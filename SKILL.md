@@ -275,19 +275,31 @@ ICODE_OUT_DIR=".icode_output_${LAST}"
 
 ---
 
-### 步骤 5 — 无限轮循环深度复检（闭环规则）
+### 步骤 5 — 无限轮循环深度复检（双阶段递进）
 
 **命令**: `/icode deepcheck`
 **产出**: `{ICODE_OUT_DIR}/05_review_rounds.json`
 
-这是最关键的质量关卡。必须实现闭环规则：
+这是最关键的质量关卡。采用**双阶段递进**模式：先固定维度检查，通过后切自由探索，防止 AI 偷懒复读。
+
+#### 双阶段说明
+
+| 阶段 | 条件 | 检查方式 |
+|------|------|----------|
+| **Fixed**（固定维度） | `phase == "fixed"` | 6 个固定维度，逐项覆盖 |
+| **Free**（自由探索） | `phase == "free"` | AI 自主选择检查角度，轮次间不重复 |
+
+**阶段切换规则**：Fixed 阶段首次出现全 clean 后，自动切换到 Free 阶段。随后在 Free 阶段继续复检，直到连续 5 轮 clean 终止。
+
+#### 执行流程
 
 1. 执行目录管理中的「检测最新目录」逻辑，确定 `ICODE_OUT_DIR`
 2. **前置文件校验**：检查 `{ICODE_OUT_DIR}/03_plan_final.md` 是否存在，检查步骤4创建的代码文件是否存在，缺失则报错并提示先执行 `/icode code`
-3. 初始化计数器 `clean_rounds = 0`, `total_rounds = 1`
+3. 初始化计数器 `clean_rounds = 0`, `total_rounds = 1`, `phase = "fixed"`
 4. 读取 `{ICODE_OUT_DIR}/03_plan_final.md` 和 `{ICODE_OUT_DIR}/.ico_metadata.json` 中的 `code_files` 字段获取代码文件列表
-5. 启动一轮复检 Agent：
+5. 根据当前 `phase` 选择对应 prompt 并启动一轮复检 Agent：
 
+**Fixed 阶段 Prompt**（`phase == "fixed"`）：
 ```
 请对以下已实施代码进行全面复检。
 
@@ -334,21 +346,64 @@ ICODE_OUT_DIR=".icode_output_${LAST}"
 }
 ```
 
+**Free 阶段 Prompt**（`phase == "free"`）：
+```
+请对以下已实施代码进行自由深度复检。
+
+**本轮模式：自由探索 —— 请自行选择 2-3 个不同角度切入，不能与前几轮完全相同，禁止偷懒重复相同维度。**
+
+最终计划：
+{读取 {ICODE_OUT_DIR}/03_plan_final.md 的内容}
+
+已实施代码：
+{读取 {ICODE_OUT_DIR}/.ico_metadata.json 中的 code_files 字段，列出所有代码文件路径和内容}
+
+可参考的检查方向（不限于此，欢迎创新）：
+- 性能瓶颈：不必要的拷贝、循环效率、算法复杂度
+- 资源管理：内存泄漏、文件句柄、锁的正确性
+- 并发安全：竞态条件、死锁、原子操作
+- 可测试性：依赖注入、Mock 友好度、测试覆盖率缺口
+- 可维护性：命名清晰度、函数复杂度、模块内聚性
+- 安全漏洞：输入校验、缓冲区溢出、权限检查
+- 编译/构建：头文件依赖、链接问题、条件编译
+- 跨平台：字节序、类型大小、编译器差异
+- 协议兼容：字段对齐、版本兼容、序列化一致性
+
+请先声明你将检查哪些角度，然后逐角度分析，给出具体问题或明确说"无问题"。
+
+只输出 JSON 格式结果（不要输出其他内容）：
+{
+  "round": {total_rounds},
+  "focus_angles": ["角度1", "角度2", "角度3"],
+  "has_issues": false,
+  "issues": [
+    {
+      "severity": "高/中/低",
+      "file": "文件路径",
+      "description": "问题描述",
+      "suggestion": "修复建议"
+    }
+  ],
+  "summary": "总体评估"
+}
+```
+
 6. 解析 Agent 返回的 JSON：
    - `total_rounds += 1`
    - 如果 `has_issues == true`：
      a. 读取 issues 列表，逐个修复代码问题（用 Edit 工具）
      b. 将本轮记录追加到 `{ICODE_OUT_DIR}/05_review_rounds.json`（JSONL 格式，每行一条）
      c. **重置 `clean_rounds = 0`**
-     d. 回到步骤 5.4 重新读取文件并开始下一轮复检
+     d. 回到步骤 5.4 重新读取文件并开始下一轮复检（**保持当前 phase 不变**）
    - 如果 `has_issues == false`：
      a. 将本轮记录追加到 `{ICODE_OUT_DIR}/05_review_rounds.json`
      b. **`clean_rounds += 1`**
-     c. 如果 `clean_rounds < 5`，回到步骤 5.4 继续复检
-     d. 如果 `clean_rounds >= 5`，**终止复检**，输出完成信息
+     c. **阶段切换检查**：如果 `phase == "fixed"` 且本轮为首次全 clean（`clean_rounds == 1`），将 `phase` 切换为 `"free"`
+     d. 如果 `clean_rounds < 5`，回到步骤 5.4 重新读取文件并开始下一轮复检
+     e. 如果 `clean_rounds >= 5`，**终止复检**，输出完成信息
 
 7. **严格执行**：必须连续满 5 轮全程无任何问题、无任何遗漏、无任何隐患，才可正式终止复检流程。
-8. 复检完成后，更新 `{ICODE_OUT_DIR}/.ico_metadata.json`：`status` 设为 `review_complete`，`completed_steps` 追加 `"5"`，并记录 `deepcheck_total_rounds` 和 `deepcheck_clean_rounds` 字段
+8. 复检完成后，更新 `{ICODE_OUT_DIR}/.ico_metadata.json`：`status` 设为 `review_complete`，`completed_steps` 追加 `"5"`，并记录 `deepcheck_total_rounds`、`deepcheck_clean_rounds` 和 `deepcheck_phase` 字段
 
 ---
 
