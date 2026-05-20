@@ -509,3 +509,4 @@ ICODE_OUT_DIR=".icode_output_${LAST}"
 3. **跨会话恢复**：关闭会话后重新打开，只需在相同工作目录运行 `ls -d .icode_output_*` 确认目录，然后直接调用对应步骤命令即可
 4. **目录自动递增**：每次 `/icode new` 或 `/icode plan` 创建新目录，旧任务不受影响
 5. **中断恢复**：产物保存在目录中，重新执行某步骤可覆盖该步骤的输出
+6. **Git 安全**：禁止执行任何 Git 危险操作（如 `git reset --hard`、`git push --force`、`git checkout .`、`git clean -f` 等），**也禁止执行 `git commit` 和 `git push`**。代码变更由用户自行决定是否提交或推送
