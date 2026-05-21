@@ -130,22 +130,25 @@
 }
 ```
 
-### 结果处理
+### 强制操作（每轮完成后必须执行）
 
-解析 Agent 返回的 JSON：
-- `total_rounds += 1`
-- 如果 `has_issues == true`：
-  a. 读取 issues 列表，逐个修复代码问题（用 Edit 工具）
-  b. 将本轮记录追加到 `{ICODE_OUT_DIR}/05_review_rounds.json`（JSONL 格式，每行一条）
-  c. **重置 `clean_rounds = 0`**
-  d. 回到步骤 5.3 重新读取文件并开始下一轮复检（**保持当前 phase 不变**）
-- 如果 `has_issues == false`：
-  a. 将本轮记录追加到 `{ICODE_OUT_DIR}/05_review_rounds.json`
-  b. **`clean_rounds += 1`**
-  c. **阶段切换检查**：如果 `phase == "fixed"` 且本轮为首次全 clean（`clean_rounds == 1`），将 `phase` 切换为 `"free"`
-  d. 如果 `clean_rounds < 5`，回到步骤 5.3 重新读取文件并开始下一轮复检
-  e. 如果 `clean_rounds >= 5`，**终止复检**，输出完成信息
+- **必须将本轮 Agent 返回的 JSON 记录追加写入 `{ICODE_OUT_DIR}/05_review_rounds.json`**（JSONL 格式，每行一条）
+- 解析本轮 JSON：
+  - `total_rounds += 1`
+  - 如果 `has_issues == true`：
+    a. 读取 issues 列表，逐个修复代码问题（用 Edit 工具）
+    b. **必须使用 Write 工具将本轮 JSON 追加到 `{ICODE_OUT_DIR}/05_review_rounds.json`**
+    c. **重置 `clean_rounds = 0`**
+    d. 回到步骤 5.3 重新读取文件并开始下一轮复检（**保持当前 phase 不变**）
+  - 如果 `has_issues == false`：
+    a. **必须使用 Write 工具将本轮 JSON 追加到 `{ICODE_OUT_DIR}/05_review_rounds.json`**
+    b. **`clean_rounds += 1`**
+    c. **阶段切换检查**：如果 `phase == "fixed"` 且本轮为首次全 clean（`clean_rounds == 1`），将 `phase` 切换为 `"free"`
+    d. 如果 `clean_rounds < 5`，回到步骤 5.3 重新读取文件并开始下一轮复检
+    e. 如果 `clean_rounds >= 5`，**终止复检**，输出完成信息
 
 **严格执行**：必须连续满 5 轮全程无任何问题、无任何遗漏、无任何隐患，才可正式终止复检流程。
 
-复检完成后，更新 `{ICODE_OUT_DIR}/.ico_metadata.json`：`status` 设为 `review_complete`，`completed_steps` 追加 `"5"`，并记录 `deepcheck_total_rounds`、`deepcheck_clean_rounds` 和 `deepcheck_phase` 字段。
+**复检完成后强制操作**：
+
+- **更新 `{ICODE_OUT_DIR}/.ico_metadata.json`**：将 `status` 设为 `review_complete`，`completed_steps` 追加 `"5"`，并写入 `deepcheck_total_rounds`、`deepcheck_clean_rounds` 和 `deepcheck_phase` 字段

@@ -44,5 +44,7 @@
 输出完整最终定稿版计划。
 ```
 
-5. 将定稿计划写入 `{ICODE_OUT_DIR}/03_plan_final.md`
-6. 更新 `{ICODE_OUT_DIR}/.ico_metadata.json` 的 `status` 为 `plan_finalized`，`completed_steps` 追加 `"3"`
+## 强制操作（完成后必须执行）
+
+5. **将子 Agent 返回的定稿计划写入 `{ICODE_OUT_DIR}/03_plan_final.md` 文件**（必须使用 Write 工具，不可省略此步骤）
+6. **更新 `{ICODE_OUT_DIR}/.ico_metadata.json`**：将 `status` 设为 `plan_finalized`，`completed_steps` 追加 `"3"`，写回文件

@@ -53,15 +53,15 @@
 
 5. 将终审报告写入 `{ICODE_OUT_DIR}/06_audit.md`
 
-## 6.2 统一修复
+## 6.2 强制修复
 
 1. 读取 `{ICODE_OUT_DIR}/06_audit.md` 中的问题清单
 2. 按严重程度排序（高 → 中 → 低）逐个修复：
    - 每个问题用 Edit 工具修复
-   - 修复后记录到 `{ICODE_OUT_DIR}/06_fixes.log`
+   - 修复后**必须使用 Write 工具追加记录到 `{ICODE_OUT_DIR}/06_fixes.log`**
 3. 全部修复完毕后，做一次全局编译/语法验证（运行项目对应的编译命令，验证所有文件无错误），最多尝试 3 次
 4. 确认所有问题已关闭
-5. 将 `{ICODE_OUT_DIR}/.ico_metadata.json` 的 `status` 更新为 `completed`
+5. **更新 `{ICODE_OUT_DIR}/.ico_metadata.json`**：将 `status` 设为 `completed`，写回文件
 
 ## 6.3 最终交付
 

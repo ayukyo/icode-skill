@@ -46,8 +46,11 @@
 - 校验项以 [ ] checkbox 形式列出
 ```
 
-4. 将返回内容写入 `{ICODE_OUT_DIR}/01_plan.md`
-5. 创建元信息文件 `{ICODE_OUT_DIR}/.ico_metadata.json`：
+## 强制操作（完成后必须执行）
+
+4. **将子 Agent 返回的计划内容写入 `{ICODE_OUT_DIR}/01_plan.md` 文件**（必须使用 Write 工具，不可省略此步骤）
+5. **创建 `{ICODE_OUT_DIR}/.ico_metadata.json`**：
+
 ```json
 {
   "requirement": "{用户输入的原始需求}",

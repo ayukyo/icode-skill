@@ -38,8 +38,10 @@
 请开始编码实施。
 ```
 
-5. Agent 自动创建/修改代码文件，过程中执行编译验证，确保编译通过
-6. 编码实施完毕后：
+## 强制操作（完成后必须执行）
+
+5. **子 Agent 自动创建/修改代码文件**，过程中执行编译验证（最多 3 次），确保编译通过
+6. **更新元信息**：
    - 确认编译验证结果（如有失败需重新修复）
-   - 记录所有新增/修改的文件路径列表并保存到 `{ICODE_OUT_DIR}/.ico_metadata.json` 的 `code_files` 字段
-   - 更新 `status` 为 `code_done`，`completed_steps` 追加 `"4"`
+   - 将 `code_files` 字段更新为所有新增/修改的文件路径列表，写入 `{ICODE_OUT_DIR}/.ico_metadata.json`
+   - 将 `status` 设为 `code_done`，`completed_steps` 追加 `"4"`，写回文件
