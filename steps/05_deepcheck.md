@@ -142,6 +142,7 @@
 ### 强制操作（每轮完成后必须执行）
 
 - **必须将本轮 Agent 返回的 JSON 记录追加写入 `{ICODE_OUT_DIR}/05_review_rounds.json`**（JSONL 格式，每行一条）
+- **修复代码时禁止删除现有注释**：仅修改问题相关的代码逻辑，保留原有注释内容
 - 解析本轮 JSON：
   - `total_rounds += 1`
   - 如果 `has_issues == true`：
