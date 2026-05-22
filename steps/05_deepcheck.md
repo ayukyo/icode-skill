@@ -154,3 +154,4 @@
 **复检完成后强制操作**：
 
 - **更新 `{ICODE_OUT_DIR}/.ico_metadata.json`**：将 `status` 设为 `review_complete`，`completed_steps` 追加 `"5"`，并写入 `deepcheck_total_rounds`、`deepcheck_clean_rounds` 和 `deepcheck_phase` 字段
+- 如果是全流程模式：**立即继续执行步骤6**
