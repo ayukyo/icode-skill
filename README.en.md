@@ -49,18 +49,20 @@ git clone <repo-url> ~/.claude/skills/icode
 
 ## Model Assignment in Full-Flow
 
-In `/icode new` full-flow mode, each step automatically uses the optimal model:
+In `/icode new` full-flow mode, each step uses the following model:
 
-| Step | Function | Model |
-| --- | --- | --- |
-| 1 | Draft plan | opus |
-| 2 | Review plan | sonnet |
-| 3 | Merge & finalize | opus |
-| 4 | Code implementation | opus |
-| 5 | Iterative re-check | sonnet |
-| 6 | Final audit | opus |
+| Step | Function | Model | Notes |
+| --- | --- | --- | --- |
+| 1 | Draft plan | Main session | Executed in main session, preserves requirement context |
+| 2 | Review plan | sonnet | Sub-Agent execution |
+| 3 | Merge & finalize | opus | Sub-Agent execution |
+| 4 | Code implementation | opus | Sub-Agent execution |
+| 5 | Iterative re-check | sonnet | Sub-Agent execution |
+| 6 | Final audit | opus | Sub-Agent execution |
 
-In step-by-step mode, each step uses the current session model — you decide.
+- **Step 1** runs directly in the main session, preserving all requirement discussion context
+- **Steps 2-6** use sub-Agents for model switching and context isolation
+- In step-by-step mode, each step uses the current session model — you decide
 
 ## Directory Structure
 
@@ -85,7 +87,7 @@ In step-by-step mode, each step uses the current session model — you decide.
 
 ## Version
 
-Current version: v1.1.0
+Current version: v1.2.0
 
 For detailed step descriptions, see [SKILL.md](SKILL.md).
 
