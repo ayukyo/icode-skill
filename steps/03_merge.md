@@ -26,10 +26,9 @@
 请将审查意见合并优化进原计划。
 
 **输出方式（必须遵守）**：
-1. 使用 Write 工具将定稿计划写入 `{ICODE_OUT_DIR}/03_plan_final.md`
-2. 如果写入失败，**必须多次重试**直到成功
-3. 写入成功后，回复"已完成：{ICODE_OUT_DIR}/03_plan_final.md"
-4. 不要输出定稿计划内容本身
+1. **尝试**使用 Write 工具将内容写入 `{ICODE_OUT_DIR}/03_plan_final.md`（失败则忽略）
+2. **必须在回复中输出完整定稿计划**（主 Agent 会提取写入文件）
+3. 回复以"===FINAL PLAN START==="开头、以"===FINAL PLAN END==="结尾
 
 原始计划：
 {读取 {ICODE_OUT_DIR}/01_plan.md 的内容}
@@ -56,6 +55,6 @@
 
 ## 强制操作（完成后必须执行）
 
-5. **确认子 Agent 已将定稿计划写入 `{ICODE_OUT_DIR}/03_plan_final.md`**（检查文件存在且非空，缺失则重新启动子 Agent）
+5. **提取子 Agent 回复中的定稿计划内容**（从 ===FINAL PLAN START=== 和 ===FINAL PLAN END=== 之间提取），使用 Write 工具写入 `{ICODE_OUT_DIR}/03_plan_final.md`
 6. **更新 `{ICODE_OUT_DIR}/.ico_metadata.json`**：将 `status` 设为 `plan_finalized`，`completed_steps` 追加 `"3"`，写回文件
 7. 如果是全流程模式：**立即继续执行步骤4**

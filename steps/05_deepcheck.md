@@ -86,10 +86,9 @@
 }
 
 **输出方式（必须遵守）**：
-1. 使用 Write 工具将 JSON 结果写入 `{ICODE_OUT_DIR}/deepcheck_round_{total_rounds}.json`
-2. 如果写入失败，**必须多次重试**直到成功
-3. 写入成功后，回复"已完成：{ICODE_OUT_DIR}/deepcheck_round_{total_rounds}.json"
-4. 不要输出 JSON 内容本身
+1. **尝试**使用 Write 工具将 JSON 写入 `{ICODE_OUT_DIR}/deepcheck_round_{total_rounds}.json`（失败则忽略）
+2. **必须在回复中输出完整 JSON 结果**（主 Agent 会提取写入文件，这是主要交付方式）
+3. 回复以"===JSON START==="开头、以"===JSON END==="结尾
 ```
 
 ### Free 阶段 Prompt（`phase == "free"`）
@@ -133,10 +132,9 @@
 - 先声明本轮检查角度（文本形式）
 
 **输出方式（必须遵守）**：
-1. 使用 Write 工具将 JSON 结果写入 `{ICODE_OUT_DIR}/deepcheck_round_{total_rounds}.json`
-2. 如果写入失败，**必须多次重试**直到成功
-3. 写入成功后，回复"已完成：{ICODE_OUT_DIR}/deepcheck_round_{total_rounds}.json"
-4. 不要输出 JSON 内容本身
+1. **尝试**使用 Write 工具将 JSON 写入 `{ICODE_OUT_DIR}/deepcheck_round_{total_rounds}.json`（失败则忽略）
+2. **必须在回复中输出完整 JSON 结果**（主 Agent 会提取写入文件，这是主要交付方式）
+3. 回复以"===JSON START==="开头、以"===JSON END==="结尾
 
 JSON 格式如下：
 {
@@ -157,14 +155,14 @@ JSON 格式如下：
 
 ### 强制操作（每轮完成后必须执行）
 
-- **读取子 Agent 写入的 `{ICODE_OUT_DIR}/deepcheck_round_{total_rounds}.json`**（用 Read 工具读取 JSON），再**追加写入 `{ICODE_OUT_DIR}/05_review_rounds.json`**（JSONL 格式，每行一条）
+- **提取子 Agent 回复中的 JSON 内容**（从 ===JSON START=== 和 ===JSON END=== 之间提取），使用 Write 工具写入 `{ICODE_OUT_DIR}/deepcheck_round_{total_rounds}.json`，再**追加写入 `{ICODE_OUT_DIR}/05_review_rounds.json`**（JSONL 格式，每行一条）
 - **修复代码时禁止删除现有注释**：仅修改问题相关的代码逻辑，保留原有注释内容
 - 解析本轮 JSON：
   - `total_rounds += 1`
   - 如果 `has_issues == true`：
     a. 读取 issues 列表，逐个修复代码问题（用 Edit 工具）
     b. **重置 `clean_rounds = 0`**
-    d. 回到执行流程第3步重新读取文件并开始下一轮复检（**保持当前 phase 不变**）
+    c. 回到执行流程第3步重新读取文件并开始下一轮复检（**保持当前 phase 不变**）
   - 如果 `has_issues == false`：
     a. **`clean_rounds += 1`**
     b. **阶段切换检查**：如果 `phase == "fixed"` 且本轮为首次全 clean（`clean_rounds == 1`），将 `phase` 切换为 `"free"`

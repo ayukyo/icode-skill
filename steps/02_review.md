@@ -71,12 +71,11 @@
 ========== 输出要求 ==========
 
 **输出方式（必须遵守）**：
-1. 使用 Write 工具将 JSON 结果写入 `{ICODE_OUT_DIR}/review_round_{total_rounds}.json`
-2. 如果写入失败，**必须多次重试**直到成功
-3. 写入成功后，回复"已完成：{ICODE_OUT_DIR}/review_round_{total_rounds}.json"
-4. 不要在其他回复内容中输出 JSON 内容，只回复确认信息
+1. **尝试**使用 Write 工具将 JSON 写入 `{ICODE_OUT_DIR}/review_round_{total_rounds}.json`（失败则忽略）
+2. **必须在回复中输出完整 JSON 结果**（主 Agent 会提取写入文件，这是主要交付方式）
+3. 回复以"===JSON START==="开头、以"===JSON END==="结尾，方便提取
 
-输出 JSON 格式结果：
+输出 JSON 格式：
 {
   "round": 1,
   "independent_plan_summary": "独立编制的简要计划概述",
@@ -139,10 +138,9 @@
 6. **现有实现对照** — 计划方案是否与现有代码重复或冲突，是否遗漏了可复用模块
 
 **输出方式（必须遵守）**：
-1. 使用 Write 工具将 JSON 结果写入 `{ICODE_OUT_DIR}/review_round_{total_rounds}.json`
-2. 如果写入失败，**必须多次重试**直到成功
-3. 写入成功后，回复"已完成：{ICODE_OUT_DIR}/review_round_{total_rounds}.json"
-4. 不要在其他回复内容中输出 JSON 内容，只回复确认信息
+1. **尝试**使用 Write 工具将 JSON 写入 `{ICODE_OUT_DIR}/review_round_{total_rounds}.json`（失败则忽略）
+2. **必须在回复中输出完整 JSON 结果**（主 Agent 会提取写入文件，这是主要交付方式）
+3. 回复以"===JSON START==="开头、以"===JSON END==="结尾，方便提取
 
 输出 JSON 格式：
 {
@@ -164,8 +162,8 @@
 
 ### 强制操作（每轮完成后必须执行）
 
-- **读取子 Agent 写入的 `{ICODE_OUT_DIR}/review_round_{total_rounds}.json`**（用 Read 工具读取，确认文件存在）
-- **将本轮审查结果追加写入 `{ICODE_OUT_DIR}/02_review.md`**（格式：`## 第N轮审查` + JSON内容）
+- **提取子 Agent 回复中的 JSON 内容**（从 ===JSON START=== 和 ===JSON END=== 之间提取），使用 Write 工具写入 `{ICODE_OUT_DIR}/review_round_{total_rounds}.json`
+- **追加写入 `{ICODE_OUT_DIR}/02_review.md`**（格式：`## 第N轮审查` + JSON内容）
 - **解析 JSON**：
   - `total_rounds += 1`
   - 如果 `has_new_issues == true`：

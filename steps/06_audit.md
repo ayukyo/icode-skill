@@ -26,10 +26,9 @@
 请对照原始定稿计划，对当前已实施完成的代码做最终权威终审核验。
 
 **输出方式（必须遵守）**：
-1. 使用 Write 工具将终审报告写入 `{ICODE_OUT_DIR}/06_audit.md`
-2. 如果写入失败，**必须多次重试**直到成功
-3. 写入成功后，回复"已完成：{ICODE_OUT_DIR}/06_audit.md"
-4. 不要输出终审报告内容本身
+1. **尝试**使用 Write 工具将内容写入 `{ICODE_OUT_DIR}/06_audit.md`（失败则忽略）
+2. **必须在回复中输出完整终审报告**（主 Agent 会提取写入文件）
+3. 回复以"===AUDIT START==="开头、以"===AUDIT END==="结尾
 
 原始定稿计划：
 {读取 {ICODE_OUT_DIR}/03_plan_final.md 的内容}
@@ -62,7 +61,7 @@
 - 最终结论（通过/有条件通过/不通过）
 ```
 
-5. **确认子 Agent 已将终审报告写入 `{ICODE_OUT_DIR}/06_audit.md`**（检查文件存在且非空，缺失则重新启动子 Agent）
+5. **提取子 Agent 回复中的终审报告内容**（从 ===AUDIT START=== 和 ===AUDIT END=== 之间提取），使用 Write 工具写入 `{ICODE_OUT_DIR}/06_audit.md`
 
 ## 6.2 强制修复
 
