@@ -10,10 +10,14 @@
 
 ## 6.1 出具终审报告
 
+### ⚠️ 强制规则：禁止主 Agent 直接终审
+
+终审报告**必须由子 Agent 独立完成**。主 Agent 只负责确定目录、读取文件、启动子 Agent、写入报告和修复。**主 Agent 不得跳过子 Agent 自行撰写终审报告或自行评估缺陷清单。**
+
 1. 执行目录管理中的「检测最新目录」逻辑，确定 `ICODE_OUT_DIR`
 2. 读取 `{ICODE_OUT_DIR}/03_plan_final.md`、`.ico_metadata.json` 获取代码文件列表和复检轮次数据（`deepcheck_total_rounds`、`deepcheck_clean_rounds`）
 3. 按「通用规则」确定当前模型
-4. 按「通用规则」启动子 Agent，prompt 为：
+4. **必须启动子 Agent 执行终审**（主 Agent 不可自行终审），按「通用规则」启动子 Agent，prompt 为：
 
 ```
 当前使用模型：{当前模型名称}。
@@ -21,7 +25,11 @@
 
 请对照原始定稿计划，对当前已实施完成的代码做最终权威终审核验。
 
-**输出文件路径**：请将终审报告直接写入 `.icode_output_N/06_audit.md`（主 Agent 会将路径替换为实际值），**不要写到其他位置后再拷贝**。
+**输出方式（必须遵守）**：
+1. 使用 Write 工具将终审报告写入 `{ICODE_OUT_DIR}/06_audit.md`
+2. 如果写入失败，**必须多次重试**直到成功
+3. 写入成功后，回复"已完成：{ICODE_OUT_DIR}/06_audit.md"
+4. 不要输出终审报告内容本身
 
 原始定稿计划：
 {读取 {ICODE_OUT_DIR}/03_plan_final.md 的内容}
@@ -54,7 +62,7 @@
 - 最终结论（通过/有条件通过/不通过）
 ```
 
-5. 将终审报告写入 `{ICODE_OUT_DIR}/06_audit.md`
+5. **确认子 Agent 已将终审报告写入 `{ICODE_OUT_DIR}/06_audit.md`**（检查文件存在且非空，缺失则重新启动子 Agent）
 
 ## 6.2 强制修复
 

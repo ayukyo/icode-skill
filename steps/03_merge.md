@@ -10,10 +10,14 @@
 
 ## 执行步骤
 
+### ⚠️ 强制规则：禁止主 Agent 直接合并定稿
+
+定稿合并**必须由子 Agent 独立完成**。主 Agent 只负责确定目录、读取文件、启动子 Agent、写入文件。**主 Agent 不得跳过子 Agent 自行合并定稿内容。**
+
 1. 执行目录管理中的「检测最新目录」逻辑，确定 `ICODE_OUT_DIR`
 2. 读取 `{ICODE_OUT_DIR}/01_plan.md` 和 `{ICODE_OUT_DIR}/02_review.md`
 3. 按「通用规则」确定当前模型
-4. 按「通用规则」启动子 Agent，prompt 为：
+4. **必须启动子 Agent 执行合并定稿**（主 Agent 不可自行合并），按「通用规则」启动子 Agent，prompt 为：
 
 ```
 当前使用模型：{当前模型名称}。
@@ -21,7 +25,11 @@
 
 请将审查意见合并优化进原计划。
 
-**输出文件路径**：请将定稿计划直接写入 `.icode_output_N/03_plan_final.md`（主 Agent 会将路径替换为实际值），**不要写到其他位置后再拷贝**。
+**输出方式（必须遵守）**：
+1. 使用 Write 工具将定稿计划写入 `{ICODE_OUT_DIR}/03_plan_final.md`
+2. 如果写入失败，**必须多次重试**直到成功
+3. 写入成功后，回复"已完成：{ICODE_OUT_DIR}/03_plan_final.md"
+4. 不要输出定稿计划内容本身
 
 原始计划：
 {读取 {ICODE_OUT_DIR}/01_plan.md 的内容}
@@ -48,6 +56,6 @@
 
 ## 强制操作（完成后必须执行）
 
-5. **将子 Agent 返回的定稿计划写入 `{ICODE_OUT_DIR}/03_plan_final.md` 文件**（必须使用 Write 工具，不可省略此步骤）
+5. **确认子 Agent 已将定稿计划写入 `{ICODE_OUT_DIR}/03_plan_final.md`**（检查文件存在且非空，缺失则重新启动子 Agent）
 6. **更新 `{ICODE_OUT_DIR}/.ico_metadata.json`**：将 `status` 设为 `plan_finalized`，`completed_steps` 追加 `"3"`，写回文件
 7. 如果是全流程模式：**立即继续执行步骤4**
