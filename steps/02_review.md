@@ -16,165 +16,70 @@
 
 ### ⚠️ 强制规则：禁止主 Agent 直接审查
 
-每轮审查**必须由子 Agent 独立完成**。主 Agent 只负责确定目录、读取文件、启动子 Agent、写入记录。**主 Agent 不得跳过子 Agent 自行撰写审查意见或评估计划质量。**
+每轮审查**必须由子 Agent 独立完成**。主 Agent 只负责确定目录、读取文件、启动子 Agent、写入记录。**主 Agent 不得自行撰写审查意见。**
 
 1. 执行目录管理中的「检测最新目录」逻辑，确定 `ICODE_OUT_DIR`
-2. 读取 `{ICODE_OUT_DIR}/01_plan.md` 和 `.ico_metadata.json`（获取原始需求）
+2. 读取 `{ICODE_OUT_DIR}/01_plan.md` 和 `.ico_metadata.json` 获取原始需求
 3. 初始化计数器 `clean_rounds = 0`, `total_rounds = 1`
 4. 按「通用规则」确定当前模型
-5. **必须启动子 Agent 执行审查**（主 Agent 不可自行审查），按「通用规则」启动子 Agent，根据轮次选择对应 prompt：
+5. 输出模型确认：`▶ 步骤2 使用模型：{当前模型名称}`
+6. **启动子 Agent** 执行审查，prompt 如下。
 
----
-
-### 首轮 Prompt（`total_rounds == 1`）
+**首轮 prompt（`total_rounds == 1`）**：
 
 ```
 当前使用模型：{当前模型名称}。
-**请先进行深度思考（理解需求→独立编制计划→对比分析→逐维审查），再开始执行。**
 
-========== 阶段一：独立编制计划 ==========
+========== 独立编制计划 ==========
+原始需求：{读取 .ico_metadata.json 中的 requirement 字段}
+请先基于原始需求独立编制一份简要项目计划（架构思路、功能模块、核心接口、实现步骤），不要参考下方步骤1计划。
 
-原始需求：
-{读取 .ico_metadata.json 中的 requirement 字段}
-
-请先基于原始需求，**独立编制一份简要项目计划**，包含：
-- 架构思路与技术选型
-- 功能模块划分
-- 核心接口和数据流
-- 关键实现步骤
-
-不要参考步骤1的已有计划，完全基于你对需求的理解来写。
-
-========== 阶段二：对比分析 ==========
-
+========== 对比分析 ==========
 步骤1计划内容：
-{读取 {ICODE_OUT_DIR}/01_plan.md 的内容}
+{读取 {ICODE_OUT_DIR}/01_plan.md 的全部内容}
 
-将你独立编制的计划与步骤1计划进行逐项对比，分析：
-1. **遗漏点** — 步骤1计划中缺少了哪些你认为必要的功能/模块/步骤
-2. **偏差点** — 步骤1计划中哪些方案与你的独立判断不一致，谁更合理
-3. **多余点** — 步骤1计划中哪些内容超出需求范围
-4. **分歧裁决** — 对每处差异给出你的裁决（采纳独立方案/采纳步骤1方案/需折中）
+将你的独立计划与步骤1计划逐项对比：遗漏点、偏差点、多余点，给出裁决。
 
-========== 阶段三：逐维审查 ==========
+========== 逐维审查（6个维度，全部覆盖）==========
+1. 逻辑合理性 — 流程是否合理、有无矛盾
+2. 流程完整性 — 是否有遗漏步骤或环节
+3. 场景覆盖度 — 正常/异常/边界场景是否全部覆盖
+4. 风险遗漏 — 还有哪些技术/业务风险未提及
+5. 落地可行性 — 在当前项目架构下是否可直接执行
+6. 现有实现对照 — 计划方案是否与现有代码重复或冲突
 
-**硬性要求：必须逐项审查全部 6 个维度，每个维度必须给出明确结论，不得跳过或遗漏。**
+========== 输出 ==========
+**禁止执行任何工具调用**，所有信息已在 prompt 中提供，基于以上内容直接分析输出。
 
-审查维度（必须全部覆盖，缺一不可）：
-1. **逻辑合理性** — 流程是否合理、有无矛盾
-2. **流程完整性** — 是否有遗漏步骤或环节
-3. **场景覆盖度** — 正常/异常/边界场景是否全部覆盖
-4. **风险遗漏** — 还有哪些技术/业务风险未提及
-5. **落地可行性** — 在当前项目架构下是否可直接执行
-6. **现有实现对照** — 计划方案是否与现有代码重复或冲突，是否遗漏了可复用模块
-
-========== 输出要求 ==========
-
-**输出方式（必须遵守）**：
-1. **尝试**使用 Write 工具将 JSON 写入 `{ICODE_OUT_DIR}/review_round_{total_rounds}.json`（失败则忽略）
-2. **必须在回复中输出完整 JSON 结果**（主 Agent 会提取写入文件，这是主要交付方式）
-3. 回复以"===JSON START==="开头、以"===JSON END==="结尾，方便提取
-
-输出 JSON 格式：
-{
-  "round": 1,
-  "independent_plan_summary": "独立编制的简要计划概述",
-  "comparison_analysis": [
-    {
-      "type": "遗漏/偏差/多余",
-      "independent_view": "我的方案",
-      "plan_view": "步骤1方案",
-      "verdict": "采纳/折中/驳回",
-      "reason": "理由"
-    }
-  ],
-  "dimension_results": {
-    "1": "通过/问题",
-    "2": "通过/问题",
-    "3": "通过/问题",
-    "4": "通过/问题",
-    "5": "通过/问题",
-    "6": "通过/问题"
-  },
-  "has_new_issues": true/false,
-  "new_issues": [
-    {
-      "dimension": "维度编号",
-      "severity": "高/中/低",
-      "description": "问题描述",
-      "suggestion": "改进建议"
-    }
-  ],
-  "summary": "总体评估"
-}
+直接输出 JSON，以 ===JSON START=== 开头、===JSON END=== 结尾：
+{"round":1,"independent_plan_summary":"概述","comparison_analysis":[{"type":"遗漏/偏差/多余","independent_view":"我的方案","plan_view":"步骤1方案","verdict":"采纳/折中/驳回","reason":"理由"}],"dimension_results":{"1":"通过/问题","2":"通过/问题","3":"通过/问题","4":"通过/问题","5":"通过/问题","6":"通过/问题"},"has_new_issues":true/false,"new_issues":[{"dimension":"1-6","severity":"高/中/低","description":"问题描述","suggestion":"建议"}],"summary":"总体评估"}
 ```
 
----
-
-### 后续轮次 Prompt（`total_rounds > 1`）
+**后续轮次 prompt（`total_rounds > 1`）**：
 
 ```
 当前使用模型：{当前模型名称}。
-**请先进行深度思考（阅读计划→逐维度审查→汇总结论），再开始执行。**
 
-请对以下项目计划做补充审查。
+补充审查第 {total_rounds} 轮。步骤1计划内容：
+{读取 {ICODE_OUT_DIR}/01_plan.md 的全部内容}
 
-**本轮审查**：第 {total_rounds} 轮（补充审查）
-
-计划文档内容：
-{读取 {ICODE_OUT_DIR}/01_plan.md 的内容}
-
-之前轮次已发现的问题列表：
+之前轮次已发现问题：
 {之前轮次的问题列表}
 
-请检查是否还有遗漏的问题，或之前发现的问题是否还有更深层次的风险。
+检查是否还有遗漏问题或更深层次风险。
 
-审查维度（必须全部覆盖，缺一不可）：
-1. **逻辑合理性** — 流程是否合理、有无矛盾
-2. **流程完整性** — 是否有遗漏步骤或环节
-3. **场景覆盖度** — 正常/异常/边界场景是否全部覆盖
-4. **风险遗漏** — 还有哪些技术/业务风险未提及
-5. **落地可行性** — 在当前项目架构下是否可直接执行
-6. **现有实现对照** — 计划方案是否与现有代码重复或冲突，是否遗漏了可复用模块
+维度（全部覆盖）：1.逻辑合理性 2.流程完整性 3.场景覆盖度 4.风险遗漏 5.落地可行性 6.现有实现对照
 
-**输出方式（必须遵守）**：
-1. **尝试**使用 Write 工具将 JSON 写入 `{ICODE_OUT_DIR}/review_round_{total_rounds}.json`（失败则忽略）
-2. **必须在回复中输出完整 JSON 结果**（主 Agent 会提取写入文件，这是主要交付方式）
-3. 回复以"===JSON START==="开头、以"===JSON END==="结尾，方便提取
+**禁止执行任何工具调用**，所有信息已在 prompt 中提供，基于以上内容直接分析输出。
 
-输出 JSON 格式：
-{
-  "round": {total_rounds},
-  "has_new_issues": true/false,
-  "new_issues": [
-    {
-      "dimension": "维度编号",
-      "severity": "高/中/低",
-      "description": "问题描述",
-      "suggestion": "改进建议"
-    }
-  ],
-  "summary": "本轮总体评估"
-}
+直接输出 JSON，以 ===JSON START=== 开头、===JSON END=== 结尾：
+{"round":{total_rounds},"has_new_issues":true/false,"new_issues":[{"dimension":"1-6","severity":"高/中/低","description":"问题描述","suggestion":"建议"}],"summary":"本轮评估"}
 ```
 
----
-
-### 强制操作（每轮完成后必须执行）
-
-- **提取子 Agent 回复中的 JSON 内容**（从 ===JSON START=== 和 ===JSON END=== 之间提取），使用 Write 工具写入 `{ICODE_OUT_DIR}/review_round_{total_rounds}.json`
-- **追加写入 `{ICODE_OUT_DIR}/02_review.md`**（格式：`## 第N轮审查` + JSON内容）
-- **解析 JSON**：
-  - `total_rounds += 1`
-  - 如果 `has_new_issues == true`：
-    a. 记录本轮发现的新问题
-    b. **重置 `clean_rounds = 0`**
-    c. 如果 `total_rounds <= 3`，回到执行流程第5步重新启动子 Agent 开始下一轮
-    d. 如果 `total_rounds > 3`，**终止审查**，输出"达到上限，审查完成"
-  - 如果 `has_new_issues == false`：
-    a. **`clean_rounds += 1`**
-    b. 如果 `clean_rounds < 2`，回到执行流程第5步重新启动子 Agent 开始下一轮
-    c. 如果 `clean_rounds >= 2`，**终止审查**，输出"连续2轮无新问题，审查完成"
-
-- **更新 `{ICODE_OUT_DIR}/.ico_metadata.json`**：将 `status` 设为 `review_done`，`completed_steps` 追加 `"2"`，并写入 `review_total_rounds`（实际完成轮次数，即 `total_rounds - 1`）和 `review_clean_rounds` 字段
-- 如果是全流程模式：**立即继续执行步骤3**
+7. **提取 JSON**（从 ===JSON START=== → ===JSON END===），写入 `{ICODE_OUT_DIR}/review_round_{total_rounds}.json`，追加到 `{ICODE_OUT_DIR}/02_review.md`
+8. **解析 JSON 控制循环**：
+   - `total_rounds += 1`
+   - 有 issues（`has_new_issues == true`）：`clean_rounds = 0`，若 `total_rounds <= 3` 回到第6步重新启动子 Agent，否则终止
+   - 无 issues（`has_new_issues == false`）：`clean_rounds += 1`，若 `clean_rounds < 2` 回到第6步继续，否则终止
+9. **更新 `.ico_metadata.json`**：`status = review_done`，`completed_steps` 追加 `"2"`，记录轮次
+10. 全流程模式：**立即继续执行步骤3**

@@ -21,32 +21,109 @@
 
 ### ⚠️ 强制规则：禁止主 Agent 直接复检
 
-每轮复检**必须由子 Agent 独立完成**。主 Agent 只负责确定目录、读取文件、启动子 Agent、执行修复、写入记录。**主 Agent 不得跳过子 Agent 自行评估代码质量**。
+每轮复检**必须由子 Agent 独立完成**。主 Agent 只负责确定目录、读取文件、启动子 Agent、执行修复、写入记录。**主 Agent 不得自行评估代码质量。**
 
 1. 执行目录管理中的「检测最新目录」逻辑，确定 `ICODE_OUT_DIR`
-2. 初始化计数器 `clean_rounds = 0`, `total_rounds = 1`, `phase = "fixed"`
-3. 读取 `{ICODE_OUT_DIR}/03_plan_final.md` 和 `.ico_metadata.json` 中的 `code_files` 字段获取代码文件列表
+2. 读取 `{ICODE_OUT_DIR}/03_plan_final.md` 和所有代码文件（从 `.ico_metadata.json` 的 `code_files` 获取列表）
+   - 如果 `phase == "free"`：额外读取 `{ICODE_OUT_DIR}/05_review_rounds.json` 汇总历史角度列表
+3. 初始化计数器 `clean_rounds = 0`, `total_rounds = 1`, `phase = "fixed"`
 4. 按「通用规则」确定当前模型
-5. **必须启动子 Agent 执行复检**（主 Agent 不可自行复检），按「通用规则」启动子 Agent，根据当前 `phase` 选择对应 prompt 模板：
-   - 如果 `phase == "free"`：读取 `{ICODE_OUT_DIR}/05_review_rounds.json`
-     - 每条记录中，优先取 `focus_angles` 字段（Free 记录）；若无则取 `dimension_results` 的 key 列表（Fixed 记录），转为角度描述
-     - 汇总所有历史角度为"前几轮已检查角度列表"填入 Free prompt
+5. 输出模型确认：`▶ 步骤5 使用模型：{当前模型名称}`
+6. **启动子 Agent** 执行复检，根据 `phase` 选择对应 prompt。
 
-### Fixed 阶段 Prompt（`phase == "fixed"`）
+**Fixed 阶段 prompt（`phase == "fixed"`）**：
 
 ```
 当前使用模型：{当前模型名称}。
-**请先进行深度思考（对照计划逐模块检查→逐维度评估→汇总问题），再开始执行。**
 
 请对以下已实施代码进行全面复检。
 
+定稿计划：
+{读取 {ICODE_OUT_DIR}/03_plan_final.md 的全部内容}
+
+已实施代码文件列表及内容：
+{读取代码文件列表，逐个列出文件路径和内容}
+
+**必须先建立计划-代码追溯矩阵**（逐条对照计划中的功能点/接口/约束，标记代码中的对应实现位置和完成状态），再逐维度评估。
+
+复检维度（7个，全部覆盖，缺一不可）：
+1. **计划实施一致性** — 逐条对照每个功能点/接口/约束，验证代码100%对齐，逐条陈述实现状态
+2. 逻辑闭环 — 数据流、控制流完整，跨文件调用链一致
+3. 异常处理 — 错误码、异常场景、边界条件
+4. 边界场景 — 空值、越界、超时、并发
+5. 规范写法 — 项目代码风格
+6. 潜在隐患 — 内存泄漏、死锁、资源竞争、安全漏洞
+7. **跨文件一致性** — 接口变更全链路同步，上下游数据结构对齐
+
+**禁止执行任何工具调用**，所有信息已在 prompt 中提供，基于以上内容直接分析输出。
+
+直接输出 JSON，以 ===JSON START=== 开头、===JSON END=== 结尾：
+{"round":{total_rounds},"dimension_results":{"1":"通过/问题","2":"通过/问题","3":"通过/问题","4":"通过/问题","5":"通过/问题","6":"通过/问题","7":"通过/问题"},"has_issues":true/false,"issues":[{"severity":"高/中/低","file":"文件路径","dimension":"1-7","description":"问题描述","suggestion":"修复建议"}],"summary":"总体评估"}
+```
+
+**Free 阶段 prompt（`phase == "free"`）**：
+
+```
+当前使用模型：{当前模型名称}。
+
+自由深度复检，假设此轮是最后一轮，必须尽全力找出遗留问题。
+
+前几轮已检查角度：{历史角度列表（本轮请选新角度）}
+
+定稿计划：
+{读取 {ICODE_OUT_DIR}/03_plan_final.md 的全部内容}
+
+已实施代码文件列表及内容：
+{读取代码文件列表，逐个列出文件路径和内容}
+
+硬性规则：
+- 选 2-3 个与本轮之前不同的新角度，**每个角度至少给出3个具体检查点**
+- **严禁"快速收尾"**：禁止"无新增问题"、"快速收尾"等偷懒措辞
+- 无问题必须提供具体分析证据，不可空泛说"全部通过"
+- **至少有一轮 Free 阶段必须选"计划实施一致性"角度**
+
+参考方向：计划实施一致性、性能瓶颈、资源管理、并发安全、可测试性、可维护性、安全漏洞、编译/构建、跨平台、协议兼容
+
+**禁止执行任何工具调用**，所有信息已在 prompt 中提供，基于以上内容直接分析输出。
+
+直接输出 JSON，以 ===JSON START=== 开头、===JSON END=== 结尾：
+{"round":{total_rounds},"focus_angles":["角度1","角度2","角度3"],"has_issues":true/false,"issues":[{"severity":"高/中/低","file":"文件路径","description":"问题描述","suggestion":"修复建议"}],"summary":"总体评估"}
+```
+
+### 强制操作（每轮完成后必须执行）
+
+- **提取子 Agent 回复中的 JSON 内容**（从 ===JSON START=== 和 ===JSON END=== 之间提取），使用 Write 工具写入 `{ICODE_OUT_DIR}/deepcheck_round_{total_rounds}.json`，再**追加写入 `{ICODE_OUT_DIR}/05_review_rounds.json`**（JSONL 格式，每行一条）
+- **修复代码时禁止删除现有注释**：仅修改问题相关的代码逻辑，保留原有注释内容
+- 解析本轮 JSON：
+  - `total_rounds += 1`
+  - 如果 `has_issues == true`：
+    a. 读取 issues 列表，逐个修复代码问题（用 Edit 工具）
+    b. **重置 `clean_rounds = 0`**
+    c. 回到执行流程第4步重新启动子 Agent 开始下一轮复检（**保持当前 phase 不变**）
+  - 如果 `has_issues == false`：
+    a. **`clean_rounds += 1`**
+    b. **阶段切换检查**：如果 `phase == "fixed"` 且本轮为首次全 clean（`clean_rounds == 1`），将 `phase` 切换为 `"free"`
+    c. 如果 `clean_rounds < 5`，回到执行流程第4步重新启动子 Agent 开始下一轮复检
+    d. 如果 `clean_rounds >= 5`，**终止复检**，输出完成信息
+
+**严格执行**：必须连续满 5 轮全程无任何问题、无任何遗漏、无任何隐患，才可正式终止复检流程。
+
+**复检完成后强制操作**：
+
+- **更新 `{ICODE_OUT_DIR}/.ico_metadata.json`**：将 `status` 设为 `review_complete`，`completed_steps` 追加 `"5"`，并写入 `deepcheck_total_rounds`（实际完成轮次数，即 `total_rounds - 1`）、`deepcheck_clean_rounds` 和 `deepcheck_phase` 字段
+- 如果是全流程模式：**立即继续执行步骤6**
+
+---
+
+## 子 Agent 执行指南 — Fixed 阶段
+
+**请先进行深度思考（对照计划逐模块检查→逐维度评估→汇总问题），再开始执行。**
+
+请对已实施代码进行全面复检。
+
 **硬性要求：必须逐项检查全部 7 个复检维度，每个维度都必须给出明确结论（通过/发现问题），不得跳过或遗漏任何维度。**
 
-最终计划：
-{读取 {ICODE_OUT_DIR}/03_plan_final.md 的内容}
-
-已实施代码：
-{读取 {ICODE_OUT_DIR}/.ico_metadata.json 中的 code_files 字段，列出所有代码文件路径和内容}
+**禁止执行任何工具调用（Bash/Read 等）**，计划内容和代码已在主 Agent 的 prompt 中提供，基于以上信息直接分析。
 
 **检查前必须先建立追溯矩阵**（对照定稿计划逐条列出功能点/接口/数据结构/约束条件，标记代码中的对应实现位置和完成状态），然后再逐维度评估。追溯矩阵中的未实现/部分实现项必须记录为 issues。
 
@@ -59,65 +136,49 @@
 6. 潜在隐患 — 内存泄漏、死锁、资源竞争、安全漏洞
 7. **跨文件一致性** — 接口变更是否全链路同步、上下游数据结构是否对齐、修改的文件是否遗漏了关联文件的同步修改
 
-输出要求：
-- 必须先逐维度说明检查结果（通过/发现问题），再汇总 issues
-- 注意：`has_issues` 为 boolean 类型，true=有问题需修复，false=全部通过
-- 示例如下：
+输出 JSON 格式：
+```json
 {
   "round": {total_rounds},
   "dimension_results": {
-    "1": "通过",
-    "2": "通过",
-    "3": "问题",
-    "4": "通过",
-    "5": "通过",
-    "6": "通过",
-    "7": "通过"
+    "1": "通过/问题",
+    "2": "通过/问题",
+    "3": "通过/问题",
+    "4": "通过/问题",
+    "5": "通过/问题",
+    "6": "通过/问题",
+    "7": "通过/问题"
   },
-  "has_issues": true,
+  "has_issues": true/false,
   "issues": [
     {
-      "severity": "中",
+      "severity": "高/中/低",
       "file": "文件路径",
-      "dimension": "3",
+      "dimension": "维度编号",
       "description": "问题描述",
       "suggestion": "修复建议"
     }
   ],
   "summary": "总体评估（需明确提及覆盖了哪些维度、每个维度的结论）"
 }
-
-**输出方式（必须遵守）**：
-1. **尝试**使用 Write 工具将 JSON 写入 `{ICODE_OUT_DIR}/deepcheck_round_{total_rounds}.json`（失败则忽略）
-2. **必须在回复中输出完整 JSON 结果**（主 Agent 会提取写入文件，这是主要交付方式）
-3. 回复以"===JSON START==="开头、以"===JSON END==="结尾
 ```
 
-### Free 阶段 Prompt（`phase == "free"`）
+输出以 `===JSON START===` 开头、`===JSON END===` 结尾。
 
-**核心规则**：对计划涉及的代码实施效果开启**无限轮次多维度复检**。每一轮发现问题并修正后**重置轮次计数**，直到**连续 5 轮无问题才停止**。不可偷懒、不可提前终止。
+---
 
-```
-当前使用模型：{当前模型名称}。
-**请先进行深度思考（阅读代码→选择检查角度→逐角度分析→汇总问题），再开始执行。**
+## 子 Agent 执行指南 — Free 阶段
 
-请对以下已实施代码进行自由深度复检。
+**核心规则**：每轮都是**独立深度复检**，假设此轮可能是最后一轮，**必须尽全力挖掘潜在问题**。主控端会自行判断何时终止，子 Agent 只需专注于**本轮检查的彻底性和深入性**。
 
-**本轮模式：自由探索 —— 请自行选择 2-3 个与本轮之前不同的新角度切入。**
+**假设此轮是最后一轮复检，必须尽全力找出遗留问题。不因"之前轮次已查过"而松懈。**
 
 **硬性规则**：
-- 无限轮次多维度复检，发现问题修正后重置计数
-- 连续 5 轮无问题才可停止
-- 不可偷懒、不可跳过、不可提前终止
+- 选择 2-3 个与本轮之前不同的新角度，**每个角度必须深入分析**（至少给出3个具体检查点/代码位置）
+- **严禁"快速收尾"心态**：禁止"无新增问题"、"快速收尾"、"前面已检查过"等偷懒措辞
+- 如果没有发现问题，必须提供**具体的分析证据**（"已检查了XXX模块的XXX逻辑，确认正确"），不可空泛说"全部通过"
 
-最终计划：
-{读取 {ICODE_OUT_DIR}/03_plan_final.md 的内容}
-
-已实施代码：
-{读取 {ICODE_OUT_DIR}/.ico_metadata.json 中的 code_files 字段，列出所有代码文件路径和内容}
-
-之前轮次已检查过的角度（本轮请避开这些，选新角度）：
-{前几轮已检查角度列表，没有则填"无"}
+**禁止执行任何工具调用（Bash/Read 等）**，计划内容和代码已在主 Agent 的 prompt 中提供，基于以上信息直接分析。
 
 **强制要求：至少有一轮 Free 阶段复检必须选择"计划实施一致性"角度，逐条对照定稿计划验证代码实现是否偏离。**
 
@@ -133,19 +194,12 @@
 - 跨平台：字节序、类型大小、编译器差异
 - 协议兼容：字段对齐、版本兼容、序列化一致性
 
-输出要求：
-- 先声明本轮检查角度（文本形式）
-
-**输出方式（必须遵守）**：
-1. **尝试**使用 Write 工具将 JSON 写入 `{ICODE_OUT_DIR}/deepcheck_round_{total_rounds}.json`（失败则忽略）
-2. **必须在回复中输出完整 JSON 结果**（主 Agent 会提取写入文件，这是主要交付方式）
-3. 回复以"===JSON START==="开头、以"===JSON END==="结尾
-
-JSON 格式如下：
+输出 JSON 格式：
+```json
 {
   "round": {total_rounds},
   "focus_angles": ["角度1", "角度2", "角度3"],
-  "has_issues": false,
+  "has_issues": true/false,
   "issues": [
     {
       "severity": "高/中/低",
@@ -158,25 +212,4 @@ JSON 格式如下：
 }
 ```
 
-### 强制操作（每轮完成后必须执行）
-
-- **提取子 Agent 回复中的 JSON 内容**（从 ===JSON START=== 和 ===JSON END=== 之间提取），使用 Write 工具写入 `{ICODE_OUT_DIR}/deepcheck_round_{total_rounds}.json`，再**追加写入 `{ICODE_OUT_DIR}/05_review_rounds.json`**（JSONL 格式，每行一条）
-- **修复代码时禁止删除现有注释**：仅修改问题相关的代码逻辑，保留原有注释内容
-- 解析本轮 JSON：
-  - `total_rounds += 1`
-  - 如果 `has_issues == true`：
-    a. 读取 issues 列表，逐个修复代码问题（用 Edit 工具）
-    b. **重置 `clean_rounds = 0`**
-    c. 回到执行流程第3步重新读取文件并开始下一轮复检（**保持当前 phase 不变**）
-  - 如果 `has_issues == false`：
-    a. **`clean_rounds += 1`**
-    b. **阶段切换检查**：如果 `phase == "fixed"` 且本轮为首次全 clean（`clean_rounds == 1`），将 `phase` 切换为 `"free"`
-    c. 如果 `clean_rounds < 5`，回到执行流程第3步重新读取文件并开始下一轮复检
-    d. 如果 `clean_rounds >= 5`，**终止复检**，输出完成信息
-
-**严格执行**：必须连续满 5 轮全程无任何问题、无任何遗漏、无任何隐患，才可正式终止复检流程。
-
-**复检完成后强制操作**：
-
-- **更新 `{ICODE_OUT_DIR}/.ico_metadata.json`**：将 `status` 设为 `review_complete`，`completed_steps` 追加 `"5"`，并写入 `deepcheck_total_rounds`（实际完成轮次数，即 `total_rounds - 1`）、`deepcheck_clean_rounds` 和 `deepcheck_phase` 字段
-- 如果是全流程模式：**立即继续执行步骤6**
+输出以 `===JSON START===` 开头、`===JSON END===` 结尾。

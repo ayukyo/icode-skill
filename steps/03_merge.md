@@ -12,49 +12,36 @@
 
 ### ⚠️ 强制规则：禁止主 Agent 直接合并定稿
 
-定稿合并**必须由子 Agent 独立完成**。主 Agent 只负责确定目录、读取文件、启动子 Agent、写入文件。**主 Agent 不得跳过子 Agent 自行合并定稿内容。**
+定稿合并**必须由子 Agent 独立完成**。主 Agent 只负责确定目录、读取文件、启动子 Agent、写文件。**主 Agent 不得自行撰写定稿计划。**
 
 1. 执行目录管理中的「检测最新目录」逻辑，确定 `ICODE_OUT_DIR`
-2. 读取 `{ICODE_OUT_DIR}/01_plan.md` 和 `{ICODE_OUT_DIR}/02_review.md`
+2. 读取 `{ICODE_OUT_DIR}/01_plan.md`（原始计划）和 `{ICODE_OUT_DIR}/02_review.md`（审查意见）
 3. 按「通用规则」确定当前模型
-4. **必须启动子 Agent 执行合并定稿**（主 Agent 不可自行合并），按「通用规则」启动子 Agent，prompt 为：
+4. 输出模型确认：`▶ 步骤3 使用模型：{当前模型名称}`
+5. **启动子 Agent** 执行合并定稿，prompt 为：
 
 ```
 当前使用模型：{当前模型名称}。
-**请先进行深度思考（对比计划与审查意见→逐条判断→合并优化），再开始执行。**
 
-请将审查意见合并优化进原计划。
-
-**输出方式（必须遵守）**：
-1. **尝试**使用 Write 工具将内容写入 `{ICODE_OUT_DIR}/03_plan_final.md`（失败则忽略）
-2. **必须在回复中输出完整定稿计划**（主 Agent 会提取写入文件）
-3. 回复以"===FINAL PLAN START==="开头、以"===FINAL PLAN END==="结尾
+请将以下审查意见合并优化进原始计划。
 
 原始计划：
-{读取 {ICODE_OUT_DIR}/01_plan.md 的内容}
+{读取 {ICODE_OUT_DIR}/01_plan.md 的全部内容}
 
 审查意见：
-{读取 {ICODE_OUT_DIR}/02_review.md 的内容}
+{读取 {ICODE_OUT_DIR}/02_review.md 的全部内容}
 
 要求：
-1. 逐条甄别审查意见合理性
-2. 保留采纳所有正确、贴合业务、补齐短板的合理内容
-3. 剔除无效、冗余、不贴合实际的建议
-4. 完整合并优化进原有计划
-5. 保持整体架构不变，只完善补齐内容
-6. 在每处修改处标注 [审查采纳] 标记
-7. **最终自检**：Agent 输出定稿计划后，**必须**从头到尾通读全文做完整性检查：
-   - 章节结构是否完整、编号是否连续
-   - 校验项是否全部以 [ ] checkbox 格式列出
-   - 计划描述是否准确无歧义
-   - 所有 [审查采纳] 标记位置是否合理
-   发现问题立即修正，修正后重新输出完整定稿版
+1. 逐条甄别审查意见，保留正确合理的，剔除无效冗余的
+2. 每处修改标注 [审查采纳] 标记
+3. 保持整体架构不变
+4. 输出前必须自检：章节完整、编号连续、校验项 checkbox 格式正确
 
-输出完整最终定稿版计划。
+**禁止执行任何工具调用**，所有信息已在 prompt 中提供，基于以上内容直接分析输出。
+
+直接输出完整定稿计划，以 ===FINAL PLAN START=== 开头、===FINAL PLAN END=== 结尾。
 ```
 
-## 强制操作（完成后必须执行）
-
-5. **提取子 Agent 回复中的定稿计划内容**（从 ===FINAL PLAN START=== 和 ===FINAL PLAN END=== 之间提取），使用 Write 工具写入 `{ICODE_OUT_DIR}/03_plan_final.md`
-6. **更新 `{ICODE_OUT_DIR}/.ico_metadata.json`**：将 `status` 设为 `plan_finalized`，`completed_steps` 追加 `"3"`，写回文件
-7. 如果是全流程模式：**立即继续执行步骤4**
+6. **提取定稿内容**（从 ===FINAL PLAN START=== 到 ===FINAL PLAN END===），写入 `{ICODE_OUT_DIR}/03_plan_final.md`
+7. **更新 `.ico_metadata.json`**：`status = plan_finalized`，`completed_steps` 追加 `"3"`
+8. 全流程模式：**立即继续执行步骤4**
