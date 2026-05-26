@@ -49,8 +49,6 @@
 6. 现有实现对照 — 计划方案是否与现有代码重复或冲突
 
 ========== 输出 ==========
-**禁止执行任何工具调用**，所有信息已在 prompt 中提供，基于以上内容直接分析输出。
-
 直接输出 JSON，以 ===JSON START=== 开头、===JSON END=== 结尾：
 {"round":1,"independent_plan_summary":"概述","comparison_analysis":[{"type":"遗漏/偏差/多余","independent_view":"我的方案","plan_view":"步骤1方案","verdict":"采纳/折中/驳回","reason":"理由"}],"dimension_results":{"1":"通过/问题","2":"通过/问题","3":"通过/问题","4":"通过/问题","5":"通过/问题","6":"通过/问题"},"has_new_issues":true/false,"new_issues":[{"dimension":"1-6","severity":"高/中/低","description":"问题描述","suggestion":"建议"}],"summary":"总体评估"}
 ```
@@ -69,8 +67,6 @@
 检查是否还有遗漏问题或更深层次风险。
 
 维度（全部覆盖）：1.逻辑合理性 2.流程完整性 3.场景覆盖度 4.风险遗漏 5.落地可行性 6.现有实现对照
-
-**禁止执行任何工具调用**，所有信息已在 prompt 中提供，基于以上内容直接分析输出。
 
 直接输出 JSON，以 ===JSON START=== 开头、===JSON END=== 结尾：
 {"round":{total_rounds},"has_new_issues":true/false,"new_issues":[{"dimension":"1-6","severity":"高/中/低","description":"问题描述","suggestion":"建议"}],"summary":"本轮评估"}

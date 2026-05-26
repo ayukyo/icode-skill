@@ -135,7 +135,7 @@ ICODE_OUT_DIR=".icode_output_${LAST}"
    - 主 Agent **必须读取这些文件并将内容替换进 prompt**，再将完整的 prompt 传给子 Agent
    - 每个 prompt 必须是**自包含的**，子 Agent 无需读任何其他文件即可执行
    - prompt 末尾必须强调"直接输出结果，以 ===XXX START=== 开头"，防止子 Agent 跑偏
-   - **prompt 末尾必须追加**：`**禁止执行任何工具调用（Bash/Read/Write/Edit等），所有信息已在 prompt 中提供，基于以上内容直接分析输出。**`
+   - prompt 末尾可追加：`**优先使用 prompt 中已提供的信息进行分析，必要时可执行工具调用**`
 
    **`{用户输入的原始需求}` 的传递规则**：
    - 子 Agent 是全新上下文，**看不到主会话中的任何历史对话**
