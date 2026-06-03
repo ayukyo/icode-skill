@@ -99,7 +99,7 @@
    每轮一个独立的 markdown 区块，步骤3将按此格式解析。
 8. **解析 JSON 控制循环**：
    - `total_rounds += 1`
-   - 有 issues（`has_new_issues == true`）：`clean_rounds = 0`，若 `total_rounds <= 3` 回到第6步。**回到第6步前，先读取所有 `review_round_*.json` 汇总**：提取 `new_issues` 列表 + 首轮的 `file_review.key_findings`，作为 `{之前各轮的 new_issues 列表 + file_review.key_findings}` 填入后续轮次 prompt
+   - 有 issues（`has_new_issues == true`）：`clean_rounds = 0`，回到第6步继续审查。**回到第6步前，先读取所有 `review_round_*.json` 汇总**：提取 `new_issues` 列表 + 首轮的 `file_review.key_findings`，作为 `{之前各轮的 new_issues 列表 + file_review.key_findings}` 填入后续轮次 prompt。若 `total_rounds >= 5`，先输出警告 `⚠️ 审查已达5轮仍有问题，但继续直到连续2轮无新问题`，不终止
    - 无 issues（`has_new_issues == false`）：`clean_rounds += 1`，若 `clean_rounds < 2` 同上汇总后回到第6步，否则终止
 9. **更新 `.ico_metadata.json`**：`status = review_done`，`completed_steps` 追加 `"2"`，记录轮次
 10. 全流程模式：**立即继续执行步骤3**
