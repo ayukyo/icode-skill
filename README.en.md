@@ -9,7 +9,7 @@ ICode is a Claude Code Skill that breaks down the journey from requirement to de
 - Full-flow mode (`/icode new`) auto-switches to the optimal model per step
 - Outputs saved under `.icode_output_N/`, supports cross-session recovery
 - Metadata management (`.ico_metadata.json`) for execution status and code file tracking
-- Dual-phase deepcheck (Fixed → Free) to prevent AI laziness and repetitive reviews
+- Triple-phase deepcheck (Reverse → Fixed → Free) to prevent AI laziness and catch implementation gaps
 
 ## Installation
 
@@ -72,6 +72,7 @@ In `/icode new` full-flow mode, each step uses the following model:
 ├── 01_plan.md              # Step 1: Project plan
 ├── 02_review.md            # Step 2: Review report
 ├── 03_plan_final.md        # Step 3: Finalized plan
+├── 05_reverse.json         # Step 5: Reverse-engineered spec (single JSON)
 ├── 05_review_rounds.json   # Step 5: Review round logs (JSONL)
 ├── 06_audit.md             # Step 6: Audit report
 └── 06_fixes.log            # Step 6: Fix log

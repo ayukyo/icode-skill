@@ -85,11 +85,39 @@ ICODE_OUT_DIR=".icode_output_${LAST}"
   "created_at": "创建时间",
   "status": "当前步骤状态",
   "completed_steps": ["1", "2"],
-  "code_files": ["path/to/file"]
+  "code_files": ["path/to/file"],
+  "total_rounds": 1,
+  "clean_rounds": 0,
+  "phase": "reverse",
+  "code_compile_failed": false,
+  "deepcheck_total_rounds": 0,
+  "deepcheck_clean_rounds": 0,
+  "deepcheck_phase": "reverse"
 }
 ```
 
 每步执行后必须更新 `status` 和 `completed_steps`。步骤4编码后必须记录 `code_files`。
+
+**`code_files` 路径基准**：所有路径**相对于项目根目录**（即用户运行 `/icode` 命令的目录），不含前导 `./`。例：`src/foo.c`、`include/bar.h`。主 Agent 使用 Read 工具时须自行拼接绝对路径。
+
+**可选字段**（按需写入，缺失视为默认值）：
+- `total_rounds` / `clean_rounds`：步骤 2 续跑用
+- `phase`：步骤 5 续跑用（值：`reverse` / `fixed` / `free`）
+- `code_compile_failed`：步骤 4 编译失败标记（`true` 时步骤 5 入口输出警告）
+- `deepcheck_total_rounds` / `deepcheck_clean_rounds` / `deepcheck_phase`：步骤 5 完成时记录
+
+**`status` 字段枚举**（统一词表，所有步骤必须严格遵守，禁止自定义）：
+
+| 步骤 | 状态值 | 含义 |
+|------|--------|------|
+| 1 | `plan_done` | 步骤1计划完成 |
+| 2 | `review_in_progress` → `review_done` | 步骤2审查中 → 完成 |
+| 3 | `plan_finalized` | 步骤3定稿完成 |
+| 4 | `code_in_progress` → `code_done` | 步骤4编码中 → 完成 |
+| 5 | `deepcheck_in_progress` → `deepcheck_done` | 步骤5复检中 → 完成 |
+| 6 | `completed` | 步骤6终审完成（终态） |
+
+**`in_progress` 状态用于支持分步中断续跑**（详见各步骤"分步中断续跑"段）：步骤 2/5 在每轮结束时实时落盘 `*_in_progress` + 当前轮次/phase，崩溃后重启可从断点恢复。
 
 ### 模型分配
 
@@ -124,6 +152,7 @@ ICODE_OUT_DIR=".icode_output_${LAST}"
 
 > **步骤1 不使用子 Agent**，直接在主会话中执行。以下规则仅适用于步骤2-6。
 
+0. **并发子 Agent 最多 3 个** — 同一时刻同时在跑的子 Agent 数量不超过 3 个。子 Agent 过多同时并发容易失败。**阶段数量与子 Agent 数量无关**：步骤 2/5 的多轮循环可包含任意个子 Agent，只要遵守并发≤3 的约束（通常串行启动即可满足）。
 1. **确定当前模型** — 全流程模式按上表设置 `model`；分步模式不设置 `model` 参数。将 `{当前模型名称}` 替换为实际模型名。
 2. **输出模型确认** — 启动子 Agent 前，必须先在对话中输出：`▶ 步骤N 使用模型：{当前模型名称}`，让用户确认模型切换生效。
 3. **必须使用 Agent 工具启动一个子 Agent**（不可由主 Agent 直接执行），设置 `model` 参数（分步模式不设置）。
@@ -158,6 +187,14 @@ ICODE_OUT_DIR=".icode_output_${LAST}"
    b. 回复中无标记但有实质内容（>50 tokens） → 将全部回复内容作为输出，完成（标记不是必需的）
    c. 回复内容极少（≤50 tokens 或无实质内容） → **可能是后台 Agent 工具调用中间状态**，先检查 TaskOutput 取得最终结果。如果 TaskOutput 返回实质内容，按 a/b 处理。
    d. 以上均无内容 → 重新启动子 Agent（使用同一类型），不可自行切换策略
+
+   **子 Agent 沉默恢复（4 级判定 c/d 触发时）**：
+   - **不要用 `max_tokens` 限长**——会截断分析输出，治标不治本
+   - **步骤 1：SendMessage 续接** — 向同一 Agent ID 发 "请直接输出完整结果" 类短 prompt，60% 概率可恢复
+   - **步骤 2：补强指令后重发** — 续接失败时，重新启动子 Agent，prompt 前置更强的指令：例如 "你必须输出至少 200 tokens" / "必须包含 ===XXX START=== 标记" / "禁止说'无法完成'" / 直接列出必含字段
+   - **步骤 3：换模型** — 仍失败时，换用其他模型（如 sonnet → opus 或反之），不换 Agent 类型
+   - **步骤 4：放弃该轮** — 三次均失败，输出 `⚠️ 子 Agent 连续沉默，本轮跳过` 警告并继续后续步骤；残留问题由步骤 6 终审兜底
+   - **禁止**：在 c/d 状态下由主 Agent 接管生成内容（违反"禁止主 Agent 接管"）
 6. **禁止合并或跳过步骤** — 6 个步骤必须逐一执行，**不可合并**（如"快速自检合并步骤5-6"）、**不可跳过**任何步骤。步骤2-6每个都必须启动独立的子 Agent 执行，完成后才能继续下一步。步骤1在主会话中直接执行。
 
 7. **主 Agent 必须读取输入文件（仅限步骤2-6）** — 主 Agent **必须自行读取当前步骤所需的全部输入文件**（计划、代码、审查意见等），将内容填入 prompt 后传给子 Agent。这是子 Agent 获取信息的唯一渠道。**例外：步骤1在主会话中执行，需要主 Agent 阅读代码并直接撰写计划。**

@@ -42,7 +42,10 @@
 
 6. **提取代码文件**（从 ===FILE: 文件路径=== 到 ===END FILE===），使用 Write 工具创建/修改每个文件
 7. **编译验证**：运行项目对应的编译命令（最多尝试 3 次），确保所有文件无错误、无警告
+   - **3 次仍失败**：输出 `⚠️ 编译失败兜底` 警告，**不**设 `code_done`，而是设 `code_in_progress` + `code_compile_failed = true`。代码文件仍写入磁盘，`code_files` 仍记录，但 metadata 标记编译失败
+   - 步骤 5 入口检测到 `code_compile_failed` 时输出警告，但仍继续（部分项目可能只有 warning 无 error 也能跑）
 8. **更新元信息**：
-   - 将 `code_files` 更新为所有新增/修改的**相对路径**列表
-   - `status = code_done`，`completed_steps` 追加 `"4"`
-9. 全流程模式：**立即继续执行步骤5**
+   - 将 `code_files` 更新为所有新增/修改的**相对项目根目录**的路径列表
+   - 编译通过：`status = code_done`，`completed_steps` 追加 `"4"`
+   - 编译失败：`status = code_in_progress`，`code_compile_failed = true`，**不**追加 `completed_steps`
+9. 全流程模式：编译通过则**立即继续执行步骤5**；编译失败则中止，提示用户修复

@@ -8,6 +8,16 @@
 
 检查 `{ICODE_OUT_DIR}/03_plan_final.md` 和步骤4创建的代码文件是否存在，缺失则报错并提示先执行 `/icode code`。
 
+## 关键：代码新鲜度保证
+
+**启动子 Agent 前，主 Agent 必须重新读取所有代码文件**，将最新内容嵌入 prompt。
+
+步骤6运行在步骤5之后，步骤5的修复已落盘。审计子 Agent 必须看到**步骤5修复后的最新代码**，否则：
+- 步骤5已修的问题会被重复报告为"未修复"
+- 步骤5修复引入的新问题可能被遗漏
+
+主 Agent 在 6.1 第 5 步（启动子 Agent 前）用 Read/Glob 重新拉取 `.ico_metadata.json` 中 `code_files` 列表对应的所有文件，替换进 prompt。
+
 ## 6.1 出具终审报告
 
 ### ⚠️ 强制规则：禁止主 Agent 直接终审
@@ -15,11 +25,12 @@
 终审报告**必须由子 Agent 独立完成**。主 Agent 只负责确定目录、读取文件、启动子 Agent、写文件、执行修复。**主 Agent 不得自行撰写终审报告或评估缺陷。**
 
 1. 执行目录管理中的「检测最新目录」逻辑，确定 `ICODE_OUT_DIR`
-2. 读取 `{ICODE_OUT_DIR}/03_plan_final.md` 和所有代码文件（从 `.ico_metadata.json` 的 `code_files` 获取列表）
-   - 额外读取 `{ICODE_OUT_DIR}/05_review_rounds.json`（若存在），提取历史问题和角度汇总，避免重复发现已知问题
+2. 读取 `{ICODE_OUT_DIR}/03_plan_final.md` 和 `.ico_metadata.json` 的 `code_files` 列表
+   - 额外读取 `{ICODE_OUT_DIR}/05_review_rounds.json`（若存在，Fixed/Free 轮次 JSONL）和 `{ICODE_OUT_DIR}/05_reverse.json`（若存在，逆推规格），提取历史问题和角度汇总，避免重复发现已知问题
 3. 按「通用规则」确定当前模型
 4. 输出模型确认：`▶ 步骤6 使用模型：{当前模型名称}`
-5. **启动子 Agent** 执行终审，prompt 为：
+5. **重新读取所有代码文件**（关键！保证最新）
+6. **启动子 Agent** 执行终审，prompt 为：
 
 ```
 当前使用模型：{当前模型名称}。
@@ -29,11 +40,12 @@
 定稿计划：
 {读取 {ICODE_OUT_DIR}/03_plan_final.md 的全部内容}
 
-代码文件列表及内容：
+代码文件列表及内容（含步骤5修复后的最新内容）：
 {读取代码文件列表，逐个列出文件路径和内容}
 
 **步骤5 深检历史（若存在）**：
-{读取 `{ICODE_OUT_DIR}/05_review_rounds.json`，汇总已检查角度和已发现问题}
+{读取 `{ICODE_OUT_DIR}/05_review_rounds.json`（Fixed/Free 轮次 JSONL），汇总已检查角度和已发现问题}
+{若 `{ICODE_OUT_DIR}/05_reverse.json` 存在，单独读取其内容作为参考}
 
 **注意**：已修复的深检问题无需重复报告。专注于深检未覆盖的角度或更深层次的架构问题。
 
