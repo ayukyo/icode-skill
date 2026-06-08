@@ -1,9 +1,9 @@
 ---
 name: icode
-description: 六步全流程编码工作流，支持分步手动调用：/icode help (帮助), /icode new <需求> (新建+计划), /icode review (审查), /icode merge (定稿), /icode code (编码), /icode deepcheck (复检), /icode audit (终审)
+description: 六步全流程编码工作流，支持分步手动调用：/icode help (帮助), /icode new <需求> (新建+计划), /icode review [N] (审查), /icode merge (定稿), /icode code (编码), /icode deepcheck (复检), /icode audit (终审)
 ---
 
-**版本**: v1.2.0
+**版本**: v1.3.0
 
 # ICode 六步全流程编码工作流
 
@@ -18,7 +18,7 @@ description: 六步全流程编码工作流，支持分步手动调用：/icode 
 | `/icode help` | **帮助**：输出使用流程示例 | 否 |
 | `/icode new <需求>` | **全流程**：创建新目录 → 步骤1→6 串联 | ✅ 创建新目录 |
 | `/icode plan <需求>` | **仅步骤1**：拟定项目计划 | ✅ 创建新目录 |
-| `/icode review` | **仅步骤2**：多轮循环审查 | 用最新目录 |
+| `/icode review [N]` | **仅步骤2**：多轮循环审查（N=轮数，默认3） | 用最新目录 |
 | `/icode merge` | **仅步骤3**：合并审查意见定稿 | 用最新目录 |
 | `/icode code` | **仅步骤4**：落地编码实施 | 用最新目录 |
 | `/icode deepcheck` | **仅步骤5**：三阶段递进复检 | 用最新目录 |
@@ -36,7 +36,8 @@ description: 六步全流程编码工作流，支持分步手动调用：/icode 
 
 # 方式B：分步执行
 /icode plan 实现MCU雨量传感器I2C驱动   # 步骤1
-/icode review                          # 步骤2
+/icode review                          # 步骤2（默认3轮）
+/icode review 5                        # 步骤2（指定5轮）
 /icode merge                           # 步骤3
 /icode code                            # 步骤4
 /icode deepcheck                       # 步骤5
@@ -88,6 +89,7 @@ ICODE_OUT_DIR=".icode_output_${LAST}"
   "code_files": ["path/to/file"],
   "total_rounds": 1,
   "clean_rounds": 0,
+  "max_rounds": 3,
   "phase": "reverse",
   "code_compile_failed": false,
   "deepcheck_total_rounds": 0,
@@ -101,7 +103,7 @@ ICODE_OUT_DIR=".icode_output_${LAST}"
 **`code_files` 路径基准**：所有路径**相对于项目根目录**（即用户运行 `/icode` 命令的目录），不含前导 `./`。例：`src/foo.c`、`include/bar.h`。使用 Read 工具时须将相对路径拼接为绝对路径。
 
 **可选字段**（按需写入，缺失视为默认值）：
-- `total_rounds` / `clean_rounds`：步骤 2 续跑用
+- `total_rounds` / `clean_rounds` / `max_rounds`：步骤 2 续跑用（`max_rounds` 由 `/icode review [N]` 参数决定，默认 3）
 - `phase`：步骤 5 续跑用（值：`reverse` / `fixed` / `free`）
 - `code_compile_failed`：步骤 4 编译失败标记（`true` 时步骤 5 入口输出警告）
 - `deepcheck_total_rounds` / `deepcheck_clean_rounds` / `deepcheck_phase`：步骤 5 完成时记录

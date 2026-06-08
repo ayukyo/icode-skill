@@ -19,21 +19,24 @@
 
 解析 02_review.md 中的审查意见——从每个 json 代码块提取 JSON，重点关注：
 - 首轮的 `file_review.key_findings`（通读实际代码发现的问题）
-- 所有轮的 `new_issues`（维度审查发现的问题）
+- 所有轮的 `new_issues`（维度审查发现的问题，含 `affected_sections`/`suggestion`/`rejection_risk` 结构化字段）
 
 **要求**：
 1. 逐条甄别审查意见（含 `new_issues` 和 `file_review.key_findings`），两者同等重要
-2. `file_review.key_findings` 中的接口约束、命名模式、隐式依赖等，若计划未覆盖，必须补充
-3. 每处修改标注 `[审查采纳 #编号]` 或 `[通读发现]` 标记
-4. 保持整体架构不变
-5. 输出前必须自检：章节完整、编号连续、校验项 checkbox 格式正确
+2. 利用 issue 的 `affected_sections` 字段定位计划中需修改的章节，利用 `suggestion` 字段理解建议修改，利用 `rejection_risk` 评估否决后果
+3. 对每条 issue 做出判断：采纳 / 部分采纳 / 否决。否决必须写明理由（rejection_reason）
+4. `file_review.key_findings` 中的接口约束、命名模式、隐式依赖等，若计划未覆盖，必须补充
+5. 每处修改标注 `[审查采纳 #编号]` 或 `[通读发现]` 或 `[审查否决 #编号: 理由]` 标记
+6. 保持整体架构不变
+7. 输出前必须自检：章节完整、编号连续、校验项 checkbox 格式正确
 
 **写入定稿**：使用 Write 工具写入 `{ICODE_OUT_DIR}/03_plan_final.md`。
 
 ### 定稿自检
 
 读取刚写入的 `{ICODE_OUT_DIR}/03_plan_final.md`，逐项检查：
-- 8 章节完整（概述、功能需求、架构设计、详细设计、异常处理、实现步骤、校验项、风险评估）
+
+- 9 章节完整（概述、功能需求、架构设计、架构决策记录ADR、详细设计、异常处理、实现步骤、校验项、风险评估）
 - 校验项 checkbox 格式正确（`- [ ]` 或 `- [x]`）
 - 章节编号连续无重复
 - 所有 [审查采纳] 标记与审查意见对应
