@@ -1,12 +1,15 @@
-# ICode — Six-Step End-to-End Coding Workflow
+# ICode — End-to-End Coding Workflow (Step 0 + 1~6)
 
-ICode is a Claude Code Skill that breaks down the journey from requirement to delivery into 6 strict steps. Each step can be invoked independently, allowing you to switch models between steps.
+ICode is a Claude Code Skill that breaks down the journey from requirement to delivery into strict steps. Each step can be invoked independently, allowing you to switch models between steps.
+
+- **Step 0 (optional)**: Iterative requirement-draft conversation, output as `00_init.md`
+- **Steps 1~6**: Plan → Review → Finalize → Code → Deep Check → Audit
 
 ## Features
 
-- **Plan → Review → Finalize → Code → Deep Check → Audit**, six-step closed loop
+- **(Optional) Requirement Draft → Plan → Review → Finalize → Code → Deep Check → Audit**, closed-loop delivery
 - Each step callable independently; switch models between steps
-- Full-flow mode (`/icode new`) auto-chains all 6 steps
+- Full-flow mode (`/icode start`) auto-chains steps 1→6
 - All steps run in the main session — no sub-agent isolation issues
 - Outputs saved under `.icode_output_N/`, supports cross-session recovery
 - Metadata management (`.ico_metadata.json`) for execution status and code file tracking
@@ -15,6 +18,7 @@ ICode is a Claude Code Skill that breaks down the journey from requirement to de
 - Architecture Decision Records (ADR) section for centralized decision tracking
 - Review supports custom round count (`/icode review [N]`) and incremental review mode
 - Structured review issues (affected sections / suggestion / rejection risk)
+- **(New in v1.4.0)** `/icode init` produces a `00_init.md` requirement draft via multi-turn dialogue, updated incrementally each round; `/icode start`/`/icode plan` auto-detects and reuses the directory as requirement input
 
 ## Installation
 
@@ -27,8 +31,8 @@ git clone <repo-url> ~/.claude/skills/icode
 ## Quick Start
 
 ```bash
-# One-shot full flow (auto model switching)
-/icode new Implement MCU rain sensor I2C driver
+# One-shot full flow (uses current session model; switch with /model if needed)
+/icode start Implement MCU rain sensor I2C driver
 
 # Or step by step
 /icode plan Implement MCU rain sensor I2C driver   # Step 1: Draft plan
@@ -38,6 +42,11 @@ git clone <repo-url> ~/.claude/skills/icode
 /icode code                                         # Step 4: Code implementation
 /icode deepcheck                                    # Step 5: Iterative re-review
 /icode audit                                        # Step 6: Final audit & fix
+
+# When the requirement is unclear: discuss first, then enter the flow
+/icode init Record point_cloud / lidar_imu re-bag    # Step 0: kick-off draft + dialogue
+# ... multi-turn discussion; 00_init.md is updated incrementally each round ...
+/icode start                                          # Reuses the same directory; uses 00_init.md as input
 ```
 
 ## Commands
@@ -45,23 +54,27 @@ git clone <repo-url> ~/.claude/skills/icode
 | Command | Description | Creates Dir? |
 | --- | --- | --- |
 | `/icode help` | Help: show usage examples | No |
-| `/icode new <req>` | Full flow: create dir → steps 1–6 | Yes |
-| `/icode plan <req>` | Step 1 only: draft project plan | Yes |
+| `/icode init [<rough req>]` | Optional Step 0: multi-turn dialogue → `00_init.md` (always creates a fresh directory) | Yes (always fresh) |
+| `/icode start <req>` | Full flow: create/reuse dir → steps 1–6 | Yes / Reuse |
+| `/icode plan <req>` | Step 1 only: draft project plan | Yes / Reuse |
 | `/icode review [N]` | Step 2 only: review the plan (N=rounds, default 3) | No |
 | `/icode merge` | Step 3 only: merge reviews & finalize | No |
 | `/icode code` | Step 4 only: implement code | No |
 | `/icode deepcheck` | Step 5 only: iterative re-check | No |
 | `/icode audit` | Step 6 only: final audit + fix | No |
 
+> When `/icode start` / `/icode plan` is launched and the latest `.icode_output_N/` contains only `00_init.md` (Step 0 output), it **reuses that directory** with `00_init.md` as the requirement input; otherwise it creates a fresh directory as usual.
+
 ## Execution
 
-All 6 steps run in the main session with the current model. No automatic model switching — use `/model` manually if needed.
+All steps run in the main session with the current model. No automatic model switching — use `/model` manually if needed.
 
 ## Directory Structure
 
-```
+```text
 .icode_output_N/
 ├── .ico_metadata.json      # Metadata (status, code file list)
+├── 00_init.md              # Step 0 (optional): Requirement draft (incrementally updated)
 ├── 01_plan.md              # Step 1: Project plan
 ├── 02_review.md            # Step 2: Review report
 ├── review_round_*.json     # Step 2: Per-round review details (JSON)
@@ -74,7 +87,9 @@ All 6 steps run in the main session with the current model. No automatic model s
 
 ## Workflow
 
-```
+```text
+[Step 0 (optional)] Requirement Draft Dialogue
+       ↓
 [Step 1] Plan → [Step 2] Review → [Step 3] Finalize
                                           ↓
 [Step 6] Audit ← [Step 5] Deep Check ← [Step 4] Code
@@ -82,7 +97,15 @@ All 6 steps run in the main session with the current model. No automatic model s
 
 ## Version
 
-Current version: v1.3.0
+Current version: v1.4.0
+
+### What's New (v1.4.0)
+
+- **New optional Step 0: `/icode init`** — When the requirement is unclear, discuss with the AI in multiple turns; `00_init.md` is incrementally updated each round, always keeping a complete structure (Background / Status / New requirements / Impact / Open decisions)
+- **`/icode init` always starts fresh**: every invocation creates a brand-new directory — no reuse, no resume of a previous discussion. To continue the previous discussion, just keep talking; the AI auto-detects and incrementally updates the document
+- **Two input modes**: `/icode init <rough req>` kicks off with a draft then enters dialogue; `/icode init` enters dialogue with an empty template
+- **Smart detection by `/icode start`/`/icode plan`**: when the latest directory contains only `00_init.md`, automatically reuse it as the requirement input (any CLI argument is treated as supplementary context only)
+- **Step 0 is independent and does not auto-chain**: only after the user explicitly runs `/icode start`/`/icode plan` does the flow advance to Step 1
 
 For detailed step descriptions, see [SKILL.md](SKILL.md).
 
