@@ -16,7 +16,7 @@
 
 1. 执行目录管理中的「检测最新目录」逻辑，确定 `ICODE_OUT_DIR`
 2. 读取 `{ICODE_OUT_DIR}/01_plan.md` 和 `.ico_metadata.json` 获取原始需求
-3. **深度思考**（必须先执行）：需求分解 → 独立方案构思 → 对比要点预判
+3. **强制思考前置**（不可跳过，缺证据视为不合规）：先输出 `ultrathink` 触发词；再调用 `sequential-thinking` MCP，至少 3 步，每步对应一个子项：需求分解 → 独立方案构思 → 对比要点预判
 4. **分步续跑检测**：
    - 解析命令参数获取 `max_rounds`：若 `/icode review N` 提供了正整数 N，则 `max_rounds = N`；否则 `max_rounds = 3`
    - 若 `.ico_metadata.json.status == "review_in_progress"`，从 metadata 恢复 `total_rounds` / `clean_rounds` 字段

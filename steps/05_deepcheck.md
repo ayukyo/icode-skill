@@ -49,7 +49,7 @@ Free 阶段一次性完整覆盖全部 15 个角度。
 1. 检测最新目录，确定 `ICODE_OUT_DIR`
 2. 读取 `03_plan_final.md` 和 `.ico_metadata.json`
    - 若 `.ico_metadata.json.code_compile_failed == true`，输出 `⚠️ 步骤4编译失败，仍继续复检` 警告
-3. **深度思考**（必须先执行）：梳理代码清单 → 回顾计划要点 → 制定逆推/Fixed/Free 检查策略
+3. **强制思考前置**（不可跳过，缺证据视为不合规）：先输出 `ultrathink` 触发词；再调用 `sequential-thinking` MCP，至少 3 步，每步对应一个子项：梳理代码清单 → 回顾计划要点 → 制定逆推/Fixed/Free 检查策略
 4. **分步续跑**：若 `status == "deepcheck_in_progress"`，从 metadata 恢复 `total_rounds` / `clean_rounds` / `phase`，同时读取已存在的 `05_reverse.json`（若存在则跳过 Reverse）和 `deepcheck_round_*.json`
 5. 否则初始化 `clean_rounds = 0`, `total_rounds = 1`, `phase = "reverse"`, `status = deepcheck_in_progress`
 6. 输出：`▶ 步骤5 复检开始`
