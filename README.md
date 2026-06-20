@@ -61,7 +61,7 @@ git clone <repo-url> ~/.claude/skills/icode
 | `/icode merge` | 仅步骤3：合并审查意见定稿 | 否 |
 | `/icode code` | 仅步骤4：落地编码实施 | 否 |
 | `/icode deepcheck` | 仅步骤5：无限轮循环复检 | 否 |
-| `/icode audit` | 仅步骤6：终极终审 + 统一修复 | 否 |
+| `/icode audit` | 仅步骤6：终极终审 + 统一修复 + 文档化（产出 README.md） | 否 |
 
 > `/icode start` / `/icode plan` 启动时若发现最新 `.icode_output_N/` 只有 `00_init.md`（步骤0产物），自动**复用该目录**并以 `00_init.md` 为需求输入；否则按常规创建新目录。
 
@@ -82,7 +82,8 @@ git clone <repo-url> ~/.claude/skills/icode
 ├── 05_reverse.json         # 步骤5：逆推规格（单条 JSON）
 ├── 05_review_rounds.json   # 步骤5：复检轮次记录（JSONL）
 ├── 06_audit.md             # 步骤6：终审报告
-└── 06_fixes.log            # 步骤6：修复日志
+├── 06_fixes.log            # 步骤6：修复日志
+└── README.md               # 步骤6.4 文档化产物：本次变更说明
 ```
 
 ## 工作流程

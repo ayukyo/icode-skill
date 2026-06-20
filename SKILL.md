@@ -26,7 +26,7 @@ description: 端到端编码工作流（步骤 0~6，含可选需求初稿步骤
 | `/icode merge` | **仅步骤3**：合并审查意见定稿 | 用最新目录 |
 | `/icode code` | **仅步骤4**：落地编码实施 | 用最新目录 |
 | `/icode deepcheck` | **仅步骤5**：三阶段递进复检 | 用最新目录 |
-| `/icode audit` | **仅步骤6**：终极终审 + 统一修复 | 用最新目录 |
+| `/icode audit` | **仅步骤6**：终极终审 + 统一修复 + 文档化（产出 `{ICODE_OUT_DIR}/README.md`） | 用最新目录 |
 
 > **`/icode start` / `/icode plan` 的目录复用规则**：启动时检查最新 `.icode_output_N/` 目录，若该目录**只有 `00_init.md`（仅 `.ico_metadata.json` + `00_init.md`，无其他步骤产物）**，则**复用该目录**（不递增 N），并将 `00_init.md` 作为需求输入；否则按"创建新目录"逻辑走。详见下文「目录管理」段落。
 

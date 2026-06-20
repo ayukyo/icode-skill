@@ -61,7 +61,7 @@ git clone <repo-url> ~/.claude/skills/icode
 | `/icode merge` | Step 3 only: merge reviews & finalize | No |
 | `/icode code` | Step 4 only: implement code | No |
 | `/icode deepcheck` | Step 5 only: iterative re-check | No |
-| `/icode audit` | Step 6 only: final audit + fix | No |
+| `/icode audit` | Step 6 only: final audit + fix + documentation (produces `README.md`) | No |
 
 > When `/icode start` / `/icode plan` is launched and the latest `.icode_output_N/` contains only `00_init.md` (Step 0 output), it **reuses that directory** with `00_init.md` as the requirement input; otherwise it creates a fresh directory as usual.
 
@@ -82,7 +82,8 @@ All steps run in the main session with the current model. No automatic model swi
 ├── 05_reverse.json         # Step 5: Reverse-engineered spec (single JSON)
 ├── 05_review_rounds.json   # Step 5: Review round logs (JSONL)
 ├── 06_audit.md             # Step 6: Audit report
-└── 06_fixes.log            # Step 6: Fix log
+├── 06_fixes.log            # Step 6: Fix log
+└── README.md               # Step 6.4 documentation: change summary
 ```
 
 ## Workflow
