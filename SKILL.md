@@ -3,7 +3,7 @@ name: icode
 description: 端到端编码工作流（步骤 0~6，含可选需求初稿步骤），支持分步手动调用：/icode help (帮助), /icode init [<粗略需求>] (需求初稿), /icode start <需求> (全流程), /icode review [N] (审查), /icode merge (定稿), /icode code (编码), /icode deepcheck (复检), /icode audit (终审)
 ---
 
-**版本**: v1.5.0
+**版本**: v1.5.1
 
 # ICode 全流程编码工作流（步骤 0 + 1~6）
 
@@ -172,20 +172,25 @@ ICODE_OUT_DIR=".icode_output/.icode_output_${LAST}"
 
 ### 强制思考前置（所有步骤必须遵守，缺一不可）
 
-**每个步骤开始前，必须先 ultrathink 并显式调用 `sequential-thinking` MCP 工具**——这是不可跳过的硬性前置。证据：上下文必须能看到 `mcp__sequential-thinking__sequentialthinking` 的 tool_call 记录，否则该步骤产出视为不合规。
+**每个步骤开始前，必须先 ultrathink 并完成结构化思考**——这是不可跳过的硬性前置。思考环节不可整体跳过，但**执行载体分主备两档**：
+
+- **首选**：调用 `sequential-thinking` MCP 工具（`mcp__sequential-thinking__sequentialthinking`），至少 3 步，每步对应下方子项之一。上下文能看到该 tool_call 记录即为合规证据。
+- **降级**：若当前环境未连接 / 不可用该 MCP（工具列表与 deferred tools 池中均无 `sequential-thinking`），则**必须以显式的「结构化思考」文字块替代**——在回复中先输出一个 `### 结构化思考` 块，逐项完成下方要求的子项（每项一小段，不可省略），再进入产出。该文字块即为合规证据。
+
+> 判定 MCP 是否可用：尝试调用 `sequential-thinking`；若工具不存在则按降级路径走。**两种载体任选其一即可，但思考环节本身不可省略**——未呈现任一形式的思考证据，该步骤产出视为不合规。
 
 **通用流程**（每步执行）：
 1. **输出 `ultrathink` 触发词**（触发更长的内部推理 budget）
-2. **调用 `sequential-thinking` MCP**，至少 3 步，每步对应下面的子项之一：
+2. **完成结构化思考**（MCP 优先，不可用则降级文字块），至少 3 步，每步对应下面的子项之一：
    - **需求分解**：把原始需求拆成可验证的子项
    - **方案分析**：候选方案 + 取舍
    - **风险评估**：影响面、边界、依赖、回滚
    - 步骤文件可按本步骤特点增补额外子项（详见各 step 文件）
-3. **不得跳过思考直接产出**——所有 Write/Edit 必须在思考调用之后
+3. **不得跳过思考直接产出**——所有 Write/Edit 必须在思考证据之后
 
 **层级关系**：
 - API 层：`CLAUDE_CODE_EFFORT_LEVEL=max` + `model=opus`（控制推理 effort）
-- Hook 层：`UserPromptSubmit` 拦截 `/icode` 命令，缺证据时注入提醒
+- Hook 层：`UserPromptSubmit` 拦截 `/icode` 命令，缺思考证据时注入提醒
 - Prompt 层：本节 + 各 step 文件的"强制思考前置"段
 
 具体每步子项见各步骤文件。
