@@ -11,7 +11,7 @@ ICode is a Claude Code Skill that breaks down the journey from requirement to de
 - Each step callable independently; switch models between steps
 - Full-flow mode (`/icode start`) auto-chains steps 1→6
 - All steps run in the main session — no sub-agent isolation issues
-- Outputs saved under `.icode_output_N/`, supports cross-session recovery
+- Outputs saved under `.icode_output/.icode_output_N/` (unified under the `.icode_output/` parent dir), supports cross-session recovery
 - Metadata management (`.ico_metadata.json`) for execution status and code file tracking
 - Triple-phase deepcheck (Reverse → Fixed → Free) to prevent AI laziness and catch implementation gaps
 - Plan step enforces assertion verification (Read/Grep validation, `[verified]`/`[unverified]` tags)
@@ -63,7 +63,7 @@ git clone <repo-url> ~/.claude/skills/icode
 | `/icode deepcheck` | Step 5 only: iterative re-check | No |
 | `/icode audit` | Step 6 only: final audit + fix + documentation (produces `README.md`) | No |
 
-> When `/icode start` / `/icode plan` is launched and the latest `.icode_output_N/` contains only `00_init.md` (Step 0 output), it **reuses that directory** with `00_init.md` as the requirement input; otherwise it creates a fresh directory as usual.
+> When `/icode start` / `/icode plan` is launched and the latest `.icode_output/.icode_output_N/` contains only `00_init.md` (Step 0 output), it **reuses that directory** with `00_init.md` as the requirement input; otherwise it creates a fresh directory as usual.
 
 ## Execution
 
@@ -72,18 +72,19 @@ All steps run in the main session with the current model. No automatic model swi
 ## Directory Structure
 
 ```text
-.icode_output_N/
-├── .ico_metadata.json      # Metadata (status, code file list)
-├── 00_init.md              # Step 0 (optional): Requirement draft (incrementally updated)
-├── 01_plan.md              # Step 1: Project plan
-├── 02_review.md            # Step 2: Review report
-├── review_round_*.json     # Step 2: Per-round review details (JSON)
-├── 03_plan_final.md        # Step 3: Finalized plan
-├── 05_reverse.json         # Step 5: Reverse-engineered spec (single JSON)
-├── 05_review_rounds.json   # Step 5: Review round logs (JSONL)
-├── 06_audit.md             # Step 6: Audit report
-├── 06_fixes.log            # Step 6: Fix log
-└── README.md               # Step 6.4 documentation: change summary
+.icode_output/                # Unified parent dir, holds all outputs
+└── .icode_output_N/          # N auto-increments (new per requirement)
+    ├── .ico_metadata.json      # Metadata (status, code file list)
+    ├── 00_init.md              # Step 0 (optional): Requirement draft (incrementally updated)
+    ├── 01_plan.md              # Step 1: Project plan
+    ├── 02_review.md            # Step 2: Review report
+    ├── review_round_*.json     # Step 2: Per-round review details (JSON)
+    ├── 03_plan_final.md        # Step 3: Finalized plan
+    ├── 05_reverse.json         # Step 5: Reverse-engineered spec (single JSON)
+    ├── 05_review_rounds.json   # Step 5: Review round logs (JSONL)
+    ├── 06_audit.md             # Step 6: Audit report
+    ├── 06_fixes.log            # Step 6: Fix log
+    └── README.md               # Step 6.4 documentation: change summary
 ```
 
 ## Workflow

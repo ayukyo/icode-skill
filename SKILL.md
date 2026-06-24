@@ -14,7 +14,7 @@ description: 端到端编码工作流（步骤 0~6，含可选需求初稿步骤
 
 ## 调用命令
 
-所有输出保存在 `.icode_output_N/`（N 自动递增）目录下：
+所有输出保存在 `.icode_output/.icode_output_N/`（N 自动递增）目录下——所有产物统一收纳在 `.icode_output/` 父目录内，避免工程根目录堆积大量 `.icode_output_*` 目录：
 
 | 命令 | 功能 | 创建目录？ |
 |------|------|-----------|
@@ -28,7 +28,7 @@ description: 端到端编码工作流（步骤 0~6，含可选需求初稿步骤
 | `/icode deepcheck` | **仅步骤5**：三阶段递进复检 | 用最新目录 |
 | `/icode audit` | **仅步骤6**：终极终审 + 统一修复 + 文档化（产出 `{ICODE_OUT_DIR}/README.md`） | 用最新目录 |
 
-> **`/icode start` / `/icode plan` 的目录复用规则**：启动时检查最新 `.icode_output_N/` 目录，若该目录**只有 `00_init.md`（仅 `.ico_metadata.json` + `00_init.md`，无其他步骤产物）**，则**复用该目录**（不递增 N），并将 `00_init.md` 作为需求输入；否则按"创建新目录"逻辑走。详见下文「目录管理」段落。
+> **`/icode start` / `/icode plan` 的目录复用规则**：启动时检查最新 `.icode_output/.icode_output_N/` 目录，若该目录**只有 `00_init.md`（仅 `.ico_metadata.json` + `00_init.md`，无其他步骤产物）**，则**复用该目录**（不递增 N），并将 `00_init.md` 作为需求输入；否则按"创建新目录"逻辑走。详见下文「目录管理」段落。
 
 ### 帮助说明（`/icode help`）
 
@@ -63,20 +63,23 @@ description: 端到端编码工作流（步骤 0~6，含可选需求初稿步骤
 
 **创建新目录**（用于 `init`，以及 `start` / `plan` 在不满足复用条件时）：
 ```bash
-LAST=$(ls -d .icode_output_* 2>/dev/null | grep -oP '(?<=\.icode_output_)\d+' | sort -n | tail -1)
+mkdir -p .icode_output   # 统一父目录，所有产物收纳于此
+LAST=$(ls -d .icode_output/.icode_output_* 2>/dev/null | grep -oP '(?<=\.icode_output_)\d+' | sort -n | tail -1)
 NEXT=${LAST:-0}; NEXT=$((NEXT + 1))
-ICODE_OUT_DIR=".icode_output_${NEXT}"
+ICODE_OUT_DIR=".icode_output/.icode_output_${NEXT}"
 mkdir -p "$ICODE_OUT_DIR"
 ```
 
 **复用 / 创建新目录决策**（仅用于 `start` / `plan`）：
 ```bash
-LAST=$(ls -d .icode_output_* 2>/dev/null | grep -oP '(?<=\.icode_output_)\d+' | sort -n | tail -1)
+mkdir -p .icode_output
+LAST=$(ls -d .icode_output/.icode_output_* 2>/dev/null | grep -oP '(?<=\.icode_output_)\d+' | sort -n | tail -1)
 REUSE=0
 if [ -n "$LAST" ]; then
-  CAND=".icode_output_${LAST}"
+  CAND=".icode_output/.icode_output_${LAST}"
   # 只有 .ico_metadata.json + 00_init.md 时复用
-  FILES=$(ls -A "$CAND" 2>/dev/null | sort | tr '\n' ' ')
+  # 用排序后的文件名集合判定，避免 locale 影响点号排序导致顺序不一致
+  FILES=$(ls -A "$CAND" 2>/dev/null | LC_ALL=C sort | tr '\n' ' ')
   if [ "$FILES" = ".ico_metadata.json 00_init.md " ]; then
     REUSE=1
     ICODE_OUT_DIR="$CAND"
@@ -84,7 +87,7 @@ if [ -n "$LAST" ]; then
 fi
 if [ "$REUSE" = "0" ]; then
   NEXT=${LAST:-0}; NEXT=$((NEXT + 1))
-  ICODE_OUT_DIR=".icode_output_${NEXT}"
+  ICODE_OUT_DIR=".icode_output/.icode_output_${NEXT}"
   mkdir -p "$ICODE_OUT_DIR"
 fi
 ```
@@ -93,12 +96,12 @@ fi
 
 **检测最新目录**（用于 `review`/`merge`/`code`/`deepcheck`/`audit`）：
 ```bash
-LAST=$(ls -d .icode_output_* 2>/dev/null | grep -oP '(?<=\.icode_output_)\d+' | sort -n | tail -1)
+LAST=$(ls -d .icode_output/.icode_output_* 2>/dev/null | grep -oP '(?<=\.icode_output_)\d+' | sort -n | tail -1)
 if [ -z "$LAST" ]; then
-  echo "错误：没有找到 .icode_output_N 目录，请先运行 /icode start <需求> 或 /icode init"
+  echo "错误：没有找到 .icode_output/.icode_output_N 目录，请先运行 /icode start <需求> 或 /icode init"
   exit 1
 fi
-ICODE_OUT_DIR=".icode_output_${LAST}"
+ICODE_OUT_DIR=".icode_output/.icode_output_${LAST}"
 ```
 
 ### 前置文件校验
@@ -198,8 +201,8 @@ ICODE_OUT_DIR=".icode_output_${LAST}"
 ### 注意事项
 
 - **Git 安全**：禁止执行任何 Git 危险操作（`git reset --hard`、`git push --force` 等），**也禁止 `git commit` 和 `git push`**
-- **`.icode_output_N/` 目录无需用户确认**：该目录下创建/写入/修改 `.md`/`.json`/`.log` 文件均为安全操作
-- **跨会话恢复**：运行 `ls -d .icode_output_*` 确认目录后，直接调用对应步骤即可
+- **`.icode_output/` 父目录及其下的 `.icode_output_N/` 目录无需用户确认**：该目录下创建/写入/修改 `.md`/`.json`/`.log` 文件均为安全操作
+- **跨会话恢复**：运行 `ls -d .icode_output/.icode_output_*` 确认目录后，直接调用对应步骤即可
 - **中断恢复**：重新执行某步骤可覆盖该步骤输出
 
 ## 各步骤详细规则

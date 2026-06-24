@@ -10,7 +10,7 @@
 
 1. **目录管理 + 需求来源决策**（必须严格按以下顺序）：
 
-   a. 检查最新 `.icode_output_N/` 目录是否满足"步骤0复用条件"（仅含 `.ico_metadata.json` + `00_init.md`，无其他步骤产物）。
+   a. 检查最新 `.icode_output/.icode_output_N/` 目录是否满足"步骤0复用条件"（仅含 `.ico_metadata.json` + `00_init.md`，无其他步骤产物）。
    b. **满足复用条件**：
       - 复用该目录（不创建新目录），`ICODE_OUT_DIR` 指向该目录
       - **Read 该目录下的 `00_init.md`**，将其内容作为本次步骤1的**主要需求输入**
