@@ -6,7 +6,8 @@
 
 采用**独立计划对比 + 多轮循环审查**模式：
 - **首轮**：先基于原始需求独立编制简要计划，再与步骤1计划逐项对比，最后做6维度审查
-- **后续轮次**：**增量审查**，只审查上一轮修改的部分 + 跨章节影响分析，**最多 N 轮**（N 由 `/icode review [N]` 指定，默认 3）。连续 2 轮无新问题提前终止
+- **后续轮次**：**增量审查**，只审查上一轮修改的部分 + 跨章节影响分析。**软上限 N 轮**（N 由 `/icode review [N]` 指定，默认 3）；达到 N 但**仍有新问题**时**自动延长 +2 轮**，直到连续 2 轮无新问题，或触达**硬上限** `absolute_cap = max(10, N×2)`
+- **终止条件**：以下任一满足即终止——(a) 连续 2 轮无新问题；(b) 触达 `absolute_cap`（若此时仍有新问题，落盘告警并提示用户回到步骤1修计划）
 
 ## 前置校验
 
@@ -19,13 +20,14 @@
 3. **强制思考前置**（不可跳过，缺证据视为不合规）：先输出 `ultrathink` 触发词；再完成结构化思考——**首选**调用 `sequential-thinking` MCP（至少 3 步），**MCP 不可用时降级**为输出 `### 结构化思考` 文字块（逐项完成，不可省略）；每步/每项对应一个子项：需求分解 → 独立方案构思 → 对比要点预判
 4. **分步续跑检测**：
    - 解析命令参数获取 `max_rounds`：若 `/icode review N` 提供了正整数 N，则 `max_rounds = N`；否则 `max_rounds = 3`
-   - 若 `.ico_metadata.json.status == "review_in_progress"`，从 metadata 恢复 `total_rounds` / `clean_rounds` 字段
+   - 计算 `absolute_cap = max(10, max_rounds × 2)`（硬上限，防止无限循环）
+   - 若 `.ico_metadata.json.status == "review_in_progress"`，从 metadata 恢复 `total_rounds` / `clean_rounds` / `max_rounds` / `absolute_cap` / `extended_rounds` 字段
    - 同时读取所有已存在的 `review_round_*.json` 汇总历史问题
    - 跳过已完成轮次，从当前 `total_rounds` 继续
-   - 续跑时以 metadata 中保存的 `max_rounds` 为准（首次执行时写入 metadata）
-   - 输出续跑信息：`▶ 步骤2 续跑，从第{total_rounds}轮开始（已完成{total_rounds-1}轮，最多{max_rounds}轮）`
-   - 否则初始化 `clean_rounds = 0`, `total_rounds = 1`，`max_rounds` 由参数决定，并设 `status = review_in_progress`，将 `max_rounds` 写入 metadata
-5. 输出步骤确认：`▶ 步骤2 审查开始（最多{max_rounds}轮）`
+   - 续跑时以 metadata 中保存的 `max_rounds` / `absolute_cap` 为准（首次执行时写入 metadata）
+   - 输出续跑信息：`▶ 步骤2 续跑，从第{total_rounds}轮开始（已完成{total_rounds-1}轮，当前轮数上限{max_rounds}，已扩展{extended_rounds}次，硬上限{absolute_cap}轮）`
+   - 否则初始化 `clean_rounds = 0`, `total_rounds = 1`, `extended_rounds = 0`，`max_rounds` 由参数决定，并设 `status = review_in_progress`，将 `max_rounds` / `absolute_cap` / `extended_rounds` 写入 metadata
+5. 输出步骤确认：`▶ 步骤2 审查开始（{max_rounds}轮内完成；如最后一轮仍有新问题，自动延长 +2 轮，最多扩展至 {absolute_cap} 轮）`
 
 ### 首轮审查（`total_rounds == 1`）
 
@@ -86,9 +88,41 @@
 
 ### 循环控制
 
-- `total_rounds += 1`
-- **实时落盘**：将 `status` 保持为 `review_in_progress`，写入当前 `total_rounds` 和 `clean_rounds` 到 metadata
-- 有 issues：`clean_rounds = 0`，**若 `total_rounds <= max_rounds`** 回到后续轮次继续；否则终止
-- 无 issues：`clean_rounds += 1`，若 `clean_rounds < 2` 且 `total_rounds <= max_rounds` 继续后续轮次，否则终止
-- 终止后更新 `.ico_metadata.json`：`status = review_done`，`completed_steps` 追加 `"2"`
-- 全流程模式：**立即继续执行步骤3**
+每轮结束后：
+
+1. `total_rounds += 1`
+2. **实时落盘**：保持 `status = review_in_progress`，写入当前 `total_rounds` / `clean_rounds` / `max_rounds` / `absolute_cap` / `extended_rounds` 到 metadata
+3. **判定下一步**（按顺序检查，命中即定）：
+
+   **(a) 触达硬上限**（`total_rounds > absolute_cap`）：
+   - **终止**。若最后一轮 `has_new_issues == true`，落盘告警（见下"触达硬上限处理"）；否则按"无新问题"正常终止
+
+   **(b) 有新问题（`has_new_issues == true`）**：
+   - `clean_rounds = 0`
+   - 若 `total_rounds <= max_rounds`：继续下一轮（正常流程）
+   - 若 `total_rounds > max_rounds`（已达原定上限，但仍有问题）：**自动延长**——`max_rounds = min(max_rounds + 2, absolute_cap)`，`extended_rounds += 1`，输出 `🔄 第{total_rounds-1}轮仍有新问题，自动延长至{max_rounds}轮（已扩展{extended_rounds}次，硬上限{absolute_cap}轮）`，继续下一轮
+
+   **(c) 无新问题（`has_new_issues == false`）**：
+   - `clean_rounds += 1`
+   - 若 `clean_rounds >= 2`：**正常终止**（连续 2 轮 clean，达到稳定收敛）
+   - 若 `clean_rounds < 2` 且 `total_rounds <= max_rounds`：继续下一轮（在 `max_rounds` 内验证稳定性）
+   - 若 `clean_rounds < 2` 且 `total_rounds > max_rounds`：**正常终止**（已用满用户指定/已扩展的轮数预算，不再为单轮 clean 跨过上限继续跑）
+
+4. **触达硬上限处理**（分支 (a) 命中且最后一轮 `has_new_issues == true`）：
+   - 在 `02_review.md` 顶部插入告警块：
+
+     ```markdown
+     ## ⚠️ 未解决问题告警
+
+     已审查 {total_rounds-1} 轮（含 {extended_rounds} 次自动延长），触达硬上限 {absolute_cap} 轮，但**最后一轮仍发现新问题**。
+     **建议**：回到步骤1（`/icode plan`）重新审视计划本身的根本性缺陷，而非继续在步骤2修补。
+     **未解决问题概览**：见最后一轮 `review_round_{total_rounds-1}.json` 的 `new_issues` 字段。
+     ```
+
+   - 在 metadata 中记录 `unresolved_issues_at_cap = true`
+   - 输出告警：`⚠️ 步骤2 触达硬上限{absolute_cap}轮仍有未解决问题，建议回到步骤1`
+
+5. **终止后更新 metadata**：`status = review_done`，`completed_steps` 追加 `"2"`，保留 `extended_rounds` / `unresolved_issues_at_cap` 字段供后续步骤参考
+6. **全流程模式**：
+   - 若 `unresolved_issues_at_cap == true`：**暂停**全流程串联，输出 `⚠️ 步骤2 存在未解决问题，请手动决定是否继续 /icode merge 或回到 /icode plan`
+   - 否则：**立即继续执行步骤3**

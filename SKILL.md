@@ -3,7 +3,7 @@ name: icode
 description: 端到端编码工作流（步骤 0~6，含可选需求初稿步骤），支持分步手动调用：/icode help (帮助), /icode init [<粗略需求>] (需求初稿), /icode start <需求> (全流程), /icode review [N] (审查), /icode merge (定稿), /icode code (编码), /icode deepcheck (复检), /icode audit (终审)
 ---
 
-**版本**: v1.6.0
+**版本**: v1.7.0
 
 # ICode 全流程编码工作流（步骤 0 + 1~6）
 
@@ -128,6 +128,9 @@ ICODE_OUT_DIR=".icode_output/.icode_output_${LAST}"
   "total_rounds": 1,
   "clean_rounds": 0,
   "max_rounds": 3,
+  "absolute_cap": 10,
+  "extended_rounds": 0,
+  "unresolved_issues_at_cap": false,
   "phase": "reverse",
   "code_compile_failed": false,
   "deepcheck_total_rounds": 0,
@@ -141,7 +144,10 @@ ICODE_OUT_DIR=".icode_output/.icode_output_${LAST}"
 **`code_files` 路径基准**：所有路径**相对于项目根目录**（即用户运行 `/icode` 命令的目录），不含前导 `./`。例：`src/foo.c`、`include/bar.h`。使用 Read 工具时须将相对路径拼接为绝对路径。
 
 **可选字段**（按需写入，缺失视为默认值）：
-- `total_rounds` / `clean_rounds` / `max_rounds`：步骤 2 续跑用（`max_rounds` 由 `/icode review [N]` 参数决定，默认 3）
+- `total_rounds` / `clean_rounds` / `max_rounds`：步骤 2 续跑用（`max_rounds` 由 `/icode review [N]` 参数决定，默认 3；运行中如最后一轮仍有新问题会**自动延长 +2 轮**）
+- `absolute_cap`：步骤 2 硬上限，`= max(10, max_rounds初始值 × 2)`，防止无限循环
+- `extended_rounds`：步骤 2 自动延长次数（每次延长 +2 轮，触发条件：达到 `max_rounds` 但仍有新问题）
+- `unresolved_issues_at_cap`：步骤 2 触达 `absolute_cap` 仍有新问题时置 `true`，提示用户回到步骤1修计划
 - `phase`：步骤 5 续跑用（值：`reverse` / `fixed` / `free`）
 - `code_compile_failed`：步骤 4 编译失败标记（`true` 时步骤 5 入口输出警告）
 - `deepcheck_total_rounds` / `deepcheck_clean_rounds` / `deepcheck_phase`：步骤 5 完成时记录
