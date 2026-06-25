@@ -36,7 +36,7 @@ git clone <repo-url> ~/.claude/skills/icode
 
 # 或者分步执行
 /icode plan 实现MCU雨量传感器I2C驱动   # 步骤1：拟定计划
-/icode review                          # 步骤2：专项审查（默认3轮）
+/icode review                          # 步骤2：专项审查（软上限3轮，仍有问题时自动延长）
 /icode review 5                        # 步骤2：指定5轮审查
 /icode merge                           # 步骤3：合并定稿
 /icode code                            # 步骤4：编码实施
@@ -57,7 +57,7 @@ git clone <repo-url> ~/.claude/skills/icode
 | `/icode init [<粗略需求>]` | 可选步骤0：多轮对话产出需求初稿 `00_init.md`（每次调用都新建目录） | ✅ 每次都新建 |
 | `/icode start <需求>` | 全流程：创建/复用目录 → 步骤1→6 | ✅ / 复用 |
 | `/icode plan <需求>` | 仅步骤1：拟定项目计划 | ✅ / 复用 |
-| `/icode review [N]` | 仅步骤2：专项审查计划（N=轮数，默认3） | 否 |
+| `/icode review [N]` | 仅步骤2：专项审查计划（N=软上限轮数，默认3；仍有问题时自动延长 +2 轮） | 否 |
 | `/icode merge` | 仅步骤3：合并审查意见定稿 | 否 |
 | `/icode code` | 仅步骤4：落地编码实施 | 否 |
 | `/icode deepcheck` | 仅步骤5：无限轮循环复检 | 否 |

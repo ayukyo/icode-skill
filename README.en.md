@@ -36,7 +36,7 @@ git clone <repo-url> ~/.claude/skills/icode
 
 # Or step by step
 /icode plan Implement MCU rain sensor I2C driver   # Step 1: Draft plan
-/icode review                                       # Step 2: Review plan (default 3 rounds)
+/icode review                                       # Step 2: Review plan (soft cap 3 rounds; auto-extends if issues remain)
 /icode review 5                                     # Step 2: 5-round review
 /icode merge                                        # Step 3: Merge & finalize
 /icode code                                         # Step 4: Code implementation
@@ -57,7 +57,7 @@ git clone <repo-url> ~/.claude/skills/icode
 | `/icode init [<rough req>]` | Optional Step 0: multi-turn dialogue → `00_init.md` (always creates a fresh directory) | Yes (always fresh) |
 | `/icode start <req>` | Full flow: create/reuse dir → steps 1–6 | Yes / Reuse |
 | `/icode plan <req>` | Step 1 only: draft project plan | Yes / Reuse |
-| `/icode review [N]` | Step 2 only: review the plan (N=rounds, default 3) | No |
+| `/icode review [N]` | Step 2 only: review the plan (N=soft cap rounds, default 3; auto-extends +2 if issues remain) | No |
 | `/icode merge` | Step 3 only: merge reviews & finalize | No |
 | `/icode code` | Step 4 only: implement code | No |
 | `/icode deepcheck` | Step 5 only: iterative re-check | No |
