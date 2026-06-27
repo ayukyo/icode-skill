@@ -3,7 +3,7 @@ name: icode
 description: 端到端编码工作流（步骤 0~6，含可选需求初稿步骤），支持分步手动调用：/icode help (帮助), /icode init [<粗略需求>] (需求初稿), /icode start <需求> (全流程), /icode review [N] (审查), /icode merge (定稿), /icode code (编码), /icode deepcheck (复检), /icode audit (终审)
 ---
 
-**版本**: v1.7.1
+**版本**: v1.8.0
 
 # ICode 全流程编码工作流（步骤 0 + 1~6）
 
@@ -29,6 +29,8 @@ description: 端到端编码工作流（步骤 0~6，含可选需求初稿步骤
 | `/icode audit` | **仅步骤6**：终极终审 + 统一修复 + 文档化（产出 `{ICODE_OUT_DIR}/README.md`） | 用最新目录 |
 
 > **`/icode start` / `/icode plan` 的目录复用规则**：启动时检查最新 `.icode_output/.icode_output_N/` 目录，若该目录**只有 `00_init.md`（仅 `.ico_metadata.json` + `00_init.md`，无其他步骤产物）**，则**复用该目录**（不递增 N），并将 `00_init.md` 作为需求输入；否则按"创建新目录"逻辑走。详见下文「目录管理」段落。
+
+> **历史检索复用**：`/icode init`、`/icode plan`、`/icode start` 启动时会自动检索全局索引中相似历史工单并按命令分流注入参考（init→需求要点 / plan→ADR+风险），详见下文「历史检索复用」段落。`/icode review`/`merge`/`code`/`deepcheck`/`audit` 不触发检索。
 
 ### 帮助说明（`/icode help`）
 
@@ -114,6 +116,8 @@ ICODE_OUT_DIR=".icode_output/.icode_output_${LAST}"
 | deepcheck | `{ICODE_OUT_DIR}/03_plan_final.md` + 步骤4代码文件 |
 | audit | `{ICODE_OUT_DIR}/03_plan_final.md` + 步骤4代码文件 |
 
+> **通用依赖**：所有步骤均依赖 `{ICODE_OUT_DIR}/.ico_metadata.json`（读取 status/completed_steps/续跑字段等），上表仅列出各步骤**额外**要求的产物文件。`init`/`plan`/`start` 因会创建 metadata，无前置校验。
+
 缺失则报错并提示需要先执行哪一步。
 
 ### 元信息文件（`.ico_metadata.json`）
@@ -132,11 +136,15 @@ ICODE_OUT_DIR=".icode_output/.icode_output_${LAST}"
   "extended_rounds": 0,
   "unresolved_issues_at_cap": false,
   "pending_verification": [],
-  "phase": "reverse",
   "code_compile_failed": false,
   "deepcheck_total_rounds": 0,
   "deepcheck_clean_rounds": 0,
-  "deepcheck_phase": "reverse"
+  "deepcheck_phase": "reverse",
+  "requirement_summary": "",
+  "requirement_points": [],
+  "keywords": [],
+  "indexed": false,
+  "ticket_id": ""
 }
 ```
 
@@ -150,9 +158,13 @@ ICODE_OUT_DIR=".icode_output/.icode_output_${LAST}"
 - `extended_rounds`：步骤 2 自动延长次数（每次延长 +2 轮，触发条件：达到 `max_rounds` 但仍有新问题）
 - `unresolved_issues_at_cap`：步骤 2 触达 `absolute_cap` 仍有新问题时置 `true`，提示用户回到步骤1修计划
 - `pending_verification`：步骤 2 对抗验证中 `needs_more_evidence` 的 issue 清单（**完整 issue 对象数组**，含 `id`/`affected_sections`/`suggestion`/`rejection_risk`/`evidence_pointer`/`verification_status`，供步骤3定稿时直接复核无需回查 JSON），随轮次动态维护（新增追加、已证实/证伪移除），供步骤3定稿时重点复核
-- `phase`：步骤 5 续跑用（值：`reverse` / `fixed` / `free`）
 - `code_compile_failed`：步骤 4 编译失败标记（`true` 时步骤 5 入口输出警告）
-- `deepcheck_total_rounds` / `deepcheck_clean_rounds` / `deepcheck_phase`：步骤 5 完成时记录
+- `deepcheck_total_rounds` / `deepcheck_clean_rounds` / `deepcheck_phase`：步骤 5 续跑用（`deepcheck_phase` 值：`reverse` / `fixed` / `free`），步骤5完成时最终记录
+- `requirement_summary`：一句话需求摘要（≤200 token），跨工程历史检索的主依据。步骤0首轮基于粗略需求生成，步骤0每轮对话后更新，步骤1完成计划后基于完整计划刷新
+- `requirement_points`：需求要点清单（≤10 条字符串），`/icode init` 检索命中时注入用。由步骤0从 `00_init.md`「3.新增需求点」自动提炼，用户无感
+- `keywords`：技术关键词（≤8 个），辅助检索匹配
+- `indexed`：是否已写入全局索引（防重复写入）
+- `ticket_id`：本工单在全局索引中的唯一键（`{工程名}-{N}`，冲突时带 hash 后缀）。步骤0写索引时持久化到 metadata；**跳过步骤0直接 `/icode plan`/`/icode start` 的常规新建目录情况**，在步骤1首次写索引时生成并回填 metadata。供后续步骤检索时排除当前工单
 
 **`status` 字段枚举**（统一词表，所有步骤必须严格遵守，禁止自定义）：
 
@@ -171,8 +183,8 @@ ICODE_OUT_DIR=".icode_output/.icode_output_${LAST}"
 **`in_progress` 状态的两种语义**：
 
 - `init_in_progress`：步骤0**稳态**标记，文档每轮增量更新，等待 `/icode start`/`/icode plan` 复用并切换到 `plan_done`。**不参与崩溃续跑判定**。
-- `review_in_progress` / `deepcheck_in_progress`：步骤 2/5 的**中断续跑标记**，每轮结束时实时落盘 `*_in_progress` + 当前轮次/phase，崩溃后重启可从断点恢复。
-- `code_in_progress`：步骤 4 的**执行中标记**（只在步骤4整体开始时落盘 `code_in_progress`，完成后切换为 `code_done`，不带轮次/phase 维度的断点续跑）。
+- `review_in_progress` / `deepcheck_in_progress`：步骤 2/5 的**中断续跑标记**，每轮结束时实时落盘 `*_in_progress` + 续跑计数器，崩溃后重启可从断点恢复。步骤2落盘 `total_rounds`/`clean_rounds`/`max_rounds`/`absolute_cap`/`extended_rounds`/`pending_verification`；步骤5落盘 `deepcheck_total_rounds`/`deepcheck_clean_rounds`/`deepcheck_phase`。
+- `code_in_progress`：步骤 4 的**执行中标记**（只在步骤4整体开始时落盘 `code_in_progress`，完成后切换为 `code_done`，不带轮次/阶段维度的断点续跑）。
 
 ### 执行模式
 
@@ -219,6 +231,7 @@ ICODE_OUT_DIR=".icode_output/.icode_output_${LAST}"
 8. **跳过自检报告**：修改后未输出完整的 7 维自检报告
 9. **跳过对抗验证**：步骤 2.5 逐维审查产出的 issue 未经独立质疑者子代理对抗就下 `confirmed` 结论（**步骤 2.4 已用 Read/Grep 实证验证失败的 issue 例外**，已有铁证可直接 `confirmed` 无需对抗）；或把主代理推理过程喂给质疑者当既定事实（破坏独立性）；或对抗未收敛时和稀泥默认通过
 10. **伪造共识 / 默认通过**：issue 无 `evidence_pointer` 证据回指就确认；断言无法实证验证时不标 `[未验证-证据不足]` 而默认通过；对抗裁决分裂时不降级而强行 `confirmed`
+11. **跳过历史检索 / 污染产物**：`/icode init`/`/icode plan`/`/icode start` 未执行历史检索注入（全局索引存在时）；或把历史参考内容写进 `00_init.md`/堆砌进 `01_plan.md`（污染工程产物）；或命中工单后照抄历史决策而不顾当前需求差异
 
 **合规要求**：
 
@@ -229,6 +242,7 @@ ICODE_OUT_DIR=".icode_output/.icode_output_${LAST}"
 - 文档章节——**每个章节必须有实质内容**，不得写"略"、"同上"、"参考 XX 文件"
 - 步骤 2 对抗验证——**步骤 2.5 逐维审查产出的每条 issue 必须经独立质疑者子代理对抗**（步骤 2.4 实证 issue 例外），未跑对抗或对抗未收敛的 issue 一律 `needs_more_evidence`，不得 `confirmed`；每条 `confirmed` issue 必须有可回指的 `evidence_pointer`
 - 诚实降级——断言/issue 无法实证验证时，**必须**标 `[未验证-证据不足]` 列入 `pending_verification`，不得默认通过；对抗裁决分裂时必须降级，**宁可说不知道，也不伪造共识**
+- 历史检索复用——`/icode init`/`/icode plan`/`/icode start` 启动时**必须先执行历史检索**（全局索引存在时），命中后按命令分流注入；历史参考**只进会话上下文**，不得写进 `00_init.md`，不得在 `01_plan.md` 堆砌历史引用（唯一例外：实质借鉴的 ADR 可在"理由"末尾加一句溯源）；命中工单的参考**只作启发**，不得照抄
 
 **为什么强制**：本工作流的价值在于"完整闭环 + 多轮审查 + 充分思考"，任何偷懒都会破坏闭环、放过隐藏缺陷、最终把质量负担转嫁给后续维护。**省下的 token 远小于因质量下降而需返工的代价**。
 
@@ -240,12 +254,56 @@ ICODE_OUT_DIR=".icode_output/.icode_output_${LAST}"
 
 **续跑判定规则**：以 `completed_steps` 中**编号 1~6 范围内最大的已完成步骤**为基准推进下一步。`"0"` 仅作为"已走过步骤0"的标记，**不影响**推进逻辑。例：`["0"]` → 下一步是步骤1；`["0","1"]` → 下一步是步骤2。
 
-步骤 2/5 的 `*_in_progress` 状态 + 轮次计数器支持断点续跑（步骤0的 `init_in_progress` 不参与，详见上节"两种语义"）。
+步骤 2/5 的 `*_in_progress` 状态 + 轮次计数器支持**断点续跑**（步骤0的 `init_in_progress` 不参与，详见上节"两种语义"）；步骤 4 的 `code_in_progress`（编译失败时保留）支持**整体续跑**——重跑步骤4时从计划重新编码，不带轮次断点。
+
+### 历史检索复用（跨工程/跨工单借鉴）
+
+**痛点**：每次 `/icode` 都是冷启动，过往相似需求的计划/决策/踩坑无法被新需求复用。本机制在不破坏工程隔离、不撑爆上下文的前提下，让新需求能主动检索历史相似工单并定点注入参考。
+
+**全局索引**（不污染任何工程，不放技能目录）：
+
+- 索引文件：`~/.claude/icode_data/index.json`（首次运行自动创建）。**路径说明**：`~` 是当前用户主目录，由 Claude Code 工具层跨平台解析（Linux/macOS/Windows 通用），与技能目录 `~/.claude/skills/icode/` 同源。技能文件**禁止硬编码**任何具体用户路径（如 `/home/xxx`、`C:\Users\xxx`），所有全局路径必须用 `~` 表达，确保技能可移植
+- 每条记录：`ticket_id`(`{工程名}-{N}`，工程名冲突时追加 `project_path` 短 hash 后缀保唯一)、`project_path`、`out_dir`、`requirement_summary`(≤200token)、`requirement_points`(≤10条)、`keywords`(≤8个)、`has_init`/`has_plan`、`status`、`created_at`
+- **只存指针和摘要，不存产物正文**。产物仍在各工程 `.icode_output/`，工程隔离不破坏。
+
+**写索引时机**：
+- 步骤0 首轮写 `00_init.md` 后：**首次生成 `ticket_id`**（`{工程名}-{N}`，冲突加 hash 后缀）并回填 metadata，写入 `requirement_summary`+空 `requirement_points`+`has_init=true`
+- 步骤0 每轮对话更新后：刷新 `requirement_points`（从「3.新增需求点」自动提炼）+ `requirement_summary`
+- 步骤1 写完 `01_plan.md` 后：刷新 `requirement_summary`（基于完整计划）+ `has_plan=true`；**常规新建目录首跑时**（跳过步骤0）在此首次生成 `ticket_id` 并回填 metadata、首次写入索引条目（`has_init=false`）
+- 步骤6 终审完成后：刷新 `status=completed`，`requirement_summary` 若与最终交付显著偏差则基于最终成果刷新
+
+**检索注入流程**（`/icode init`、`/icode plan`、`/icode start` 共用检索，分流注入）：
+
+1. **检索阶段**（强制思考**之前**；`/icode init` 在建目录后检索，`/icode plan`/`/icode start` 在目录管理+确定需求来源后检索——确保用完整需求做相关性判断）：Read 全局索引，主代理扫所有 `requirement_summary`，结合当前需求判断相关性，选 top-2 命中（明确无关则 0 条）。排除当前正在写的 `ticket_id`，不自我参考。
+2. **注入阶段**（按命令分流）：
+
+| 命令 | 命中后注入内容 | 来源 | 体积上限 |
+|------|--------------|------|---------|
+| `/icode init` | 命中工单的 `requirement_points`（需求要点清单） | 读 metadata 或 `00_init.md`「3.新增需求点」 | ≤500 token/条 |
+| `/icode plan` / `/icode start` | 命中工单的 **ADR 章节 + 风险评估章节** | 定点读 `01_plan.md` 对应章节（**不读全文**） | ≤1K token/条 |
+
+3. **注入形式**：历史参考作为主代理的**思考输入**，在强制思考文字块里加一节「历史参考」，影响后续产出质量。**零命中不注入，不强凑参考**。
+
+**防撑爆三道闸门**：
+- **索引体积**：全局索引单条只存摘要+要点+关键词，整体 <2K token
+- **命中数**：最多 top-2
+- **注入体积**：init 注入要点 ≤500 token/条；plan 注入 ADR+风险 ≤1K token/条；超大工单需深读时派子代理消化成摘要返回（隔离上下文）
+
+**工程污染防护**（重要）：
+- 历史参考**只进会话上下文，不写进产物文件**（`00_init.md` 完全不写历史引用；`01_plan.md` 不堆砌历史引用）
+- **唯一最小留痕**：若某条 ADR 实质借鉴了历史工单决策，在该 ADR「理由」末尾加一句 `(参考相似工单 {ticket_id} 的同类决策)`——这是决策溯源而非污染，且可选
+- 全局索引在 `~/.claude/icode_data/`，工程内无感知；产物路径不动
+
+**边界处理**：
+- 全局索引不存在 → 首次运行自动创建空索引，检索跳过
+- 命中工单产物读不到（工程被删/移动）→ 跳过该条不报错，索引条目惰性保留
+- `00_init.md` 无「3.新增需求点」→ `requirement_points` 为空，`/icode init` 命中时不注入该条
 
 ### 注意事项
 
 - **Git 安全**：禁止执行任何 Git 危险操作（`git reset --hard`、`git push --force` 等），**也禁止 `git commit` 和 `git push`**
 - **`.icode_output/` 父目录及其下的 `.icode_output_N/` 目录无需用户确认**：该目录下创建/写入/修改 `.md`/`.json`/`.log` 文件均为安全操作
+- **工程污染防护**：`.icode_output/` 是 icode 产物目录，建议在工程 `.gitignore` 中加入 `.icode_output/`，避免产物误提交；icode 本身**不自动修改工程的 `.gitignore`**（工程配置由用户掌控）。历史检索的全局索引位于 `~/.claude/icode_data/`，不在任何工程内，无污染风险
 - **跨会话恢复**：运行 `ls -d .icode_output/.icode_output_*` 确认目录后，直接调用对应步骤即可
 - **中断恢复**：重新执行某步骤可覆盖该步骤输出
 

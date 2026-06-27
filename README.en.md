@@ -18,8 +18,9 @@ ICode is a Claude Code Skill that breaks down the journey from requirement to de
 - Architecture Decision Records (ADR) section for centralized decision tracking
 - Review supports custom round count (`/icode review [N]`) and incremental review mode
 - Structured review issues (affected sections / suggestion / rejection risk / evidence pointer / adversarial verification status)
-- **(New in v1.7.1)** Review introduces independent skeptic sub-agents for adversarial verification (three lenses: evidence / alternative-explanation / sufficiency); issues without adversarial verification or sufficient evidence cannot be confirmed; unverifiable assertions are honestly downgraded to `[unverified-insufficient-evidence]` rather than faking consensus
-- **(New in v1.4.0)** `/icode init` produces a `00_init.md` requirement draft via multi-turn dialogue, updated incrementally each round; `/icode start`/`/icode plan` auto-detects and reuses the directory as requirement input
+- Review introduces independent skeptic sub-agents for adversarial verification (three lenses: evidence / alternative-explanation / sufficiency); issues without adversarial verification or sufficient evidence cannot be confirmed; unverifiable assertions are honestly downgraded to `[unverified-insufficient-evidence]` rather than faking consensus
+- Cross-project historical retrieval & reuse: `/icode init`/`/icode plan`/`/icode start` auto-search a global index (`~/.claude/icode_data/index.json`) for similar past tickets and inject references by command (init → requirement points / plan → ADR+risk); three gates prevent context overflow; references stay in-session only, never pollute project artifacts
+- `/icode init` produces a `00_init.md` requirement draft via multi-turn dialogue, updated incrementally each round; `/icode start`/`/icode plan` auto-detects and reuses the directory as requirement input
 
 ## Installation
 
@@ -97,20 +98,6 @@ All steps run in the main session with the current model. No automatic model swi
                                           ↓
 [Step 6] Audit ← [Step 5] Deep Check ← [Step 4] Code
 ```
-
-## Version
-
-Current version: v1.4.0
-
-### What's New (v1.4.0)
-
-- **New optional Step 0: `/icode init`** — When the requirement is unclear, discuss with the AI in multiple turns; `00_init.md` is incrementally updated each round, always keeping a complete structure (Background / Status / New requirements / Impact / Open decisions)
-- **`/icode init` always starts fresh**: every invocation creates a brand-new directory — no reuse, no resume of a previous discussion. To continue the previous discussion, just keep talking; the AI auto-detects and incrementally updates the document
-- **Two input modes**: `/icode init <rough req>` kicks off with a draft then enters dialogue; `/icode init` enters dialogue with an empty template
-- **Smart detection by `/icode start`/`/icode plan`**: when the latest directory contains only `00_init.md`, automatically reuse it as the requirement input (any CLI argument is treated as supplementary context only)
-- **Step 0 is independent and does not auto-chain**: only after the user explicitly runs `/icode start`/`/icode plan` does the flow advance to Step 1
-
-For detailed step descriptions, see [SKILL.md](SKILL.md).
 
 ## License
 

@@ -50,8 +50,8 @@ Free 阶段一次性完整覆盖全部 15 个角度。
 2. 读取 `03_plan_final.md` 和 `.ico_metadata.json`
    - 若 `.ico_metadata.json.code_compile_failed == true`，输出 `⚠️ 步骤4编译失败，仍继续复检` 警告
 3. **强制思考前置**（不可跳过，缺证据视为不合规）：先输出 `ultrathink` 触发词；再完成结构化思考——**首选**调用 `sequential-thinking` MCP（至少 3 步），**MCP 不可用时降级**为输出 `### 结构化思考` 文字块（逐项完成，不可省略）；每步/每项对应一个子项：梳理代码清单 → 回顾计划要点 → 制定逆推/Fixed/Free 检查策略
-4. **分步续跑**：若 `status == "deepcheck_in_progress"`，从 metadata 恢复 `total_rounds` / `clean_rounds` / `phase`，同时读取已存在的 `05_reverse.json`（若存在则跳过 Reverse）和 `deepcheck_round_*.json`
-5. 否则初始化 `clean_rounds = 0`, `total_rounds = 1`, `phase = "reverse"`, `status = deepcheck_in_progress`
+4. **分步续跑**：若 `status == "deepcheck_in_progress"`，从 metadata 恢复 `deepcheck_total_rounds` / `deepcheck_clean_rounds` / `deepcheck_phase`，同时读取已存在的 `05_reverse.json`（若存在则跳过 Reverse）和 `deepcheck_round_*.json`
+5. 否则初始化 `deepcheck_clean_rounds = 0`, `deepcheck_total_rounds = 1`, `deepcheck_phase = "reverse"`, `status = deepcheck_in_progress`
 6. 输出：`▶ 步骤5 复检开始`
 
 ### 阶段 1 — Reverse（逆推）
@@ -72,7 +72,7 @@ Free 阶段一次性完整覆盖全部 15 个角度。
 - **欠实现**：计划有，逆推没有
 - **偏离/冗余**：逆推有，计划没提
 
-发现问题则用 Edit 修复代码。更新计数器，写入 `deepcheck_round_1.json` 和追加写入 `05_review_rounds.json`。`phase` 切换为 `"fixed"`。
+发现问题则用 Edit 修复代码。更新计数器，写入 `deepcheck_round_1.json` 和追加写入 `05_review_rounds.json`。`deepcheck_phase` 切换为 `"fixed"`。
 
 ### 阶段 2 — Fixed（固定维度）
 
@@ -87,7 +87,7 @@ Free 阶段一次性完整覆盖全部 15 个角度。
 6. 潜在隐患 — 内存泄漏、死锁、资源竞争、安全漏洞
 7. 跨文件一致性 — 接口变更全链路同步
 
-写入 `deepcheck_round_{total_rounds}.json` 和追加写入 `05_review_rounds.json`。
+写入 `deepcheck_round_{deepcheck_total_rounds}.json` 和追加写入 `05_review_rounds.json`。
 
 ### 阶段 3 — Free（自由探索）
 
@@ -95,13 +95,13 @@ Free 阶段一次性完整覆盖全部 15 个角度。
 
 ### 循环控制
 
-- `total_rounds += 1`
-- **实时落盘**：`status = deepcheck_in_progress`，写入当前 `total_rounds`/`clean_rounds`/`phase` 到 metadata
-- **阶段切换时重置 `clean_rounds = 0`**（每个阶段独立计数）
+- `deepcheck_total_rounds += 1`
+- **实时落盘**：`status = deepcheck_in_progress`，写入当前 `deepcheck_total_rounds`/`deepcheck_clean_rounds`/`deepcheck_phase` 到 metadata
+- **阶段切换时重置 `deepcheck_clean_rounds = 0`**（每个阶段独立计数）
 - Reverse 阶段：单次执行后始终进入 Fixed，不参与循环
-- has_issues → 修复 → `clean_rounds = 0` → 回到**当前阶段**重新执行（重新读代码）。**Free 阶段修复后不重跑**
-- 无 issues → `clean_rounds += 1`
-  - Fixed 首次全 clean → 切换 `phase = "free"`，`clean_rounds = 0`
+- has_issues → 修复 → `deepcheck_clean_rounds = 0` → 回到**当前阶段**重新执行（重新读代码）。**Free 阶段修复后不重跑**
+- 无 issues → `deepcheck_clean_rounds += 1`
+  - Fixed 首次全 clean → 切换 `deepcheck_phase = "free"`，`deepcheck_clean_rounds = 0`
   - Free 完成后 → 终止
 - 终止后更新 `.ico_metadata.json`：`status = deepcheck_done`，`completed_steps` 追加 `"5"`
 - 全流程模式：**立即继续执行步骤6**

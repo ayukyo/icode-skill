@@ -1,7 +1,7 @@
 # 步骤 6 — 终极终审 + 出具报告 + 统一修复
 
 **命令**: `/icode audit`
-**产出**: `{ICODE_OUT_DIR}/06_audit.md` + `{ICODE_OUT_DIR}/06_fixes.log`
+**产出**: `{ICODE_OUT_DIR}/06_audit.md` + `{ICODE_OUT_DIR}/06_fixes.log` + `{ICODE_OUT_DIR}/README.md`（6.4 文档化产出）
 **会话**: 主会话
 
 ## 前置校验
@@ -55,7 +55,8 @@
    - 修复后追加记录到 `{ICODE_OUT_DIR}/06_fixes.log`
 3. 全部修复后做全局编译验证，最多 3 次
 4. 更新 `.ico_metadata.json`：`status = completed`
-5. 输出交付总结
+5. **刷新全局索引最终状态**：Read `~/.claude/icode_data/index.json`，**按 metadata 的 `ticket_id` 定位**本工单条目，更新 `status` = `completed`，`requirement_summary` 若与最终交付有显著偏差则基于 `03_plan_final.md`+交付成果刷新一次（确保未来检索命中的摘要准确反映最终成果而非中途状态）。写回 index.json。
+6. 输出交付总结
 
 ## 6.3 最终交付
 

@@ -20,13 +20,18 @@
 ### 首次调用（即每次 `/icode init`）
 
 1. **执行目录管理中的「创建新目录」逻辑**（**强制新建，不做任何复用判定**），确定 `ICODE_OUT_DIR`
-2. 处理输入参数（**两种都支持**）：
-   - **有参数**（`/icode init <粗略需求>`）：将参数作为初始需求，先基于参数结合项目代码做一轮初步分析，产出第一版 `00_init.md`
-   - **无参数**（`/icode init`）：产出空模板版 `00_init.md`（各章节内容写"待补"），然后主动询问用户"这次想做什么？"开启对话
-3. **强制思考前置**（不可跳过，缺证据视为不合规）：先输出 `ultrathink` 触发词；再完成结构化思考——**首选**调用 `sequential-thinking` MCP（至少 4 步），**MCP 不可用时降级**为输出 `### 结构化思考` 文字块（逐项完成，不可省略）；每步/每项对应一个子项：需求分解 → 现状盘点 → 影响面分析 → 待决策项识别
-4. **了解现有工程**：阅读项目中相关代码，识别现状、可复用模块、相关接口
-5. 使用 Write 工具写入 `{ICODE_OUT_DIR}/00_init.md`（模板见下文）
-6. 创建 `{ICODE_OUT_DIR}/.ico_metadata.json`：
+2. **历史检索复用**（强制思考之前，全局索引存在时必须执行，详见 SKILL.md「历史检索复用」段）：
+   - Read `~/.claude/icode_data/index.json`（不存在则跳过检索）
+   - 主代理扫所有 `tickets` 的 `requirement_summary`，结合本次粗略需求判断相关性，选 top-2 命中（明确无关则 0 条）。`/icode init` 每次强制新建目录，本次工单尚未入索引，故无需排除当前 ticket_id
+   - **`/icode init` 注入分支**：命中工单只读其 `requirement_points`（需求要点清单，≤500 token/条），作为后续讨论的启发——提示用户"上次相似需求曾关注过这些点，本次是否也需要考虑"。**只进会话上下文，绝不写进 `00_init.md`**。
+   - 零命中不注入，不强凑参考
+3. 处理输入参数（**两种都支持**，本步骤只**构思内容框架**，实际 Write 在步骤6；深度读代码在步骤5）：
+   - **有参数**（`/icode init <粗略需求>`）：将参数作为初始需求，结合步骤2历史参考（若有），**构思**第一版 `00_init.md` 各章节内容框架（此时不深入读代码，代码细节留给步骤5）
+   - **无参数**（`/icode init`）：**构思**空模板版 `00_init.md`（各章节内容写"待补"），然后主动询问用户"这次想做什么？"开启对话
+4. **强制思考前置**（不可跳过，缺证据视为不合规）：先输出 `ultrathink` 触发词；再完成结构化思考——**首选**调用 `sequential-thinking` MCP（至少 4 步），**MCP 不可用时降级**为输出 `### 结构化思考` 文字块（逐项完成，不可省略）；每步/每项对应一个子项：需求分解 → 现状盘点 → 影响面分析 → 待决策项识别。**若步骤2有历史参考，在此处「历史参考」小节记录命中工单 id 与要点，作为思考输入**
+5. **了解现有工程**：阅读项目中相关代码，识别现状、可复用模块、相关接口
+6. 使用 Write 工具写入 `{ICODE_OUT_DIR}/00_init.md`（模板见下文）
+7. 创建 `{ICODE_OUT_DIR}/.ico_metadata.json`：
 
    ```json
    {
@@ -34,11 +39,23 @@
      "created_at": "当前时间",
      "status": "init_in_progress",
      "completed_steps": ["0"],
-     "code_files": []
+     "code_files": [],
+     "requirement_summary": "{基于粗略需求的一句话摘要，≤200 token；无参数时填空字符串}",
+     "requirement_points": [],
+     "keywords": "{≤8个技术关键词数组，无参数时填空数组}",
+     "indexed": false,
+     "ticket_id": "{步骤8 写入索引后回填，初始创建时为空字符串}"
    }
    ```
 
-7. 提示用户：可继续对话补充需求，文档会随对话自动更新；讨论完成后运行 `/icode start` 或 `/icode plan` 进入步骤1。**若想另起炉灶讨论别的需求**，再敲 `/icode init`（会新建另一个目录）。
+8. **写入全局索引**（步骤7之后立即执行）：Read `~/.claude/icode_data/index.json`（不存在则创建 `{"version":"1","updated_at":"当前时间","tickets":[]}`），追加一条新记录：
+   - `ticket_id` = `{工程名}-{N}`（工程名取 `project_path` 的 basename；N 为当前 `.icode_output_N` 的 N）。**工程名冲突处理**：若索引中已存在相同 `{工程名}-{N}` 但 `project_path` 不同的条目，ticket_id 追加 `project_path` 的短 hash 后缀（如 `mowerware-1-a3f2`）以保唯一
+   - `project_path` = 当前工程根绝对路径
+   - `out_dir` = `.icode_output/.icode_output_{N}`
+   - `requirement_summary` / `keywords` 取自步骤7 metadata；`requirement_points` 暂为空数组
+   - `has_init` = true，`has_plan` = false，`status` = `init_in_progress`，`created_at` = 当前时间
+   - 写回 index.json，同时置 metadata `indexed = true`、`ticket_id = {生成的 ticket_id}`（持久化 ticket_id，供后续步骤检索时排除当前工单，避免反推）
+9. 提示用户：可继续对话补充需求，文档会随对话自动更新；讨论完成后运行 `/icode start` 或 `/icode plan` 进入步骤1。**若想另起炉灶讨论别的需求**，再敲 `/icode init`（会新建另一个目录）。
 
 ### 后续每轮对话（同一会话内，由 AI 自主识别，无需用户敲命令）
 
@@ -47,7 +64,8 @@
 1. **先 Read 现有 `00_init.md`**，理解当前文档状态
 2. 跟用户讨论（回答疑问、提出反问、澄清歧义）
 3. **本轮对话结束前，必须用 Write 工具更新 `00_init.md`**，把本轮新信息合并进对应章节，保持文档结构完整
-4. 不需要等待用户说"结束"才落档，**每轮都增量更新**
+4. **刷新全局索引条目**：从 `00_init.md`「3.新增需求点」自动提炼 `requirement_points`（≤10 条），结合本轮讨论刷新 `requirement_summary`，更新 metadata 对应字段，并**按 metadata 的 `ticket_id` 定位** `~/.claude/icode_data/index.json` 中本工单条目，更新其 `requirement_summary` / `requirement_points`。**用户无感，不写进 `00_init.md`**。
+5. 不需要等待用户说"结束"才落档，**每轮都增量更新**
 
 **判定"是否还在迭代当前 init"的依据**：
 
