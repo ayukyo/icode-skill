@@ -17,7 +17,8 @@ ICode is a Claude Code Skill that breaks down the journey from requirement to de
 - Plan step enforces assertion verification (Read/Grep validation, `[verified]`/`[unverified]` tags)
 - Architecture Decision Records (ADR) section for centralized decision tracking
 - Review supports custom round count (`/icode review [N]`) and incremental review mode
-- Structured review issues (affected sections / suggestion / rejection risk)
+- Structured review issues (affected sections / suggestion / rejection risk / evidence pointer / adversarial verification status)
+- **(New in v1.7.1)** Review introduces independent skeptic sub-agents for adversarial verification (three lenses: evidence / alternative-explanation / sufficiency); issues without adversarial verification or sufficient evidence cannot be confirmed; unverifiable assertions are honestly downgraded to `[unverified-insufficient-evidence]` rather than faking consensus
 - **(New in v1.4.0)** `/icode init` produces a `00_init.md` requirement draft via multi-turn dialogue, updated incrementally each round; `/icode start`/`/icode plan` auto-detects and reuses the directory as requirement input
 
 ## Installation

@@ -3,7 +3,7 @@ name: icode
 description: 端到端编码工作流（步骤 0~6，含可选需求初稿步骤），支持分步手动调用：/icode help (帮助), /icode init [<粗略需求>] (需求初稿), /icode start <需求> (全流程), /icode review [N] (审查), /icode merge (定稿), /icode code (编码), /icode deepcheck (复检), /icode audit (终审)
 ---
 
-**版本**: v1.7.0
+**版本**: v1.7.1
 
 # ICode 全流程编码工作流（步骤 0 + 1~6）
 
@@ -22,7 +22,7 @@ description: 端到端编码工作流（步骤 0~6，含可选需求初稿步骤
 | `/icode init [<粗略需求>]` | **可选步骤0**：多轮对话产出 `00_init.md`（需求初稿）。**每次调用都新建目录，不复用、不续聊**（详见 [steps/00_init.md](steps/00_init.md)） | ✅ 每次都新建 |
 | `/icode start <需求>` | **全流程**：创建/复用目录 → 步骤1→6 串联（**复用规则见下**） | ✅ 创建新目录 / 复用 |
 | `/icode plan <需求>` | **仅步骤1**：拟定项目计划（**复用规则见下**） | ✅ 创建新目录 / 复用 |
-| `/icode review [N]` | **仅步骤2**：多轮循环审查（N=软上限轮数，默认3；如最后一轮仍有新问题自动延长 +2 轮，最多扩展至 `max(10, N×2)`） | 用最新目录 |
+| `/icode review [N]` | **仅步骤2**：多轮循环审查 + 独立质疑者对抗验证（N=软上限轮数，默认3；如最后一轮仍有新问题自动延长 +2 轮，最多扩展至 `max(10, N×2)`） | 用最新目录 |
 | `/icode merge` | **仅步骤3**：合并审查意见定稿 | 用最新目录 |
 | `/icode code` | **仅步骤4**：落地编码实施 | 用最新目录 |
 | `/icode deepcheck` | **仅步骤5**：三阶段递进复检 | 用最新目录 |
@@ -131,6 +131,7 @@ ICODE_OUT_DIR=".icode_output/.icode_output_${LAST}"
   "absolute_cap": 10,
   "extended_rounds": 0,
   "unresolved_issues_at_cap": false,
+  "pending_verification": [],
   "phase": "reverse",
   "code_compile_failed": false,
   "deepcheck_total_rounds": 0,
@@ -148,6 +149,7 @@ ICODE_OUT_DIR=".icode_output/.icode_output_${LAST}"
 - `absolute_cap`：步骤 2 硬上限，`= max(10, max_rounds初始值 × 2)`，防止无限循环
 - `extended_rounds`：步骤 2 自动延长次数（每次延长 +2 轮，触发条件：达到 `max_rounds` 但仍有新问题）
 - `unresolved_issues_at_cap`：步骤 2 触达 `absolute_cap` 仍有新问题时置 `true`，提示用户回到步骤1修计划
+- `pending_verification`：步骤 2 对抗验证中 `needs_more_evidence` 的 issue 清单（**完整 issue 对象数组**，含 `id`/`affected_sections`/`suggestion`/`rejection_risk`/`evidence_pointer`/`verification_status`，供步骤3定稿时直接复核无需回查 JSON），随轮次动态维护（新增追加、已证实/证伪移除），供步骤3定稿时重点复核
 - `phase`：步骤 5 续跑用（值：`reverse` / `fixed` / `free`）
 - `code_compile_failed`：步骤 4 编译失败标记（`true` 时步骤 5 入口输出警告）
 - `deepcheck_total_rounds` / `deepcheck_clean_rounds` / `deepcheck_phase`：步骤 5 完成时记录
@@ -215,6 +217,8 @@ ICODE_OUT_DIR=".icode_output/.icode_output_${LAST}"
 6. **审查/复检走过场**：审查意见全是"无问题"、"通过"等空泛结论，无具体证据
 7. **跳过强制思考**：未输出 `ultrathink` 触发词、未做 MCP 思考或降级文字思考块
 8. **跳过自检报告**：修改后未输出完整的 7 维自检报告
+9. **跳过对抗验证**：步骤 2.5 逐维审查产出的 issue 未经独立质疑者子代理对抗就下 `confirmed` 结论（**步骤 2.4 已用 Read/Grep 实证验证失败的 issue 例外**，已有铁证可直接 `confirmed` 无需对抗）；或把主代理推理过程喂给质疑者当既定事实（破坏独立性）；或对抗未收敛时和稀泥默认通过
+10. **伪造共识 / 默认通过**：issue 无 `evidence_pointer` 证据回指就确认；断言无法实证验证时不标 `[未验证-证据不足]` 而默认通过；对抗裁决分裂时不降级而强行 `confirmed`
 
 **合规要求**：
 
@@ -223,6 +227,8 @@ ICODE_OUT_DIR=".icode_output/.icode_output_${LAST}"
 - 审查/复检的轮次——**必须跑完连续 K 轮无新问题或达到 max_rounds**，不得提前终止
 - 编码——**必须完整可编译可运行**，不得留 TODO 占位、不得伪代码、不得"仅给出关键部分"
 - 文档章节——**每个章节必须有实质内容**，不得写"略"、"同上"、"参考 XX 文件"
+- 步骤 2 对抗验证——**步骤 2.5 逐维审查产出的每条 issue 必须经独立质疑者子代理对抗**（步骤 2.4 实证 issue 例外），未跑对抗或对抗未收敛的 issue 一律 `needs_more_evidence`，不得 `confirmed`；每条 `confirmed` issue 必须有可回指的 `evidence_pointer`
+- 诚实降级——断言/issue 无法实证验证时，**必须**标 `[未验证-证据不足]` 列入 `pending_verification`，不得默认通过；对抗裁决分裂时必须降级，**宁可说不知道，也不伪造共识**
 
 **为什么强制**：本工作流的价值在于"完整闭环 + 多轮审查 + 充分思考"，任何偷懒都会破坏闭环、放过隐藏缺陷、最终把质量负担转嫁给后续维护。**省下的 token 远小于因质量下降而需返工的代价**。
 
