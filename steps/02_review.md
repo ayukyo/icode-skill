@@ -7,7 +7,7 @@
 采用**独立计划对比 + 多轮循环审查**模式：
 - **首轮**：先基于原始需求独立编制简要计划，再与步骤1计划逐项对比，最后做6维度审查
 - **后续轮次**：**增量审查**，只审查上一轮修改的部分 + 跨章节影响分析。**软上限 N 轮**（N 由 `/icode review [N]` 指定，默认 3）；达到 N 但**仍有新问题**时**自动延长 +2 轮**，直到连续 2 轮无新问题，或触达**硬上限** `absolute_cap = max(10, N×2)`
-- **终止条件**：以下任一满足即终止——(a) 连续 2 轮无新问题；(b) 触达 `absolute_cap`（若此时仍有新问题，落盘告警并提示用户回到步骤1修计划）
+- **终止条件**：以下任一满足即终止——(a) 连续 2 轮无新问题；(b) 触达 `absolute_cap`（若此时仍有新问题，落盘告警并提示用户回到步骤1修计划）；(c) `clean_rounds < 2` 但 `total_rounds > max_rounds`（已用满轮数预算但未达连续2轮 clean，正常终止，详见「循环控制」）
 
 ## 前置校验
 
@@ -16,7 +16,7 @@
 ## 执行流程
 
 1. 执行目录管理中的「检测最新目录」逻辑，确定 `ICODE_OUT_DIR`
-2. 读取 `{ICODE_OUT_DIR}/01_plan.md` 和 `.ico_metadata.json` 获取原始需求
+2. 读取 `.ico_metadata.json` 获取原始需求（`requirement` 字段）。**注意**：本步骤**只读 metadata 取原始需求，不读 `01_plan.md`**——`01_plan.md` 留到步骤 2.2 对比分析时再读，避免步骤 2.1 独立编制计划时受步骤1计划污染
 3. **分步续跑检测**（必须在强制思考之前，决定本轮是首轮还是续跑）：
    - 解析命令参数获取 `max_rounds`：若 `/icode review N` 提供了正整数 N，则 `max_rounds = N`；否则 `max_rounds = 3`
    - 计算 `absolute_cap = max(10, max_rounds × 2)`（硬上限，防止无限循环）
@@ -26,7 +26,7 @@
    - 续跑时以 metadata 中保存的 `max_rounds` / `absolute_cap` 为准（首次执行时写入 metadata）
    - 输出续跑信息：`▶ 步骤2 续跑，从第{total_rounds}轮开始（已完成{total_rounds-1}轮，当前轮数上限{max_rounds}，已扩展{extended_rounds}次，硬上限{absolute_cap}轮）`
    - 否则初始化 `clean_rounds = 0`, `total_rounds = 1`, `extended_rounds = 0`，`max_rounds` 由参数决定，并设 `status = review_in_progress`，将 `max_rounds` / `absolute_cap` / `extended_rounds` 写入 metadata
-4. **强制思考前置**（不可跳过，缺证据视为不合规；基于步骤3的续跑判定结果选择思考路径）：先输出 `ultrathink` 触发词；再完成结构化思考——**首选**调用 `sequential-thinking` MCP（至少 3 步），**MCP 不可用时降级**为输出 `### 结构化思考` 文字块（逐项完成，不可省略）。
+4. **强制思考前置**（不可跳过，缺证据视为不合规；基于上述第3步「分步续跑检测」的判定结果选择思考路径）：先输出 `ultrathink` 触发词；再完成结构化思考——**首选**调用 `sequential-thinking` MCP（至少 3 步），**MCP 不可用时降级**为输出 `### 结构化思考` 文字块（逐项完成，不可省略）。
    - **首轮**（`total_rounds == 1`）子项：需求分解 → 独立方案构思 → 对比要点预判
    - **续跑**（`total_rounds > 1`）子项：回顾历史轮次问题 → 增量审查范围界定 → 跨章节影响预判
 5. 输出步骤确认：`▶ 步骤2 审查开始（{max_rounds}轮内完成；如最后一轮仍有新问题，自动延长 +2 轮，最多扩展至 {absolute_cap} 轮）`
