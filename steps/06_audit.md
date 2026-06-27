@@ -17,7 +17,7 @@
 1. 检测最新目录，确定 `ICODE_OUT_DIR`
 2. 读取 `03_plan_final.md` 和 `.ico_metadata.json` 的 `code_files` 列表 + `code_deviations`（步骤4主动偏离记录，供6.2偏差备忘汇总）
 3. 额外读取 `05_review_rounds.json`（若存在）+ `05_reverse.json`（若存在）
-4. **强制思考前置**（不可跳过，缺证据视为不合规；完整规则见 [references/thinking.md](../references/thinking.md)）：本步骤子项（至少3步）= 构建追溯矩阵（计划功能点→代码位置）→ 汇步骤历史 → 规划 6 维度审计策略
+4. **强制思考前置**（不可跳过，缺证据视为不合规；**必须先 Read [references/thinking.md](../references/thinking.md) 完整内容**（不得凭概述/记忆执行，否则产出不合规））：本步骤子项（至少3步）= 构建追溯矩阵（计划功能点→代码位置）→ 汇步骤历史 → 规划 6 维度审计策略
 5. 输出：`▶ 步骤6 终审开始`
 6. **重新读取所有代码文件**
 7. 执行终审
@@ -113,7 +113,7 @@
 
 ### 强制思考前置
 
-完整规则见 [references/thinking.md](../references/thinking.md)。本步骤（6.4 文档化）子项（至少4步）= 通读计划要点 → 扫描代码公共接口 → 识别文档类型 → 规划章节结构。
+**必须先 Read [references/thinking.md](../references/thinking.md) 完整内容**（不得凭概述/记忆执行，否则产出不合规）。本步骤（6.4 文档化）子项（至少4步）= 通读计划要点 → 扫描代码公共接口 → 识别文档类型 → 规划章节结构。
 
 ### 文档化执行流程
 

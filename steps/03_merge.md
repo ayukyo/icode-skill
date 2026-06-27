@@ -12,7 +12,7 @@
 
 1. 执行目录管理中的「检测最新目录」逻辑，确定 `ICODE_OUT_DIR`
 2. 读取 `{ICODE_OUT_DIR}/01_plan.md`（原始计划）和 `{ICODE_OUT_DIR}/02_review.md`（审查意见）
-3. **强制思考前置**（不可跳过，缺证据视为不合规；完整规则见 [references/thinking.md](../references/thinking.md)）：本步骤子项（至少3步）= 逐条甄别审查意见 → 判断采纳/驳回 → 规划修改策略
+3. **强制思考前置**（不可跳过，缺证据视为不合规；**必须先 Read [references/thinking.md](../references/thinking.md) 完整内容**（不得凭概述/记忆执行，否则产出不合规））：本步骤子项（至少3步）= 逐条甄别审查意见 → 判断采纳/驳回 → 规划修改策略
 4. 输出步骤确认：`▶ 步骤3 定稿开始`
 
 ### 合并定稿

@@ -112,3 +112,13 @@ All steps run in the main session with the current model. No automatic model swi
 ## License
 
 MIT
+
+## DEMO (for testing the icode workflow)
+
+`demo/` is a minimal C calculator project (`calc.h` / `calc.c` / `main.c` / `Makefile`), **purpose-built for end-to-end testing of the icode workflow** — all four invocation modes (A full-flow / B step-by-step / C init→start / D log→start) can be run against it: Step 1 plan, Step 4 code, Step 5 deep-check, Step 6 compile verification all have real code to operate on.
+
+```bash
+cd demo && make && ./calc_demo   # confirm the baseline builds and runs
+```
+
+Example test requirement (Mode A): `cd demo && /icode start add modulo and power operations to the calculator, plus integer overflow checks`

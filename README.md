@@ -112,3 +112,13 @@ git clone <repo-url> ~/.claude/skills/icode
 ## 许可证
 
 MIT
+
+## DEMO（用于测试 icode 流程）
+
+`demo/` 是一个最小 C 计算器工程（`calc.h`/`calc.c`/`main.c`/`Makefile`），**专门用来端到端测试 icode 工作流**——四种调用方式（A 全流程 / B 分步 / C init→start / D log→start）都可在此工程里真实跑通：步骤1 计划、步骤4 编码、步骤5 复检、步骤6 编译验证都有真实代码可操作。
+
+```bash
+cd demo && make && ./calc_demo   # 确认基线可编译可运行
+```
+
+测试示例需求（方式A）：`cd demo && /icode start 给计算器增加取模和幂运算功能，并补全整数溢出检查`
