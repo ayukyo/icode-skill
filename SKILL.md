@@ -253,7 +253,7 @@ ICODE_OUT_DIR=".icode_output/.icode_output_${LAST}"
 12. **跳过偏差回写 / 污染计划**：步骤6 终审未把实质偏差汇总回写到 `03_plan_final.md` 的「实现偏差备忘」段（含无偏差时未写"无实质偏差"留痕）；或回写时改了计划正文（破坏对照价值）；或把细节差异堆砌进备忘（抬高回读噪音）；或步骤4 主动偏离计划未记入 `code_deviations`
 13. **注释/日志偷工**：步骤4 编码漏写导出函数/关键分支/数据结构注释；关键路径（错误返回/状态跳转/外部交互/决策分支/降级重试）漏加日志导致运行时无法排查；步骤5 复检/步骤6 终审未把注释完备性+日志覆盖纳入检查（漏检即放行）；或引入项目未使用的新日志库
 14. **日志根因分析偷工**：`/icode log` 跳过基线检查直接 grep 日志；对抗分析质疑者未独立 spawn 或未独立读日志（主代理自演）；伪造根因共识（证据不足不降级）；根因结论无日志行回指；或照抄历史工单根因不顾当前症状差异
-15. **references 软引用未实读**：step 文件写"见 references/xxx.md"但执行时**未用 Read 工具实读该共享文件**，凭 SKILL.md 概述或记忆执行——新会话里 references 内容不在上下文，凭记忆执行必出错。**引用 references 的步骤，必须先 Read 该文件完整内容再执行**，否则该步骤产出视为不合规
+15. **references 软引用未实读**：step 文件写"见 references/xxx.md"但执行时**未用 Read 工具实读该共享文件**，凭 SKILL.md 概述或记忆执行——新会话里 references 内容不在上下文，凭记忆执行必出错。**引用 references 的步骤，必须先 Read 该文件完整内容再执行**，否则该步骤产出视为不合规。**同会话已读不豁免**：每步仍须重新 Read（显式Read是深度思考的前置仪式，凭记忆会降级思考质量），Read 后输出确认行 `📖 已 Read references/xxx.md` 作为合规证据
 16. **思考块过薄**：强制思考降级文字块每子项只有一句话带过（如"与步骤1一致""通过"），未展开实质推演。**每个思考子项必须有 ≥2 句实质内容**（具体设计点/具体检查项/具体风险），步骤2独立方案构思须≥3设计点、步骤5每阶段须列具体检查项、步骤6追溯矩阵须逐功能点定位代码
 
 **合规要求**：
@@ -288,19 +288,20 @@ ICODE_OUT_DIR=".icode_output/.icode_output_${LAST}"
 **全局索引**（不污染任何工程，不放技能目录）：
 
 - 索引文件：`~/.claude/icode_data/index.json`（首次运行自动创建）。**路径说明**：`~` 是当前用户主目录，由 Claude Code 工具层跨平台解析（Linux/macOS/Windows 通用），与技能目录 `~/.claude/skills/icode/` 同源。技能文件**禁止硬编码**任何具体用户路径（如 `/home/xxx`、`C:\Users\xxx`），所有全局路径必须用 `~` 表达，确保技能可移植
-- 每条记录：`ticket_id`(`{工程名}-{N}`，工程名冲突时追加 `project_path` 短 hash 后缀保唯一)、`project_path`、`out_dir`、`requirement_summary`(≤200token)、`requirement_points`(≤10条)、`keywords`(≤8个)、`has_00_init`/`has_plan`、`status`、`created_at`。**`has_00_init` 语义 = 该工单是否已产出 `00_init.md`（走过 init 或 log，log 也会产出 00_init.md），与"是否走过步骤0 init"解耦**——log 未走过 init 但产出 00_init.md 故也为 true
+- 每条记录：`ticket_id`(`{工程名}-{N}`，工程名冲突时追加 `project_path` 短 hash 后缀保唯一)、`project_path`、`out_dir`、`requirement_summary`(≤200token)、`requirement_points`(≤10条)、`keywords`(≤8个)、`has_00_init`/`has_plan`、`status`、`created_at`、`last_used_at`(检索命中时更新，LRU淘汰依据)、`hit_count`(检索命中+1，达10永久保留)。**`has_00_init` 语义 = 该工单是否已产出 `00_init.md`（走过 init 或 log，log 也会产出 00_init.md），与"是否走过步骤0 init"解耦**——log 未走过 init 但产出 00_init.md 故也为 true
 - **只存指针和摘要，不存产物正文**。产物仍在各工程 `.icode_output/`，工程隔离不破坏。
+- **LRU 淘汰**（防 index.json 无限膨胀）：索引是检索缓存非档案。容量上限 200 条；`hit_count >= 10` 永久保留；未完成态（init/log/review/deepcheck/code in_progress）不淘汰；超上限时淘汰 `hit_count < 10` 且已完成态中 `last_used_at` 最老的。检索命中更新 `last_used_at`+`hit_count` 续期。淘汰只删索引条目，产物保留各工程。详见 [references/dir_and_metadata.md](references/dir_and_metadata.md)「索引淘汰规则」
 
 **写索引时机**：
-- `/icode log` 产出 `log_analysis.md` + `00_init.md` 后：**首次生成 `ticket_id`**（`{工程名}-{N}`，冲突加 hash 后缀）并回填 metadata，写入 `requirement_summary`（根因摘要）+`requirement_points`（修复要点）+`has_00_init=true`+`status=log_done`
-- 步骤0 首轮写 `00_init.md` 后：**首次生成 `ticket_id`**（`{工程名}-{N}`，冲突加 hash 后缀）并回填 metadata，写入 `requirement_summary`+空 `requirement_points`+`has_00_init=true`
+- `/icode log` 产出 `log_analysis.md` + `00_init.md` 后：**首次生成 `ticket_id`**（`{工程名}-{N}`，冲突加 hash 后缀）并回填 metadata，写入 `requirement_summary`（根因摘要）+`requirement_points`（修复要点）+`has_00_init=true`+`status=log_done`+`last_used_at=当前`+`hit_count=0`，**写后执行LRU淘汰**
+- 步骤0 首轮写 `00_init.md` 后：**首次生成 `ticket_id`**（`{工程名}-{N}`，冲突加 hash 后缀）并回填 metadata，写入 `requirement_summary`+空 `requirement_points`+`has_00_init=true`+`last_used_at=当前`+`hit_count=0`，**写后执行LRU淘汰**
 - 步骤0 每轮对话更新后：刷新 `requirement_points`（从「3.新增需求点」自动提炼）+ `requirement_summary`
-- 步骤1 写完 `01_plan.md` 后：刷新 `requirement_summary`（基于完整计划）+ `has_plan=true`；**常规新建目录首跑时**（跳过步骤0）在此首次生成 `ticket_id` 并回填 metadata、首次写入索引条目（`has_00_init=false`）
+- 步骤1 写完 `01_plan.md` 后：刷新 `requirement_summary`（基于完整计划）+ `has_plan=true`；**常规新建目录首跑时**（跳过步骤0）在此首次生成 `ticket_id` 并回填 metadata、首次写入索引条目（`has_00_init=false`、`last_used_at=当前`、`hit_count=0`），**写后执行LRU淘汰**
 - 步骤6 终审完成后：刷新 `status=completed`，`requirement_summary` 若与最终交付显著偏差则基于最终成果刷新
 
 **检索注入流程**（`/icode init`、`/icode log`、`/icode plan`、`/icode start` 共用检索，分流注入）：
 
-1. **检索阶段**（强制思考**之前**；`/icode init`/`/icode log` 在建目录后检索，`/icode plan`/`/icode start` 在目录管理+确定需求来源后检索——确保用完整需求做相关性判断）：Read 全局索引，主代理扫所有 `requirement_summary`，结合当前需求/症状判断相关性，选 top-2 命中（明确无关则 0 条）。排除当前正在写的 `ticket_id`，不自我参考。
+1. **检索阶段**（强制思考**之前**；`/icode init`/`/icode log` 在建目录后检索，`/icode plan`/`/icode start` 在目录管理+确定需求来源后检索——确保用完整需求做相关性判断）：Read 全局索引，主代理扫所有 `requirement_summary`，结合当前需求/症状判断相关性，选 top-2 命中（明确无关则 0 条）。排除当前正在写的 `ticket_id`，不自我参考。**命中续期**：对选中的 top-2 工单，更新其 `last_used_at`=当前时间、`hit_count`+=1，写回 index.json（被复用即续期，防LRU淘汰）。
 2. **注入阶段**（按命令分流）：
 
 | 命令 | 命中后注入内容 | 来源 | 体积上限 |

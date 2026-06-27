@@ -73,7 +73,10 @@ Read `~/.claude/icode_data/index.json`（不存在则创建 `{"version":"1","upd
   - 步骤0 init 首轮：`has_00_init` = true、`has_plan` = false、`status` = `init_in_progress`、`requirement_points` 暂空
   - 步骤1 常规新建首跑（跳过 init/log）：`has_00_init` = false、`has_plan` = true、`status` = `plan_done`
 - `created_at` = 当前时间
+- `last_used_at` = 当前时间（**新增**：检索命中时更新，LRU淘汰依据；首次写入=created_at）
+- `hit_count` = 0（**新增**：检索命中时+1，达10永久保留）
 - 写回 index.json，置 metadata `indexed = true`、`ticket_id = {生成的 ticket_id}`
+- **写入后执行 LRU 淘汰**（见下方「索引淘汰规则」）
 
 ## 索引条目更新（已有 ticket_id 的情况）
 
@@ -82,6 +85,26 @@ Read `~/.claude/icode_data/index.json`（不存在则创建 `{"version":"1","upd
 - 步骤0 每轮对话后：刷新 `requirement_summary` / `requirement_points`（从 `00_init.md`「3.新增需求点」自动提炼）
 - 步骤1 写完 `01_plan.md` 后：`requirement_summary`（基于完整计划刷新）、`has_plan` = true、`status` = `plan_done`
 - 步骤6 终审后：`status` = `completed`，`requirement_summary` 若与最终交付显著偏差则基于最终成果刷新
+
+## 检索命中续期（检索阶段执行）
+
+检索阶段（init/log/plan/start 启动时扫 index.json）若某工单被选为 top-2 命中并注入，更新该条目：
+- `last_used_at` = 当前时间（续期，LRU不淘汰）
+- `hit_count` += 1（累计命中次数）
+- 写回 index.json
+
+## 索引淘汰规则（LRU + 命中续期 + 永久保留）
+
+**目的**：index.json 是检索缓存非档案，随工单增长会膨胀。靠 LRU 淘汰失去复用价值的老工单，保留高价值工单。淘汰只删索引条目，**不删各工程 `.icode_output/` 产物**（产物保留，索引只是指针）。
+
+**触发时机**：每次写索引（首次写入/条目更新）后执行淘汰扫描。
+
+**淘汰规则**：
+1. **容量上限 200 条**：tickets 数组超 200 时触发淘汰
+2. **永久保留**：`hit_count >= 10` 的工单永久不淘汰（已被验证高复用价值）
+3. **未完成态保留**：`status` 为 `init_in_progress`/`log_done`/`log_in_progress`/`review_in_progress`/`deepcheck_in_progress`/`code_in_progress` 的工单不淘汰（流程未结束）
+4. **LRU 淘汰**：超上限时，在 `hit_count < 10` 且 `status = completed/review_done/deepcheck_done/plan_done/plan_finalized`（已完成或已推进态）的工单中，淘汰 `last_used_at` 最老的，直到条目数 ≤ 200
+5. **淘汰不报错**：静默移除，用户无感
 
 ## .ico_metadata.json 模板
 

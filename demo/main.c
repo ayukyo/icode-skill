@@ -61,5 +61,24 @@ int main(void)
     rc = calc_basic(10, 3, '?', &result);  /* 无效操作符 */
     printf("10 ? 3 rc=%d (expect %d)\n", rc, CALC_ERR_INVALID);
 
+    /* ---- 新增：开方运算（向下取整） ---- */
+    rc = calc_sqrt(0, &result);
+    printf("sqrt(0) = %d (rc=%d)\n", result, rc);  /* 0 */
+
+    rc = calc_sqrt(1, &result);
+    printf("sqrt(1) = %d (rc=%d)\n", result, rc);  /* 1 */
+
+    rc = calc_sqrt(10, &result);
+    printf("sqrt(10) = %d (rc=%d)\n", result, rc);  /* 3（向下取整） */
+
+    rc = calc_sqrt(16, &result);
+    printf("sqrt(16) = %d (rc=%d)\n", result, rc);  /* 4（完美平方） */
+
+    rc = calc_sqrt(-4, &result);  /* 负数，应返回 INVALID */
+    printf("sqrt(-4) rc=%d (expect %d)\n", rc, CALC_ERR_INVALID);
+
+    rc = calc_sqrt(INT_MAX, &result);
+    printf("sqrt(INT_MAX) = %d (rc=%d)\n", result, rc);  /* 46340 */
+
     return 0;
 }

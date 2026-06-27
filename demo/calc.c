@@ -114,3 +114,40 @@ int calc_power(int base, int exp, int *result)
     }
     return CALC_OK;
 }
+
+/*
+ * 整数开方 ⌊√x⌋（向下取整）
+ * 纯整数二分法：在 [1, x] 区间找最大 r 使 r²≤x，即向下取整
+ * 复用 mul_overflows 检查 mid²溢出（mid 大时防御性检查）
+ */
+int calc_sqrt(int x, int *result)
+{
+    if (result == 0 || x < 0) {
+        return CALC_ERR_INVALID;  /* 空指针或负数无实数平方根 */
+    }
+    if (x == 0 || x == 1) {
+        *result = x;  /* √0=0, √1=1 直接返回 */
+        return CALC_OK;
+    }
+
+    int lo = 1;
+    int hi = x;  /* 二分区间 [1, x] */
+    while (lo <= hi) {
+        int mid = lo + (hi - lo) / 2;  /* 防加法溢出 */
+        if (mul_overflows(mid, mid)) {
+            hi = mid - 1;  /* mid²溢出，mid偏大，缩上界 */
+            continue;
+        }
+        int sq = mid * mid;
+        if (sq == x) {
+            *result = mid;  /* 完美平方 */
+            return CALC_OK;
+        } else if (sq < x) {
+            lo = mid + 1;  /* mid偏小 */
+        } else {
+            hi = mid - 1;  /* mid偏大 */
+        }
+    }
+    *result = hi;  /* 循环结束 lo>hi，hi 是最大 r 使 r²<x，即向下取整 */
+    return CALC_OK;
+}
