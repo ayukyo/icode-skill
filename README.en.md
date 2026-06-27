@@ -1,7 +1,8 @@
-# ICode — End-to-End Coding Workflow (Step 0 + 1~6)
+# ICode — End-to-End Coding Workflow (Step 0 + 1~6, with log root-cause analysis entry)
 
 ICode is a Claude Code Skill that breaks down the journey from requirement to delivery into strict steps. Each step can be invoked independently, allowing you to switch models between steps.
 
+- **Entry commands (optional)**: `/icode log` log root-cause analysis (domain-agnostic) → fix requirement; `/icode init` requirement-draft conversation
 - **Step 0 (optional)**: Iterative requirement-draft conversation, output as `00_init.md`
 - **Steps 1~6**: Plan → Review → Finalize → Code → Deep Check → Audit
 
@@ -19,8 +20,9 @@ ICode is a Claude Code Skill that breaks down the journey from requirement to de
 - Review supports custom round count (`/icode review [N]`) and incremental review mode
 - Structured review issues (affected sections / suggestion / rejection risk / evidence pointer / adversarial verification status)
 - Review introduces independent skeptic sub-agents for adversarial verification (three lenses: evidence / alternative-explanation / sufficiency); issues without adversarial verification or sufficient evidence cannot be confirmed; unverifiable assertions are honestly downgraded to `[unverified-insufficient-evidence]` rather than faking consensus
-- Cross-project historical retrieval & reuse: `/icode init`/`/icode plan`/`/icode start` auto-search a global index (`~/.claude/icode_data/index.json`) for similar past tickets and inject references by command (init → requirement points / plan → ADR+risk); three gates prevent context overflow; references stay in-session only, never pollute project artifacts
-- `/icode init` produces a `00_init.md` requirement draft via multi-turn dialogue, updated incrementally each round; `/icode start`/`/icode plan` auto-detects and reuses the directory as requirement input
+- Cross-project historical retrieval & reuse: `/icode init`/`/icode log`/`/icode plan`/`/icode start` auto-search a global index (`~/.claude/icode_data/index.json`) for similar past tickets and inject references by command (init → requirement points / log → root cause+evidence / plan → ADR+risk); three gates prevent context overflow; references stay in-session only, never pollute project artifacts
+- `/icode log` log root-cause analysis entry: baseline check first (git diff / state-link diagram) then log reconnaissance, adversarial analysis (3 skeptics) prevents confirmation bias, honest downgrade rather than fabricating root cause; outputs `log_analysis.md` + auto-converts to fix requirement `00_init.md` feeding Step 1; domain-agnostic (robotics / server / embedded / web all OK)
+- `/icode init` produces a `00_init.md` requirement draft via multi-turn dialogue, updated incrementally each round; `/icode start`/`/icode plan` (no args) detects init/log entry state and asks "reuse/new", choosing reuse takes `00_init.md` as requirement input
 
 ## Installation
 
@@ -48,7 +50,12 @@ git clone <repo-url> ~/.claude/skills/icode
 # When the requirement is unclear: discuss first, then enter the flow
 /icode init Record point_cloud / lidar_imu re-bag    # Step 0: kick-off draft + dialogue
 # ... multi-turn discussion; 00_init.md is updated incrementally each round ...
-/icode start                                          # Reuses the same directory; uses 00_init.md as input
+/icode start                                          # No args → detects init entry state, asks "reuse/new"; reuse takes 00_init.md as input → steps 1–6
+
+# From a bug log: analyze root cause first, then fix
+/icode log ~/work/log/recharge-anomaly "no rotation after undocking"   # Entry: analyze log root cause, outputs log_analysis.md + fix requirement 00_init.md
+# ... after adversarial analysis converges; if you doubt it, keep talking to re-run the disputed branch ...
+/icode start                                          # No args → detects log_done entry state, asks "reuse/new"; reuse takes 00_init.md (fix requirement) as input → steps 1–6
 ```
 
 ## Commands
@@ -56,6 +63,7 @@ git clone <repo-url> ~/.claude/skills/icode
 | Command | Description | Creates Dir? |
 | --- | --- | --- |
 | `/icode help` | Help: show usage examples | No |
+| `/icode log [scattered info...]` | Optional entry: log root-cause analysis → fix requirement `00_init.md` (domain-agnostic, always fresh) | Yes (always fresh) |
 | `/icode init [<rough req>]` | Optional Step 0: multi-turn dialogue → `00_init.md` (always creates a fresh directory) | Yes (always fresh) |
 | `/icode start <req>` | Full flow: create/reuse dir → steps 1–6 | Yes / Reuse |
 | `/icode plan <req>` | Step 1 only: draft project plan | Yes / Reuse |
@@ -65,7 +73,7 @@ git clone <repo-url> ~/.claude/skills/icode
 | `/icode deepcheck` | Step 5 only: iterative re-check | No |
 | `/icode audit` | Step 6 only: final audit + fix + documentation (produces `README.md`) | No |
 
-> When `/icode start` / `/icode plan` is launched and the latest `.icode_output/.icode_output_N/` contains only `00_init.md` (Step 0 output), it **reuses that directory** with `00_init.md` as the requirement input; otherwise it creates a fresh directory as usual.
+> When `/icode start` / `/icode plan` is launched and the latest `.icode_output/.icode_output_N/` is in entry state (status `init_in_progress` or `log_done`, i.e. init/log produced `00_init.md` but hasn't entered Step 1), it **asks the user "reuse/new"** — reuse takes `00_init.md` as input (from log, also reads `log_analysis.md` as background); non-entry state with args creates fresh.
 
 ## Execution
 
@@ -77,11 +85,12 @@ All steps run in the main session with the current model. No automatic model swi
 .icode_output/                # Unified parent dir, holds all outputs
 └── .icode_output_N/          # N auto-increments (new per requirement)
     ├── .ico_metadata.json      # Metadata (status, code file list)
-    ├── 00_init.md              # Step 0 (optional): Requirement draft (incrementally updated)
+    ├── log_analysis.md         # Entry log (optional): log root-cause analysis report
+    ├── 00_init.md              # Step 0 (optional) / Entry log: Requirement draft (incrementally updated)
     ├── 01_plan.md              # Step 1: Project plan
     ├── 02_review.md            # Step 2: Review report
     ├── review_round_*.json     # Step 2: Per-round review details (JSON)
-    ├── 03_plan_final.md        # Step 3: Finalized plan
+    ├── 03_plan_final.md        # Step 3: Finalized plan (reserves "implementation deviation memo" section at the end, written back by Step 6)
     ├── 05_reverse.json         # Step 5: Reverse-engineered spec (single JSON)
     ├── 05_review_rounds.json   # Step 5: Review round logs (JSONL)
     ├── 06_audit.md             # Step 6: Audit report
@@ -92,11 +101,12 @@ All steps run in the main session with the current model. No automatic model swi
 ## Workflow
 
 ```text
-[Step 0 (optional)] Requirement Draft Dialogue
-       ↓
+[Entry log (optional)] Log root-cause analysis → fix requirement 00_init.md
+[Step 0 (optional)] Requirement Draft Dialogue → 00_init.md
+       ↓ (start/plan no args → ask reuse/new)
 [Step 1] Plan → [Step 2] Review → [Step 3] Finalize
                                           ↓
-[Step 6] Audit ← [Step 5] Deep Check ← [Step 4] Code
+[Step 6] Audit (incl. deviation writeback) ← [Step 5] Deep Check ← [Step 4] Code
 ```
 
 ## License

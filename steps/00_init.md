@@ -29,7 +29,7 @@
    - **有参数**（`/icode init <粗略需求>`）：将参数作为初始需求，结合步骤2历史参考（若有），**构思**第一版 `00_init.md` 各章节内容框架（此时不深入读代码，代码细节留给步骤4）
    - **无参数**（`/icode init`）：**构思**空模板版 `00_init.md`（各章节内容写"待补"），然后主动询问用户"这次想做什么？"开启对话
 4. **了解现有工程**：阅读项目中相关代码，识别现状、可复用模块、相关接口（**先于思考**，为步骤5的"现状盘点/影响面分析"提供代码依据）
-5. **强制思考前置**（不可跳过，缺证据视为不合规）：先输出 `ultrathink` 触发词；再完成结构化思考——**首选**调用 `sequential-thinking` MCP（至少 4 步），**MCP 不可用时降级**为输出 `### 结构化思考` 文字块（逐项完成，不可省略）；每步/每项对应一个子项：需求分解 → 现状盘点（基于步骤4读码结果） → 影响面分析（基于步骤4读码结果） → 待决策项识别。**若步骤2有历史参考，在此处「历史参考」小节记录命中工单 id 与要点，作为思考输入**
+5. **强制思考前置**（不可跳过，缺证据视为不合规；完整规则见 [references/thinking.md](../references/thinking.md)）：本步骤子项（至少4步）= 需求分解 → 现状盘点（基于步骤4读码结果） → 影响面分析（基于步骤4读码结果） → 待决策项识别。**若步骤2有历史参考，在此处「历史参考」小节记录命中工单 id 与要点，作为思考输入**
 6. 使用 Write 工具写入 `{ICODE_OUT_DIR}/00_init.md`（模板见下文）
 7. 创建 `{ICODE_OUT_DIR}/.ico_metadata.json`：
 
@@ -49,11 +49,11 @@
    ```
 
 8. **写入全局索引**（步骤7之后立即执行）：Read `~/.claude/icode_data/index.json`（不存在则创建 `{"version":"1","updated_at":"当前时间","tickets":[]}`），追加一条新记录：
-   - `ticket_id` = `{工程名}-{N}`（工程名取 `project_path` 的 basename；N 为当前 `.icode_output_N` 的 N）。**工程名冲突处理**：若索引中已存在相同 `{工程名}-{N}` 但 `project_path` 不同的条目，ticket_id 追加 `project_path` 的短 hash 后缀（如 `mowerware-1-a3f2`）以保唯一
+   - `ticket_id` = `{工程名}-{N}`（工程名取 `project_path` 的 basename；N 为当前 `.icode_output_N` 的 N）。**工程名冲突处理**：若索引中已存在相同 `{工程名}-{N}` 但 `project_path` 不同的条目，ticket_id 追加 `project_path` 的短 hash 后缀（如 `myproject-1-a3f2`）以保唯一
    - `project_path` = 当前工程根绝对路径
    - `out_dir` = `.icode_output/.icode_output_{N}`
    - `requirement_summary` / `keywords` 取自步骤7 metadata；`requirement_points` 暂为空数组
-   - `has_init` = true，`has_plan` = false，`status` = `init_in_progress`，`created_at` = 当前时间
+   - `has_00_init` = true，`has_plan` = false，`status` = `init_in_progress`，`created_at` = 当前时间
    - 写回 index.json，同时置 metadata `indexed = true`、`ticket_id = {生成的 ticket_id}`（持久化 ticket_id，供后续步骤检索时排除当前工单，避免反推）
 9. 提示用户：可继续对话补充需求，文档会随对话自动更新；讨论完成后运行 `/icode start` 或 `/icode plan` 进入步骤1。**若想另起炉灶讨论别的需求**，再敲 `/icode init`（会新建另一个目录）。
 

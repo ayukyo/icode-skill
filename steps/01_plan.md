@@ -8,14 +8,15 @@
 
 ## 执行步骤
 
-1. **目录管理 + 需求来源决策**（必须严格按以下顺序）：
+1. **目录管理 + 需求来源决策**（必须严格按以下顺序；完整目录管理脚本见 [references/dir_and_metadata.md](../references/dir_and_metadata.md)）：
 
-   a. 检查最新 `.icode_output/.icode_output_N/` 目录是否满足"步骤0复用条件"（仅含 `.ico_metadata.json` + `00_init.md`，无其他步骤产物）。
+   a. 检查最新 `.icode_output/.icode_output_N/` 目录是否满足"入口态复用条件"：有 `.ico_metadata.json` + `00_init.md`，且**无 `01_plan.md`**（status 为 `init_in_progress` 或 `log_done`，即 init/log 产出 00_init.md 但未进步骤1）。**注**：log 目录除 00_init.md 外还有 `log_analysis.md`，仍满足复用条件。
    b. **满足复用条件**：
       - 复用该目录（不创建新目录），`ICODE_OUT_DIR` 指向该目录
-      - **Read 该目录下的 `00_init.md`**，将其内容作为本次步骤1的**主要需求输入**
+      - **Read 该目录下的 `00_init.md`**，将其内容作为本次步骤1的**主要需求输入**（init 产出的是需求初稿；log 产出的是根因转成的修复需求）
+      - 若目录含 `log_analysis.md`（即来自 `/icode log`），**Read 其「核心结论 + 建议修复方向」章节作背景参考**——步骤1计划应基于该根因展开修复方案，在 ADR/风险评估里呼应根因证据
       - 若 `/icode start` / `/icode plan` 命令行同时携带了需求字符串，仅作为**补充上下文**（次优先级），不覆盖 `00_init.md`
-      - 在 `01_plan.md` 的"需求描述"章节中明确标注：本计划基于 `00_init.md` 展开，并引用其关键章节
+      - 在 `01_plan.md` 的"需求描述"章节中明确标注：本计划基于 `00_init.md` 展开（若来自 log，标注"基于根因报告 log_analysis.md 的修复需求"），并引用其关键章节
    c. **不满足复用条件**：执行常规「创建新目录」逻辑，确定 `ICODE_OUT_DIR`，需求输入采用命令行参数
 
 2. **历史检索复用**（目录管理之后、强制思考之前，全局索引存在时必须执行，详见 SKILL.md「历史检索复用」段）。**置于目录管理之后**：此时需求来源已确定（复用情况已读 `00_init.md`，常规新建情况用命令行参数），可用完整需求做相关性判断：
@@ -25,7 +26,7 @@
    - 命中工单的 `01_plan.md` 读不到（工程被删/移动）→ 跳过该条不报错
    - 零命中不注入，不强凑参考
 
-3. **强制思考前置**（不可跳过，缺证据视为不合规）：先输出 `ultrathink` 触发词；再完成结构化思考——**首选**调用 `sequential-thinking` MCP（至少 3 步），**MCP 不可用时降级**为输出 `### 结构化思考` 文字块（逐项完成，不可省略）；每步/每项对应一个子项：需求分解 → 方案分析 → 风险评估。**若步骤2有历史参考，在此处「历史参考」小节记录命中工单 id 与 ADR/风险要点，作为思考输入**
+3. **强制思考前置**（不可跳过，缺证据视为不合规；完整规则见 [references/thinking.md](../references/thinking.md)）：本步骤子项（至少3步）= 需求分解 → 方案分析 → 风险评估。**若步骤2有历史参考，在此处「历史参考」小节记录命中工单 id 与 ADR/风险要点，作为思考输入**
 4. 撰写计划：
    a. **先了解现有工程**：阅读项目中现有的代码，了解目录结构、现有架构模式、可复用模块
    b. **撰写计划**：包含以下 9 个章节（缺一不可）：
@@ -97,14 +98,14 @@
 ```
 
    - **两种情况都要刷新全局索引**（步骤5之后）：Read `~/.claude/icode_data/index.json`，按 `ticket_id` 更新本工单条目——`requirement_summary` 用刷新后的值、`has_plan` = true、`status` = `plan_done`，写回 index.json，置 metadata `indexed = true`。
-   - **常规新建目录情况**（此前未入索引）：此时需**首次生成并写入**条目。`ticket_id` 按 `{工程名}-{N}` 规则生成（工程名冲突时加 `project_path` 短 hash 后缀，规则同步骤0），`has_init` = false，`has_plan` = true，`project_path`/`out_dir`/`created_at`/`requirement_summary`/`keywords` 取自本步骤 metadata；写入索引后**回填 metadata 的 `ticket_id` 字段**。
+   - **常规新建目录情况**（此前未入索引）：此时需**首次生成并写入**条目。`ticket_id` 按 `{工程名}-{N}` 规则生成（工程名冲突时加 `project_path` 短 hash 后缀，规则同步骤0），`has_00_init` = false，`has_plan` = true，`project_path`/`out_dir`/`created_at`/`requirement_summary`/`keywords` 取自本步骤 metadata；写入索引后**回填 metadata 的 `ticket_id` 字段**。
    - **复用步骤0目录情况**：metadata 已有 `ticket_id`，按该 id 更新对应条目（`has_plan` 置 true，刷新 `requirement_summary`），不新建条目。
 
 6. 如果是 `/icode start`（全流程模式）：
 
    - **立即继续执行步骤2**（不要等待用户确认）。**过渡提示不得写死轮数**——只输出 `▶ 步骤1 完成，进入步骤2 审查`，**不要**自行加"（3轮）""（默认3轮）"等轮数说明；轮数与延长机制由步骤2 启动时自行输出（见 [02_review.md](02_review.md)）
    - 如果会话断开后恢复，读取 `.ico_metadata.json` 的 `completed_steps`，从最后一个完成步骤的下一步继续。
-   - **续跑判定规则**：以 `completed_steps` 中**编号 1~6 范围内最大的已完成步骤**为基准推进下一步。`"0"` 仅作为"已走过步骤0"的标记，**不影响**推进逻辑。例：
-     - `["0"]` → 下一步是步骤1
-     - `["0","1"]` 或 `["1"]` → 下一步是步骤2
+   - **续跑判定规则**：以 `completed_steps` 中**编号 1~6 范围内最大的已完成步骤**为基准推进下一步。`"0"` 和 `"log"` 仅作为"已走过步骤0/log入口"的标记，**不影响**推进逻辑。例：
+     - `["0"]`/`["log"]`/`["log","0"]` → 下一步是步骤1
+     - `["0","1"]` 或 `["1"]` 或 `["log","1"]` → 下一步是步骤2
      - `["0","1","2"]` 或 `["1","2"]` → 下一步是步骤3
