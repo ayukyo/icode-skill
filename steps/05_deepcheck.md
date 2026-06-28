@@ -44,12 +44,14 @@ Free 阶段一次性完整覆盖全部 15 个角度。
 
 **必须先建立计划-代码追溯矩阵**（逐条列出计划功能点/接口/约束，标记代码对应位置和完成状态），再逐维度评估。禁止跳过追溯直接给"全部通过"。
 
+**Free 阶段 A6 深检/争议验证——必须独立 spawn 3 质疑者子代理**：若 Free 阶段发现任何深检 issue 或需争议性验证的点，**必须按 [references/adversarial.md](../references/adversarial.md) 模式独立 spawn 3 个质疑者子代理**（证据质疑者/替代解释者/充分性质疑者各一，不得合并 spawn，少任一视为不合规——见反偷懒第14条）。产物（deepcheck_round_*.json 的 adversarial_verification）必须记录每个质疑者的 **独立 spawn Agent ID** 作为调用证据。
+
 ## 执行步骤
 
 1. 检测最新目录，确定 `ICODE_OUT_DIR`
 2. 读取 `03_plan_final.md` 和 `.ico_metadata.json`
    - 若 `.ico_metadata.json.code_compile_failed == true`，输出 `⚠️ 步骤4编译失败，仍继续复检` 警告
-3. **强制思考前置**（不可跳过，缺证据视为不合规；**必须先 Read [references/thinking.md](../references/thinking.md) 完整内容**（不得凭概述/记忆执行，否则产出不合规））：本步骤子项（至少3步）= 梳理代码清单 → 回顾计划要点 → 制定逆推/Fixed/Free 检查策略
+3. **强制思考前置**（不可跳过，缺证据视为不合规；**必须先 Read [references/thinking.md](../references/thinking.md) + [references/anti_laziness.md](../references/anti_laziness.md) 完整内容**（不得凭概述/记忆执行，否则产出不合规））：本步骤子项（至少3步）= 梳理代码清单 → 回顾计划要点 → 制定逆推/Fixed/Free 检查策略
 4. **分步续跑**：若 `status == "deepcheck_in_progress"`，从 metadata 恢复 `deepcheck_total_rounds` / `deepcheck_clean_rounds` / `deepcheck_phase`，同时读取已存在的 `05_reverse.json`（若存在则跳过 Reverse）和 `deepcheck_round_*.json`
 5. 否则初始化 `deepcheck_clean_rounds = 0`, `deepcheck_total_rounds = 1`, `deepcheck_phase = "reverse"`, `status = deepcheck_in_progress`
 6. 输出：`▶ 步骤5 复检开始`
@@ -89,7 +91,7 @@ Free 阶段一次性完整覆盖全部 15 个角度。
 2. 逻辑闭环 — 数据流、控制流、跨文件调用链
 3. 异常处理 — 错误码、异常场景、边界条件
 4. 边界场景 — 空值、越界、超时、并发
-5. 规范写法 + 注释完备性 + 日志覆盖 — 项目代码风格；导出函数/接口/关键分支/数据结构注释是否完备（对照步骤4 第6条）；关键路径（错误返回/状态跳转/外部交互/决策分支/降级重试）日志是否覆盖（对照步骤4 第7条）
+5. 规范写法 + 注释完备性 + 日志覆盖 + **优雅度** — 项目代码风格；导出函数/接口/关键分支/数据结构注释是否完备（对照步骤4 第6条）；关键路径（错误返回/状态跳转/外部交互/决策分支/降级重试）日志是否覆盖（对照步骤4 第7条）；**优雅度5条**（对照步骤4 第9条）：①复用优先——新增工具函数 grep 工程是否已有等价，有则必须复用 ②风格对齐——命名/错误处理/日志/注释格式与同模块既有代码一致 ③调用链模式一致——组织方式（注册/属性中心/RAII/错误码）与工程既有模式一致 ④最小侵入——git diff 无"顺手重构"式无关改动 ⑤接口克制——public 符号都必要，能 static 就不 public。不达标记 issue（如"新增 check_overflow 与既有 mul_overflows 重复，应复用"）
 6. 潜在隐患 — 内存泄漏、死锁、资源竞争、安全漏洞
 7. 跨文件一致性 — 接口变更全链路同步
 

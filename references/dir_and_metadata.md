@@ -75,6 +75,7 @@ Read `~/.claude/icode_data/index.json`（不存在则创建 `{"version":"1","upd
 - `created_at` = 当前时间
 - `last_used_at` = 当前时间（**新增**：检索命中时更新，LRU淘汰依据；首次写入=created_at）
 - `hit_count` = 0（**新增**：检索命中时+1，达10永久保留）
+- `stale` = false（**新增**：过时校验发现代码锚点失效置true，stale工单不再注入不续期）
 - 写回 index.json，置 metadata `indexed = true`、`ticket_id = {生成的 ticket_id}`
 - **写入后执行 LRU 淘汰**（见下方「索引淘汰规则」）
 
@@ -86,9 +87,29 @@ Read `~/.claude/icode_data/index.json`（不存在则创建 `{"version":"1","upd
 - 步骤1 写完 `01_plan.md` 后：`requirement_summary`（基于完整计划刷新）、`has_plan` = true、`status` = `plan_done`
 - 步骤6 终审后：`status` = `completed`，`requirement_summary` 若与最终交付显著偏差则基于最终成果刷新
 
-## 检索命中续期（检索阶段执行）
+## 检索命中续期 + 过时校验（检索阶段执行）
 
-检索阶段（init/log/plan/start 启动时扫 index.json）若某工单被选为 top-2 命中并注入，更新该条目：
+检索阶段（init/log/plan/start 启动时扫 index.json）若某工单被选为 top-2 命中，**先做过时校验，再续期**：
+
+### 过时校验（防注入过时信息）
+
+索引存的是工单**当时的摘要**，但工程会迭代，老工单的 ADR/需求可能已被后续工单推翻。命中过时工单注入会误导。
+
+**校验方法**（只查代码锚点是否还在，不重读全文，控 token）：
+1. 读该工单 `01_plan.md` 的 ADR 章节，提取其涉及的**代码锚点**（如"calc.c mul_overflows"、"calc.h calc_sqrt"）
+2. 用 Grep 快速确认锚点代码是否仍存在于当前工程
+3. **锚点不存在**（代码已删除/重构/重命名）→ 该工单过时，置 `stale=true`，**跳过注入**（即使 hit_count 高也不注入）
+4. **锚点存在** → 工单仍有效，正常注入
+
+### stale 字段
+
+- index.json 每条加 `stale`（默认 false）
+- `stale=true` 的工单：**不再注入**（检索时跳过），但仍保留在索引（不删，留追溯）
+- stale 工单不参与 hit_count 续期（不再被命中）
+- 若该工单产物被刷新（如重跑步骤6终审），可手动重置 `stale=false`
+
+### 续期（校验通过才续期）
+
 - `last_used_at` = 当前时间（续期，LRU不淘汰）
 - `hit_count` += 1（累计命中次数）
 - 写回 index.json
@@ -97,13 +118,15 @@ Read `~/.claude/icode_data/index.json`（不存在则创建 `{"version":"1","upd
 
 **目的**：index.json 是检索缓存非档案，随工单增长会膨胀。靠 LRU 淘汰失去复用价值的老工单，保留高价值工单。淘汰只删索引条目，**不删各工程 `.icode_output/` 产物**（产物保留，索引只是指针）。
 
-**触发时机**：每次写索引（首次写入/条目更新）后执行淘汰扫描。
+**触发时机**：每次写索引（首次写入/条目更新/命中续期）后执行：先排序，再淘汰扫描。
+
+**排序规则**（写入时重排 tickets 数组）：按 `hit_count` 降序、同值按 `last_used_at` 降序。高复用价值 + 近期被用的工单排前，扫描 `requirement_summary` 时主代理先看到高价值项，判断相关性更快；LRU 淘汰时最老的自然在末尾。
 
 **淘汰规则**：
 1. **容量上限 200 条**：tickets 数组超 200 时触发淘汰
 2. **永久保留**：`hit_count >= 10` 的工单永久不淘汰（已被验证高复用价值）
 3. **未完成态保留**：`status` 为 `init_in_progress`/`log_done`/`log_in_progress`/`review_in_progress`/`deepcheck_in_progress`/`code_in_progress` 的工单不淘汰（流程未结束）
-4. **LRU 淘汰**：超上限时，在 `hit_count < 10` 且 `status = completed/review_done/deepcheck_done/plan_done/plan_finalized`（已完成或已推进态）的工单中，淘汰 `last_used_at` 最老的，直到条目数 ≤ 200
+4. **LRU 淘汰**：超上限时，在 `hit_count < 10` 且 `status = completed/review_done/deepcheck_done/plan_done/plan_finalized`（已完成或已推进态）的工单中，淘汰 `last_used_at` 最老的（数组末尾），直到条目数 ≤ 200
 5. **淘汰不报错**：静默移除，用户无感
 
 ## .ico_metadata.json 模板

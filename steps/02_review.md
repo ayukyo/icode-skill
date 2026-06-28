@@ -22,7 +22,7 @@
    - 若 `.ico_metadata.json.status == "review_in_progress"`，**续跑**（审查中断未终止）：从 metadata 恢复 `total_rounds` / `clean_rounds` / `extended_rounds` / `pending_verification` 字段；`max_rounds` / `absolute_cap` 按**新参数优先**原则——若 `param_max_rounds` 非空，则 `max_rounds = param_max_rounds`、`absolute_cap = max(10, param_max_rounds × 2)`，并更新 metadata；否则沿用 metadata 旧值（首次执行时写入）。读取所有已存在的 `review_round_*.json` 汇总历史问题，跳过已完成轮次，从当前 `total_rounds` 继续
    - 输出续跑信息：`▶ 步骤2 续跑，从第{total_rounds}轮开始（已完成{total_rounds-1}轮，当前轮数上限{max_rounds}，已扩展{extended_rounds}次，硬上限{absolute_cap}轮）`
    - 否则**首轮初始化**（status 为 `plan_done`/`review_done`/其他非 in_progress 态）：`status=review_done` 表示上一轮审查已收敛终止，再调 `/icode review` 视为**重新审查**——`clean_rounds = 0`, `total_rounds = 1`, `extended_rounds = 0`，`max_rounds` 由参数决定（`param_max_rounds` 或默认 3），`absolute_cap = max(10, max_rounds × 2)`，设 `status = review_in_progress`，将 `max_rounds` / `absolute_cap` / `extended_rounds` 写入 metadata。**重新审查会覆盖旧 `review_round_*.json` 与 `02_review.md`**——若用户想在中断处续跑，应确保 status 是 `review_in_progress`（中断态）而非 `review_done`（终止态）
-4. **强制思考前置**（不可跳过，缺证据视为不合规；**必须先 Read [references/thinking.md](../references/thinking.md) 完整内容**（不得凭概述/记忆执行，否则产出不合规）；基于上述第3步「分步续跑检测」的判定结果选择思考路径）：
+4. **强制思考前置**（不可跳过，缺证据视为不合规；**必须先 Read [references/thinking.md](../references/thinking.md) + [references/anti_laziness.md](../references/anti_laziness.md) 完整内容**（不得凭概述/记忆执行，否则产出不合规）；基于上述第3步「分步续跑检测」的判定结果选择思考路径）：
    - **首轮**（`total_rounds == 1`）子项（至少3步）：需求分解 → 独立方案构思 → 对比要点预判
    - **续跑**（`total_rounds > 1`）子项（至少3步）：回顾历史轮次问题 → 增量审查范围界定 → 跨章节影响预判
 5. 输出步骤确认：`▶ 步骤2 审查开始（{max_rounds}轮内完成；如最后一轮仍有新问题，自动延长 +2 轮，最多扩展至 {absolute_cap} 轮）`

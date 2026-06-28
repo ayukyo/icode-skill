@@ -208,70 +208,13 @@ ICODE_OUT_DIR=".icode_output/.icode_output_${LAST}"
 
 所有步骤（含可选步骤0）在主会话中执行，使用当前会话模型。**不主动切换模型**，用户如需切换可手动 `/model`。
 
-### 强制思考前置（所有步骤必须遵守，缺一不可）
+### 强制思考前置（所有步骤必须遵守）
 
-**每个步骤开始前，必须先 ultrathink 并完成结构化思考**——这是不可跳过的硬性前置。思考环节不可整体跳过，但**执行载体分主备两档**：
-
-- **首选**：调用 `sequential-thinking` MCP 工具（`mcp__sequential-thinking__sequentialthinking`），至少 3 步，每步对应下方子项之一。上下文能看到该 tool_call 记录即为合规证据。
-- **降级**：若当前环境未连接 / 不可用该 MCP（工具列表与 deferred tools 池中均无 `sequential-thinking`），则**必须以显式的「结构化思考」文字块替代**——在回复中先输出一个 `### 结构化思考` 块，逐项完成下方要求的子项（每项一小段，不可省略），再进入产出。该文字块即为合规证据。
-
-> 判定 MCP 是否可用：尝试调用 `sequential-thinking`；若工具不存在则按降级路径走。**两种载体任选其一即可，但思考环节本身不可省略**——未呈现任一形式的思考证据，该步骤产出视为不合规。
-
-**通用流程**（每步执行）：
-1. **输出 `ultrathink` 触发词**（触发更长的内部推理 budget）
-2. **完成结构化思考**（MCP 优先，不可用则降级文字块），至少 3 步，每步对应下面的子项之一：
-   - **需求分解**：把原始需求拆成可验证的子项
-   - **方案分析**：候选方案 + 取舍
-   - **风险评估**：影响面、边界、依赖、回滚
-   - 步骤文件可按本步骤特点增补额外子项（详见各 step 文件）
-3. **不得跳过思考直接产出**——所有 Write/Edit 必须在思考证据之后
-
-**层级关系**：
-- API 层：`CLAUDE_CODE_EFFORT_LEVEL=max` + `model=opus`（控制推理 effort）
-- Hook 层：`UserPromptSubmit` 拦截 `/icode` 命令，缺思考证据时注入提醒
-- Prompt 层：本节 + 各 step 文件的"强制思考前置"段
-
-具体每步子项见各步骤文件。
+完整规则**必须先 Read [references/thinking.md](references/thinking.md)**（不得凭概述/记忆执行，否则产出不合规——见反偷懒第15条）。核心要点：每步开始前先 `ultrathink`，首选 `sequential-thinking` MCP 至少3步，MCP 不可用降级 `### 结构化思考` 文字块；每步思考子项见各 step 文件 + thinking.md。
 
 ### 反偷懒约束（所有步骤必须遵守，硬性总则）
 
-**禁止以"省 token / 省时间 / 简化产出 / 已大致足够"为由偷工减料**。任何步骤的产出必须**完整**完成本步骤定义的所有子项、维度、轮次和文件，**不得合并、不得跳过、不得降级**。
-
-**典型偷懒行为（一经发现，该步骤产出视为不合规）**：
-
-1. **合并产出**：把多个独立步骤的产物揉进同一个文件（如把审查和定稿合到一个文件、把代码和复检合并写）
-2. **跳过子项**：步骤定义里要求的子项/维度/章节漏写或写"略"、"同上"、"参考前文"
-3. **降低轮次**：步骤 2 审查、步骤 5 复检要求的轮次未达标就提前终止（如 `max_rounds=3` 只跑 1 轮就声称"已无新问题"）
-4. **示意/伪代码替代实现**：步骤 4 编码时用 `// TODO`、`// ...`、`// 省略类似实现` 等占位符代替真实代码
-5. **省略产物文件**：步骤明确要求的 `.json` / `.md` / `.log` 文件缺失、或内容是空模板
-6. **审查/复检走过场**：审查意见全是"无问题"、"通过"等空泛结论，无具体证据
-7. **跳过强制思考**：未输出 `ultrathink` 触发词、未做 MCP 思考或降级文字思考块
-8. **跳过自检报告**：修改后未输出完整的 7 维自检报告
-9. **跳过对抗验证**：步骤 2.5 逐维审查产出的 issue 未经独立质疑者子代理对抗就下 `confirmed` 结论（**步骤 2.4 已用 Read/Grep 实证验证失败的 issue 例外**，已有铁证可直接 `confirmed` 无需对抗）；或把主代理推理过程喂给质疑者当既定事实（破坏独立性）；或对抗未收敛时和稀泥默认通过
-10. **伪造共识 / 默认通过**：issue 无 `evidence_pointer` 证据回指就确认；断言无法实证验证时不标 `[未验证-证据不足]` 而默认通过；对抗裁决分裂时不降级而强行 `confirmed`
-11. **跳过历史检索 / 污染产物**：`/icode init`/`/icode plan`/`/icode start` 未执行历史检索注入（全局索引存在时）；或把历史参考内容写进 `00_init.md`/堆砌进 `01_plan.md`（污染工程产物）；或命中工单后照抄历史决策而不顾当前需求差异
-12. **跳过偏差回写 / 污染计划**：步骤6 终审未把实质偏差汇总回写到 `03_plan_final.md` 的「实现偏差备忘」段（含无偏差时未写"无实质偏差"留痕）；或回写时改了计划正文（破坏对照价值）；或把细节差异堆砌进备忘（抬高回读噪音）；或步骤4 主动偏离计划未记入 `code_deviations`
-13. **注释/日志偷工**：步骤4 编码漏写导出函数/关键分支/数据结构注释；关键路径（错误返回/状态跳转/外部交互/决策分支/降级重试）漏加日志导致运行时无法排查；步骤5 复检/步骤6 终审未把注释完备性+日志覆盖纳入检查（漏检即放行）；或引入项目未使用的新日志库
-14. **日志根因分析偷工**：`/icode log` 跳过基线检查直接 grep 日志；对抗分析质疑者未独立 spawn 或未独立读日志（主代理自演）；伪造根因共识（证据不足不降级）；根因结论无日志行回指；或照抄历史工单根因不顾当前症状差异
-15. **references 软引用未实读**：step 文件写"见 references/xxx.md"但执行时**未用 Read 工具实读该共享文件**，凭 SKILL.md 概述或记忆执行——新会话里 references 内容不在上下文，凭记忆执行必出错。**引用 references 的步骤，必须先 Read 该文件完整内容再执行**，否则该步骤产出视为不合规。**同会话已读不豁免**：每步仍须重新 Read（显式Read是深度思考的前置仪式，凭记忆会降级思考质量），Read 后输出确认行 `📖 已 Read references/xxx.md` 作为合规证据
-16. **思考块过薄**：强制思考降级文字块每子项只有一句话带过（如"与步骤1一致""通过"），未展开实质推演。**每个思考子项必须有 ≥2 句实质内容**（具体设计点/具体检查项/具体风险），步骤2独立方案构思须≥3设计点、步骤5每阶段须列具体检查项、步骤6追溯矩阵须逐功能点定位代码
-
-**合规要求**：
-
-- 步骤定义里写"至少 N 步" / "至少 N 项" / "N 个维度"——**必须 ≥ N**，不得以"N-1 个已经够了"为由减少
-- 步骤定义里列出的所有产物文件——**必须全部产出**，不得以"另一个文件已经包含"为由省略
-- 审查/复检的轮次——**必须跑完连续 K 轮无新问题或达到 max_rounds**，不得提前终止
-- 编码——**必须完整可编译可运行**，不得留 TODO 占位、不得伪代码、不得"仅给出关键部分"
-- 文档章节——**每个章节必须有实质内容**，不得写"略"、"同上"、"参考 XX 文件"
-- 步骤 2 对抗验证 / 诚实降级——见上方"典型偷懒行为"第 9/10 条的反面要求（正面执行：每条 issue 经独立质疑者对抗或 2.4 实证、未对抗/未收敛一律 `needs_more_evidence`、无 `evidence_pointer` 不得 `confirmed`、断言无法实证验证时标 `[未验证-证据不足]` 列入 `pending_verification`）
-- 历史检索复用——`/icode init`/`/icode plan`/`/icode start` 启动时**必须先执行历史检索**（全局索引存在时），命中后按命令分流注入；历史参考**只进会话上下文**，不得写进 `00_init.md`，不得在 `01_plan.md` 堆砌历史引用（唯一例外：实质借鉴的 ADR 可在"理由"末尾加一句溯源）；命中工单的参考**只作启发**，不得照抄
-- 实现偏差回写——步骤6 终审**必须汇总**步骤4 `code_deviations` + 步骤5 `05_reverse.json` + 步骤6 终审偏差，回写到 `03_plan_final.md` 末尾步骤3预留的「实现偏差备忘」段；**只填充预留段、不改计划正文**；只标实质不一致（接口/数据结构/功能有无/实现方式/异常策略变更），细节差异不标；无偏差也必须写"无实质偏差"留痕；每条偏差必须能回指计划章节 + 代码行
-- 注释与日志完备性——步骤4 编码**必须**满足注释增强（导出函数/接口/关键分支/数据结构/算法）与日志覆盖（错误返回/状态跳转/外部交互/决策分支/降级重试关键路径有日志，遵循项目既有日志风格，不引入新库）；步骤5 复检（Fixed 第5维度 + Free A15）+ 步骤6 终审（代码质量维度）**必须检查**注释完备性与日志覆盖，漏写记为 issue，不得放行
-- 日志根因分析——`/icode log` **必须**先做基线检查（git diff/状态链路图/文档参考不盲信）再 grep 日志；对抗分析**必须**独立 spawn 3 质疑者子代理、独立读日志；根因结论**必须**有日志行回指（节点+时间+原文）；证据不足**必须**诚实降级"未定论"；历史根因只作启发不得照抄
-
-**为什么强制**：本工作流的价值在于"完整闭环 + 多轮审查 + 充分思考"，任何偷懒都会破坏闭环、放过隐藏缺陷、最终把质量负担转嫁给后续维护。**省下的 token 远小于因质量下降而需返工的代价**。
-
-**用户授权例外**：仅当用户**明确显式**说"跳过步骤 X" / "只跑 1 轮"等指令时才可降级，且必须在产出文件中明确记录"已按用户指令降级，跳过的内容包括：..."。模型不得自行降级、不得擅自合并。
+完整规则**必须先 Read [references/anti_laziness.md](references/anti_laziness.md)**（不得凭概述/记忆执行，否则产出不合规——见反偷懒第15条）。核心要点：16条典型偷懒行为 + 正面合规要求；引用 references 必须每步重新 Read 输出 `📖 已 Read` 确认行；思考块每子项≥2句实质内容；用户授权例外须显式记录。
 
 ### 全流程串联规则
 
@@ -288,20 +231,21 @@ ICODE_OUT_DIR=".icode_output/.icode_output_${LAST}"
 **全局索引**（不污染任何工程，不放技能目录）：
 
 - 索引文件：`~/.claude/icode_data/index.json`（首次运行自动创建）。**路径说明**：`~` 是当前用户主目录，由 Claude Code 工具层跨平台解析（Linux/macOS/Windows 通用），与技能目录 `~/.claude/skills/icode/` 同源。技能文件**禁止硬编码**任何具体用户路径（如 `/home/xxx`、`C:\Users\xxx`），所有全局路径必须用 `~` 表达，确保技能可移植
-- 每条记录：`ticket_id`(`{工程名}-{N}`，工程名冲突时追加 `project_path` 短 hash 后缀保唯一)、`project_path`、`out_dir`、`requirement_summary`(≤200token)、`requirement_points`(≤10条)、`keywords`(≤8个)、`has_00_init`/`has_plan`、`status`、`created_at`、`last_used_at`(检索命中时更新，LRU淘汰依据)、`hit_count`(检索命中+1，达10永久保留)。**`has_00_init` 语义 = 该工单是否已产出 `00_init.md`（走过 init 或 log，log 也会产出 00_init.md），与"是否走过步骤0 init"解耦**——log 未走过 init 但产出 00_init.md 故也为 true
+- 每条记录：`ticket_id`(`{工程名}-{N}`，工程名冲突时追加 `project_path` 短 hash 后缀保唯一)、`project_path`、`out_dir`、`requirement_summary`(≤200token)、`requirement_points`(≤10条)、`keywords`(≤8个)、`has_00_init`/`has_plan`、`status`、`created_at`、`last_used_at`(检索命中时更新，LRU淘汰依据)、`hit_count`(检索命中+1，达10永久保留)、`stale`(默认false，过时校验发现代码锚点失效置true，stale工单不再注入)。**`has_00_init` 语义 = 该工单是否已产出 `00_init.md`（走过 init 或 log，log 也会产出 00_init.md），与"是否走过步骤0 init"解耦**——log 未走过 init 但产出 00_init.md 故也为 true
 - **只存指针和摘要，不存产物正文**。产物仍在各工程 `.icode_output/`，工程隔离不破坏。
-- **LRU 淘汰**（防 index.json 无限膨胀）：索引是检索缓存非档案。容量上限 200 条；`hit_count >= 10` 永久保留；未完成态（init/log/review/deepcheck/code in_progress）不淘汰；超上限时淘汰 `hit_count < 10` 且已完成态中 `last_used_at` 最老的。检索命中更新 `last_used_at`+`hit_count` 续期。淘汰只删索引条目，产物保留各工程。详见 [references/dir_and_metadata.md](references/dir_and_metadata.md)「索引淘汰规则」
+- **LRU 淘汰**（防 index.json 无限膨胀）：索引是检索缓存非档案。容量上限 200 条；`hit_count >= 10` 永久保留；未完成态（init/log/review/deepcheck/code in_progress）不淘汰；超上限时淘汰 `hit_count < 10` 且已完成态中 `last_used_at` 最老的。检索命中更新 `last_used_at`+`hit_count` 续期。淘汰只删索引条目，产物保留各工程。**排序**：tickets 数组按 `hit_count` 降序、同值按 `last_used_at` 降序（高价值近期项在前，扫描快+淘汰从末尾）。详见 [references/dir_and_metadata.md](references/dir_and_metadata.md)「索引淘汰规则」
+- **过时校验**（防注入过时信息）：索引存的是工单当时的摘要，工程迭代后老工单 ADR/需求可能已过时。检索命中准备注入前，Grep 校验该工单 ADR 涉及的代码锚点是否仍存在；锚点失效→置 `stale=true` 跳过注入（即使 hit_count 高也不注入）。stale 工单保留索引留追溯，不再续期。详见 [references/dir_and_metadata.md](references/dir_and_metadata.md)「检索命中续期 + 过时校验」
 
 **写索引时机**：
-- `/icode log` 产出 `log_analysis.md` + `00_init.md` 后：**首次生成 `ticket_id`**（`{工程名}-{N}`，冲突加 hash 后缀）并回填 metadata，写入 `requirement_summary`（根因摘要）+`requirement_points`（修复要点）+`has_00_init=true`+`status=log_done`+`last_used_at=当前`+`hit_count=0`，**写后执行LRU淘汰**
-- 步骤0 首轮写 `00_init.md` 后：**首次生成 `ticket_id`**（`{工程名}-{N}`，冲突加 hash 后缀）并回填 metadata，写入 `requirement_summary`+空 `requirement_points`+`has_00_init=true`+`last_used_at=当前`+`hit_count=0`，**写后执行LRU淘汰**
+- `/icode log` 产出 `log_analysis.md` + `00_init.md` 后：**首次生成 `ticket_id`**（`{工程名}-{N}`，冲突加 hash 后缀）并回填 metadata，写入 `requirement_summary`（根因摘要）+`requirement_points`（修复要点）+`has_00_init=true`+`status=log_done`+`last_used_at=当前`+`hit_count=0`+`stale=false`，**写后执行LRU淘汰**
+- 步骤0 首轮写 `00_init.md` 后：**首次生成 `ticket_id`**（`{工程名}-{N}`，冲突加 hash 后缀）并回填 metadata，写入 `requirement_summary`+空 `requirement_points`+`has_00_init=true`+`last_used_at=当前`+`hit_count=0`+`stale=false`，**写后执行LRU淘汰**
 - 步骤0 每轮对话更新后：刷新 `requirement_points`（从「3.新增需求点」自动提炼）+ `requirement_summary`
-- 步骤1 写完 `01_plan.md` 后：刷新 `requirement_summary`（基于完整计划）+ `has_plan=true`；**常规新建目录首跑时**（跳过步骤0）在此首次生成 `ticket_id` 并回填 metadata、首次写入索引条目（`has_00_init=false`、`last_used_at=当前`、`hit_count=0`），**写后执行LRU淘汰**
+- 步骤1 写完 `01_plan.md` 后：刷新 `requirement_summary`（基于完整计划）+ `has_plan=true`；**常规新建目录首跑时**（跳过步骤0）在此首次生成 `ticket_id` 并回填 metadata、首次写入索引条目（`has_00_init=false`、`last_used_at=当前`、`hit_count=0`、`stale=false`），**写后执行LRU淘汰**
 - 步骤6 终审完成后：刷新 `status=completed`，`requirement_summary` 若与最终交付显著偏差则基于最终成果刷新
 
 **检索注入流程**（`/icode init`、`/icode log`、`/icode plan`、`/icode start` 共用检索，分流注入）：
 
-1. **检索阶段**（强制思考**之前**；`/icode init`/`/icode log` 在建目录后检索，`/icode plan`/`/icode start` 在目录管理+确定需求来源后检索——确保用完整需求做相关性判断）：Read 全局索引，主代理扫所有 `requirement_summary`，结合当前需求/症状判断相关性，选 top-2 命中（明确无关则 0 条）。排除当前正在写的 `ticket_id`，不自我参考。**命中续期**：对选中的 top-2 工单，更新其 `last_used_at`=当前时间、`hit_count`+=1，写回 index.json（被复用即续期，防LRU淘汰）。
+1. **检索阶段**（强制思考**之前**；`/icode init`/`/icode log` 在建目录后检索，`/icode plan`/`/icode start` 在目录管理+确定需求来源后检索——确保用完整需求做相关性判断）：Read 全局索引，主代理扫所有 `requirement_summary`，结合当前需求/症状判断相关性，选 top-2 命中（明确无关则 0 条）。排除当前正在写的 `ticket_id`，不自我参考。**过时校验**：对选中的 top-2 工单，Grep 校验其 ADR 涉及的代码锚点是否仍存在；锚点失效→置 `stale=true` 跳过该条注入。**命中续期**：校验通过的工单，更新其 `last_used_at`=当前时间、`hit_count`+=1，写回 index.json（被复用即续期，防LRU淘汰）。`stale=true` 的工单不注入不续期。
 2. **注入阶段**（按命令分流）：
 
 | 命令 | 命中后注入内容 | 来源 | 体积上限 |
@@ -360,5 +304,6 @@ ICODE_OUT_DIR=".icode_output/.icode_output_${LAST}"
 | 共享文件 | 内容 | 引用方 |
 |---------|------|--------|
 | [references/thinking.md](references/thinking.md) | 强制思考前置（ultrathink/MCP/降级文字块/各步子项） | 所有 step |
+| [references/anti_laziness.md](references/anti_laziness.md) | 反偷懒约束（16条偷懒行为+合规要求+references必读+确认行） | 所有 step |
 | [references/adversarial.md](references/adversarial.md) | 对抗分析模式（3质疑者/裁决优先级/诚实降级/证据回指） | 02_review / log |
-| [references/dir_and_metadata.md](references/dir_and_metadata.md) | 目录管理 + ticket_id 生成 + 全局索引写入 + metadata 模板 | init / log / plan |
+| [references/dir_and_metadata.md](references/dir_and_metadata.md) | 目录管理 + ticket_id 生成 + 全局索引写入（含LRU淘汰） + metadata 模板 | init / log / plan |

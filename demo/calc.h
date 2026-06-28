@@ -38,4 +38,13 @@ int calc_power(int base, int exp, int *result);
  */
 int calc_sqrt(int x, int *result);
 
+/*
+ * 整数绝对值 |x|
+ * x >= 0：*result = x
+ * x < 0（非 INT_MIN）：*result = -x
+ * x == INT_MIN：返回 CALC_ERR_OVERFLOW（|INT_MIN| = INT_MAX+1 超出 int 范围）
+ * 成功返回 CALC_OK，失败不写 *result
+ */
+int calc_abs(int x, int *result);
+
 #endif /* CALC_H */

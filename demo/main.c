@@ -80,5 +80,28 @@ int main(void)
     rc = calc_sqrt(INT_MAX, &result);
     printf("sqrt(INT_MAX) = %d (rc=%d)\n", result, rc);  /* 46340 */
 
+    /* ---- 新增：绝对值运算 ---- */
+    rc = calc_abs(5, &result);
+    printf("abs(5) = %d (rc=%d)\n", result, rc);  /* 5 */
+
+    rc = calc_abs(-5, &result);
+    printf("abs(-5) = %d (rc=%d)\n", result, rc);  /* 5 */
+
+    rc = calc_abs(0, &result);
+    printf("abs(0) = %d (rc=%d)\n", result, rc);  /* 0 */
+
+    rc = calc_abs(INT_MIN, &result);  /* INT_MIN 溢出 */
+    printf("abs(INT_MIN) rc=%d (expect %d)\n", rc, CALC_ERR_OVERFLOW);
+
+    /* ---- 新增：calc_power 边界测试（验证 exp+base 防御） ---- */
+    rc = calc_power(2, 30, &result);  /* 2^30=1073741824 < INT_MAX，不溢出 */
+    printf("2 ^ 30 = %d (rc=%d, expect 0)\n", result, rc);
+
+    rc = calc_power(2, 31, &result);  /* 2^31=INT_MAX+1 必超，应返 OVERFLOW */
+    printf("2 ^ 31 rc=%d (expect %d OVERFLOW)\n", rc, CALC_ERR_OVERFLOW);
+
+    rc = calc_power(3, 20, &result);  /* 3^20=3486784401 > INT_MAX，应返 OVERFLOW（base≠2 边界） */
+    printf("3 ^ 20 rc=%d (expect %d OVERFLOW)\n", rc, CALC_ERR_OVERFLOW);
+
     return 0;
 }
