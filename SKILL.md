@@ -27,7 +27,9 @@ description: 端到端编码工作流（步骤 0~6，含可选需求初稿步骤
 | `/icode merge` | **仅步骤3**：合并审查意见定稿 | 用最新目录 |
 | `/icode code` | **仅步骤4**：落地编码实施 | 用最新目录 |
 | `/icode deepcheck` | **仅步骤5**：三阶段递进复检 | 用最新目录 |
-| `/icode audit` | **仅步骤6**：终极终审 + 统一修复 + 文档化（产出 `{ICODE_OUT_DIR}/README.md`） | 用最新目录 |
+| `/icode audit` | **仅步骤6**：终极终审 + 统一修复（产出 `{ICODE_OUT_DIR}/06_audit.md`） | 用最新目录 |
+| `/icode readme` | **可选步骤7**：生成交付报告（面向人的自包含总结，动态文件名，智能识别功能/查BUG模板）。步骤6完成后手动触发 | 用最新目录 |
+| `/icode status` | **只读**：查当前工单状态（不创建目录/不写文件） | 否 |
 
 > **`/icode start` / `/icode plan` 的目录复用规则**：启动时检查最新 `.icode_output/.icode_output_N/` 目录：
 > - **入口态有歧义 → 问（无论带参与否）**：最新目录 status 为 `init_in_progress` 或 `log_done`（即 init/log 产出了 `00_init.md` 但还没进步骤1，且无 `01_plan.md`）时，**必须问用户**："检测到最近有未完成的初稿/根因 `<摘要>`，是 ① 在此基础上继续（复用目录）/ ② 开全新需求（新建目录）？"——用户选①则复用（命令行参数作补充），选②则新建。**入口态下"带参"不能作为新建的充分条件**——带参可能是补充旧需求也可能是新需求，区分不了，故一律问。**不得擅自复用**（会丢失新需求）也**不得擅自新建**（会丢失 init/log 上下文）。
@@ -69,6 +71,8 @@ description: 端到端编码工作流（步骤 0~6，含可选需求初稿步骤
 /icode start                             # 无参→检测到 log_done 入口态，会询问"复用/新建"，选复用则把 00_init.md（修复需求）作输入，进入步骤1→6
 # 或：
 /icode plan                            # 无参→同上询问，选复用则仅执行步骤1
+/icode readme                          # 可选：步骤6完成后手动触发，生成交付报告（面向人的自包含总结）
+/icode status                          # 可选：随时查当前工单状态（只读，不创建目录）
 ```
 
 ## 通用规则
@@ -294,6 +298,8 @@ ICODE_OUT_DIR=".icode_output/.icode_output_${LAST}"
 | 4 | `code` | [steps/04_code.md](steps/04_code.md) |
 | 5 | `deepcheck` | [steps/05_deepcheck.md](steps/05_deepcheck.md) |
 | 6 | `audit` | [steps/06_audit.md](steps/06_audit.md) |
+| 7 | `readme` | [steps/07_readme.md](steps/07_readme.md) |
+| - | `status` | [steps/status.md](steps/status.md) |
 
 **执行步骤时，必须先读取对应的 `steps/XX_*.md` 文件，按其中的详细指令执行。**
 

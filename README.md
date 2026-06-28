@@ -71,7 +71,9 @@ git clone <repo-url> ~/.claude/skills/icode
 | `/icode merge` | 仅步骤3：合并审查意见定稿 | 否 |
 | `/icode code` | 仅步骤4：落地编码实施 | 否 |
 | `/icode deepcheck` | 仅步骤5：无限轮循环复检 | 否 |
-| `/icode audit` | 仅步骤6：终极终审 + 统一修复 + 文档化（产出 README.md） | 否 |
+| `/icode audit` | 仅步骤6：终极终审 + 统一修复（产出 06_audit.md） | 否 |
+| `/icode readme` | 可选步骤7：生成交付报告（面向人的自包含总结，动态文件名，智能识别功能/查BUG模板） | 否 |
+| `/icode status` | 只读：查当前工单状态（不创建目录/不写文件） | 否 |
 
 > `/icode start` / `/icode plan` 启动时若最新 `.icode_output/.icode_output_N/` 为入口态（status 为 `init_in_progress` 或 `log_done`，即 init/log 产出了 `00_init.md` 但未进步骤1），**询问用户"复用/新建"**——选复用则把 `00_init.md` 作需求输入（来自 log 则同时读 `log_analysis.md` 作背景）；非入口态带参直接新建。
 
@@ -93,7 +95,7 @@ git clone <repo-url> ~/.claude/skills/icode
     ├── 03_plan_final.md        # 步骤3：定稿计划（末尾预留"实现偏差备忘"段，步骤6回写）
     ├── 05_deepcheck.md          # 步骤5：三阶段复检（Reverse/Fixed/Free 合并）
     ├── 06_audit.md             # 步骤6：终审报告（含修复日志段）
-    └── README.md               # 步骤6.4 文档化产物：本次变更说明
+    └── {动态文件名}.md        # 步骤7（可选）：交付报告（/icode readme 生成，面向人的自包含总结）
 ```
 
 ## 工作流程
