@@ -10,7 +10,7 @@ ICode is a Claude Code Skill that breaks down the journey from requirement to de
 
 - **(Optional) Requirement Draft → Plan → Review → Finalize → Code → Deep Check → Audit**, closed-loop delivery
 - Each step callable independently; switch models between steps
-- Full-flow mode (`/icode start`) auto-chains steps 1→6
+- Full-flow mode (`/icode start` full 3-round review + adversarial / `/icode fast` trimmed 1-round no-adversarial) auto-chains steps 1→6
 - All steps run in the main session — no sub-agent isolation issues
 - Outputs saved under `.icode_output/.icode_output_N/` (unified under the `.icode_output/` parent dir), supports cross-session recovery
 - Metadata management (`.ico_metadata.json`) for execution status and code file tracking
@@ -74,7 +74,7 @@ git clone <repo-url> ~/.claude/skills/icode
 | `/icode review [N]` | Step 2 only: review the plan (N=soft cap rounds, default 3; auto-extends +2 if issues remain) | No |
 | `/icode merge` | Step 3 only: merge reviews & finalize | No |
 | `/icode code` | Step 4 only: implement code | No |
-| `/icode deepcheck` | Step 5 only: iterative re-check | No |
+| `/icode deepcheck` | Step 5 only: three-phase progressive check (Reverse → Fixed → Free; fast mode runs Reverse only) | No |
 | `/icode audit` | Step 6 only: final audit + fix (produces `06_audit.md`) | No |
 | `/icode readme` | Optional Step 7: generate delivery report (self-contained summary, dynamic filename, smart feature/bugfix template) | No |
 | `/icode status` | Read-only: query current ticket status (no dir/file created) | No |
@@ -119,10 +119,15 @@ MIT
 
 ## DEMO (for testing the icode workflow)
 
-`demo/` is a minimal C calculator project (`calc.h` / `calc.c` / `main.c` / `Makefile`), **purpose-built for end-to-end testing of the icode workflow** — all four invocation modes (A full-flow / B step-by-step / C init→start / D log→start) can be run against it: Step 1 plan, Step 4 code, Step 5 deep-check, Step 6 compile verification all have real code to operate on.
+`demo/` is a minimal C calculator project (`calc.h` / `calc.c` / `main.c` / `Makefile`), **purpose-built for end-to-end testing of the icode workflow** — all five invocation modes (A full-flow / B step-by-step / C init→start / D log→start / E fast trimmed) can be run against it: Step 1 plan, Step 4 code, Step 5 deep-check, Step 6 compile verification all have real code to operate on.
 
 ```bash
 cd demo && make && ./calc_demo   # confirm the baseline builds and runs
 ```
 
-Example test requirement (Mode A): `cd demo && /icode start add modulo and power operations to the calculator, plus integer overflow checks`
+Example test requirements:
+- **Mode A**: `cd demo && /icode start add modulo and power operations to the calculator, plus integer overflow checks`
+- **Mode B (step-by-step)**: `cd demo && /icode plan add isqrt to calc.c` then `/icode review` `/icode merge` `/icode code` `/icode deepcheck` `/icode audit`
+- **Mode C (init then start)**: `cd demo && /icode init add new feature to calculator` (multi-turn dialogue to clarify) → `/icode start`
+- **Mode D (log then start)**: `cd demo && /icode log <log_path> "symptom"` → outputs root cause + fix requirement → `/icode start`
+- **Mode E (fast trimmed)**: `cd demo && /icode fast add isqrt to calc.c` (~65% time cost)

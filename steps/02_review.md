@@ -58,6 +58,14 @@
 **步骤 2.5 — 逐维审查（6个维度，全部覆盖）**：
 1. 逻辑合理性、2. 流程完整性、3. 场景覆盖度、4. 风险遗漏、5. 落地可行性、6. 现有实现对照
 
+> **数值/数学边界自检**（针对涉及数值计算的算法，如 lcm、gcd、pow、sqrt 等）：审查计划中的"预期结果"必须**自行验证数学正确性**，不能照搬历史经验。常见陷阱：
+> - `46341² ≈ 2.147×10⁹` < INT_MAX，不溢出（√INT_MAX≈46340.95）
+> - `50000² = 2.5×10⁹` > INT_MAX，溢出
+> - `INT_MAX * 2` 必溢出
+> - `INT_MIN * -1` 溢出
+> - `gcd(0,0)` 数学未定义，工程需明确约定
+> 计划中所有"预期结果为 X"类断言（特别是测试期望值），应在 2.4 阶段用 Read/Grep + 数学推导验证；无法验证的标 `[未验证-数值边界]`
+
 > **产出要求**：本步骤产出的每条 issue **必须当场填写 `evidence_pointer`**（计划章节号/行号 + 代码路径:行号），作为步骤 2.5.5 对抗验证的输入底座。2.5 阶段无法提供证据回指的"问题直觉"不得作为 issue 提出——先回到 2.3/2.4 用 Read/Grep 实证定位，再提 issue。
 
 **步骤 2.5.5 — 对抗验证（独立质疑者子代理，不可跳过）**：
@@ -67,6 +75,8 @@
 步骤 2.5 产出的 issue 清单是**主代理单视角**的结论，存在确认偏误风险。本步骤强制引入**独立质疑者**对每条 issue 做对抗验证，只有经对抗仍成立的 issue（或步骤 2.4 已实证验证为 `confirmed` 的 issue）才能进入 `new_issues`。
 
 **对抗模式**（3质疑者/裁决优先级/诚实降级/独立性硬约束/零待对抗快速通道）——**必须先 Read [references/adversarial.md](../references/adversarial.md) 完整内容**（不得凭概述/记忆执行）。本步骤分析对象 = 步骤 2.5 产出的 issue（步骤 2.4 实证 issue 例外，已有铁证直接 `confirmed` 无需对抗）。
+
+> **log 阶段对抗验证结论复用**（针对方式D log→start 工单）：如果当前工单来自 `/icode log` 入口（`completed_steps` 含 `"log"`），log 阶段已对根因做对抗验证（3 质疑者独立 spawn），步骤2 **可复用**该结论，不需重新 spawn 3 质疑者对抗根因。但**仍需**对"步骤1 计划本身"（9 章节结构、ADR 合理性、错误处理充分性等）做 3 轮审查（不依赖对抗验证）。复用的具体方式：把 log_analysis.md 第 6 章「对抗分析记录」作为已确认的根因引用，在 review_round_*.json 中标注 "log_phase_adversarial=reused" 字段。
 
 **输入契约**（喂质疑者）：`01_plan.md` 路径 + 相关代码文件路径 + 待验证 issue 清单（含 `id`/`affected_sections`/`suggestion`/`rejection_risk`/`evidence_pointer`）。
 
@@ -105,6 +115,8 @@
 4. **遗漏深挖**：基于之前轮次的发现继续深入，检查更深层次风险
 
 维度同首轮，但仅针对增量范围。**增量轮次同样必须执行步骤 2.5.5 对抗验证**（只对增量 issue），不得因"上一轮已审过"而跳过对抗。**增量轮的"断言验证跟进"若发现新的断言验证失败，同样适用步骤 2.4 实证快速通道**（直接标 `confirmed` 计入 `new_issues`，无需对抗），但必须填写 `evidence_pointer`。
+
+> **review_round_*.json 写入规则**（避免空文件噪音）：仅当本轮有 `new_issues` 或 `pending_verification` 或 `refuted_issues` 中任意一类非空时才写 `review_round_{total_rounds}.json`；clean 轮（无 issue）跳过写文件，仅在 02_review.md 中标注 "第 N 轮：clean"。避免 N 轮审查产生 N 个空 JSON 文件。
 
 写入 `review_round_{total_rounds}.json` 后追加写入 `02_review.md`（**人类可读摘要格式同首轮，不嵌套 JSON**）。
 

@@ -60,7 +60,9 @@ ICODE_OUT_DIR=".icode_output/.icode_output_${LAST}"
 
 - `ticket_id` = `{工程名}-{N}`（工程名取 `project_path` 的 basename；N 为当前 `.icode_output_N` 的 N）
 - **工程名冲突处理**：若索引中已存在相同 `{工程名}-{N}` 但 `project_path` 不同的条目，ticket_id 追加 `project_path` 的短 hash 后缀（如 `myproject-1-a3f2`）以保唯一
+- **入口命令（init/log）共享 N 序列**：init/log 各自创建新目录时，N 是当前目录下**所有** `.icode_output_*` 中的最大 N + 1，不区分 init/log（demo-5 是 init，demo-9 是 log，N 单调递增）
 - 生成后**回填 metadata 的 `ticket_id` 字段**，供后续步骤检索时排除当前工单（避免反推）
+- **唯一性保证**：写索引前必须 Python 解析 index.json 检查无重复 ticket_id；如发现重复（手工误操作导致），用 `python3 -c` 脚本去重（保留 status 最靠后的）
 
 ## 全局索引写入（首次写入）
 

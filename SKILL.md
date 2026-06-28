@@ -24,6 +24,17 @@ description: 端到端编码工作流（步骤 0~6，含可选需求初稿步骤
 | `/icode start <需求>` | **全流程（full 模式）**：创建/复用目录 → 步骤1→6 串联。步骤2 review 默认 3 轮 + 对抗验证，步骤5 deepcheck 三阶段循环（**复用规则见下**） | ✅ 创建新目录 / 复用 |
 | `/icode fast <需求>` | **精简全流程（fast 模式）**：plan → review(1轮无对抗) → merge → code → deepcheck(Reverse 单阶段) → audit。耗时约为全流程 65%，产物结构与 full 对齐（详见 [steps/fast.md](steps/fast.md)）。入口打印警告、用户自负其责 | ✅ 创建新目录 / 复用 |
 | `/icode plan <需求>` | **仅步骤1**：拟定项目计划（**复用规则见下**） | ✅ 创建新目录 / 复用 |
+
+> **步骤0 init 状态转换时机**（避免状态机歧义）：
+> - `init` 调用：建新目录，立即写 `status=init_in_progress` + `completed_steps=["0"]` 落盘
+> - 多轮对话期间：状态保持 `init_in_progress`，`00_init.md` 每轮增量更新
+> - 用户决定进入步骤1（调 `start`/`plan`）：**start/plan 调用时立即**把 status 从 `init_in_progress` 切换为 `plan_done`，`completed_steps` 追加 `"1"`（**步骤1计划已就绪等价于 plan_done 终态**，因为 start 调用前已读 00_init.md 作步骤1输入）
+> - **不得在 init 阶段把 status 切换为 plan_done**——只有 start/plan 显式复用时才切换
+
+> **log 入口状态转换时机**（方式D log→start 工单）：
+> - `log` 调用：建新目录，写 `status=log_done` + `completed_steps=["log"]` 落盘
+> - 用户决定进入步骤1（调 `start`/`plan`）：**start/plan 调用时立即**把 status 从 `log_done` 切换为 `plan_done`，`completed_steps` 追加 `"1"`（与 init→start 复用规则一致）
+> - **不得在 log 阶段把 status 切换为 plan_done**——只有 start/plan 显式复用时才切换
 | `/icode review [N]` | **仅步骤2**：多轮循环审查 + 独立质疑者对抗验证（N=软上限轮数，默认3；如最后一轮仍有新问题自动延长 +2 轮，最多扩展至 `max(10, N×2)`）。`mode=="fast"` 时强制 1 轮无对抗 | 用最新目录 |
 | `/icode merge` | **仅步骤3**：合并审查意见定稿 | 用最新目录 |
 | `/icode code` | **仅步骤4**：落地编码实施 | 用最新目录 |
@@ -33,7 +44,10 @@ description: 端到端编码工作流（步骤 0~6，含可选需求初稿步骤
 | `/icode status` | **只读**：查当前工单状态（含 `mode` 字段，不创建目录/不写文件） | 否 |
 
 > **`/icode start` / `/icode plan` / `/icode fast` 的目录复用规则**：启动时检查最新 `.icode_output/.icode_output_N/` 目录：
-> - **入口态有歧义 → 问（无论带参与否）**：最新目录 status 为 `init_in_progress` 或 `log_done`（即 init/log 产出了 `00_init.md` 但还没进步骤1，且无 `01_plan.md`）时，**必须问用户**："检测到最近有未完成的初稿/根因 `<摘要>`，是 ① 在此基础上继续（复用目录）/ ② 开全新需求（新建目录）？"——用户选①则复用（命令行参数作补充），选②则新建。**入口态下"带参"不能作为新建的充分条件**——带参可能是补充旧需求也可能是新需求，区分不了，故一律问。**不得擅自复用**（会丢失新需求）也**不得擅自新建**（会丢失 init/log 上下文）。
+> - **入口态有歧义 → 问（无参场景）**：最新目录 status 为 `init_in_progress` 或 `log_done`（即 init/log 产出了 `00_init.md` 但还没进步骤1，且无 `01_plan.md`），且命令**无参**时，**必须问用户**："检测到最近有未完成的初稿/根因 `<摘要>`，是 ① 在此基础上继续（复用目录）/ ② 开全新需求（新建目录）？"——用户选①则复用（无参），选②则新建
+> - **入口态 + 带参 → 默认复用**（方式C 走的就是这条）：`/icode start <需求>` / `/icode plan <需求>` / `/icode fast <需求>` 在 init_in_progress 状态下，**默认复用**该 init 目录（命令行参数作为需求补充输入，00_init.md 为主体），不需问用户——因为 init 阶段已经显式投入了用户成本，带参 start 的意图明显是"接着 init 继续"
+> - **入口态下"无参"必须问**（避免反推/浪费 init 工作）；**"带参"不需问**（用户显式意图已明确）
+> - **不得擅自新建**（会丢失 init/log 上下文）
 > - **非入口态带参 → 直接新建**：最新目录已进入步骤1+（有 `01_plan.md` 等，REUSE=0），`/icode start <需求>` / `/icode plan <需求>` / `/icode fast <需求>` 带参一律新建目录。
 > - **无参且无入口态可复用 → 报错**：提示先 init/log 或带参新建。
 > 详见下文「目录管理」段落。
@@ -259,6 +273,13 @@ ICODE_OUT_DIR=".icode_output/.icode_output_${LAST}"
 - `/icode log` 产出 `log_analysis.md` + `00_init.md` 后：**首次生成 `ticket_id`**（`{工程名}-{N}`，冲突加 hash 后缀）并回填 metadata，写入 `requirement_summary`（根因摘要）+`requirement_points`（修复要点）+`has_00_init=true`+`status=log_done`+`last_used_at=当前`+`hit_count=0`+`stale=false`，**写后执行LRU淘汰**
 - 步骤0 首轮写 `00_init.md` 后：**首次生成 `ticket_id`**（`{工程名}-{N}`，冲突加 hash 后缀）并回填 metadata，写入 `requirement_summary`+空 `requirement_points`+`has_00_init=true`+`last_used_at=当前`+`hit_count=0`+`stale=false`，**写后执行LRU淘汰**
 - 步骤0 每轮对话更新后：刷新 `requirement_points`（从「3.新增需求点」自动提炼）+ `requirement_summary`
+  - **`requirement_points` 提炼算法**（明确可执行）：
+    1. 扫描 `00_init.md` 中 `## 3. 新增需求点` 章节下的 `- [ ]` / `- [x]` 列表项
+    2. 每行去掉 checkbox 前缀（`- [ ] ` / `- [x] `），保留核心短语作为一条 `requirement_points`
+    3. 若某行超 50 字符，截断到 50 字符 + `...`（避免索引体积爆）
+    4. 最多保留 10 条，多余的丢弃
+    5. 若「3. 新增需求点」章节缺失/为空，`requirement_points` 保持空数组
+    6. 例：`- [x] calc_eval 函数签名` → `"calc_eval 函数签名"`
 - 步骤1 写完 `01_plan.md` 后：刷新 `requirement_summary`（基于完整计划）+ `has_plan=true`；**常规新建目录首跑时**（跳过步骤0）在此首次生成 `ticket_id` 并回填 metadata、首次写入索引条目（`has_00_init=false`、`last_used_at=当前`、`hit_count=0`、`stale=false`），**写后执行LRU淘汰**
 - 步骤6 终审完成后：刷新 `status=completed`，`requirement_summary` 若与最终交付显著偏差则基于最终成果刷新
 
