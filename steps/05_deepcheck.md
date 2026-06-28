@@ -1,7 +1,7 @@
 # 步骤 5 — 三阶段递进深度复检
 
 **命令**: `/icode deepcheck`
-**产出**: `{ICODE_OUT_DIR}/05_reverse.json` + `{ICODE_OUT_DIR}/05_review_rounds.json`
+**产出**: `{ICODE_OUT_DIR}/05_deepcheck.md`（合并三阶段产物，不再单独存 JSON）
 **会话**: 主会话
 
 ## 前置校验
@@ -44,7 +44,7 @@ Free 阶段一次性完整覆盖全部 15 个角度。
 
 **必须先建立计划-代码追溯矩阵**（逐条列出计划功能点/接口/约束，标记代码对应位置和完成状态），再逐维度评估。禁止跳过追溯直接给"全部通过"。
 
-**Free 阶段 A6 深检/争议验证——必须独立 spawn 3 质疑者子代理**：若 Free 阶段发现任何深检 issue 或需争议性验证的点，**必须按 [references/adversarial.md](../references/adversarial.md) 模式独立 spawn 3 个质疑者子代理**（证据质疑者/替代解释者/充分性质疑者各一，不得合并 spawn，少任一视为不合规——见反偷懒第14条）。产物（deepcheck_round_*.json 的 adversarial_verification）必须记录每个质疑者的 **独立 spawn Agent ID** 作为调用证据。
+**Free 阶段 A6 深检/争议验证——必须独立 spawn 3 质疑者子代理**：若 Free 阶段发现任何深检 issue 或需争议性验证的点，**必须按 [references/adversarial.md](../references/adversarial.md) 模式独立 spawn 3 个质疑者子代理**（证据质疑者/替代解释者/充分性质疑者各一，不得合并 spawn，少任一视为不合规——见反偷懒第14条）。产物（`05_deepcheck.md` 的「对抗验证」段）必须记录每个质疑者的 **独立 spawn Agent ID** 作为调用证据。
 
 ## 执行步骤
 
@@ -52,7 +52,7 @@ Free 阶段一次性完整覆盖全部 15 个角度。
 2. 读取 `03_plan_final.md` 和 `.ico_metadata.json`
    - 若 `.ico_metadata.json.code_compile_failed == true`，输出 `⚠️ 步骤4编译失败，仍继续复检` 警告
 3. **强制思考前置**（不可跳过，缺证据视为不合规；**必须先 Read [references/thinking.md](../references/thinking.md) + [references/anti_laziness.md](../references/anti_laziness.md) 完整内容**（不得凭概述/记忆执行，否则产出不合规））：本步骤子项（至少3步）= 梳理代码清单 → 回顾计划要点 → 制定逆推/Fixed/Free 检查策略
-4. **分步续跑**：若 `status == "deepcheck_in_progress"`，从 metadata 恢复 `deepcheck_total_rounds` / `deepcheck_clean_rounds` / `deepcheck_phase`，同时读取已存在的 `05_reverse.json`（若存在则跳过 Reverse）和 `deepcheck_round_*.json`
+4. **分步续跑**：若 `status == "deepcheck_in_progress"`，从 metadata 恢复 `deepcheck_total_rounds` / `deepcheck_clean_rounds` / `deepcheck_phase`，同时读取已存在的 `05_deepcheck.md`（若含「Reverse 逆推」段则跳过 Reverse）
 5. 否则初始化 `deepcheck_clean_rounds = 0`, `deepcheck_total_rounds = 1`, `deepcheck_phase = "reverse"`, `status = deepcheck_in_progress`
 6. 输出：`▶ 步骤5 复检开始`
 
@@ -70,7 +70,7 @@ Free 阶段一次性完整覆盖全部 15 个角度。
 
 > **注释完备性 + 日志覆盖**不在 Reverse 逆推阶段重复检查——留待 Fixed 第5维度与 Free A15 统一查（避免同步骤三处重复）
 
-写入 `{ICODE_OUT_DIR}/05_reverse.json`。
+写入 `{ICODE_OUT_DIR}/05_deepcheck.md` 的「Reverse 逆推」段（**人类可读摘要，不单独存 JSON**）。
 
 **对比**：读取 `03_plan_final.md`，与逆推规格做机械 diff：
 - **欠实现**：计划有，逆推没有
@@ -78,9 +78,9 @@ Free 阶段一次性完整覆盖全部 15 个角度。
 
 **处理分流**（区分该修的 vs 该留的）：
 - **该修的偏离**（代码错误/漏实现/与计划冲突的不合理偏差）：用 Edit 修复代码使其符合计划，**计入 has_issues**（触发修复→重跑循环）
-- **合理偏离**（因约束必须不同、或代码比计划更优的实质偏差）：**不修代码**，保留实现，记录到 `05_reverse.json` 留待步骤6 终审汇总回写到 `03_plan_final.md` 的「实现偏差备忘」段，**不计入 has_issues**（无需修复，不触发循环）
+- **合理偏离**（因约束必须不同、或代码比计划更优的实质偏差）：**不修代码**，保留实现，记录到 `05_deepcheck.md` 留待步骤6 终审汇总回写到 `03_plan_final.md` 的「实现偏差备忘」段，**不计入 has_issues**（无需修复，不触发循环）
 
-发现问题则按上述分流处理。更新计数器，写入 `deepcheck_round_1.json` 和追加写入 `05_review_rounds.json`。`deepcheck_phase` 切换为 `"fixed"`。
+发现问题则按上述分流处理。更新计数器，写入 `05_deepcheck.md` 的「Round {N}」段。`deepcheck_phase` 切换为 `"fixed"`。
 
 ### 阶段 2 — Fixed（固定维度）
 
@@ -95,7 +95,7 @@ Free 阶段一次性完整覆盖全部 15 个角度。
 6. 潜在隐患 — 内存泄漏、死锁、资源竞争、安全漏洞
 7. 跨文件一致性 — 接口变更全链路同步
 
-写入 `deepcheck_round_{deepcheck_total_rounds}.json` 和追加写入 `05_review_rounds.json`。
+写入 `05_deepcheck.md` 的「Fixed 7维度」段（**人类可读摘要，不单独存 JSON**）。
 
 ### 阶段 3 — Free（自由探索）
 

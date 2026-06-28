@@ -65,14 +65,25 @@
 **步骤 2.6 — 写入结果**：
 以 JSON 格式写入 `{ICODE_OUT_DIR}/review_round_1.json`，包含：independent_plan_summary、file_review（files_read + key_findings）、comparison_analysis、dimension_results、adversarial_verification（每个质疑者的裁决+依据+最终状态；**零待对抗 issue 即跳过对抗验证时为 `null`**）、has_new_issues、new_issues（仅含 `verification_status == confirmed` 的 issue，含步骤 2.4 实证 confirmed 与步骤 2.5.5 对抗 confirmed 两类来源，每条遵循下方 Issue 结构化模板）、refuted_issues（被对抗推翻的 issue + 推翻原因）、pending_verification（`needs_more_evidence` 的 issue，标 `[未验证-证据不足]`）、summary。
 
-再追加写入 `{ICODE_OUT_DIR}/02_review.md`，格式为：
+再写入 `{ICODE_OUT_DIR}/02_review.md`（**人类可读摘要，不嵌套完整 JSON**），格式为：
 
 ````markdown
 ## 第N轮审查
-```json
-{完整 JSON 内容}
-```
+
+### 维度结果
+{6维度一句话结论}
+
+### 对抗验证
+- 质疑者1（Agent ID）: 裁决 + 一句依据
+- 质疑者2（Agent ID）: 裁决 + 一句依据
+- 质疑者3（Agent ID）: 裁决 + 一句依据
+- 最终: confirmed X / refuted Y / needs_more Z
+
+### 结论
+{has_new_issues + clean_rounds + 一句话总结}
 ````
+
+> **02_review.md 不复制 review_round_*.json 全文**——JSON 文件单独存结构化数据供步骤3读取，02_review.md 只存人类可读摘要。
 
 ### 后续轮次 — 增量审查（`total_rounds > 1`，不再重复通读文件）
 
@@ -85,7 +96,7 @@
 
 维度同首轮，但仅针对增量范围。**增量轮次同样必须执行步骤 2.5.5 对抗验证**（只对增量 issue），不得因"上一轮已审过"而跳过对抗。**增量轮的"断言验证跟进"若发现新的断言验证失败，同样适用步骤 2.4 实证快速通道**（直接标 `confirmed` 计入 `new_issues`，无需对抗），但必须填写 `evidence_pointer`。
 
-写入 `review_round_{total_rounds}.json` 后再追加写入 `02_review.md`。
+写入 `review_round_{total_rounds}.json` 后追加写入 `02_review.md`（**人类可读摘要格式同首轮，不嵌套 JSON**）。
 
 ### Issue 结构化模板
 

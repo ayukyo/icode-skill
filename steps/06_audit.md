@@ -1,7 +1,7 @@
 # 步骤 6 — 终极终审 + 出具报告 + 统一修复
 
 **命令**: `/icode audit`
-**产出**: `{ICODE_OUT_DIR}/06_audit.md` + `{ICODE_OUT_DIR}/06_fixes.log` + `{ICODE_OUT_DIR}/README.md`（6.4 文档化产出）+ 回写 `{ICODE_OUT_DIR}/03_plan_final.md` 的「实现偏差备忘」段（6.2 第5步）
+**产出**: `{ICODE_OUT_DIR}/06_audit.md`（含修复日志段） + `{ICODE_OUT_DIR}/README.md`（6.4 文档化产出）+ 回写 `{ICODE_OUT_DIR}/03_plan_final.md` 的「实现偏差备忘」段（6.2 第5步）
 **会话**: 主会话
 
 ## 前置校验
@@ -16,7 +16,7 @@
 
 1. 检测最新目录，确定 `ICODE_OUT_DIR`
 2. 读取 `03_plan_final.md` 和 `.ico_metadata.json` 的 `code_files` 列表 + `code_deviations`（步骤4主动偏离记录，供6.2偏差备忘汇总）
-3. 额外读取 `05_review_rounds.json`（若存在）+ `05_reverse.json`（若存在）
+3. 额外读取 `05_deepcheck.md`（若存在）
 4. **强制思考前置**（不可跳过，缺证据视为不合规；**必须先 Read [references/thinking.md](../references/thinking.md) + [references/anti_laziness.md](../references/anti_laziness.md) 完整内容**（不得凭概述/记忆执行，否则产出不合规））：本步骤子项（至少3步）= 构建追溯矩阵（计划功能点→代码位置）→ 汇步骤历史 → 规划 6 维度审计策略
 5. 输出：`▶ 步骤6 终审开始`
 6. **重新读取所有代码文件**
@@ -52,7 +52,7 @@
 1. 读取 `06_audit.md` 中的问题清单
 2. 按严重程度排序（高 → 中 → 低）逐个修复
    - 每个问题用 Edit 工具修复，**禁止删除现有注释**
-   - 修复后追加记录到 `{ICODE_OUT_DIR}/06_fixes.log`
+   - 修复后追加记录到 `06_audit.md` 的「修复日志」段
 3. 全部修复后做全局编译验证，最多 3 次
 4. 更新 `.ico_metadata.json`：`status = completed`
 5. **回写实现偏差备忘到 `03_plan_final.md`**（不可跳过，详见下方「实现偏差备忘」规范）
@@ -65,7 +65,7 @@
 
 **偏差来源汇总**（步骤6 统一回写，步骤4/5 不各自回写以免多次改动计划）：
 - 步骤4 编码时主动偏离（发现计划不可行而调整）：记录在 `.ico_metadata.json` 的 `code_deviations` 字段（数组）
-- 步骤5 逆推复检发现的欠实现/偏离：记录在 `05_reverse.json`
+- 步骤5 逆推复检发现的欠实现/偏离：记录在 `05_deepcheck.md`
 - 步骤6 终审的方案偏离度：记录在 `06_audit.md`
 
 **回溯标注门槛**（只标"实质不一致、回读会误解"的偏差，细节差异不标以免噪音）：

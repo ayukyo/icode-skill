@@ -91,10 +91,8 @@ git clone <repo-url> ~/.claude/skills/icode
     ├── 02_review.md            # 步骤2：审查报告
     ├── review_round_*.json     # 步骤2：各轮审查详情（JSON）
     ├── 03_plan_final.md        # 步骤3：定稿计划（末尾预留"实现偏差备忘"段，步骤6回写）
-    ├── 05_reverse.json         # 步骤5：逆推规格（单条 JSON）
-    ├── 05_review_rounds.json   # 步骤5：复检轮次记录（JSONL）
-    ├── 06_audit.md             # 步骤6：终审报告
-    ├── 06_fixes.log            # 步骤6：修复日志
+    ├── 05_deepcheck.md          # 步骤5：三阶段复检（Reverse/Fixed/Free 合并）
+    ├── 06_audit.md             # 步骤6：终审报告（含修复日志段）
     └── README.md               # 步骤6.4 文档化产物：本次变更说明
 ```
 

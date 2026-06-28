@@ -91,10 +91,8 @@ All steps run in the main session with the current model. No automatic model swi
     ├── 02_review.md            # Step 2: Review report
     ├── review_round_*.json     # Step 2: Per-round review details (JSON)
     ├── 03_plan_final.md        # Step 3: Finalized plan (reserves "implementation deviation memo" section at the end, written back by Step 6)
-    ├── 05_reverse.json         # Step 5: Reverse-engineered spec (single JSON)
-    ├── 05_review_rounds.json   # Step 5: Review round logs (JSONL)
-    ├── 06_audit.md             # Step 6: Audit report
-    ├── 06_fixes.log            # Step 6: Fix log
+    ├── 05_deepcheck.md          # Step 5: Three-phase deepcheck (Reverse/Fixed/Free merged)
+    ├── 06_audit.md             # Step 6: Audit report (incl. fix log section)
     └── README.md               # Step 6.4 documentation: change summary
 ```
 
