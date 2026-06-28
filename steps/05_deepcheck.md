@@ -4,6 +4,14 @@
 **产出**: `{ICODE_OUT_DIR}/05_deepcheck.md`（合并三阶段产物，不再单独存 JSON）
 **会话**: 主会话
 
+> **fast 模式降级**（`metadata.mode == "fast"`）：fast 模式下本步骤**只跑 Reverse 阶段**，完成后直接终止，不切换 Fixed / Free。详见 [steps/fast.md](fast.md)。具体行为：
+>
+> - Reverse 跑完后，`deepcheck_phase` **不切到 `"fixed"`**，状态直接置 `deepcheck_done`
+> - 跳过 Fixed 7 维度检查（业务一致性 / 异常处理 / 边界等深度维度）
+> - 跳过 Free 15 角度 + A6 独立 3 质疑者 spawn
+> - 输出标记：`▶ 步骤5 fast 模式：仅 Reverse 阶段`
+> - 依赖 plan + 1 轮 review + Reverse 单阶段 + audit 四道关卡承担检查职责（fast 设计取舍）
+
 ## 前置校验
 
 检查 `{ICODE_OUT_DIR}/03_plan_final.md` 和步骤4创建的代码文件是否存在，缺失则报错并提示先执行 `/icode code`。
@@ -20,6 +28,8 @@
 - Reverse：单次执行，完成后进入 Fixed
 - Fixed → Free：Fixed 首次全 clean 后切换
 - Free：单次完整执行后终止
+
+> **fast 模式特例**（`metadata.mode == "fast"`，最高优先级）：Reverse 完成后**不切换 Fixed，直接终止**。`deepcheck_phase` 保留 `"reverse"`，状态置 `deepcheck_done`，`completed_steps` 追加 `"5"`。即使 Reverse 发现 has_issues 走修复循环，修复完仍只重跑 Reverse（不切 Fixed/Free）——fast 模式的核心检查职责交给 audit。
 
 ## 关键：代码新鲜度
 
@@ -107,6 +117,7 @@ Free 阶段一次性完整覆盖全部 15 个角度。
 - **实时落盘**：`status = deepcheck_in_progress`，写入当前 `deepcheck_total_rounds`/`deepcheck_clean_rounds`/`deepcheck_phase` 到 metadata
 - **阶段切换时重置 `deepcheck_clean_rounds = 0`**（每个阶段独立计数）
 - Reverse 阶段：单次执行后始终进入 Fixed，不参与循环
+  > **fast 模式特例**（`metadata.mode == "fast"`，最高优先级，命中即跳过 Fixed/Free）：Reverse 单次执行后**直接终止**——`deepcheck_phase` 保留 `"reverse"`，状态置 `deepcheck_done`，`completed_steps` 追加 `"5"`。即使发现 has_issues 走修复循环，修复完仍只重跑 Reverse（不切 Fixed/Free）。
 - has_issues → 修复 → `deepcheck_clean_rounds = 0`。**阶段分流**：Reverse/Fixed 阶段 → 回到**当前阶段**重新执行（重新读代码）；**Free 阶段 → 修复后直接终止**（Free 一次性完整覆盖，不重跑——重跑会重复 15 角度检查）
 - 无 issues → `deepcheck_clean_rounds += 1`
   - Fixed 首次全 clean（`deepcheck_clean_rounds` 达 1）→ 切换 `deepcheck_phase = "free"`，`deepcheck_clean_rounds = 0`

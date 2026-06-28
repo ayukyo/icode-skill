@@ -1,9 +1,9 @@
 ---
 name: icode
-description: 端到端编码工作流（步骤 0~6，含可选需求初稿步骤与日志根因分析入口），支持分步手动调用：/icode help (帮助), /icode init [<粗略需求>] (需求初稿), /icode log [零散信息...] (日志根因分析→转修复需求), /icode start <需求> (全流程), /icode plan <需求> (计划), /icode review [N] (审查), /icode merge (定稿), /icode code (编码), /icode deepcheck (复检), /icode audit (终审)
+description: 端到端编码工作流（步骤 0~6，含可选需求初稿步骤与日志根因分析入口），支持分步手动调用：/icode help (帮助), /icode init [<粗略需求>] (需求初稿), /icode log [零散信息...] (日志根因分析→转修复需求), /icode start <需求> (全流程), /icode fast <需求> (精简全流程), /icode plan <需求> (计划), /icode review [N] (审查), /icode merge (定稿), /icode code (编码), /icode deepcheck (复检), /icode audit (终审)
 ---
 
-**版本**: v1.8.0
+**版本**: v1.9.0
 
 # ICode 全流程编码工作流（步骤 0 + 1~6）
 
@@ -21,23 +21,24 @@ description: 端到端编码工作流（步骤 0~6，含可选需求初稿步骤
 | `/icode help` | **帮助**：输出使用流程示例 | 否 |
 | `/icode log [零散信息...]` | **可选入口（日志根因分析）**：把"设备/服务日志+模糊症状"转为有对抗验证的根因报告，自动转修复需求 `00_init.md` 衔接步骤1。先基线检查（git diff/链路图）再日志侦察，对抗分析防确认偏误。**领域无关，每次调用都新建目录**（详见 [steps/log.md](steps/log.md)） | ✅ 每次都新建 |
 | `/icode init [<粗略需求>]` | **可选步骤0**：多轮对话产出 `00_init.md`（需求初稿）。**每次调用都新建目录，不复用、不续聊**（详见 [steps/00_init.md](steps/00_init.md)） | ✅ 每次都新建 |
-| `/icode start <需求>` | **全流程**：创建/复用目录 → 步骤1→6 串联（**复用规则见下**） | ✅ 创建新目录 / 复用 |
+| `/icode start <需求>` | **全流程（full 模式）**：创建/复用目录 → 步骤1→6 串联。步骤2 review 默认 3 轮 + 对抗验证，步骤5 deepcheck 三阶段循环（**复用规则见下**） | ✅ 创建新目录 / 复用 |
+| `/icode fast <需求>` | **精简全流程（fast 模式）**：plan → review(1轮无对抗) → merge → code → deepcheck(Reverse 单阶段) → audit。耗时约为全流程 65%，产物结构与 full 对齐（详见 [steps/fast.md](steps/fast.md)）。入口打印警告、用户自负其责 | ✅ 创建新目录 / 复用 |
 | `/icode plan <需求>` | **仅步骤1**：拟定项目计划（**复用规则见下**） | ✅ 创建新目录 / 复用 |
-| `/icode review [N]` | **仅步骤2**：多轮循环审查 + 独立质疑者对抗验证（N=软上限轮数，默认3；如最后一轮仍有新问题自动延长 +2 轮，最多扩展至 `max(10, N×2)`） | 用最新目录 |
+| `/icode review [N]` | **仅步骤2**：多轮循环审查 + 独立质疑者对抗验证（N=软上限轮数，默认3；如最后一轮仍有新问题自动延长 +2 轮，最多扩展至 `max(10, N×2)`）。`mode=="fast"` 时强制 1 轮无对抗 | 用最新目录 |
 | `/icode merge` | **仅步骤3**：合并审查意见定稿 | 用最新目录 |
 | `/icode code` | **仅步骤4**：落地编码实施 | 用最新目录 |
-| `/icode deepcheck` | **仅步骤5**：三阶段递进复检 | 用最新目录 |
+| `/icode deepcheck` | **仅步骤5**：三阶段递进复检（Reverse → Fixed → Free）。`mode=="fast"` 时只跑 Reverse 阶段 | 用最新目录 |
 | `/icode audit` | **仅步骤6**：终极终审 + 统一修复（产出 `{ICODE_OUT_DIR}/06_audit.md`） | 用最新目录 |
 | `/icode readme` | **可选步骤7**：生成交付报告（面向人的自包含总结，动态文件名，智能识别功能/查BUG模板）。步骤6完成后手动触发 | 用最新目录 |
-| `/icode status` | **只读**：查当前工单状态（不创建目录/不写文件） | 否 |
+| `/icode status` | **只读**：查当前工单状态（含 `mode` 字段，不创建目录/不写文件） | 否 |
 
-> **`/icode start` / `/icode plan` 的目录复用规则**：启动时检查最新 `.icode_output/.icode_output_N/` 目录：
+> **`/icode start` / `/icode plan` / `/icode fast` 的目录复用规则**：启动时检查最新 `.icode_output/.icode_output_N/` 目录：
 > - **入口态有歧义 → 问（无论带参与否）**：最新目录 status 为 `init_in_progress` 或 `log_done`（即 init/log 产出了 `00_init.md` 但还没进步骤1，且无 `01_plan.md`）时，**必须问用户**："检测到最近有未完成的初稿/根因 `<摘要>`，是 ① 在此基础上继续（复用目录）/ ② 开全新需求（新建目录）？"——用户选①则复用（命令行参数作补充），选②则新建。**入口态下"带参"不能作为新建的充分条件**——带参可能是补充旧需求也可能是新需求，区分不了，故一律问。**不得擅自复用**（会丢失新需求）也**不得擅自新建**（会丢失 init/log 上下文）。
-> - **非入口态带参 → 直接新建**：最新目录已进入步骤1+（有 `01_plan.md` 等，REUSE=0），`/icode start <需求>`/`/icode plan <需求>` 带参一律新建目录。
+> - **非入口态带参 → 直接新建**：最新目录已进入步骤1+（有 `01_plan.md` 等，REUSE=0），`/icode start <需求>` / `/icode plan <需求>` / `/icode fast <需求>` 带参一律新建目录。
 > - **无参且无入口态可复用 → 报错**：提示先 init/log 或带参新建。
 > 详见下文「目录管理」段落。
 
-> **历史检索复用**：`/icode init`、`/icode plan`、`/icode start`、`/icode log` 启动时会自动检索全局索引中相似历史工单并按命令分流注入参考（init→需求要点 / plan→ADR+风险 / log→根因结论+证据），详见下文「历史检索复用」段落。`/icode review`/`merge`/`code`/`deepcheck`/`audit` 不触发检索。
+> **历史检索复用**：`/icode init`、`/icode plan`、`/icode start`、`/icode fast`、`/icode log` 启动时会自动检索全局索引中相似历史工单并按命令分流注入参考（init→需求要点 / plan/start/fast→ADR+风险 / log→根因结论+证据），详见下文「历史检索复用」段落。`/icode review`/`merge`/`code`/`deepcheck`/`audit` 不触发检索。
 
 ### 帮助说明（`/icode help`）
 
@@ -75,11 +76,23 @@ description: 端到端编码工作流（步骤 0~6，含可选需求初稿步骤
 /icode status                          # 可选：随时查当前工单状态（只读，不创建目录）
 ```
 
+```bash
+# 方式E：精简全流程（fast 模式，单文件/小改动场景）
+/icode fast 给 calc.c 增加 isqrt 函数                  # 一键串联：plan→review(1轮无对抗)→merge→code→deepcheck(Reverse)→audit
+# 入口警告自动打印：
+# ⚠️ /icode fast 模式：
+#    - 步骤2 review 固定 1 轮无对抗验证
+#    - 步骤5 deepcheck 只跑 Reverse 阶段（跳过 Fixed/Free）
+#    - 依赖 plan+1 轮 review+Reverse 单阶段+audit 四道关卡
+#    - 复杂需求（跨模块/新架构/安全敏感）建议改用 /icode start 全流程
+# 产物：01_plan.md, 02_review.md, 03_plan_final.md, 05_deepcheck.md, 06_audit.md（与 full 模式结构对齐）
+```
+
 ## 通用规则
 
 ### 目录管理
 
-**创建新目录**（用于 `init`，以及 `start` / `plan` 在不满足复用条件时）：
+**创建新目录**（用于 `init`，以及 `start` / `plan` / `fast` 在不满足复用条件时）：
 ```bash
 mkdir -p .icode_output   # 统一父目录，所有产物收纳于此
 LAST=$(ls -d .icode_output/.icode_output_* 2>/dev/null | grep -oP '(?<=\.icode_output_)\d+' | sort -n | tail -1)
@@ -88,7 +101,7 @@ ICODE_OUT_DIR=".icode_output/.icode_output_${NEXT}"
 mkdir -p "$ICODE_OUT_DIR"
 ```
 
-**复用 / 创建新目录决策**（仅用于 `start` / `plan`）：
+**复用 / 创建新目录决策**（用于 `start` / `plan` / `fast`）：
 ```bash
 mkdir -p .icode_output
 LAST=$(ls -d .icode_output/.icode_output_* 2>/dev/null | grep -oP '(?<=\.icode_output_)\d+' | sort -n | tail -1)
@@ -185,6 +198,8 @@ ICODE_OUT_DIR=".icode_output/.icode_output_${LAST}"
 - `indexed`：是否已写入全局索引（防重复写入）
 - `ticket_id`：本工单在全局索引中的唯一键（`{工程名}-{N}`，冲突时带 hash 后缀）。步骤0写索引时持久化到 metadata；**跳过步骤0直接 `/icode plan`/`/icode start` 的常规新建目录情况**，在步骤1首次写索引时生成并回填 metadata。供后续步骤检索时排除当前工单
 - `code_deviations`：步骤4 编码时主动偏离定稿计划的记录数组（每条含 `plan_said`/`actual_done`/`reason`），供步骤6 终审汇总回写到 `03_plan_final.md` 的「实现偏差备忘」段；无偏离写空数组 `[]`
+- `mode`（新增，可选，默认 `"full"`）：工单模式。`"full"` = `/icode start` 全流程（步骤2 默认 3 轮 + 对抗，步骤5 三阶段循环）；`"fast"` = `/icode fast` 精简全流程（步骤2 固定 1 轮无对抗，步骤5 只跑 Reverse）。**字段缺失视为 `"full"`（向后兼容旧 metadata）**。详见 [steps/fast.md](steps/fast.md)
+- `max_rounds`（新增，可选，默认 3）：步骤2 review 软上限轮数。`mode="full"` 时由 `/icode review N` 参数决定（默认 3）；`mode="fast"` 时**自动串联下强制为 1**，但**单步命令（`/icode review N`）在 fast 工单上调用时 N 优先级最高**——用户用参数 N 显式表达 fast→full 升级意图时，按 N 轮跑（详见 [references/dir_and_metadata.md](references/dir_and_metadata.md)「步骤2/5 读 mode 字段的契约」段）。**字段缺失视为 3**
 
 **`status` 字段枚举**（统一词表，所有步骤必须严格遵守，禁止自定义）：
 
@@ -293,6 +308,7 @@ ICODE_OUT_DIR=".icode_output/.icode_output_${LAST}"
 | log | `log` | [steps/log.md](steps/log.md) |
 | 0 | `init` | [steps/00_init.md](steps/00_init.md) |
 | 1 | `plan` / `start` | [steps/01_plan.md](steps/01_plan.md) |
+| 1~6 | `fast` | [steps/fast.md](steps/fast.md)（编排）+ 各步骤文件（带 fast 降级分支） |
 | 2 | `review` | [steps/02_review.md](steps/02_review.md) |
 | 3 | `merge` | [steps/03_merge.md](steps/03_merge.md) |
 | 4 | `code` | [steps/04_code.md](steps/04_code.md) |

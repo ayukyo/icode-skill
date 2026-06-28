@@ -180,8 +180,50 @@ Read `~/.claude/icode_data/index.json`（不存在则创建 `{"version":"1","upd
   "requirement_points": [],
   "keywords": "{≤8个技术关键词数组}",
   "indexed": false,
-  "ticket_id": "{步骤5 刷新索引时回填}"
+  "ticket_id": "{步骤5 刷新索引时回填}",
+  "mode": "full",
+  "max_rounds": 3
 }
 ```
 
 > 复用步骤0目录的情况：metadata 已存在，步骤1只更新 status（→plan_done）、completed_steps（追加"1"）、刷新检索字段，不重建。
+
+### `/icode fast` 新建目录
+
+```json
+{
+  "requirement": "{用户输入的原始需求}",
+  "created_at": "当前时间",
+  "status": "plan_done",
+  "completed_steps": ["1"],
+  "code_files": [],
+  "requirement_summary": "{基于完整计划的一句话摘要，≤200 token}",
+  "requirement_points": [],
+  "keywords": "{≤8个技术关键词数组}",
+  "indexed": false,
+  "ticket_id": "{写入索引后回填}",
+  "mode": "fast",
+  "max_rounds": 1
+}
+```
+
+**`mode` 字段**（新增，可选，默认 `"full"`）：
+
+- `"full"`：全流程模式（`/icode start`），步骤2 review 默认 3 轮 + 对抗，步骤5 deepcheck 三阶段循环
+- `"fast"`：精简模式（`/icode fast`），步骤2 review 固定 1 轮无对抗，步骤5 deepcheck 只跑 Reverse
+- **字段缺失**视为 `"full"`（向后兼容旧 metadata）
+
+**`max_rounds` 字段**（新增，可选）：
+
+- 步骤2 review 软上限轮数。`"full"` 默认 3，`"fast"` 固定 1
+- 用户可通过 `/icode review N` 临时覆盖（仅本轮），`mode="fast"` 时 N 参数被忽略（强制 1）
+- 字段缺失视为 3（向后兼容）
+
+**步骤2/5 读 mode 字段的契约**：
+
+- 步骤2 review：开头读 metadata.mode，若 `"fast"` 则降级（详见 [steps/02_review.md](../steps/02_review.md)「fast 模式降级」段）
+- 步骤5 deepcheck：开头读 metadata.mode，若 `"fast"` 则降级（详见 [steps/05_deepcheck.md](../steps/05_deepcheck.md)「fast 模式降级」段）
+- 单步命令（`/icode review N` / `/icode deepcheck`）独立调用时**仍读 mode 字段**——这是 fast→full 升级机制的核心：
+  - **fast→full 升级**：fast 工单上用户主动跑 `/icode review 5` 想做更深度审查时，**参数 N 覆盖 mode**（意图明确优先于工单模式），按 full 模式跑 N 轮+对抗（**此场景下 fast 的 `param_max_rounds` 忽略被绕开**——用户用参数显式表达升级意图，参数优先级最高）
+  - **full→fast 降级**：不允许——单步命令不强制按 fast 模式执行（用户若想走 fast 应改用 `/icode fast` 重启链路，而不是在 full 工单上强制 fast 降级）
+  - 单步命令读 mode 字段只用于 **状态显示**（如 `▶ 步骤2 检测到 fast 模式，但 N=5 显式升级，按 5 轮执行`），不强制降级

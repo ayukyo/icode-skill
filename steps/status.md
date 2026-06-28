@@ -18,6 +18,7 @@
 最新工单: .icode_output_N (ticket_id)
 需求: {requirement}
 状态: {status}（{status中文说明}）
+模式: {mode 字段读取方式：直接读 metadata.mode 字段，缺失或空值视为 "full"（默认）；fast 模式下显示「fast（精简：review 1轮无对抗 + deepcheck 仅 Reverse）」}
 已完成: {completed_steps 链路，如 log → 1 → 2 → 3 → 4}
 下一步: {根据续跑判定规则推断，如 "/icode deepcheck (步骤5复检)"}
 代码文件: {code_files 列表，无则"未编码"}

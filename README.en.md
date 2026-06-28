@@ -47,6 +47,9 @@ git clone <repo-url> ~/.claude/skills/icode
 /icode deepcheck                                    # Step 5: Iterative re-review
 /icode audit                                        # Step 6: Final audit & fix
 
+# Trimmed full flow (fast mode: single-file/small changes; ~65% of full-flow cost)
+/icode fast "Add isqrt function to calc.c"          # plan→review(1 round, no adversarial)→merge→code→deepcheck(Reverse only)→audit
+
 # When the requirement is unclear: discuss first, then enter the flow
 /icode init Record point_cloud / lidar_imu re-bag    # Step 0: kick-off draft + dialogue
 # ... multi-turn discussion; 00_init.md is updated incrementally each round ...
@@ -66,6 +69,7 @@ git clone <repo-url> ~/.claude/skills/icode
 | `/icode log [scattered info...]` | Optional entry: log root-cause analysis → fix requirement `00_init.md` (domain-agnostic, always fresh) | Yes (always fresh) |
 | `/icode init [<rough req>]` | Optional Step 0: multi-turn dialogue → `00_init.md` (always creates a fresh directory) | Yes (always fresh) |
 | `/icode start <req>` | Full flow: create/reuse dir → steps 1–6 | Yes / Reuse |
+| `/icode fast <req>` | Trimmed full flow: plan→review(1 round, no adversarial)→merge→code→deepcheck(Reverse only)→audit (~65% of full-flow cost) | Yes / Reuse |
 | `/icode plan <req>` | Step 1 only: draft project plan | Yes / Reuse |
 | `/icode review [N]` | Step 2 only: review the plan (N=soft cap rounds, default 3; auto-extends +2 if issues remain) | No |
 | `/icode merge` | Step 3 only: merge reviews & finalize | No |
@@ -75,7 +79,7 @@ git clone <repo-url> ~/.claude/skills/icode
 | `/icode readme` | Optional Step 7: generate delivery report (self-contained summary, dynamic filename, smart feature/bugfix template) | No |
 | `/icode status` | Read-only: query current ticket status (no dir/file created) | No |
 
-> When `/icode start` / `/icode plan` is launched and the latest `.icode_output/.icode_output_N/` is in entry state (status `init_in_progress` or `log_done`, i.e. init/log produced `00_init.md` but hasn't entered Step 1), it **asks the user "reuse/new"** — reuse takes `00_init.md` as input (from log, also reads `log_analysis.md` as background); non-entry state with args creates fresh.
+> When `/icode start` / `/icode plan` / `/icode fast` is launched and the latest `.icode_output/.icode_output_N/` is in entry state (status `init_in_progress` or `log_done`, i.e. init/log produced `00_init.md` but hasn't entered Step 1), it **asks the user "reuse/new"** — reuse takes `00_init.md` as input (from log, also reads `log_analysis.md` as background); non-entry state with args creates fresh.
 
 ## Execution
 

@@ -47,6 +47,9 @@ git clone <repo-url> ~/.claude/skills/icode
 /icode deepcheck                       # 步骤5：循环复检
 /icode audit                           # 步骤6：终极终审
 
+# 精简全流程（fast 模式：单文件/小改动场景，耗时约为全流程 65%）
+/icode fast 给 calc.c 增加 isqrt 函数   # plan→review(1轮无对抗)→merge→code→deepcheck(Reverse)→audit
+
 # 需求不明确时，先讨论再进入流程
 /icode init 录制 point_cloud / lidar_imu 转包      # 步骤0：起一稿，进入对话
 # ... 多轮对话补充需求，文档 00_init.md 每轮都被增量更新 ...
@@ -66,6 +69,7 @@ git clone <repo-url> ~/.claude/skills/icode
 | `/icode log [零散信息...]` | 可选入口：日志根因分析→转修复需求 `00_init.md`（领域无关，每次都新建目录） | ✅ 每次都新建 |
 | `/icode init [<粗略需求>]` | 可选步骤0：多轮对话产出需求初稿 `00_init.md`（每次调用都新建目录） | ✅ 每次都新建 |
 | `/icode start <需求>` | 全流程：创建/复用目录 → 步骤1→6 | ✅ / 复用 |
+| `/icode fast <需求>` | 精简全流程：plan→review(1轮无对抗)→merge→code→deepcheck(Reverse)→audit（耗时约为全流程 65%） | ✅ / 复用 |
 | `/icode plan <需求>` | 仅步骤1：拟定项目计划 | ✅ / 复用 |
 | `/icode review [N]` | 仅步骤2：专项审查计划（N=软上限轮数，默认3；仍有问题时自动延长 +2 轮） | 否 |
 | `/icode merge` | 仅步骤3：合并审查意见定稿 | 否 |
@@ -75,7 +79,7 @@ git clone <repo-url> ~/.claude/skills/icode
 | `/icode readme` | 可选步骤7：生成交付报告（面向人的自包含总结，动态文件名，智能识别功能/查BUG模板） | 否 |
 | `/icode status` | 只读：查当前工单状态（不创建目录/不写文件） | 否 |
 
-> `/icode start` / `/icode plan` 启动时若最新 `.icode_output/.icode_output_N/` 为入口态（status 为 `init_in_progress` 或 `log_done`，即 init/log 产出了 `00_init.md` 但未进步骤1），**询问用户"复用/新建"**——选复用则把 `00_init.md` 作需求输入（来自 log 则同时读 `log_analysis.md` 作背景）；非入口态带参直接新建。
+> `/icode start` / `/icode plan` / `/icode fast` 启动时若最新 `.icode_output/.icode_output_N/` 为入口态（status 为 `init_in_progress` 或 `log_done`，即 init/log 产出了 `00_init.md` 但未进步骤1），**询问用户"复用/新建"**——选复用则把 `00_init.md` 作需求输入（来自 log 则同时读 `log_analysis.md` 作背景）；非入口态带参直接新建。
 
 ## 执行方式
 
@@ -103,10 +107,12 @@ git clone <repo-url> ~/.claude/skills/icode
 ```text
 [入口 log(可选)] 日志根因分析 → 转修复需求 00_init.md
 [步骤0(可选)] 需求初稿对话 → 00_init.md
-       ↓（start/plan 无参 → 询问复用/新建）
+       ↓（start/plan/fast 无参 → 询问复用/新建）
 [步骤1] 拟定计划 → [步骤2] 专项审查 → [步骤3] 合并定稿
                                               ↓
 [步骤6] 终审修复(含偏差回写) ← [步骤5] 循环复检 ← [步骤4] 编码实施
+
+fast 模式（/icode fast）：步骤2 固定 1 轮无对抗，步骤5 只跑 Reverse；产物与 full 模式结构对齐
 ```
 
 ## 许可证
