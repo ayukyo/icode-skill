@@ -3,3 +3,4 @@
 /demo/calc_demo
 /demo/*.o
 /demo/log/
+/.icode_output/

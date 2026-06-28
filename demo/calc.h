@@ -47,4 +47,13 @@ int calc_sqrt(int x, int *result);
  */
 int calc_abs(int x, int *result);
 
+/*
+ * 整数平方根 ⌊√x⌋（向下取整）
+ * x < 0：返回 CALC_ERR_INVALID（负数无实数平方根）
+ * x >= 0：*result = 向下取整的整数平方根（如 √10=3，因 3²=9≤10<16=4²）
+ * 成功返回 CALC_OK，失败不写 *result
+ * 注：isqrt 与 sqrt 功能完全等价，此处保留 calc_ 前缀以符合 calc_* 命名规范
+ */
+int calc_isqrt(int x, int *result);
+
 #endif /* CALC_H */

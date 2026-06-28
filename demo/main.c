@@ -103,5 +103,24 @@ int main(void)
     rc = calc_power(3, 20, &result);  /* 3^20=3486784401 > INT_MAX，应返 OVERFLOW（base≠2 边界） */
     printf("3 ^ 20 rc=%d (expect %d OVERFLOW)\n", rc, CALC_ERR_OVERFLOW);
 
+    /* ---- 新增：isqrt 整数平方根 ---- */
+    rc = calc_isqrt(0, &result);
+    printf("isqrt(0) = %d (rc=%d)\n", result, rc);  /* 0 */
+
+    rc = calc_isqrt(1, &result);
+    printf("isqrt(1) = %d (rc=%d)\n", result, rc);  /* 1 */
+
+    rc = calc_isqrt(10, &result);
+    printf("isqrt(10) = %d (rc=%d)\n", result, rc);  /* 3（向下取整） */
+
+    rc = calc_isqrt(100, &result);
+    printf("isqrt(100) = %d (rc=%d)\n", result, rc);  /* 10 */
+
+    rc = calc_isqrt(-4, &result);  /* 负数，应返回 INVALID */
+    printf("isqrt(-4) rc=%d (expect %d)\n", rc, CALC_ERR_INVALID);
+
+    rc = calc_isqrt(INT_MAX, &result);
+    printf("isqrt(INT_MAX) = %d (rc=%d)\n", result, rc);  /* 46340 */
+
     return 0;
 }
