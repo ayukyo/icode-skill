@@ -68,6 +68,8 @@ ICODE_OUT_DIR=".icode_output/.icode_output_${LAST}"
 
 Read `~/.claude/icode_data/index.json`（不存在则创建 `{"version":"1","updated_at":"当前时间","tickets":[]}`），追加一条新记录：
 
+> **"当前时间"取值约定（强制，防 LRU 失效）**：`updated_at` / `created_at` / `last_used_at` 等**所有时间字段必须是运行时取的真实系统当前时间**（如 Bash `date +%Y-%m-%dT%H:%M:%S`、Python `datetime.now()`），**禁止写死固定值**（如 `2026-06-29T09:30:00`）。理由：LRU 淘汰与排序依赖 `last_used_at` 区分新旧，若时间戳被写死成同一个固定值，所有条目时间相同 → LRU 退化为随机删除、排序失序、续期续错（见历史 bug：某工单 `last_used_at` 被刷新但 `hit_count=0` 的数据失真）。
+
 - `ticket_id` / `project_path`（当前工程根绝对路径）/ `out_dir`（`.icode_output/.icode_output_{N}`）
 - `requirement_summary` / `requirement_points` / `keywords` 取自本步骤 metadata
 - 入口命令的标记：
