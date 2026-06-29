@@ -108,11 +108,9 @@ fi
 
 **步骤2/5 的 fast 模式行为**（由各自步骤文件读 `metadata.mode` 字段判定）：
 
-- **步骤2 review**：检测到 `mode=="fast"` 时
-  - `max_rounds` 强制覆盖为 1，且 `param_max_rounds` 即使非空也忽略（**fast 设计意图优先于用户参数**——`/icode review N` 在 fast 工单上调用时 N 不生效；如需升级到 full 模式跑 N 轮，应改 metadata.mode 后重启或用 `/icode start` 重跑）
-  - 跳过步骤 2.5.5 独立质疑者对抗验证，直接把步骤 2.5 产出 issue 标 `verification_status=confirmed` 计入 `new_issues`（**降级为单视角审查**，无对抗防确认偏误）
-  - 循环控制 fast 特例接管：`total_rounds >= 1` 直接终止（详见 [steps/02_review.md](02_review.md)「循环控制」fast 特例段）
-  - 输出标记：`▶ 步骤2 fast 模式：1 轮审查，无对抗验证`
+- **步骤2 review**：检测到 `mode=="fast"` 时，按**是否带参 N**区分两种场景（详见 [steps/02_review.md](02_review.md) 顶部「fast 模式行为」段）：
+  - **场景一·自动串联**（`/icode fast` 调起、未带参 N，`FAST_LOCKED=true`）：`max_rounds` 强制 1、跳过步骤 2.5.5 对抗（issue 直接标 `confirmed`，**降级为单视角审查**）、循环控制 `total_rounds >= 1` 直接终止。输出 `▶ 步骤2 fast 模式：1 轮审查，无对抗验证`
+  - **场景二·单步升级**（fast 工单上显式跑 `/icode review N`，`FAST_LOCKED=false`）：**N 优先级最高**——按 N 轮跑 + 恢复对抗验证 + 走正常 (a)(b)(c) 循环控制，与 full 模式一致（这是 fast→full 升级机制，用户显式表达升级意图）
 
 - **步骤5 deepcheck**：检测到 `mode=="fast"` 时
   - 跑完 Reverse 阶段后**直接终止**（不切换到 Fixed / Free）

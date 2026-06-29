@@ -17,7 +17,7 @@
 
 ### 合并定稿
 
-解析 02_review.md 中的审查意见——从每个 json 代码块提取 JSON，重点关注：
+解析审查意见——从 `review_round_*.json` 文件（按 `total_rounds` 读取所有轮 JSON）提取结构化审查数据，重点关注：
 - 首轮的 `file_review.key_findings`（通读实际代码发现的问题）
 - 所有轮的 `new_issues`（**仅含 `verification_status == confirmed` 的问题**，含步骤 2.4 实证 confirmed 与步骤 2.5.5 对抗 confirmed 两类来源，含 `affected_sections`/`suggestion`/`rejection_risk`/`evidence_pointer` 结构化字段）
 - 所有轮的 `refuted_issues`（被对抗推翻的 issue，**默认不采纳**，仅作记录）

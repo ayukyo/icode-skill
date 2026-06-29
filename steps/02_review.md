@@ -4,12 +4,11 @@
 **产出**: `{ICODE_OUT_DIR}/02_review.md`
 **会话**: 主会话
 
-> **fast 模式降级**（`metadata.mode == "fast"`）：fast 模式下本步骤**固定 1 轮、无对抗验证**。详见 [steps/fast.md](fast.md)。具体行为：
+> **fast 模式行为（区分两种场景）**（`metadata.mode == "fast"`）：详见 [steps/fast.md](fast.md)。「自动串联」与「单步升级」两类场景行为不同，判定依据是用户**是否带参 N**：
 >
-> - `max_rounds` 强制为 1，跳过参数解析与默认值逻辑
-> - 跳过步骤 2.5.5 独立质疑者对抗，步骤 2.5 产出 issue 直接标 `verification_status=confirmed` 计入 `new_issues`（**降级为单视角审查**，无对抗防确认偏误，由用户自负其责）
-> - 循环控制在 `total_rounds >= 1` 时**直接终止**，不走延长逻辑（详见「循环控制」fast 特例）
-> - 输出标记：`▶ 步骤2 fast 模式：1 轮审查，无对抗验证`
+> - **场景一·自动串联**（`/icode fast` 调起步骤2，**未带参 N**，`param_max_rounds` 为空）：fast 精简语义，**固定 1 轮、无对抗验证**——`max_rounds` 强制为 1、跳过步骤 2.5.5 对抗（步骤 2.5 产出 issue 直接标 `verification_status=confirmed` 计入 `new_issues`，**降级为单视角审查**，由用户自负其责）、循环控制 `total_rounds >= 1` 直接终止。输出标记：`▶ 步骤2 fast 模式：1 轮审查，无对抗验证`
+> - **场景二·单步升级**（fast 工单上用户显式跑 `/icode review N`，**带了正整数 N**，`param_max_rounds` 非空）：视为 fast→full 升级意图，**N 优先级最高**——`max_rounds = N`、`absolute_cap = max(10, N × 2)`、**恢复步骤 2.5.5 对抗验证**、走正常 (a)(b)(c) 循环控制（**不触发** fast 特例）。输出标记：`▶ 步骤2 fast 工单单步升级：按 N={N} 轮 + 对抗验证执行`
+> - **场景判定**：见步骤3「分步续跑检测」——以 `param_max_rounds` 是否非空区分（非空→场景二升级；空→场景一锁死1轮）
 
 采用**独立计划对比 + 多轮循环审查**模式：
 - **首轮**：先基于原始需求独立编制简要计划，再与步骤1计划逐项对比，最后做6维度审查
@@ -24,12 +23,16 @@
 
 1. 执行目录管理中的「检测最新目录」逻辑，确定 `ICODE_OUT_DIR`
 2. 读取 `.ico_metadata.json` 获取原始需求（`requirement` 字段）。**注意**：本步骤**只读 metadata 取原始需求，不读 `01_plan.md`**——`01_plan.md` 留到步骤 2.2 对比分析时再读，避免步骤 2.1 独立编制计划时受步骤1计划污染
-3. **分步续跑检测**（必须在强制思考之前，决定本轮是首轮还是续跑）：
-   - **fast 模式前置覆盖**：若读取 `metadata.mode == "fast"`，`max_rounds` 强制覆盖为 1，且 **`param_max_rounds` 即使非空也忽略**（即 `/icode review N` 在 fast 工单上调用时 N 不生效，fast 设计意图优先），后续分支 (a)(b)(c) 由循环控制 fast 特例接管（`total_rounds >= 1` 直接终止）。`absolute_cap = max(10, 1 × 2) = 10` 但**永远不触达**（fast 不走延长）。
-   - 解析命令参数获取 `max_rounds`：若 `/icode review N` 提供了正整数 N，则 `max_rounds = N`（记为 `param_max_rounds`）；否则 `param_max_rounds` 为空。**注意**：fast 模式前置覆盖优先级最高，本步骤的 `param_max_rounds` 解析仅在非 fast 模式下生效
-   - 若 `.ico_metadata.json.status == "review_in_progress"`，**续跑**（审查中断未终止）：从 metadata 恢复 `total_rounds` / `clean_rounds` / `extended_rounds` / `pending_verification` 字段；`max_rounds` / `absolute_cap` 按**新参数优先**原则——若 `param_max_rounds` 非空，则 `max_rounds = param_max_rounds`、`absolute_cap = max(10, param_max_rounds × 2)`，并更新 metadata；否则沿用 metadata 旧值（首次执行时写入）。**fast 模式下 param_max_rounds 已被前置覆盖强制为 1，本分支不再二次覆盖**。读取所有已存在的 `review_round_*.json` 汇总历史问题，跳过已完成轮次，从当前 `total_rounds` 继续
+3. **分步续跑检测**（必须在强制思考之前，决定本轮是首轮还是续跑，并判定 fast 场景）：
+   - **解析命令参数**：若 `/icode review N` 提供了正整数 N，记 `param_max_rounds = N`（非空）；否则 `param_max_rounds` 为空。
+   - **判定 fast 场景**（读 `metadata.mode`，缺失视为 `"full"`）：若 `mode == "fast"`，按本文件顶部「fast 模式行为」区分两种场景，**参数是否带 N 是场景判定的唯一依据**：
+     - **场景一·自动串联**（`param_max_rounds` 为空，即 `/icode fast` 调起、未带参 N）：设标志 `FAST_LOCKED = true`。`max_rounds` 强制为 1，`absolute_cap = max(10, 1 × 2) = 10`（但**永远不触达**，场景一不走延长）。后续步骤 2.5.5 跳过对抗、循环控制走 fast 特例（`total_rounds >= 1` 直接终止）。
+     - **场景二·单步升级**（`param_max_rounds` 非空，即 fast 工单上显式跑 `/icode review N`）：设 `FAST_LOCKED = false`。`max_rounds = param_max_rounds`、`absolute_cap = max(10, param_max_rounds × 2)`，**恢复步骤 2.5.5 对抗验证**、走正常 (a)(b)(c) 循环控制（**不触发** fast 特例）。
+     - 即：fast 模式下 **`param_max_rounds` 非空→场景二升级（N 生效）；空→场景一锁死1轮**——这是 fast→full 升级机制的核心（详见 [references/dir_and_metadata.md](../references/dir_and_metadata.md)「步骤2/5 读 mode 字段的契约」段）。
+   - 若 `mode != "fast"`（含缺失视为 full）：`FAST_LOCKED = false`，`param_max_rounds` 正常参与 `max_rounds` 决策。
+   - 若 `.ico_metadata.json.status == "review_in_progress"`，**续跑**（审查中断未终止）：从 metadata 恢复 `total_rounds` / `clean_rounds` / `extended_rounds` / `pending_verification` 字段；`max_rounds` / `absolute_cap` 按**新参数优先**原则——若 `param_max_rounds` 非空，则 `max_rounds = param_max_rounds`、`absolute_cap = max(10, param_max_rounds × 2)`，并更新 metadata；否则沿用 metadata 旧值（首次执行时写入）。**场景一 `FAST_LOCKED=true` 时强制 `max_rounds=1`（覆盖上述决策）**。读取所有已存在的 `review_round_*.json` 汇总历史问题，跳过已完成轮次，从当前 `total_rounds` 继续
    - 输出续跑信息：`▶ 步骤2 续跑，从第{total_rounds}轮开始（已完成{total_rounds-1}轮，当前轮数上限{max_rounds}，已扩展{extended_rounds}次，硬上限{absolute_cap}轮）`
-   - 否则**首轮初始化**（status 为 `plan_done`/`review_done`/其他非 in_progress 态）：`status=review_done` 表示上一轮审查已收敛终止，再调 `/icode review` 视为**重新审查**——`clean_rounds = 0`, `total_rounds = 1`, `extended_rounds = 0`，`max_rounds` 由参数决定（`param_max_rounds` 或默认 3），`absolute_cap = max(10, max_rounds × 2)`，设 `status = review_in_progress`，将 `max_rounds` / `absolute_cap` / `extended_rounds` 写入 metadata。**fast 模式下 param_max_rounds 已被前置覆盖强制为 1，本分支不再二次覆盖**。**重新审查会覆盖旧 `review_round_*.json` 与 `02_review.md`**——若用户想在中断处续跑，应确保 status 是 `review_in_progress`（中断态）而非 `review_done`（终止态）
+   - 否则**首轮初始化**（status 为 `plan_done`/`review_done`/其他非 in_progress 态）：`status=review_done` 表示上一轮审查已收敛终止，再调 `/icode review` 视为**重新审查**——`clean_rounds = 0`, `total_rounds = 1`, `extended_rounds = 0`，`max_rounds` 由参数决定（`param_max_rounds` 非空用 `param_max_rounds`，否则默认 3），`absolute_cap = max(10, max_rounds × 2)`，设 `status = review_in_progress`，将 `max_rounds` / `absolute_cap` / `extended_rounds` 写入 metadata。**场景一 `FAST_LOCKED=true` 时强制 `max_rounds=1`（覆盖上述决策）**。**重新审查会覆盖旧 `review_round_*.json` 与 `02_review.md`**——若用户想在中断处续跑，应确保 status 是 `review_in_progress`（中断态）而非 `review_done`（终止态）
 4. **强制思考前置**（不可跳过，缺证据视为不合规；**必须先 Read [references/thinking.md](../references/thinking.md) + [references/anti_laziness.md](../references/anti_laziness.md) 完整内容**（不得凭概述/记忆执行，否则产出不合规）；基于上述第3步「分步续跑检测」的判定结果选择思考路径）：
    - **首轮**（`total_rounds == 1`）子项（至少3步）：需求分解 → 独立方案构思 → 对比要点预判
    - **续跑**（`total_rounds > 1`）子项（至少3步）：回顾历史轮次问题 → 增量审查范围界定 → 跨章节影响预判
@@ -70,7 +73,9 @@
 
 **步骤 2.5.5 — 对抗验证（独立质疑者子代理，不可跳过）**：
 
-> **fast 模式跳过**（`metadata.mode == "fast"`）：不 spawn 任何质疑者子代理，直接把步骤 2.5 产出 issue 标 `verification_status=confirmed` 计入 `new_issues`。`adversarial_verification` 字段写 `null` 并标注「fast 模式：无对抗」。**这是设计上的单视角审查，由用户自负其责**——fast 入口警告已明示。
+> **fast 场景一跳过对抗**（`FAST_LOCKED == true`，即 `/icode fast` 自动串联、未带参 N）：不 spawn 任何质疑者子代理，直接把步骤 2.5 产出 issue 标 `verification_status=confirmed` 计入 `new_issues`。`adversarial_verification` 字段写 `null` 并标注「fast 场景一：无对抗」。**这是设计上的单视角审查，由用户自负其责**——fast 入口警告已明示。
+>
+> **fast 场景二恢复对抗**（`FAST_LOCKED == false`，即 fast 工单上显式跑 `/icode review N` 升级）：**与 full 模式完全一致**——必须 spawn 3 个独立质疑者子代理做对抗验证，不得跳过。fast→full 升级一旦触发即恢复完整对抗流程。
 
 步骤 2.5 产出的 issue 清单是**主代理单视角**的结论，存在确认偏误风险。本步骤强制引入**独立质疑者**对每条 issue 做对抗验证，只有经对抗仍成立的 issue（或步骤 2.4 已实证验证为 `confirmed` 的 issue）才能进入 `new_issues`。
 
@@ -150,8 +155,10 @@
 2. **实时落盘**：保持 `status = review_in_progress`，写入当前 `total_rounds` / `clean_rounds` / `max_rounds` / `absolute_cap` / `extended_rounds` / `pending_verification` 到 metadata。`pending_verification` 维护规则：本轮新增的 `needs_more_evidence` issue 追加进清单；**已在后续轮被证实（升为 confirmed）或证伪（降为 refuted）的 issue 从清单移除**，避免已解决项残留；仅保留仍处于待验证状态的 issue。
 3. **判定下一步**（按顺序检查，命中即定）：
 
-   > **fast 模式特例**（`metadata.mode == "fast"`，最高优先级，命中即跳过 (a)(b)(c)）：
-   > `total_rounds >= 1` 时**直接终止**——fast 固定 1 轮无对抗，不走延长逻辑与连续 2 轮 clean 收敛。状态置 `review_done`，`clean_rounds` 保留当前值，`completed_steps` 追加 `"2"`。即使 `has_new_issues == true`，fast 也不强制回到步骤1——用户自负其责（fast 模式警告已在入口处告知）。
+   > **fast 场景一特例**（`FAST_LOCKED == true`，即 `/icode fast` 自动串联、未带参 N，最高优先级，命中即跳过 (a)(b)(c)）：
+   > `total_rounds >= 1` 时**直接终止**——fast 场景一固定 1 轮无对抗，不走延长逻辑与连续 2 轮 clean 收敛。状态置 `review_done`，`clean_rounds` 保留当前值，`completed_steps` 追加 `"2"`。即使 `has_new_issues == true`，场景一也不强制回到步骤1——用户自负其责（fast 入口警告已明示）。
+   >
+   > **fast 场景二走正常循环**（`FAST_LOCKED == false`，即 fast 工单上显式跑 `/icode review N` 升级）：**不触发本特例**，落入下方 (a)(b)(c) 正常判定——可延长、可连续2轮clean收敛、可触达硬上限告警，与 full 模式一致。
 
    **(a) 触达硬上限**（`total_rounds > absolute_cap`）：
    - **终止**。若最后一轮 `has_new_issues == true`，落盘告警（见下"触达硬上限处理"）；否则按"无新问题"正常终止

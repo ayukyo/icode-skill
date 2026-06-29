@@ -25,6 +25,19 @@
 索引工单: {全局索引 tickets 数} 条
 ```
 
+**`status` → 中文说明映射**（与 SKILL.md「status 字段枚举」表一致）：
+
+| status | 中文说明 |
+|--------|----------|
+| `log_in_progress` / `log_done` | 日志根因分析中 / 完成 |
+| `init_in_progress` | 步骤0 需求初稿讨论中 |
+| `plan_done` | 步骤1 计划完成 |
+| `review_in_progress` / `review_done` | 步骤2 审查中 / 完成 |
+| `plan_finalized` | 步骤3 定稿完成 |
+| `code_in_progress` / `code_done` | 步骤4 编码中 / 完成 |
+| `deepcheck_in_progress` / `deepcheck_done` | 步骤5 复检中 / 完成 |
+| `completed` | 步骤6 终审完成（终态） |
+
 4. 若无 `.icode_output_N` 目录，输出提示："未找到工单目录，请先运行 /icode start/init/log"
 
 ## 不需要强制思考前置

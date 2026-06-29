@@ -217,14 +217,14 @@ Read `~/.claude/icode_data/index.json`（不存在则创建 `{"version":"1","upd
 
 **`max_rounds` 字段**（新增，可选）：
 
-- 步骤2 review 软上限轮数。`"full"` 默认 3，`"fast"` 固定 1
-- 用户可通过 `/icode review N` 临时覆盖（仅本轮），`mode="fast"` 时 N 参数被忽略（强制 1）
+- 步骤2 review 软上限轮数。`"full"` 默认 3；`"fast"` 下区分场景（见下「步骤2/5 读 mode 字段的契约」）
+- 用户可通过 `/icode review N` 临时覆盖（仅本轮）。`mode="fast"` 时：自动串联（`/icode fast` 调起、未带参 N）固定 1 轮；fast 工单上显式跑 `/icode review N`（带参）则 N 生效触发升级（场景二）
 - 字段缺失视为 3（向后兼容）
 
 **步骤2/5 读 mode 字段的契约**：
 
-- 步骤2 review：开头读 metadata.mode，若 `"fast"` 则降级（详见 [steps/02_review.md](../steps/02_review.md)「fast 模式降级」段）
-- 步骤5 deepcheck：开头读 metadata.mode，若 `"fast"` 则降级（详见 [steps/05_deepcheck.md](../steps/05_deepcheck.md)「fast 模式降级」段）
+- 步骤2 review：开头读 metadata.mode，若 `"fast"` 则按「是否带参 N」区分两种场景（详见 [steps/02_review.md](../steps/02_review.md)「fast 模式行为（区分两种场景）」段）——自动串联锁死1轮无对抗；单步命令 `/icode review N` 触发升级跑 N 轮+对抗
+- 步骤5 deepcheck：开头读 metadata.mode，若 `"fast"` 则只跑 Reverse 阶段（详见 [steps/05_deepcheck.md](../steps/05_deepcheck.md)「fast 模式降级」段）
 - 单步命令（`/icode review N` / `/icode deepcheck`）独立调用时**仍读 mode 字段**——这是 fast→full 升级机制的核心：
   - **fast→full 升级**：fast 工单上用户主动跑 `/icode review 5` 想做更深度审查时，**参数 N 覆盖 mode**（意图明确优先于工单模式），按 full 模式跑 N 轮+对抗（**此场景下 fast 的 `param_max_rounds` 忽略被绕开**——用户用参数显式表达升级意图，参数优先级最高）
   - **full→fast 降级**：不允许——单步命令不强制按 fast 模式执行（用户若想走 fast 应改用 `/icode fast` 重启链路，而不是在 full 工单上强制 fast 降级）

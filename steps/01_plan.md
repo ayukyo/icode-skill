@@ -93,7 +93,9 @@
   "requirement_points": [],
   "keywords": "{≤8个技术关键词数组}",
   "indexed": false,
-  "ticket_id": "{步骤5 刷新索引时回填，初始创建时为空字符串}"
+  "ticket_id": "{步骤5 刷新索引时回填，初始创建时为空字符串}",
+  "mode": "full",
+  "max_rounds": 3
 }
 ```
 

@@ -8,21 +8,12 @@ ICode is a Claude Code Skill that breaks down the journey from requirement to de
 
 ## Features
 
-- **(Optional) Requirement Draft → Plan → Review → Finalize → Code → Deep Check → Audit**, closed-loop delivery
-- Each step callable independently; switch models between steps
-- Full-flow mode (`/icode start` full 3-round review + adversarial / `/icode fast` trimmed 1-round no-adversarial) auto-chains steps 1→6
-- All steps run in the main session — no sub-agent isolation issues
-- Outputs saved under `.icode_output/.icode_output_N/` (unified under the `.icode_output/` parent dir), supports cross-session recovery
-- Metadata management (`.ico_metadata.json`) for execution status and code file tracking
-- Triple-phase deepcheck (Reverse → Fixed → Free) to prevent AI laziness and catch implementation gaps
-- Plan step enforces assertion verification (Read/Grep validation, `[verified]`/`[unverified]` tags)
-- Architecture Decision Records (ADR) section for centralized decision tracking
-- Review supports custom round count (`/icode review [N]`) and incremental review mode
-- Structured review issues (affected sections / suggestion / rejection risk / evidence pointer / adversarial verification status)
-- Review introduces independent skeptic sub-agents for adversarial verification (three lenses: evidence / alternative-explanation / sufficiency); issues without adversarial verification or sufficient evidence cannot be confirmed; unverifiable assertions are honestly downgraded to `[unverified-insufficient-evidence]` rather than faking consensus
-- Cross-project historical retrieval & reuse: `/icode init`/`/icode log`/`/icode plan`/`/icode start` auto-search a global index (`~/.claude/icode_data/index.json`) for similar past tickets and inject references by command (init → requirement points / log → root cause+evidence / plan → ADR+risk); three gates prevent context overflow; references stay in-session only, never pollute project artifacts
-- `/icode log` log root-cause analysis entry: baseline check first (git diff / state-link diagram) then log reconnaissance, adversarial analysis (3 skeptics) prevents confirmation bias, honest downgrade rather than fabricating root cause; outputs `log_analysis.md` + auto-converts to fix requirement `00_init.md` feeding Step 1; domain-agnostic (robotics / server / embedded / web all OK)
-- `/icode init` produces a `00_init.md` requirement draft via multi-turn dialogue, updated incrementally each round; `/icode start`/`/icode plan` (no args) detects init/log entry state and asks "reuse/new", choosing reuse takes `00_init.md` as requirement input
+- **Closed-loop delivery**: (optional) Requirement Draft → Plan → Review → Finalize → Code → Deep Check → Audit; each step callable independently, runs in the main session without model switching
+- **Dual modes**: `/icode start` full flow (multi-round review + adversarial verification) / `/icode fast` trimmed (1 round, no adversarial, ~65% cost); auto-chains steps 1→6
+- **Anti-laziness quality gates**: triple-phase deepcheck (Reverse/Fixed/Free), plan assertion verification, ADR decision records, adversarial verification (independent skeptics — insufficient evidence is never confirmed, honest downgrade over fake consensus)
+- **Cross-project history retrieval**: init/log/plan/start auto-search similar past tickets and inject by command; references stay in-session, never pollute project artifacts
+- **Two optional entries**: `/icode log` log root-cause analysis (baseline check first, then adversarial analysis; domain-agnostic) → fix requirement; `/icode init` multi-turn requirement draft → `00_init.md`
+- **Outputs & state management**: unified under `.icode_output/.icode_output_N/`, `.ico_metadata.json` tracks status/code files, supports cross-session recovery and resumable runs
 
 ## Installation
 
