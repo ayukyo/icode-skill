@@ -91,7 +91,7 @@ Read `~/.claude/icode_data/index.json`（不存在则创建 `{"version":"1","upd
 
 ## 检索命中续期 + 过时校验（检索阶段执行）
 
-检索阶段（init/log/plan/start 启动时扫 index.json）若某工单被选为 top-2 命中，**先做过时校验，再续期**：
+检索阶段（init/log/plan/start 启动时扫 index.json）采用**两段式检索**（详见 SKILL.md「检索注入流程」）——段一 keywords Jaccard 粗筛取 ≤20 候选（零 token，排除 stale/当前 ticket_id），段二只把候选 summary 喂 LLM 精读打分选 top-N 命中（N 由梯度决定）。对 top-N 命中工单，**先做过时校验，再续期**：
 
 ### 过时校验（防注入过时信息）
 
@@ -107,7 +107,8 @@ Read `~/.claude/icode_data/index.json`（不存在则创建 `{"version":"1","upd
 
 - index.json 每条加 `stale`（默认 false）
 - `stale=true` 的工单：**不再注入**（检索时跳过），但仍保留在索引（不删，留追溯）
-- stale 工单不参与 hit_count 续期（不再被命中）
+- stale 工单**不被段一粗筛命中**（关键词交集前即排除）、不参与 hit_count 续期（不再被命中）
+- stale 由三种途径触发：①检索命中准备注入前被动校验锚点失效；②每次写索引后主动扫描最旧 K 条锚点失效；③僵尸未完成态超时降级（见「索引淘汰规则」规则 5）
 - 若该工单产物被刷新（如重跑步骤6终审），可手动重置 `stale=false`
 
 ### 续期（校验通过才续期）
@@ -116,20 +117,30 @@ Read `~/.claude/icode_data/index.json`（不存在则创建 `{"version":"1","upd
 - `hit_count` += 1（累计命中次数）
 - 写回 index.json
 
+> **原子同步（强制，防数据失真）**：`last_used_at` 与 `hit_count` 必须在**同一次写回**中同步更新，**不得只更新其一**。历史 bug：某次命中只更新了 `last_used_at` 却漏 `hit_count` 自增，导致 `last_used_at` 被刷新但 `hit_count=0`——这条工单在 LRU 排序里因 hit_count 低沉底、却被 last_used_at"续期"误导排序，**直接破坏淘汰准确性**。续期写入时若任一字段更新失败，整次续期回滚不落盘。
+
 ## 索引淘汰规则（LRU + 命中续期 + 永久保留）
 
 **目的**：index.json 是检索缓存非档案，随工单增长会膨胀。靠 LRU 淘汰失去复用价值的老工单，保留高价值工单。淘汰只删索引条目，**不删各工程 `.icode_output/` 产物**（产物保留，索引只是指针）。
 
-**触发时机**：每次写索引（首次写入/条目更新/命中续期）后执行：先排序，再淘汰扫描。
+**触发时机**：每次写索引（首次写入/条目更新/命中续期）后执行：先排序，再淘汰扫描，最后主动 stale 扫描。
 
-**排序规则**（写入时重排 tickets 数组）：按 `hit_count` 降序、同值按 `last_used_at` 降序。高复用价值 + 近期被用的工单排前，扫描 `requirement_summary` 时主代理先看到高价值项，判断相关性更快；LRU 淘汰时最老的自然在末尾。
+**排序规则**（写入时重排 tickets 数组）：按 `hit_count` 降序、同值按 `last_used_at` 降序。高复用价值 + 近期被用的工单排前，段一粗筛扫 `keywords` 时主代理先看到高价值项，判断相关性更快；LRU 淘汰时最老的自然在末尾。
 
 **淘汰规则**：
 1. **容量上限 200 条**：tickets 数组超 200 时触发淘汰
-2. **永久保留**：`hit_count >= 10` 的工单永久不淘汰（已被验证高复用价值）
-3. **未完成态保留**：`status` 为 `init_in_progress`/`log_done`/`log_in_progress`/`review_in_progress`/`deepcheck_in_progress`/`code_in_progress` 的工单不淘汰（流程未结束）
+2. **永久保留**：`hit_count >= 10` 的工单永久不淘汰（被复用≥10 次的高价值工单）
+3. **未完成态保留**：`status` 为 `init_in_progress`/`log_done`/`log_in_progress`/`review_in_progress`/`deepcheck_in_progress`/`code_in_progress` 的工单**默认**不淘汰（流程未结束）——**但有超时降级例外**（见规则 5）
 4. **LRU 淘汰**：超上限时，在 `hit_count < 10` 且 `status = completed/review_done/deepcheck_done/plan_done/plan_finalized`（已完成或已推进态）的工单中，淘汰 `last_used_at` 最老的（数组末尾），直到条目数 ≤ 200
-5. **淘汰不报错**：静默移除，用户无感
+5. **僵尸未完成态超时降级**：未完成态工单（init/log/review/deepcheck/code in_progress）若 `last_used_at` 距当前**超过 30 天**无更新，视为"建了就扔"的僵尸工单——**不删 status，改置 `stale=true`**（复用 stale 机制，不污染 status 语义），降级后该条不再受规则 3 的未完成态保护，纳入规则 4 可淘汰集。**触发时机**：每次写索引触发淘汰扫描时，顺带检查所有未完成态工单是否超时。区分"正在用"（30 天内有更新）与"建了就扔"（超时）
+6. **淘汰不报错**：静默移除，用户无感
+
+**主动 stale 扫描**（防过时信息堆积，规则 5 之外的第二道清理）：
+
+- **现状漏洞**：原设计 stale 校验只在"检索命中准备注入前"才做——没被命中的老条目永远 stale=false，永远不会被这个机制清理，stale 清理形同虚设。
+- **新增主动扫描**：每次写索引触发淘汰扫描后，**顺带对 `last_used_at` 最旧的 K 条**（K=min(10, 当前条目数)）做一次代码锚点 Grep 校验（方法同「过时校验」段）。锚点失效→置 `stale=true`。把"被动校验"变"主动清理"。
+- **控 token**：只扫最旧的 K 条（最可能过时），不扫全量；Grep 单条锚点 <1K token。
+- stale 工单仍受排序影响沉在数组末尾，但**不注入不续期**，可在后续 LRU 淘汰中被规则 4 移除（若它已达可淘汰态）或长期留追溯（若未完成态）。
 
 ## .ico_metadata.json 模板
 
