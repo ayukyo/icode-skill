@@ -79,7 +79,9 @@
 
 步骤 2.5 产出的 issue 清单是**主代理单视角**的结论，存在确认偏误风险。本步骤强制引入**独立质疑者**对每条 issue 做对抗验证，只有经对抗仍成立的 issue（或步骤 2.4 已实证验证为 `confirmed` 的 issue）才能进入 `new_issues`。
 
-**对抗模式**（3质疑者/裁决优先级/诚实降级/独立性硬约束/零待对抗快速通道）——**必须先 Read [references/adversarial.md](../references/adversarial.md) 完整内容**（不得凭概述/记忆执行）。本步骤分析对象 = 步骤 2.5 产出的 issue（步骤 2.4 实证 issue 例外，已有铁证直接 `confirmed` 无需对抗）。
+**对抗模式**（3质疑者/subagent_type=schema 强制结构化/裁决优先级/诚实降级/独立性硬约束/零待对抗快速通道/子代理失败处理）——**必须先 Read [references/adversarial.md](../references/adversarial.md) 完整内容**（不得凭概述/记忆执行）。本步骤分析对象 = 步骤 2.5 产出的 issue（步骤 2.4 实证 issue 例外，已有铁证直接 `confirmed` 无需对抗）。
+
+> **子代理失败处理**（实测痛点：质疑者偶尔只返回开场白/被截断）：**禁止改由主代理自演裁决**。失败时按 adversarial.md「子代理失败处理」重试1次→仍失败诚实降级为 `[未验证-子代理对抗失败]` 计入 `pending_verification`，绝不伪造 `confirmed`。主代理 Read/Grep 实证铁证不算自演（属事实核查），判断性结论才必须独立 spawn。
 
 > **log 阶段对抗验证结论复用**（针对方式D log→start 工单）：如果当前工单来自 `/icode log` 入口（`completed_steps` 含 `"log"`），log 阶段已对根因做对抗验证（3 质疑者独立 spawn），步骤2 **可复用**该结论，不需重新 spawn 3 质疑者对抗根因。但**仍需**对"步骤1 计划本身"（9 章节结构、ADR 合理性、错误处理充分性等）做 3 轮审查（不依赖对抗验证）。复用的具体方式：把 log_analysis.md 第 6 章「对抗分析记录」作为已确认的根因引用，在 review_round_*.json 中标注 "log_phase_adversarial=reused" 字段。
 

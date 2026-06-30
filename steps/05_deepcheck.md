@@ -54,7 +54,7 @@ Free 阶段一次性完整覆盖全部 15 个角度。
 
 **必须先建立计划-代码追溯矩阵**（逐条列出计划功能点/接口/约束，标记代码对应位置和完成状态），再逐维度评估。禁止跳过追溯直接给"全部通过"。
 
-**Free 阶段 A6 深检/争议验证——必须独立 spawn 3 质疑者子代理**：若 Free 阶段发现任何深检 issue 或需争议性验证的点，**必须按 [references/adversarial.md](../references/adversarial.md) 模式独立 spawn 3 个质疑者子代理**（证据质疑者/替代解释者/充分性质疑者各一，不得合并 spawn，少任一视为不合规——见反偷懒第14条）。产物（`05_deepcheck.md` 的「对抗验证」段）必须记录每个质疑者的 **独立 spawn Agent ID** 作为调用证据。
+**Free 阶段 A6 深检/争议验证——必须独立 spawn 3 质疑者子代理**：若 Free 阶段发现任何深检 issue 或需争议性验证的点，**必须按 [references/adversarial.md](../references/adversarial.md) 模式独立 spawn 3 个质疑者子代理**（证据质疑者/替代解释者/充分性质疑者各一，不得合并 spawn，少任一视为不合规——见反偷懒第14条；**spawn 规格**：`subagent_type: "general-purpose"` + schema 强制结构化，**禁用 Explore** 防只调研不裁决被截断）。产物（`05_deepcheck.md` 的「对抗验证」段）必须记录每个质疑者的 **独立 spawn Agent ID** 作为调用证据。子代理失败时按 adversarial.md「子代理失败处理」重试1次→仍失败诚实降级为 `[未验证-子代理对抗失败]`，**绝不改由主代理自演裁决**。
 
 ## 执行步骤
 
