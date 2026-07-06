@@ -21,7 +21,7 @@
 
 2. **历史检索复用**（目录管理之后、强制思考之前，全局索引存在时必须执行，详见 SKILL.md「历史检索复用」段）。**置于目录管理之后**：此时需求来源已确定（复用情况已读 `00_init.md`，常规新建情况用命令行参数），可用完整需求做相关性判断：
    - Read `~/.claude/icode_data/index.json`（不存在则跳过检索）
-   - **两段式检索**：段一从本次需求提炼关键词集，与各 ticket `keywords` 做 Jaccard 粗筛取 ≤20 候选（零 token，排除 stale/当前 `ticket_id`）；段二只把候选 `requirement_summary` 喂主代理精读打分选 top-N 命中（N 由梯度决定，明确无关则 0 条）。**排除当前 `ticket_id`**，不自我参考——当前 ticket_id 读「最新 `.icode_output_N` 目录的 `.ico_metadata.json`」的 `ticket_id` 字段；**常规新建目录首跑时目录刚创建、尚未入索引，无需排除**；复用步骤0目录时 metadata 已有 ticket_id，按值排除
+   - **两段式检索**：段一从本次需求提炼关键词集，与各 ticket `keywords` 做 Jaccard 粗筛取 ≤10 候选（零 token，排除 stale/当前 `ticket_id`）；段二只把候选 `keywords + requirement_points` 喂主代理精读打分选 top-N 命中（N 由梯度决定，明确无关则 0 条）。**排除当前 `ticket_id`**，不自我参考——当前 ticket_id 读「最新 `.icode_output_N` 目录的 `.ico_metadata.json`」的 `ticket_id` 字段；**常规新建目录首跑时目录刚创建、尚未入索引，无需排除**；复用步骤0目录时 metadata 已有 ticket_id，按值排除
    - **`/icode plan`/`/icode start` 注入分支**：命中工单**定点读其 `01_plan.md` 的 ADR 章节 + 风险评估章节**（**不读全文**，≤1K token/条），作为本次计划的启发——参考其决策理由与踩坑。**只进会话上下文，不得在 `01_plan.md` 堆砌历史引用**（唯一例外：实质借鉴的 ADR 可在"理由"末尾加一句 `(参考相似工单 {ticket_id} 的同类决策)`）
    - 命中工单的 `01_plan.md` 读不到（工程被删/移动）→ 跳过该条不报错
    - 零命中不注入，不强凑参考
@@ -84,7 +84,7 @@
      - `status`: `init_in_progress` → `plan_done`
      - `completed_steps`: 在原有 `["0"]` 后追加 `"1"`，形成 `["0", "1"]`
      - 保留原有 `requirement`、`created_at`，可在 requirement 后追加命令行参数（若有）
-     - **刷新检索字段**：基于完整计划刷新 `requirement_summary`（一句话摘要，≤200 token）；`requirement_points` 保持步骤0的值或补全；`keywords` 按计划涉及的技术栈补全；保留 `indexed=true`
+     - **刷新检索字段**：基于完整计划刷新 `requirement_summary`（一句话摘要，≤100 token）；`requirement_points` 保持步骤0的值或补全；`keywords` 按计划涉及的技术栈补全；保留 `indexed=true`
    - **常规新建目录的情况**：创建新文件如下：
 
 ```json
@@ -94,7 +94,7 @@
   "status": "plan_done",
   "completed_steps": ["1"],
   "code_files": [],
-  "requirement_summary": "{基于完整计划的一句话摘要，≤200 token}",
+  "requirement_summary": "{基于完整计划的一句话摘要，≤100 token}",
   "requirement_points": [],
   "keywords": "{≤8个技术关键词数组}",
   "indexed": false,

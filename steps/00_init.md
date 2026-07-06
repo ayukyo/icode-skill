@@ -22,7 +22,7 @@
 1. **执行目录管理中的「创建新目录」逻辑**（**强制新建，不做任何复用判定**），确定 `ICODE_OUT_DIR`
 2. **历史检索复用**（强制思考之前，全局索引存在时必须执行，详见 SKILL.md「历史检索复用」段）：
    - Read `~/.claude/icode_data/index.json`（不存在则跳过检索）
-   - **两段式检索**：段一从本次粗略需求提炼关键词集，与各 ticket `keywords` 做 Jaccard 粗筛取 ≤20 候选（零 token，排除 stale）；段二只把候选 `requirement_summary` 喂主代理精读打分选 top-N 命中（N 由梯度决定，明确无关则 0 条）。`/icode init` 每次强制新建目录，本次工单尚未入索引，故无需排除当前 ticket_id
+   - **两段式检索**：段一从本次粗略需求提炼关键词集，与各 ticket `keywords` 做 Jaccard 粗筛取 ≤10 候选（零 token，排除 stale）；段二只把候选 `keywords + requirement_points` 喂主代理精读打分选 top-N 命中（N 由梯度决定，明确无关则 0 条）。`/icode init` 每次强制新建目录，本次工单尚未入索引，故无需排除当前 ticket_id
    - **`/icode init` 注入分支**：命中工单只读其 `requirement_points`（需求要点清单，≤500 token/条），作为后续讨论的启发——提示用户"上次相似需求曾关注过这些点，本次是否也需要考虑"。**只进会话上下文，绝不写进 `00_init.md`**。
    - 零命中不注入，不强凑参考
 3. 处理输入参数（**两种都支持**，本步骤只**构思内容框架**，实际 Write 在步骤6；深度读代码在步骤4）：
@@ -40,7 +40,7 @@
      "status": "init_in_progress",
      "completed_steps": ["0"],
      "code_files": [],
-     "requirement_summary": "{基于粗略需求的一句话摘要，≤200 token；无参数时填空字符串}",
+     "requirement_summary": "{基于粗略需求的一句话摘要，≤100 token；无参数时填空字符串}",
      "requirement_points": [],
      "keywords": "{≤8个技术关键词数组，无参数时填空数组}",
      "indexed": false,
@@ -64,7 +64,7 @@
 1. **先 Read 现有 `00_init.md`**，理解当前文档状态
 2. 跟用户讨论（回答疑问、提出反问、澄清歧义）
 3. **本轮对话结束前，必须用 Write 工具更新 `00_init.md`**，把本轮新信息合并进对应章节，保持文档结构完整
-4. **刷新全局索引条目**：从 `00_init.md`「3.新增需求点」自动提炼 `requirement_points`（≤10 条），结合本轮讨论刷新 `requirement_summary`，更新 metadata 对应字段，并**按 metadata 的 `ticket_id` 定位** `~/.claude/icode_data/index.json` 中本工单条目，更新其 `requirement_summary` / `requirement_points`。**用户无感，不写进 `00_init.md`**。
+4. **刷新全局索引条目**：从 `00_init.md`「3.新增需求点」提炼 `requirement_points`（≤8 条，每条 ≤30 token），结合本轮讨论刷新 `requirement_summary`。**注**：`requirement_points` 仅在步骤0首轮和步骤1完成时刷新，每轮对话不重复刷（防止索引条目膨胀），并**按 metadata 的 `ticket_id` 定位** `~/.claude/icode_data/index.json` 中本工单条目，更新其 `requirement_summary` / `requirement_points`。**用户无感，不写进 `00_init.md`**。
 5. 不需要等待用户说"结束"才落档，**每轮都增量更新**
 
 **判定"是否还在迭代当前 init"的依据**：

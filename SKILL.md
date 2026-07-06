@@ -3,7 +3,7 @@ name: icode
 description: 端到端编码工作流（步骤 0~6，含可选需求初稿步骤与日志根因分析入口），支持分步手动调用：/icode help (帮助), /icode init [<粗略需求>] (需求初稿), /icode log [零散信息...] (日志根因分析→转修复需求), /icode start <需求> (全流程), /icode fast <需求> (精简全流程), /icode plan <需求> (计划), /icode review [N] (审查), /icode merge (定稿), /icode code (编码), /icode deepcheck (复检), /icode audit (终审)
 ---
 
-**版本**: v1.9.0
+**版本**: v2.0.0
 
 # ICode 全流程编码工作流（步骤 0 + 1~6）
 
@@ -205,8 +205,8 @@ ICODE_OUT_DIR=".icode_output/.icode_output_${LAST}"
 - `pending_verification`：步骤 2 对抗验证中 `needs_more_evidence` 的 issue 清单（**完整 issue 对象数组**，含 `id`/`affected_sections`/`suggestion`/`rejection_risk`/`evidence_pointer`/`verification_status`，供步骤3定稿时直接复核无需回查 JSON），随轮次动态维护（新增追加、已证实/证伪移除），供步骤3定稿时重点复核
 - `code_compile_failed`：步骤 4 编译失败标记（`true` 时步骤 5 入口输出警告）
 - `deepcheck_total_rounds` / `deepcheck_clean_rounds` / `deepcheck_phase`：步骤 5 续跑用（`deepcheck_phase` 值：`reverse` / `fixed` / `free`），步骤5完成时最终记录
-- `requirement_summary`：一句话需求摘要（≤200 token），跨工程历史检索的主依据。步骤0首轮基于粗略需求生成，步骤0每轮对话后更新，步骤1完成计划后基于完整计划刷新
-- `requirement_points`：需求要点清单（≤10 条字符串），`/icode init` 检索命中时注入用。由步骤0从 `00_init.md`「3.新增需求点」自动提炼，用户无感
+- `requirement_summary`：一句话需求摘要（≤100 token），跨工程历史检索的主依据。步骤0首轮基于粗略需求生成，步骤0每轮对话后更新，步骤1完成计划后基于完整计划刷新
+- `requirement_points`：需求要点清单（≤8 条字符串，每条 ≤30 token），`/icode init` 检索命中时注入用。由步骤0从 `00_init.md`「3.新增需求点」自动提炼，用户无感
 - `keywords`：技术关键词（≤8 个），辅助检索匹配
 - `indexed`：是否已写入全局索引（防重复写入）
 - `ticket_id`：本工单在全局索引中的唯一键（`{工程名}-{N}`，冲突时带 hash 后缀）。步骤0写索引时持久化到 metadata；**跳过步骤0直接 `/icode plan`/`/icode start` 的常规新建目录情况**，在步骤1首次写索引时生成并回填 metadata。供后续步骤检索时排除当前工单
@@ -263,7 +263,7 @@ ICODE_OUT_DIR=".icode_output/.icode_output_${LAST}"
 **全局索引**（不污染任何工程，不放技能目录）：
 
 - 索引文件：`~/.claude/icode_data/index.json`（首次运行自动创建）。**路径说明**：`~` 是当前用户主目录，由 Claude Code 工具层跨平台解析（Linux/macOS/Windows 通用），与技能目录 `~/.claude/skills/icode/` 同源。技能文件**禁止硬编码**任何具体用户路径（如 `/home/xxx`、`C:\Users\xxx`），所有全局路径必须用 `~` 表达，确保技能可移植
-- 每条记录：`ticket_id`(`{工程名}-{N}`，工程名冲突时追加 `project_path` 短 hash 后缀保唯一)、`project_path`、`out_dir`、`requirement_summary`(≤200token)、`requirement_points`(≤10条)、`keywords`(≤8个)、`has_00_init`/`has_plan`、`status`、`created_at`、`last_used_at`(检索命中时更新，LRU淘汰依据)、`hit_count`(检索命中+1，达10永久保留)、`stale`(默认false，过时校验发现代码锚点失效置true，stale工单不再注入)。**`has_00_init` 语义 = 该工单是否已产出 `00_init.md`（走过 init 或 log，log 也会产出 00_init.md），与"是否走过步骤0 init"解耦**——log 未走过 init 但产出 00_init.md 故也为 true
+- 每条记录：`ticket_id`(`{工程名}-{N}`，工程名冲突时追加 `project_path` 短 hash 后缀保唯一)、`project_path`、`out_dir`、`requirement_summary`(≤100 token)、`requirement_points`(≤8 条)、`keywords`(≤8个)、`has_00_init`/`has_plan`、`status`、`created_at`、`last_used_at`(检索命中时更新，LRU淘汰依据)、`hit_count`(检索命中+1，达10永久保留)、`stale`(默认false，过时校验发现代码锚点失效置true，stale工单不再注入)。**`has_00_init` 语义 = 该工单是否已产出 `00_init.md`（走过 init 或 log，log 也会产出 00_init.md），与"是否走过步骤0 init"解耦**——log 未走过 init 但产出 00_init.md 故也为 true
 - **只存指针和摘要，不存产物正文**。产物仍在各工程 `.icode_output/`，工程隔离不破坏。
 - **LRU 淘汰**（防 index.json 无限膨胀）：索引是检索缓存非档案。容量上限 200 条；`hit_count >= 10` 永久保留（被复用≥10 次的高价值工单）；未完成态（init/log/review/deepcheck/code in_progress）默认不淘汰，但**超时降级**（`last_used_at` 超 30 天无更新→置 `stale=true` 解除保护、纳入可淘汰，不新增 status 值）；超上限时淘汰 `hit_count < 10` 且 `stale=false` 完成态中 `last_used_at` 最老的。另**主动 stale 扫描**：每次写索引顺带校验最旧 K 条锚点，失效置 `stale=true`。检索命中**原子同步**更新 `last_used_at`+`hit_count` 续期。淘汰只删索引条目，产物保留各工程。**排序**：tickets 数组按 `hit_count` 降序、同值按 `last_used_at` 降序（高价值近期项在前，段一粗筛扫 keywords 快+淘汰从末尾）。详见 [references/dir_and_metadata.md](references/dir_and_metadata.md)「索引淘汰规则」
 - **过时校验**（防注入过时信息）：索引存的是工单当时的摘要，工程迭代后老工单 ADR/需求可能已过时。**两处触发**：①检索命中准备注入前（被动）；②每次写索引触发淘汰后，主动 Grep 校验最旧 K 条代码锚点（主动）。锚点失效→置 `stale=true` 跳过注入（即使 hit_count 高也不注入）。stale 工单保留索引留追溯，不再续期，不再被段一粗筛命中。详见 [references/dir_and_metadata.md](references/dir_and_metadata.md)「检索命中续期 + 过时校验」与「索引淘汰规则·主动 stale 扫描」
@@ -271,12 +271,12 @@ ICODE_OUT_DIR=".icode_output/.icode_output_${LAST}"
 **写索引时机**（**`keywords` 是段一粗筛的检索索引，所有入口首次写索引时必须填 ≤8 个技术关键词、不得为空**——空 keywords 的工单无法被粗筛命中，等于检索盲区）：
 - `/icode log` 产出 `log_analysis.md` + `00_init.md` 后：**首次生成 `ticket_id`**（`{工程名}-{N}`，冲突加 hash 后缀）并回填 metadata，写入 `requirement_summary`（根因摘要）+`requirement_points`（修复要点）+`keywords`（≤8个，从根因/症状提炼）+`has_00_init=true`+`status=log_done`+`last_used_at=当前`+`hit_count=0`+`stale=false`，**写后执行LRU淘汰 + 主动 stale 扫描**
 - 步骤0 首轮写 `00_init.md` 后：**首次生成 `ticket_id`**（`{工程名}-{N}`，冲突加 hash 后缀）并回填 metadata，写入 `requirement_summary`+空 `requirement_points`+`keywords`（≤8个，从粗略需求提炼）+`has_00_init=true`+`last_used_at=当前`+`hit_count=0`+`stale=false`，**写后执行LRU淘汰 + 主动 stale 扫描**
-- 步骤0 每轮对话更新后：刷新 `requirement_points`（从「3.新增需求点」自动提炼）+ `requirement_summary`
+- 步骤0 每轮对话更新后：刷新 `requirement_summary`；`requirement_points` **仅在首次写索引时生成**（步骤0首轮），步骤0 每轮对话不重复刷新（步骤1 完成 `01_plan.md` 时再统一刷一次）
   - **`requirement_points` 提炼算法**（明确可执行）：
     1. 扫描 `00_init.md` 中 `## 3. 新增需求点` 章节下的 `- [ ]` / `- [x]` 列表项
     2. 每行去掉 checkbox 前缀（`- [ ] ` / `- [x] `），保留核心短语作为一条 `requirement_points`
-    3. 若某行超 50 字符，截断到 50 字符 + `...`（避免索引体积爆）
-    4. 最多保留 10 条，多余的丢弃
+    3. 若某行超 30 字符，截断到 30 字符 + `...`（避免索引体积爆）
+    4. 最多保留 8 条，多余的丢弃
     5. 若「3. 新增需求点」章节缺失/为空，`requirement_points` 保持空数组
     6. 例：`- [x] calc_eval 函数签名` → `"calc_eval 函数签名"`
 - 步骤1 写完 `01_plan.md` 后：刷新 `requirement_summary`（基于完整计划）+ `has_plan=true`；**常规新建目录首跑时**（跳过步骤0）在此首次生成 `ticket_id` 并回填 metadata、首次写入索引条目（`has_00_init=false`、`keywords`（≤8个，从计划技术栈提炼，不得为空）、`last_used_at=当前`、`hit_count=0`、`stale=false`），**写后执行LRU淘汰 + 主动 stale 扫描**
@@ -286,21 +286,25 @@ ICODE_OUT_DIR=".icode_output/.icode_output_${LAST}"
 
 1. **检索阶段·两段式**（强制思考**之前**；`/icode init`/`/icode log` 在建目录后检索，`/icode plan`/`/icode start` 在目录管理+确定需求来源后检索——确保用完整需求做相关性判断）：
 
-   **段一·粗筛（不进 LLM，纯计算，零 token 消耗）**：从当前需求/症状提炼关键词集 `K_new`，与索引中每条 ticket 的 `keywords` 做集合交集，按 **Jaccard 相似度**（`|K_new ∩ K_ticket| / |K_new ∪ K_ticket|`）降序排列。`stale=true` 与当前 `ticket_id`（不自我参考）排除。取相似度 > 0 的前 **≤20 条**作为候选集（候选为 0 则直接零命中结束）。**关键词缺失的工单**（`keywords` 为空）在粗筛中无法被命中，故写索引时 `keywords` 不得为空（≤8 个技术词）。
+   **段一·粗筛（不进 LLM，纯计算，零 token 消耗）**：从当前需求/症状提炼关键词集 `K_new`，**先过滤** `stale=true` 与当前 `ticket_id`（不自我参考）——段一粗筛前**显式排除**（而非粗筛后再过滤），降低计算量；再与剩余 ticket 的 `keywords` 做集合交集，按 **Jaccard 相似度**（`|K_new ∩ K_ticket| / |K_new ∪ K_ticket|`）降序排列。取相似度 > 0 的前 **≤10 条**作为候选集（候选为 0 则直接零命中结束）。**关键词缺失的工单**（`keywords` 为空）在粗筛中无法被命中，故写索引时 `keywords` 不得为空（≤8 个技术词）。
 
-   > **为何先粗筛**：index.json 到 200 条上限时全量进上下文 ≈ 3.5 万 token，纯靠 LLM 现场扫全部 summary 会撑爆 context 且判断质量随条数下降。粗筛把 O(全部) 降到 O(候选集)，实测能圈出 ≤20 条强相关候选。
+   > **为何先粗筛**：index.json 到 200 条上限时全量进上下文 ≈ 3.5 万 token，纯靠 LLM 现场扫全部 summary 会撑爆 context 且判断质量随条数下降。粗筛把 O(全部) 降到 O(候选集)，实测能圈出 ≤10 条强相关候选。
 
-   **段二·精读（进 LLM）**：只把候选集的 `requirement_summary`（≤200token/条，20 条 ≤4K token）喂给主代理，结合当前需求/症状逐条判相关性并打分（0-10）。按分数排序，选 top-N 命中（N 由梯度规则定，见下）。
+   **段二·精读（进 LLM）**：只把候选集的 `keywords + requirement_points`（约 50-100 token/条，10 条 ≤1K token）喂给主代理，结合当前需求/症状逐条判相关性并打分（0-10）。按分数排序，选 top-N 命中（N 由梯度规则定，见下）。
 
-2. **过时校验 + 命中续期**（对 top-N 命中工单）：Grep 校验其 ADR 涉及的代码锚点是否仍存在；锚点失效→置 `stale=true` 跳过该条注入（即使 hit_count 高也不注入）。**命中续期**：校验通过的工单，**原子同步更新** `last_used_at`=当前时间、`hit_count`+=1，写回 index.json（两字段必须同一次写回，不得只更其一——详见 [references/dir_and_metadata.md](references/dir_and_metadata.md)「续期（校验通过才续期）·原子同步」）。`stale=true` 的工单不注入不续期。
+2. **过时校验 + 命中续期**（对 top-N 命中工单，分两道校验）：
+   - **项目路径校验**：先 `test -d {project_path}` 校验工程根目录仍存在；工程被删/移动→置 `stale=true` 跳过该条注入（即使 hit_count 高也不注入），避免对已删除工程的引用注入
+   - **代码锚点校验**：Grep 校验其 ADR 涉及的代码锚点是否仍存在；锚点失效→置 `stale=true` 跳过该条注入
+
+   **命中续期**：两道校验均通过的工单，**原子同步更新** `last_used_at`=当前时间、`hit_count`+=1，写回 index.json（两字段必须同一次写回，不得只更其一——详见 [references/dir_and_metadata.md](references/dir_and_metadata.md)「续期（校验通过才续期）·原子同步」）。`stale=true` 的工单不注入不续期。
 
 3. **注入阶段·top-N 动态梯度**（按命令分流，N 由相关性梯度决定而非固定值）：
 
-   - **强相关**（精读分数 ≥8）：全注入，上限 3 条
+   - **强相关**（精读分数 ≥8）：全注入，上限 2 条
    - **弱相关**（精读分数 5~7）：在强相关之外再注 ≤1 条最相关的作"边缘参考"
    - **零强相关但有弱相关**：注 ≤2 条最相关
    - **全无相关**（分数 <5 或候选集为 0）：**零注入，不强凑参考**
-   - 注入总量上限：强相关 3×1K + 弱相关 1×0.8K ≈ 3.8K token（plan 模式；init/log 按下表体积上限）
+   - 注入总量上限：强相关 2×1K + 弱相关 1×0.8K ≈ 2.8K token（plan 模式；init/log 按下表体积上限）
 
    | 命令 | 命中后注入内容 | 来源 | 体积上限 |
    |------|--------------|------|---------|
@@ -312,7 +316,7 @@ ICODE_OUT_DIR=".icode_output/.icode_output_${LAST}"
 
 **防撑爆四道闸门**：
 - **索引体积**：全局索引单条只存摘要+要点+关键词，整体 <2K token
-- **粗筛控量**：两段式检索只把 ≤20 条候选集 summary 喂 LLM（非全量），控 token
+- **粗筛控量**：两段式检索只把 ≤10 条候选集 keywords+requirement_points 喂 LLM（非全量），控 token
 - **注入数**：top-N 动态梯度，强相关≤3 + 弱相关≤1，全相关时上限 4 条
 - **注入体积**：init 注入要点 ≤500 token/条；plan 注入 ADR+风险 ≤1K token/条；log 注入根因+证据 ≤800 token/条；超大工单需深读时派子代理消化成摘要返回（隔离上下文）
 

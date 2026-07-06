@@ -50,7 +50,7 @@ fi
 
 ### 2. 历史检索（与 `/icode start` 计划模式一致）
 
-- 读 `~/.claude/icode_data/index.json`，**两段式检索**：段一 keywords Jaccard 粗筛取 ≤20 候选（零 token，排除 stale/当前 `ticket_id`），段二候选 summary 精读打分选 top-N 命中（N 由梯度决定，明确无关则 0 条），过时校验后注入 ADR+风险章节
+- 读 `~/.claude/icode_data/index.json`，**两段式检索**：段一 keywords Jaccard 粗筛取 ≤10 候选（零 token，排除 stale/当前 `ticket_id`），段二候选 keywords+requirement_points 精读打分选 top-N 命中（N 由梯度决定，明确无关则 0 条），过时校验后注入 ADR+风险章节
 - 排除当前 `ticket_id`，不自我参考
 
 ### 3. 创建 metadata
@@ -64,7 +64,7 @@ fi
   "status": "plan_done",
   "completed_steps": ["1"],
   "code_files": [],
-  "requirement_summary": "{基于完整计划的一句话摘要，≤200 token}",
+  "requirement_summary": "{基于完整计划的一句话摘要，≤100 token}",
   "requirement_points": [],
   "keywords": [],
   "indexed": false,

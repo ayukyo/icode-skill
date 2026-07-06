@@ -93,7 +93,24 @@ Read `~/.claude/icode_data/index.json`（不存在则创建 `{"version":"1","upd
 
 ## 检索命中续期 + 过时校验（检索阶段执行）
 
-检索阶段（init/log/plan/start 启动时扫 index.json）采用**两段式检索**（详见 SKILL.md「检索注入流程」）——段一 keywords Jaccard 粗筛取 ≤20 候选（零 token，排除 stale/当前 ticket_id），段二只把候选 summary 喂 LLM 精读打分选 top-N 命中（N 由梯度决定）。对 top-N 命中工单，**先做过时校验，再续期**：
+检索阶段（init/log/plan/start 启动时扫 index.json）采用**两段式检索**（详见 SKILL.md「检索注入流程」）——段一 keywords Jaccard 粗筛取 ≤10 候选（零 token，排除 stale/当前 ticket_id），段二只把候选 keywords+requirement_points 喂 LLM 精读打分选 top-N 命中（N 由梯度决定）。对 top-N 命中工单，**先做过时校验，再续期**：
+
+### 项目路径校验（防注入已删除工程）
+
+**触发时机**：检索命中准备注入前，与代码锚点校验同级。
+
+**校验方法**：
+
+```bash
+test -d "{project_path}" || {  # 工程根目录已删除/移动
+  # 标记该工单 stale=true
+  # 跳过该条注入（即使 hit_count 高也不注入）
+}
+```
+
+**设计意图**：工程被删/移动后，老工单的 ADR/需求已无意义，注入会误导。stale=true 后该工单不再被段一粗筛命中（段一前显式排除）、不再被注入、不再续期。
+
+**与现有 stale 机制的关系**：复用 stale 字段，不引入新状态值；项目路径校验失败的工单走与代码锚点失效相同的 stale 路径。
 
 ### 过时校验（防注入过时信息）
 
@@ -140,7 +157,7 @@ Read `~/.claude/icode_data/index.json`（不存在则创建 `{"version":"1","upd
 **主动 stale 扫描**（防过时信息堆积，规则 5 之外的第二道清理）：
 
 - **现状漏洞**：原设计 stale 校验只在"检索命中准备注入前"才做——没被命中的老条目永远 stale=false，永远不会被这个机制清理，stale 清理形同虚设。
-- **新增主动扫描**：每次写索引触发淘汰扫描后，**顺带对 `last_used_at` 最旧的 K 条**（K=min(10, 当前条目数)）做一次代码锚点 Grep 校验（方法同「过时校验」段）。锚点失效→置 `stale=true`。把"被动校验"变"主动清理"。
+- **新增主动扫描**：每次写索引触发淘汰扫描后，**顺带对 `last_used_at` 最旧的 K 条**（**K=min(30, 当前条目数)**，索引 150 条时覆盖率 20%）做一次代码锚点 Grep 校验（方法同「过时校验」段）。锚点失效→置 `stale=true`。把"被动校验"变"主动清理"。
 - **控 token**：只扫最旧的 K 条（最可能过时），不扫全量；Grep 单条锚点 <1K token。
 - stale 工单仍受排序影响沉在数组末尾，但**不注入不续期**，可在后续 LRU 淘汰中被规则 4 移除（若它已达可淘汰态）或长期留追溯（若未完成态）。
 
@@ -157,7 +174,7 @@ Read `~/.claude/icode_data/index.json`（不存在则创建 `{"version":"1","upd
   "status": "log_done",
   "completed_steps": ["log"],
   "code_files": [],
-  "requirement_summary": "{根因一句话摘要，≤200 token}",
+  "requirement_summary": "{根因一句话摘要，≤100 token}",
   "requirement_points": ["修复要点1", "修复要点2"],
   "keywords": "{≤8个技术关键词}",
   "indexed": false,
@@ -174,7 +191,7 @@ Read `~/.claude/icode_data/index.json`（不存在则创建 `{"version":"1","upd
   "status": "init_in_progress",
   "completed_steps": ["0"],
   "code_files": [],
-  "requirement_summary": "{基于粗略需求的一句话摘要，≤200 token；无参数时填空字符串}",
+  "requirement_summary": "{基于粗略需求的一句话摘要，≤100 token；无参数时填空字符串}",
   "requirement_points": [],
   "keywords": "{≤8个技术关键词数组，无参数时填空数组}",
   "indexed": false,
@@ -191,7 +208,7 @@ Read `~/.claude/icode_data/index.json`（不存在则创建 `{"version":"1","upd
   "status": "plan_done",
   "completed_steps": ["1"],
   "code_files": [],
-  "requirement_summary": "{基于完整计划的一句话摘要，≤200 token}",
+  "requirement_summary": "{基于完整计划的一句话摘要，≤100 token}",
   "requirement_points": [],
   "keywords": "{≤8个技术关键词数组}",
   "indexed": false,
@@ -212,7 +229,7 @@ Read `~/.claude/icode_data/index.json`（不存在则创建 `{"version":"1","upd
   "status": "plan_done",
   "completed_steps": ["1"],
   "code_files": [],
-  "requirement_summary": "{基于完整计划的一句话摘要，≤200 token}",
+  "requirement_summary": "{基于完整计划的一句话摘要，≤100 token}",
   "requirement_points": [],
   "keywords": "{≤8个技术关键词数组}",
   "indexed": false,
