@@ -52,6 +52,8 @@ fi
 
 - 读 `~/.claude/icode_data/index.json`，**两段式检索**：段一 keywords Jaccard 粗筛取 ≤10 候选（零 token，排除 stale/当前 `ticket_id`），段二候选 keywords+requirement_points 精读打分选 top-N 命中（N 由梯度决定，明确无关则 0 条），过时校验后注入 ADR+风险章节
 - 排除当前 `ticket_id`，不自我参考
+- **段零·工程文档检索**（与历史检索并行，候选合并排序）：`ls ~/.claude/icode_data/project_docs/<project_id>/`（`project_id`=`basename(git rev-parse --show-toplevel)`），逐章读前 50 行按 KEYS 匹配，命中按 `[小节锚点]` 定点读小节；无知识库则零命中（ℹ️ 不阻塞）。详见 [references/dir_and_metadata.md](../references/dir_and_metadata.md)「段零·工程文档检索」段
+- **注入防重复**（两源共用 `_inject_cache.json`）：无缓存则创建空 `{"ticket_id":"<本工单>","injections":[]}`；注入前按 `(source, ref_id, slice)` 查缓存去重，已注入的跳过。历史源 slice=`adr_risks`；段零 slice=`section:<file>`。详见 [references/dir_and_metadata.md](../references/dir_and_metadata.md)「注入缓存机制」段
 
 ### 3. 创建 metadata
 

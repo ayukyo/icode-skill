@@ -24,6 +24,8 @@
    - **两段式检索**：段一从本次需求提炼关键词集，与各 ticket `keywords` 做 Jaccard 粗筛取 ≤10 候选（零 token，排除 stale/当前 `ticket_id`）；段二只把候选 `keywords + requirement_points` 喂主代理精读打分选 top-N 命中（N 由梯度决定，明确无关则 0 条）。**排除当前 `ticket_id`**，不自我参考——当前 ticket_id 读「最新 `.icode_output_N` 目录的 `.ico_metadata.json`」的 `ticket_id` 字段；**常规新建目录首跑时目录刚创建、尚未入索引，无需排除**；复用步骤0目录时 metadata 已有 ticket_id，按值排除
    - **`/icode plan`/`/icode start` 注入分支**：命中工单**定点读其 `01_plan.md` 的 ADR 章节 + 风险评估章节**（**不读全文**，≤1K token/条），作为本次计划的启发——参考其决策理由与踩坑。**只进会话上下文，不得在 `01_plan.md` 堆砌历史引用**（唯一例外：实质借鉴的 ADR 可在"理由"末尾加一句 `(参考相似工单 {ticket_id} 的同类决策)`）
    - 命中工单的 `01_plan.md` 读不到（工程被删/移动）→ 跳过该条不报错
+   - **段零·工程文档检索**（与历史检索并行，候选合并排序）：`ls ~/.claude/icode_data/project_docs/<project_id>/`（`project_id`=`basename(git rev-parse --show-toplevel)`），逐章读前 50 行按 KEYS 匹配，命中按 `[小节锚点]` 定点读小节；无知识库则零命中（ℹ️ 不阻塞）。详见 [references/dir_and_metadata.md](../references/dir_and_metadata.md)「段零·工程文档检索」段
+   - **注入防重复**（两源共用 `_inject_cache.json`）：无缓存则创建空 `{"ticket_id":"<本工单>","injections":[]}`；注入前按 `(source, ref_id, slice)` 查缓存去重，已注入的跳过。历史源 slice=`adr_risks`；段零 slice=`section:<file>`。详见 [references/dir_and_metadata.md](../references/dir_and_metadata.md)「注入缓存机制」段
    - 零命中不注入，不强凑参考
 
 3. **强制思考前置**（不可跳过，缺证据视为不合规；**必须先 Read [references/thinking.md](../references/thinking.md) + [references/anti_laziness.md](../references/anti_laziness.md) 完整内容**（不得凭概述/记忆执行，否则产出不合规））：本步骤子项（至少3步）= 需求分解 → 方案分析 → 风险评估。**若步骤2有历史参考，在此处「历史参考」小节记录命中工单 id 与 ADR/风险要点，作为思考输入**

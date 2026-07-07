@@ -1,6 +1,6 @@
 ---
 name: icode
-description: 端到端编码工作流（步骤 0~6，含可选需求初稿步骤与日志根因分析入口），支持分步手动调用：/icode help (帮助), /icode init [<粗略需求>] (需求初稿), /icode log [零散信息...] (日志根因分析→转修复需求), /icode start <需求> (全流程), /icode fast <需求> (精简全流程), /icode plan <需求> (计划), /icode review [N] (审查), /icode merge (定稿), /icode code (编码), /icode deepcheck (复检), /icode audit (终审)
+description: 端到端编码工作流（步骤 0~6，含可选需求初稿步骤与日志根因分析入口），支持分步手动调用：/icode help (帮助), /icode init [<粗略需求>] (需求初稿), /icode log [零散信息...] (日志根因分析→转修复需求), /icode start <需求> (全流程), /icode fast <需求> (精简全流程), /icode plan <需求> (计划), /icode review [N] (审查), /icode merge (定稿), /icode code (编码), /icode deepcheck (复检), /icode audit (终审), /icode doc [自然语言] (工程级知识库生成), /icode readme (交付报告), /icode status (工单状态)
 ---
 
 **版本**: v2.0.0
@@ -41,6 +41,7 @@ description: 端到端编码工作流（步骤 0~6，含可选需求初稿步骤
 | `/icode deepcheck` | **仅步骤5**：三阶段递进复检（Reverse → Fixed → Free）。`mode=="fast"` 时只跑 Reverse 阶段 | 用最新目录 |
 | `/icode audit` | **仅步骤6**：终极终审 + 统一修复（产出 `{ICODE_OUT_DIR}/06_audit.md`） | 用最新目录 |
 | `/icode readme` | **可选步骤7**：生成交付报告（面向人的自包含总结，动态文件名，智能识别功能/查BUG模板）。步骤6完成后手动触发 | 用最新目录 |
+| `/icode doc [自然语言]` | **工程级知识库生成（独立步骤）**：扫描工程代码特征，生成/维护 `~/.claude/icode_data/project_docs/<project_id>/` 下的工程知识库章节（架构/IPC/术语表/代码事实审计），供 init/log/plan/start/fast 段零自动检索注入。**去参数化**——目标工程与动作（全量/增量/新增）由自然语言识别。**不创建工单目录、不写工单 metadata、不参与步骤1~6推进**（详见 [steps/doc.md](steps/doc.md)） | 否（写全局 `project_docs/`） |
 | `/icode status` | **只读**：查当前工单状态（含 `mode` 字段 + 全局索引工单数，不创建目录/不写文件） | 否 |
 
 > **`/icode start` / `/icode plan` / `/icode fast` 的目录复用规则**：启动时检查最新 `.icode_output/.icode_output_N/` 目录：
@@ -73,14 +74,14 @@ description: 端到端编码工作流（步骤 0~6，含可选需求初稿步骤
 /icode audit                           # 步骤6
 
 # 方式C：先讨论需求再进入流程（推荐用于需求不明确的场景）
-/icode init 录制 point_cloud / lidar_imu 转包       # 步骤0：起一稿，进入对话
+/icode init 录制传感器数据转包              # 步骤0：起一稿，进入对话
 # ... 多轮对话补充需求，文档 00_init.md 每轮都被增量更新 ...
 /icode start                             # 无参→检测到 init 入口态，会询问"复用/新建"，选复用则把 00_init.md 作需求输入，进入步骤1→6
 # 或：
 /icode plan                            # 无参→同上询问，选复用则仅执行步骤1
 
 # 方式D：从 bug 日志分析切入修复（先查根因，再修复）
-/icode log ~/work/log/回充异常 "退桩后不旋转"      # 入口：分析日志根因，产出 log_analysis.md + 修复需求 00_init.md
+/icode log ~/work/log/服务异常 "启动后无响应"      # 入口：分析日志根因，产出 log_analysis.md + 修复需求 00_init.md
 # ... 对抗分析收敛后，根因确定；若质疑可继续对话重跑被质疑分支 ...
 /icode start                             # 无参→检测到 log_done 入口态，会询问"复用/新建"，选复用则把 00_init.md（修复需求）作输入，进入步骤1→6
 # 或：
@@ -99,6 +100,17 @@ description: 端到端编码工作流（步骤 0~6，含可选需求初稿步骤
 #    - 依赖 plan+1 轮 review+Reverse 单阶段+audit 四道关卡
 #    - 复杂需求（跨模块/新架构/安全敏感）建议改用 /icode start 全流程
 # 产物：01_plan.md, 02_review.md, 03_plan_final.md, 05_deepcheck.md, 06_audit.md（与 full 模式结构对齐）
+```
+
+```bash
+# 方式F：工程级知识库生成（doc 步骤，独立于 1~6 流程，任意时刻可跑）
+/icode doc                              # 无描述→全局扫描：列各工程知识库 stale 状态 + 建议动作
+/icode doc myproject                    # 检查该工程更新（增量优先：git diff 命中章节才重生成）
+/icode doc 重新生成 myproject           # 全量重生成（触发确认门：检测手动编辑，警告后才覆盖）
+/icode doc myproject 加 feature_xxx     # 新增章节（十位桶自动编号）
+# 产物：~/.claude/icode_data/project_docs/<project_id>/*.md（章节自带身份证：前 50 行四块）
+# 不创建工单目录、不写工单 metadata、不参与步骤1~6推进
+# 生成后，后续 /icode init|log|plan|start|fast 启动时段零自动检索注入相关章节（无需手动告知参考文档）
 ```
 
 ## 通用规则
@@ -258,6 +270,12 @@ ICODE_OUT_DIR=".icode_output/.icode_output_${LAST}"
 
 ### 历史检索复用（跨工程/跨工单借鉴）
 
+> **检索复用两源**（init/log/plan/start/fast 启动时并行检索，候选合并排序注入，最相关者胜）：
+>
+> - **源1·历史工单**（本段）：跨工单借鉴相似需求的 ADR/风险/根因/要点，详见下文
+> - **源2·工程文档（段零）**：当前工程 `~/.claude/icode_data/project_docs/<project_id>/` 知识库（`/icode doc` 生成），段零只读章节前 50 行粗筛、命中按 `[小节锚点]` 定点读小节。详见 [references/dir_and_metadata.md](references/dir_and_metadata.md)「段零·工程文档检索」段 + [references/doc_template.md](references/doc_template.md)
+> - **防重复注入**（两源共用）：`{ICODE_OUT_DIR}/_inject_cache.json` 按 `(source, ref_id, slice)` 三元组去重，历史源 `hit_count` 同目录内同 ticket 只续期一次。详见 [references/dir_and_metadata.md](references/dir_and_metadata.md)「注入缓存机制」段
+
 **痛点**：每次 `/icode` 都是冷启动，过往相似需求的计划/决策/踩坑无法被新需求复用。本机制在不破坏工程隔离、不撑爆上下文的前提下，让新需求能主动检索历史相似工单并定点注入参考。
 
 **全局索引**（不污染任何工程，不放技能目录）：
@@ -282,7 +300,7 @@ ICODE_OUT_DIR=".icode_output/.icode_output_${LAST}"
 - 步骤1 写完 `01_plan.md` 后：刷新 `requirement_summary`（基于完整计划）+ `has_plan=true`；**常规新建目录首跑时**（跳过步骤0）在此首次生成 `ticket_id` 并回填 metadata、首次写入索引条目（`has_00_init=false`、`keywords`（≤8个，从计划技术栈提炼，不得为空）、`last_used_at=当前`、`hit_count=0`、`stale=false`），**写后执行LRU淘汰 + 主动 stale 扫描**
 - 步骤6 终审完成后：刷新 `status=completed`，`requirement_summary` 若与最终交付显著偏差则基于最终成果刷新
 
-**检索注入流程**（`/icode init`、`/icode log`、`/icode plan`、`/icode start` 共用检索，分流注入）：
+**检索注入流程**（`/icode init`、`/icode log`、`/icode plan`、`/icode start`、`/icode fast` 共用检索，分流注入；段零工程文档候选与本流程候选合并排序后统一注入，不分来源）：
 
 1. **检索阶段·两段式**（强制思考**之前**；`/icode init`/`/icode log` 在建目录后检索，`/icode plan`/`/icode start` 在目录管理+确定需求来源后检索——确保用完整需求做相关性判断）：
 
@@ -298,7 +316,9 @@ ICODE_OUT_DIR=".icode_output/.icode_output_${LAST}"
 
    **命中续期**：两道校验均通过的工单，**原子同步更新** `last_used_at`=当前时间、`hit_count`+=1，写回 index.json（两字段必须同一次写回，不得只更其一——详见 [references/dir_and_metadata.md](references/dir_and_metadata.md)「续期（校验通过才续期）·原子同步」）。`stale=true` 的工单不注入不续期。
 
-3. **注入阶段·top-N 动态梯度**（按命令分流，N 由相关性梯度决定而非固定值）：
+   **续期去重**（防 hit_count 虚高）：续期前查 `{ICODE_OUT_DIR}/_inject_cache.json`，若本工单目录已续期过该历史工单（`source=history AND ref_id=该 ticket` 任一记录）则不再 `+1`（新 slice 仍注入）。详见 [references/dir_and_metadata.md](references/dir_and_metadata.md)「注入缓存机制·续期去重」段
+
+3. **注入阶段·top-N 动态梯度**（按命令分流，N 由相关性梯度决定；**注入前查 `{ICODE_OUT_DIR}/_inject_cache.json` 去重**——按 `(source, ref_id, slice)` 三元组查，已注入的 slice 跳过。历史源 `(history, ticket, <slice>)`、段零 `(project_doc, 章节文件, section:<file>)`。详见 [references/dir_and_metadata.md](references/dir_and_metadata.md)「注入缓存机制·去重规则」段）：
 
    - **强相关**（精读分数 ≥8）：全注入，上限 2 条
    - **弱相关**（精读分数 5~7）：在强相关之外再注 ≤1 条最相关的作"边缘参考"
@@ -335,7 +355,7 @@ ICODE_OUT_DIR=".icode_output/.icode_output_${LAST}"
 
 - **Git 安全**：禁止执行任何 Git 危险操作（`git reset --hard`、`git push --force` 等），**也禁止 `git commit` 和 `git push`**
 - **`.icode_output/` 父目录及其下的 `.icode_output_N/` 目录无需用户确认**：该目录下创建/写入/修改 `.md`/`.json`/`.log` 文件均为安全操作
-- **工程污染防护**：`.icode_output/` 是 icode 产物目录，建议在工程 `.gitignore` 中加入 `.icode_output/`，避免产物误提交；icode 本身**不自动修改工程的 `.gitignore`**（工程配置由用户掌控）。历史检索的全局索引位于 `~/.claude/icode_data/`，不在任何工程内，无污染风险
+- **工程污染防护**：`.icode_output/` 是 icode 产物目录，建议在工程 `.gitignore` 中加入 `.icode_output/`，避免产物误提交；icode 本身**不自动修改工程的 `.gitignore`**（工程配置由用户掌控）。历史检索的全局索引位于 `~/.claude/icode_data/`，不在任何工程内，无污染风险；`/icode doc` 的工程文档库位于 `~/.claude/icode_data/project_docs/`，同样不在任何工程内、不写工程内任何文件（用户工程内已有 `doc/workflows/` 等历史文档时，忽略不读取不迁移不删除，从零生成到全局）
 - **跨会话恢复**：运行 `ls -d .icode_output/.icode_output_*` 确认目录后，直接调用对应步骤即可
 - **中断恢复**：重新执行某步骤可覆盖该步骤输出
 
@@ -355,6 +375,7 @@ ICODE_OUT_DIR=".icode_output/.icode_output_${LAST}"
 | 5 | `deepcheck` | [steps/05_deepcheck.md](steps/05_deepcheck.md) |
 | 6 | `audit` | [steps/06_audit.md](steps/06_audit.md) |
 | 7 | `readme` | [steps/07_readme.md](steps/07_readme.md) |
+| doc | `doc` | [steps/doc.md](steps/doc.md) |
 | - | `status` | [steps/status.md](steps/status.md) |
 
 **执行步骤时，必须先读取对应的 `steps/XX_*.md` 文件，按其中的详细指令执行。**
@@ -368,4 +389,5 @@ ICODE_OUT_DIR=".icode_output/.icode_output_${LAST}"
 | [references/thinking.md](references/thinking.md) | 强制思考前置（ultrathink/MCP/降级文字块/各步子项） | 所有 step |
 | [references/anti_laziness.md](references/anti_laziness.md) | 反偷懒约束（16条偷懒行为+合规要求+references必读+确认行） | 所有 step |
 | [references/adversarial.md](references/adversarial.md) | 对抗分析模式（3质疑者/裁决优先级/诚实降级/证据回指） | 02_review / log |
-| [references/dir_and_metadata.md](references/dir_and_metadata.md) | 目录管理 + ticket_id 生成 + 全局索引写入（含LRU淘汰） + metadata 模板 | init / log / plan |
+| [references/dir_and_metadata.md](references/dir_and_metadata.md) | 目录管理 + ticket_id 生成 + 全局索引写入（含LRU淘汰） + metadata 模板 + **注入缓存机制（防重复注入，两源共用）** + **project_docs 工程文档库 + 段零检索** | init / log / plan / start / fast / doc |
+| [references/doc_template.md](references/doc_template.md) | icode doc 章节模板：前 50 行四块结构（项目元信息/KEYS/简要说明/目录）+ 十位桶编号 + 自适应 grep 关键词表 + 99 章审计策略 | doc |

@@ -259,3 +259,128 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
   - **fast→full 升级**：fast 工单上用户主动跑 `/icode review 5` 想做更深度审查时，**参数 N 覆盖 mode**（意图明确优先于工单模式），按 full 模式跑 N 轮+对抗（**此场景下 fast 的 `param_max_rounds` 忽略被绕开**——用户用参数显式表达升级意图，参数优先级最高）
   - **full→fast 降级**：不允许——单步命令不强制按 fast 模式执行（用户若想走 fast 应改用 `/icode fast` 重启链路，而不是在 full 工单上强制 fast 降级）
   - 单步命令读 mode 字段只用于 **状态显示**（如 `▶ 步骤2 检测到 fast 模式，但 N=5 显式升级，按 5 轮执行`），不强制降级
+
+## 注入缓存机制（防重复注入，两源共用）
+
+> 本机制解决「同一开发链路内重复注入同一来源的同一信息切片」问题。**历史检索复用（现有）**和**段零工程文档检索（icode doc 新增）**共用此缓存。定义在此处一处，五入口（init/log/plan/start/fast）统一引用。
+
+### 设计动机
+
+五入口（init/log/plan/start/fast）启动时都会触发检索注入，但一次开发链路常跨多命令（如 init→start 复用同目录），同一历史工单/文档章节会被多次命中，导致 **token 浪费**（重复注入同一切片）+ **hit_count 扭曲**（同目录多次续期虚高，扭曲 `hit_count >= 10` 永久保留判定）。
+
+### 缓存文件
+
+`{ICODE_OUT_DIR}/_inject_cache.json`（工单目录内，与 `.ico_metadata.json` 平级，跟随工单生命周期）：
+
+```json
+{
+  "ticket_id": "demo-5",
+  "injections": [
+    {
+      "source": "history",
+      "ref_id": "demo-3",
+      "slice": "requirement_points",
+      "by_cmd": "init",
+      "at": "2026-07-06T15:30:00Z"
+    },
+    {
+      "source": "project_doc",
+      "ref_id": "07_messages_and_ipc.md",
+      "slice": "section:07_messages_and_ipc.md",
+      "by_cmd": "plan",
+      "at": "2026-07-06T15:35:00Z"
+    }
+  ]
+}
+```
+
+### slice 取值词表（两源统一）
+
+| source | slice | 注入命令 | 含义 |
+|--------|-------|---------|------|
+| `history` | `requirement_points` | init | 需求要点清单 |
+| `history` | `adr_risks` | plan / start / fast | ADR + 风险评估章节 |
+| `history` | `root_cause_evidence` | log | 根因结论 + 决定性证据 |
+| `project_doc` | `section:<file>` | init/log/plan/start/fast | 工程文档章节（可细化到小节锚点 `section:<file>#<anchor>`） |
+
+### 去重规则（核心）
+
+**注入前查缓存**——对每个准备注入的项，按 `(source, ref_id, slice)` 三元组查 `injections` 数组：
+
+- **三元组已存在** → **跳过注入**（不重复进思考输入）+ **跳过续期**（历史源不重复 `+1` hit_count）
+- **三元组不存在** → 注入 + 追加一条缓存记录
+
+**不同 slice 允许共存**（不是 bug，是特性）：
+
+- init 注 `(history, demo-3, requirement_points)`，后续 start 注 `(history, demo-3, adr_risks)`——两个不同 slice，各自注入一次，合理
+- 这是"一次开发链路里不同步骤注入同一工单的不同信息切片"的正常场景
+
+### 续期去重（hit_count 防重复 +1）
+
+**历史源**命中才续期 `hit_count`（工程文档源无续期概念）。同一工单目录内，对同一历史 `ticket_id` 的续期**只算一次**：
+
+- **判定依据**：缓存 `injections` 中是否已有 `source == "history" AND ref_id == <该 ticket_id>` 的**任一**记录
+- **已有** → 已续期过，本次命中不再 `+1`（但若 slice 是新的，仍允许注入该新 slice，只是不续期）
+- **没有** → 首次命中，注入 + 续期（`hit_count += 1` + `last_used_at` 原子同步）+ 写缓存
+
+**跨工单目录**命中同一历史工单 → 算新的续期（不同 `_inject_cache.json`，各自首次命中 `+1`）。符合"独立开发才算多次复用"。
+
+### 生命周期与崩溃恢复
+
+- **跟随工单目录 + append-only**：`.icode_output_N/` 删除→缓存消失；每条注入立即写盘，崩溃不丢、重启不重复注入
+- **与续跑机制正交**：不读 `*_in_progress`，不影响步骤 2/5 断点续跑
+- **向后兼容**：旧工单无缓存→首次检索创建空缓存 `{"ticket_id":"<本工单>","injections":[]}`（ticket_id 读 metadata，暂无填空串）
+
+### 工程污染防护
+
+缓存只在 `.icode_output_N/` 内（不进工程根/git，建议 `.gitignore` 已含 `.icode_output/`），与 `.ico_metadata.json` 平级独立，不污染检索字段。
+
+## project_docs 工程文档库（icode doc 步骤用）
+
+> `/icode doc` 生成的工程级知识库。**零配置、零状态文件、零索引文件**——只有章节 .md 文件，每个自带身份证（前 50 行三合一）。详见 [steps/doc.md](../steps/doc.md) 与 [references/doc_template.md](doc_template.md)。
+
+### 目录布局
+
+```text
+~/.claude/icode_data/project_docs/
+└── <project_id>/                    # project_id = basename(git rev-parse --show-toplevel)
+    ├── 00_overview.md               # 永远首章，元信息块含 generation_commit/submodules
+    ├── 10_architecture.md
+    ├── 20_<module>_<topic>.md       # 十位桶：20-29 模块章节，留空隙可插入
+    ├── 30_<module>_<topic>.md       # 第二个模块桶
+    ├── ...
+    ├── 90_glossary.md
+    └── 99_code_facts_audit.md       # 永远末章
+```
+
+### project_id 语义
+
+- `project_id` = `basename($(git rev-parse --show-toplevel))`——**永远等于 git 仓库根 basename**，不区分子目录
+- 子目录（如 `myrepo/module_a/`）是同一 project 下的**章节模块**（章节名带模块前缀 `20_module_a_overview.md`），不是独立 project
+- **冲突处理**：若 `~/.claude/icode_data/project_docs/<basename>/` 已存在且其 `00_overview.md` 元信息块的 `project_path` 与当前 git_root 不同 → 自动追加短 hash 后缀（如 `myproject__a3f2`），AI 靠元信息块的 git remote 区分同名工程
+- **零配置**：不引入 `.icode_doc_config.json` / `.aliases` 等任何配置文件，工程名等可配信息全在章节元信息块
+
+### 章节前 50 行三合一（自带身份证）
+
+每个章节前 50 行承载项目元信息块（工程名/git/提交/子模块/产品线/模块/时间）+ KEYS 块（检索词带 `[小节锚点]`，段零按小节注入不灌全章）+ 简要说明（50~100 字），完整结构见 [references/doc_template.md](doc_template.md)。**元信息块替代 config + state + index 三个文件**——文件系统即数据库（`ls` 枚举、元信息查状态、KEYS 做检索）。
+
+### 段零·工程文档检索（init/log/plan/start/fast 共用）
+
+五入口启动时，与历史检索复用并行做段零检索，**候选合并后统一排序**注入（不分来源，最相关者胜）：
+
+```text
+1. cwd → git rev-parse --show-toplevel → project_id = basename
+2. ls ~/.claude/icode_data/project_docs/<project_id>/*.md
+   ├─ 不存在 → 段零零命中（输出一行 ℹ️ 提示"本工程尚未生成知识库，可运行 /icode doc"，不阻塞，不写缓存）
+   └─ 存在 → 逐章读前 50 行 → KEYS 匹配 + 简要说明语义打分 → 段零候选集
+3. 合并排序：段零候选 + 历史检索段一/二候选 → 统一按相关度排序 → top-N（强相关≤2 + 弱相关≤1，总量≤3 条）
+4. 对每个 top-N 项：
+   - 查 _inject_cache.json，若 (project_doc, <file>, section:<file>) 已存在 → 跳过
+   - 否则：按 KEYS 的 [小节锚点] 定点读对应小节（不读全章，≤1K token/条）→ 注入思考输入「历史参考」节 → 写缓存
+```
+
+**防重复注入**：与历史源共用 `_inject_cache.json`（见上节），跨命令不重复注入同一章节。
+
+**stale 检测**（注入前被动校验，控 token）：读 `00_overview.md` 元信息块的 `generation_commit` + submodule commits，与 `git rev-parse HEAD` + `git submodule status` 对比；HEAD 变更且 `git diff <commit>..HEAD` 命中该章 KEYS"文件位置" → 标 stale，注入时附警告"⚠️ 此章节基于旧 commit，可能过时"。
+
+**工程隔离**：段零严格按当前 cwd 的 project_id 检索，**不跨 project 注入**（projectA 工单不注入 projectB 的文档；姊妹工程引用走章节正文内的文字描述，不自动跨库——跨库检索留作 v2）
