@@ -1,4 +1,4 @@
-# ICode — End-to-End Coding Workflow (Step 0 + 1~6, with log root-cause analysis entry)
+# ICode — End-to-End Coding Workflow (Step 0 + 1~6, with log root-cause analysis entry + project-level knowledge base)
 
 ICode is a Claude Code Skill that breaks down the journey from requirement to delivery into strict steps. Each step can be invoked independently, allowing you to switch models between steps.
 
@@ -12,6 +12,9 @@ ICode is a Claude Code Skill that breaks down the journey from requirement to de
 - **Dual modes**: `/icode start` full flow (multi-round review + adversarial verification) / `/icode fast` trimmed (1 round, no adversarial, ~65% cost); auto-chains steps 1→6
 - **Anti-laziness quality gates**: triple-phase deepcheck (Reverse/Fixed/Free), plan assertion verification, ADR decision records, adversarial verification (independent skeptics — insufficient evidence is never confirmed, honest downgrade over fake consensus)
 - **Cross-project history retrieval**: init/log/plan/start auto-search similar past tickets and inject by command; references stay in-session, never pollute project artifacts
+- **Project-level knowledge base** (`/icode doc`): generates a global project knowledge base; later tickets auto-retrieve and inject — no need to manually tell it which docs to reference
+- **Anti-duplicate injection**: history retrieval and project-doc retrieval share a cache for de-duplication, avoiding repeated injection within one dev chain
+- **Anti-laziness hardening**: Steps 5/6 enforce a Read confirmation line + file:line evidence + a self-check checklist; Step 2 adversarial enforces Agent ID
 - **Two optional entries**: `/icode log` log root-cause analysis (baseline check first, then adversarial analysis; domain-agnostic) → fix requirement; `/icode init` multi-turn requirement draft → `00_init.md`
 - **Outputs & state management**: unified under `.icode_output/.icode_output_N/`, `.ico_metadata.json` tracks status/code files, supports cross-session recovery and resumable runs
 
@@ -41,13 +44,19 @@ git clone <repo-url> ~/.claude/skills/icode
 # Trimmed full flow (fast mode: single-file/small changes; ~65% of full-flow cost)
 /icode fast "Add isqrt function to calc.c"          # plan→review(1 round, no adversarial)→merge→code→deepcheck(Reverse only)→audit
 
+# Project-level knowledge base (standalone step, runs anytime, not part of steps 1–6)
+/icode doc                              # No args → scan all project knowledge bases for staleness
+/icode doc myproject                    # Check this project for updates (incremental-first: only regen chapters hit by git diff)
+/icode doc regenerate myproject         # Full regen (triggers confirmation gate, protects manual edits)
+# After generation, later /icode init|log|plan|start|fast auto-retrieves and injects relevant chapters
+
 # When the requirement is unclear: discuss first, then enter the flow
-/icode init Record point_cloud / lidar_imu re-bag    # Step 0: kick-off draft + dialogue
+/icode init Record sensor data re-bag    # Step 0: kick-off draft + dialogue
 # ... multi-turn discussion; 00_init.md is updated incrementally each round ...
 /icode start                                          # No args → detects init entry state, asks "reuse/new"; reuse takes 00_init.md as input → steps 1–6
 
 # From a bug log: analyze root cause first, then fix
-/icode log ~/work/log/recharge-anomaly "no rotation after undocking"   # Entry: analyze log root cause, outputs log_analysis.md + fix requirement 00_init.md
+/icode log ~/work/log/service-anomaly "no response after startup"   # Entry: analyze log root cause, outputs log_analysis.md + fix requirement 00_init.md
 # ... after adversarial analysis converges; if you doubt it, keep talking to re-run the disputed branch ...
 /icode start                                          # No args → detects log_done entry state, asks "reuse/new"; reuse takes 00_init.md (fix requirement) as input → steps 1–6
 ```
@@ -68,6 +77,7 @@ git clone <repo-url> ~/.claude/skills/icode
 | `/icode deepcheck` | Step 5 only: three-phase progressive check (Reverse → Fixed → Free; fast mode runs Reverse only) | No |
 | `/icode audit` | Step 6 only: final audit + fix (produces `06_audit.md`) | No |
 | `/icode readme` | Optional Step 7: generate delivery report (self-contained summary, dynamic filename, smart feature/bugfix template) | No |
+| `/icode doc [natural language]` | Project-level knowledge base (standalone step): scans code features to generate global knowledge-base chapters; auto-retrieved/injected by init/log/plan/start/fast phase-zero. No ticket dir, not part of steps 1–6 | No (writes global `project_docs/`) |
 | `/icode status` | Read-only: query current ticket status (no dir/file created) | No |
 
 > When `/icode start` / `/icode plan` / `/icode fast` is launched and the latest `.icode_output/.icode_output_N/` is in entry state (status `init_in_progress` or `log_done`, i.e. init/log produced `00_init.md` but hasn't entered Step 1), it **asks the user "reuse/new"** — reuse takes `00_init.md` as input (from log, also reads `log_analysis.md` as background); non-entry state with args creates fresh.

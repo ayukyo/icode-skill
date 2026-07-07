@@ -28,7 +28,7 @@
 ```markdown
 # {需求标题} — 交付报告
 
-**代码仓库**：`{project_path 绝对路径}`（如 `/home/orbbec/git/icode-skill/demo`）
+**代码仓库**：`{project_path 绝对路径}`（如 `/home/user/myproject`）
 
 **错误码体系**（首次提到错误码时列出，方便不熟悉 calc.h 的读者）：
 - `CALC_OK` (0)：成功
