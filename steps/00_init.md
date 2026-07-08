@@ -55,7 +55,7 @@
    - `project_path` = 当前工程根绝对路径
    - `out_dir` = `.icode_output/.icode_output_{N}`
    - `requirement_summary` / `keywords` 取自步骤7 metadata；`requirement_points` 暂为空数组
-   - `has_00_init` = true，`has_plan` = false，`status` = `init_in_progress`，`created_at` = 当前时间
+   - `has_00_init` = true，`has_plan` = false，`status` = `init_in_progress`，`created_at` = 当前时间，`last_used_at` = 当前时间（首次写入=created_at），`hit_count` = 0，`stale` = false
    - 写回 index.json，同时置 metadata `indexed = true`、`ticket_id = {生成的 ticket_id}`（持久化 ticket_id，供后续步骤检索时排除当前工单，避免反推）
 9. 提示用户：可继续对话补充需求，文档会随对话自动更新；讨论完成后运行 `/icode start` 或 `/icode plan` 进入步骤1。**若想另起炉灶讨论别的需求**，再敲 `/icode init`（会新建另一个目录）。
 

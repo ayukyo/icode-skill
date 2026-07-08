@@ -68,7 +68,7 @@ fi
   "code_files": [],
   "requirement_summary": "{基于完整计划的一句话摘要，≤100 token}",
   "requirement_points": [],
-  "keywords": [],
+  "keywords": "{≤8个技术关键词数组，从需求/计划技术栈提炼，不得为空--空 keywords 工单无法被段一粗筛命中}",
   "indexed": false,
   "ticket_id": "{写入索引后回填}",
   "mode": "fast",

@@ -15,7 +15,7 @@
 - 工程简名：`project_path` 的 basename
 - 需求关键词：从 requirement 提取核心动词+对象（如"增加取模和幂运算"→`modulo_power`，"溢出修复"→`overflow_fix`）
 - 全小写 + 下划线分隔
-- 示例：`calc_modulo_power.md`、`calc_power_overflow_fix.md`、`calc_abs_function.md`
+- 示例：`{工程简名}_modulo_power.md`、`{工程简名}_overflow_fix.md`、`{工程简名}_abs_function.md`
 
 ## 智能模板选择
 
@@ -30,21 +30,21 @@
 
 **代码仓库**：`{project_path 绝对路径}`（如 `/home/user/myproject`）
 
-**错误码体系**（首次提到错误码时列出，方便不熟悉 calc.h 的读者）：
-- `CALC_OK` (0)：成功
-- `CALC_ERR_DIV_ZERO` (1)：除零
-- `CALC_ERR_INVALID` (2)：参数错
-- `CALC_ERR_OVERFLOW` (3)：整数溢出
-- `CALC_ERR_SYNTAX` (4)：语法错误（新增）
+**错误码体系**（首次提到错误码时列出，方便不熟悉本工程头文件的读者）：
+- `{ERR_OK}` (0)：成功
+- `{ERR_DIV_ZERO}` (1)：除零
+- `{ERR_INVALID}` (2)：参数错
+- `{ERR_OVERFLOW}` (3)：整数溢出
+- `{ERR_SYNTAX}` (4)：语法错误（新增）
 
 ## 1. 需求概述
 {原始需求 + 背景目标 + 与现有函数的差异点（一句话）。从 00_init.md/命令行参数提取，自包含不引用内部文件}
 
 **与现有函数的差异点**（必填，避免与历史 readme 内容雷同）：
-{一句话说明"新函数与 calc_* 现有函数的本质差异"，如：
-- calc_lcm 复用 calc_gcd 而非重写 GCD
-- calc_eval 是首个字符串解析入口
-- calc_isqrt 与 calc_sqrt 等价但走 calc_ 前缀命名}
+{一句话说明"新函数与本工程现有函数的本质差异"，如：
+- 新 lcm 复用现有 gcd 而非重写 GCD
+- 新 eval 是首个字符串解析入口
+- 新 isqrt 与现有 sqrt 等价但走统一前缀命名}
 
 ## 2. 设计方案
 {架构设计 + 关键接口签名。从 03_plan_final.md 提取要点，自包含}
@@ -87,14 +87,14 @@
 
 **实际运行输出**（必含，5-10 行实际 stdout/stderr）：
 ```
-$ ./calc_demo
-{gcd(12, 8) = 4 (rc=0)
-gcd(0, 0) = 0 (rc=0)
+$ ./{demo可执行文件}
+{func_a(12, 8) = 4 (rc=0)
+func_a(0, 0) = 0 (rc=0)
 ...}
 ```
 
 **测试用例位置**（第三人能找到测试代码）：
-`main.c` 末尾，可用 `grep "{函数名}" main.c` 定位
+`{测试入口文件}` 末尾，可用 `grep "{函数名}" {测试入口文件}` 定位
 
 ## 7. 已知限制
 {残留风险 + 待验证假设 + 不在本次修复范围的相关问题。从 06_audit.md 提取，自包含}
@@ -108,7 +108,7 @@ gcd(0, 0) = 0 (rc=0)
 > - **"审查与复检"对第三人无价值**：改写为"安全性与测试覆盖"
 > - **"偏差与修复"无内容**：重命名为"实现要点"，无偏差时写亮点
 > - **新功能 readme 内容雷同**：1 需求概述必含"与现有函数的差异点"一句话
-> - **BUG 修复 readme 文件名无原函数关联**：文件名用 `{原函数}_{bug 类型}.md`（如 `calc_eval_parse_number_overflow_fix.md`）
+> - **BUG 修复 readme 文件名无原函数关联**：文件名用 `{原函数}_{bug 类型}.md`（如 `{工程简名}_parse_number_overflow_fix.md`）
 
 ### 查BUG模板（方式D，含 log 步骤）
 
@@ -116,14 +116,14 @@ gcd(0, 0) = 0 (rc=0)
 # {BUG标题} — 交付报告
 
 **代码仓库**：`{project_path 绝对路径}`
-**受影响函数**：`{原函数名}`（如 `parse_number` 是 `calc_eval` 的子函数）
+**受影响函数**：`{原函数名}`（如 `parse_number` 是 `eval` 的子函数）
 
 **错误码体系**（首次提到时列出）：
-- `CALC_OK` (0)：成功
-- `CALC_ERR_DIV_ZERO` (1)：除零
-- `CALC_ERR_INVALID` (2)：参数错
-- `CALC_ERR_OVERFLOW` (3)：整数溢出
-- `CALC_ERR_SYNTAX` (4)：语法错误
+- `{ERR_OK}` (0)：成功
+- `{ERR_DIV_ZERO}` (1)：除零
+- `{ERR_INVALID}` (2)：参数错
+- `{ERR_OVERFLOW}` (3)：整数溢出
+- `{ERR_SYNTAX}` (4)：语法错误
 
 ## 1. BUG概述
 {症状 + 影响 + 日志来源 + 触发条件（一句话）。从 log_analysis.md 提取，自包含}
@@ -136,7 +136,7 @@ gcd(0, 0) = 0 (rc=0)
 {根因假设 + 对抗验证 + 决定性证据。从 log_analysis.md 提取，自包含}
 
 **决定性证据**（必填，必含代码行号 + 实际运行对比）：
-- 代码位置：file:line（如 `calc.c:380`）
+- 代码位置：file:line（如 `src/module.c:380`）
 - 实际运行：{实测值 vs 预期值，明确反差}
 
 ## 3. 修复方案
@@ -177,9 +177,9 @@ gcd(0, 0) = 0 (rc=0)
 
 **实际运行输出**（必填，5-10 行实测 stdout）：
 ```
-$ ./calc_demo
-{calc_eval("2147483647") = 2147483647 (rc=0, expect INT_MAX OK)
-calc_eval("2147483648") rc=3 (expect 3 OVERFLOW)
+$ ./{demo可执行文件}
+{eval("2147483647") = 2147483647 (rc=0, expect INT_MAX OK)
+eval("2147483648") rc=3 (expect 3 OVERFLOW)
 ...}
 ```
 
@@ -190,7 +190,7 @@ calc_eval("2147483648") rc=3 (expect 3 OVERFLOW)
 {残余风险 + 待验证 + 不在本次修复范围的相关问题。从 06_audit.md 提取，自包含}
 
 **不在本次修复范围的相关问题**（必填，避免与 BUG 概述重复）：
-{如"INT_MIN 字面量 `-2147483648` 仍会触发 OVERFLOW（已在 parse_factor 防御，但本 BUG 修复未涉及该路径）"}
+{如"INT_MIN 字面量 `-2147483648` 仍会触发 OVERFLOW（已在解析入口防御，但本 BUG 修复未涉及该路径）"}
 ```
 
 ## 自包含约束（重要）

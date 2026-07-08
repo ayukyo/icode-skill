@@ -93,6 +93,8 @@ Read `~/.claude/icode_data/index.json`（不存在则创建 `{"version":"1","upd
 
 ## 检索命中续期 + 过时校验（检索阶段执行）
 
+> **⚠️ index.json 读取方式（防与 DOC 混淆）**：本段 index.json 指**全局工单索引** `~/.claude/icode_data/index.json`，是完整 JSON 文件，必须用 `json.load` **整体解析 `tickets` 数组全量读**，禁止按行截断（如只读前 50 行--12 条工单约占 350 行，前 50 行仅覆盖 2 条，会漏掉其余工单导致检索失真）。「前 50 行」规则**仅适用于** `project_docs/<id>/*.md` 章节（见下文「段零·工程文档检索」段步骤 2），两者不可混用。
+
 检索阶段（init/log/plan/start 启动时扫 index.json）采用**两段式检索**（详见 SKILL.md「检索注入流程」）——段一 keywords Jaccard 粗筛取 ≤10 候选（零 token，排除 stale/当前 ticket_id），段二只把候选 keywords+requirement_points 喂 LLM 精读打分选 top-N 命中（N 由梯度决定）。对 top-N 命中工单，**先做过时校验，再续期**：
 
 ### 项目路径校验（防注入已删除工程）
@@ -212,7 +214,7 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
   "requirement_points": [],
   "keywords": "{≤8个技术关键词数组}",
   "indexed": false,
-  "ticket_id": "{步骤5 刷新索引时回填}",
+  "ticket_id": "{刷新全局索引时回填}",
   "mode": "full",
   "max_rounds": 3
 }

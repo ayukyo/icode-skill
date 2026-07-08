@@ -92,7 +92,7 @@ description: 端到端编码工作流（步骤 0~6，含可选需求初稿步骤
 
 ```bash
 # 方式E：精简全流程（fast 模式，单文件/小改动场景）
-/icode fast 给 calc.c 增加 isqrt 函数                  # 一键串联：plan→review(1轮无对抗)→merge→code→deepcheck(Reverse)→audit
+/icode fast 给工具模块增加 clamp 函数                  # 一键串联：plan→review(1轮无对抗)→merge→code→deepcheck(Reverse)→audit
 # 入口警告自动打印：
 # ⚠️ /icode fast 模式：
 #    - 步骤2 review 固定 1 轮无对抗验证
@@ -304,7 +304,7 @@ ICODE_OUT_DIR=".icode_output/.icode_output_${LAST}"
 
 1. **检索阶段·两段式**（强制思考**之前**；`/icode init`/`/icode log` 在建目录后检索，`/icode plan`/`/icode start` 在目录管理+确定需求来源后检索——确保用完整需求做相关性判断）：
 
-   **段一·粗筛（不进 LLM，纯计算，零 token 消耗）**：从当前需求/症状提炼关键词集 `K_new`，**先过滤** `stale=true` 与当前 `ticket_id`（不自我参考）——段一粗筛前**显式排除**（而非粗筛后再过滤），降低计算量；再与剩余 ticket 的 `keywords` 做集合交集，按 **Jaccard 相似度**（`|K_new ∩ K_ticket| / |K_new ∪ K_ticket|`）降序排列。取相似度 > 0 的前 **≤10 条**作为候选集（候选为 0 则直接零命中结束）。**关键词缺失的工单**（`keywords` 为空）在粗筛中无法被命中，故写索引时 `keywords` 不得为空（≤8 个技术词）。
+   **段一·粗筛（不进 LLM，纯计算，零 token 消耗）**：从当前需求/症状提炼关键词集 `K_new`，**先过滤** `stale=true` 与当前 `ticket_id`（不自我参考）——段一粗筛前**显式排除**（而非粗筛后再过滤），降低计算量；再与**全量 `tickets` 数组中**剩余 ticket 的 `keywords` 做集合交集（index.json 是完整 JSON，必须 `json.load` 整体解析全量读，禁止只读前 N 行--「前 50 行」仅适用于 `project_docs/*.md` 章节，见 [dir_and_metadata.md](references/dir_and_metadata.md)「段零·工程文档检索」段），按 **Jaccard 相似度**（`|K_new ∩ K_ticket| / |K_new ∪ K_ticket|`）降序排列。取相似度 > 0 的前 **≤10 条**作为候选集（候选为 0 则直接零命中结束）。**关键词缺失的工单**（`keywords` 为空）在粗筛中无法被命中，故写索引时 `keywords` 不得为空（≤8 个技术词）。
 
    > **为何先粗筛**：index.json 到 200 条上限时全量进上下文 ≈ 3.5 万 token，纯靠 LLM 现场扫全部 summary 会撑爆 context 且判断质量随条数下降。粗筛把 O(全部) 降到 O(候选集)，实测能圈出 ≤10 条强相关候选。
 
@@ -329,7 +329,7 @@ ICODE_OUT_DIR=".icode_output/.icode_output_${LAST}"
    | 命令 | 命中后注入内容 | 来源 | 体积上限 |
    |------|--------------|------|---------|
    | `/icode init` | 命中工单的 `requirement_points`（需求要点清单） | 读 metadata 或 `00_init.md`「3.新增需求点」 | ≤500 token/条 |
-   | `/icode plan` / `/icode start` | 命中工单的 **ADR 章节 + 风险评估章节** | 定点读 `01_plan.md` 对应章节（**不读全文**） | ≤1K token/条 |
+   | `/icode plan` / `/icode start` / `/icode fast` | 命中工单的 **ADR 章节 + 风险评估章节** | 定点读 `01_plan.md` 对应章节（**不读全文**） | ≤1K token/条 |
    | `/icode log` | 命中工单的 **根因结论 + 决定性证据** | 定点读 `log_analysis.md`「核心结论 + 决定性证据」章节（**不读全文**） | ≤800 token/条 |
 
 4. **注入形式**：历史参考作为主代理的**思考输入**，在强制思考文字块里加一节「历史参考」，影响后续产出质量。**零命中不注入，不强凑参考**。
@@ -337,7 +337,7 @@ ICODE_OUT_DIR=".icode_output/.icode_output_${LAST}"
 **防撑爆四道闸门**：
 - **索引体积**：全局索引单条只存摘要+要点+关键词，整体 <2K token
 - **粗筛控量**：两段式检索只把 ≤10 条候选集 keywords+requirement_points 喂 LLM（非全量），控 token
-- **注入数**：top-N 动态梯度，强相关≤3 + 弱相关≤1，全相关时上限 4 条
+- **注入数**：top-N 动态梯度，强相关≤2 + 弱相关≤1，全相关时上限 3 条（与段零工程文档候选合并后总量≤3 条一致，见 [dir_and_metadata.md](references/dir_and_metadata.md)「段零·工程文档检索」段步骤 4）
 - **注入体积**：init 注入要点 ≤500 token/条；plan 注入 ADR+风险 ≤1K token/条；log 注入根因+证据 ≤800 token/条；超大工单需深读时派子代理消化成摘要返回（隔离上下文）
 
 **工程污染防护**（重要）：

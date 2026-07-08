@@ -93,4 +93,5 @@
 ## 各步骤的分析对象
 
 - **步骤2 review**：分析对象 = 步骤2.5 逐维审查产出的 issue（步骤2.4 实证验证失败的 issue 例外，已有铁证直接 confirmed 无需对抗）
+- **步骤5 deepcheck**：分析对象 = Free 阶段 A6 深检/争议验证发现的 issue（必须独立 spawn 3 质疑者，详见 [05_deepcheck.md](../steps/05_deepcheck.md)「Free 阶段角度管理」段）
 - **入口 log**：分析对象 = 阶段2 现场还原后分析师提的根因假设 H

@@ -22,7 +22,7 @@
 已完成: {completed_steps 链路，如 log → 1 → 2 → 3 → 4}
 下一步: {根据续跑判定规则推断，如 "/icode deepcheck (步骤5复检)"}
 代码文件: {code_files 列表，无则"未编码"}
-索引工单: {全局索引 tickets 数} 条
+索引工单: {全局索引 tickets 数} 条（用 `json.load` 全量解析 `~/.claude/icode_data/index.json` 的 `tickets` 数组取长度，禁止按行截断--「前 50 行」仅适用于 project_docs 章节）
 ```
 
 **`status` → 中文说明映射**（与 SKILL.md「status 字段枚举」表一致）：
