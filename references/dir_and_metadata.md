@@ -355,10 +355,15 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
 
 ### project_id 语义
 
-- `project_id` = `basename($(git rev-parse --show-toplevel))`——**永远等于 git 仓库根 basename**，不区分子目录
+- **git-root 模式**（cwd 在 git 仓库内）：`project_id` = `basename($(git rev-parse --show-toplevel))`，不区分子目录
+- **`repo` 根模式**（cwd 不在 git 仓库但有 `.repo/manifest.xml`，如 Google `repo` 管理的多仓库项目）：`project_id` = `basename(从 cwd 向上找第一个含 .repo/ 的目录)`
 - 子目录（如 `myrepo/module_a/`）是同一 project 下的**章节模块**（章节名带模块前缀 `20_module_a_overview.md`），不是独立 project
 - **冲突处理**：若 `~/.claude/icode_data/project_docs/<basename>/` 已存在且其 `00_overview.md` 元信息块的 `project_path` 与当前 git_root 不同 → 自动追加短 hash 后缀（如 `myproject__a3f2`），AI 靠元信息块的 git remote 区分同名工程
-- **零配置**：不引入 `.icode_doc_config.json` / `.aliases` 等任何配置文件，工程名等可配信息全在章节元信息块
+- **零配置**：不引入任何配置文件，工程名等可配信息全在章节元信息块
+- **`resolve_project_id(cwd)` 算法**：
+  1. `git rev-parse --show-toplevel` 成功 → git-root 模式，返回 `(basename(git_root), "git-root", git_root)`
+  2. 否则从 cwd 向上逐级 `test -d $d/.repo`，首个命中 → repo-root 模式，返回 `(basename(repo_root), "repo-root", repo_root)`
+  3. 都失败 → 报错"请在 git 仓库或 repo 管理的项目内运行 /icode doc 或段零检索"
 
 ### 章节前 50 行三合一（自带身份证）
 
@@ -366,21 +371,153 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
 
 ### 段零·工程文档检索（init/log/plan/start/fast 共用）
 
-五入口启动时，与历史检索复用并行做段零检索，**候选合并后统一排序**注入（不分来源，最相关者胜）：
+五入口启动时，与历史检索复用并行做段零检索，**候选合并后统一排序**注入（不分来源，最相关者胜）。除工程自身章节（`project_docs/`）外，自动覆盖工程依赖的模块共享文档（`module_docs/`，按仓库+分支 key 跨工程共享，详见「module_docs 工程模块库」段）。
 
 ```text
-1. cwd → git rev-parse --show-toplevel → project_id = basename
+1. cwd → resolve_project_id(cwd) → (project_id, project_type)  # git-root 或 repo-root
 2. ls ~/.claude/icode_data/project_docs/<project_id>/*.md
    ├─ 不存在 → 段零零命中（输出一行 ℹ️ 提示"本工程尚未生成知识库，可运行 /icode doc"，不阻塞，不写缓存）
-   └─ 存在 → 逐章读前 50 行 → KEYS 匹配 + 简要说明语义打分 → 段零候选集
-3. 合并排序：段零候选 + 历史检索段一/二候选 → 统一按相关度排序 → top-N（强相关≤2 + 弱相关≤1，总量≤3 条）
-4. 对每个 top-N 项：
-   - 查 _inject_cache.json，若 (project_doc, <file>, section:<file>) 已存在 → 跳过
+   └─ 存在 → 逐章读前 50 行 → KEYS 匹配 + 简要说明语义打分 → project 候选集
+3. 读 project_docs/<project_id>/_meta.json → module_deps 列表
+   对每个 dep：ls ~/.claude/icode_data/module_docs/<dep.key>/*.md
+   ├─ 目录不存在或无 .md → 收集到「缺失模块」列表（末尾汇总警告），跳过该 dep
+   └─ 存在 → 读前 50 行 → KEYS 匹配 → module 候选集
+3.5 **反查父项目**（子仓库内工作时）：如果 cwd 在 git-root 模式 → 计算 `cwd_relative = realpath(cwd) 相对 realpath(.repo 所在目录)`（**注意：是相对 .repo 根，不是相对 git_root**——例如 cwd 在 `myproject/module_a/`、.repo 在 `myproject/.repo/` 时，cwd_relative = `module_a/`）→ 若 `.repo/manifest.xml` 存在且 `cwd_relative` 精确匹配或为某 `<project path>` 的子路径 → 该 manifest project 的"父 repo 根"=`.repo/` 所在目录；把父 project（repo-root）也纳入检索（读 `project_docs/<父 project_id>/_meta.json` + 章节），候选合并排序时一并参与打分（来源标签标「来源：project:父 project_id」）
+4. 合并排序：project 候选 + module 候选 + 反查父项目章节 + 历史检索段一/二候选 → 统一按相关度排序 → top-N（强相关≤2 + 弱相关≤1，总量≤3 条）
+5. 对每个 top-N 项：
+   - 查 _inject_cache.json → 已注入的同 slice 跳过
    - 否则：按 KEYS 的 [小节锚点] 定点读对应小节（不读全章，≤1K token/条）→ 注入思考输入「历史参考」节 → 写缓存
+   - 命中附来源标签：「来源：project:myproject」或「来源：module:module_a@main@a3f2b1c」
 ```
 
 **防重复注入**：与历史源共用 `_inject_cache.json`（见上节），跨命令不重复注入同一章节。
 
 **stale 检测**（注入前被动校验，控 token）：读 `00_overview.md` 元信息块的 `generation_commit` + submodule commits，与 `git rev-parse HEAD` + `git submodule status` 对比；HEAD 变更且 `git diff <commit>..HEAD` 命中该章 KEYS"文件位置" → 标 stale，注入时附警告"⚠️ 此章节基于旧 commit，可能过时"。
 
-**工程隔离**：段零严格按当前 cwd 的 project_id 检索，**不跨 project 注入**（projectA 工单不注入 projectB 的文档；姊妹工程引用走章节正文内的文字描述，不自动跨库——跨库检索留作 v2）
+**附加输出**（段零末尾汇总）：
+- ⚠️ **缺失模块警告**（若步骤 3 收集到「缺失模块」列表）：输出「工程引用了以下 module_docs 但不存在：\`{dep1.name}\`(\`{dep1.key}\`), \`{dep2.name}\`(\`{dep2.key}\`)... — 请检查是否已 /icode doc 生成，或工程 _meta.json.module_deps 是否写错 key」
+- ⚠️ **未生成模块警告**（若工程 `_meta.json.unresolved_modules` 非空）：输出「工程有 N 个未生成模块（拉取失败）：\`{name1}\`(\`{reason1}\`), \`{name2}\`(\`{reason2}\`)... — 子仓库代码本地化后重跑 /icode doc 时自动恢复」
+
+**工程隔离**：段零严格按当前 cwd 的 project_id 检索**工程自身章节**（不跨 project 注入 `project_docs/`），但**自动跨仓库跨分支覆盖依赖的 `module_docs/`**（多个 project 引用同一上游仓库同分支只一份，自动复用）。姊妹工程引用走章节正文内的文字描述，不自动跨库。
+
+## module_docs 工程模块库（按仓库+分支共享）
+
+> **核心思想**：工程依赖的"独立模块"（git submodule / `repo` 管理 / CMake FetchContent / monorepo 子目录 / vendor / 用户配置）按"上游仓库 + 分支"为粒度共享文档。**多个工程引用同一上游仓库同一分支只生成一份**，段零自动覆盖，开发时快速定位关联模块的文档。
+
+### 目录布局（module_docs 层）
+
+```text
+~/.claude/icode_data/
+├── project_docs/                          # 工程级（v1 已有）
+│   └── <project_id>/
+│       ├── _meta.json                    # 工程元信息（含 module_deps 列表）
+│       ├── 00_overview.md
+│       └── .../*.md
+└── module_docs/                          # 模块级（按仓库+分支 key）
+    └── <sha256(repo_url+":"+branch)[:12]>/   # 如 module_a@main → 9f3a2b1c4d8e
+        ├── _meta.json                    # 模块元信息（url/branch/commit/used_by）
+        ├── 00_overview.md
+        └── .../*.md
+```
+
+### `module_docs` key 计算
+
+```text
+key = sha256(repo_url + ":" + branch) → hexdigest[:12]
+```
+
+- 不同仓库（不同 URL）→ 不同 key
+- 同仓库不同分支（main vs dev）→ 不同 key
+- 同仓库同分支不同 commit → 同一 key，stale 检测（commit 变了标 stale）
+- 同仓库 fork（不同 URL）→ 不同 key
+
+### `_meta.json` 模板（工程与模块各一份）
+
+**工程 _meta.json**（`project_docs/<project_id>/_meta.json`）：
+
+```json
+{
+  "project_id": "myproject",
+  "project_type": "repo-root",
+  "git_root": "/home/user/myproject",
+  "module_deps": [
+    {
+      "type": "repo",
+      "name": "module_a",
+      "url": "git@example.com:user/myproject/module_a.git",
+      "branch": "main",
+      "key": "<sha256>",
+      "commit": "a3f2b1c",
+      "path": "module_a/"
+    }
+  ],
+  "unresolved_modules": [
+    {
+      "name": "lib_b",
+      "type": "cmake",
+      "reason": "CMake FetchContent build 目录未下载，无法本地读取",
+      "attempt_at": "2026-07-06T15:30:00Z"
+    }
+  ]
+}
+```
+
+**模块 _meta.json**（`module_docs/<key>/_meta.json`）：
+
+```json
+{
+  "repo_url": "git@example.com:user/myproject/module_a.git",
+  "branch": "main",
+  "current_commit": "a3f2b1c",
+  "used_by": ["myproject", "another_project"],
+  "last_generated_at": "2026-07-06T15:30:00Z",
+  "last_generated_commit": "a3f2b1c",
+  "generation_trigger": "auto"
+}
+```
+
+### 工程元信息块"依赖子模块"字段规范
+
+`00_overview.md` 元信息块加：
+
+```markdown
+> **项目元信息**
+> - 工程名：myproject
+> - 项目类型：repo-root（.repo/manifest.xml 管理）
+> - Git 地址：git@example.com:user/myproject.git
+> - 分支/提交：main @ a3f2b1c
+> - 依赖子模块（按仓库+分支）：
+>   - module_a → module:module_a@main@a3f2b1c（module_docs/<key>/）
+>   - module_b → module:module_b@dev@b8c3d4e（module_docs/<key>/）
+> - 章节归属模块：myproject
+> - 章节生成时间：2026-07-06T15:30:00Z
+```
+
+### 6 级模块检测（按优先级，`/icode doc` 执行）
+
+| # | 方式 | 识别 | 提取 URL + branch | commit 获取 |
+| --- | --- | --- | --- | --- |
+| 1 | git submodule | `.gitmodules` | url + `git config -f .gitmodules submodule.<name>.branch` | `git submodule status` |
+| 2 | `repo` 管理 | `.repo/manifest.xml` | `<remote fetch>` + `<project name>` 拼 URL，`<project revision>` = branch | `cd <submodule_path> && git rev-parse HEAD` |
+| 3 | CMake FetchContent | `CMakeLists.txt` 扫 `FetchContent_Declare` | `GIT_REPOSITORY` + `GIT_TAG` | 通常不可用（build 目录未下载），fallback 警告 |
+| 4 | monorepo 启发式 | 无 .gitmodules + 多子目录各自有 README + 独立构建文件（CMakeLists/package.json/Cargo.toml/Makefile） | 子目录路径，branch 标 "unknown" | 不可用 |
+| 5 | vendor 扫描 | `vendor/<lib>/` 子目录 | 子目录路径，type="vendor-no-git" | 不可用 |
+| 6 | 用户配置 | `.icode_doc_modules`（工程根） | 显式列路径/URL | 显式 |
+
+**去重**（两步，避免单一目录被多种方式识别导致重复生成）：
+1. **先按"归一化绝对路径"合并**——归一化绝对路径 = `realpath <path>` 解析（处理符号链接 + 路径规范化）后**去尾部 `/`**；同一归一化路径被多种方式识别（如 vendor + monorepo 都识别某路径）→ 合并到 type 列表，type 字段记录多标签如 `"vendor,monorepo"`
+2. **再按 `key = sha256(url+":"+branch)[:12]` 去重**（同一上游仓库同分支只一份）
+
+### 子仓库代码获取
+
+- **git submodule**：`git submodule foreach 'git archive HEAD | tar -x -C $tmp/<name>'`（或逐个 `cd <submodule> && git archive HEAD | tar -x -C $tmp`）
+- **`repo` 子仓库**：`cd <submodule_path> && git archive HEAD | tar -x -C $tmp`
+- **monorepo/vendor**：直接读子目录文件（不需 archive）
+- **CMake FetchContent**：通常 build 目录未下载，fallback 警告「依赖模块代码未本地化，跳过生成」
+
+### 段零跨仓库自动覆盖（关键收益）
+
+- 同一上游仓库（如 `module_a@main`）被多个工程都引用 → 段零都查同一份 `module_docs/<key>/`，**只生成一次、复用**
+- 详见「段零·工程文档检索」段步骤 3（module_deps 检索）+ 步骤 3.5（反查父项目）
+
+**生成时不省 token**（用户闲时跑，模块文档可详细完整生成），**检索时省 token**（段零只读前 50 行粗筛 + 命中按小节锚点读，不灌全章）。

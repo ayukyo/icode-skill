@@ -9,18 +9,39 @@
 
 ## 前置校验
 
-1. cwd 必须在 git 仓库内：`git rev-parse --show-toplevel` 失败 → 报错"请在 git 仓库内运行 /icode doc"
-2. 全局目录 `~/.claude/icode_data/project_docs/`（首次自动创建）
+1. cwd 必须在 git 仓库或 `repo` 管理的项目内：
+   - `git rev-parse --show-toplevel` 成功 → git-root 模式
+   - 否则从 cwd 向上逐级 `test -d $d/.repo`，首个命中 → repo-root 模式（Google `repo` 工具管理的多仓库项目如独立子仓库组成的超级项目）
+   - 都失败 → 报错"请在 git 仓库或 `repo` 管理的项目内运行 /icode doc"
+2. 全局目录 `~/.claude/icode_data/project_docs/` 和 `~/.claude/icode_data/module_docs/`（首次自动创建）
 
 ## project_id 解析
 
 ```bash
-GIT_ROOT=$(git rev-parse --show-toplevel)
+# git-root 模式（cwd 在 git 仓库内）
+GIT_ROOT=$(git rev-parse --show-toplevel 2>/dev/null)
+PROJECT_TYPE="git-root"
+if [ -z "$GIT_ROOT" ]; then
+  # repo-root 模式（cwd 向上找 .repo/）
+  REPO_ROOT=""
+  D="$PWD"
+  while [ "$D" != "/" ]; do
+    [ -d "$D/.repo" ] && REPO_ROOT="$D" && break
+    D=$(dirname "$D")
+  done
+  if [ -n "$REPO_ROOT" ]; then
+    GIT_ROOT="$REPO_ROOT"
+    PROJECT_TYPE="repo-root"
+  else
+    echo "错误：cwd 不在 git 仓库或 repo 管理的项目内"
+    exit 1
+  fi
+fi
 PROJECT_ID=$(basename "$GIT_ROOT")
 DOC_DIR="$HOME/.claude/icode_data/project_docs/$PROJECT_ID"
 ```
 
-**冲突检测**：`$DOC_DIR` 已存在时读其 `00_overview.md` 元信息块的 `project_path`——与当前 `GIT_ROOT` 一致则复用；不一致（同名不同工程）则追加短 hash 后缀 `${PROJECT_ID}__$(echo $GIT_ROOT|sha256sum|cut -c1-4)`，输出 ℹ️ 一行提示。
+**冲突检测**：`$DOC_DIR` 已存在时读其 `00_overview.md` 元信息块的 `project_path`——与当前 `GIT_ROOT` 一致则复用；不一致（同名不同工程）则追加短 hash 后缀 `${PROJECT_ID}__$(echo $GIT_ROOT|sha256sum|cut -c1-4)`，输出 ℹ️ 一行提示。`PROJECT_TYPE`（`git-root`/`repo-root`）写进工程 _meta.json。
 
 ## 意图识别（去参数化）
 
@@ -47,22 +68,47 @@ AI 解析自然语言的「目标工程」+「动作」：
 
 ### 1. 解析 project_id + 意图（见上）
 
-### 2. 代码特征扫描（先扫描后生成）
+### 2. 模块检测 + 代码特征扫描（先扫描后生成）
 
-用 Grep 扫描工程代码特征，按 [doc_template.md](../references/doc_template.md)「动态章节」表决定追加哪些章节（AI 根据工程实际技术栈选 grep 模式，**不硬编码框架名**）。汇总「章节规划清单」：固定（00/10/90/99）+ 命中的动态章节。
+**模块检测**（按 6 级优先级识别工程依赖的独立模块）：详见 [dir_and_metadata.md](../references/dir_and_metadata.md)「module_docs 工程模块库」段「6 级模块检测」表（git submodule / `repo` 管理 / CMake FetchContent / monorepo 启发式 / vendor 扫描 / 用户配置 + `.icode_doc_modules` JSON 格式）。
+
+**monorepo 启发式补充判别条件**（dir_and_metadata 表未含，doc.md 步骤 2 独有）：子目录**不在工程根 `.gitignore` 中**（避免误把工程内辅助目录当独立模块）+ **子目录有自己的 README**（含 `## ` 等 markdown 标题）。
+
+**去重**：详见 dir_and_metadata.md 同段「去重」两步（先按归一化绝对路径合并 + 再按 `key = sha256(url+":"+branch)[:12]` 去重）。输出 modules 列表（每个含 url+branch+key+commit+path+type），写进工程 _meta.json 的 `module_deps` 字段。
+
+**代码特征扫描**：用 Grep 扫描工程代码特征，按本表「动态章节」段（doc_template.md「五」）决定追加哪些章节（AI 根据工程实际技术栈选 grep 模式，**不硬编码框架名**）。汇总「章节规划清单」：固定（00/10/90/99）+ 命中的动态章节。
 
 ### 3. 增量判定（非全量时）
 
 - `$DOC_DIR` 不存在 → 首次全量
 - 存在 → 读 `00_overview.md` 的 `generation_commit`：HEAD 相同→"已是最新"；不同→`git diff <commit>..HEAD --name-only` 拿变更文件，命中某章 KEYS"文件位置"的章增量重生成，其余跳过；变更文件在未覆盖目录→提示"是否生成新章节"
+- **模块依赖变化检测**（关键，否则新增/删除依赖漏生成）：比较旧 `_meta.json.module_deps` 与步骤 2 检测的新 modules 列表 → 差异：
+  - 新加的 dep（key 不在旧列表）→ 触发对应 module_docs 生成
+  - 删除的 dep（旧列表有但新列表无）→ 提示「工程不再依赖 X，module_docs/{key}/ 是否保留（默认保留，需手动清理）」
+  - key 变化的 dep（url 或 branch 变）→ 触发新 key 的 module_docs 全量重生成 + 旧 key 提示是否清理
 
 ### 4. 强制思考前置（不可跳过）
 
 **必须先 Read [references/thinking.md](../references/thinking.md) + [references/anti_laziness.md](../references/anti_laziness.md) + [references/doc_template.md](../references/doc_template.md) 完整内容**（不得凭概述执行）。子项（≥4步）= 扫描结果分析 → 章节规划 → 元信息字段准备 → 风险评估（手动编辑/冲突）。
 
-### 5. 生成章节
+### 5. 生成 module_docs（依赖）+ 工程章节
 
-对每个待生成章节：读相关代码（Read/Grep）→ 按模板写正文 → 生成前 50 行四块（KEYS 按 [doc_template.md](../references/doc_template.md)「七」提取）→ Write 到 `$DOC_DIR/<NN>_<module>_<topic>.md`（十位桶，新增取 `max(NN)+1`）。单章失败→标记不拖垮。
+**先生成 module_docs**（依赖先于依赖者，用户闲时跑不省 token，模块文档可详细完整生成）：
+
+- 对每个 module（从步骤 2 检测的 modules 列表）：
+  - 克隆/读取该 module 的代码到临时目录（git submodule 用 `git submodule foreach 'git archive HEAD | tar -x -C $tmp/<name>'`；repo 子仓库用 `cd <submodule_path> && git archive HEAD | tar -x -C $tmp`；monorepo/vendor 直接读子目录；CMake FetchContent 通常 build 目录未下载，fallback 警告）
+  - 按 [doc_template.md](../references/doc_template.md)「九、模块章节模板」生成章节（前 50 行四块 + 模板自适应 grep 表；KEYS 按 doc_template.md「七」提取）
+  - Write 到 `$HOME/.claude/icode_data/module_docs/<key>/<NN>_<topic>.md`（十位桶）
+  - **读 `module_docs/<key>/_meta.json`（如存在）→ 提取现有 `used_by` → 与本工程（按 `project_id` 标识）合并去重**（避免 B 工程生成时覆盖 A 工程的引用）
+  - 写 `_meta.json`（`repo_url` / `branch` / `current_commit` / `used_by` = 合并去重后的列表）
+  - 检查 `<key>/_meta.json` 的 `current_commit` 与当前模块 commit 是否一致：一致跳过（已是最新），不一致→**该 module 全量重生成**（单 module 文档量小，全量合理；不需增量 diff，简化逻辑）
+- 拉取失败→**不写**该 dep 到工程 `_meta.json.module_deps`（避免段零检索时查不到对应 `module_docs/<key>/` 漏匹配）；在工程 `_meta.json.unresolved_modules` 数组里记录 `{name, type, reason, attempt_at}`（`reason` 如"CMake FetchContent build 目录未下载"）；不拖垮（其他 module 继续）
+
+**再生成工程自身章节**（依赖者引用依赖者，含"依赖子模块"字段）：
+
+- 对每个待生成章节：读相关代码（Read/Grep）→ 按模板写正文 → 生成前 50 行四块（含「依赖子模块」字段）→ Write 到 `$DOC_DIR/<NN>_<module>_<topic>.md`（十位桶，新增取 `max(NN)+1`）
+- 写 `_meta.json`（`project_id` / `project_type` / `git_root` / `module_deps` 仅含已成功生成的模块 / `unresolved_modules` 含失败的模块）
+- 单章失败→标记不拖垮
 
 ### 6. 代码事实审计（`99_code_facts_audit.md`，永远生成）
 
@@ -82,14 +128,18 @@ AI 解析自然语言的「目标工程」+「动作」：
 | 00_overview.md | 新增 | - |
 | <章节名> | 增量更新 | 3 处 file:line 重验 |
 | 99_code_facts_audit.md | 失败 | 子代理超时，重跑 |
+未生成模块 N 个（unresolved_modules）：<name1> (<reason1>), <name2> (<reason2>)... — 重跑 /icode doc 时自动恢复
 ```
 
 ## 元信息块字段取值约定
 
-- **工程名**：默认 `basename($GIT_ROOT)`，可在 `00_overview.md` 手动改
+- **工程名 / 模块名**：默认 `basename($GIT_ROOT)`，可在章节文件手动改
 - **Git 地址**：`git -C "$GIT_ROOT" remote get-url origin`（无 remote 填"无 remote"）
 - **分支/提交**：`git rev-parse --abbrev-ref HEAD` + `git rev-parse --short HEAD` + `git log -1 --format=%ci`
-- **子模块**：读 `.gitmodules`（无则"无子模块"）+ `git submodule status`，每行 `path → url @ commit`
+- **项目类型 / 模块类型**：`PROJECT_TYPE`（`git-root` 或 `repo-root`），或模块的 `MODULE_TYPE`（`git-submodule`/`repo`/`cmake`/`monorepo`/`vendor`/`user`）
+- **子模块（git submodule，v1 字段）**：读 `.gitmodules`（无则"无子模块"）+ `git submodule status`，每行 `path → url @ commit`
+- **依赖子模块（按仓库+分支）**：从工程 _meta.json 的 `module_deps` 列表取，章节元信息块格式 `module_a → module:module_a@main@a3f2b1c（module_docs/<key>/）`
+- **被工程引用（模块章节 used_by）**：从模块 _meta.json 的 `used_by` 列表取（如 `myproject（git-root）, another_project（repo-root）`）
 - **产品线/型号**：grep 工程的产品型号宏/配置，推断不出填"未识别"
 - **章节归属模块**：与文件名 `<module>` 一致；跨模块章节填 `null`
 - **章节生成时间**：运行时 `date +%Y-%m-%dT%H:%M:%SZ`，**禁止写死**

@@ -12,7 +12,7 @@ ICode is a Claude Code Skill that breaks down the journey from requirement to de
 - **Dual modes**: `/icode start` full flow (multi-round review + adversarial verification) / `/icode fast` trimmed (1 round, no adversarial, ~65% cost); auto-chains steps 1→6
 - **Anti-laziness quality gates**: triple-phase deepcheck (Reverse/Fixed/Free), plan assertion verification, ADR decision records, adversarial verification (independent skeptics — insufficient evidence is never confirmed, honest downgrade over fake consensus)
 - **Cross-project history retrieval**: init/log/plan/start auto-search similar past tickets and inject by command; references stay in-session, never pollute project artifacts
-- **Project-level knowledge base** (`/icode doc`): generates a global project knowledge base; later tickets auto-retrieve and inject — no need to manually tell it which docs to reference
+- **Project-level knowledge base** (`/icode doc`): generates a global project knowledge base (cross-repo/cross-branch shared, module docs generated once and reused), auto-retrieved and injected by phase-zero search — no need to manually tell it which docs to reference
 - **Anti-duplicate injection**: history retrieval and project-doc retrieval share a cache for de-duplication, avoiding repeated injection within one dev chain
 - **Anti-laziness hardening**: Steps 5/6 enforce a Read confirmation line + file:line evidence + a self-check checklist; Step 2 adversarial enforces Agent ID
 - **Two optional entries**: `/icode log` log root-cause analysis (baseline check first, then adversarial analysis; domain-agnostic) → fix requirement; `/icode init` multi-turn requirement draft → `00_init.md`

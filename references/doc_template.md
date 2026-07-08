@@ -11,9 +11,11 @@
 
 > **项目元信息**
 > - 工程名：myproject
+> - 项目类型：git-root（或 repo-root，.repo/manifest.xml 管理）
 > - Git 地址：git@example.com:user/myproject.git
 > - 分支/提交：main @ a3f2b1c (2026-07-06 12:30)
-> - 子模块：thirdparty/lib_algo → ...git @ c8d2f1a；thirdparty/lib_nav → ...git @ b9e4d3c
+> - 子模块（git submodule，v1 字段）：thirdparty/lib_algo → ...git @ c8d2f1a；thirdparty/lib_nav → ...git @ b9e4d3c
+> - 依赖子模块（按仓库+分支，段零跨仓库覆盖用）：module_a → module:module_a@main@a3f2b1c（module_docs/{key}/）；module_b → module:module_b@dev@b8c3d4e（module_docs/{key}/）
 > - 产品线/型号：{产品代号，无则填"未识别"}
 > - 章节归属模块：module_a
 > - 章节生成时间：2026-07-06T15:30:00Z
@@ -114,3 +116,47 @@
 段零检索流程见 [references/dir_and_metadata.md](dir_and_metadata.md)「段零·工程文档检索」段：`ls` 枚举章节 → 读前 50 行 KEYS 匹配 → 命中按 `[小节锚点]` 定点读小节 → 查 `_inject_cache.json` 防重复注入。
 
 **章节作者责任**：保证前 50 行 KEYS 准确反映正文、锚点指向真实 H2 小节。AI 生成时自动保证；用户手动改正文后应同步更新 KEYS（不更新则段零匹配精度下降，不报错）。
+
+## 九、模块章节模板（module_docs 共享文档）
+
+> 与工程章节（"一"）结构一致（前 50 行四块），但元信息块字段差异反映"这是子模块的文档，不是工程的文档"。
+
+### 模块章节与工程章节的差异
+
+| 字段 | 工程章节 | 模块章节 |
+| --- | --- | --- |
+| 工程名 → **模块名** | myproject | module_a（子模块名） |
+| 项目类型 → **模块类型** | git-root / repo-root | git-submodule / repo / cmake / monorepo / vendor / user |
+| Git 地址 | 工程根 url | 子模块 url（如 `git@example.com:user/myproject/module_a.git`） |
+| 依赖子模块 | 工程依赖的子模块列表 | **不填**（除非子模块本身依赖其他子模块，需在 _meta.json 嵌套记录） |
+| 关联模块 → **对外接口** | 工程内其他模块名 | 子模块对外暴露的 API 类/方法 |
+| 文件位置 | 工程内 src/ 路径 | 子模块内相对路径 |
+
+### 模块章节完整示例（精简，元信息块+KEYS+简要说明，H2 模板用一行说明）
+
+```markdown
+# {子模块名 章节中文标题}
+
+> **项目元信息**
+> - 模块名：module_a
+> - 模块类型：git-submodule（或 repo / cmake / monorepo / vendor / user）
+> - Git 地址：git@example.com:user/myproject/module_a.git
+> - 分支/提交：main @ a3f2b1c (2026-07-06 12:30)
+> - 被工程引用（used_by）：myproject（git-root）, another_project（git-root）
+
+> **KEYS**（术语→小节锚点）
+> - 核心类：[模块A] ModuleAClass, [API] ModuleAClass.method1
+> - 对外接口：[API] ModuleAClass.method1
+> - 文件位置：src/module_a/feature_node.cpp
+
+> **简要说明**（50~100 字）
+> module_a 提供 feature_x 能力，对外暴露 ModuleAClass.method1 接口。被 myproject、another_project 调用。
+```
+
+> **H2 模板**（3 段，与工程章节模板同）：`## 1. 架构` / `## 2. API` / `## 3. 使用约束`（每段正文由 `## 1. 架构` H2 锚点定位，段零按锚点定点读，不灌全章）
+
+### 模块章节特定字段
+
+- **`used_by`**：列出引用此模块的工程，按 `_meta.json` 的 `project_type` 区分（`git-root` / `repo-root` / `user`）
+- **段零来源标签**（段零命中模块章节时附，便于 AI 区分来源）：「来源：project:工程名」/「来源：module:module_a@branch@commit」
+- **`<key>/` 一致性**：元信息块展示的 `<key>/` 从 `_meta.json` 读（不重算 URL+branch），确保与 `module_docs/<key>/` 目录名一致（避免 URL 字符串微变如大小写、尾部 `/`、协议前缀导致不同 key）
