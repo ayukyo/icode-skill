@@ -9,6 +9,8 @@
 
 检查 `{ICODE_OUT_DIR}/.ico_metadata.json` 的 `status == "completed"`（步骤6已完成）。若未完成则报错提示先执行步骤6。
 
+**产物时效校验（防 README 基于过时产物）**：读 metadata 的 `created_at`（工单创建时间，近似步骤6 完成的下界）+ `code_files` 列表，用 `find {code_files} -newer {ICODE_OUT_DIR}/.ico_metadata.json` 检测是否有源码文件 mtime 晚于 metadata 创建时间。若有 → 输出警告「⚠️ 检测到步骤6 完成后代码仍有变更（N 个文件 mtime 晚于终审时间），README 的"已知限制/方案"可能基于过时产物，建议重跑步骤5/6 或确认变更不影响交付」；不阻塞生成（README 的"使用说明"段含实时运行输出兜底，面向人可判断）。
+
 ## 文件名生成
 
 从 metadata 的 `requirement` 提炼关键词，生成 `{工程简名}_{需求关键词}.md`：

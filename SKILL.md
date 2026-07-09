@@ -273,7 +273,7 @@ ICODE_OUT_DIR=".icode_output/.icode_output_${LAST}"
 > **检索复用两源**（init/log/plan/start/fast 启动时并行检索，候选合并排序注入，最相关者胜）：
 >
 > - **源1·历史工单**（本段）：跨工单借鉴相似需求的 ADR/风险/根因/要点，详见下文
-> - **源2·工程文档（段零）**：当前工程 `~/.claude/icode_data/project_docs/<project_id>/` 知识库（`/icode doc` 生成），段零只读章节前 50 行粗筛、命中按 `[小节锚点]` 定点读小节。详见 [references/dir_and_metadata.md](references/dir_and_metadata.md)「段零·工程文档检索」段 + [references/doc_template.md](references/doc_template.md)
+> - **源2·工程文档（段零）**：当前工程 `~/.claude/icode_data/project_docs/<project_id>/` 知识库（`/icode doc` 生成），段零只读章节前 50 行粗筛、命中按 `[小节锚点]` 定点读小节。**过时章节降级注入**（stale 章节不注正文只注摘要+警告，与历史工单 stale 跳过注入同等防误导）+ **注入文档须 Read/Grep 实证不盲信**（文档是快照可能过时，不作代码事实依据）。详见 [references/dir_and_metadata.md](references/dir_and_metadata.md)「段零·工程文档检索」「stale 章节降级注入」「不盲信约束」段 + [references/doc_template.md](references/doc_template.md)
 > - **防重复注入**（两源共用）：`{ICODE_OUT_DIR}/_inject_cache.json` 按 `(source, ref_id, slice)` 三元组去重，历史源 `hit_count` 同目录内同 ticket 只续期一次。详见 [references/dir_and_metadata.md](references/dir_and_metadata.md)「注入缓存机制」段
 
 **痛点**：每次 `/icode` 都是冷启动，过往相似需求的计划/决策/踩坑无法被新需求复用。本机制在不破坏工程隔离、不撑爆上下文的前提下，让新需求能主动检索历史相似工单并定点注入参考。
@@ -284,7 +284,7 @@ ICODE_OUT_DIR=".icode_output/.icode_output_${LAST}"
 - 每条记录：`ticket_id`(`{工程名}-{N}`，工程名冲突时追加 `project_path` 短 hash 后缀保唯一)、`project_path`、`out_dir`、`requirement_summary`(≤100 token)、`requirement_points`(≤8 条)、`keywords`(≤8个)、`has_00_init`/`has_plan`、`status`、`created_at`、`last_used_at`(检索命中时更新，LRU淘汰依据)、`hit_count`(检索命中+1，达10永久保留)、`stale`(默认false，过时校验发现代码锚点失效置true，stale工单不再注入)。**`has_00_init` 语义 = 该工单是否已产出 `00_init.md`（走过 init 或 log，log 也会产出 00_init.md），与"是否走过步骤0 init"解耦**——log 未走过 init 但产出 00_init.md 故也为 true
 - **只存指针和摘要，不存产物正文**。产物仍在各工程 `.icode_output/`，工程隔离不破坏。
 - **LRU 淘汰**（防 index.json 无限膨胀）：索引是检索缓存非档案。容量上限 200 条；`hit_count >= 10` 永久保留（被复用≥10 次的高价值工单）；未完成态（init/log/review/deepcheck/code in_progress）默认不淘汰，但**超时降级**（`last_used_at` 超 30 天无更新→置 `stale=true` 解除保护、纳入可淘汰，不新增 status 值）；超上限时淘汰 `hit_count < 10` 且 `stale=false` 完成态中 `last_used_at` 最老的。另**主动 stale 扫描**：每次写索引顺带校验最旧 K 条锚点，失效置 `stale=true`。检索命中**原子同步**更新 `last_used_at`+`hit_count` 续期。淘汰只删索引条目，产物保留各工程。**排序**：tickets 数组按 `hit_count` 降序、同值按 `last_used_at` 降序（高价值近期项在前，段一粗筛扫 keywords 快+淘汰从末尾）。详见 [references/dir_and_metadata.md](references/dir_and_metadata.md)「索引淘汰规则」
-- **过时校验**（防注入过时信息）：索引存的是工单当时的摘要，工程迭代后老工单 ADR/需求可能已过时。**两处触发**：①检索命中准备注入前（被动）；②每次写索引触发淘汰后，主动 Grep 校验最旧 K 条代码锚点（主动）。锚点失效→置 `stale=true` 跳过注入（即使 hit_count 高也不注入）。stale 工单保留索引留追溯，不再续期，不再被段一粗筛命中。详见 [references/dir_and_metadata.md](references/dir_and_metadata.md)「检索命中续期 + 过时校验」与「索引淘汰规则·主动 stale 扫描」
+- **过时校验**（防注入过时信息）：索引存的是工单当时的摘要，工程迭代后老工单 ADR/需求可能已过时。**两处触发**：①检索命中准备注入前（被动）；②每次写索引触发淘汰后，主动 Grep 校验最旧 K 条代码锚点（主动）。锚点失效→置 `stale=true` 跳过注入（即使 hit_count 高也不注入）。stale 工单保留索引留追溯，不再续期，不再被段一粗筛命中。**project_docs 工程文档同样有过时校验**：段零注入前被动 stale 检测（命中 KEYS 文件位置或正文目录前缀即标 stale，降级注入不注正文）+ `/icode doc` 末尾主动 stale 扫描（全库锚点校验写 `_meta.json.stale_files`，见 [steps/doc.md](steps/doc.md) 步骤8）+ module_docs commit 一致性校验（同分支不同 commit 降级注入+警告）。详见 [references/dir_and_metadata.md](references/dir_and_metadata.md)「检索命中续期 + 过时校验」「索引淘汰规则·主动 stale 扫描」「project_docs 主动 stale 扫描」「段零·工程文档检索·步骤 3 commit 一致性校验」
 
 **写索引时机**（**`keywords` 是段一粗筛的检索索引，所有入口首次写索引时必须填 ≤8 个技术关键词、不得为空**——空 keywords 的工单无法被粗筛命中，等于检索盲区）：
 - `/icode log` 产出 `log_analysis.md` + `00_init.md` 后：**首次生成 `ticket_id`**（`{工程名}-{N}`，冲突加 hash 后缀）并回填 metadata，写入 `requirement_summary`（根因摘要）+`requirement_points`（修复要点）+`keywords`（≤8个，从根因/症状提炼）+`has_00_init=true`+`status=log_done`+`last_used_at=当前`+`hit_count=0`+`stale=false`，**写后执行LRU淘汰 + 主动 stale 扫描**

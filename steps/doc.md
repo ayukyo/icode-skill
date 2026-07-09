@@ -112,7 +112,7 @@ AI 解析自然语言的「目标工程」+「动作」：
 
 ### 6. 代码事实审计（`99_code_facts_audit.md`，永远生成）
 
-增量+并行（见 [doc_template.md](../references/doc_template.md)「六」）：首次并行子代理验证全库 file:line；增量只重验变更文件相关引用。子代理失败→该批标 `[未验证-子代理失败]`。
+增量+并行（见 [doc_template.md](../references/doc_template.md)「六」）：首次并行子代理验证全库 file:line；增量只重验变更文件相关引用（**含一跳联动**：grep 变更文件调用的符号，把被引用的未变更文件也纳入重验，缩小语义联动盲区）。**已知盲区**：未变更文件因他处变更而语义变化时（二跳及以上联动）增量审计不重验，残余过时由段零 stale 检测 + 不盲信约束兜底（见 [dir_and_metadata.md](../references/dir_and_metadata.md)）。子代理失败→该批标 `[未验证-子代理失败]`。
 
 ### 7. 进度输出（阶段级 + 末尾汇总）
 
@@ -130,6 +130,20 @@ AI 解析自然语言的「目标工程」+「动作」：
 | 99_code_facts_audit.md | 失败 | 子代理超时，重跑 |
 未生成模块 N 个（unresolved_modules）：<name1> (<reason1>), <name2> (<reason2>)... — 重跑 /icode doc 时自动恢复
 ```
+
+### 8. 主动 stale 扫描（project_docs 章节锚点校验，防过时堆积）
+
+对比 index.json 的主动 stale 扫描（见 [dir_and_metadata.md](../references/dir_and_metadata.md)「索引淘汰规则·主动 stale 扫描」），project_docs 章节此前只有段零命中前被动检测，长期不跑 /icode doc 的工程过时章节无机制标记。本步骤补第二道清理（详见 [dir_and_metadata.md](../references/dir_and_metadata.md)「project_docs 主动 stale 扫描」段）：
+
+- **时机**：步骤7 进度输出后（章节已生成 + 99 章审计完成）
+- **范围**：全库章节（project_docs 章节量可控，每章 Grep 锚点 <1K token，全量可控）
+- **方法**：逐章读其前 50 行 KEYS「文件位置」列出的源码路径，用 Grep 确认锚点代码仍存在（方法同 99 章审计的 exists 校验，但只验存在性不验描述属实，更轻）
+- **结果写工程 _meta.json.stale_files**：锚点失效（文件已删/路径已改/符号已重命名）→ 章节文件名加入 stale_files；锚点恢复存在（无论本次是否重生成，如代码恢复或重生成）→ 从 stale_files 移除；**stale_files 每次全量重算**（步骤8 执行后反映当前所有锚点失效章节，非增量累加）
+- **输出**：步骤7 汇总表之后独立输出 stale_files 结果（不并入步骤7 表，避免时序冲突；N=0 写"无过时章节"；N>0 列出章节名 + 锚点失效原因，建议重跑 /icode doc 或确认锚点）
+- **段零消费**：段零检索时先读 stale_files 快速跳过过时章节正文（降级注入摘要，见 [dir_and_metadata.md](../references/dir_and_metadata.md)「stale 章节降级注入」）
+
+> 不校验"描述是否属实"（那是 99 章审计职责），本步骤只做存在性快检控 token；99 章带 [未验证-子代理失败] 的章节不自动标 stale（未验证≠过时）。
+
 
 ## 元信息块字段取值约定
 
@@ -162,6 +176,7 @@ AI 解析自然语言的「目标工程」+「动作」：
 - 每章前 50 行四块齐全
 - `00_overview.md` 元信息块含当前 HEAD 的 `generation_commit` + 完整子模块列表
 - `99_code_facts_audit.md` 已生成（部分失败也标明）
+- 工程 _meta.json.stale_files 已刷新（步骤8 主动 stale 扫描，段零检索据此跳过过时章节）
 - 末尾汇总表输出
 
 ## 衔接与可重复

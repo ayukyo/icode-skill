@@ -304,6 +304,7 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
 | `history` | `adr_risks` | plan / start / fast | ADR + 风险评估章节 |
 | `history` | `root_cause_evidence` | log | 根因结论 + 决定性证据 |
 | `project_doc` | `section:<file>` | init/log/plan/start/fast | 工程文档章节（可细化到小节锚点 `section:<file>#<anchor>`） |
+| `project_doc` | `section:<file>#stale-summary` | init/log/plan/start/fast | stale 章节降级注入的简要说明（不读正文小节，见「stale 章节降级注入」） |
 
 ### 去重规则（核心）
 
@@ -384,23 +385,43 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
    对每个 dep：ls ~/.claude/icode_data/module_docs/<dep.key>/*.md
    ├─ 目录不存在或无 .md → 收集到「缺失模块」列表（末尾汇总警告），跳过该 dep
    └─ 存在 → 读前 50 行 → KEYS 匹配 → module 候选集
+      **commit 一致性校验（防跨工程 commit 漂移误导）**：比对工程 `_meta.json.module_deps[].commit`（本工程 pin 的 commit）与 `module_docs/<key>/_meta.json.current_commit`：
+      - 一致 → 正常注入（模块文档版本与本工程代码版本匹配）
+      - 不一致（同分支不同 commit，跨工程 /icode doc 互相覆盖所致，见「module_docs key 计算」）→ **降级注入**：注入正文但附警告「⚠️ 模块 `<name>` 文档基于 commit `<current_commit>`，本工程 pin `<dep.commit>`，API/行为以本工程代码为准，须 Read 实证」，提示下游不得直接采信模块文档的 file:line / 接口描述
+      - key 只含 url+branch 不含 commit，同分支不同 commit 共用同一 key 无法靠目录隔离，段零必须运行时比对 commit 兜底；`/icode doc` 生成时的全量重生成覆盖（见 [doc.md](../steps/doc.md) 步骤5）只把文档更新到"最后一次跑 doc 的工程"的 commit，不能消除跨工程漂移
 3.5 **反查父项目**（子仓库内工作时）：如果 cwd 在 git-root 模式 → 计算 `cwd_relative = realpath(cwd) 相对 realpath(.repo 所在目录)`（**注意：是相对 .repo 根，不是相对 git_root**——例如 cwd 在 `myproject/module_a/`、.repo 在 `myproject/.repo/` 时，cwd_relative = `module_a/`）→ 若 `.repo/manifest.xml` 存在且 `cwd_relative` 精确匹配或为某 `<project path>` 的子路径 → 该 manifest project 的"父 repo 根"=`.repo/` 所在目录；把父 project（repo-root）也纳入检索（读 `project_docs/<父 project_id>/_meta.json` + 章节），候选合并排序时一并参与打分（来源标签标「来源：project:父 project_id」）
 4. 合并排序：project 候选 + module 候选 + 反查父项目章节 + 历史检索段一/二候选 → 统一按相关度排序 → top-N（强相关≤2 + 弱相关≤1，总量≤3 条）
-5. 对每个 top-N 项：
-   - 查 _inject_cache.json → 已注入的同 slice 跳过
-   - 否则：按 KEYS 的 [小节锚点] 定点读对应小节（不读全章，≤1K token/条）→ 注入思考输入「历史参考」节 → 写缓存
+5. 对每个 top-N 项（注入策略按来源区分）：
+   - **project 章节**：stale 判定（查 `_meta.json.stale_files` + 运行时 `git diff` 兜底，见「stale 检测」）-- stale → slice=`section:<file>#stale-summary`，按「stale 章节降级注入」只注简要说明+警告（不读正文小节）；非 stale → slice=`section:<file>#<anchor>`，按 KEYS [小节锚点] 定点读对应小节（不读全章，≤1K token/条）→ 注入思考输入「历史参考」节
+   - **module 章节**：按步骤3 commit 校验结果 -- 一致 → slice=`section:<file>#<anchor>` 注正文；不一致 → 降级注正文+警告（步骤3，须 Read 实证）
+   - 查 _inject_cache.json → 已注入的同 slice 跳过；否则注入并写缓存
    - 命中附来源标签：「来源：project:myproject」或「来源：module:module_a@main@a3f2b1c」
 ```
 
 **防重复注入**：与历史源共用 `_inject_cache.json`（见上节），跨命令不重复注入同一章节。
 
-**stale 检测**（注入前被动校验，控 token）：读 `00_overview.md` 元信息块的 `generation_commit` + submodule commits，与 `git rev-parse HEAD` + `git submodule status` 对比；HEAD 变更且 `git diff <commit>..HEAD` 命中该章 KEYS"文件位置" → 标 stale，注入时附警告"⚠️ 此章节基于旧 commit，可能过时"。
+**stale 检测**（注入前被动校验，控 token；与历史工单 stale「跳过注入」对齐防误导目标）：读 `00_overview.md` 元信息块的 `generation_commit` + submodule commits，与 `git rev-parse HEAD` + `git submodule status` 对比；HEAD 变更且 `git diff <commit>..HEAD --name-only` 命中该章 KEYS「文件位置」**或命中章节正文涉及的目录前缀**（应对 KEYS 文件位置不完整 / 新增文件 / 重构改路径导致漏判的假阴性）→ 判定该章 stale。**两源合一**：先查工程 `_meta.json.stale_files`（主动扫描持久化结果，见下文「project_docs 主动 stale 扫描」）快速识别 stale 章节（降级注入摘要不注正文，见下文「stale 章节降级注入」），再运行时 `git diff` 兜底（`_meta.json` 可能比最新 HEAD 旧）。判定宁可放宽（假阳性仅触发降级，假阴性才会误导）。
+
+**stale 章节降级注入（不注正文，防误导）**：stale 章节**绝不注入正文小节**（避免过时 file:line / IPC 契约 / 调用链误导新工作流），改为**只注入「简要说明」（50~100 字概览，不含 file:line，误导风险低）+ 警告行**「⚠️ 章节 `<文件>` 基于旧 commit `<generation_commit>`，当前 HEAD `<HEAD>`，已过时仅注入摘要，建议重跑 `/icode doc` 更新」。与历史工单 stale「跳过注入」同等防误导强度--过时的正文小节不进新工作流思考输入；降级保留「简要说明」仅给新工作流方向性参考，不构成事实依据（配合下文「不盲信约束」）。 注入缓存 slice 记为 `section:<file>#stale-summary`（与正文小节 `section:<file>#<anchor>` 区分，避免去重混淆；章节重跑变新鲜后注入正文小节不被误跳过）。
+
+**不盲信约束（段零注入的工程/模块文档仅作参考）**：段零注入的 project_docs / module_docs 章节是 `/icode doc` 生成时的**快照**，可能因工程迭代而过时（即使未标 stale 也只是「未检测到过时」，非「已验证最新」）。下游 init/plan/start/fast/log 步骤**不得将注入的文档描述当作事实直接采信**：凡涉及代码行为 / 位置 / 接口契约 / 调用链 / 错误码的断言，**必须用 Read/Grep 实证当前代码**后再纳入决策（与 [anti_laziness.md](anti_laziness.md)「段零文档不盲信」条 + [01_plan.md](../steps/01_plan.md) 计划断言实证一致）。文档只作「设计意图与模块关系」的启发，不作「代码事实」的依据。
 
 **附加输出**（段零末尾汇总）：
 - ⚠️ **缺失模块警告**（若步骤 3 收集到「缺失模块」列表）：输出「工程引用了以下 module_docs 但不存在：\`{dep1.name}\`(\`{dep1.key}\`), \`{dep2.name}\`(\`{dep2.key}\`)... — 请检查是否已 /icode doc 生成，或工程 _meta.json.module_deps 是否写错 key」
 - ⚠️ **未生成模块警告**（若工程 `_meta.json.unresolved_modules` 非空）：输出「工程有 N 个未生成模块（拉取失败）：\`{name1}\`(\`{reason1}\`), \`{name2}\`(\`{reason2}\`)... — 子仓库代码本地化后重跑 /icode doc 时自动恢复」
 
 **工程隔离**：段零严格按当前 cwd 的 project_id 检索**工程自身章节**（不跨 project 注入 `project_docs/`），但**自动跨仓库跨分支覆盖依赖的 `module_docs/`**（多个 project 引用同一上游仓库同分支只一份，自动复用）。姊妹工程引用走章节正文内的文字描述，不自动跨库。
+
+
+### project_docs 主动 stale 扫描（`/icode doc` 末尾执行，防过时章节堆积）
+
+对比 index.json 的主动 stale 扫描，project_docs 章节此前只有"段零命中前被动检测"一条路径--长期不跑 `/icode doc` 的工程，过时章节无机制标记，首次段零命中才被动检测（且只降级注入，不清理）。本机制补第二道清理（与 index.json「主动 stale 扫描」对齐，见上文「索引淘汰规则·主动 stale 扫描」）：
+
+- **触发时机**：`/icode doc` 执行末尾（见 [doc.md](../steps/doc.md) 步骤8）
+- **扫描范围**：全库章节（project_docs 章节量可控，每章 Grep 锚点 <1K token，全量可控；不像 index.json 只扫最旧 K 条）
+- **校验方法**：逐章读其 KEYS「文件位置」列出的文件路径，用 Grep 确认锚点代码仍存在（方法同 index.json「过时校验」）
+- **结果写 `_meta.json.stale_files`**：失效的章节文件名写入工程 `_meta.json.stale_files` 数组；章节重生成（锚点恢复）后从此数组移除
+- **段零消费**：段零检索时先读 `stale_files` 快速跳过（无需每章 git diff，控 token），再运行时 `git diff` 兜底（见上文「stale 检测」两源合一）
 
 ## module_docs 工程模块库（按仓库+分支共享）
 
@@ -430,7 +451,7 @@ key = sha256(repo_url + ":" + branch) → hexdigest[:12]
 
 - 不同仓库（不同 URL）→ 不同 key
 - 同仓库不同分支（main vs dev）→ 不同 key
-- 同仓库同分支不同 commit → 同一 key，stale 检测（commit 变了标 stale）
+- 同仓库同分支不同 commit → 同一 key（key 只含 url+branch，不含 commit）。**段零检索时**比对工程 pin 的 commit 与 `module_docs/<key>/_meta.json.current_commit`，不一致→降级注入+警告（见「段零·工程文档检索」步骤 3 commit 一致性校验）；`/icode doc` 生成时 commit 不一致→全量重生成覆盖（见 [doc.md](../steps/doc.md) 步骤5）。两者不矛盾：生成时覆盖更新文档版本，检索时校验是否匹配当前工程 pin 的 commit
 - 同仓库 fork（不同 URL）→ 不同 key
 
 ### `_meta.json` 模板（工程与模块各一份）
@@ -460,7 +481,8 @@ key = sha256(repo_url + ":" + branch) → hexdigest[:12]
       "reason": "CMake FetchContent build 目录未下载，无法本地读取",
       "attempt_at": "2026-07-06T15:30:00Z"
     }
-  ]
+  ],
+  "stale_files": []
 }
 ```
 
