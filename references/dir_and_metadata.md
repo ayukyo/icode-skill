@@ -442,7 +442,7 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
 │       ├── 00_overview.md
 │       └── .../*.md
 └── module_docs/                          # 模块级（按仓库+分支 key）
-    └── <sha256(repo_url+":"+branch)[:12]>/   # 如 module_a@main → 9f3a2b1c4d8e
+    └── <url_basename_sanitized>_<sha256(repo_url+":"+branch)[:12]>/   # 如 module_a@main → module_a_9f3a2b1c4d8e
         ├── _meta.json                    # 模块元信息（url/branch/commit/used_by）
         ├── 00_overview.md
         └── .../*.md
@@ -451,13 +451,16 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
 ### `module_docs` key 计算
 
 ```text
-key = sha256(repo_url + ":" + branch) → hexdigest[:12]
+key = <url_basename_sanitized> + "_" + sha256(repo_url + ":" + branch)[:12]
 ```
 
-- 不同仓库（不同 URL）→ 不同 key
-- 同仓库不同分支（main vs dev）→ 不同 key
-- 同仓库同分支不同 commit → 同一 key（key 只含 url+branch，不含 commit）。**段零检索时**比对工程 pin 的 commit 与 `module_docs/<key>/_meta.json.current_commit`，不一致→降级注入+警告（见「段零·工程文档检索」步骤 3 commit 一致性校验）；`/icode doc` 生成时 commit 不一致→全量重生成覆盖（见 [doc.md](../steps/doc.md) 步骤5）。两者不矛盾：生成时覆盖更新文档版本，检索时校验是否匹配当前工程 pin 的 commit
-- 同仓库 fork（不同 URL）→ 不同 key
+- **`url_basename_sanitized`**：url 去掉末尾 `.git` 取最后一段（`basename`），非 `[a-zA-Z0-9_-]` 字符替换为 `_`（防边界情况，如 url basename 含 `.` `@` `:` 等）
+- **人眼可读**：目录名以模块名开头（如 `module_a_9f3a2b1c4d8e`），`ls module_docs/` 一眼看出是哪个模块的文档，不用反查 hash
+- **保留 hash 去重**：同 basename 不同 fork（不同 url，如协议/用户名不同）→ basename 相同但 hash 不同 → 不同 key（如 `module_a_aaaa` vs `module_a_bbbb`）
+- **例**：`git@example.com:user/myproject/module_a.git` @ `main` → basename `module_a` → key `module_a_9f3a2b1c4d8e`
+- 不同仓库（不同 URL）→ basename 或 hash 至少一个不同 → 不同 key
+- 同仓库不同分支（main vs dev）→ hash 包含 branch → 不同 key
+- 同仓库同分支不同 commit → 同一 key（key 不含 commit）。**段零检索时**比对工程 pin 的 commit 与 `module_docs/<key>/_meta.json.current_commit`，不一致→降级注入+警告（见「段零·工程文档检索」步骤 3 commit 一致性校验）；`/icode doc` 生成时 commit 不一致→全量重生成覆盖（见 [doc.md](../steps/doc.md) 步骤5）。两者不矛盾：生成时覆盖更新文档版本，检索时校验是否匹配当前工程 pin 的 commit
 
 ### `_meta.json` 模板（工程与模块各一份）
 
@@ -474,7 +477,7 @@ key = sha256(repo_url + ":" + branch) → hexdigest[:12]
       "name": "module_a",
       "url": "git@example.com:user/myproject/module_a.git",
       "branch": "main",
-      "key": "<sha256>",
+      "key": "<url_basename_sanitized>_<sha256[:12]>",
       "commit": "a3f2b1c",
       "path": "module_a/",
       "generated": true
@@ -536,7 +539,7 @@ key = sha256(repo_url + ":" + branch) → hexdigest[:12]
 
 **去重**（两步，避免单一目录被多种方式识别导致重复生成）：
 1. **先按"归一化绝对路径"合并**——归一化绝对路径 = `realpath <path>` 解析（处理符号链接 + 路径规范化）后**去尾部 `/`**；同一归一化路径被多种方式识别（如 vendor + monorepo 都识别某路径）→ 合并到 type 列表，type 字段记录多标签如 `"vendor,monorepo"`
-2. **再按 `key = sha256(url+":"+branch)[:12]` 去重**（同一上游仓库同分支只一份）
+2. **再按 `key = <url_basename_sanitized>_<sha256(url+":"+branch)[:12]>` 去重**（同一上游仓库同分支只一份，key 格式含模块名前缀便于人眼辨认，详见本段「module_docs key 计算」）
 
 ### 子仓库代码获取
 

@@ -173,4 +173,4 @@
 
 - **`used_by`**：列出引用此模块的工程，按 `_meta.json` 的 `project_type` 区分（`git-root` / `repo-root` / `user`）
 - **段零来源标签**（段零命中模块章节时附，便于 AI 区分来源）：「来源：project:工程名」/「来源：module:module_a@branch@commit」
-- **`<key>/` 一致性**：元信息块展示的 `<key>/` 从 `_meta.json` 读（不重算 URL+branch），确保与 `module_docs/<key>/` 目录名一致（避免 URL 字符串微变如大小写、尾部 `/`、协议前缀导致不同 key）
+- **`<key>/` 一致性**：元信息块展示的 `<key>/` 从 `_meta.json` 读（不重算 URL+branch），确保与 `module_docs/<key>/` 目录名一致（避免 URL 字符串微变如大小写、尾部 `/`、协议前缀导致不同 key）。key 格式 `<url_basename_sanitized>_<sha256[:12]>`（含模块名前缀便于人眼辨认，详见 [dir_and_metadata.md](dir_and_metadata.md)「module_docs key 计算」）
