@@ -22,7 +22,7 @@
 1. **执行目录管理中的「创建新目录」逻辑**（**强制新建，不做任何复用判定**），确定 `ICODE_OUT_DIR`
 2. **历史检索复用**（强制思考之前，全局索引存在时必须执行，详见 SKILL.md「历史检索复用」段）：
    - Read `~/.claude/icode_data/index.json`（不存在则跳过检索）
-   - **两段式检索**：段一从本次粗略需求提炼关键词集，与各 ticket `keywords` 做 Jaccard 粗筛取 ≤10 候选（零 token，排除 stale）；段二只把候选 `keywords + requirement_points` 喂主代理精读打分选 top-N 命中（N 由梯度决定，明确无关则 0 条）。`/icode init` 每次强制新建目录，本次工单尚未入索引，故无需排除当前 ticket_id
+   - **两段式检索**：段一从本次粗略需求提炼关键词集，与各 ticket `keywords` 做 Jaccard 粗筛取 ≤10 候选（零 token，可复活预扫后排除剩余 stale）；段二只把候选 `keywords + requirement_points` 喂主代理精读打分选 top-N 命中（N 由梯度决定，明确无关则 0 条）。`/icode init` 每次强制新建目录，本次工单尚未入索引，故无需排除当前 ticket_id
    - **`/icode init` 注入分支**：命中工单只读其 `requirement_points`（需求要点清单，≤500 token/条），作为后续讨论的启发——提示用户"上次相似需求曾关注过这些点，本次是否也需要考虑"。**只进会话上下文，绝不写进 `00_init.md`**。
    - **段零·工程文档检索**（与历史检索并行，候选合并排序）：`resolve_project_id(cwd)`（支持 git-root / repo-root 双模式，`repo` 根模式从 cwd 向上找 `.repo/manifest.xml`）→ `ls ~/.claude/icode_data/project_docs/<project_id>/`，逐章读前 50 行按 KEYS 匹配 → 读 `project_docs/<project_id>/_meta.json` 的 `module_deps` 列表，对每个 dep 查 `module_docs/<dep.key>/` → **反查父项目**（cwd 在子仓库 + path 匹配 manifest 的 `<project path>` → 父 repo-root 也纳入检索）；命中按 `[小节锚点]` 定点读小节；无知识库则零命中（ℹ️ 不阻塞）。详见 [references/dir_and_metadata.md](../references/dir_and_metadata.md)「段零·工程文档检索」+「module_docs 工程模块库」段；**stale 章节降级注入摘要不注正文 + module commit 一致性校验**见「stale 章节降级注入」「步骤 3 commit 一致性校验」段
    - **注入防重复**（两源共用 `_inject_cache.json`）：无缓存则创建空 `{"ticket_id":"<本工单>","injections":[]}`（ticket_id 读 metadata，暂无填空串）；注入前按 `(source, ref_id, slice)` 查缓存去重，已注入的跳过。历史源 slice=`requirement_points`；段零 slice=`section:<file>`。详见 [references/dir_and_metadata.md](../references/dir_and_metadata.md)「注入缓存机制」段
@@ -55,7 +55,7 @@
    - `project_path` = 当前工程根绝对路径
    - `out_dir` = `.icode_output/.icode_output_{N}`
    - `requirement_summary` / `keywords` 取自步骤7 metadata；`requirement_points` 暂为空数组
-   - `has_00_init` = true，`has_plan` = false，`status` = `init_in_progress`，`created_at` = 当前时间，`last_used_at` = 当前时间（首次写入=created_at），`hit_count` = 0，`stale` = false
+   - `has_00_init` = true，`has_plan` = false，`status` = `init_in_progress`，`created_at` = 当前时间，`last_used_at` = 当前时间（首次写入=created_at），`hit_count` = 0，`stale` = false，`stale_reason` = null，`stale_checked_commit` = null，`created_commit` = `git rev-parse HEAD`（只读，非 git 仓库为 null），`created_branch` = `git rev-parse --abbrev-ref HEAD`
    - 写回 index.json，同时置 metadata `indexed = true`、`ticket_id = {生成的 ticket_id}`（持久化 ticket_id，供后续步骤检索时排除当前工单，避免反推）
 9. 提示用户：可继续对话补充需求，文档会随对话自动更新；讨论完成后运行 `/icode start` 或 `/icode plan` 进入步骤1。**若想另起炉灶讨论别的需求**，再敲 `/icode init`（会新建另一个目录）。
 

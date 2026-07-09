@@ -28,7 +28,7 @@
 1. **执行目录管理中的「创建新目录」逻辑**（强制新建，不做复用判定），确定 `ICODE_OUT_DIR`
 2. **历史检索复用**（强制思考之前，全局索引存在时必须执行，详见 SKILL.md「历史检索复用」段）：
    - Read `~/.claude/icode_data/index.json`（不存在则跳过检索）
-   - **两段式检索**：段一从本次症状/关键词提炼关键词集，与各 ticket `keywords` 做 Jaccard 粗筛取 ≤10 候选（零 token，排除 stale）；段二只把候选 `keywords + requirement_points` 喂主代理精读打分选 top-N 命中（N 由梯度决定，明确无关则 0 条）。`/icode log` 每次强制新建目录，本次工单尚未入索引，故无需排除当前 ticket_id
+   - **两段式检索**：段一从本次症状/关键词提炼关键词集，与各 ticket `keywords` 做 Jaccard 粗筛取 ≤10 候选（零 token，可复活预扫后排除剩余 stale）；段二只把候选 `keywords + requirement_points` 喂主代理精读打分选 top-N 命中（N 由梯度决定，明确无关则 0 条）。`/icode log` 每次强制新建目录，本次工单尚未入索引，故无需排除当前 ticket_id
    - **`/icode log` 注入分支**：命中工单定点读其 `log_analysis.md` 的「根因结论 + 决定性证据」章节（**不读全文**，≤800 token/条），作为本次分析的启发——参考其根因方向与踩坑。**只进会话上下文，绝不写进 `log_analysis.md`**（唯一例外：实质借鉴可在该根因条目末尾加一句 `(参考相似工单 {ticket_id} 的同类根因)`）
    - **段零·工程文档检索**（与历史检索并行，候选合并排序）：`resolve_project_id(cwd)`（支持 git-root / repo-root 双模式，`repo` 根模式从 cwd 向上找 `.repo/manifest.xml`）→ `ls ~/.claude/icode_data/project_docs/<project_id>/`，逐章读前 50 行按 KEYS 匹配 → 读 `project_docs/<project_id>/_meta.json` 的 `module_deps` 列表，对每个 dep 查 `module_docs/<dep.key>/` → **反查父项目**（cwd 在子仓库 + path 匹配 manifest 的 `<project path>` → 父 repo-root 也纳入检索）；命中按 `[小节锚点]` 定点读小节；无知识库则零命中（ℹ️ 不阻塞）。详见 [references/dir_and_metadata.md](../references/dir_and_metadata.md)「段零·工程文档检索」+「module_docs 工程模块库」段；**stale 章节降级注入摘要不注正文 + module commit 一致性校验**见「stale 章节降级注入」「步骤 3 commit 一致性校验」段
    - **注入防重复**（两源共用 `_inject_cache.json`）：无缓存则创建空 `{"ticket_id":"<本工单>","injections":[]}`；注入前按 `(source, ref_id, slice)` 查缓存去重，已注入的跳过。历史源 slice=`root_cause_evidence`；段零 slice=`section:<file>`。详见 [references/dir_and_metadata.md](../references/dir_and_metadata.md)「注入缓存机制」段
@@ -110,7 +110,7 @@
     - `ticket_id` = `{工程名}-{N}`（冲突时加 `project_path` 短 hash 后缀，规则同 init）
     - `project_path` = 当前工程根绝对路径；`out_dir` = `.icode_output/.icode_output_{N}`
     - `requirement_summary` / `requirement_points` / `keywords` 取自步骤9 metadata
-    - `has_00_init` = true（log 已产出 `00_init.md`），`has_plan` = false，`status` = `log_done`，`created_at` = 当前时间，`last_used_at` = 当前时间（首次写入=created_at），`hit_count` = 0，`stale` = false
+    - `has_00_init` = true（log 已产出 `00_init.md`），`has_plan` = false，`status` = `log_done`，`created_at` = 当前时间，`last_used_at` = 当前时间（首次写入=created_at），`hit_count` = 0，`stale` = false，`stale_reason` = null，`stale_checked_commit` = null，`created_commit` = `git rev-parse HEAD`（只读，非 git 仓库为 null），`created_branch` = `git rev-parse --abbrev-ref HEAD`
     - 写回 index.json，置 metadata `indexed = true`、`ticket_id`
 11. 提示用户：根因已定，可敲 `/icode plan` 或 `/icode start`（无参）复用本目录的 `00_init.md` 进入修复流程；若对根因有异议，继续对话即可重跑对抗分析
 

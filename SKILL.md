@@ -281,14 +281,14 @@ ICODE_OUT_DIR=".icode_output/.icode_output_${LAST}"
 **全局索引**（不污染任何工程，不放技能目录）：
 
 - 索引文件：`~/.claude/icode_data/index.json`（首次运行自动创建）。**路径说明**：`~` 是当前用户主目录，由 Claude Code 工具层跨平台解析（Linux/macOS/Windows 通用），与技能目录 `~/.claude/skills/icode/` 同源。技能文件**禁止硬编码**任何具体用户路径（如 `/home/xxx`、`C:\Users\xxx`），所有全局路径必须用 `~` 表达，确保技能可移植
-- 每条记录：`ticket_id`(`{工程名}-{N}`，工程名冲突时追加 `project_path` 短 hash 后缀保唯一)、`project_path`、`out_dir`、`requirement_summary`(≤100 token)、`requirement_points`(≤8 条)、`keywords`(≤8个)、`has_00_init`/`has_plan`、`status`、`created_at`、`last_used_at`(检索命中时更新，LRU淘汰依据)、`hit_count`(检索命中+1，达10永久保留)、`stale`(默认false，过时校验发现代码锚点失效置true，stale工单不再注入)。**`has_00_init` 语义 = 该工单是否已产出 `00_init.md`（走过 init 或 log，log 也会产出 00_init.md），与"是否走过步骤0 init"解耦**——log 未走过 init 但产出 00_init.md 故也为 true
+- 每条记录：`ticket_id`(`{工程名}-{N}`，工程名冲突时追加 `project_path` 短 hash 后缀保唯一)、`project_path`、`out_dir`、`requirement_summary`(≤100 token)、`requirement_points`(≤8 条)、`keywords`(≤8个)、`has_00_init`/`has_plan`、`status`、`created_at`、`last_used_at`(检索命中时更新，LRU淘汰依据)、`hit_count`(检索命中+1，达20永久保留)、`stale`(默认false，过时校验失败置true，软stale可复活)、`stale_reason`(失败原因`anchor_gone`/`checkout_mismatch`/`path_gone`/`semantic_deviation`/`timeout`)、`stale_checked_commit`(上次评估时HEAD，可复活判据)、`created_commit`(创建时HEAD，commit上下文判据，非git仓库为null)、`created_branch`(`--abbrev-ref HEAD`)。**`has_00_init` 语义 = 该工单是否已产出 `00_init.md`（走过 init 或 log，log 也会产出 00_init.md），与"是否走过步骤0 init"解耦**——log 未走过 init 但产出 00_init.md 故也为 true
 - **只存指针和摘要，不存产物正文**。产物仍在各工程 `.icode_output/`，工程隔离不破坏。
-- **LRU 淘汰**（防 index.json 无限膨胀）：索引是检索缓存非档案。容量上限 200 条；`hit_count >= 10` 永久保留（被复用≥10 次的高价值工单）；未完成态（init/log/review/deepcheck/code in_progress）默认不淘汰，但**超时降级**（`last_used_at` 超 30 天无更新→置 `stale=true` 解除保护、纳入可淘汰，不新增 status 值）；超上限时淘汰 `hit_count < 10` 且 `stale=false` 完成态中 `last_used_at` 最老的。另**主动 stale 扫描**：每次写索引顺带校验最旧 K 条锚点，失效置 `stale=true`。检索命中**原子同步**更新 `last_used_at`+`hit_count` 续期。淘汰只删索引条目，产物保留各工程。**排序**：tickets 数组按 `hit_count` 降序、同值按 `last_used_at` 降序（高价值近期项在前，段一粗筛扫 keywords 快+淘汰从末尾）。详见 [references/dir_and_metadata.md](references/dir_and_metadata.md)「索引淘汰规则」
-- **过时校验**（防注入过时信息）：索引存的是工单当时的摘要，工程迭代后老工单 ADR/需求可能已过时。**两处触发**：①检索命中准备注入前（被动）；②每次写索引触发淘汰后，主动 Grep 校验最旧 K 条代码锚点（主动）。锚点失效→置 `stale=true` 跳过注入（即使 hit_count 高也不注入）。stale 工单保留索引留追溯，不再续期，不再被段一粗筛命中。**project_docs 工程文档同样有过时校验**：段零注入前被动 stale 检测（命中 KEYS 文件位置或正文目录前缀即标 stale，降级注入不注正文）+ `/icode doc` 末尾主动 stale 扫描（全库锚点校验写 `_meta.json.stale_files`，见 [steps/doc.md](steps/doc.md) 步骤8）+ module_docs commit 一致性校验（同分支不同 commit 降级注入+警告）。详见 [references/dir_and_metadata.md](references/dir_and_metadata.md)「检索命中续期 + 过时校验」「索引淘汰规则·主动 stale 扫描」「project_docs 主动 stale 扫描」「段零·工程文档检索·步骤 3 commit 一致性校验」
+- **LRU 淘汰**（防 index.json 无限膨胀）：索引是检索缓存非档案。容量上限 200 条；`hit_count >= 20` 永久保留（被复用≥20 次的高价值工单）；未完成态（init/log/review/deepcheck/code in_progress）默认不淘汰，但**超时降级**（`last_used_at` 超 30 天无更新->置 `stale=true`+`stale_reason=timeout` 解除保护、纳入可淘汰，不新增 status 值；timeout 为硬 stale 不复活）；超上限时在**可淘汰集**淘汰 `last_used_at` 最老的：① `hit_count < 20` 且 `stale=false` 完成态，或 ② `stale=true` 且 `stale_reason=timeout` 的超时降级僵尸（status 仍 in_progress）；**软 stale（非 timeout）保留不淘汰待复活**。另**主动 stale 扫描**：每次写索引顺带校验最旧 K 条锚点，失效置 `stale=true`。检索命中**原子同步**更新 `last_used_at`+`hit_count` 续期。淘汰只删索引条目，产物保留各工程。**排序**：tickets 数组按 `hit_count` 降序、同值按 `last_used_at` 降序（高价值近期项在前，段一粗筛扫 keywords 快+淘汰从末尾）。详见 [references/dir_and_metadata.md](references/dir_and_metadata.md)「索引淘汰规则」
+- **过时校验**（防注入过时信息）：索引存的是工单当时的摘要，工程迭代后老工单 ADR/需求可能已过时。**两处触发**：①检索命中准备注入前（被动）；②每次写索引触发淘汰后，主动 Grep 校验最旧 K 条代码锚点（主动）。锚点失效→置 `stale=true` 跳过注入（即使 hit_count 高也不注入）。stale 工单保留索引留追溯，不再续期，不再被段一粗筛命中。**project_docs 工程文档同样有过时校验**：段零注入前被动 stale 检测（命中 KEYS 文件位置或正文目录前缀即标 stale，降级注入不注正文）+ `/icode doc` 末尾主动 stale 扫描（全库锚点校验写 `_meta.json.stale_files`，见 [steps/doc.md](steps/doc.md) 步骤8）+ module_docs commit 一致性校验（同分支不同 commit 降级注入+警告）。**历史工单 stale 校验 v2**：commit 上下文比对（`created_commit` vs 当前 HEAD：同提交高置信注入/后代跑锚点/祖先分叉软stale）+ top-N 注入前语义偏离 checklist（抓"锚点在但语义变"）+ stale 可复活（checkout 变化重评，解决临时旧提交误判）+ **Git 操作只读白名单**（禁 checkout/reset/commit 等写操作与网络操作，详见「过时校验·Git 操作安全白名单」）。详见 [references/dir_and_metadata.md](references/dir_and_metadata.md)「检索命中续期 + 过时校验」「索引淘汰规则·主动 stale 扫描」「project_docs 主动 stale 扫描」「段零·工程文档检索·步骤 3 commit 一致性校验」
 
 **写索引时机**（**`keywords` 是段一粗筛的检索索引，所有入口首次写索引时必须填 ≤8 个技术关键词、不得为空**——空 keywords 的工单无法被粗筛命中，等于检索盲区）：
-- `/icode log` 产出 `log_analysis.md` + `00_init.md` 后：**首次生成 `ticket_id`**（`{工程名}-{N}`，冲突加 hash 后缀）并回填 metadata，写入 `requirement_summary`（根因摘要）+`requirement_points`（修复要点）+`keywords`（≤8个，从根因/症状提炼）+`has_00_init=true`+`status=log_done`+`last_used_at=当前`+`hit_count=0`+`stale=false`，**写后执行LRU淘汰 + 主动 stale 扫描**
-- 步骤0 首轮写 `00_init.md` 后：**首次生成 `ticket_id`**（`{工程名}-{N}`，冲突加 hash 后缀）并回填 metadata，写入 `requirement_summary`+空 `requirement_points`+`keywords`（≤8个，从粗略需求提炼）+`has_00_init=true`+`last_used_at=当前`+`hit_count=0`+`stale=false`，**写后执行LRU淘汰 + 主动 stale 扫描**
+- `/icode log` 产出 `log_analysis.md` + `00_init.md` 后：**首次生成 `ticket_id`**（`{工程名}-{N}`，冲突加 hash 后缀）并回填 metadata，写入 `requirement_summary`（根因摘要）+`requirement_points`（修复要点）+`keywords`（≤8个，从根因/症状提炼）+`has_00_init=true`+`status=log_done`+`last_used_at=当前`+`hit_count=0`+`stale=false`+`stale_reason=null`+`stale_checked_commit=null`+`created_commit`（`git rev-parse HEAD` 只读，非git仓库为null）+`created_branch`，**写后执行LRU淘汰 + 主动 stale 扫描**
+- 步骤0 首轮写 `00_init.md` 后：**首次生成 `ticket_id`**（`{工程名}-{N}`，冲突加 hash 后缀）并回填 metadata，写入 `requirement_summary`+空 `requirement_points`+`keywords`（≤8个，从粗略需求提炼）+`has_00_init=true`+`last_used_at=当前`+`hit_count=0`+`stale=false`+`stale_reason=null`+`stale_checked_commit=null`+`created_commit`（`git rev-parse HEAD` 只读，非git仓库为null）+`created_branch`，**写后执行LRU淘汰 + 主动 stale 扫描**
 - 步骤0 每轮对话更新后：刷新 `requirement_summary`；`requirement_points` **仅在首次写索引时生成**（步骤0首轮），步骤0 每轮对话不重复刷新（步骤1 完成 `01_plan.md` 时再统一刷一次）
   - **`requirement_points` 提炼算法**（明确可执行）：
     1. 扫描 `00_init.md` 中 `## 3. 新增需求点` 章节下的 `- [ ]` / `- [x]` 列表项
@@ -297,24 +297,28 @@ ICODE_OUT_DIR=".icode_output/.icode_output_${LAST}"
     4. 最多保留 8 条，多余的丢弃
     5. 若「3. 新增需求点」章节缺失/为空，`requirement_points` 保持空数组
     6. 例：`- [x] calc_eval 函数签名` → `"calc_eval 函数签名"`
-- 步骤1 写完 `01_plan.md` 后：刷新 `requirement_summary`（基于完整计划）+ `has_plan=true`；**常规新建目录首跑时**（跳过步骤0）在此首次生成 `ticket_id` 并回填 metadata、首次写入索引条目（`has_00_init=false`、`keywords`（≤8个，从计划技术栈提炼，不得为空）、`last_used_at=当前`、`hit_count=0`、`stale=false`），**写后执行LRU淘汰 + 主动 stale 扫描**
-- 步骤6 终审完成后：刷新 `status=completed`，`requirement_summary` 若与最终交付显著偏差则基于最终成果刷新
+- 步骤1 写完 `01_plan.md` 后：刷新 `requirement_summary`（基于完整计划）+ `has_plan=true`；**常规新建目录首跑时**（跳过步骤0）在此首次生成 `ticket_id` 并回填 metadata、首次写入索引条目（`has_00_init=false`、`keywords`（≤8个，从计划技术栈提炼，不得为空）、`last_used_at=当前`、`hit_count=0`、`stale=false`、`stale_reason=null`、`stale_checked_commit=null`、`created_commit`（`git rev-parse HEAD` 只读，非git仓库为null）、`created_branch`），**写后执行LRU淘汰 + 主动 stale 扫描**
+- 步骤6 终审完成后：刷新 `status=completed`，`requirement_summary` 若与最终交付显著偏差则基于最终成果刷新；**若 `stale=true` 重置 `stale=false`+`stale_reason=null`+`stale_checked_commit=null`**（旧 stale 判据失效，下次检索重评）
 
 **检索注入流程**（`/icode init`、`/icode log`、`/icode plan`、`/icode start`、`/icode fast` 共用检索，分流注入；段零工程文档候选与本流程候选合并排序后统一注入，不分来源）：
 
 1. **检索阶段·两段式**（强制思考**之前**；`/icode init`/`/icode log` 在建目录后检索，`/icode plan`/`/icode start` 在目录管理+确定需求来源后检索——确保用完整需求做相关性判断）：
 
-   **段一·粗筛（不进 LLM，纯计算，零 token 消耗）**：从当前需求/症状提炼关键词集 `K_new`，**先过滤** `stale=true` 与当前 `ticket_id`（不自我参考）——段一粗筛前**显式排除**（而非粗筛后再过滤），降低计算量；再与**全量 `tickets` 数组中**剩余 ticket 的 `keywords` 做集合交集（index.json 是完整 JSON，必须 `json.load` 整体解析全量读，禁止只读前 N 行--「前 50 行」仅适用于 `project_docs/*.md` 章节，见 [dir_and_metadata.md](references/dir_and_metadata.md)「段零·工程文档检索」段），按 **Jaccard 相似度**（`|K_new ∩ K_ticket| / |K_new ∪ K_ticket|`）降序排列。取相似度 > 0 的前 **≤10 条**作为候选集（候选为 0 则直接零命中结束）。**关键词缺失的工单**（`keywords` 为空）在粗筛中无法被命中，故写索引时 `keywords` 不得为空（≤8 个技术词）。
+   **段一·粗筛（不进 LLM，纯计算，零 token 消耗）**：从当前需求/症状提炼关键词集 `K_new`，**先过滤**当前 `ticket_id`（不自我参考）+ **可复活预扫**（对每条 stale 工单取 `H = git -C {project_path} rev-parse HEAD`（只读）；`stale=true` 且 `stale_reason != timeout` 且 `stale_checked_commit != H` 的临时置 `stale=false` 重入候选重评，见步骤2「可复活 stale」）后剩余的 `stale=true`--段一粗筛前**显式排除**（而非粗筛后再过滤），降低计算量；再与**全量 `tickets` 数组中**剩余 ticket 的 `keywords` 做集合交集（index.json 是完整 JSON，必须 `json.load` 整体解析全量读，禁止只读前 N 行--「前 50 行」仅适用于 `project_docs/*.md` 章节，见 [dir_and_metadata.md](references/dir_and_metadata.md)「段零·工程文档检索」段），按 **Jaccard 相似度**（`|K_new ∩ K_ticket| / |K_new ∪ K_ticket|`）降序排列。取相似度 > 0 的前 **≤10 条**作为候选集（候选为 0 则直接零命中结束）。**关键词缺失的工单**（`keywords` 为空）在粗筛中无法被命中，故写索引时 `keywords` 不得为空（≤8 个技术词）。
 
    > **为何先粗筛**：index.json 到 200 条上限时全量进上下文 ≈ 3.5 万 token，纯靠 LLM 现场扫全部 summary 会撑爆 context 且判断质量随条数下降。粗筛把 O(全部) 降到 O(候选集)，实测能圈出 ≤10 条强相关候选。
 
    **段二·精读（进 LLM）**：只把候选集的 `keywords + requirement_points`（约 50-100 token/条，10 条 ≤1K token）喂给主代理，结合当前需求/症状逐条判相关性并打分（0-10）。按分数排序，选 top-N 命中（N 由梯度规则定，见下）。
 
-2. **过时校验 + 命中续期**（对 top-N 命中工单，分两道校验）：
-   - **项目路径校验**：先 `test -d {project_path}` 校验工程根目录仍存在；工程被删/移动→置 `stale=true` 跳过该条注入（即使 hit_count 高也不注入），避免对已删除工程的引用注入
-   - **代码锚点校验**：Grep 校验其 ADR 涉及的代码锚点是否仍存在；锚点失效→置 `stale=true` 跳过该条注入
+2. **过时校验 + 命中续期**（对 top-N 命中工单，注入前逐条；`H = git -C {project_path} rev-parse HEAD`（每候选一次）；详见 [references/dir_and_metadata.md](references/dir_and_metadata.md)「过时校验」）：
+   - **项目路径校验**：`test -d {project_path}` 失败->`stale=true`+`stale_reason=path_gone`，跳过注入
+   - **commit 上下文校验**（`created_commit` 非 null）：`H==created_commit`->高置信注入快路径；`git merge-base --is-ancestor {created_commit} {H}`：退出0->正常演进进锚点校验；退出1->`stale=true`+`stale_reason=checkout_mismatch`（软stale，checkout变化可复活）；退出128（commit不可达）->视同null进锚点校验
+   - **代码锚点校验**：Grep 该工单工程 `{project_path}` 的 ADR 锚点是否仍存在；失效->`stale=true`+`stale_reason=anchor_gone`，跳过注入
+   - **语义偏离校验**（仅对已决定注入的 top-N≤3 条）：Read 该工单工程 `{project_path}` 的锚点代码按偏离 checklist 判 ADR 前提（签名/返回值边界/调用关系）是否仍成立；偏离->`stale=true`+`stale_reason=semantic_deviation`，跳过注入（抓"锚点在但语义变"）
 
-   **命中续期**：两道校验均通过的工单，**原子同步更新** `last_used_at`=当前时间、`hit_count`+=1，写回 index.json（两字段必须同一次写回，不得只更其一——详见 [references/dir_and_metadata.md](references/dir_and_metadata.md)「续期（校验通过才续期）·原子同步」）。`stale=true` 的工单不注入不续期。
+   **命中续期**：全部校验通过的工单，**原子同步更新** `last_used_at`=当前时间、`hit_count`+=1 写回（两字段同一次写回，不得只更其一--详见 [references/dir_and_metadata.md](references/dir_and_metadata.md)「续期（校验通过才续期）·原子同步」）；`stale_checked_commit=H` 在评估时已更新（与 hit_count 解耦，续期去重不阻断）。`stale=true` 的工单不注入不续期（软stale可复活见下）。
+
+   **可复活 stale**（解决 checkout 假阳性）：段一前对每条 stale 工单取其 `H = git -C {project_path} rev-parse HEAD`；`stale=true` 且 `stale_reason != timeout` 且 `stale_checked_commit != H` 的工单临时置 `stale=false` 重入段一重评（重评仍失败则更新 `stale_checked_commit=H`，同 HEAD 不再重评）。**所有 git 调用只读**，禁止 checkout/reset/commit 等写操作与网络操作（白名单见 [references/dir_and_metadata.md](references/dir_and_metadata.md)「过时校验·Git 操作安全白名单」）。
 
    **续期去重**（防 hit_count 虚高）：续期前查 `{ICODE_OUT_DIR}/_inject_cache.json`，若本工单目录已续期过该历史工单（`source=history AND ref_id=该 ticket` 任一记录）则不再 `+1`（新 slice 仍注入）。详见 [references/dir_and_metadata.md](references/dir_and_metadata.md)「注入缓存机制·续期去重」段
 

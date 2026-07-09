@@ -56,7 +56,7 @@
 3. 全部修复后做全局编译验证，最多 3 次
 4. 更新 `.ico_metadata.json`：`status = completed`
 5. **回写实现偏差备忘到 `03_plan_final.md`**（不可跳过，详见下方「实现偏差备忘」规范）
-6. **刷新全局索引最终状态**：Read `~/.claude/icode_data/index.json`，**按 metadata 的 `ticket_id` 定位**本工单条目，更新 `status` = `completed`，`requirement_summary` 若与最终交付有显著偏差则基于 `03_plan_final.md`+交付成果刷新一次（确保未来检索命中的摘要准确反映最终成果而非中途状态）。写回 index.json。
+6. **刷新全局索引最终状态**：Read `~/.claude/icode_data/index.json`，**按 metadata 的 `ticket_id` 定位**本工单条目，更新 `status` = `completed`，`requirement_summary` 若与最终交付有显著偏差则基于 `03_plan_final.md`+交付成果刷新一次（确保未来检索命中的摘要准确反映最终成果而非中途状态）；**若该工单当前 `stale=true`，重置 `stale=false`+`stale_reason=null`+`stale_checked_commit=null`**（产物可能经本轮更新，旧 stale 判据失效；下次检索注入前由过时校验按当前 `01_plan` 锚点重评，盲重置安全不致误注入）。写回 index.json。
 7. 输出交付总结
 
 ### 实现偏差备忘（回溯标注，防回读误解）

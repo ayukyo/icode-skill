@@ -78,8 +78,12 @@ Read `~/.claude/icode_data/index.json`（不存在则创建 `{"version":"1","upd
   - 步骤1 常规新建首跑（跳过 init/log）：`has_00_init` = false、`has_plan` = true、`status` = `plan_done`
 - `created_at` = 当前时间
 - `last_used_at` = 当前时间（**新增**：检索命中时更新，LRU淘汰依据；首次写入=created_at）
-- `hit_count` = 0（**新增**：检索命中时+1，达10永久保留）
-- `stale` = false（**新增**：过时校验发现代码锚点失效置true，stale工单不再注入不续期）
+- `hit_count` = 0（**新增**：检索命中时+1，达20永久保留）
+- `stale` = false（**新增**：过时校验失败置true，stale工单不再注入不续期；软stale可复活见下）
+- `stale_reason` = `null`（**新增**：失败原因 `anchor_gone`/`checkout_mismatch`/`path_gone`/`semantic_deviation`/`timeout` 之一，未标 stale 时为 null）
+- `stale_checked_commit` = `null`（**新增**：上次 stale 评估时的工作树 HEAD，可复活判据）
+- `created_commit` = 工单创建时工作树 HEAD（`git rev-parse HEAD`，**只读**；非 git 仓库/失败→`null` 走纯锚点兜底），不可变，commit 上下文 stale 判据
+- `created_branch` = `git rev-parse --abbrev-ref HEAD`（detached 记 `HEAD`，非 git 仓库→`null`），仅标签
 - 写回 index.json，置 metadata `indexed = true`、`ticket_id = {生成的 ticket_id}`
 - **写入后执行 LRU 淘汰**（见下方「索引淘汰规则」）
 
@@ -95,7 +99,7 @@ Read `~/.claude/icode_data/index.json`（不存在则创建 `{"version":"1","upd
 
 > **⚠️ index.json 读取方式（防与 DOC 混淆）**：本段 index.json 指**全局工单索引** `~/.claude/icode_data/index.json`，是完整 JSON 文件，必须用 `json.load` **整体解析 `tickets` 数组全量读**，禁止按行截断（如只读前 50 行--12 条工单约占 350 行，前 50 行仅覆盖 2 条，会漏掉其余工单导致检索失真）。「前 50 行」规则**仅适用于** `project_docs/<id>/*.md` 章节（见下文「段零·工程文档检索」段步骤 2），两者不可混用。
 
-检索阶段（init/log/plan/start 启动时扫 index.json）采用**两段式检索**（详见 SKILL.md「检索注入流程」）——段一 keywords Jaccard 粗筛取 ≤10 候选（零 token，排除 stale/当前 ticket_id），段二只把候选 keywords+requirement_points 喂 LLM 精读打分选 top-N 命中（N 由梯度决定）。对 top-N 命中工单，**先做过时校验，再续期**：
+检索阶段（init/log/plan/start 启动时扫 index.json）采用**两段式检索**（详见 SKILL.md「检索注入流程」）——段一 keywords Jaccard 粗筛取 ≤10 候选（零 token，复活预扫后排除剩余 stale/当前 ticket_id），段二只把候选 keywords+requirement_points 喂 LLM 精读打分选 top-N 命中（N 由梯度决定）。对 top-N 命中工单，**先做过时校验，再续期**：
 
 ### 项目路径校验（防注入已删除工程）
 
@@ -118,25 +122,34 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
 
 索引存的是工单**当时的摘要**，但工程会迭代，老工单的 ADR/需求可能已被后续工单推翻。命中过时工单注入会误导。
 
-**校验方法**（只查代码锚点是否还在，不重读全文，控 token）：
-1. 读该工单 `01_plan.md` 的 ADR 章节，提取其涉及的**代码锚点**（如"calc.c mul_overflows"、"calc.h calc_sqrt"）
-2. 用 Grep 快速确认锚点代码是否仍存在于当前工程
-3. **锚点不存在**（代码已删除/重构/重命名）→ 该工单过时，置 `stale=true`，**跳过注入**（即使 hit_count 高也不注入）
-4. **锚点存在** → 工单仍有效，正常注入
+> **⚠️ Git 操作安全白名单（强制，违反即不合规）**：本段所有 git 调用必须**只读**，仅允许：`git rev-parse HEAD` / `git rev-parse --abbrev-ref HEAD` / `git rev-parse --git-dir` / `git merge-base --is-ancestor <A> <B>`（仅取退出码 0/1）/ `git status --porcelain` / `git log --oneline -1` / `git cat-file -e <sha>`。**禁止** `checkout`/`switch`/`reset`/`stash`/`clean`/`commit`/`add`/`rm`/`rebase`/`merge`/`cherry-pick`/`push`/`fetch`/`pull`/`branch -D`/`tag -d` 等一切写操作与网络操作。stale 检测**只读工作树现状，绝不改工作树/索引/提交**--"checkout 变化时重评"指检测到**用户外部**改了 HEAD 后只读重评，**绝不由技能主动 checkout**。`-C {project_path}` 前缀用于跨工程工单切换目录执行只读命令，必需且允许；全部本地完成，离线可用。
+
+**校验方法**（对 top-N 命中工单，注入前逐条；`H = git -C {project_path} rev-parse HEAD`（该工单工程的当前 HEAD，每候选取一次；非 git 仓库/失败→`null` 走纯锚点兜底））：
+1. **项目路径校验**：`test -d {project_path}` 失败→置 `stale=true`+`stale_reason=path_gone`+`stale_checked_commit=H`，**跳过注入**（即使 hit_count 高也不注入），避免对已删除工程的引用注入
+2. **commit 上下文校验**（`created_commit` 非 null 时；为 null 跳过本步进第3步纯锚点兜底）：
+   - `H == created_commit`→工作树恰为工单出生提交，完全匹配，**not stale，高置信注入**（快路径，跳过第3步锚点校验）
+   - `git merge-base --is-ancestor {created_commit} {H}`：退出 0→正常前向演进，进第3步；退出 1（H 是 `created_commit` 的祖先/分叉）→置 `stale=true`+`stale_reason=checkout_mismatch`+`stale_checked_commit=H`，**软 stale 跳过注入**（checkout 变化时可复活，见「stale 字段·可复活」）；退出 128（`created_commit` 不可达，如 GC/换库）→视同 `created_commit=null` 进第3步纯锚点兜底
+3. **代码锚点校验**（廉价，现有）：读该工单 `01_plan.md` 的 ADR 章节提取**代码锚点**（如"calc.c mul_overflows"），Grep 该工单工程（`{project_path}`）确认是否仍存在；不存在（删除/重构/重命名）→置 `stale=true`+`stale_reason=anchor_gone`+`stale_checked_commit=H`，**跳过注入**
+4. **语义偏离校验**（新，贵层，仅对已决定注入的 top-N≤3 条）：Read 该工单工程（`{project_path}`）锚点处当前代码，按 **ADR 偏离 checklist** 判 ADR 前提是否仍成立：①ADR 涉及的函数/类签名是否仍匹配 ②返回值/边界值/错误码是否仍如 ADR 所述 ③ADR 推理依赖的调用关系/数据结构是否仍存在。任一不成立→置 `stale=true`+`stale_reason=semantic_deviation`+`stale_checked_commit=H`，**跳过注入**（专抓"锚点符号在但语义已变"，锚点校验抓不到）
+
+通过全部校验→工单有效，正常注入 + 续期（`stale_checked_commit=H` 在评估时已更新）。
 
 ### stale 字段
 
-- index.json 每条加 `stale`（默认 false）
+- index.json 每条加 `stale`（默认 false）+ `stale_reason`（默认 null）+ `stale_checked_commit`（默认 null）
 - `stale=true` 的工单：**不再注入**（检索时跳过），但仍保留在索引（不删，留追溯）
-- stale 工单**不被段一粗筛命中**（关键词交集前即排除）、不参与 hit_count 续期（不再被命中）
-- stale 由三种途径触发：①检索命中准备注入前被动校验锚点失效；②每次写索引后主动扫描最旧 K 条锚点失效；③僵尸未完成态超时降级（见「索引淘汰规则」规则 5）
-- 若该工单产物被刷新（如重跑步骤6终审），可手动重置 `stale=false`
+- stale 工单默认**不被段一粗筛命中**（关键词交集前即排除）、不参与 hit_count 续期（不再被命中）--但有**可复活例外**（见下）
+- stale 由五种途径触发，每种填对应 `stale_reason`：①检索命中注入前被动校验失败（`path_gone`/`checkout_mismatch`/`anchor_gone`/`semantic_deviation`）；②每次写索引后主动扫描最旧 K 条锚点失效（`anchor_gone`）；③僵尸未完成态超时降级（`timeout`，见「索引淘汰规则」规则 5）
+- **软 stale vs 硬 stale**：`checkout_mismatch`/`anchor_gone`/`path_gone`/`semantic_deviation` 为**软 stale**（依赖当前 checkout，可复活）；`timeout` 为**硬 stale**（活动维度，checkout 变化不复活，下次写索引刷新活动时自然解除）
+- **可复活规则**（解决 checkout 假阳性，核心）：检索段一前对每条 stale 工单取 `H = git -C {project_path} rev-parse HEAD`（该工单工程当前 HEAD）；对每条 `stale=true` 且 `stale_reason != timeout` 且 `stale_checked_commit != H` 的工单，**临时置 `stale=false`** 让其重入段一候选集，按「过时校验」重评。重评仍失败→`stale=true` 且更新 `stale_checked_commit=H`（同 HEAD 下次不再重评，省算）；用户 checkout 回正常→`stale_checked_commit != H` 成立→自动复活重评。**临时 checkout 旧提交误判的 stale，回正常 HEAD 后自动复活，不再永久粘住**（每条 stale 工单一次 `git -C` 调用 <10ms，stale 通常少数；git 调用只读，见「过时校验·Git 操作安全白名单」）
+- 若该工单产物被刷新（如重跑步骤6终审）：**步骤6 终审刷新索引时已自动重置** `stale=false`+`stale_reason=null`+`stale_checked_commit=null`（旧 stale 判据失效，下次检索按当前 `01_plan` 锚点重评）；其他产物刷新场景可手动重置
 
 ### 续期（校验通过才续期）
 
 - `last_used_at` = 当前时间（续期，LRU不淘汰）
 - `hit_count` += 1（累计命中次数）
 - 写回 index.json
+- `stale_checked_commit` 在「过时校验」评估阶段已更新为当前 `H`（**与 hit_count 解耦**--续期去重跳过 hit_count +1 时，stale_checked_commit 仍随评估更新，保证可复活判据准确）
 
 > **原子同步（强制，防数据失真）**：`last_used_at` 与 `hit_count` 必须在**同一次写回**中同步更新，**不得只更新其一**。历史 bug：某次命中只更新了 `last_used_at` 却漏 `hit_count` 自增，导致 `last_used_at` 被刷新但 `hit_count=0`——这条工单在 LRU 排序里因 hit_count 低沉底、却被 last_used_at"续期"误导排序，**直接破坏淘汰准确性**。续期写入时若任一字段更新失败，整次续期回滚不落盘。
 
@@ -150,16 +163,16 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
 
 **淘汰规则**：
 1. **容量上限 200 条**：tickets 数组超 200 时触发淘汰
-2. **永久保留**：`hit_count >= 10` 的工单永久不淘汰（被复用≥10 次的高价值工单）
+2. **永久保留**：`hit_count >= 20` 的工单永久不淘汰（被复用≥20 次的高价值工单）
 3. **未完成态保留**：`status` 为 `init_in_progress`/`log_done`/`log_in_progress`/`review_in_progress`/`deepcheck_in_progress`/`code_in_progress` 的工单**默认**不淘汰（流程未结束）——**但有超时降级例外**（见规则 5）
-4. **LRU 淘汰**：超上限时，在 `hit_count < 10` 且 `status = completed/review_done/deepcheck_done/plan_done/plan_finalized`（已完成或已推进态）的工单中，淘汰 `last_used_at` 最老的（数组末尾），直到条目数 ≤ 200
-5. **僵尸未完成态超时降级**：未完成态工单（init/log/review/deepcheck/code in_progress）若 `last_used_at` 距当前**超过 30 天**无更新，视为"建了就扔"的僵尸工单——**不删 status，改置 `stale=true`**（复用 stale 机制，不污染 status 语义），降级后该条不再受规则 3 的未完成态保护，纳入规则 4 可淘汰集。**触发时机**：每次写索引触发淘汰扫描时，顺带检查所有未完成态工单是否超时。区分"正在用"（30 天内有更新）与"建了就扔"（超时）
+4. **LRU 淘汰**：超上限时，在**可淘汰集**中淘汰 `last_used_at` 最老的（数组末尾），直到条目数 ≤ 200。**可淘汰集** = `hit_count < 20` 且满足下列**任一**：① `stale=false` 且 `status = completed/review_done/deepcheck_done/plan_done/plan_finalized`（正常已完成/推进态）；② `stale=true` 且 `stale_reason = timeout`（规则 5 超时降级的僵尸未完成态，status 仍 in_progress 但已降级可淘汰）。**`stale=true` 且 `stale_reason != timeout` 的软 stale 工单不在可淘汰集**（保留待 checkout 变化后复活重评）
+5. **僵尸未完成态超时降级**：未完成态工单（init/log/review/deepcheck/code in_progress）若 `last_used_at` 距当前**超过 30 天**无更新，视为"建了就扔"的僵尸工单——**不删 status，改置 `stale=true`+`stale_reason=timeout`**（复用 stale 机制，不污染 status 语义），降级后该条不再受规则 3 的未完成态保护，**纳入规则 4 可淘汰集②**（status 仍 in_progress，由可淘汰集②的 `stale_reason=timeout` 判定可淘汰）。**触发时机**：每次写索引触发淘汰扫描时，顺带检查所有未完成态工单是否超时。区分"正在用"（30 天内有更新）与"建了就扔"（超时）。**timeout 为硬 stale**：复活条件 `stale_reason != timeout` 排除它，超时降级不复活、直接走淘汰
 6. **淘汰不报错**：静默移除，用户无感
 
 **主动 stale 扫描**（防过时信息堆积，规则 5 之外的第二道清理）：
 
 - **现状漏洞**：原设计 stale 校验只在"检索命中准备注入前"才做——没被命中的老条目永远 stale=false，永远不会被这个机制清理，stale 清理形同虚设。
-- **新增主动扫描**：每次写索引触发淘汰扫描后，**顺带对 `last_used_at` 最旧的 K 条**（**K=min(30, 当前条目数)**，索引 150 条时覆盖率 20%）做一次代码锚点 Grep 校验（方法同「过时校验」段）。锚点失效→置 `stale=true`。把"被动校验"变"主动清理"。
+- **新增主动扫描**：每次写索引触发淘汰扫描后，**顺带对 `last_used_at` 最旧的 K 条**（**K=min(30, 当前条目数)**，索引 150 条时覆盖率 20%）做一次代码锚点 Grep 校验（方法同「过时校验」段第3步）。锚点失效→置 `stale=true`+`stale_reason=anchor_gone`+`stale_checked_commit=H`（H=该工单 `git -C {project_path} rev-parse HEAD`（只读）；属软 stale，checkout 变化时可复活）。把"被动校验"变"主动清理"。
 - **控 token**：只扫最旧的 K 条（最可能过时），不扫全量；Grep 单条锚点 <1K token。
 - stale 工单仍受排序影响沉在数组末尾，但**不注入不续期**，可在后续 LRU 淘汰中被规则 4 移除（若它已达可淘汰态）或长期留追溯（若未完成态）。
 
@@ -268,7 +281,7 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
 
 ### 设计动机
 
-五入口（init/log/plan/start/fast）启动时都会触发检索注入，但一次开发链路常跨多命令（如 init→start 复用同目录），同一历史工单/文档章节会被多次命中，导致 **token 浪费**（重复注入同一切片）+ **hit_count 扭曲**（同目录多次续期虚高，扭曲 `hit_count >= 10` 永久保留判定）。
+五入口（init/log/plan/start/fast）启动时都会触发检索注入，但一次开发链路常跨多命令（如 init→start 复用同目录），同一历史工单/文档章节会被多次命中，导致 **token 浪费**（重复注入同一切片）+ **hit_count 扭曲**（同目录多次续期虚高，扭曲 `hit_count >= 20` 永久保留判定）。
 
 ### 缓存文件
 
