@@ -47,9 +47,10 @@ DOC_DIR="$HOME/.claude/icode_data/project_docs/$PROJECT_ID"
 
 AI 解析自然语言的「目标工程」+「动作」：
 
-- **目标**：无描述→全局扫描（列各工程 stale 状态 + 建议动作，用户选）；路径→`git rev-parse` 解析 git 根（路径相对根部分仅过滤模块，不改 project_id）；工程名→`project_docs/` basename + `00_overview.md` 工程名匹配（多命中问、零命中用 cwd）；模块名→按 cwd 定 project_id 后按 KEYS 匹配已有章节
+- **目标**：无描述→全局扫描（列各工程 stale 状态 + 建议动作，用户选）；路径→`git rev-parse` 解析 git 根（路径相对根部分仅过滤模块，不改 project_id）；工程名→`project_docs/` basename + `00_overview.md` 工程名匹配（多命中问、零命中用 cwd）；模块名→按 cwd 定 project_id 后，**先判定该模块是否为独立 git 仓库**（查 `.repo/projects/<name>.git`、`.gitmodules`、`CMakeLists.txt` 的 `FetchContent_Declare`，方法同步骤 2 模块检测）：**是独立仓库**→生成/更新该模块 `module_docs/<key>/`（聚焦），工程 `project_docs` 仅补"该模块在工程 IPC 拓扑中的角色"上下文章节（不重复 module_docs 内部细节，职责划分见 [doc_template.md](../references/doc_template.md)「九 · 职责划分」）；**非独立仓库**（工程内普通子目录）→生成/更新 `project_docs` 中该模块章节。两者均按 KEYS 匹配已有章节做增量判定（首次无章节可匹配时见步骤 3「首次全量 + 模块名参数」）
 - **动作**：全量词（重新生成/全量/从头）→全量重生成（**确认门**）；增量词（检查/刷新/更新）→增量；新增词（加/补充）→新章节；只读词（只看/列一下）→扫描不写；无动作词→默认增量
 - **歧义必问**：目标明确无动作词但 git diff 命中 ≥50% 章节→问"全量/增量N个/仅列"；"加 X"但 X 已存在→问"覆盖/新建/合并"；完全模糊→列候选工程让选
+- **独立仓库模块默认不问**：模块名命中独立 git 仓库时，默认按 "module_docs + 工程上下文章节" 互补生成（见「目标」+ 步骤 5），**不强制三选一问询**（判定规则已定死 "独立仓库→两者互补"，问询徒增交互成本）；**仅当用户动作词明确表达 "只要模块本身"**（如 "只看/仅模块/不要工程上下文"）时→跳过工程上下文章节，只生成该模块 module_docs
 
 ## 确认门（全量重生成必经）
 
@@ -70,7 +71,7 @@ AI 解析自然语言的「目标工程」+「动作」：
 
 ### 2. 模块检测 + 代码特征扫描（先扫描后生成）
 
-**模块检测**（按 6 级优先级识别工程依赖的独立模块）：详见 [dir_and_metadata.md](../references/dir_and_metadata.md)「module_docs 工程模块库」段「6 级模块检测」表（git submodule / `repo` 管理 / CMake FetchContent / monorepo 启发式 / vendor 扫描 / 用户配置 + `.icode_doc_modules` JSON 格式）。
+**模块检测**（按 6 级优先级识别工程依赖的独立模块）：详见 [dir_and_metadata.md](../references/dir_and_metadata.md)「module_docs 工程模块库」段「6 级模块检测」表（git submodule / `repo` 管理 / CMake FetchContent / monorepo 启发式 / vendor 扫描 / 用户配置 + `.icode_doc_modules` JSON 格式）。**"独立模块"判定 = 该模块本身是独立 git 仓库，与"是否工程核心"无关**——工程核心模块同时是独立仓库时两者都生成，互补不重复（职责划分见 [doc_template.md](../references/doc_template.md)「九 · 职责划分」）。
 
 **monorepo 启发式补充判别条件**（dir_and_metadata 表未含，doc.md 步骤 2 独有）：子目录**不在工程根 `.gitignore` 中**（避免误把工程内辅助目录当独立模块）+ **子目录有自己的 README**（含 `## ` 等 markdown 标题）。
 
@@ -87,6 +88,11 @@ AI 解析自然语言的「目标工程」+「动作」：
   - 删除的 dep（旧列表有但新列表无）→ 提示「工程不再依赖 X，module_docs/{key}/ 是否保留（默认保留，需手动清理）」
   - key 变化的 dep（url 或 branch 变）→ 触发新 key 的 module_docs 全量重生成 + 旧 key 提示是否清理
 
+- **首次全量 + 模块名参数**（`$DOC_DIR` 不存在但用户给了模块名）-> 该模块名作为"聚焦生成目标"，而非"匹配已有章节"（首次无章节可匹配，原匹配语义悬空）：
+  - 该模块是独立仓库 -> 生成该模块 module_docs + 工程固定章节（00/90/99）+ 命中动态章节，其中 `10_architecture` 描述该模块在工程拓扑中的角色（不重复 module_docs 内部）
+  - 该模块非独立仓库 -> 生成 `project_docs` 该模块章节 + 固定章节（00/90/99）
+  - 其余章节按代码特征自适应生成；**不因用户只点一个模块而省略固定章节**（00/90/99 永远生成）
+
 ### 4. 强制思考前置（不可跳过）
 
 **必须先 Read [references/thinking.md](../references/thinking.md) + [references/anti_laziness.md](../references/anti_laziness.md) + [references/doc_template.md](../references/doc_template.md) 完整内容**（不得凭概述执行）。子项（≥4步）= 扫描结果分析 → 章节规划 → 元信息字段准备 → 风险评估（手动编辑/冲突）。
@@ -95,7 +101,13 @@ AI 解析自然语言的「目标工程」+「动作」：
 
 **先生成 module_docs**（依赖先于依赖者，用户闲时跑不省 token，模块文档可详细完整生成）：
 
-- 对每个 module（从步骤 2 检测的 modules 列表）：
+**module_docs 生成范围（按用户意图聚焦，避免全量 token 爆炸）**：
+
+- **用户指定模块名** -> 聚焦该模块（其余检测到的独立仓库模块标 `generated: false` 写入 `module_deps`，不生成文档，末尾汇总提示"其余 N 个模块未生成 module_docs，可 `/icode doc <name>` 按需生成"）：该模块是独立仓库 -> 生成该模块 module_docs；该模块非独立仓库 -> 不生成 module_docs（该模块走下方「再生成工程自身章节」生成 project_docs 章节）
+- **无模块名（全量）**→ 检测到的所有模块写入 `module_deps`（可读模块 `generated: true`）；module_docs 只生成"代码已本地化可读"的（git submodule / `repo` 子项目 / monorepo / vendor），不可读的（如 CMake FetchContent build 目录未下载）标 `unresolved_modules`
+- **反例（禁止）**：**不得因数量大而全部降级、把模块内容塞进 `project_docs` 章节替代 module_docs**（历史 bug：某工程 34 个 `repo` 子项目时 AI 把模块塞进 project_docs 章节，module_docs 一个没生成）；全量时可读模块数量过多（如超过 10 个）时，应**分批生成或提示用户分次 `/icode doc <name>` 聚焦**，而非降级塞 project_docs
+
+- 对每个**待生成**的 module（按上述范围筛后的列表，非全量 modules）：
   - 克隆/读取该 module 的代码到临时目录（git submodule 用 `git submodule foreach 'git archive HEAD | tar -x -C $tmp/<name>'`；repo 子仓库用 `cd <submodule_path> && git archive HEAD | tar -x -C $tmp`；monorepo/vendor 直接读子目录；CMake FetchContent 通常 build 目录未下载，fallback 警告）
   - 按 [doc_template.md](../references/doc_template.md)「九、模块章节模板」生成章节（前 50 行四块 + 模板自适应 grep 表；KEYS 按 doc_template.md「七」提取）
   - Write 到 `$HOME/.claude/icode_data/module_docs/<key>/<NN>_<topic>.md`（十位桶）
@@ -107,7 +119,7 @@ AI 解析自然语言的「目标工程」+「动作」：
 **再生成工程自身章节**（依赖者引用依赖者，含"依赖子模块"字段）：
 
 - 对每个待生成章节：读相关代码（Read/Grep）→ 按模板写正文 → 生成前 50 行四块（含「依赖子模块」字段）→ Write 到 `$DOC_DIR/<NN>_<module>_<topic>.md`（十位桶，新增取 `max(NN)+1`）
-- 写 `_meta.json`（`project_id` / `project_type` / `git_root` / `module_deps` 仅含已成功生成的模块 / `unresolved_modules` 含失败的模块）
+- 写 `_meta.json`（`project_id` / `project_type` / `git_root` / `module_deps` 含所有检测到的可读模块（已生成 `generated: true`、按需未生成 `generated: false`，见上「module_docs 生成范围」）/ `unresolved_modules` 含拉取失败的模块）
 - 单章失败→标记不拖垮
 
 ### 6. 代码事实审计（`99_code_facts_audit.md`，永远生成）

@@ -383,7 +383,9 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
    └─ 存在 → 逐章读前 50 行 → KEYS 匹配 + 简要说明语义打分 → project 候选集
 3. 读 project_docs/<project_id>/_meta.json → module_deps 列表
    对每个 dep：ls ~/.claude/icode_data/module_docs/<dep.key>/*.md
-   ├─ 目录不存在或无 .md → 收集到「缺失模块」列表（末尾汇总警告），跳过该 dep
+   ├─ 目录不存在或无 .md：
+   │   - dep.generated == false（按需未生成，见 doc.md 步骤5「module_docs 生成范围」用户指定模块名场景）-> 不报缺失，提示"可 `/icode doc <name>` 按需生成"，跳过该 dep
+   │   - dep.generated 缺省或 true（本应生成却缺失）-> 收集到「缺失模块」列表（末尾汇总警告），跳过该 dep
    └─ 存在 → 读前 50 行 → KEYS 匹配 → module 候选集
       **commit 一致性校验（防跨工程 commit 漂移误导）**：比对工程 `_meta.json.module_deps[].commit`（本工程 pin 的 commit）与 `module_docs/<key>/_meta.json.current_commit`：
       - 一致 → 正常注入（模块文档版本与本工程代码版本匹配）
@@ -409,6 +411,7 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
 **附加输出**（段零末尾汇总）：
 - ⚠️ **缺失模块警告**（若步骤 3 收集到「缺失模块」列表）：输出「工程引用了以下 module_docs 但不存在：\`{dep1.name}\`(\`{dep1.key}\`), \`{dep2.name}\`(\`{dep2.key}\`)... — 请检查是否已 /icode doc 生成，或工程 _meta.json.module_deps 是否写错 key」
 - ⚠️ **未生成模块警告**（若工程 `_meta.json.unresolved_modules` 非空）：输出「工程有 N 个未生成模块（拉取失败）：\`{name1}\`(\`{reason1}\`), \`{name2}\`(\`{reason2}\`)... — 子仓库代码本地化后重跑 /icode doc 时自动恢复」
+- ℹ️ **按需未生成模块提示**（若步骤 3 收集到 `generated == false` 的模块）：输出「工程有 N 个模块未生成 module_docs（按需未生成，上次 /icode doc 指定了其他模块聚焦）：\`{name1}\`, \`{name2}\`... - 可 \`/icode doc <name>\` 按需生成」
 
 **工程隔离**：段零严格按当前 cwd 的 project_id 检索**工程自身章节**（不跨 project 注入 `project_docs/`），但**自动跨仓库跨分支覆盖依赖的 `module_docs/`**（多个 project 引用同一上游仓库同分支只一份，自动复用）。姊妹工程引用走章节正文内的文字描述，不自动跨库。
 
@@ -426,6 +429,8 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
 ## module_docs 工程模块库（按仓库+分支共享）
 
 > **核心思想**：工程依赖的"独立模块"（git submodule / `repo` 管理 / CMake FetchContent / monorepo 子目录 / vendor / 用户配置）按"上游仓库 + 分支"为粒度共享文档。**多个工程引用同一上游仓库同一分支只生成一份**，段零自动覆盖，开发时快速定位关联模块的文档。
+
+> **「独立模块」判定澄清**："独立模块"指**该模块本身是独立 git 仓库**（无论它是否同时是工程核心模块）。`repo` 管理的子项目（如某任务控制中枢模块，是工程核心但同时是独立子仓库）判定为独立模块 -> 生成 module_docs；其工程视角（在工程 IPC 拓扑中的角色）写在 project_docs。**"是否独立 git 仓库"是唯一判定标准，与"是否工程核心"无关**--核心模块同时是独立仓库时，两者都生成，互补不重复（职责划分见 [doc_template.md](doc_template.md)「九 · 职责划分」）。
 
 ### 目录布局（module_docs 层）
 
@@ -471,7 +476,8 @@ key = sha256(repo_url + ":" + branch) → hexdigest[:12]
       "branch": "main",
       "key": "<sha256>",
       "commit": "a3f2b1c",
-      "path": "module_a/"
+      "path": "module_a/",
+      "generated": true
     }
   ],
   "unresolved_modules": [
