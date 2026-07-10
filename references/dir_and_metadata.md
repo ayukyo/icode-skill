@@ -407,7 +407,7 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
 3.5 **反查父项目**（子仓库内工作时）：如果 cwd 在 git-root 模式 → 计算 `cwd_relative = realpath(cwd) 相对 realpath(.repo 所在目录)`（**注意：是相对 .repo 根，不是相对 git_root**——例如 cwd 在 `myproject/module_a/`、.repo 在 `myproject/.repo/` 时，cwd_relative = `module_a/`）→ 若 `.repo/manifest.xml` 存在且 `cwd_relative` 精确匹配或为某 `<project path>` 的子路径 → 该 manifest project 的"父 repo 根"=`.repo/` 所在目录；把父 project（repo-root）也纳入检索（读 `project_docs/<父 project_id>/_meta.json` + 章节），候选合并排序时一并参与打分（来源标签标「来源：project:父 project_id」）
 4. 合并排序：project 候选 + module 候选 + 反查父项目章节 + 历史检索段一/二候选 → 统一按相关度排序 → top-N（强相关≤2 + 弱相关≤1，总量≤3 条）
 5. 对每个 top-N 项（注入策略按来源区分）：
-   - **project 章节**：stale 判定（查 `_meta.json.stale_files` + 运行时 `git diff` 兜底，见「stale 检测」）-- stale → slice=`section:<file>#stale-summary`，按「stale 章节降级注入」只注简要说明+警告（不读正文小节）；非 stale → slice=`section:<file>#<anchor>`，按 KEYS [小节锚点] 定点读对应小节（不读全章，≤1K token/条）→ 注入思考输入「历史参考」节
+   - **project 章节**：stale 判定（查 `_meta.json.stale_files` + 运行时 `git diff` 兜底，见「stale 检测」）-- stale → slice=`section:<file>#stale-summary`，按「stale 章节降级注入」只注简要说明+警告（不读正文小节）；非 stale → 检查 template_version（见下文「质量信号」）：v2 → slice=`section:<file>#<anchor>` 正常注入；v1 → slice=`section:<file>#v1-summary` 降级注入摘要+升级提示不注正文（v1 章节模板过旧，注入质量不可控）。按 KEYS [小节锚点] 定点读对应小节（不读全章，≤1K token/条）→ 注入思考输入「历史参考」节
    - **module 章节**：按步骤3 commit 校验结果 -- 一致 → slice=`section:<file>#<anchor>` 注正文；不一致 → 降级注正文+警告（步骤3，须 Read 实证）
    - 查 _inject_cache.json → 已注入的同 slice 跳过；否则注入并写缓存
    - 命中附来源标签：「来源：project:myproject」或「来源：module:module_a@main@a3f2b1c」
@@ -420,6 +420,26 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
 **stale 章节降级注入（不注正文，防误导）**：stale 章节**绝不注入正文小节**（避免过时 file:line / IPC 契约 / 调用链误导新工作流），改为**只注入「简要说明」（50~100 字概览，不含 file:line，误导风险低）+ 警告行**「⚠️ 章节 `<文件>` 基于旧 commit `<generation_commit>`，当前 HEAD `<HEAD>`，已过时仅注入摘要，建议重跑 `/icode doc` 更新」。与历史工单 stale「跳过注入」同等防误导强度--过时的正文小节不进新工作流思考输入；降级保留「简要说明」仅给新工作流方向性参考，不构成事实依据（配合下文「不盲信约束」）。 注入缓存 slice 记为 `section:<file>#stale-summary`（与正文小节 `section:<file>#<anchor>` 区分，避免去重混淆；章节重跑变新鲜后注入正文小节不被误跳过）。
 
 **不盲信约束（段零注入的工程/模块文档仅作参考）**：段零注入的 project_docs / module_docs 章节是 `/icode doc` 生成时的**快照**，可能因工程迭代而过时（即使未标 stale 也只是「未检测到过时」，非「已验证最新」）。下游 init/plan/start/fast/log 步骤**不得将注入的文档描述当作事实直接采信**：凡涉及代码行为 / 位置 / 接口契约 / 调用链 / 错误码的断言，**必须用 Read/Grep 实证当前代码**后再纳入决策（与 [anti_laziness.md](anti_laziness.md)「段零文档不盲信」条 + [01_plan.md](../steps/01_plan.md) 计划断言实证一致）。文档只作「设计意图与模块关系」的启发，不作「代码事实」的依据。
+
+**质量信号（v2 新增，模板版本驱动的注入优先级）**：章节 `_meta.json.template_version` 与 [doc_template.md](../references/doc_template.md) 顶部 `SCHEMA_VERSION` 比对：
+
+| 章节状态 | 注入策略 | 注入缓存 slice |
+|----------|---------|---------------|
+| `template_version == SCHEMA_VERSION`（v2 章节，如 v2.0.0）**且非 stale** | 正常注入（既新鲜又高质量） | `section:<file>#<anchor>` |
+| `template_version == SCHEMA_VERSION`（v2 章节）**但 stale** | 降级注入（stale 优先于模板版本——避免注入过时内容） | `section:<file>#stale-summary` |
+| `template_version < SCHEMA_VERSION`（v1 章节，含缺失字段）**且非 stale** | **降级注入**：只注「简要说明」+ 警告「⚠️ 章节基于旧模板版本 `<旧版本>`，当前 SCHEMA_VERSION `<SCHEMA_VERSION>`，建议重跑 `/icode doc` 触发模板迁移」+ 建议运行 `/icode doc` 升级；**不注正文小节**（旧模板未含 14 项必含元素 + 业务流独立章节 + 英文中文备注 + 链路中文说明，注入质量不可控） | `section:<file>#v1-summary` |
+| v1 章节 + stale | 降级注入（取 stale-summary，stale 优先级 > 模板版本） | `section:<file>#stale-summary` |
+| 缺失 template_version 字段 | 视为 v1，走上一档降级路径 | 同上 |
+
+**优先级排序**：v2 章节在候选排序中权重 > v1 章节（同相关度下 v2 优先），保证下游尽量拿到高质量上下文。注入缓存 slice 区分：正常注入 `section:<file>#<anchor>` + 升级后重注 `section:<file>#<anchor>`（v1→v2 升级后同一锚点覆盖旧缓存）、降级注入 `section:<file>#v1-summary` / `section:<file>#stale-summary`。**stale 优先级 > 模板版本**（避免给下游注入过时正文，哪怕章节是 v2 高质量版本）。去重不混淆：同一章节 v1→v2 升级后，下游重新拿到 `section:<file>#<anchor>`（不被旧 `v1-summary` 缓存跳过，因为 slice 名不同）。
+
+**双视角使用说明（v2 新增）**：v2 章节**同时服务两类读者**，段零注入策略因下游角色不同而不同：
+
+- **init/plan/start/fast 步骤**：偏重 AI 视角的 14 项必含元素（H2 摘要 + 锚点表 + API 速查表 + 状态转移表），用于让 AI 在写代码/做计划时直接 grep 定位
+- **log 步骤**：偏重人/AI 双视角的故障现象索引表 + 故障排查表 + 状态转移表，用于日志根因分析时直接对照
+- **readme 步骤**：偏重人视角的 00_overview 6 项必含元素（新手导览 + 全栈图 + 角色路径），用于生成交付报告时引用
+
+下游步骤消费注入上下文时，应先识别自身角色，按上表选择最相关的必含元素。详见 [doc_template.md](../references/doc_template.md)「〇、模板版本与双视角设计」+「14 项必含元素」段。
 
 **附加输出**（段零末尾汇总）：
 - ⚠️ **缺失模块警告**（若步骤 3 收集到「缺失模块」列表）：输出「工程引用了以下 module_docs 但不存在：\`{dep1.name}\`(\`{dep1.key}\`), \`{dep2.name}\`(\`{dep2.key}\`)... — 请检查是否已 /icode doc 生成，或工程 _meta.json.module_deps 是否写错 key」

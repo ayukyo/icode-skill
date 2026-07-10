@@ -99,6 +99,48 @@ AI 解析自然语言的「目标工程」+「动作」：
 
 ### 5. 生成 module_docs（依赖）+ 工程章节
 
+#### 5.0 质量审视与模板版本迁移（v2 新增，**必经子步骤**）
+
+> 每次跑 `/icode doc` 前必须先执行本子步骤，**不通过则不能跳过**——是模板升级后保持文档质量一致性的关键机制。
+
+**5.0.1 读 SCHEMA_VERSION**
+
+从 [doc_template.md](../references/doc_template.md) 顶部 `<!-- SCHEMA_VERSION: ... -->` 注释读取当前模板版本号（如 `v2.0.0`）。
+
+**5.0.2 扫描现有章节**
+
+对 `$DOC_DIR` 与各 `$HOME/.claude/icode_data/module_docs/<key>/` 下所有 `*.md` 章节（不含 `_meta.json`）：
+
+1. 读每章 `_meta.json.template_version`（缺失视为 `v1`）
+2. 读每章正文元信息块 `template_version` 字段（缺失视为 `v1`，但若 `_meta.json` 有则取 `_meta.json`）
+3. 对比 SCHEMA_VERSION：
+
+| 章节状态 | 动作 |
+|----------|------|
+| `template_version >= SCHEMA_VERSION` 且通过 [doc_template.md](../references/doc_template.md)「十、质量审视检查清单」达标率 ≥ 0.9 | 跳过，无需重生成 |
+| `template_version >= SCHEMA_VERSION` 但达标率 0.7-0.9 | 标记"局部补全"，增量补全缺失元素（不重生成全文） |
+| `template_version < SCHEMA_VERSION`（含缺失/视为 v1） | 标记"待升级"，强制全量重生成（**不走"局部补全"路径**，模板大版本变更必须整体重生成） |
+| 达标率 < 0.7（任何版本） | 标记"待升级"，全量重生成 |
+
+**5.0.3 确认门（必经）**
+
+对所有标记为"待升级"的章节，**先检测手动编辑**（读每章元信息块"章节生成时间" T_gen，对比文件 mtime；mtime 晚于 T_gen → 被手动改过）：
+
+- 无手动编辑 → 直接重生成（无需询问用户，模板升级是 doc 步骤的常规行为）
+- 有手动编辑 → **禁止静默覆盖**，提示询问（同全量确认门三选一：全量覆盖 / diff 后人工合并 / 跳过这些章只升级其余）
+
+**5.0.4 升级后写新版本号**
+
+重生成完成的章节必须：
+- 正文元信息块写入 `template_version: v2.0.0`（或当前 SCHEMA_VERSION）
+- `_meta.json` 同步写入 `template_version` 字段
+
+**5.0.5 进度输出**
+
+- 步骤 7 末尾输出"模板迁移汇总"表（见下文 §7 更新）
+
+#### 5.1 正常生成流程（用户意图驱动）
+
 **先生成 module_docs**（依赖先于依赖者，用户闲时跑不省 token，模块文档可详细完整生成）：
 
 **module_docs 生成范围（按用户意图聚焦，避免全量 token 爆炸）**：
@@ -109,17 +151,17 @@ AI 解析自然语言的「目标工程」+「动作」：
 
 - 对每个**待生成**的 module（按上述范围筛后的列表，非全量 modules）：
   - 克隆/读取该 module 的代码到临时目录（git submodule 用 `git submodule foreach 'git archive HEAD | tar -x -C $tmp/<name>'`；repo 子仓库用 `cd <submodule_path> && git archive HEAD | tar -x -C $tmp`；monorepo/vendor 直接读子目录；CMake FetchContent 通常 build 目录未下载，fallback 警告）
-  - 按 [doc_template.md](../references/doc_template.md)「九、模块章节模板」生成章节（前 50 行四块 + 模板自适应 grep 表；KEYS 按 doc_template.md「七」提取）
+  - 按 [doc_template.md](../references/doc_template.md)「九、模块章节模板」+「十四项必含元素」生成章节（前 50 行四块 + 必含元素清单 + 模板自适应 grep 表；KEYS 按 doc_template.md「七」提取）
   - Write 到 `$HOME/.claude/icode_data/module_docs/<key>/<NN>_<topic>.md`（十位桶）
   - **读 `module_docs/<key>/_meta.json`（如存在）→ 提取现有 `used_by` → 与本工程（按 `project_id` 标识）合并去重**（避免 B 工程生成时覆盖 A 工程的引用）
-  - 写 `_meta.json`（`repo_url` / `branch` / `current_commit` / `used_by` = 合并去重后的列表）
+  - 写 `_meta.json`（`repo_url` / `branch` / `current_commit` / `used_by` = 合并去重后的列表 + **`template_version: v2.0.0`**）
   - 检查 `<key>/_meta.json` 的 `current_commit` 与当前模块 commit 是否一致：一致跳过（已是最新），不一致→**该 module 全量重生成**（单 module 文档量小，全量合理；不需增量 diff，简化逻辑）
 - 拉取失败→**不写**该 dep 到工程 `_meta.json.module_deps`（避免段零检索时查不到对应 `module_docs/<key>/` 漏匹配）；在工程 `_meta.json.unresolved_modules` 数组里记录 `{name, type, reason, attempt_at}`（`reason` 如"CMake FetchContent build 目录未下载"）；不拖垮（其他 module 继续）
 
 **再生成工程自身章节**（依赖者引用依赖者，含"依赖子模块"字段）：
 
-- 对每个待生成章节：读相关代码（Read/Grep）→ 按模板写正文 → 生成前 50 行四块（含「依赖子模块」字段）→ Write 到 `$DOC_DIR/<NN>_<module>_<topic>.md`（十位桶，新增取 `max(NN)+1`）
-- 写 `_meta.json`（`project_id` / `project_type` / `git_root` / `module_deps` 含所有检测到的可读模块（已生成 `generated: true`、按需未生成 `generated: false`，见上「module_docs 生成范围」）/ `unresolved_modules` 含拉取失败的模块）
+- 对每个待生成章节：读相关代码（Read/Grep）→ 按模板写正文（含十四项必含元素）→ 生成前 50 行四块（含「依赖子模块」字段 + **`template_version`**）→ Write 到 `$DOC_DIR/<NN>_<module>_<topic>.md`（十位桶，新增取 `max(NN)+1`）
+- 写 `_meta.json`（`project_id` / `project_type` / `git_root` / `module_deps` 含所有检测到的可读模块（已生成 `generated: true`、按需未生成 `generated: false`，见上「module_docs 生成范围」）/ `unresolved_modules` 含拉取失败的模块 / **`template_version: v2.0.0`** / **`stale_files`** —— **保留既有 stale_files 字段**，步骤 8 主动 stale 扫描会刷新；不要因为新增 template_version 而丢失 stale_files 数据，导致段零 stale 检测失效）
 - 单章失败→标记不拖垮
 
 ### 6. 代码事实审计（`99_code_facts_audit.md`，永远生成）
@@ -130,18 +172,33 @@ AI 解析自然语言的「目标工程」+「动作」：
 
 ```text
 ▶ /icode doc myproject
-[1/3] 扫描代码特征... ✓ 识别 N 个章节候选
-[2/3] 生成章节 [8/12]... (当前 <章节名>)
-[3/3] 代码事实审计 [验证 45/120 引用]...
+[1/5] 扫描代码特征... ✓ 识别 N 个章节候选
+[2/5] 模板版本审视... ✓ 发现 M 个旧版本章节（当前模板 v2.0.0）
+[3/5] 生成章节 [8/12]... (当前 <章节名>)
+[4/5] 代码事实审计 [验证 45/120 引用]...
+[5/5] 主动 stale 扫描... ✓
 
 ✓ 完成。汇总：
-| 章节 | 状态 | 备注 |
-|------|------|------|
-| 00_overview.md | 新增 | - |
-| <章节名> | 增量更新 | 3 处 file:line 重验 |
-| 99_code_facts_audit.md | 失败 | 子代理超时，重跑 |
+| 章节 | 状态 | 模板版本 | 备注 |
+|------|------|---------|------|
+| 00_overview.md | 新增 | v2.0.0 | - |
+| <章节名> | 模板升级 | v1 → v2.0.0 | 14 项必含清单检查：12/14 通过 |
+| <章节名> | 增量更新 | v2.0.0 | 3 处 file:line 重验 |
+| 99_code_facts_audit.md | 失败 | v2.0.0 | 子代理超时，重跑 |
+
+模板迁移汇总（v2 新增）：
+| 工程 | 旧版本 | 新版本 | 升级章节 | 跳过章节 | 状态 |
+|------|-------|-------|---------|---------|------|
+| myproject | v1 | v2.0.0 | 9 章 | 2 章（手动编辑跳过） | 升级成功 |
+| another_project | v2.0.0 | v2.0.0 | 0 章 | 11 章 | 无需升级 |
+
 未生成模块 N 个（unresolved_modules）：<name1> (<reason1>), <name2> (<reason2>)... — 重跑 /icode doc 时自动恢复
 ```
+
+**模板迁移汇总表说明**（v2 新增）：
+- **升级章节**：本轮从旧版本升级到 `v2.0.0` 的章节数
+- **跳过章节**：检测到手动编辑且用户选"跳过这些章只升级其余"的数量
+- **状态**：升级成功 / 部分跳过 / 失败（失败章节数）
 
 ### 8. 主动 stale 扫描（project_docs 章节锚点校验，防过时堆积）
 
@@ -169,6 +226,7 @@ AI 解析自然语言的「目标工程」+「动作」：
 - **产品线/型号**：grep 工程的产品型号宏/配置，推断不出填"未识别"
 - **章节归属模块**：与文件名 `<module>` 一致；跨模块章节填 `null`
 - **章节生成时间**：运行时 `date +%Y-%m-%dT%H:%M:%SZ`，**禁止写死**
+- **模板版本（v2 新增）**：`template_version`，与 [doc_template.md](../references/doc_template.md) 顶部 `<!-- SCHEMA_VERSION: v2.0.0 -->` 一致；**写入章节正文元信息块 + `_meta.json`**（双写防丢失）。缺失或 < 当前 SCHEMA_VERSION → 视为旧版本章节，触发模板版本迁移
 
 ## 反偷懒
 
@@ -185,10 +243,12 @@ AI 解析自然语言的「目标工程」+「动作」：
 ## 完成标志
 
 - 规划章节已生成（固定 00/90/99 + 命中的动态章节）
-- 每章前 50 行四块齐全
-- `00_overview.md` 元信息块含当前 HEAD 的 `generation_commit` + 完整子模块列表
+- 每章前 50 行四块齐全 + `template_version: v2.0.0` 字段写入
+- 14 项必含元素（按章节类型）达标率 ≥ 70%
+- `00_overview.md` 元信息块含当前 HEAD 的 `generation_commit` + 完整子模块列表 + `template_version`
 - `99_code_facts_audit.md` 已生成（部分失败也标明）
 - 工程 _meta.json.stale_files 已刷新（步骤8 主动 stale 扫描，段零检索据此跳过过时章节）
+- 模板迁移汇总表输出（v2 新增，详见步骤 7 末尾）
 - 末尾汇总表输出
 
 ## 衔接与可重复
