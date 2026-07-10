@@ -7,9 +7,9 @@
 每个步骤开始前，必须先 ultrathink 并完成结构化思考——这是不可跳过的硬性前置。思考环节不可整体跳过，但**执行载体分主备两档**：
 
 - **首选**：调用 `sequential-thinking` MCP 工具（`mcp__sequential-thinking__sequentialthinking`），至少 3 步（步骤定义里另有要求除外，如至少 4~5 步），每步对应该步骤声明的子项之一。上下文能看到该 tool_call 记录即为合规证据。
-- **降级**：若当前环境未连接 / 不可用该 MCP（工具列表与 deferred tools 池中均无 `sequential-thinking`），则必须以显式的「结构化思考」文字块替代——在回复中先输出一个 `### 结构化思考` 块，逐项完成该步骤要求的子项（每项一小段，不可省略），再进入产出。该文字块即为合规证据。
+- **降级**：若当前环境未配置该 MCP（`~/.claude.json` 的 `mcpServers` 与项目根 `.mcp.json` 均无 `sequential-thinking` server，或已配置但 ToolSearch 取不到/调用失败），则必须以显式的「结构化思考」文字块替代——在回复中先输出一个 `### 结构化思考` 块，逐项完成该步骤要求的子项（每项一小段，不可省略），再进入产出。该文字块即为合规证据。
 
-> 判定 MCP 是否可用：尝试调用 `sequential-thinking`；若工具不存在则按降级路径走。两种载体任选其一即可，但思考环节本身不可省略——未呈现任一形式的思考证据，该步骤产出视为不合规。
+> 判定 MCP 是否可用（**关键：MCP 工具为懒加载，"工具列表里肉眼看不到"≠不可用，禁止凭扫工具列表/deferred 池下结论**）：先 Read `~/.claude.json` 的 `mcpServers` + 项目根 `.mcp.json`（若有），含 `sequential-thinking` server 即视为已配置可用 -> 用 ToolSearch 取 `mcp__sequential-thinking__sequentialthinking` 后调用（首选路径）；两处都未配置、或 ToolSearch 无命中/调用失败，才按降级路径走。两种载体任选其一即可，但思考环节本身不可省略——未呈现任一形式的思考证据，该步骤产出视为不合规。
 
 ## 通用流程（每步执行）
 
