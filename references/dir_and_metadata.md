@@ -382,26 +382,39 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
 ```text
 ~/.claude/icode_data/project_docs/
 └── <project_id>/                    # project_id = basename(git rev-parse --show-toplevel)
-    ├── 00_overview.md               # 永远首章，元信息块含 generation_commit/submodules
-    ├── 10_architecture.md
-    ├── 20_<module>_<topic>.md       # 十位桶：20-29 模块章节，留空隙可插入
-    ├── 30_<module>_<topic>.md       # 第二个模块桶
-    ├── ...
-    ├── 90_glossary.md
-    └── 99_code_facts_audit.md       # 永远末章
+    ├── main/                        # 分支目录：DOC_DIR 按 <project_id>/<branch> 分目录
+    │   ├── 00_overview.md           # 永远首章，元信息块含 generation_commit/branch/submodules
+    │   ├── 10_architecture.md
+    │   ├── 20_<module>_<topic>.md   # 十位桶：20-29 模块章节，留空隙可插入
+    │   ├── 30_<module>_<topic>.md   # 第二个模块桶
+    │   ├── ...
+    │   ├── 90_glossary.md
+    │   ├── 99_code_facts_audit.md   # 永远末章
+    │   └── _meta.json               # 含 branch + head_commit，跨分支不通用
+    ├── feature/                     # 同一工程在 feature 分支跑 /icode doc 落这里
+    │   ├── 00_overview.md
+    │   └── ...
+    └── (detached)/                  # detached HEAD 状态落此目录（罕见）
+        └── ...
 ```
 
-### project_id 语义
+### project_id 与 branch 语义
 
 - **git-root 模式**（cwd 在 git 仓库内）：`project_id` = `basename($(git rev-parse --show-toplevel))`，不区分子目录
 - **`repo` 根模式**（cwd 不在 git 仓库但有 `.repo/manifest.xml`，如 Google `repo` 管理的多仓库项目）：`project_id` = `basename(从 cwd 向上找第一个含 .repo/ 的目录)`
+- **branch 感知**：DOC_DIR = `~/.claude/icode_data/project_docs/<project_id>/<branch>/`，**按分支分目录存**（key 设计见下文「DOC_DIR 分支隔离」段）
+  - 同工程不同分支（如 `myproject/main/` vs `myproject/feature/`）→ 天然隔离互不覆盖
+  - **detached HEAD** → 落到 `(detached)` 子目录
+  - **非 git 仓库** → 落到 `(no-git)` 子目录
+  - 分支名 sanitize：路径分隔符 `/`、`\` 与文件名非法字符 `: * ? " < > |` 替换为 `_`，避免破坏目录结构
 - 子目录（如 `myrepo/module_a/`）是同一 project 下的**章节模块**（章节名带模块前缀 `20_module_a_overview.md`），不是独立 project
-- **冲突处理**：若 `~/.claude/icode_data/project_docs/<basename>/` 已存在且其 `00_overview.md` 元信息块的 `project_path` 与当前 git_root 不同 → 自动追加短 hash 后缀（如 `myproject__a3f2`），AI 靠元信息块的 git remote 区分同名工程
-- **零配置**：不引入任何配置文件，工程名等可配信息全在章节元信息块
+- **冲突处理**：若 `~/.claude/icode_data/project_docs/<project_id>/<branch>/` 已存在且其 `00_overview.md` 元信息块的 `project_path` 与当前 `git_root` 不同 → 自动追加 hash 后缀 `${PROJECT_ID}__${BRANCH_SAFE}__$(echo $GIT_ROOT|sha256sum|cut -c1-4)`，AI 靠元信息块的 git remote 区分同名工程同名分支
+- **零配置**：不引入任何配置文件，工程名、分支等可配信息全在章节元信息块
 - **`resolve_project_id(cwd)` 算法**：
-  1. `git rev-parse --show-toplevel` 成功 → git-root 模式，返回 `(basename(git_root), "git-root", git_root)`
-  2. 否则从 cwd 向上逐级 `test -d $d/.repo`，首个命中 → repo-root 模式，返回 `(basename(repo_root), "repo-root", repo_root)`
+  1. `git rev-parse --show-toplevel` 成功 → git-root 模式，返回 `(basename(git_root), "git-root", git_root, abbrev-ref HEAD)`
+  2. 否则从 cwd 向上逐级 `test -d $d/.repo`，首个命中 → repo-root 模式，返回 `(basename(repo_root), "repo-root", repo_root, "(no-git)")`
   3. 都失败 → 报错"请在 git 仓库或 repo 管理的项目内运行 /icode doc 或段零检索"
+  4. **多分支并存**：同 `project_id` 下可有多个 `<branch>/` 子目录，下游段零检索需枚举所有分支目录 + 按当前 cwd 分支过滤（详见「DOC_DIR 分支隔离」段）
 
 ### 章节前 50 行三合一（自带身份证）
 
@@ -413,10 +426,13 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
 
 ```text
 1. cwd → resolve_project_id(cwd) → (project_id, project_type)  # git-root 或 repo-root
-2. ls ~/.claude/icode_data/project_docs/<project_id>/*.md
-   ├─ 不存在 → 段零零命中（输出一行 ℹ️ 提示"本工程尚未生成知识库，可运行 /icode doc"，不阻塞，不写缓存）
-   └─ 存在 → 逐章读前 50 行 → KEYS 匹配 + 简要说明语义打分 → project 候选集
-3. 读 project_docs/<project_id>/_meta.json → module_deps 列表
+2. **DOC_DIR 分支过滤**（关键，多分支并存不交叉污染）：按 `resolve_project_id(cwd)` 算法算出 `<project_id>` + 当前分支 `<branch>`（sanitize 后），只读 `<DOC_DIR>=~/.claude/icode_data/project_docs/<project_id>/<branch_safe>/*.md`，**不交叉读其他分支子目录**（如当前在 `feature` 分支时不读 `main` 子目录，反之亦然）。理由：分支间代码差异大，跨分支工程文档互相借鉴必然失真。
+   - 列出其他分支子目录（仅枚举用于 ℹ️ 提示，不读章节）：`ls ~/.claude/icode_data/project_docs/<project_id>/` 各子目录 → 输出"本工程已有 N 个分支的知识库：main (a3f2b1c)、feature (b8c3d4e)、dev (c1e2f3a) — 当前分支 `<branch>` 已建则用，未建则提示按需 `/icode doc`"
+   - **legacy 兼容回退**（v1 升级到 v2 时的过渡关键，已存在但还没跑过 `/icode doc` 的工程）：若 `<DOC_DIR>` 不存在但 `<project_id>/` 目录下直接有 `00_overview.md` 等章节（v1 单级布局）→ 输出 ⚠️ 警告「该工程 project_docs 还在 v1 单级布局（旧版，未按分支分子目录）—— 本次段零检索**回退按 legacy 方式读**章节（不会判为零命中），但建议下次 `/icode doc` 时**自动迁移**到 `<id>/<branch>/` 多分支布局（迁移逻辑见 doc.md 步骤 5，保留旧章节 + 写到正确分支子目录）」→ 读 `<project_id>/00_overview.md` 元信息块的 `generation_commit` + `分支/提交` 字段 → 同上做分支 + 祖先 stale 校验（**强制分支校验**：从元信息块提取旧 branch 与当前 `git rev-parse --abbrev-ref HEAD` 比对，不一致→该工程所有章节 stale，按 stale 章节降级注入只注摘要 + 警告），KEYS 匹配 + 语义打分 → project 候选集 → **整段检索末尾汇总追加一行 ℹ️「本工程 v1→v2 迁移未完成，建议下个稳定时机跑 `/icode doc` 触发自动迁移，旧数据保留直到迁移成功」**（避免段零每次都重复警告）
+   - ls `<DOC_DIR>/*.md`：
+     ├─ 不存在（且无 legacy 回退命中）→ 段零零命中（输出一行 ℹ️ 提示"本工程当前分支 `<branch>` 尚未生成知识库，可运行 `/icode doc`，或切换到已建分支"，不阻塞，不写缓存）
+     └─ 存在 → 逐章读前 50 行 → KEYS 匹配 + 简要说明语义打分 → project 候选集
+3. 读 `<DOC_DIR>/_meta.json` → `module_deps` 列表（**注意**：不是 `project_docs/<project_id>/_meta.json`，是按分支子目录里的；每个分支独立 _meta.json，互不继承）
    对每个 dep：ls ~/.claude/icode_data/module_docs/<dep.key>/*.md
    ├─ 目录不存在或无 .md：
    │   - dep.generated == false（按需未生成，见 doc.md 步骤5「module_docs 生成范围」用户指定模块名场景）-> 不报缺失，提示"可 `/icode doc <name>` 按需生成"，跳过该 dep
@@ -426,7 +442,7 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
       - 一致 → 正常注入（模块文档版本与本工程代码版本匹配）
       - 不一致（同分支不同 commit，跨工程 /icode doc 互相覆盖所致，见「module_docs key 计算」）→ **降级注入**：注入正文但附警告「⚠️ 模块 `<name>` 文档基于 commit `<current_commit>`，本工程 pin `<dep.commit>`，API/行为以本工程代码为准，须 Read 实证」，提示下游不得直接采信模块文档的 file:line / 接口描述
       - key 只含 url+branch 不含 commit，同分支不同 commit 共用同一 key 无法靠目录隔离，段零必须运行时比对 commit 兜底；`/icode doc` 生成时的全量重生成覆盖（见 [doc.md](../steps/doc.md) 步骤5）只把文档更新到"最后一次跑 doc 的工程"的 commit，不能消除跨工程漂移
-3.5 **反查父项目**（子仓库内工作时）：如果 cwd 在 git-root 模式 → 计算 `cwd_relative = realpath(cwd) 相对 realpath(.repo 所在目录)`（**注意：是相对 .repo 根，不是相对 git_root**——例如 cwd 在 `myproject/module_a/`、.repo 在 `myproject/.repo/` 时，cwd_relative = `module_a/`）→ 若 `.repo/manifest.xml` 存在且 `cwd_relative` 精确匹配或为某 `<project path>` 的子路径 → 该 manifest project 的"父 repo 根"=`.repo/` 所在目录；把父 project（repo-root）也纳入检索（读 `project_docs/<父 project_id>/_meta.json` + 章节），候选合并排序时一并参与打分（来源标签标「来源：project:父 project_id」）
+3.5 **反查父项目**（子仓库内工作时）：如果 cwd 在 git-root 模式 → 计算 `cwd_relative = realpath(cwd) 相对 realpath(.repo 所在目录)`（**注意：是相对 .repo 根，不是相对 git_root**——例如 cwd 在 `myproject/module_a/`、.repo 在 `myproject/.repo/` 时，cwd_relative = `module_a/`）→ 若 `.repo/manifest.xml` 存在且 `cwd_relative` 精确匹配或为某 `<project path>` 的子路径 → 该 manifest project 的"父 repo 根"=`.repo/` 所在目录；把父 project（repo-root）也纳入检索（读 `project_docs/<父 project_id>/<父 branch>/_meta.json` + 章节，**按父 repo 自身分支子目录读**，勿读错的分支），候选合并排序时一并参与打分（来源标签标「来源：project:父 project_id」）
 4. 合并排序：project 候选 + module 候选 + 反查父项目章节 + 历史检索段一/二候选 → 统一按相关度排序 → top-N（强相关≤2 + 弱相关≤1，总量≤3 条）
 5. 对每个 top-N 项（注入策略按来源区分）：
    - **project 章节**：stale 判定（查 `_meta.json.stale_files` + 运行时 `git diff` 兜底，见「stale 检测」）-- stale → slice=`section:<file>#stale-summary`，按「stale 章节降级注入」只注简要说明+警告（不读正文小节）；非 stale → 检查 template_version（见下文「质量信号」）：v2 → slice=`section:<file>#<anchor>` 正常注入；v1 → slice=`section:<file>#v1-summary` 降级注入摘要+升级提示不注正文（v1 章节模板过旧，注入质量不可控）。按 KEYS [小节锚点] 定点读对应小节（不读全章，≤1K token/条）→ 注入思考输入「历史参考」节
@@ -437,7 +453,18 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
 
 **防重复注入**：与历史源共用 `_inject_cache.json`（见上节），跨命令不重复注入同一章节。
 
-**stale 检测**（注入前被动校验，控 token；与历史工单 stale「跳过注入」对齐防误导目标）：读 `00_overview.md` 元信息块的 `generation_commit` + submodule commits，与 `git rev-parse HEAD` + `git submodule status` 对比；HEAD 变更且 `git diff <commit>..HEAD --name-only` 命中该章 KEYS「文件位置」**或命中章节正文涉及的目录前缀**（应对 KEYS 文件位置不完整 / 新增文件 / 重构改路径导致漏判的假阴性）→ 判定该章 stale。**两源合一**：先查工程 `_meta.json.stale_files`（主动扫描持久化结果，见下文「project_docs 主动 stale 扫描」）快速识别 stale 章节（降级注入摘要不注正文，见下文「stale 章节降级注入」），再运行时 `git diff` 兜底（`_meta.json` 可能比最新 HEAD 旧）。判定宁可放宽（假阳性仅触发降级，假阴性才会误导）。
+**stale 检测**（注入前被动校验，控 token；与历史工单 stale「跳过注入」对齐防误导目标）：读 `00_overview.md` 元信息块的 `generation_commit` + 工程 `_meta.json.branch` + submodule commits，与 `git rev-parse --abbrev-ref HEAD` + `git rev-parse --short HEAD` + `git submodule status` 对比；**先做分支 + 祖先双校验**（防跨分支误用 git diff + 防分支切换文档复用误导）：
+
+- **分支校验（最优先，主防线）**：
+  - 工程 `_meta.json.branch` == `git rev-parse --abbrev-ref HEAD`（含 detachable 后 `HEAD` 字面量相等）→ 继续祖先校验
+  - **分支不一致**（如 `_meta.json.branch = main` 但 cwd HEAD 在 `feature`）→ **该工程所有章节直接判定 stale**（不只看 diff 命中，跨分支文档整体不可信），slice=`section:<file>#stale-branch-mismatch`，按「stale 章节降级注入」只注简要说明 + 警告行「⚠️ 文档基于分支 `<branch>`，当前 `<current-branch>`，跨分支差异可能很大，重跑 `/icode doc` 重生成」
+  - 工程本身非 git 仓库（`_meta.json.branch = null`）→ 跳过分支校验，走祖先 + diff 路径
+- **祖先校验**（分支一致后）：
+  - `git merge-base --is-ancestor <prev> HEAD` 退出 0（正常前向演进）→ HEAD 变更且 `git diff <commit>..HEAD --name-only` 命中该章 KEYS「文件位置」**或命中章节正文涉及的目录前缀**（应对 KEYS 文件位置不完整 / 新增文件 / 重构改路径导致漏判的假阴性）→ 判定该章 stale
+  - 退出 1（HEAD 是 prev 的祖先/分叉 / prev 与 HEAD 在不同分支，如工程切了分支或重置）→ **`git diff` 不可信**（merge-base 可能很远导致 diff 失真/巨变），**直接判定该章 stale**（不留余地跨分支增量判定，避免误把"几乎全章变更"当增量）
+  - 退出 128（prev 不可达，如 GC/换库）→ 同上直接判定 stale
+
+**两源合一**：先查工程 `_meta.json.stale_files`（主动扫描持久化结果，见下文「project_docs 主动 stale 扫描」）快速识别 stale 章节（降级注入摘要不注正文，见下文「stale 章节降级注入」），再运行时 `git diff` 兜底（`_meta.json` 可能比最新 HEAD 旧）。判定宁可放宽（假阳性仅触发降级，假阴性才会误导）。
 
 **stale 章节降级注入（不注正文，防误导）**：stale 章节**绝不注入正文小节**（避免过时 file:line / IPC 契约 / 调用链误导新工作流），改为**只注入「简要说明」（50~100 字概览，不含 file:line，误导风险低）+ 警告行**「⚠️ 章节 `<文件>` 基于旧 commit `<generation_commit>`，当前 HEAD `<HEAD>`，已过时仅注入摘要，建议重跑 `/icode doc` 更新」。与历史工单 stale「跳过注入」同等防误导强度--过时的正文小节不进新工作流思考输入；降级保留「简要说明」仅给新工作流方向性参考，不构成事实依据（配合下文「不盲信约束」）。 注入缓存 slice 记为 `section:<file>#stale-summary`（与正文小节 `section:<file>#<anchor>` 区分，避免去重混淆；章节重跑变新鲜后注入正文小节不被误跳过）。
 
@@ -485,6 +512,15 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
 
 > **核心思想**：工程依赖的"独立模块"（git submodule / `repo` 管理 / CMake FetchContent / monorepo 子目录 / vendor / 用户配置）按"上游仓库 + 分支"为粒度共享文档。**多个工程引用同一上游仓库同一分支只生成一份**，段零自动覆盖，开发时快速定位关联模块的文档。
 
+> **工程分支切换 vs 模块分支切换（颗粒度独立）**：工程分支（`project_docs/<project_id>/<branch>/`）和模块分支（`module_docs/<url+branch>/`）是**两层独立维度**，互不绑定：
+>
+> - **工程分支切换 + 模块不动**（如 `myproject` 从 `main` 切到 `feature`，但 `.gitmodules` 里所有 submodule 还 pin 在 `main`）：工程文档落到 `myproject/feature/` 新分支子目录；模块文档 `module_a@main` 等**自动复用**旧目录 `module_docs/<module_a+mainhash>/`，不重新生成（`dep.key` 不变 → 步骤 3 模块依赖变化检测走"key 不在旧列表的差集"是空集 → 跳过生成）
+> - **工程分支切换 + 部分模块也切分支**（如 `myproject` 切 `feature`，同时 submodule 里 `module_c` 切到 `c-feature`）：未切分支的模块共用旧目录；切分支的模块按新 `url+branch` key 落到新目录，**新旧目录并存**不覆盖；提示旧 key 是否清理
+> - **同分支跨工程引用**（工程 A 和工程 B 都依赖 `module_a@main`）：依旧共用一份 `module_docs/<module_a+mainhash>/`，`used_by` 字段记录两个工程
+> - **detached HEAD 工程** + 同一 url+branch 的模块：模块按 url+branch 复用，工程的"另一份文档"和模块文档**互不冲突**（模块 key 是模块的 url+branch，与工程 HEAD 无关）
+>
+> **禁止误读**：不得把"工程分支切换 → 必须全量重生成 module_docs"——这是错的，只有该模块本身 url 或 branch 变化才重生成对应模块；其它没变的模块按 key 直接复用。
+
 > **「独立模块」判定澄清**："独立模块"指**该模块本身是独立 git 仓库**（无论它是否同时是工程核心模块）。`repo` 管理的子项目（如某任务控制中枢模块，是工程核心但同时是独立子仓库）判定为独立模块 -> 生成 module_docs；其工程视角（在工程 IPC 拓扑中的角色）写在 project_docs。**"是否独立 git 仓库"是唯一判定标准，与"是否工程核心"无关**--核心模块同时是独立仓库时，两者都生成，互补不重复（职责划分见 [doc_template.md](doc_template.md)「九 · 职责划分」）。
 
 ### 目录布局（module_docs 层）
@@ -519,13 +555,15 @@ key = <url_basename_sanitized> + "_" + sha256(repo_url + ":" + branch)[:12]
 
 ### `_meta.json` 模板（工程与模块各一份）
 
-**工程 _meta.json**（`project_docs/<project_id>/_meta.json`）：
+**工程 _meta.json**（`project_docs/<project_id>/<branch>/_meta.json`，**每个分支子目录独立一份**，互不继承；切换工程分支后写入对应分支子目录的 `_meta.json`）：
 
 ```json
 {
   "project_id": "myproject",
   "project_type": "repo-root",
   "git_root": "/home/user/myproject",
+  "branch": "main",
+  "head_commit": "a3f2b1c",
   "module_deps": [
     {
       "type": "repo",
@@ -546,7 +584,8 @@ key = <url_basename_sanitized> + "_" + sha256(repo_url + ":" + branch)[:12]
       "attempt_at": "2026-07-06T15:30:00Z"
     }
   ],
-  "stale_files": []
+  "stale_files": [],
+  "template_version": "v2.0.0"
 }
 ```
 

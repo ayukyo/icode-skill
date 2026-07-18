@@ -9,7 +9,42 @@
 - **首选**：调用 `sequential-thinking` MCP 工具（`mcp__sequential-thinking__sequentialthinking`），至少 3 步（步骤定义里另有要求除外，如至少 4~5 步），每步对应该步骤声明的子项之一。上下文能看到该 tool_call 记录即为合规证据。
 - **降级**：若当前环境未配置该 MCP（`~/.claude.json` 的 `mcpServers` 与项目根 `.mcp.json` 均无 `sequential-thinking` server，或已配置但 ToolSearch 取不到/调用失败），则必须以显式的「结构化思考」文字块替代——在回复中先输出一个 `### 结构化思考` 块，逐项完成该步骤要求的子项（每项一小段，不可省略），再进入产出。该文字块即为合规证据。
 
-> 判定 MCP 是否可用（**关键：MCP 工具为懒加载，"工具列表里肉眼看不到"≠不可用，禁止凭扫工具列表/deferred 池下结论**）：先 Read `~/.claude.json` 的 `mcpServers` + 项目根 `.mcp.json`（若有），含 `sequential-thinking` server 即视为已配置可用 -> 用 ToolSearch 取 `mcp__sequential-thinking__sequentialthinking` 后调用（首选路径）；两处都未配置、或 ToolSearch 无命中/调用失败，才按降级路径走。两种载体任选其一即可，但思考环节本身不可省略——未呈现任一形式的思考证据，该步骤产出视为不合规。
+> **判定 MCP 是否可用**（关键：MCP 工具为懒加载，**deferred 池 = 已配置可用**而非"暂不可用"，必须分两步判定）：
+>
+> **第一步·取可用证据**（任一即视为"已配置可用"，**必须**走首选路径，禁止据此走降级）：
+>
+> - **证据 A（强证据）**：Read `~/.claude.json` 的 `mcpServers` 或项目根 `.mcp.json` 含 `sequential-thinking` server
+> - **证据 B（强证据，最易误判处）**：系统提示 deferred tools 列表中列出 `mcp__sequential-thinking__sequentialthinking`
+>
+> **第二步·首选路径执行**（拿到任一强证据后）：
+>
+> 1. ToolSearch 取 `mcp__sequential-thinking__sequentialthinking` schema 加载
+> 2. 实际调用该工具，至少 3 步，每步对应该步骤声明的子项之一
+> 3. 调用成功 → 完成思考；调用返回错误/超时 → 才能进入降级路径
+>
+> **禁止误判场景**（历史实测的踩坑模式，逐条禁止）：
+>
+> - ⛔ **看到 deferred 列表里有 `mcp__sequential-thinking__sequentialthinking` 却判定"不可用"** —— deferred 是懒加载就绪态，**正是首选路径的强证据**，绝不可据此走降级
+> - ⛔ **未实际调用 ToolSearch 就判定"ToolSearch 无命中"** —— ToolSearch 是独立工具，必须实际调用得到返回（拿到 schema 或确认无该工具）才能下结论
+> - ⛔ **未实际调用 `mcp__sequential-thinking__sequentialthinking` 就判定"调用失败"** —— 必须有真实的调用返回错误/超时证据
+> - ⛔ **看到顶层工具列表里没有该 MCP 就判定"不可用"** —— 顶层看不到 ≡ deferred 池可见，是懒加载不是缺失
+> - ⛔ **凭记忆推断未经 Read 配置文件判定"无 server"** —— 必须实际 Read `~/.claude.json`，未读到配置才能说"无 server"
+>
+> **降级路径的合法前置**（满足以下**任一组**才能走降级文字块）：
+>
+> **配置证据组**（必须**同时**成立）：
+>
+> 1. 已实际 Read `~/.claude.json` 的 `mcpServers` **与** 项目根 `.mcp.json`（若有）→ **都**无 `sequential-thinking` server
+> 2. 系统提示 deferred tools 列表**未**列出 `mcp__sequential-thinking__sequentialthinking`
+>
+> **运行证据组**（满足任一即可）：
+>
+> 1. 已实际调用 ToolSearch 取 schema → 确认无命中
+> 2. 已实际调用 `mcp__sequential-thinking__sequentialthinking` → 确认返回错误/超时
+>
+> 两组证据**任一组全部满足**才能合法走降级。**任一组都不满足即不可走降级**，必须坚持首选路径。
+>
+> **两种载体任选其一即可，但思考环节本身不可省略**——未呈现任一形式的思考证据，该步骤产出视为不合规。
 
 ## 通用流程（每步执行）
 

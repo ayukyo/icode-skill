@@ -1,7 +1,7 @@
 # 步骤 doc — 工程级知识库生成（独立步骤，不参与 1~6 流程推进）
 
 **命令**: `/icode doc [自然语言]`
-**产出**: `~/.claude/icode_data/project_docs/<project_id>/*.md`（章节自带身份证）
+**产出**: `~/.claude/icode_data/project_docs/<project_id>/<branch>/*.md`（分支子目录隔离，**切换分支跑 doc 不互相覆盖**；章节自带身份证）
 **会话**: 主会话
 **定位**: **工程级知识库生成与维护，独立步骤**。不创建 `.icode_output_N/`、不写 `.ico_metadata.json`、不更新工单 `completed_steps`/`status`。知识库供 `/icode init`/`log`/`plan`/`start`/`fast` 启动时**段零检索**自动注入。
 
@@ -38,10 +38,17 @@ if [ -z "$GIT_ROOT" ]; then
   fi
 fi
 PROJECT_ID=$(basename "$GIT_ROOT")
-DOC_DIR="$HOME/.claude/icode_data/project_docs/$PROJECT_ID"
+# 分支感知：DOC_DIR 按 <project_id>/<branch> 分目录，**切分支跑 doc 不污染其他分支**
+# detached HEAD / 非 git 仓库 → BRANCH="(detached)" 或 BRANCH="(no-git)"
+BRANCH=$(git -C "$GIT_ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null)
+[ -z "$BRANCH" ] && BRANCH="(no-git)"
+[ "$BRANCH" = "HEAD" ] && BRANCH="(detached)"
+# 分支名 sanitize（去除路径分隔符、特殊字符，避免破坏目录结构）
+BRANCH_SAFE=$(echo "$BRANCH" | tr '/\\:*?"<>|' '_')
+DOC_DIR="$HOME/.claude/icode_data/project_docs/$PROJECT_ID/$BRANCH_SAFE"
 ```
 
-**冲突检测**：`$DOC_DIR` 已存在时读其 `00_overview.md` 元信息块的 `project_path`——与当前 `GIT_ROOT` 一致则复用；不一致（同名不同工程）则追加短 hash 后缀 `${PROJECT_ID}__$(echo $GIT_ROOT|sha256sum|cut -c1-4)`，输出 ℹ️ 一行提示。`PROJECT_TYPE`（`git-root`/`repo-root`）写进工程 _meta.json。
+**冲突检测**：`$DOC_DIR` 已存在时读其 `00_overview.md` 元信息块的 `project_path`——与当前 `GIT_ROOT` 一致则复用；不一致（同名分支但不同工程）则追加短 hash 后缀 `${PROJECT_ID}__${BRANCH_SAFE}__$(echo $GIT_ROOT|sha256sum|cut -c1-4)`，输出 ℹ️ 一行提示。**同一工程不同分支**（如 `myproject/main/` vs `myproject/feature/`）按分支目录天然隔离，**互不覆盖**；**detached HEAD / 非 git 工程**落到 `(detached)` / `(no-git)` 目录，单独记录。`PROJECT_TYPE`（`git-root`/`repo-root`）写进工程 _meta.json。
 
 ## 意图识别（去参数化）
 
@@ -82,7 +89,11 @@ AI 解析自然语言的「目标工程」+「动作」：
 ### 3. 增量判定（非全量时）
 
 - `$DOC_DIR` 不存在 → 首次全量
-- 存在 → 读 `00_overview.md` 的 `generation_commit`：HEAD 相同→"已是最新"；不同→`git diff <commit>..HEAD --name-only` 拿变更文件，命中某章 KEYS"文件位置"的章增量重生成，其余跳过；变更文件在未覆盖目录→提示"是否生成新章节"
+- 存在 → 读 `00_overview.md` 的 `generation_commit`，**先做祖先合法性校验**（关键，防跨分支误判增量）：
+  - **HEAD 与 prev 是同一 commit**→"已是最新"
+  - **`git merge-base --is-ancestor <prev> HEAD` 退出 0**（prev 是 HEAD 祖先，正常前向演进）→`git diff <prev>..HEAD --name-only` 拿变更文件，命中某章 KEYS"文件位置"的章增量重生成，其余跳过；变更文件在未覆盖目录→提示"是否生成新章节"
+  - **退出 1（HEAD 是 prev 的祖先/分叉 / prev 与 HEAD 在不同分支）**→**`git diff` 不可信，必须视为"另一版工程"，按全量重生成处理**（不分青红皂白继续增量会因 merge-base 远导致 diff 失真，把大部分文件当变更/漏判关键变更），提示用户「prev `<prev>` 与 HEAD `<HEAD>` 不在同一祖先链（分支切换/fork/换库），按新工程全量重生成」
+  - **退出 128（prev 不可达，如 GC/换库）**→按全量重生成处理
 - **模块依赖变化检测**（关键，否则新增/删除依赖漏生成）：比较旧 `_meta.json.module_deps` 与步骤 2 检测的新 modules 列表 → 差异：
   - 新加的 dep（key 不在旧列表）→ 触发对应 module_docs 生成
   - 删除的 dep（旧列表有但新列表无）→ 提示「工程不再依赖 X，module_docs/{key}/ 是否保留（默认保留，需手动清理）」
@@ -160,8 +171,20 @@ AI 解析自然语言的「目标工程」+「动作」：
 
 **再生成工程自身章节**（依赖者引用依赖者，含"依赖子模块"字段）：
 
+- **v1 → v2 自动迁移（关键，兼容现有旧数据）**：写入 `$DOC_DIR/_meta.json` 前先检测旧 v1 单级布局：
+  - 若 `~/.claude/icode_data/project_docs/<PROJECT_ID>/` 目录下**直接平铺** `00_overview.md` / `*.md` / `_meta.json`（无分支子目录）→ 是 v1 旧布局，**必须先迁移再写**：
+    1. `mkdir -p $DOC_DIR`（即 `<project_id>/<branch_safe>/`）
+    2. 把旧 `<project_id>/*.md` 全部 `mv` 到 `$DOC_DIR/`
+    3. 把旧 `<project_id>/_meta.json` `mv` 到 `$DOC_DIR/`
+    4. 读旧 `_meta.json` 的 `project_type` + `git_root` + `module_deps` + `unresolved_modules` + `stale_files`（**全部字段不丢**），按 [dir_and_metadata.md](../references/dir_and_metadata.md)「工程 _meta.json 模板」格式重写到 `$DOC_DIR/_meta.json`（字段集：`project_id` + `project_type` + `git_root` + `branch` + `head_commit` + `module_deps` + `unresolved_modules` + `stale_files` + `template_version`）
+    5. 旧 `<project_id>/` 目录留空后 `rmdir` 删除
+    6. **留迁移追踪**：删旧 `_meta.json` 前先 cp 到 `$DOC_DIR/_meta.json.v1_migrated_from`（防回退）
+    7. 输出 ℹ️「v1→v2 迁移完成：`<id>/` 单级布局 → `<id>/<branch>/` 多分支布局，N 个章节迁移成功，旧数据备份在 `_meta.json.v1_migrated_from`」
+  - 若 `$DOC_DIR` 已存在（即分支子目录已建）→ 跳过迁移，走正常生成路径
+  - **v1+v2 混合布局边缘**（罕见：用户已手动 mkdir 创建 `<id>/<branch>/` 但旧 `<id>/` 还有平铺章节）：检测到**同时存在**两个布局 → **不静默决定**：①自动备份 v1 平铺的 `<id>/*.md` + `<id>/_meta.json` 到 `<id>/_v1_legacy_backup_<timestamp>/`；②询问用户「检测到混合布局：v1 平铺的章节会被移到 `v1_legacy_backup_<timestamp>/` 子目录且不在段零检索范围，**v2 `<id>/<branch>/` 才是新主目录**。确认迁移？」→ 用户确认后按 v1→v2 路径正常处理；用户拒绝则按 v2 已存在路径处理（v1 数据进 backup 目录不参与检索）
+  - **禁止**：直接写入新布局但**不迁移旧布局**——会让旧章节留在 `<id>/` 目录孤立、再下次 `/icode doc` 时被强制清空或判为"未迁移的孤儿"，数据丢失
 - 对每个待生成章节：读相关代码（Read/Grep）→ 按模板写正文（含十四项必含元素）→ 生成前 50 行四块（含「依赖子模块」字段 + **`template_version`**）→ Write 到 `$DOC_DIR/<NN>_<module>_<topic>.md`（十位桶，新增取 `max(NN)+1`）
-- 写 `_meta.json`（`project_id` / `project_type` / `git_root` / `module_deps` 含所有检测到的可读模块（已生成 `generated: true`、按需未生成 `generated: false`，见上「module_docs 生成范围」）/ `unresolved_modules` 含拉取失败的模块 / **`template_version: v2.0.0`** / **`stale_files`** —— **保留既有 stale_files 字段**，步骤 8 主动 stale 扫描会刷新；不要因为新增 template_version 而丢失 stale_files 数据，导致段零 stale 检测失效）
+- 写 `_meta.json`（`project_id` / `project_type` / `git_root` / **`branch = git rev-parse --abbrev-ref HEAD`** / **`head_commit = git rev-parse --short HEAD`** 显式持久化分支与提交，**下游段零借鉴时用这两个字段比对当前 cwd 的 HEAD/分支是否还匹配，跨分支直接 stale 不注入正文，避免误导** / `module_deps` 含所有检测到的可读模块（已生成 `generated: true`、按需未生成 `generated: false`，见上「module_docs 生成范围」）/ `unresolved_modules` 含拉取失败的模块 / **`template_version: v2.0.0`** / **`stale_files`** —— **保留既有 stale_files 字段**，步骤 8 主动 stale 扫描会刷新；不要因为新增 template_version 而丢失 stale_files 数据，导致段零 stale 检测失效）
 - 单章失败→标记不拖垮
 
 ### 6. 代码事实审计（`99_code_facts_audit.md`，永远生成）
