@@ -56,7 +56,7 @@
 3. 全部修复后做全局编译验证，最多 3 次
 4. 更新 `.ico_metadata.json`：`status = completed`
 5. **回写实现偏差备忘到 `03_plan_final.md`**（不可跳过，详见下方「实现偏差备忘」规范）
-6. **刷新全局索引最终状态**：Read `~/.claude/icode_data/index.json`，**按 metadata 的 `ticket_id` 定位**本工单条目，更新 `status` = `completed`，`requirement_summary` 若与最终交付有显著偏差则基于 `03_plan_final.md`+交付成果刷新一次（确保未来检索命中的摘要准确反映最终成果而非中途状态）；**若该工单当前 `stale=true`，重置 `stale=false`+`stale_reason=null`+`stale_checked_commit=null`**（产物可能经本轮更新，旧 stale 判据失效；下次检索注入前由过时校验按当前 `01_plan` 锚点重评，盲重置安全不致误注入）；**确认 verdict（方向结论，v2 新增）**：向用户确认本工单核心方案最终方向结论--默认保持 `unknown` 不阻塞流程；若方案已实机验证有效标 `verified`，若核心方案被证伪/已回退标 `disproved`（填 `verdict_reason`+`correct_direction`），若被替代方案取代标 `superseded`（填 `superseded_by`）；标注时回填 `verdict`+`verdict_reason`+`correct_direction`+`verdict_source`（`machine_test`/`review`/`user`）+`verdict_at`（运行时取系统时间）；详见 SKILL.md「verdict 字段族」。写回 index.json（metadata + index 同步，不得只写其一）。
+6. **刷新全局索引最终状态**：Read `~/.claude/icode_data/index.json`，**按 metadata 的 `ticket_id` 定位**本工单条目，更新 `status` = `completed`，`requirement_summary` 若与最终交付有显著偏差则基于 `03_plan_final.md`+交付成果刷新一次（确保未来检索命中的摘要准确反映最终成果而非中途状态）；**若该工单当前 `stale=true`，重置 `stale=false`+`stale_reason=null`+`stale_checked_commit=null`**（产物可能经本轮更新，旧 stale 判据失效；下次检索注入前由过时校验按当前 `01_plan` 锚点重评，盲重置安全不致误注入）；**确认 verdict（方向结论，v2 新增）**：向用户确认本工单核心方案最终方向结论--默认保持 `unknown` 不阻塞流程；若方案已实机验证有效标 `verified`，若核心方案被证伪/已回退标 `disproved`（填 `verdict_reason`+`correct_direction`；可选 `--premise-dep` 填证伪依赖的外部模块，支持硬复活检测），若被替代方案取代标 `superseded`（填 `superseded_by`）；标注时回填 `verdict`+`verdict_reason`+`correct_direction`+`verdict_source`（`machine_test`/`review`/`user`）+`verdict_at`（运行时取系统时间）；详见 SKILL.md「verdict 字段族」。写回 index.json（metadata + index 同步，不得只写其一）。
 7. 输出交付总结
 
 ### 实现偏差备忘（回溯标注，防回读误解）

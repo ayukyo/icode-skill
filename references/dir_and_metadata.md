@@ -59,10 +59,10 @@ ICODE_OUT_DIR=".icode_output/.icode_output_${LAST}"
 ## ticket_id 生成规则
 
 - `ticket_id` = `{工程名}-{N}`（工程名取 `project_path` 的 basename；N 为当前 `.icode_output_N` 的 N）
-- **工程名冲突处理**：若索引中已存在相同 `{工程名}-{N}` 但 `project_path` 不同的条目，ticket_id 追加 `project_path` 的短 hash 后缀（如 `myproject-1-a3f2`）以保唯一
+- **工程名冲突处理（生成时必须检查）**：生成 ticket_id 后，**必须 Python 解析 index.json 检查是否已有相同 `{工程名}-{N}` 但 `project_path` 不同的条目**；有则追加 `project_path` 短 hash 后缀（`sha256(project_path)[:4]`，如 `myproject-1-a3f2`）保唯一。**写后唯一性验证兜底**（见「全局索引写入」段），即使生成时漏检，写后硬检查会自动修正
 - **入口命令（init/log）共享 N 序列**：init/log 各自创建新目录时，N 是当前目录下**所有** `.icode_output_*` 中的最大 N + 1，不区分 init/log（demo-5 是 init，demo-9 是 log，N 单调递增）
 - 生成后**回填 metadata 的 `ticket_id` 字段**，供后续步骤检索时排除当前工单（避免反推）
-- **唯一性保证**：写索引前必须 Python 解析 index.json 检查无重复 ticket_id；如发现重复（手工误操作导致），用 `python3 -c` 脚本去重（保留 status 最靠后的）
+- **唯一性保证**：写索引前 Python 解析 index.json 检查无重复 ticket_id；**写后唯一性验证兜底**（见「全局索引写入」段，强制硬检查）：发现同 ticket_id 不同 project_path 自动加 hash 后缀修正，同 ticket_id 同 project_path 去重（保留 status 最靠后的）。手工误操作或 AI 漏检均由写后硬检查兜底
 
 ## 全局索引写入（首次写入）
 
@@ -86,7 +86,12 @@ Read `~/.claude/icode_data/index.json`（不存在则创建 `{"version":"1","upd
 - `created_branch` = `git rev-parse --abbrev-ref HEAD`（detached 记 `HEAD`，非 git 仓库→`null`），仅标签
 - `verdict` = `"unknown"`（**新增**：方向结论，详见 SKILL.md「verdict 字段族」；首次写入固定 `unknown`，由后续标注/终审/批量识别改写）
 - `verdict_reason` / `correct_direction` / `verdict_source` / `verdict_at` / `superseded_by` = `null`（**新增**：verdict 关联字段，标注时按需填）
+- `verdict_premise_deps` = `[]` / `verdict_review_needed` = `false`（**新增**：硬复活字段，默认空/false；`disproved`/`superseded` 标注时按需填 `verdict_premise_deps` 支持依赖变化检测）
 - 写回 index.json，置 metadata `indexed = true`、`ticket_id = {生成的 ticket_id}`
+- **写后唯一性验证（强制硬检查，防 AI 偷懒漏检冲突）**：写回后 Python 验证 `tickets` 数组 `ticket_id` 全局唯一：
+  - **同 ticket_id 不同 project_path**（工程名冲突未加后缀）-> 自动给**后写入的**（`created_at` 较晚）追加 `project_path` 短 hash 后缀（`sha256(project_path)[:4]`，如 `mowerware_rl2601-14-a3f2`），同步该工单 `metadata.ticket_id` + 重新排序
+  - **同 ticket_id 同 project_path**（真重复条目，手工误操作）-> 去重，保留 `status` 最靠后的（流程最接近完成），删另一个
+  - 修正后重新写回 index.json（原子写）
 - **写入后执行 LRU 淘汰**（见下方「索引淘汰规则」）
 
 ## 索引条目更新（已有 ticket_id 的情况）
@@ -137,10 +142,13 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
 通过全部校验→工单有效，**按 verdict 分流注入**（详见 SKILL.md「历史检索复用·注入分流」段）+ 续期（`stale_checked_commit=H` 在评估时已更新）：
 
 - `verdict="verified"`/`"unknown"`（含所有旧工单）：正常注入 ADR+风险章节（现状不变）；**`unknown` 强制走 A 层强化**（扩读 `00_init.md` 末轮对话摘要 + 对抗质疑三问 + ⚠️未验证警告，见 [thinking.md](thinking.md)「历史参考小节」）--这是旧工单（无 verdict）防误导的主防线，不依赖标注
-- `verdict="disproved"`：**反转注入避坑**--不注 ADR（避免错误方向被借鉴），改注 `verdict_reason` + `correct_direction`，标 ⛔ 避坑；`correct_direction` 缺失时降级注 ADR + ⛔ 警告（ADR 仅作避坑对照，提示补标 `correct_direction`）
+- `verdict="disproved"`（`verdict_review_needed=false`）：**反转注入避坑 + 证伪前提断言**--不注 ADR，改注 `verdict_reason`（作可验证断言）+ `correct_direction`，标 ⛔ 避坑；**强制新需求 Grep/Read 验证证伪前提是否仍成立**（如"某接口语义是重置"，须 Read 当前实现确认是否仍重置）：仍成立则确实避坑；已失效则方向或可重新考虑，提示 `/icode status --verdict` 标复活（unknown/verified）；`correct_direction` 缺失时降级注 ADR + ⛔ 警告（提示补标）
+- `verdict="disproved"`/`"superseded"`（`verdict_review_needed=true`，证伪前提依赖已变化）：**降级对抗质疑**--不硬反转，走 unknown A 层（扩读末轮+对抗质疑三问）+ 注"曾证伪 + 证伪前提 + 依赖从旧 commit 到新 commit 已变化"提示，让新需求重新评估证伪前提是否仍成立；前提失效则该方向或可重新考虑，提示标复活。**防漏过后来又可行的方向**
 - `verdict="superseded"`：注替代指针 `superseded_by` + `correct_direction` + 替代工单摘要，标 🔁 已替代
 
 > **stale 与 verdict 正交**：`stale=true` 优先跳过注入（技术过时，锚点都没了，连避坑都不用）；`stale=false` 才按 verdict 分流。verdict 抓"方向证伪"（锚点在但方向错），stale 抓"技术过时"（锚点没了），互补不重叠。
+
+> **verdict_review_needed 被动检测**（检索命中 disproved/superseded 注入前）：若 `verdict_premise_deps` 非空，逐 dep 取 `git -C {dep.path} rev-parse HEAD`（只读，stale 白名单内）比对 dep.commit，变了则置 `verdict_review_needed=true` 写回 index.json，该工单本次降级走 unknown 对抗质疑（不硬反转，防漏过后来又可行的方向）；未变则 `verdict_review_needed=false` 走硬反转+证伪前提断言。主动检测见 `/icode status --scan-verdict`（[steps/status.md](../steps/status.md)）
 
 ### stale 字段
 
@@ -191,7 +199,7 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
 
 入口命令（init/log）和步骤1常规新建目录时创建。完整字段定义见 SKILL.md「元信息文件」段，此处仅列入口创建时的最小模板：
 
-> **verdict 字段族**（方向结论，可选，详见 SKILL.md「verdict 字段族」）：所有入口模板均可选；**创建时可不写**（缺失视为 `"unknown"`，向后兼容旧 metadata）；需标注时回填 `verdict`+`verdict_reason`+`correct_direction`+`verdict_source`+`verdict_at`（`superseded` 额外填 `superseded_by`），途径见 `/icode status --verdict`（[steps/status.md](../steps/status.md)）/ 步骤6 终审（[steps/06_audit.md](../steps/06_audit.md)）/ 批量识别扫描。**索引首次写入时 verdict 固定 `"unknown"`、关联字段 null**（见「全局索引写入」段）
+> **verdict 字段族**（方向结论，可选，详见 SKILL.md「verdict 字段族」）：所有入口模板均可选；**创建时可不写**（缺失视为 `"unknown"`，向后兼容旧 metadata）；需标注时回填 `verdict`+`verdict_reason`+`correct_direction`+`verdict_source`+`verdict_at`（`superseded` 额外填 `superseded_by`；`disproved`/`superseded` 可选填 `verdict_premise_deps` 支持硬复活），途径见 `/icode status --verdict`（[steps/status.md](../steps/status.md)）/ 步骤6 终审（[steps/06_audit.md](../steps/06_audit.md)）/ 批量识别扫描。**索引首次写入时 verdict 固定 `"unknown"`、关联字段 null、premise_deps `[]`/review_needed `false`**（见「全局索引写入」段）
 
 ### `/icode log` 产出后
 

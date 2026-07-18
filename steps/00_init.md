@@ -56,7 +56,7 @@
    - `out_dir` = `.icode_output/.icode_output_{N}`
    - `requirement_summary` / `keywords` 取自步骤7 metadata；`requirement_points` 暂为空数组
    - `has_00_init` = true，`has_plan` = false，`status` = `init_in_progress`，`created_at` = 当前时间，`last_used_at` = 当前时间（首次写入=created_at），`hit_count` = 0，`stale` = false，`stale_reason` = null，`stale_checked_commit` = null，`created_commit` = `git rev-parse HEAD`（只读，非 git 仓库为 null），`created_branch` = `git rev-parse --abbrev-ref HEAD`
-   - 写回 index.json，同时置 metadata `indexed = true`、`ticket_id = {生成的 ticket_id}`（持久化 ticket_id，供后续步骤检索时排除当前工单，避免反推）
+   - 写回 index.json，同时置 metadata `indexed = true`、`ticket_id = {生成的 ticket_id}`（持久化 ticket_id，供后续步骤检索时排除当前工单，避免反推）；**写后执行唯一性验证**（见 [references/dir_and_metadata.md](../references/dir_and_metadata.md)「全局索引写入·写后唯一性验证」，防工程名冲突未加 hash 后缀）
 9. 提示用户：可继续对话补充需求，文档会随对话自动更新；讨论完成后运行 `/icode start` 或 `/icode plan` 进入步骤1。**若想另起炉灶讨论别的需求**，再敲 `/icode init`（会新建另一个目录）。
 
 ### 后续每轮对话（同一会话内，由 AI 自主识别，无需用户敲命令）
@@ -151,7 +151,7 @@
 
 ## 对话摘要（可选）
 
-{按时间顺序简记每轮关键结论；可选，便于回顾本次讨论的演进。**末轮特别要求**（v2 新增）：若本次讨论中出现方案证伪/回退/方向变更（如实机发现原方案不可行、改用替代方案），末轮必须明确记录"原方案 X 不可行/已回退，改用方案 Y"--该末轮结论是历史检索 `unknown` 工单注入时扩读的关键（捞最终方向，详见 [../references/thinking.md](../references/thinking.md)「历史参考小节」），也是 `/icode status --scan-verdict` 批量识别证伪信号的扫描点；末轮缺失或未写清证伪，会导致错误方向工单继续被当正面启发注入误导新需求}
+{按时间顺序简记每轮关键结论；可选，便于回顾本次讨论的演进。**末轮特别要求**（v2 新增）：若本次讨论中出现方案证伪/回退/方向变更（如实机发现原方案不可行、改用替代方案），末轮必须明确记录"原方案 X 不可行/已回退，改用方案 Y"（若证伪依赖外部模块/库，记录模块名 + 当时 commit，便于后续 `/icode status --verdict --premise-dep` 标注启用硬复活）--该末轮结论是历史检索 `unknown` 工单注入时扩读的关键（捞最终方向，详见 [../references/thinking.md](../references/thinking.md)「历史参考小节」），也是 `/icode status --scan-verdict` 批量识别证伪信号的扫描点；末轮缺失或未写清证伪，会导致错误方向工单继续被当正面启发注入误导新需求}
 
 - 轮次1：...
 - 轮次2：...
