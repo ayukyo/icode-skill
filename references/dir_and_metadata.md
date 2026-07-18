@@ -84,6 +84,8 @@ Read `~/.claude/icode_data/index.json`（不存在则创建 `{"version":"1","upd
 - `stale_checked_commit` = `null`（**新增**：上次 stale 评估时的工作树 HEAD，可复活判据）
 - `created_commit` = 工单创建时工作树 HEAD（`git rev-parse HEAD`，**只读**；非 git 仓库/失败→`null` 走纯锚点兜底），不可变，commit 上下文 stale 判据
 - `created_branch` = `git rev-parse --abbrev-ref HEAD`（detached 记 `HEAD`，非 git 仓库→`null`），仅标签
+- `verdict` = `"unknown"`（**新增**：方向结论，详见 SKILL.md「verdict 字段族」；首次写入固定 `unknown`，由后续标注/终审/批量识别改写）
+- `verdict_reason` / `correct_direction` / `verdict_source` / `verdict_at` / `superseded_by` = `null`（**新增**：verdict 关联字段，标注时按需填）
 - 写回 index.json，置 metadata `indexed = true`、`ticket_id = {生成的 ticket_id}`
 - **写入后执行 LRU 淘汰**（见下方「索引淘汰规则」）
 
@@ -93,7 +95,7 @@ Read `~/.claude/icode_data/index.json`（不存在则创建 `{"version":"1","upd
 
 - 步骤0 每轮对话后：刷新 `requirement_summary` / `requirement_points`（从 `00_init.md`「3.新增需求点」自动提炼）
 - 步骤1 写完 `01_plan.md` 后：`requirement_summary`（基于完整计划刷新）、`has_plan` = true、`status` = `plan_done`
-- 步骤6 终审后：`status` = `completed`，`requirement_summary` 若与最终交付显著偏差则基于最终成果刷新
+- 步骤6 终审后：`status` = `completed`，`requirement_summary` 若与最终交付显著偏差则基于最终成果刷新；**终审时确认 verdict**（默认保持 `unknown` 不阻塞流程；用户标 `verified`/`disproved`/`superseded` 时回填 `verdict`+`verdict_reason`+`correct_direction`+`verdict_source`+`verdict_at`，详见 [steps/06_audit.md](../steps/06_audit.md)）
 
 ## 检索命中续期 + 过时校验（检索阶段执行）
 
@@ -132,7 +134,13 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
 3. **代码锚点校验**（廉价，现有）：读该工单 `01_plan.md` 的 ADR 章节提取**代码锚点**（如"calc.c mul_overflows"），Grep 该工单工程（`{project_path}`）确认是否仍存在；不存在（删除/重构/重命名）→置 `stale=true`+`stale_reason=anchor_gone`+`stale_checked_commit=H`，**跳过注入**
 4. **语义偏离校验**（新，贵层，仅对已决定注入的 top-N≤3 条）：Read 该工单工程（`{project_path}`）锚点处当前代码，按 **ADR 偏离 checklist** 判 ADR 前提是否仍成立：①ADR 涉及的函数/类签名是否仍匹配 ②返回值/边界值/错误码是否仍如 ADR 所述 ③ADR 推理依赖的调用关系/数据结构是否仍存在。任一不成立→置 `stale=true`+`stale_reason=semantic_deviation`+`stale_checked_commit=H`，**跳过注入**（专抓"锚点符号在但语义已变"，锚点校验抓不到）
 
-通过全部校验→工单有效，正常注入 + 续期（`stale_checked_commit=H` 在评估时已更新）。
+通过全部校验→工单有效，**按 verdict 分流注入**（详见 SKILL.md「历史检索复用·注入分流」段）+ 续期（`stale_checked_commit=H` 在评估时已更新）：
+
+- `verdict="verified"`/`"unknown"`（含所有旧工单）：正常注入 ADR+风险章节（现状不变）；**`unknown` 强制走 A 层强化**（扩读 `00_init.md` 末轮对话摘要 + 对抗质疑三问 + ⚠️未验证警告，见 [thinking.md](thinking.md)「历史参考小节」）--这是旧工单（无 verdict）防误导的主防线，不依赖标注
+- `verdict="disproved"`：**反转注入避坑**--不注 ADR（避免错误方向被借鉴），改注 `verdict_reason` + `correct_direction`，标 ⛔ 避坑；`correct_direction` 缺失时降级注 ADR + ⛔ 警告（ADR 仅作避坑对照，提示补标 `correct_direction`）
+- `verdict="superseded"`：注替代指针 `superseded_by` + `correct_direction` + 替代工单摘要，标 🔁 已替代
+
+> **stale 与 verdict 正交**：`stale=true` 优先跳过注入（技术过时，锚点都没了，连避坑都不用）；`stale=false` 才按 verdict 分流。verdict 抓"方向证伪"（锚点在但方向错），stale 抓"技术过时"（锚点没了），互补不重叠。
 
 ### stale 字段
 
@@ -146,8 +154,11 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
 
 ### 续期（校验通过才续期）
 
-- `last_used_at` = 当前时间（续期，LRU不淘汰）
-- `hit_count` += 1（累计命中次数）
+> **verdict 分流（v2 新增，防错误工单被机制奖励）**：`verdict="verified"`/`"unknown"` 正常续期（`last_used_at`+`hit_count` 原子同步）；`verdict="disproved"`/`"superseded"` 命中**只更新 `verdict_at` 记录最近提醒，不续期 `last_used_at`、不续期 `hit_count`**--被证伪/取代的工单不应因反复命中被当高价值永久保留优先注入。续期去重缓存判定仍按 `(source=history, ref_id=ticket)` 任一记录判（见「续期去重」），disproved/superseded 工单命中仍写缓存记录（防同目录重复注入），只是不 +1 hit_count。**向后兼容**：旧工单无 `verdict` 字段视为 `"unknown"`，续期行为与现状完全等价
+
+- `last_used_at` = 当前时间（续期，LRU不淘汰）--仅 `verified`/`unknown`；`disproved`/`superseded` 跳过
+- `hit_count` += 1（累计命中次数）--仅 `verified`/`unknown`；`disproved`/`superseded` 跳过
+- `verdict_at` = 当前时间（仅 `disproved`/`superseded` 命中时更新，记录提醒次数，不触发续期）
 - 写回 index.json
 - `stale_checked_commit` 在「过时校验」评估阶段已更新为当前 `H`（**与 hit_count 解耦**--续期去重跳过 hit_count +1 时，stale_checked_commit 仍随评估更新，保证可复活判据准确）
 
@@ -159,11 +170,11 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
 
 **触发时机**：每次写索引（首次写入/条目更新/命中续期）后执行：先排序，再淘汰扫描，最后主动 stale 扫描。
 
-**排序规则**（写入时重排 tickets 数组）：按 `hit_count` 降序、同值按 `last_used_at` 降序。高复用价值 + 近期被用的工单排前，段一粗筛扫 `keywords` 时主代理先看到高价值项，判断相关性更快；LRU 淘汰时最老的自然在末尾。
+**排序规则**（写入时重排 tickets 数组）：按复合键 `(verdict_priority, hit_count)` 降序、同值按 `last_used_at` 降序。`verdict_priority`：`verified`=0（最高）> `unknown`=1 > `superseded`=2 > `disproved`=3（最低，沉底）。高价值已验证工单排前，被证伪工单沉底；段一粗筛扫 `keywords` 时主代理先看到高价值项，判断相关性更快；LRU 淘汰时最老的自然在末尾。**向后兼容**：旧工单无 `verdict` 视为 `unknown`=1，与现状所有工单按 `hit_count` 排序完全等价（仅对有 verdict 的工单生效）
 
 **淘汰规则**：
 1. **容量上限 200 条**：tickets 数组超 200 时触发淘汰
-2. **永久保留**：`hit_count >= 20` 的工单永久不淘汰（被复用≥20 次的高价值工单）
+2. **永久保留**：`hit_count >= 20` **且 `verdict != "disproved"`** 的工单永久不淘汰（被复用≥20 次的高价值工单）。**例外**：`verdict="disproved"` 的工单即使 `hit_count >= 20` 也不永久保留--被证伪的方案不应作为高价值正面参考永久保留（仍可被反转注入避坑，但走正常淘汰流）
 3. **未完成态保留**：`status` 为 `init_in_progress`/`log_done`/`log_in_progress`/`review_in_progress`/`deepcheck_in_progress`/`code_in_progress` 的工单**默认**不淘汰（流程未结束）——**但有超时降级例外**（见规则 5）
 4. **LRU 淘汰**：超上限时，在**可淘汰集**中淘汰 `last_used_at` 最老的（数组末尾），直到条目数 ≤ 200。**可淘汰集** = `hit_count < 20` 且满足下列**任一**：① `stale=false` 且 `status = completed/review_done/deepcheck_done/plan_done/plan_finalized`（正常已完成/推进态）；② `stale=true` 且 `stale_reason = timeout`（规则 5 超时降级的僵尸未完成态，status 仍 in_progress 但已降级可淘汰）。**`stale=true` 且 `stale_reason != timeout` 的软 stale 工单不在可淘汰集**（保留待 checkout 变化后复活重评）
 5. **僵尸未完成态超时降级**：未完成态工单（init/log/review/deepcheck/code in_progress）若 `last_used_at` 距当前**超过 30 天**无更新，视为"建了就扔"的僵尸工单——**不删 status，改置 `stale=true`+`stale_reason=timeout`**（复用 stale 机制，不污染 status 语义），降级后该条不再受规则 3 的未完成态保护，**纳入规则 4 可淘汰集②**（status 仍 in_progress，由可淘汰集②的 `stale_reason=timeout` 判定可淘汰）。**触发时机**：每次写索引触发淘汰扫描时，顺带检查所有未完成态工单是否超时。区分"正在用"（30 天内有更新）与"建了就扔"（超时）。**timeout 为硬 stale**：复活条件 `stale_reason != timeout` 排除它，超时降级不复活、直接走淘汰
@@ -179,6 +190,8 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
 ## .ico_metadata.json 模板
 
 入口命令（init/log）和步骤1常规新建目录时创建。完整字段定义见 SKILL.md「元信息文件」段，此处仅列入口创建时的最小模板：
+
+> **verdict 字段族**（方向结论，可选，详见 SKILL.md「verdict 字段族」）：所有入口模板均可选；**创建时可不写**（缺失视为 `"unknown"`，向后兼容旧 metadata）；需标注时回填 `verdict`+`verdict_reason`+`correct_direction`+`verdict_source`+`verdict_at`（`superseded` 额外填 `superseded_by`），途径见 `/icode status --verdict`（[steps/status.md](../steps/status.md)）/ 步骤6 终审（[steps/06_audit.md](../steps/06_audit.md)）/ 批量识别扫描。**索引首次写入时 verdict 固定 `"unknown"`、关联字段 null**（见「全局索引写入」段）
 
 ### `/icode log` 产出后
 
@@ -316,6 +329,7 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
 | `history` | `requirement_points` | init | 需求要点清单 |
 | `history` | `adr_risks` | plan / start / fast | ADR + 风险评估章节 |
 | `history` | `root_cause_evidence` | log | 根因结论 + 决定性证据 |
+| `history` | `verdict_lesson` | init/plan/start/fast/log | disproved/superseded 工单反转注入的避坑结论（`verdict_reason`+`correct_direction`，见「检索命中续期·过时校验」段 verdict 分流注入） |
 | `project_doc` | `section:<file>` | init/log/plan/start/fast | 工程文档章节（可细化到小节锚点 `section:<file>#<anchor>`） |
 | `project_doc` | `section:<file>#stale-summary` | init/log/plan/start/fast | stale 章节降级注入的简要说明（不读正文小节，见「stale 章节降级注入」） |
 

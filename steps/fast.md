@@ -50,7 +50,7 @@ fi
 
 ### 2. 历史检索（与 `/icode start` 计划模式一致）
 
-- 读 `~/.claude/icode_data/index.json`，**两段式检索**：段一 keywords Jaccard 粗筛取 ≤10 候选（零 token，可复活预扫后排除剩余 stale/当前 `ticket_id`），段二候选 keywords+requirement_points 精读打分选 top-N 命中（N 由梯度决定，明确无关则 0 条），过时校验后注入 ADR+风险章节
+- 读 `~/.claude/icode_data/index.json`，**两段式检索**：段一 keywords Jaccard 粗筛取 ≤10 候选（零 token，可复活预扫后排除剩余 stale/当前 `ticket_id`），段二候选 keywords+requirement_points 精读打分选 top-N 命中（N 由梯度决定，明确无关则 0 条），过时校验后**按 `verdict` 分流注入**（`disproved`/`superseded` 反转避坑不注 ADR；`unknown` 扩读 `00_init.md` 末轮+对抗质疑；详见 [01_plan.md](01_plan.md) 注入分支 + SKILL.md「注入形式·按 verdict 分流」）
 - 排除当前 `ticket_id`，不自我参考
 - **段零·工程文档检索**（与历史检索并行，候选合并排序）：`resolve_project_id(cwd)`（支持 git-root / repo-root 双模式，`repo` 根模式从 cwd 向上找 `.repo/manifest.xml`）→ `ls ~/.claude/icode_data/project_docs/<project_id>/`，逐章读前 50 行按 KEYS 匹配 → 读 `project_docs/<project_id>/_meta.json` 的 `module_deps` 列表，对每个 dep 查 `module_docs/<dep.key>/` → **反查父项目**（cwd 在子仓库 + path 匹配 manifest 的 `<project path>` → 父 repo-root 也纳入检索）；命中按 `[小节锚点]` 定点读小节；无知识库则零命中（ℹ️ 不阻塞）。详见 [references/dir_and_metadata.md](../references/dir_and_metadata.md)「段零·工程文档检索」+「module_docs 工程模块库」段；**stale 章节降级注入摘要不注正文 + module commit 一致性校验**见「stale 章节降级注入」「步骤 3 commit 一致性校验」段
 - **注入防重复**（两源共用 `_inject_cache.json`）：无缓存则创建空 `{"ticket_id":"<本工单>","injections":[]}`；注入前按 `(source, ref_id, slice)` 查缓存去重，已注入的跳过。历史源 slice=`adr_risks`；段零 slice=`section:<file>`。详见 [references/dir_and_metadata.md](../references/dir_and_metadata.md)「注入缓存机制」段

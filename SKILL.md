@@ -42,7 +42,7 @@ description: 端到端编码工作流（步骤 0~6，含可选需求初稿步骤
 | `/icode audit` | **仅步骤6**：终极终审 + 统一修复（产出 `{ICODE_OUT_DIR}/06_audit.md`） | 用最新目录 |
 | `/icode readme` | **可选步骤7**：生成交付报告（面向人的自包含总结，动态文件名，智能识别功能/查BUG模板）。步骤6完成后手动触发 | 用最新目录 |
 | `/icode doc [自然语言]` | **工程级知识库生成（独立步骤）**：扫描工程代码特征，生成/维护 `~/.claude/icode_data/project_docs/<project_id>/` 下的工程知识库章节（架构/IPC/术语表/代码事实审计），**同时检测工程依赖的独立模块**（git submodule / `repo` 管理 / CMake FetchContent / monorepo / vendor / 用户配置，6 级优先级）并生成 `~/.claude/icode_data/module_docs/{key}/` 模块共享文档（**按仓库+分支 key 跨工程共享**，同一上游仓库同分支只一份），供 init/log/plan/start/fast 段零自动跨仓库检索注入。**去参数化**——目标工程与动作（全量/增量/新增）由自然语言识别。**不创建工单目录、不写工单 metadata、不参与步骤1~6推进**（详见 [steps/doc.md](steps/doc.md)） | 否（写全局 `project_docs/` 和 `module_docs/`） |
-| `/icode status` | **只读**：查当前工单状态（含 `mode` 字段 + 全局索引工单数，不创建目录/不写文件） | 否 |
+| `/icode status` | **状态查询/verdict 标注**：默认只读查当前工单状态（含 `mode`/`verdict` 字段 + 全局索引工单数）；`--verdict <ticket_id> <verified|disproved|superseded> "<reason>" [--correct "<正确方向>"] [--source <machine_test|review|user|auto_signal>]` 手动标注工单方向结论（双写 metadata+index，幂等覆盖刷新 `verdict_at`）；`--scan-verdict` 批量扫描 unknown 完成态工单的 00_init 末轮/06_audit 证伪信号并提示标注（详见 [steps/status.md](steps/status.md)） | 否（默认只读；`--verdict`/`--scan-verdict` 写 metadata+全局索引，不写工程内源码文件） |
 
 > **`/icode start` / `/icode plan` / `/icode fast` 的目录复用规则**：启动时检查最新 `.icode_output/.icode_output_N/` 目录：
 > - **入口态有歧义 → 一律问用户**（无论是否带参）：最新目录 status 为 `init_in_progress` 或 `log_done`（即 init/log 产出了 `00_init.md` 但还没进步骤1，且无 `01_plan.md`）时，**必须问用户**："检测到最近有未完成的初稿/根因 `<摘要>`，是 ① 在此基础上继续（复用目录）/ ② 开全新需求（新建目录）？"——用户选①则复用（命令行参数作为需求补充输入，`00_init.md` 为主体），选②则新建
@@ -226,6 +226,16 @@ ICODE_OUT_DIR=".icode_output/.icode_output_${LAST}"
 - `mode`（新增，可选，默认 `"full"`）：工单模式。`"full"` = `/icode start` 全流程（步骤2 默认 3 轮 + 对抗，步骤5 三阶段循环）；`"fast"` = `/icode fast` 精简全流程（步骤2 固定 1 轮无对抗，步骤5 只跑 Reverse）。**字段缺失视为 `"full"`（向后兼容旧 metadata）**。详见 [steps/fast.md](steps/fast.md)
 - `max_rounds`（新增，可选，默认 3）：步骤2 review 软上限轮数。`mode="full"` 时由 `/icode review N` 参数决定（默认 3）；`mode="fast"` 时**自动串联下强制为 1**，但**单步命令（`/icode review N`）在 fast 工单上调用时 N 优先级最高**——用户用参数 N 显式表达 fast→full 升级意图时，按 N 轮跑（详见 [references/dir_and_metadata.md](references/dir_and_metadata.md)「步骤2/5 读 mode 字段的契约」段）。**字段缺失视为 3**
 
+> **`verdict` 字段族（方向结论，v2 新增）**--与 `status` 流程态正交：`status` 表示"流程走到哪步"，`verdict` 表示"方案方向对不对"。用于历史检索注入分流，防止已被证伪/取代的工单误导新需求（详见下文「历史检索复用·注入分流」段）：
+> - `verdict`（可选，默认 `"unknown"`）：枚举 `"unknown"`（未判定，旧工单默认）/`"verified"`（已验证有效，实机通过/终审高分/已上线无回退）/`"disproved"`（核心方案被证伪/已回退，如某"暂停数据流"方案实机发现语义是"重置状态"而非"冻结"，从根上不可行）/`"superseded"`（被替代方案取代，指向 `superseded_by`）。**字段缺失视为 `"unknown"`（向后兼容旧工单，走原注入逻辑 + 对抗质疑兜底）**
+> - `verdict_reason`（可选，≤150 token）：为何这个 verdict。`disproved` 时填证伪原因
+> - `correct_direction`（可选，≤150 token）：正确方向。`disproved`/`superseded` 时填，是反转注入避坑的核心载体
+> - `verdict_source`（可选）：结论来源，枚举 `machine_test`/`review`/`user`/`auto_signal`，可信度递减
+> - `verdict_at`（可选）：结论时间（运行时取系统时间，禁写死，同 `last_used_at` 约定）
+> - `superseded_by`（可选）：`"superseded"` 时填替代工单 `ticket_id`
+> - **录入途径**：`/icode status --verdict` 手动标注（[steps/status.md](steps/status.md)）/ 步骤6 终审回填（[steps/06_audit.md](steps/06_audit.md)）/ 批量识别扫描提示（`/icode status --scan-verdict`，[steps/status.md](steps/status.md)）
+> - **幂等保护**：verdict 一旦判定，后续 status 流转不重置；只有"步骤6 终审重新评估"或"用户显式改标"才覆盖（覆盖时刷新 `verdict_at`）
+
 **`status` 字段枚举**（统一词表，所有步骤必须严格遵守，禁止自定义）：
 
 | 步骤 | 状态值 | 含义 |
@@ -278,12 +288,14 @@ ICODE_OUT_DIR=".icode_output/.icode_output_${LAST}"
 
 **痛点**：每次 `/icode` 都是冷启动，过往相似需求的计划/决策/踩坑无法被新需求复用。本机制在不破坏工程隔离、不撑爆上下文的前提下，让新需求能主动检索历史相似工单并定点注入参考。
 
+> **verdict 防误导（v2 新增）**：历史工单的核心方案可能已被实机证伪/取代，直接注入其 ADR 会把新需求带向错误方向。本机制给每个工单标 `verdict`（方向结论，与 `status` 流程态正交），注入按 verdict 分流：`disproved` **反转注入避坑**（不注 ADR，注证伪原因+正确方向）、`superseded` 注替代指针、`unknown`（含所有旧工单，**不依赖标注**）走 A 层强制强化（扩读 `00_init.md` 末轮+对抗质疑+⚠️警告）兜底。录入：`/icode status --verdict` 手动标 / 步骤6 终审回填 / `/icode status --scan-verdict` 批量识别提示。详见「注入形式·按 verdict 分流」+ [references/dir_and_metadata.md](references/dir_and_metadata.md)「过时校验·verdict 分流注入」+「续期·verdict 分流」段
+
 **全局索引**（不污染任何工程，不放技能目录）：
 
 - 索引文件：`~/.claude/icode_data/index.json`（首次运行自动创建）。**路径说明**：`~` 是当前用户主目录，由 Claude Code 工具层跨平台解析（Linux/macOS/Windows 通用），与技能目录 `~/.claude/skills/icode/` 同源。技能文件**禁止硬编码**任何具体用户路径（如 `/home/xxx`、`C:\Users\xxx`），所有全局路径必须用 `~` 表达，确保技能可移植
-- 每条记录：`ticket_id`(`{工程名}-{N}`，工程名冲突时追加 `project_path` 短 hash 后缀保唯一)、`project_path`、`out_dir`、`requirement_summary`(≤100 token)、`requirement_points`(≤8 条)、`keywords`(≤8个)、`has_00_init`/`has_plan`、`status`、`created_at`、`last_used_at`(检索命中时更新，LRU淘汰依据)、`hit_count`(检索命中+1，达20永久保留)、`stale`(默认false，过时校验失败置true，软stale可复活)、`stale_reason`(失败原因`anchor_gone`/`checkout_mismatch`/`path_gone`/`semantic_deviation`/`timeout`)、`stale_checked_commit`(上次评估时HEAD，可复活判据)、`created_commit`(创建时HEAD，commit上下文判据，非git仓库为null)、`created_branch`(`--abbrev-ref HEAD`)。**`has_00_init` 语义 = 该工单是否已产出 `00_init.md`（走过 init 或 log，log 也会产出 00_init.md），与"是否走过步骤0 init"解耦**——log 未走过 init 但产出 00_init.md 故也为 true
+- 每条记录：`ticket_id`(`{工程名}-{N}`，工程名冲突时追加 `project_path` 短 hash 后缀保唯一)、`project_path`、`out_dir`、`requirement_summary`(≤100 token)、`requirement_points`(≤8 条)、`keywords`(≤8个)、`has_00_init`/`has_plan`、`status`、`created_at`、`last_used_at`(检索命中时更新，LRU淘汰依据)、`hit_count`(检索命中+1，达20永久保留)、`stale`(默认false，过时校验失败置true，软stale可复活)、`stale_reason`(失败原因`anchor_gone`/`checkout_mismatch`/`path_gone`/`semantic_deviation`/`timeout`)、`stale_checked_commit`(上次评估时HEAD，可复活判据)、`created_commit`(创建时HEAD，commit上下文判据，非git仓库为null)、`created_branch`(`--abbrev-ref HEAD`)、`verdict`/`verdict_reason`/`correct_direction`/`verdict_source`/`verdict_at`/`superseded_by`（方向结论字段族，默认 `verdict="unknown"` 其余 null，详见上「verdict 字段族」；检索注入按 verdict 分流，`disproved`/`superseded` 不续期 hit_count、不享受永久保留、排序降权，详见「索引淘汰规则」）。**`has_00_init` 语义 = 该工单是否已产出 `00_init.md`（走过 init 或 log，log 也会产出 00_init.md），与"是否走过步骤0 init"解耦**——log 未走过 init 但产出 00_init.md 故也为 true
 - **只存指针和摘要，不存产物正文**。产物仍在各工程 `.icode_output/`，工程隔离不破坏。
-- **LRU 淘汰**（防 index.json 无限膨胀）：索引是检索缓存非档案。容量上限 200 条；`hit_count >= 20` 永久保留（被复用≥20 次的高价值工单）；未完成态（init/log/review/deepcheck/code in_progress）默认不淘汰，但**超时降级**（`last_used_at` 超 30 天无更新->置 `stale=true`+`stale_reason=timeout` 解除保护、纳入可淘汰，不新增 status 值；timeout 为硬 stale 不复活）；超上限时在**可淘汰集**淘汰 `last_used_at` 最老的：① `hit_count < 20` 且 `stale=false` 完成态，或 ② `stale=true` 且 `stale_reason=timeout` 的超时降级僵尸（status 仍 in_progress）；**软 stale（非 timeout）保留不淘汰待复活**。另**主动 stale 扫描**：每次写索引顺带校验最旧 K 条锚点，失效置 `stale=true`。检索命中**原子同步**更新 `last_used_at`+`hit_count` 续期。淘汰只删索引条目，产物保留各工程。**排序**：tickets 数组按 `hit_count` 降序、同值按 `last_used_at` 降序（高价值近期项在前，段一粗筛扫 keywords 快+淘汰从末尾）。详见 [references/dir_and_metadata.md](references/dir_and_metadata.md)「索引淘汰规则」
+- **LRU 淘汰**（防 index.json 无限膨胀）：索引是检索缓存非档案。容量上限 200 条；`hit_count >= 20` 且 `verdict != "disproved"` 永久保留（被复用≥20 次的高价值工单；`disproved` 不永久保留，详见「索引淘汰规则」）；未完成态（init/log/review/deepcheck/code in_progress）默认不淘汰，但**超时降级**（`last_used_at` 超 30 天无更新->置 `stale=true`+`stale_reason=timeout` 解除保护、纳入可淘汰，不新增 status 值；timeout 为硬 stale 不复活）；超上限时在**可淘汰集**淘汰 `last_used_at` 最老的：① `hit_count < 20` 且 `stale=false` 完成态，或 ② `stale=true` 且 `stale_reason=timeout` 的超时降级僵尸（status 仍 in_progress）；**软 stale（非 timeout）保留不淘汰待复活**。另**主动 stale 扫描**：每次写索引顺带校验最旧 K 条锚点，失效置 `stale=true`。检索命中**原子同步**更新 `last_used_at`+`hit_count` 续期。淘汰只删索引条目，产物保留各工程。**排序**：tickets 数组按复合键 `(verdict_priority, hit_count)` 降序、同值按 `last_used_at` 降序（`verdict_priority`: verified>unknown>superseded>disproved，详见「索引淘汰规则」）（高价值近期项在前，段一粗筛扫 keywords 快+淘汰从末尾）。详见 [references/dir_and_metadata.md](references/dir_and_metadata.md)「索引淘汰规则」
 - **过时校验**（防注入过时信息）：索引存的是工单当时的摘要，工程迭代后老工单 ADR/需求可能已过时。**两处触发**：①检索命中准备注入前（被动）；②每次写索引触发淘汰后，主动 Grep 校验最旧 K 条代码锚点（主动）。锚点失效→置 `stale=true` 跳过注入（即使 hit_count 高也不注入）。stale 工单保留索引留追溯，不再续期，不再被段一粗筛命中。**project_docs 工程文档同样有过时校验**：段零注入前被动 stale 检测（命中 KEYS 文件位置或正文目录前缀即标 stale，降级注入不注正文）+ `/icode doc` 末尾主动 stale 扫描（全库锚点校验写 `_meta.json.stale_files`，见 [steps/doc.md](steps/doc.md) 步骤8）+ module_docs commit 一致性校验（同分支不同 commit 降级注入+警告）。**历史工单 stale 校验 v2**：commit 上下文比对（`created_commit` vs 当前 HEAD：同提交高置信注入/后代跑锚点/祖先分叉软stale）+ top-N 注入前语义偏离 checklist（抓"锚点在但语义变"）+ stale 可复活（checkout 变化重评，解决临时旧提交误判）+ **Git 操作只读白名单**（禁 checkout/reset/commit 等写操作与网络操作，详见「过时校验·Git 操作安全白名单」）。详见 [references/dir_and_metadata.md](references/dir_and_metadata.md)「检索命中续期 + 过时校验」「索引淘汰规则·主动 stale 扫描」「project_docs 主动 stale 扫描」「段零·工程文档检索·步骤 3 commit 一致性校验」
 
 **写索引时机**（**`keywords` 是段一粗筛的检索索引，所有入口首次写索引时必须填 ≤8 个技术关键词、不得为空**——空 keywords 的工单无法被粗筛命中，等于检索盲区）：
@@ -298,7 +310,7 @@ ICODE_OUT_DIR=".icode_output/.icode_output_${LAST}"
     5. 若「3. 新增需求点」章节缺失/为空，`requirement_points` 保持空数组
     6. 例：`- [x] calc_eval 函数签名` → `"calc_eval 函数签名"`
 - 步骤1 写完 `01_plan.md` 后：刷新 `requirement_summary`（基于完整计划）+ `has_plan=true`；**常规新建目录首跑时**（跳过步骤0）在此首次生成 `ticket_id` 并回填 metadata、首次写入索引条目（`has_00_init=false`、`keywords`（≤8个，从计划技术栈提炼，不得为空）、`last_used_at=当前`、`hit_count=0`、`stale=false`、`stale_reason=null`、`stale_checked_commit=null`、`created_commit`（`git rev-parse HEAD` 只读，非git仓库为null）、`created_branch`），**写后执行LRU淘汰 + 主动 stale 扫描**
-- 步骤6 终审完成后：刷新 `status=completed`，`requirement_summary` 若与最终交付显著偏差则基于最终成果刷新；**若 `stale=true` 重置 `stale=false`+`stale_reason=null`+`stale_checked_commit=null`**（旧 stale 判据失效，下次检索重评）
+- 步骤6 终审完成后：刷新 `status=completed`，`requirement_summary` 若与最终交付显著偏差则基于最终成果刷新；**若 `stale=true` 重置 `stale=false`+`stale_reason=null`+`stale_checked_commit=null`**（旧 stale 判据失效，下次检索重评）；**确认 verdict**（默认保持 `unknown` 不阻塞流程；用户标 `verified`/`disproved`/`superseded` 时回填 `verdict`+`verdict_reason`+`correct_direction`+`verdict_source`+`verdict_at`，详见 [steps/06_audit.md](steps/06_audit.md)）
 
 **检索注入流程**（`/icode init`、`/icode log`、`/icode plan`、`/icode start`、`/icode fast` 共用检索，分流注入；段零工程文档候选与本流程候选合并排序后统一注入，不分来源）：
 
@@ -316,7 +328,7 @@ ICODE_OUT_DIR=".icode_output/.icode_output_${LAST}"
    - **代码锚点校验**：Grep 该工单工程 `{project_path}` 的 ADR 锚点是否仍存在；失效->`stale=true`+`stale_reason=anchor_gone`，跳过注入
    - **语义偏离校验**（仅对已决定注入的 top-N≤3 条）：Read 该工单工程 `{project_path}` 的锚点代码按偏离 checklist 判 ADR 前提（签名/返回值边界/调用关系）是否仍成立；偏离->`stale=true`+`stale_reason=semantic_deviation`，跳过注入（抓"锚点在但语义变"）
 
-   **命中续期**：全部校验通过的工单，**原子同步更新** `last_used_at`=当前时间、`hit_count`+=1 写回（两字段同一次写回，不得只更其一--详见 [references/dir_and_metadata.md](references/dir_and_metadata.md)「续期（校验通过才续期）·原子同步」）；`stale_checked_commit=H` 在评估时已更新（与 hit_count 解耦，续期去重不阻断）。`stale=true` 的工单不注入不续期（软stale可复活见下）。
+   **命中续期**：全部校验通过的工单，**按 verdict 分流续期**——`verified`/`unknown`（含旧工单）原子同步更新 `last_used_at`=当前时间、`hit_count`+=1 写回（两字段同一次写回，不得只更其一--详见 [references/dir_and_metadata.md](references/dir_and_metadata.md)「续期（校验通过才续期）·原子同步」）；`stale_checked_commit=H` 在评估时已更新（与 hit_count 解耦，续期去重不阻断）。`stale=true` 的工单不注入不续期（软stale可复活见下）。
 
    **可复活 stale**（解决 checkout 假阳性）：段一前对每条 stale 工单取其 `H = git -C {project_path} rev-parse HEAD`；`stale=true` 且 `stale_reason != timeout` 且 `stale_checked_commit != H` 的工单临时置 `stale=false` 重入段一重评（重评仍失败则更新 `stale_checked_commit=H`，同 HEAD 不再重评）。**所有 git 调用只读**，禁止 checkout/reset/commit 等写操作与网络操作（白名单见 [references/dir_and_metadata.md](references/dir_and_metadata.md)「过时校验·Git 操作安全白名单」）。
 
@@ -336,7 +348,18 @@ ICODE_OUT_DIR=".icode_output/.icode_output_${LAST}"
    | `/icode plan` / `/icode start` / `/icode fast` | 命中工单的 **ADR 章节 + 风险评估章节** | 定点读 `01_plan.md` 对应章节（**不读全文**） | ≤1K token/条 |
    | `/icode log` | 命中工单的 **根因结论 + 决定性证据** | 定点读 `log_analysis.md`「核心结论 + 决定性证据」章节（**不读全文**） | ≤800 token/条 |
 
-4. **注入形式**：历史参考作为主代理的**思考输入**，在强制思考文字块里加一节「历史参考」，影响后续产出质量。**零命中不注入，不强凑参考**。
+4. **注入形式·按 verdict 分流**（v2 新增，核心防误导机制）：命中工单经段二精读+过时校验后，**先读其 `verdict` 字段按值分流注入**（字段缺失视为 `"unknown"`，向后兼容旧工单）：
+
+   | verdict | 注入内容 | 来源 | 体积上限 | 思考块标注 |
+   |---------|---------|------|---------|-----------|
+   | `verified` / `unknown`（含旧工单） | 上表对应命令的注入内容（ADR+风险/根因/要点） + **`unknown` 额外扩读 `00_init.md` 末轮对话摘要** | 上表来源 + `00_init.md` 末轮 | 上表上限 + ≤0.3K（末轮） | ✅借鉴 / `unknown` 时 ⚠️「结论未经验证标注，须甄别是否被后续实机推翻」 |
+   | `disproved` | **不注 ADR/根因/要点**（避免错误方向被借鉴），改注 `verdict_reason` + `correct_direction` | metadata/index 的 verdict 字段 | ≤0.6K/条 | ⛔「避坑参考：核心方案已被证伪，勿走同方向，正确方向见下」 |
+   | `superseded` | 替代指针 `superseded_by` + `correct_direction` + 替代工单摘要 | metadata + 替代工单 | ≤0.8K/条 | 🔁「已被替代，参考新方案 {superseded_by}」 |
+
+   - 历史参考作为主代理的**思考输入**，在强制思考文字块里加一节「历史参考」，按上表 verdict 标注 + 注入内容，影响后续产出质量
+   - **`unknown` 强制 A 层强化**（旧工单防误导主防线，不依赖标注）：扩读末轮 + 对抗质疑三问（详见 [references/thinking.md](references/thinking.md)「历史参考小节」）
+   - `disproved` 的 `correct_direction` 缺失时：降级注 ADR + ⛔ 警告（ADR 仅作避坑对照），提示用户用 `/icode status --verdict` 补标 `correct_direction`
+   - **零命中不注入，不强凑参考**
 
 **防撑爆四道闸门**：
 - **索引体积**：全局索引单条只存摘要+要点+关键词，整体 <2K token
