@@ -1,0 +1,15 @@
+{
+  "_comment": "config 可选：`/icode log <TB URL> <单号>` 用法不配 config 也能跑--AI 从 URL 抽 domain+pid 传 `--domain --pid` 给 tb_pull、`--domain` 给 tb_cookie。仅当需要 (1) `--lib <前缀>` 快捷查 pid 省每次传 --pid、(2) 固定 domain 省每次 --domain、(3) Chrome 非默认位置 chrome_base/profile、(4) 改 cookie 文件名或日志根 时才配。用法：复制为 config.json（已 gitignore，同事各自维护），脚本查找顺序 config.json -> config.example.json。projects 下每个 key 是缺陷库前缀（LIB，须大写字母，用于 LIB-NUM 如 DEMO-26 的解析），值含 pid（项目 id，从 TB URL 取）、label（项目名，人读+按名匹配）、url（TB 项目地址，可选溯源；pid 从 /project/<pid>/ 抽）。所有路径用 ~ 表达保可移植。",
+  "domain": "tb.example.com",
+  "cookie_file": ".tb_cookie",
+  "chrome_profile": "Profile 1",
+  "chrome_base": "~/.config/google-chrome",
+  "log_root": "~/work/log",
+  "projects": {
+    "DEMO": {
+      "pid": "<项目ID，从TB项目URL取>",
+      "label": "<项目名称，如 XXX项目测试缺陷管理库>",
+      "url": "https://tb.example.com/project/<项目ID>"
+    }
+  }
+}

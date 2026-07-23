@@ -17,6 +17,7 @@ ICode is a Claude Code Skill that breaks down the journey from requirement to de
 - **Anti-laziness hardening**: Steps 5/6 enforce a Read confirmation line + file:line evidence + a self-check checklist; Step 2 adversarial enforces Agent ID
 - **Two optional entries**: `/icode log` log root-cause analysis (baseline check first, then adversarial analysis; domain-agnostic) → fix requirement; `/icode init` multi-turn requirement draft → `00_init.md`
 - **Outputs & state management**: unified under `.icode_output/.icode_output_N/`, `.ico_metadata.json` tracks status/code files, supports cross-session recovery and resumable runs
+- **Optional Teambition defect source**: when `/icode log` scattered input contains a Teambition project URL or a `<LIB>-<NUM>`, it can optionally pull the defect's title/description/comments/log attachments as analysis input (multi-project text config; pull & analyze only, never writes back to TB; falls back to the local-log path when no TB reference)
 
 ## Installation
 
@@ -60,6 +61,18 @@ git clone <repo-url> ~/.claude/skills/icode
 # ... after adversarial analysis converges; if you doubt it, keep talking to re-run the disputed branch ...
 /icode start                                          # No args → detects log_done entry state, asks "reuse/new"; reuse takes 00_init.md (fix requirement) as input → steps 1–6
 ```
+
+## Optional: pull a Teambition defect's logs for analysis
+
+When `/icode log` scattered input contains a Teambition project URL (a `/project/<pid>/` path) or a `<LIB>-<NUM>` (e.g. `DEMO-26`), it can optionally auto-pull the defect's title/description/comments/log attachments into `{ICODE_OUT_DIR}/tb_source/` as input for log root-cause analysis.
+
+```bash
+/icode log analyze https://tb.example.com/project/<pid> defect DEMO-26
+# Config (optional): URL+ticket usage works without config (AI extracts domain+pid from URL, passes --domain --pid); build config.json only for multi-project shortcuts; cookie via ~/.claude/skills/icode/tools/tb/scripts/tb_cookie.py --domain <your-TB-domain>
+# Pull & analyze only, never writes back to TB; without a TB reference, log stays on the local-log path, unchanged
+```
+
+See `~/.claude/skills/icode/tools/tb/README.md` for multi-project text config and cookie setup.
 
 ## Commands
 

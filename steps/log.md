@@ -17,15 +17,22 @@
 
 | 要素 | 说明 | 缺失时自主推断 |
 |------|------|------------|
-| **日志目录** | 含节点日志的目录 | 用户零散输入给的路径；或扫 `~/work/log/`、`/var/log/`、工程内 `log/` 等常见位置；或从症状关键词找匹配目录 |
-| **问题描述** | 一句话症状 | 目录名；目录内 README/最近的 `.md` 报告；用户零散语句提炼 |
+| **日志目录** | 含节点日志的目录 | 用户零散输入给的路径；或扫 `~/work/log/`、`/var/log/`、工程内 `log/` 等常见位置；或从症状关键词找匹配目录；**或由 TB 缺陷源拉取产生**（见下行） |
+| **问题描述** | 一句话症状 | 目录名；目录内 README/最近的 `.md` 报告；用户零散语句提炼；**TB 拉取时取缺陷标题+note** |
 | **问题时间点** | 症状发生时刻 | 日志文件 mtime；日志内容里最后一次重启/异常时间；多个候选全部分析 |
+| **TB 缺陷源（可选）** | 零散输入含 `tb.example.com/.../project/<pid>/...` URL 或 `<LIB>-<NUM>`（如 `DEMO-26`）时触发 | 见下方「TB 缺陷源拉取」段；**无 TB 引用时不触发，走纯本地日志路径，行为与改前一致** |
 
 **自主性原则**：三要素尽量自己凑齐、自己推断、自己在报告里标注推断来源。**结论出来前的分析阶段不打断用户**。只有输入严重不足（既无路径又无任何症状线索）且无法推断时，才在输入收敛期一次性集中问。
 
 ## 执行步骤
 
-1. **执行目录管理中的「创建新目录」逻辑**（强制新建，不做复用判定），确定 `ICODE_OUT_DIR`
+1. **确定 ICODE_OUT_DIR**（同 TB 单优先复用，否则强制新建）：
+   - **同 TB 单复用检测（仅当零散输入含 TB 引用时）**：解析 `lib+num+pid+domain`（domain 取 https://<域名>/，pid 取 /project/<pid>/ 那段；供 tb_pull --domain --pid）-> Read `~/.claude/icode_data/index.json`，扫各 ticket 的 `tb_source` 字段，匹配同 `lib+num+pid` 的旧工单
+     - **匹配到旧工单**：比对旧工单的 `project_path` 与当前工程根（cwd）
+       - **同工程**（`project_path` == 当前工程）：询问用户"检测到 TB 单 `<ID>` 的旧工单 `.icode_output_M`（上次根因：`<摘要>`），TB 上可能有新评论/附件。① 复用旧目录继续(重拉最新数据+增量对抗) / ② 新建独立分析"；选① -> ICODE_OUT_DIR = 旧目录（`{project_path}/{out_dir}`），走下方「同 TB 单复用流程」；选② -> 强制新建
+       - **跨工程副本**（`project_path` != 当前工程）：提示"检测到 TB 单 `<ID>` 的旧工单在**另一工程副本** `{project_path}`（上次根因：`<摘要>`），当前工程是 `{cwd}`，两份源码拷贝后可能已分叉。① 跨工程复用旧目录续旧分析(⚠️风险：源码可能对不上、旧根因可能失效) / ② 当前工程新建独立分析(读旧工单 `log_analysis.md` 根因/证据作参考，须用当前源码验证) / ③ 去 `{project_path}` 目录继续"；选① -> 走「同 TB 单复用流程」(ICODE_OUT_DIR 用旧工程目录，⚠️标注跨工程源码分叉风险)；选② -> 强制新建 + 读旧工单 `log_analysis.md` 根因结论+决定性证据作参考注入会话(标注跨工程、源码可能分叉、须当前源码验证)；选③ -> 提示用户切到 `{project_path}` 再跑 `/icode log`，本次中止
+     - **无匹配 / 无 TB 引用**：走下方「创建新目录」（强制新建），行为与改前 100% 一致
+   - **创建新目录**（强制新建，不做其他复用判定）：执行目录管理中的「创建新目录」逻辑，确定 `ICODE_OUT_DIR`
 2. **历史检索复用**（强制思考之前，全局索引存在时必须执行，详见 SKILL.md「历史检索复用」段）：
    - Read `~/.claude/icode_data/index.json`（不存在则跳过检索）
    - **两段式检索**：段一从本次症状/关键词提炼关键词集，与各 ticket `keywords` 做 Jaccard 粗筛取 ≤10 候选（零 token，可复活预扫后排除剩余 stale）；段二只把候选 `keywords + requirement_points` 喂主代理精读打分选 top-N 命中（N 由梯度决定，明确无关则 0 条）。`/icode log` 每次强制新建目录，本次工单尚未入索引，故无需排除当前 ticket_id
@@ -40,6 +47,7 @@
    - 零命中不注入，不强凑参考
 3. **阶段0 输入要素收敛**（最多1-2轮，不拖成长讨论）：
    - 解析用户零散输入，提取已有信息
+   - **TB 缺陷源拉取（可选）**：零散输入含 TB 项目 URL（`tb.example.com/.../project/<pid>/...`）或 `<LIB>-<NUM>`（如 `DEMO-26`）时，按下方「TB 缺陷源拉取」段拉取缺陷单的日志/评论/附件作为分析输入；**无 TB 引用时跳过，走纯本地日志路径，行为与改前 100% 一致**
    - **能推断的推断**（日志目录/时间点/症状按上表推断），推断的标注"推断"
    - **推断不了的才问**，且一次性集中问（不挤牙膏）
    - 收敛出三要素，写入 `log_analysis.md` 的「输入要素」章节
@@ -108,17 +116,51 @@
      "requirement_points": ["修复要点1", "修复要点2"],
      "keywords": "{≤8个技术关键词}",
      "indexed": false,
-     "ticket_id": "{写入索引后回填}"
+     "ticket_id": "{写入索引后回填}",
+     "tb_source": null
    }
    ```
+
+   > `tb_source`（可选）：从 TB 拉取时填 `{lib,num,pid,label,url,meta_path}`（metadata 完整版，含本地路径），纯本地日志分析时为 `null`。**写入全局索引时只存摘要 `{lib,num,pid,label}`**（供同 TB 单检索复用，不含 url/meta_path）。
 
 10. **写入全局索引**（步骤9之后）：Read `~/.claude/icode_data/index.json`（不存在则创建），追加一条记录：
     - `ticket_id` = `{工程名}-{N}`（冲突时加 `project_path` 短 hash 后缀，规则同 init）
     - `project_path` = 当前工程根绝对路径；`out_dir` = `.icode_output/.icode_output_{N}`
     - `requirement_summary` / `requirement_points` / `keywords` 取自步骤9 metadata
     - `has_00_init` = true（log 已产出 `00_init.md`），`has_plan` = false，`status` = `log_done`，`created_at` = 当前时间，`last_used_at` = 当前时间（首次写入=created_at），`hit_count` = 0，`stale` = false，`stale_reason` = null，`stale_checked_commit` = null，`created_commit` = `git rev-parse HEAD`（只读，非 git 仓库为 null），`created_branch` = `git rev-parse --abbrev-ref HEAD`
+    - `tb_source` = 步骤9 metadata 的 `tb_source`（无 TB 源时 null）
     - 写回 index.json，置 metadata `indexed = true`、`ticket_id`；**写后执行唯一性验证**（见 [references/dir_and_metadata.md](../references/dir_and_metadata.md)「全局索引写入·写后唯一性验证」）
 11. 提示用户：根因已定，可敲 `/icode plan` 或 `/icode start`（无参）复用本目录的 `00_init.md` 进入修复流程；若对根因有异议，继续对话即可重跑对抗分析
+
+## TB 缺陷源拉取（可选前置，仅当零散输入含 TB 引用）
+
+**触发条件**：零散输入里出现 `tb.example.com/.../project/<pid>/...` 这类 TB 项目 URL，或 `<LIB>-<NUM>` 形式（如 `DEMO-26`）。**无 TB 引用时本段整段跳过，log 步骤走纯本地日志路径，行为与改前 100% 一致**（纯本地日志分析，不调任何脚本/网络）。
+
+**目标 UX**：`/icode log 分析 https://tb.example.com/project/<pid> DEMO-26 问题` -> AI 解析 -> 拉取 -> 进既有对抗根因分析流程 -> 出报告，**全程不回写 TB**。
+
+执行（在阶段0 内，目录已建之后、强制思考之前）：
+
+1. **解析三要素**：从零散输入抽 `<LIB>-<NUM>`（缺陷编号）、URL 里的 `pid`（项目 id）、项目名/label。项目解析优先级 `URL pid > config label 匹配 > config lib 前缀`
+2. **调 tb_pull**：`python3 ~/.claude/skills/icode/tools/tb/scripts/tb_pull.py --domain <域名> --pid <pid> defect <LIB>-<NUM> --out {ICODE_OUT_DIR}/tb_source`。**domain+pid 从 URL 抽**（pid 取 /project/<pid>/ 那段；支持不配 config；`--pid` 权威，支持未在 config 登记的项目）
+3. **落盘与三要素绑定**：附件 + `<ID>_meta.json` 落到 `{ICODE_OUT_DIR}/tb_source/<ID>/`；置 日志目录=`{ICODE_OUT_DIR}/tb_source/<ID>/`、问题描述=缺陷 title+note、时间点=从拉取日志内容推断
+4. **鉴权失败（401）**：提示用户跑 `python3 ~/.claude/skills/icode/tools/tb/scripts/tb_cookie.py`（或手动把浏览器 cookie 粘进 `~/.claude/skills/icode/tools/tb/scripts/.tb_cookie`），**不阻塞**--若用户只想本地分析可放弃 TB 源、退回纯本地日志路径继续
+5. **溯源**：把 TB 源信息（`lib`/`num`/`pid`/`label`/`url`/`meta_path`）记入步骤9 metadata 的 `tb_source` 字段；在 `keywords` 里带上缺陷编号（如 `DEMO-26`），便于后续历史检索按缺陷号命中相似工单
+
+> 拉取产物（`{ICODE_OUT_DIR}/tb_source/<ID>/` 下的日志附件 + `<ID>_meta.json` 里的真实评论/描述）即作为阶段2「日志侦察 + 现场还原」的输入，走既有对抗根因分析流程，与本步骤下游各阶段无缝衔接。`<ID>_meta.json` 的 `comments`/`note` 可作为症状补充证据（评论里常含复现步骤/现象描述）。
+
+## 同 TB 单复用流程（步骤1 检测到旧工单且用户选复用时）
+
+当步骤1 检测到同 `lib+num+pid` 的旧工单、且用户选择"复用旧目录继续"时：
+
+1. **复用旧目录**：`ICODE_OUT_DIR` = 旧工单目录（如 `.icode_output/.icode_output_3`），不新建；读其 `.ico_metadata.json` 的 `ticket_id`，**步骤2 历史检索须排除此旧 ticket_id 防自参考**（与新建场景步骤2「本次工单尚未入索引故无需排除」不同）
+2. **切回分析态**：metadata `status` 从 `log_done` 切回 `log_in_progress`；`completed_steps` 仍含 `"log"`
+3. **重拉最新数据**：调 `python3 ~/.claude/skills/icode/tools/tb/scripts/tb_pull.py --domain <域名> --pid <pid> defect <LIB>-<NUM> --out {ICODE_OUT_DIR}/tb_source`。tb_pull 自动把旧 `<ID>_meta.json` 备份为 `<ID>_meta.prev.json`（不丢旧数据），再写最新全量 meta
+4. **识别新增**：读 `<ID>_meta.prev.json`（旧）与 `<ID>_meta.json`（新）对比，找出**新评论**（旧 comments 没有的）和**新附件**（旧 files 没有的、或同名新拉取的 `_1` 后缀文件）
+5. **增量对抗**：读旧 `log_analysis.md` 的「核心结论 + 对抗分析记录」-> 把新增评论/附件作**新证据** -> 重跑对抗（复用 icode 步骤2 对抗模式）。新证据可能：① 确认旧根因（追加佐证）/ ② 补充旧根因遗漏环节 / ③ **推翻旧根因**（标注「本次增量推翻旧结论」+推翻理由+新结论，旧结论不删但标已推翻）
+6. **追加增量段**：在 `log_analysis.md` 追加「## 增量分析（<日期>，TB 单更新）」段：新增评论/附件清单 + 新对抗结论（确认/补充/推翻）+ 最终根因
+7. **收尾**：metadata `status` 切回 `log_done`，更新 `tb_source.meta_path`（指向新 meta）；若根因变化刷新 `requirement_summary`/`keywords`；index 记录续期 `last_used_at`+`hit_count`，同步刷新 `requirement_summary`/`keywords`
+
+> 无新增评论/附件（prev 与 current 一致）时，提示"TB 单无新数据，旧根因仍成立"，不重跑对抗、保留旧结论。
 
 ## 追问机制（与 init 的差异）
 
@@ -140,6 +182,7 @@
 - **禁止伪造根因共识**——证据不足时必须降级"未定论"，不得凑根因
 - **每条根因结论必须能回指日志片段**——做不到回指的只进「待验证假设」
 - **禁止照抄历史工单根因**——历史参考只作启发，当前症状与历史必有差异
+- **禁止向 TB 发任何写操作**（TB 缺陷源仅 GET 拉取）——严禁 POST 评论、回写结论、上传附件到 TB；分析结论只落本地 `log_analysis.md` + `00_init.md` 供人工审。`~/.claude/skills/icode/tools/tb/scripts/tb_pull.py` 本身只读无 POST，**AI 也不得自行用 Bash/requests 等任何工具向 TB 发写请求**（GET 拉取除外），违反视为越界操作
 
 ## 与步骤1的衔接
 
