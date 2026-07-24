@@ -176,10 +176,10 @@ def unique_path(dest):
 
 
 def collect_files(activities):
-    """从 activities 抽取所有附件文件。兼容 content.files[] 与 content.attachments[] 两种字段（不同 TB 版本/评论类型字段名不一），都抽。"""
+    """从评论类 activity 抽取所有附件。兼容 action=activity.comment / activity.comment.attachments（两者 content 都可能含 files[]/attachments[]），content.files[]（name/url/ext/size）与 content.attachments[]（fileName/downloadUrl/fileSize/fileType，含图片 imageHeight/imageWidth）两种字段都抽。"""
     files = []
     for a in activities:
-        if a.get("action") != "activity.comment.attachments":
+        if not (a.get("action") or "").startswith("activity.comment"):
             continue
         content = a.get("content") or {}
         for key in ("files", "attachments"):
@@ -199,7 +199,7 @@ def cmd_defect(args):
     print(f"=== {label}：{task.get('content', '')} ===")
 
     activities = fetch_activities(s, cfg, tid)
-    comments = [a for a in activities if a.get("action") == "activity.comment.attachments"]
+    comments = [a for a in activities if (a.get("action") or "").startswith("activity.comment")]
     files = collect_files(activities)
 
     out_root = args.out or cfg.get("log_root", "~/work/log")
