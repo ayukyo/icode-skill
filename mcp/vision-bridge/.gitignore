@@ -1,0 +1,16 @@
+# 用户实际配置（不入仓）
+config.json
+
+# Python venv / 缓存
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+
+# 环境文件
+.env
+.env.local
+
+# 运行时缓存
+.cache/

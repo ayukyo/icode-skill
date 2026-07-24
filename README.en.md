@@ -18,6 +18,7 @@ ICode is a Claude Code Skill that breaks down the journey from requirement to de
 - **Two optional entries**: `/icode log` log root-cause analysis (baseline check first, then adversarial analysis; domain-agnostic) → fix requirement; `/icode init` multi-turn requirement draft → `00_init.md`
 - **Outputs & state management**: unified under `.icode_output/.icode_output_N/`, `.ico_metadata.json` tracks status/code files, supports cross-session recovery and resumable runs
 - **Optional Teambition defect source**: when `/icode log` scattered input contains a Teambition project URL or a `<LIB>-<NUM>`, it can optionally pull the defect's title/description/comments/log attachments as analysis input (multi-project text config; pull & analyze only, never writes back to TB; falls back to the local-log path when no TB reference)
+- **Optional visual understanding** (`mcp/vision-bridge`): install-or-skip image/video understanding MCP — **platform-agnostic**, any OpenAI Chat Completions-compatible endpoint works (OpenAI / Claude / Gemini / Chinese vendors / self-hosted / OpenRouter, all supported). When installed, the SKILL workflow routes all image/video handling through `mcp__vision-bridge__analyze_media`; when not installed, session models fall back to their native capabilities and the user bears responsibility for outcomes. See [mcp/vision-bridge/README.md](mcp/vision-bridge/README.md) and the `Optional Enhancement` section of [SKILL.md](SKILL.md)
 
 ## Installation
 
@@ -26,6 +27,29 @@ Clone this repository into your Claude Code skills directory:
 ```bash
 git clone <repo-url> ~/.claude/skills/icode
 ```
+
+## Optional Enhancement: Image/Video Understanding
+
+Visual understanding is optional — **not installing doesn't affect the main workflow**. When installed, all image/video handling flows through `mcp__vision-bridge__analyze_media`, keeping raw media out of session models.
+
+### Install vision-bridge
+
+```bash
+cd ~/.claude/skills/icode/mcp/vision-bridge
+./install.sh                          # auto: venv + install deps + register to ~/.claude.json
+# edit the generated config.json with your base_url / api_key / model
+# restart Claude Code to take effect
+```
+
+### Platform-agnostic
+
+Any OpenAI Chat Completions-compatible endpoint works — fill in your platform's base_url and model, **no recommended defaults**.
+
+### What if unconfigured?
+
+If vision-bridge is installed but `config.json` doesn't have the three required fields (`base_url` / `api_key` / `model`), the `analyze_media` tool returns a fallback hint string and the session model processes the original image via its native multimodal capability — **behaves the same as when vision-bridge isn't installed**. No error, no blocking.
+
+See [mcp/vision-bridge/README.md](mcp/vision-bridge/README.md).
 
 ## Quick Start
 
@@ -140,6 +164,7 @@ cd demo && make && ./calc_demo   # confirm the baseline builds and runs
 ```
 
 Example test requirements:
+
 - **Mode A**: `cd demo && /icode start add modulo and power operations to the calculator, plus integer overflow checks`
 - **Mode B (step-by-step)**: `cd demo && /icode plan add isqrt to calc.c` then `/icode review` `/icode merge` `/icode code` `/icode deepcheck` `/icode audit`
 - **Mode C (init then start)**: `cd demo && /icode init add new feature to calculator` (multi-turn dialogue to clarify) → `/icode start`

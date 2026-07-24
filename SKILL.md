@@ -399,6 +399,17 @@ ICODE_OUT_DIR=".icode_output/.icode_output_${LAST}"
 - **跨会话恢复**：运行 `ls -d .icode_output/.icode_output_*` 确认目录后，直接调用对应步骤即可
 - **中断恢复**：重新执行某步骤可覆盖该步骤输出
 
+## 可选增强：图片/视频理解
+
+视觉理解是可选增强，**统一走 `mcp__vision-bridge__analyze_media` 工具**。
+
+- **装好 vision-bridge 后**：禁止把图片/视频作为附件直接传给 session 模型，必须通过该 MCP 工具
+- **装好但 config.json 缺必填字段（base_url/api_key/model）**：`analyze_media` 工具返回 fallback 提示字符串，session 模型按默认会话模型原生能力处理原图——**等同于未装 vision-bridge 的行为**，不报错、不阻塞
+- **未装 vision-bridge 时**：不做约定——session 模型按其原生多模态能力处理，是否能用、错误由用户自负
+- **vision-bridge 不绑任何平台**：任何 OpenAI Chat Completions 兼容端点都能用，**不推荐任何 provider 或模型名**——用户自己填 `base_url` / `api_key` / `model`
+- 安装：`cd ~/.claude/skills/icode/mcp/vision-bridge && ./install.sh`，三件套在生成的 `config.json` 里配（不入 `~/.claude.json`，不污染环境）
+- 详见 [mcp/vision-bridge/README.md](mcp/vision-bridge/README.md)
+
 ## 各步骤详细规则
 
 各步骤的详细 prompt、维度要求、执行流程请读取对应文件：

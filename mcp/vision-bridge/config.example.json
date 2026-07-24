@@ -1,0 +1,23 @@
+{
+  "_doc_1": "vision-bridge 不推荐任何 provider。填你平台的真实值即可。",
+  "_doc_2": "可选 provider: openai_compat | local_ocr。",
+  "_doc_3": "openai_compat: 任意 OpenAI Chat Completions 兼容端点, 必需下面 base_url/api_key/model 三件套。",
+  "_doc_4": "local_ocr: 本地 Tesseract OCR, 零 KEY, 仅图片文字提取, 不需要下面三件套 (但要装 tesseract)。",
+
+  "provider": "openai_compat",
+
+  "_base_url_doc": "你的 API 端点, 不带尾 /。比如 https://api.openai.com/v1 或 https://your-self-hosted/v1",
+  "base_url": "",
+
+  "_api_key_doc": "你的 API KEY。在你平台的开发者后台申请。",
+  "api_key": "",
+
+  "_model_doc": "你平台提供的视觉模型名 (从你平台文档『支持图片/视频理解的模型』列表里挑)。",
+  "model": "",
+
+  "_timeout_doc": "可选: HTTP 超时秒, 默认 120",
+  "timeout": 120,
+
+  "_video_frames_doc": "可选: 视频抽帧数, 默认 8。需 ffmpeg/ffprobe。",
+  "video_frames": 8
+}
