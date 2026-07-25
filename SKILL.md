@@ -37,7 +37,7 @@ description: 端到端编码工作流（步骤 0~6，含可选需求初稿步骤
 > - **不得在 log 阶段把 status 切换为 plan_done**——只有 start/plan 显式复用时才切换
 | `/icode review [N]` | **仅步骤2**：多轮循环审查 + 独立质疑者对抗验证（N=软上限轮数，默认3；如最后一轮仍有新问题自动延长 +2 轮，最多扩展至 `max(10, N×2)`）。`mode=="fast"` 时强制 1 轮无对抗 | 用最新目录 |
 | `/icode merge` | **仅步骤3**：合并审查意见定稿 | 用最新目录 |
-| `/icode code` | **仅步骤4**：落地编码实施 | 用最新目录 |
+| `/icode code` | **仅步骤4**：落地编码实施（含**末尾 1.5 子段"Code Review Fix" 4 维度复检**——核对实施是否与计划设计的 4 维度一致。复检失败轻/重度分流回代码修复或重设计，不强制阻断；详见 [steps/04_code.md](steps/04_code.md)） | 用最新目录 |
 | `/icode deepcheck` | **仅步骤5**：三阶段递进复检（Reverse → Fixed → Free）。`mode=="fast"` 时只跑 Reverse 阶段 | 用最新目录 |
 | `/icode audit` | **仅步骤6**：终极终审 + 统一修复（产出 `{ICODE_OUT_DIR}/06_audit.md`） | 用最新目录 |
 | `/icode readme` | **可选步骤7**：生成交付报告（面向人的自包含总结，动态文件名，智能识别功能/查BUG模板）。步骤6完成后手动触发 | 用最新目录 |
@@ -239,6 +239,7 @@ ICODE_OUT_DIR=".icode_output/.icode_output_${LAST}"
 - `indexed`：是否已写入全局索引（防重复写入）
 - `ticket_id`：本工单在全局索引中的唯一键（`{工程名}-{N}`，冲突时带 hash 后缀）。步骤0写索引时持久化到 metadata；**跳过步骤0直接 `/icode plan`/`/icode start` 的常规新建目录情况**，在步骤1首次写索引时生成并回填 metadata。供后续步骤检索时排除当前工单
 - `code_deviations`：步骤4 编码时主动偏离定稿计划的记录数组（每条含 `plan_said`/`actual_done`/`reason`），供步骤6 终审汇总回写到 `03_plan_final.md` 的「实现偏差备忘」段；无偏离写空数组 `[]`
+- `code_review_fix_with_issues`（新增，可选，默认 `false`）：步骤4末尾 1.5「Code Review Fix」4 维度复检未通过标记（同事提示词 4 维度闭环在 04_code 末尾的工程化复检）。`true` 时步骤5/6 入口输出警告，audit 终审会看到此标记——**不阻断流程**，仅作可见性提示，让后续 reviewer/历史检索知道本工单 4 维度复检未通过。**字段缺失视为 `false`（向后兼容旧 metadata）**
 - `mode`（新增，可选，默认 `"full"`）：工单模式。`"full"` = `/icode start` 全流程（步骤2 默认 3 轮 + 对抗，步骤5 三阶段循环）；`"fast"` = `/icode fast` 精简全流程（步骤2 固定 1 轮无对抗，步骤5 只跑 Reverse）。**字段缺失视为 `"full"`（向后兼容旧 metadata）**。详见 [steps/fast.md](steps/fast.md)
 - `max_rounds`（新增，可选，默认 3）：步骤2 review 软上限轮数。`mode="full"` 时由 `/icode review N` 参数决定（默认 3）；`mode="fast"` 时**自动串联下强制为 1**，但**单步命令（`/icode review N`）在 fast 工单上调用时 N 优先级最高**——用户用参数 N 显式表达 fast→full 升级意图时，按 N 轮跑（详见 [references/dir_and_metadata.md](references/dir_and_metadata.md)「步骤2/5 读 mode 字段的契约」段）。**字段缺失视为 3**
 
@@ -263,7 +264,7 @@ ICODE_OUT_DIR=".icode_output/.icode_output_${LAST}"
 | 1 | `plan_done` | 步骤1计划完成 |
 | 2 | `review_in_progress` → `review_done` | 步骤2审查中 → 完成 |
 | 3 | `plan_finalized` | 步骤3定稿完成 |
-| 4 | `code_in_progress` → `code_done` | 步骤4编码中 → 完成 |
+| 4 | `code_in_progress` → `code_done` | 步骤4编码中 → 完成（含末尾 1.5 "Code Review Fix" 4 维度复检；`code_review_fix_with_issues=true` 时审计可见，不阻断流程） |
 | 5 | `deepcheck_in_progress` → `deepcheck_done` | 步骤5复检中 → 完成 |
 | 6 | `completed` | 步骤6终审完成（终态） |
 

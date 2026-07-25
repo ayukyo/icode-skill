@@ -82,9 +82,28 @@
 1. **编译验证**：运行项目对应的编译命令（最多尝试 3 次），确保所有文件无错误、无警告
    - **3 次仍失败**：输出 `⚠️ 编译失败兜底` 警告，设 `code_in_progress` + `code_compile_failed = true`。代码文件仍写入磁盘，`code_files` 仍记录
    - 步骤 5 入口检测到 `code_compile_failed` 时输出警告，但仍继续
+   - **Code Review Fix（4 维度复检，1 的强制子段）**：编译通过后**必须执行**（**所有工单都触发**，不论 init/log 入口）。**作用**：核对实施是否与计划设计的 4 维度一致——同事提示词"修 bug 后做代码 review 修复，确保没有逻辑 bug 和副作用，确保没有竞态死锁问题，确保解决了日志反映的问题"的工程化复检机制
+     - **强制思考前置**（不可跳过）：本步骤子项（至少3步）= 读计划设计的 4 维度基线 → 列实施对照点 → 预判复检偏差
+     - **对照基线读取**（**任一缺失则视为设计遗漏**，须先回到 `/icode plan` 补设计）：
+       - log 工单：必须 Read `03_plan_final.md`「4.5 修复方案设计 + 4 维度设计态固化」段（log 工单必填）+ `log_analysis.md` §7 + `00_init.md` §5
+       - init 工单：必须 Read `03_plan_final.md`「4.5 修复方案设计 + 4 维度设计态固化」段（init 工单必填）+ `00_init.md` §7
+     - **4 维度复检清单**（每维度独立勾对，每条须给 file:line 证据）：
+       - **维度 1 根因闭环（log 工单）**：H/P/V 三件套是否落实 → Read 实读 P 修复点代码核对实际实现是否与设计一致 → V 是否可观测（日志/返回值/状态变化）→ 反向验证（H 错则 P 是否仍有效）
+       - **维度 2 逻辑+扩大修改**：实施 vs 计划设计的逻辑 5 类（边界/状态/异常/时序/数值）覆盖度 → git diff 最小侵入核对（每行变更回指根因/需求点）→ 优雅度6条（复用/风格/调用链/最小侵入/接口克制/调用路径）→ 三链预扫（如有新增符号）
+       - **维度 3 竞态死锁**：实施 vs 计划设计的 10 条清单覆盖度（不涉及的标 N/A）→ 锁/原子/内存序/超时是否按设计落实 → 是否引入新竞态死锁风险
+       - **维度 4 日志反映**：V 可观测性是否落实（关键路径日志是否写到位）→ 根因-日志-修复对齐 → 日志级别/风格一致 → 无敏感信息泄露
+     - **复检产出**：写入 `{ICODE_OUT_DIR}/04_code_review_fix.md`（4 维度勾对表 + 未通过维度清单）
+     - **复检失败处理**（**轻/重度分流**，不强制阻断）：
+       - **轻度失败**（设计与实施不一致，但设计本身正确）：标 `code_review_fix_with_issues=true` + 未通过清单 → 提示用户"实施偏离计划设计，回到代码修复 → 重跑本子段"
+       - **重度失败**（设计本身有问题，如维度 3 漏锁/维度 1 H/P 链断）：同上但额外提示"建议回到 `/icode plan` 重新设计——4 维度设计态本身有缺陷"
+       - 任一失败 → `status` 保持 `code_in_progress`，`completed_steps` **不**追加 `"4"`
+     - **复检通过**：`code_review_fix_with_issues=false` + `status = code_done` + `completed_steps` 追加 `"4"`
 2. **更新元信息**：
    - 将 `code_files` 更新为所有新增/修改的**相对项目根目录**的路径列表
-   - 编译通过：`status = code_done`，`completed_steps` 追加 `"4"`
-   - 编译失败：`status = code_in_progress`，`code_compile_failed = true`，**不**追加 `completed_steps`
+   - **状态流转**（按 1.5 复检结果判定）：
+     - 1.5 复检通过 → `status = code_done`，`completed_steps` 追加 `"4"`（**`code_review_fix_with_issues = false`**）
+     - 1.5 复检失败（轻/重度） → `status` 保持 `code_in_progress`，`completed_steps` **不**追加 `"4"`（**`code_review_fix_with_issues = true`**）
+     - 编译失败（1.5 未执行） → `status = code_in_progress`，`code_compile_failed = true`，`completed_steps` **不**追加 `"4"`
    - **写入 `code_deviations`**：若有主动偏离（见硬性要求第8条），将偏离记录数组写入 metadata `code_deviations`（每条含 plan_said / actual_done / reason），供步骤6 汇总；无偏离则写空数组 `[]`
-3. 全流程模式：编译通过则**立即继续执行步骤5**；编译失败则中止，提示用户修复
+   - **写入 `code_review_fix_with_issues`**（v1.x 新增，可选，默认 `false`）：4 维度复检未通过标记。`true` 时步骤 5/6 入口输出警告，audit 终审会看到此标记（**不阻断流程**，仅作可见性提示）
+3. 全流程模式：编译通过 + 1.5 复检通过则**立即继续执行步骤5**；编译失败或 1.5 复检失败则中止，提示用户修复

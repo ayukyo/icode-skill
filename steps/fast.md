@@ -103,7 +103,7 @@ fi
 | 1 | 步骤1 plan | `steps/01_plan.md` | `01_plan.md` | → `plan_done` |
 | 2 | 步骤2 review | `steps/02_review.md` | `02_review.md` | → `review_done` |
 | 3 | 步骤3 merge | `steps/03_merge.md` | `03_plan_final.md` | → `plan_finalized` |
-| 4 | 步骤4 code | `steps/04_code.md` | 代码文件 | → `code_done` |
+| 4 | 步骤4 code（含末尾 1.5 "Code Review Fix" 4 维度复检） | `steps/04_code.md` | 代码文件 + `04_code_review_fix.md` | → `code_done` |
 | 5 | 步骤5 deepcheck | `steps/05_deepcheck.md` | `05_deepcheck.md` | → `deepcheck_done` |
 | 6 | 步骤6 audit | `steps/06_audit.md` | `06_audit.md` | → `completed` |
 
@@ -113,10 +113,13 @@ fi
   - **场景一·自动串联**（`/icode fast` 调起、未带参 N，`FAST_LOCKED=true`）：`max_rounds` 强制 1、跳过步骤 2.5.5 对抗（issue 直接标 `confirmed`，**降级为单视角审查**）、循环控制 `total_rounds >= 1` 直接终止。输出 `▶ 步骤2 fast 模式：1 轮审查，无对抗验证`
   - **场景二·单步升级**（fast 工单上显式跑 `/icode review N`，`FAST_LOCKED=false`）：**N 优先级最高**——按 N 轮跑 + 恢复对抗验证 + 走正常 (a)(b)(c) 循环控制，与 full 模式一致（这是 fast→full 升级机制，用户显式表达升级意图）
 
+- **步骤4 code（含末尾 1.5 "Code Review Fix"）**：fast 模式下也执行 1.5 复检（**4 维度对所有工单都触发**，不分模式）——同事提示词的工程化复检机制不因 fast 而省略。差异：fast 模式下复检节奏紧凑，但仍产出 `04_code_review_fix.md` 并落盘 `code_review_fix_with_issues` 字段。详见 [steps/04_code.md](04_code.md)「1.5 子段」
+
 - **步骤5 deepcheck**：检测到 `mode=="fast"` 时
   - 跑完 Reverse 阶段后**直接终止**（不切换到 Fixed / Free）
   - 跳过 Free 阶段 A6 独立 3 质疑者 spawn（不适用）
   - 输出标记：`▶ 步骤5 fast 模式：仅 Reverse 阶段`
+  - **读取 `04_code_review_fix.md`**（若存在）作为补充参考：若 `code_review_fix_with_issues=true`，deepcheck 入口输出警告⚠️，Reverse 阶段重点关注 4 维度未通过项
 
 ## 中断续跑
 

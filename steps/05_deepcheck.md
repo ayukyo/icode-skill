@@ -16,6 +16,20 @@
 
 检查 `{ICODE_OUT_DIR}/03_plan_final.md` 和步骤4创建的代码文件是否存在，缺失则报错并提示先执行 `/icode code`。
 
+## 前置：Code Review Fix 复检产物读取（**软依赖，不阻塞**）
+
+**目的**：读取步骤4末尾 1.5 复检产物 `04_code_review_fix.md`（若存在），让 deepcheck 知道哪些 4 维度未通过项需要重点复检。
+
+1. Read `{ICODE_OUT_DIR}/04_code_review_fix.md`（不存在则跳过本段——可能是旧工单无 1.5 子段，或 fast/full 流程跳过了）
+2. 读 `.ico_metadata.json.code_review_fix_with_issues` 字段（缺失视为 `false`）
+3. **若 `code_review_fix_with_issues=true`**：
+   - 入口输出警告 `⚠️ 步骤4 Code Review Fix 复检未通过：{从 04_code_review_fix.md 摘录未通过维度清单}`
+   - Reverse/Fixed/Free 三阶段重点关注未通过维度（如 4 维度竞态死锁未通过 → A7 并发与重入安全加重权重）
+   - deepcheck 报告中标注"步骤4 Code Review Fix 未通过 → 本步骤重点复核"
+4. **若 `code_review_fix_with_issues=false` 或字段缺失**：
+   - 正常进入三阶段复检，不做特殊处理
+5. **绝不阻断**：本段失败（旧文件/字段缺失）→ 静默跳过，记 `[跳过-Code Review Fix 读取]`，主流程继续
+
 ## 前置：schema 迁移（自动/幂等/原子）
 
 > 自动识别 + 自动迁移：用户无需任何操作，进入步骤 5 时若检测到 `.ico_metadata.json.template_version` 缺失或旧于当前版本，**自动**在已存在的 `05_deepcheck.md` 末尾追加 blast-radius 三链基线段、补写 metadata、原子落盘；幂等（已含迁移段则跳过），失败兜底静默（不阻塞主流程）。
