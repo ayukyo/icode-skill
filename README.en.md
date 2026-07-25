@@ -116,6 +116,7 @@ See `~/.claude/skills/icode/tools/tb/README.md` for multi-project text config an
 | `/icode readme` | Optional Step 7: generate delivery report (self-contained summary, dynamic filename, smart feature/bugfix template) | No |
 | `/icode doc [natural language]` | Project-level knowledge base (standalone step): scans code features to generate global knowledge-base chapters; auto-retrieved/injected by init/log/plan/start/fast phase-zero. No ticket dir, not part of steps 1–6 | No (writes global `project_docs/`) |
 | `/icode status` | Read-only: query current ticket status (no dir/file created) | No |
+| `/icode list [keywords]` | Cross-project ticket search: tabulated view of all indexed tickets, supports `--project` / `--status` / `--since` / `--limit` / `--no-color` / `--include-stale` filtering. **Pure read-only, no jump** | No (pure read-only, cross-project) |
 
 > When `/icode start` / `/icode plan` / `/icode fast` is launched and the latest `.icode_output/.icode_output_N/` is in entry state (status `init_in_progress` or `log_done`, i.e. init/log produced `00_init.md` but hasn't entered Step 1), it **asks the user "reuse/new"** — reuse takes `00_init.md` as input (from log, also reads `log_analysis.md` as background); non-entry state with args creates fresh.
 

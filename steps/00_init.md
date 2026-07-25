@@ -31,7 +31,7 @@
    - **有参数**（`/icode init <粗略需求>`）：将参数作为初始需求，结合步骤2历史参考（若有），**构思**第一版 `00_init.md` 各章节内容框架（此时不深入读代码，代码细节留给步骤4）
    - **无参数**（`/icode init`）：**构思**空模板版 `00_init.md`（各章节内容写"待补"），然后主动询问用户"这次想做什么？"开启对话
 4. **了解现有工程**：阅读项目中相关代码，识别现状、可复用模块、相关接口（**先于思考**，为步骤5的"现状盘点/影响面分析"提供代码依据）
-5. **强制思考前置**（不可跳过，缺证据视为不合规；**必须先 Read [references/thinking.md](../references/thinking.md) + [references/anti_laziness.md](../references/anti_laziness.md) 完整内容**（不得凭概述/记忆执行，否则产出不合规））：本步骤子项（至少5步）= 需求分解 → 现状盘点（基于步骤4读码结果） → 影响面分析（基于步骤4读码结果） → 待决策项识别 → 待决策倾向自审（逐条回溯现状盘点/影响面证据，主动找反证；无反证保留、有反证修正并记反证依据）。**若步骤2有历史参考，在此处「历史参考」小节记录命中工单 id 与要点，作为思考输入**
+5. **强制思考前置**（不可跳过，缺证据视为不合规；**必须先 Read [references/thinking_core.md](../references/thinking_core.md) 完整内容（核心规则每步必读）+ 按需 Read [references/thinking_detail.md](../references/thinking_detail.md) 对应小节（各步骤子项/历史参考）+ [references/anti_laziness.md](../references/anti_laziness.md) 完整内容**（不得凭概述/记忆执行，否则产出不合规））：本步骤子项（至少5步）= 需求分解 → 现状盘点（基于步骤4读码结果） → 影响面分析（基于步骤4读码结果） → 待决策项识别 → 待决策倾向自审（逐条回溯现状盘点/影响面证据，主动找反证；无反证保留、有反证修正并记反证依据）。**若步骤2有历史参考，在此处「历史参考」小节记录命中工单 id 与要点，作为思考输入**
 6. 使用 Write 工具写入 `{ICODE_OUT_DIR}/00_init.md`（模板见下文）。**第 6 节链路图初稿**（一图流总览）：before 画步骤 4 读码所得现状链路（关键节点标 file:line），after 画构思的改动后链路并标 `[+]`/`[~]`/`[-]`，改动点清单对齐第 3 节新增需求点；无参数/信息不足时画已知部分 + `?` 待补，**不得整节留空或仅写"待补"**
 7. 创建 `{ICODE_OUT_DIR}/.ico_metadata.json`：
 
@@ -45,6 +45,8 @@
      "requirement_summary": "{基于粗略需求的一句话摘要，≤100 token；无参数时填空字符串}",
      "requirement_points": [],
      "keywords": "{≤8个技术关键词数组，无参数时填空数组}",
+     "workload_estimate": "small|medium|large（4 维度 max 算法，见步骤9）",
+     "workload_reason": "{≤80 token 一句话评估理由}",
      "indexed": false,
      "ticket_id": "{步骤8 写入索引后回填，初始创建时为空字符串}"
    }
@@ -54,10 +56,45 @@
    - `ticket_id` = `{工程名}-{N}`（工程名取 `project_path` 的 basename；N 为当前 `.icode_output_N` 的 N）。**工程名冲突处理**：若索引中已存在相同 `{工程名}-{N}` 但 `project_path` 不同的条目，ticket_id 追加 `project_path` 的短 hash 后缀（如 `myproject-1-a3f2`）以保唯一
    - `project_path` = 当前工程根绝对路径
    - `out_dir` = `.icode_output/.icode_output_{N}`
-   - `requirement_summary` / `keywords` 取自步骤7 metadata；`requirement_points` 暂为空数组
+   - `requirement_summary` / `keywords` / `workload_estimate` / `workload_reason` 取自步骤7 metadata；`requirement_points` 暂为空数组
    - `has_00_init` = true，`has_plan` = false，`status` = `init_in_progress`，`created_at` = 当前时间，`last_used_at` = 当前时间（首次写入=created_at），`hit_count` = 0，`stale` = false，`stale_reason` = null，`stale_checked_commit` = null，`created_commit` = `git rev-parse HEAD`（只读，非 git 仓库为 null），`created_branch` = `git rev-parse --abbrev-ref HEAD`
    - 写回 index.json，同时置 metadata `indexed = true`、`ticket_id = {生成的 ticket_id}`（持久化 ticket_id，供后续步骤检索时排除当前工单，避免反推）；**写后执行唯一性验证**（见 [references/dir_and_metadata.md](../references/dir_and_metadata.md)「全局索引写入·写后唯一性验证」，防工程名冲突未加 hash 后缀）
-9. 提示用户：可继续对话补充需求，文档会随对话自动更新；讨论完成后运行 `/icode start` 或 `/icode plan` 进入步骤1。**若想另起炉灶讨论别的需求**，再敲 `/icode init`（会新建另一个目录）。
+9. **工作量评估 + 入口建议**（自动给用户判断，省"我也不知道该 start 还是 fast"的纠结）：
+
+   - **4 维度信号**：
+     1. 需求点数：`requirement_points` 数组长度
+     2. 涉及文件数：`code_files` 数组长度
+     3. 跨模块数：`code_files` 顶层目录数（如 `src/foo.c`/`include/bar.h` → 2 个顶层目录 `src`/`include`）
+     4. 大改词命中：`keywords` 数组 + `00_init.md` 第 3 节文本中扫大改词典
+   - **大改词典**：`重构` / `大改` / `跨模块` / `架构` / `迁移` / `拆分` / `整合` / `refactor` / `migration` / `overhaul`
+   - **各级阈值**（任一维度落入即评该级）：
+
+     | 维度 | small | medium | large |
+     |------|-------|--------|-------|
+     | 需求点数 | ≤3 | 4-6 | ≥7 |
+     | 涉及文件数 | ≤5 | 6-15 | ≥16 |
+     | 跨模块数 | 1 | 2-3 | ≥4 |
+     | 大改词命中 | 0 | 1-2 | ≥3 |
+
+   - **算法**：4 维度分别评 small/medium/large，**取 max**（最严原则，宁可高估不低估），写入 `metadata.workload_estimate` + `metadata.workload_reason`（≤80 token 理由）
+   - **入口建议**（按评估等级自动给）：
+     - `small` → 推荐 `/icode fast`（1 轮无对抗，省 35% 时间，适合单文件/小改）
+     - `medium` → 推荐 `/icode start`（3 轮对抗保险）
+     - `large` → **必须** `/icode start`（多轮对抗 + 完整 deepcheck，跨模块/重构场景）
+   - **输出建议块**（替换原"提示用户"语，格式固定）：
+
+     ```
+     ## 下一步建议
+     📊 工作量评估：{level}
+     理由：需求点 N / 涉及 M 文件 / 跨 K 模块 / 命中 H 大改词
+     
+     💡 建议入口：/icode {start|fast}
+     - /icode start：完整 3 轮对抗 + 完整 deepcheck（{适用情况}）
+     - /icode fast：1 轮无对抗 + 单阶段 deepcheck（{适用情况}）—— {当前是否推荐}
+     ```
+
+   - **持续更新**：每轮对话结束前重评（需求点/文件数/大改词可能变化），刷新 metadata + 索引（仅刷 `workload_estimate`+`workload_reason`，不刷 `requirement_points` 防索引膨胀）
+   - **保持向后兼容**：旧 metadata 无 `workload_estimate` 视为 `"medium"`（中性默认），不阻塞后续步骤
 
 ### 后续每轮对话（同一会话内，由 AI 自主识别，无需用户敲命令）
 
@@ -66,7 +103,7 @@
 1. **先 Read 现有 `00_init.md`**，理解当前文档状态
 2. 跟用户讨论（回答疑问、提出反问、澄清歧义）
 3. **本轮对话结束前，必须用 Write 工具更新 `00_init.md`**，把本轮新信息合并进对应章节，保持文档结构完整。**若本轮涉及现状（第 2 节）/改动方案/新增需求点（第 3 节）/影响面（第 4 节）任一变化，必须同步刷新第 6 节链路图**：before 按现状补充、after 反映最新改动方案（标 `[+]`/`[~]`/`[-]`）、改动点清单与第 3 节需求点保持一致（三者一致：图上标注 = 改动点清单 = 第 3 节需求点）--链路图是「截至当前最终改什么」的总览锚点，多轮结论须收敛于此图而非淹没在正文文字里。**若本轮新增或修改了第5节待决策项，或本轮改了第2/4节（现状/影响面）导致第5节某倾向的证据基础变化**，须对受影响的倾向补跑「待决策倾向自审」（回溯第2/4节证据点找反证、证据须 Read/Grep 实证），结果回写第5节（已查无反证+证据点 / 已修正+反证 / 无代码证据-留步骤1 ADR），**并更新一行反证搜索简记（grep/Read 了哪些候选反证点、结论；保留最新、历史见 git diff），使后续可验证非空泛"已查无反证"**
-4. **刷新全局索引条目**：从 `00_init.md`「3.新增需求点」提炼 `requirement_points`（≤8 条，每条 ≤30 token），结合本轮讨论刷新 `requirement_summary`。**注**：`requirement_points` 仅在步骤0首轮和步骤1完成时刷新，每轮对话不重复刷（防止索引条目膨胀），并**按 metadata 的 `ticket_id` 定位** `~/.claude/icode_data/index.json` 中本工单条目，更新其 `requirement_summary` / `requirement_points`。**用户无感，不写进 `00_init.md`**。
+4. **刷新全局索引条目**：从 `00_init.md`「3.新增需求点」提炼 `requirement_points`（≤8 条，每条 ≤30 token），结合本轮讨论刷新 `requirement_summary`。**注**：`requirement_points` 仅在步骤0首轮和步骤1完成时刷新，每轮对话不重复刷（防止索引条目膨胀），并**按 metadata 的 `ticket_id` 定位** `~/.claude/icode_data/index.json` 中本工单条目，更新其 `requirement_summary` / `requirement_points` / `workload_estimate` / `workload_reason`（**`workload_*` 每轮都重评**——`requirement_points` 不每轮刷防索引膨胀，但工作量评估依赖 00_init.md 实时第 3 节内容，每轮可能变化）。**用户无感，不写进 `00_init.md`**。
 5. 不需要等待用户说"结束"才落档，**每轮都增量更新**
 
 **判定"是否还在迭代当前 init"的依据**：
@@ -151,7 +188,7 @@
 
 ## 对话摘要（可选）
 
-{按时间顺序简记每轮关键结论；可选，便于回顾本次讨论的演进。**末轮特别要求**（v2 新增）：若本次讨论中出现方案证伪/回退/方向变更（如实机发现原方案不可行、改用替代方案），末轮必须明确记录"原方案 X 不可行/已回退，改用方案 Y"（若证伪依赖外部模块/库，记录模块名 + 当时 commit，便于后续 `/icode status --verdict --premise-dep` 标注启用硬复活）--该末轮结论是历史检索 `unknown` 工单注入时扩读的关键（捞最终方向，详见 [../references/thinking.md](../references/thinking.md)「历史参考小节」），也是 `/icode status --scan-verdict` 批量识别证伪信号的扫描点；末轮缺失或未写清证伪，会导致错误方向工单继续被当正面启发注入误导新需求}
+{按时间顺序简记每轮关键结论；可选，便于回顾本次讨论的演进。**末轮特别要求**（v2 新增）：若本次讨论中出现方案证伪/回退/方向变更（如实机发现原方案不可行、改用替代方案），末轮必须明确记录"原方案 X 不可行/已回退，改用方案 Y"（若证伪依赖外部模块/库，记录模块名 + 当时 commit，便于后续 `/icode status --verdict --premise-dep` 标注启用硬复活）--该末轮结论是历史检索 `unknown` 工单注入时扩读的关键（捞最终方向，详见 [../references/thinking_detail.md](../references/thinking_detail.md)「历史参考小节」），也是 `/icode status --scan-verdict` 批量识别证伪信号的扫描点；末轮缺失或未写清证伪，会导致错误方向工单继续被当正面启发注入误导新需求}
 
 - 轮次1：...
 - 轮次2：...

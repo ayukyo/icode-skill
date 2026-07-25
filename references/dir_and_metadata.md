@@ -71,7 +71,7 @@ Read `~/.claude/icode_data/index.json`（不存在则创建 `{"version":"1","upd
 > **"当前时间"取值约定（强制，防 LRU 失效）**：`updated_at` / `created_at` / `last_used_at` 等**所有时间字段必须是运行时取的真实系统当前时间**（如 Bash `date +%Y-%m-%dT%H:%M:%S`、Python `datetime.now()`），**禁止写死固定值**（如 `2026-06-29T09:30:00`）。理由：LRU 淘汰与排序依赖 `last_used_at` 区分新旧，若时间戳被写死成同一个固定值，所有条目时间相同 → LRU 退化为随机删除、排序失序、续期续错（见历史 bug：某工单 `last_used_at` 被刷新但 `hit_count=0` 的数据失真）。
 
 - `ticket_id` / `project_path`（当前工程根绝对路径）/ `out_dir`（`.icode_output/.icode_output_{N}`）
-- `requirement_summary` / `requirement_points` / `keywords` 取自本步骤 metadata
+- `requirement_summary` / `requirement_points` / `keywords` / `workload_estimate` / `workload_reason` 取自本步骤 metadata
 - 入口命令的标记：
   - `/icode log` 产出：`has_00_init` = true（已产出 00_init.md）、`has_plan` = false、`status` = `log_done`
   - 步骤0 init 首轮：`has_00_init` = true、`has_plan` = false、`status` = `init_in_progress`、`requirement_points` 暂空
@@ -141,7 +141,7 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
 
 通过全部校验→工单有效，**按 verdict 分流注入**（详见 SKILL.md「历史检索复用·注入分流」段）+ 续期（`stale_checked_commit=H` 在评估时已更新）：
 
-- `verdict="verified"`/`"unknown"`（含所有旧工单）：正常注入 ADR+风险章节（现状不变）；**`unknown` 强制走 A 层强化**（扩读 `00_init.md` 末轮对话摘要 + 对抗质疑三问 + ⚠️未验证警告，见 [thinking.md](thinking.md)「历史参考小节」）--这是旧工单（无 verdict）防误导的主防线，不依赖标注
+- `verdict="verified"`/`"unknown"`（含所有旧工单）：正常注入 ADR+风险章节（现状不变）；**`unknown` 强制走 A 层强化**（扩读 `00_init.md` 末轮对话摘要 + 对抗质疑三问 + ⚠️未验证警告，见 [thinking_core.md](thinking_core.md)「历史参考小节」）--这是旧工单（无 verdict）防误导的主防线，不依赖标注
 - `verdict="disproved"`（`verdict_review_needed=false`）：**反转注入避坑 + 证伪前提断言**--不注 ADR，改注 `verdict_reason`（作可验证断言）+ `correct_direction`，标 ⛔ 避坑；**强制新需求 Grep/Read 验证证伪前提是否仍成立**（如"某接口语义是重置"，须 Read 当前实现确认是否仍重置）：仍成立则确实避坑；已失效则方向或可重新考虑，提示 `/icode status --verdict` 标复活（unknown/verified）；`correct_direction` 缺失时降级注 ADR + ⛔ 警告（提示补标）
 - `verdict="disproved"`/`"superseded"`（`verdict_review_needed=true`，证伪前提依赖已变化）：**降级对抗质疑**--不硬反转，走 unknown A 层（扩读末轮+对抗质疑三问）+ 注"曾证伪 + 证伪前提 + 依赖从旧 commit 到新 commit 已变化"提示，让新需求重新评估证伪前提是否仍成立；前提失效则该方向或可重新考虑，提示标复活。**防漏过后来又可行的方向**
 - `verdict="superseded"`：注替代指针 `superseded_by` + `correct_direction` + 替代工单摘要，标 🔁 已替代
@@ -201,6 +201,26 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
 
 > **verdict 字段族**（方向结论，可选，详见 SKILL.md「verdict 字段族」）：所有入口模板均可选；**创建时可不写**（缺失视为 `"unknown"`，向后兼容旧 metadata）；需标注时回填 `verdict`+`verdict_reason`+`correct_direction`+`verdict_source`+`verdict_at`（`superseded` 额外填 `superseded_by`；`disproved`/`superseded` 可选填 `verdict_premise_deps` 支持硬复活），途径见 `/icode status --verdict`（[steps/status.md](../steps/status.md)）/ 步骤6 终审（[steps/06_audit.md](../steps/06_audit.md)）/ 批量识别扫描。**索引首次写入时 verdict 固定 `"unknown"`、关联字段 null、premise_deps `[]`/review_needed `false`**（见「全局索引写入」段）
 
+> **`workload_estimate` 字段族**（工作量评估，v3 新增）：由步骤 0 init 收尾时自动评估，辅助用户决定走 `/icode start` 还是 `/icode fast`。详见 SKILL.md「workload_estimate 字段族」与 [steps/00_init.md](../steps/00_init.md)「步骤 9 工作量评估」段：
+> - `workload_estimate`（可选，枚举，默认 `"medium"`）：工作量等级。`"small"` 建议 `/icode fast`，`"medium"` 建议 `/icode start`，`"large"` **必须** `/icode start`
+> - `workload_reason`（可选，≤80 token）：评估理由
+> - **字段缺失兼容**：旧 metadata 无 `workload_estimate` 视为 `"medium"`（中性默认），不阻塞后续步骤
+> - **4 维度 max 算法**：需求点数 / 涉及文件数 / 跨模块数 / 大改词命中，任一维度落入即评该级，取最严
+>
+> **大改词典**（大改词命中维度扫的关键词）：`重构` / `大改` / `跨模块` / `架构` / `迁移` / `拆分` / `整合` / `refactor` / `migration` / `overhaul`
+>
+> **入口建议映射**：`small` → 建议 `/icode fast`，`medium` → 建议 `/icode start`，`large` → **必须** `/icode start`
+>
+> **阈值表**（任一维度落入即评该级）：
+>
+> | 维度 | small | medium | large |
+> |------|-------|--------|-------|
+> | 需求点数（`requirement_points` 长度） | ≤3 | 4-6 | ≥7 |
+> | 涉及文件数（`code_files` 长度） | ≤5 | 6-15 | ≥16 |
+> | 跨模块数（`code_files` 顶层目录数） | 1 | 2-3 | ≥4 |
+> | 大改词命中（`keywords` + `00_init.md` 第 3 节） | 0 | 1-2 | ≥3 |
+> - **每轮重评**：步骤 0 多轮对话期间每轮重评，**仅刷 `workload_estimate`+`workload_reason`，不刷 `requirement_points` 等检索字段**（防索引膨胀）
+
 ### `/icode log` 产出后
 
 ```json
@@ -230,6 +250,8 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
   "requirement_summary": "{基于粗略需求的一句话摘要，≤100 token；无参数时填空字符串}",
   "requirement_points": [],
   "keywords": "{≤8个技术关键词数组，无参数时填空数组}",
+  "workload_estimate": "small|medium|large",
+  "workload_reason": "{≤80 token 一句话评估理由}",
   "indexed": false,
   "ticket_id": "{步骤8 写入索引后回填}"
 }
@@ -432,6 +454,7 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
    - ls `<DOC_DIR>/*.md`：
      ├─ 不存在（且无 legacy 回退命中）→ 段零零命中（输出一行 ℹ️ 提示"本工程当前分支 `<branch>` 尚未生成知识库，可运行 `/icode doc`，或切换到已建分支"，不阻塞，不写缓存）
      └─ 存在 → 逐章读前 50 行 → KEYS 匹配 + 简要说明语义打分 → project 候选集
+   - **粗筛 0 命中早返回**：`project` 或 `module` 候选集任一为 0 条 → 不调 LLM 精读打分，直接合并入总候选集（节省 1-3K token，语义等价——粗筛 0 命中 LLM 精读也是 0）
 3. 读 `<DOC_DIR>/_meta.json` → `module_deps` 列表（**注意**：不是 `project_docs/<project_id>/_meta.json`，是按分支子目录里的；每个分支独立 _meta.json，互不继承）
    对每个 dep：ls ~/.claude/icode_data/module_docs/<dep.key>/*.md
    ├─ 目录不存在或无 .md：
@@ -496,6 +519,41 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
 - ℹ️ **按需未生成模块提示**（若步骤 3 收集到 `generated == false` 的模块）：输出「工程有 N 个模块未生成 module_docs（按需未生成，上次 /icode doc 指定了其他模块聚焦）：\`{name1}\`, \`{name2}\`... - 可 \`/icode doc <name>\` 按需生成」
 
 **工程隔离**：段零严格按当前 cwd 的 project_id 检索**工程自身章节**（不跨 project 注入 `project_docs/`），但**自动跨仓库跨分支覆盖依赖的 `module_docs/`**（多个 project 引用同一上游仓库同分支只一份，自动复用）。姊妹工程引用走章节正文内的文字描述，不自动跨库。
+
+
+
+### 检索结果缓存（5 分钟 TTL，可选 token 优化）
+
+> **目的**：5 分钟内连续触发同一入口（init/log/plan/start/fast）+ 相同关键词的检索时，跳过 LLM 精读打分，直接复用上次结果。**单工单节省 0.5-2K token**（仅命中场景，多入口连续触发时）。
+>
+> **完全可选**：以下规则让 AI 自主遵循即可，**不强制 icode-skill 命令实施**（避免破坏现有命令链路）。Claude 等 LLM 看到本段会自然在连续调用间检查缓存。
+
+**缓存机制**（AI 自主执行，5 分钟内）：
+
+1. **缓存位置**：`~/.claude/icode_data/_search_cache.json`
+2. **缓存键**：`{cwd_absolute}:{sorted_keywords_joined_by_pipe}`（cwd 必须绝对路径，关键词按字典序排序确保等价输入命中同 key）
+3. **缓存值**：`{"results": [...], "created_at": <unix_timestamp>, "index_mtime": <index.json mtime>}`
+4. **TTL**：300 秒（5 分钟）
+5. **失效条件**（任一命中即跳过缓存）：
+   - TTL 过期 → 重跑
+   - cwd 变化 → 不复用（不同工程的检索不能跨）
+   - `~/.claude/icode_data/index.json` 的 mtime 变化 → 强制失效（索引有更新）
+
+**AI 自主执行**（五入口启动时）：
+
+```
+1. 解析 cwd 绝对路径 + 本次关键词列表
+2. 构造缓存键（如 /home/.../myproject:mcu|sensor|i2c）
+3. 读 _search_cache.json → 命中键的 entry
+4. 若 entry 存在 + created_at < now-300s 内 + index_mtime 一致 → 直接复用 results
+5. 否则正常跑段一粗筛 + 段二 LLM 精读 → 写回 entry.created_at + index_mtime
+```
+
+**不降能力保证**：
+
+- TTL 5 分钟足够短，任何"工程变化"必然超出窗口（commit 间隔通常 ≥30s 但完整 doc 重建 ≥分钟级）
+- 失效条件 3 个（TTL/cwd/mtime）覆盖了所有相关性破坏场景
+- 语义等价：相同 key 相同结果（LLM 精读本身有随机性，结果可能略变——缓存牺牲微弱随机性换 0.5-2K token）
 
 
 ### project_docs 主动 stale 扫描（`/icode doc` 末尾执行，防过时章节堆积）

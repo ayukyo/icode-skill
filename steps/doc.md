@@ -106,7 +106,7 @@ AI 解析自然语言的「目标工程」+「动作」：
 
 ### 4. 强制思考前置（不可跳过）
 
-**必须先 Read [references/thinking.md](../references/thinking.md) + [references/anti_laziness.md](../references/anti_laziness.md) + [references/doc_template.md](../references/doc_template.md) 完整内容**（不得凭概述执行）。子项（≥4步）= 扫描结果分析 → 章节规划 → 元信息字段准备 → 风险评估（手动编辑/冲突）。
+**必须先 Read [references/thinking_core.md](../references/thinking_core.md) 完整内容（核心规则每步必读）+ 按需 Read [references/thinking_detail.md](../references/thinking_detail.md) 对应小节 + [references/anti_laziness.md](../references/anti_laziness.md) + [references/doc_template.md](../references/doc_template.md) 完整内容**（不得凭概述执行）。子项（≥4步）= 扫描结果分析 → 章节规划 → 元信息字段准备 → 风险评估（手动编辑/冲突）。
 
 ### 5. 生成 module_docs（依赖）+ 工程章节
 
@@ -149,6 +149,29 @@ AI 解析自然语言的「目标工程」+「动作」：
 **5.0.5 进度输出**
 
 - 步骤 7 末尾输出"模板迁移汇总"表（见下文 §7 更新）
+
+**5.0.6 项目目录布局迁移（v1 → v2，仅升级时触发一次）**
+
+> **重要**：本节与 5.0 "模板版本迁移"是**两个不同维度**——
+> - 5.0 是章节**内容**升级（template_version v1 → v2，章节内容随之重生成）
+> - 5.0.6 是工程**目录布局**升级（`project_docs/<id>/00_overview.md` 平铺 → `project_docs/<id>/<branch>/` 多分支子目录），**整库只发生一次**（v1 → v2 升级时），完成后永久不再触发
+>
+> **触发条件**：`ls project_docs/<id>/00_overview.md` 直接存在 + 无分支子目录
+>
+> **迁移 7 步**：
+> 1. `mkdir -p project_docs/<id>/<branch_safe>/` 创建新分支子目录
+> 2. `mv project_docs/<id>/00_overview.md project_docs/<id>/<branch_safe>/` 移动所有章节
+> 3. 复制所有 `_meta.json` 字段到新位置（含 `module_deps` / `unresolved_modules` / `stale_files` / `project_id` / `project_type` / `git_root` 全集）
+> 4. 旧 `project_docs/<id>/_meta.json` 备份为 `_meta.json.v1_migrated_from`（**禁止直接覆盖**）
+> 5. 删旧空目录（`rmdir project_docs/<id>/`；如非空说明漏迁章节须重试）
+> 6. 输出 ℹ️ 提示行说明已迁移
+> 7. 段零检索时若 `<id>/<branch>/` 不存在但 `<id>/` 直接有 `00_overview.md`（v1 布局）→ **回退按 legacy 方式读** + 输出 ⚠️ 提示「v1→v2 迁移未完成，下次 `/icode doc` 自动迁移」
+>
+> **禁止**：
+> - ①检测到 v1 旧布局但不迁移，直接写到新子目录 → 旧章节成孤儿
+> - ②迁移时丢字段（如漏 `module_deps`）→ 模块依赖信息丢失
+> - ③删旧目录不留备份 → 无法回退
+> - ④段零检索时 v1 布局不读 → 用户工程再也看不到旧章节
 
 #### 5.1 正常生成流程（用户意图驱动）
 

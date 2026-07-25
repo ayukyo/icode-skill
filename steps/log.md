@@ -37,8 +37,8 @@
    - Read `~/.claude/icode_data/index.json`（不存在则跳过检索）
    - **两段式检索**：段一从本次症状/关键词提炼关键词集，与各 ticket `keywords` 做 Jaccard 粗筛取 ≤10 候选（零 token，可复活预扫后排除剩余 stale）；段二只把候选 `keywords + requirement_points` 喂主代理精读打分选 top-N 命中（N 由梯度决定，明确无关则 0 条）。`/icode log` 每次强制新建目录，本次工单尚未入索引，故无需排除当前 ticket_id
    - **`/icode log` 注入分支**：命中工单经段二精读+过时校验后，**按 `verdict` 分流注入**（字段缺失视为 `unknown`，详见 SKILL.md「注入形式·按 verdict 分流」）：
-     - `verified`/`unknown`（含旧工单）：定点读其 `log_analysis.md` 的「根因结论 + 决定性证据」章节（**不读全文**，≤800 token/条）；**`unknown` 额外扩读 `00_init.md` 末轮对话摘要**（≤0.3K）+ 思考块「历史参考」走对抗质疑三问 + ⚠️未验证警告（[../references/thinking.md](../references/thinking.md)「历史参考小节」）——旧工单防误导主防线
-     - `disproved`（`verdict_review_needed=false`）：**不读根因结论**（避免错误根因方向被借鉴），改读 `verdict_reason`（作可验证断言）+ `correct_direction` 作避坑参考（≤0.7K/条）；**强制 Grep/Read 验证证伪前提是否仍成立**（详见 [../references/thinking.md](../references/thinking.md)「历史参考小节」）；`correct_direction` 缺失则降级读根因 + ⛔ 警告，提示 `/icode status --verdict` 补标
+     - `verified`/`unknown`（含旧工单）：定点读其 `log_analysis.md` 的「根因结论 + 决定性证据」章节（**不读全文**，≤800 token/条）；**`unknown` 额外扩读 `00_init.md` 末轮对话摘要**（≤0.3K）+ 思考块「历史参考」走对抗质疑三问 + ⚠️未验证警告（[../references/thinking_detail.md](../references/thinking_detail.md)「历史参考小节」）——旧工单防误导主防线
+     - `disproved`（`verdict_review_needed=false`）：**不读根因结论**（避免错误根因方向被借鉴），改读 `verdict_reason`（作可验证断言）+ `correct_direction` 作避坑参考（≤0.7K/条）；**强制 Grep/Read 验证证伪前提是否仍成立**（详见 [../references/thinking_detail.md](../references/thinking_detail.md)「历史参考小节」）；`correct_direction` 缺失则降级读根因 + ⛔ 警告，提示 `/icode status --verdict` 补标
      - `disproved`/`superseded`（`verdict_review_needed=true`，证伪前提依赖已变化）：**降级对抗质疑**--不硬反转，走 unknown A 层（扩读末轮+三问）+ 证伪前提+依赖变化提示（详见 SKILL.md「注入形式·按 verdict 分流」），让新需求重新评估前提是否仍成立
      - `superseded`：读 `superseded_by` 指针 + `correct_direction` + 替代工单根因摘要（≤0.8K/条）
      - 作为本次分析的启发——参考其根因方向与踩坑。**只进会话上下文，绝不写进 `log_analysis.md`**（唯一例外：实质借鉴可在该根因条目末尾加一句 `(参考相似工单 {ticket_id} 的同类根因)`）
@@ -51,7 +51,7 @@
    - **能推断的推断**（日志目录/时间点/症状按上表推断），推断的标注"推断"
    - **推断不了的才问**，且一次性集中问（不挤牙膏）
    - 收敛出三要素，写入 `log_analysis.md` 的「输入要素」章节
-4. **强制思考前置**（不可跳过，缺证据视为不合规；**必须先 Read [references/thinking.md](../references/thinking.md) + [references/anti_laziness.md](../references/anti_laziness.md) 完整内容**（不得凭概述/记忆执行，否则产出不合规））：本步骤子项（至少4步）= 症状分解 → 基线预判 → 链路假设 → 验证策略。**若步骤2有历史参考，在此处「历史参考」小节记录命中工单 id 与根因要点，作为思考输入**
+4. **强制思考前置**（不可跳过，缺证据视为不合规；**必须先 Read [references/thinking_core.md](../references/thinking_core.md) 完整内容（核心规则每步必读）+ 按需 Read [references/thinking_detail.md](../references/thinking_detail.md) 对应小节（各步骤子项/历史参考）+ [references/anti_laziness.md](../references/anti_laziness.md) 完整内容**（不得凭概述/记忆执行，否则产出不合规））：本步骤子项（至少4步）= 症状分解 → 基线预判 → 链路假设 → 验证策略。**若步骤2有历史参考，在此处「历史参考」小节记录命中工单 id 与根因要点，作为思考输入**
 5. **阶段1 基线检查**（grep 日志之前必做，借鉴 baseline-checklist）：
    - **git diff/status/log**：看相关代码改过没（含 submodule/subrepo）。若代码已被改过（AI/同事/其他分支 merge），问题可能在改动里
    - **画状态链路图**：从症状出发画完整数据流，标注每个状态的"谁写/谁读/谁清"。关键问题：这个状态谁写的？什么时候写？谁清的？清的时候有没有遗漏？
@@ -59,7 +59,12 @@
    - **基线快通道**：若基线检查已直接定位根因（代码改动暴露问题 + 链路图显示清除者缺失），跳过阶段2深挖，直接进阶段3 对抗验证该根因
 6. **阶段2 日志侦察 + 现场还原**：
    - **侦察**：日志目录有哪些节点/文件/多大/覆盖什么时间范围（不读 20MB 原文，用 `ls -la`/`wc -l`/`head`/`tail` 摸清）
-   - **现场还原**：围绕问题时间点（默认前后各扩5-10分钟），跨节点抽时间线，按时间合并，每行打 `[节点名]` 前缀
+   - **预聚合**（不读原文，先算统计量，省阶段 3 对抗 token）：
+     1. 各文件错误级别计数：`grep -c "ERROR\|WARN\|FATAL" <file>` 摸热度
+     2. 高频错误模式聚合：`grep -oE "ERROR [A-Z_]+" <file> | sort | uniq -c | sort -rn | head -10` 拿 top 10
+     3. 各节点时间范围：head/tail 拿首末时间戳，定位问题时刻在文件中的相对位置
+   - **时间窗口切片**：围绕问题时间点前后各 5-10 分钟，`sed -n '/<t1>/,/<t2>/p' <file>` 切出小范围关键段（避免读 20MB 原文）
+   - **现场还原**：基于预聚合 + 切片结果，跨节点抽时间线，按时间合并，每行打 `[节点名]` 前缀
    - **对照组**：捕捉重启前后/正常段vs异常段/同条件不同结果——对照组是定性"设备端 vs 环境"的铁证
    - **零号病人**：找首次异常出现的时刻，以及它之前的先兆
    - **TB 评论研读（若有 TB 源）**：若步骤1 拉取了 TB 缺陷源，Read `{ICODE_OUT_DIR}/tb_source/<ID>/<ID>_meta.json` 的 `comments[]`（TB 评论原文，常含复现步骤/现象描述/排查记录）+ `title`/`note`（缺陷描述），作为症状补充证据纳入现场还原与对抗分析；复用场景下对比 `*_meta.prev.json` 识别新增评论
@@ -174,7 +179,7 @@
 - 当前用户消息是对该目录根因报告的质疑/补充/澄清
 - 否则按正常对话处理
 
-> 强制思考前置完整规则**必须先 Read [references/thinking.md](../references/thinking.md) + [references/anti_laziness.md](../references/anti_laziness.md)**（不得凭概述/记忆执行，否则产出不合规），本步骤子项见上方步骤4。
+> 强制思考前置完整规则**必须先 Read [references/thinking_core.md](../references/thinking_core.md) 完整内容（核心规则每步必读）+ 按需 Read [references/thinking_detail.md](../references/thinking_detail.md) 对应小节 + [references/anti_laziness.md](../references/anti_laziness.md) 完整内容**（不得凭概述/记忆执行，否则产出不合规），本步骤子项见上方步骤4。
 
 ## 反偷懒机制
 

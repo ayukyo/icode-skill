@@ -140,7 +140,7 @@ fi
 
 fast 模式的"精简"不等于"偷懒"：
 
-1. **每步仍必须执行强制思考前置**（先 Read `references/thinking.md` + `references/anti_laziness.md`，缺证据视为不合规）
+1. **每步仍必须执行强制思考前置**（先 Read `references/thinking_core.md` 完整内容（核心规则每步必读）+ 按需 Read `references/thinking_detail.md` 对应小节 + `references/anti_laziness.md` 完整内容，缺证据视为不合规）
 2. **每步仍必须产出对应产物文件**（不跳过 01_plan.md / 02_review.md / 03_plan_final.md / 05_deepcheck.md / 06_audit.md）
 3. **入口警告必须如实打印**（不静默跳过提示）
 4. **跳过对抗验证不是"省略证据"**，而是承认 fast 模式下没有对抗资源——用户自负其责

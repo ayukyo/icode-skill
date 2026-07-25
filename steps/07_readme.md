@@ -211,7 +211,7 @@ eval("2147483648") rc=3 (expect 3 OVERFLOW)
 
 ## 强制思考前置
 
-**必须先 Read [references/thinking.md](../references/thinking.md) + [references/anti_laziness.md](../references/anti_laziness.md) 完整内容**（不得凭概述/记忆执行，否则产出不合规）。本步骤子项（至少4步）= 通读产物要点 → 识别报告类型(log/功能) → 提炼自包含内容 → 规划章节结构。
+**必须先 Read [references/thinking_core.md](../references/thinking_core.md) 完整内容（核心规则每步必读）+ 按需 Read [references/thinking_detail.md](../references/thinking_detail.md) 对应小节（各步骤子项/历史参考）+ [references/anti_laziness.md](../references/anti_laziness.md) 完整内容**（不得凭概述/记忆执行，否则产出不合规）。本步骤子项（至少4步）= 通读产物要点 → 识别报告类型(log/功能) → 提炼自包含内容 → 规划章节结构。
 
 ## 执行流程
 

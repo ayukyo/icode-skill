@@ -116,6 +116,7 @@ cd ~/.claude/skills/icode/mcp/vision-bridge
 | `/icode readme` | 可选步骤7：生成交付报告（面向人的自包含总结，动态文件名，智能识别功能/查BUG模板） | 否 |
 | `/icode doc [自然语言]` | 工程级知识库生成（独立步骤）：扫描代码特征生成全局知识库章节，供 init/log/plan/start/fast 段零自动检索注入。不创建工单目录、不参与 1~6 推进 | 否（写全局 `project_docs/`） |
 | `/icode status` | 只读：查当前工单状态（不创建目录/不写文件） | 否 |
+| `/icode list [关键词]` | 跨工程工单查找：表格展示全索引工单，支持 `--project` / `--status` / `--since` / `--limit` / `--no-color` 过滤。**纯只读不跳转** | 否（纯只读，跨工程） |
 
 > `/icode start` / `/icode plan` / `/icode fast` 启动时若最新 `.icode_output/.icode_output_N/` 为入口态（status 为 `init_in_progress` 或 `log_done`，即 init/log 产出了 `00_init.md` 但未进步骤1），**询问用户"复用/新建"**——选复用则把 `00_init.md` 作需求输入（来自 log 则同时读 `log_analysis.md` 作背景）；非入口态带参直接新建。
 
