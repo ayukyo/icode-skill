@@ -8,18 +8,54 @@
 
 检查 `{ICODE_OUT_DIR}/03_plan_final.md` 是否存在，不存在则报错并提示先执行 `/icode merge`。
 
+## 前置：schema 迁移（自动/幂等/原子）
+
+> 自动识别 + 自动迁移：用户无需任何操作，进入步骤 4 时若检测到 `.ico_metadata.json.template_version` 缺失或旧于当前版本，**自动**在已存在的 `03_plan_final.md` 末尾追加新段、补写 metadata、原子落盘；幂等（已含迁移段则跳过），失败兜底静默（不阻塞主流程）。
+
+**自动执行**（强制，写在工具调用前）：
+
+1. Read `.ico_metadata.json` —— 读 `template_version` 字段（缺失视为 `"v0"`）
+2. 与当前 `CODE_TEMPLATE_VERSION = "v1.1"` 比对（含本步骤三链预扫段 + blast-radius 三链段两条新增），若 `template_version` 已经 ≥ `"v1.1"` → 跳过本次迁移，直接进入"## 前置校验"
+3. 否则执行迁移 **（原子，不破坏既有正文）**：
+   a. 解析 `03_plan_final.md`，从 §5 模块详细设计章节抽取"将引入的关键符号"列表（去重 + 过滤纯注释）
+   b. 对每个符号跑三条 grep（命令见下方"三链预扫"段）
+   c. grep 结果追加到 `03_plan_final.md` 末尾的 `## 三链预扫记录（v1.1 自动迁移）` 段（不存在则新建段；用 **`grep -F '三链预扫记录（v1.1 自动迁移）'`** 检测是否已含，字面量模式，原子写：先写 `.tmp` 再 `mv`；保留原文件前 N 行不动）
+   d. 写回 metadata：增字段 `template_version = "v1.1"`、增 `migration_log` 数组追加 `{from, to, at, files}` 条目、`at = date +%Y-%m-%dT%H:%M:%S` 取系统时间（不写死）
+   e. 输出 `▶ 自动迁移 → v1.1：补全三链预扫段（迁移到 .ico_metadata.migration_log）`
+4. 任一步失败（文件 I/O 错、grep 不可用、03_plan_final 不存在）→ 静默跳过迁移、记 `[迁移跳过-原因]` 到 metadata migration_log，主流程继续（绝不阻塞步骤 4）
+
+**向后兼容**：
+
+- 旧工单（缺 `template_version`）一律视为 `v0`，自动升级到 v1.1
+- 已迁移的 metadata 再次进入步骤 4 不会重复追加（按 `grep -F '三链预扫记录（v1.1 自动迁移）'` 字面量去重）
+- 用户手改过的 `03_plan_final.md` 原文**不会被覆盖**——只在末尾追加新段
+- metadata 字段新增（`template_version` / `migration_log`）一律非破坏性，旧 metadata 缺这字段视为默认（`v0` / `[]`），写回时整对象保留
+
 ## 执行步骤
 
 1. 执行目录管理中的「检测最新目录」逻辑，确定 `ICODE_OUT_DIR`
-2. 读取 `{ICODE_OUT_DIR}/03_plan_final.md` 获取定稿计划
-3. **强制思考前置**（不可跳过，缺证据视为不合规；**必须先 Read [references/thinking_core.md](../references/thinking_core.md) 完整内容（核心规则每步必读）+ 按需 Read [references/thinking_detail.md](../references/thinking_detail.md) 对应小节（各步骤子项/历史参考）+ [references/anti_laziness.md](../references/anti_laziness.md) 完整内容**（不得凭概述/记忆执行，否则产出不合规））：本步骤子项（至少4步）= 梳理文件清单 → 规划接口 → 预判冲突点 → 确认注释策略
+2. 自动迁移（如上）—— 仅迁移到 v1.1
+3. 读取 `{ICODE_OUT_DIR}/03_plan_final.md` 获取定稿计划
+4. **强制思考前置**（不可跳过，缺证据视为不合规；**必须先 Read [references/thinking_core.md](../references/thinking_core.md) 完整内容（核心规则每步必读）+ 按需 Read [references/thinking_detail.md](../references/thinking_detail.md) 对应小节（各步骤子项/历史参考）+ [references/anti_laziness.md](../references/anti_laziness.md) 完整内容**（不得凭概述/记忆执行，否则产出不合规））：本步骤子项（至少4步）= 梳理文件清单 → 规划接口 → 预判冲突点 → 确认注释策略
 
    - 计划中的伪代码和行号引用需要在此步骤展开为完整实现。读取引用的源文件获取完整上下文
-4. 输出步骤确认：`▶ 步骤4 编码开始`
+5. 输出步骤确认：`▶ 步骤4 编码开始`
 
 ### 编码实施
 
 严格按定稿计划实施编码。
+
+**准入（强制三链预扫，每条按 `文件:行号` 给出至少 1 条命中否则禁止 Edit）**：
+
+> 受影响的"改/新增符号"必须在 Edit 前 **逐个** 输出三条 grep 结果；任一条 0 命中即不合规（先扩大范围，仍 0 命中则按"未找到、不存在"在计划中标注，不能默默跳过）。本预扫每一步强制落地，**禁止**仅凭直觉/经验跳过（旧工程代码稀疏时，0 命中本就是信号）。
+>
+> 1. **caller 链**：`grep -rn '<symbol>(' src/ include/`（找所有调用方，调用即影响面）
+> 2. **import 链**：`grep -rn '<header\|from <module>\|import <pkg>'`（找所有 include/import 来源，改签名/语义会被牵连）
+> 3. **test 链**：`grep -rln '<symbol\|<module>.*test'`（找所有可能受影响的测试文件，至少确认 test 不挂在旧路径上）
+>
+> **与自动迁移的协作**：迁移已为"将在 03_plan_final.md §5 模块详细设计中声明的符号"生成过三链预扫段；本"准入"段对**所有实际 Edit 的符号**逐个实时输出（含迁移段未列、临时发现的新符号）——两者并存不替代，迁移段给基线，准入段给当下实时证据。
+>
+> **示例**：在 `demo/calc.c` 加 `isqrt` 函数，caller 链 `grep -n 'isqrt(' demo/*.c` 应返回 0（首加）；import 链 `grep -n '#include.*calc.h' demo/*.c` 至少 1；test 链 `grep -rln 'calc.h\|sqrt' demo/` 看是否有现成测试。
 
 **硬性要求**：
 1. 先阅读项目中现有的相关代码，了解实际架构和代码风格

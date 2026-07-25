@@ -124,3 +124,44 @@
 - □ 6 维度每维度有 file:line 证据 + 评分理由 ≥2 句实质
 - □ 无"无新问题""整体通过"等空泛结论（每条结论有具体证据）
 - □ 终审时确认了 verdict（默认 `unknown` 不阻塞流程；标注 `verified`/`disproved`/`superseded` 时回填 `verdict_reason`/`correct_direction`/`verdict_source`/`verdict_at`，双写 metadata + index 同步）
+
+## 6.5 schema 状态汇总（自动写入，可缺省）
+
+> **自动写入，非交互**：本段由步骤 6 启动时自动读取 `.ico_metadata.json.template_version` + `migration_log` 数组输出；不阻塞流程、不询问用户；缺字段零退化（视为 v0 / 0 条迁移）。
+
+**触发位置**：步骤 6 启动时（前置校验之后，「6.1 出具终审报告」之前），自动追加本段到 `06_audit.md` 末尾。
+
+**输出模板**（按字段可缺省）：
+
+```markdown
+## schema 状态汇总
+
+- 当前 schema 版本: {template_version | "v0（待迁移）" | "未知（field 缺失）"}
+- schema 迁移次数: {len(migration_log) | 0 | "未知"}
+- 最近一次迁移: {migration_log[-1].at | "无"}
+- 涉及产物文件: {migration_log[*].files 聚合去重 | "无"}
+- 字段缺失兼容: 旧工单缺 `template_version` / `migration_log` 时视为 v0 / []，不报错
+```
+
+**字段缺失行为**（明确写明，便于审计追溯）：
+
+| metadata 字段 | 实际值 | 终端输出 |
+|--------------|--------|----------|
+| `template_version` | `"v1.1"` | "当前 schema 版本: v1.1" |
+| `template_version` | 缺失或 `null` | "当前 schema 版本: 未知（field 缺失）" |
+| `template_version` | `"v0"`（极老工单） | "当前 schema 版本: v0（待迁移）" |
+| `migration_log` | 数组长度 3 | "schema 迁移次数: 3" |
+| `migration_log` | 缺失或 `null` | "schema 迁移次数: 0" |
+| `migration_log[-1].at` | `"2026-07-25T12:34:56"` | "最近一次迁移: 2026-07-25 12:34:56"（取前 19 字符，去 T） |
+| `migration_log[-1].at` | 缺失 | "最近一次迁移: 无" |
+| `migration_log[*].files` | 数组聚合 | "涉及产物文件: 01_plan.md, 03_plan_final.md, 05_deepcheck.md"（去重 + 排序） |
+
+**反偷懒**：
+
+- **禁止无字段硬编**：缺 `template_version` 时必须明确标"未知"而非盲目写"v1.1"（误标会让 audit 误以为已迁移）
+- **禁止忽略 migration_log 长度**：0 与 1 与 3 是不同信号，必须如实输出数字
+- **禁止 try/except 静默**：Read JSON 失败时输出"[schema 读取失败-原因 X]"，绝不含糊
+- **禁止与其他段合并**：本段独立 H2 标题，便于将来 grep 工具检索"## schema 状态汇总"
+
+**自动化要求**：实现可用 Bash + python 一行（例如 `python3 -c "import json,sys; d=json.load(open(sys.argv[1])); ..."` 嵌入式调用）；如失败则降级为手工填写模板 + 标 `[未自动化]`。
+

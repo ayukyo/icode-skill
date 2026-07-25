@@ -199,6 +199,21 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
 
 入口命令（init/log）和步骤1常规新建目录时创建。完整字段定义见 SKILL.md「元信息文件」段，此处仅列入口创建时的最小模板：
 
+> **`template_version` 字段**（schema 版本，自 [v1.1 升级](steps/01_plan.md) 起所有新建工单默认带）：
+>
+> - 默认值：`"v1.1"`（新增工单一律带；旧工单缺字段视为 `"v0"`，会在第一次进入步骤 1 / 步骤 4 / 步骤 5 时自动迁移补全）
+> - 当前生效版本：v1.1（含 §1.5 工程结构快照 / 三链预扫段 / blast-radius 三链自检段）
+> - 读取约定：步骤 1 / 步骤 4 / 步骤 5 启动时读 `.ico_metadata.json.template_version`，与本步骤期望的 `CODE_TEMPLATE_VERSION`/`DEEPCHECK_TEMPLATE_VERSION`/`PLAN_TEMPLATE_VERSION`（均 `"v1.1"`）比对——匹配则跳过迁移、不匹配则自动追加新段并升级
+
+> **`migration_log` 字段**（schema 迁移历史，可选，默认 `[]`）：
+>
+> - 数组结构：每条 `{from, to, at, files}`。`from`/`to` 为版本字符串；`at` 为运行时 `date +%Y-%m-%dT%H:%M:%S` 取系统时间（**禁写死**，LRU 与迁移溯源依赖真实时间）；`files` 为本步迁移涉及的产物文件名数组
+> - 写入约定：步骤 1 / 步骤 4 / 步骤 5 自动迁移完成后**追加**一条（不覆盖、不去重），便于 audit 阶段追溯版本演进
+> - 失败兜底：迁移任何步骤失败，写 `{from, to, at, skip_reason}` 条目，不阻塞主流程
+> - 字段缺失兼容：旧 metadata 缺 `migration_log` 视为 `[]`；新增工单一律初始化为 `[]`
+
+> **三步迁移的相互独立性**：步骤 1 / 步骤 4 / 步骤 5 的迁移契约**互不依赖**——分别读 metadata、各自判定版本、各自追加产物段；同一工单走 `/icode start` 全流程时三步依次触发，migration_log 数组会按顺序追加 3 条（不全靠一记，单独 step 启动也 OK）。
+
 > **verdict 字段族**（方向结论，可选，详见 SKILL.md「verdict 字段族」）：所有入口模板均可选；**创建时可不写**（缺失视为 `"unknown"`，向后兼容旧 metadata）；需标注时回填 `verdict`+`verdict_reason`+`correct_direction`+`verdict_source`+`verdict_at`（`superseded` 额外填 `superseded_by`；`disproved`/`superseded` 可选填 `verdict_premise_deps` 支持硬复活），途径见 `/icode status --verdict`（[steps/status.md](../steps/status.md)）/ 步骤6 终审（[steps/06_audit.md](../steps/06_audit.md)）/ 批量识别扫描。**索引首次写入时 verdict 固定 `"unknown"`、关联字段 null、premise_deps `[]`/review_needed `false`**（见「全局索引写入」段）
 
 > **`workload_estimate` 字段族**（工作量评估，v3 新增）：由步骤 0 init 收尾时自动评估，辅助用户决定走 `/icode start` 还是 `/icode fast`。详见 SKILL.md「workload_estimate 字段族」与 [steps/00_init.md](../steps/00_init.md)「步骤 9 工作量评估」段：
@@ -234,7 +249,9 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
   "requirement_points": ["修复要点1", "修复要点2"],
   "keywords": "{≤8个技术关键词}",
   "indexed": false,
-  "ticket_id": "{写入索引后回填}"
+  "ticket_id": "{写入索引后回填}",
+  "template_version": "v1.1",
+  "migration_log": []
 }
 ```
 
@@ -253,7 +270,9 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
   "workload_estimate": "small|medium|large",
   "workload_reason": "{≤80 token 一句话评估理由}",
   "indexed": false,
-  "ticket_id": "{步骤8 写入索引后回填}"
+  "ticket_id": "{步骤8 写入索引后回填}",
+  "template_version": "v1.1",
+  "migration_log": []
 }
 ```
 
@@ -272,7 +291,9 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
   "indexed": false,
   "ticket_id": "{刷新全局索引时回填}",
   "mode": "full",
-  "max_rounds": 3
+  "max_rounds": 3,
+  "template_version": "v1.1",
+  "migration_log": []
 }
 ```
 
@@ -293,7 +314,9 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
   "indexed": false,
   "ticket_id": "{写入索引后回填}",
   "mode": "fast",
-  "max_rounds": 1
+  "max_rounds": 1,
+  "template_version": "v1.1",
+  "migration_log": []
 }
 ```
 

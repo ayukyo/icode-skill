@@ -16,6 +16,32 @@
 
 检查 `{ICODE_OUT_DIR}/03_plan_final.md` 和步骤4创建的代码文件是否存在，缺失则报错并提示先执行 `/icode code`。
 
+## 前置：schema 迁移（自动/幂等/原子）
+
+> 自动识别 + 自动迁移：用户无需任何操作，进入步骤 5 时若检测到 `.ico_metadata.json.template_version` 缺失或旧于当前版本，**自动**在已存在的 `05_deepcheck.md` 末尾追加 blast-radius 三链基线段、补写 metadata、原子落盘；幂等（已含迁移段则跳过），失败兜底静默（不阻塞主流程）。
+
+**自动执行**（强制，写在「阶段 1 — Reverse」前）：
+
+1. Read `.ico_metadata.json` —— 读 `template_version` 字段（缺失视为 `"v0"`）
+2. 与当前 `DEEPCHECK_TEMPLATE_VERSION = "v1.1"` 比对（v1.1 含本步骤 blast-radius 三链自检段 + 代码新鲜度强制 + Free 表格化），若 `template_version` 已经 ≥ `"v1.1"` → 跳过本次迁移
+3. 否则执行迁移 **（原子，不破坏既有正文）**：
+   a. 解析 `code_files` 列表（缺失或空 → 跳过本步迁移，记 `[迁移跳过-无 code_files]`）
+   b. 对每个 code_file 跑三条 grep（caller / import / test，命令见「阶段 1 — Reverse」的 blast-radius 三链自检段）
+   c. grep 结果追加到 `05_deepcheck.md` 末尾的 `## blast-radius 三链自检（v1.1 自动迁移）` 段（不存在则新建段；用 **`grep -F 'blast-radius 三链自检（v1.1 自动迁移）'`** 检测是否已含——字面量模式，marker 内 `(`/年份不做正则匹配；走幂等分支）
+   d. 原子写：先写 `.tmp` 再 `mv` 覆盖；保留原文件前 N 行不动
+   e. 写回 metadata：增字段 `template_version = "v1.1"`、增 `migration_log` 数组追加 `{from, to, at, files=[code_files 全集]}` 条目、`at = date +%Y-%m-%dT%H:%M:%S` 取系统时间（不写死）
+   f. 输出 `▶ 自动迁移 → v1.1：补全 blast-radius 三链基线段（迁移到 .ico_metadata.migration_log）`
+4. 任一步失败（文件 I/O 错、grep 不可用、code_files 缺失）→ 静默跳过迁移、记 `[迁移跳过-原因]` 到 metadata migration_log，主流程继续（绝不阻塞步骤 5）
+
+**与步骤 4 迁移的关系**：步骤 4 迁移在 `03_plan_final.md` 写基线（三链预扫段），步骤 5 迁移在 `05_deepcheck.md` 写基线（blast-radius 三链自检段）；两者解耦，单独执行、互不依赖；migration_log 数组会同时记录两次迁移。
+
+**向后兼容**：
+
+- 旧工单（缺 `template_version`）一律视为 `v0`，自动升级到 v1.1
+- 已迁移的 metadata 再次进入步骤 5 不会重复追加（按 `grep -F 'blast-radius 三链自检（v1.1 自动迁移）'` 字面量去重）
+- 用户手改过的 `05_deepcheck.md` 原文**不会被覆盖**——只在末尾追加新段
+- metadata 字段新增（`template_version` / `migration_log`）一律非破坏性，旧 metadata 缺这字段视为默认（`v0` / `[]`），写回时整对象保留
+
 ## 三阶段说明
 
 | 顺序 | 阶段 | 输入 | 目标 |
@@ -86,6 +112,12 @@ Free 阶段一次性完整覆盖全部 15 个角度。
 - **欠实现**：计划有，逆推没有
 - **偏离/冗余**：逆推有，计划没提
 - **调用模式与工程不一致**（新增维度，独立于上面两类代码-计划 diff）：对代码中每个"跨模块/跨端点/跨层"调用，grep 同文件/同模块既有同类调用的写法，核对新增调用是否对齐工程主导模式。**这层对比专门抓"计划自己写错调用模式、代码按计划实现了、代码-计划 diff 无偏离但模式本身错了"的情况**——计划-代码 diff 发现不了，必须对照工程既有模式才能发现。若新增调用与工程主导模式不符（如工程统一走路由、同函数既有同类调用走路由，新增却直调）→ 标 issue，**计入 has_issues**（即使代码与计划一致，计划本身可能错）
+
+- **blast-radius 三链自检（新增）**：对 `code_files` 每个文件，输出三条 grep 结果作为"修改影响面证据"，与 Reverse 逆推的"跨文件调用关系"段互相印证。任一链 0 命中即不合规（未扫 = 自欺）。
+  1. **caller 链**：`grep -rn '<改动的 func/类/全局符号>(' <project>` —— 列出所有 caller（含行号）
+  2. **import 链**：`grep -rn '<改动的 header>' <project>` 或等价的 `import/from` 检索 —— 列出所有依赖入口
+  3. **test 链**：`grep -rln '<符号\|<路径>' <test 目录>` —— 列出覆盖测试；无测试时显式标 `[无测试覆盖-符号 X]`，**不静默跳过**（让 has_issues 路径可触发）
+  > **兼容旧产物**：本自检作用于本轮 05_deepcheck.md 输出；旧工单（已完成 deepcheck_done）不重跑也不强制。如需对旧工单重做 blast-radius，复制 03_plan_final.md + code_files 列表到 `/tmp/manual_blast_radius.md` 用同三条 grep 离线跑一遍即可。
 
 **处理分流**（区分该修的 vs 该留的）：
 - **该修的偏离**（代码错误/漏实现/与计划冲突的不合理偏差、**调用模式与工程不一致**）：用 Edit 修复代码使其符合计划/工程模式，**计入 has_issues**（触发修复→重跑循环）

@@ -57,6 +57,7 @@
    | STATUS | `status` | 14 字符 | `completed` 灰 / 含 `in_progress` 黄 / 其他 绿 |
    | WORKLOAD | `workload_estimate` | 7 字符 | `large` 粗体红 / `medium` 黄 / `small` 灰 / 缺失 `-` |
    | LAST-USED | `last_used_at` | 16 字符（`YYYY-MM-DD HH:MM`） | 基础 |
+   | SCHEMA | `template_version` | 9 字符（`v1.1`/`v0`/`unknown`/`-`） | `v1.1+` 绿 / `v0` 黄 / `unknown` 灰 / 缺失 `-` |
    | VERDICT | `verdict` | 11 字符 | `disproved` 红 / `superseded` 蓝 / `verified` 绿 / `unknown` 灰 |
    | SUMMARY | `requirement_summary` | 60 字符截断（超长加 `…`） | 基础 |
 
@@ -88,6 +89,7 @@
 | 索引为空（`tickets=[]`） | 提示"无工单记录"后退出 |
 | 关键词无匹配 | 提示"无匹配工单（索引共 N 条，尝试其他关键词或去掉过滤条件）" |
 | 旧 metadata 无 `workload_estimate` | WORKLOAD 列显示 `-`，不报错（向后兼容） |
+| 旧 metadata 无 `template_version` | SCHEMA 列显示 `-`（与 WORKLOAD 兼容同形态），不报错 |
 | `project_path` 已删（`stale_reason=path_gone`） | PROJECT 列显示 `[path_gone]`，默认排除（除非 `--include-stale`） |
 | 字段格式异常（如 `last_used_at` 缺） | 退化为 `-`，不中断整行渲染 |
 | `--limit` 截断 | 末尾标注 `(还有 N 条未显示...)` |

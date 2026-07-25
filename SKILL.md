@@ -417,6 +417,8 @@ ICODE_OUT_DIR=".icode_output/.icode_output_${LAST}"
 - 安装：`cd ~/.claude/skills/icode/mcp/vision-bridge && ./install.sh`，三件套在生成的 `config.json` 里配（不入 `~/.claude.json`，不污染环境）
 - 详见 [mcp/vision-bridge/README.md](mcp/vision-bridge/README.md)
 
+> **关于外部工具调研**：对于"是否值得引入第三方代码工具以优化 iCode"的判断结论（如 Tree-sitter 图谱、blast-radius 思路等），沉淀在 [references/external-tools-research.md](references/external-tools-research.md) 作为调研笔记，**非 SKILL 集成、零必装依赖**，仅供未来用户决策时参考。
+
 ## 各步骤详细规则
 
 各步骤的详细 prompt、维度要求、执行流程请读取对应文件：
