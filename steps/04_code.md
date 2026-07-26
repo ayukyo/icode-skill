@@ -107,3 +107,12 @@
    - **写入 `code_deviations`**：若有主动偏离（见硬性要求第8条），将偏离记录数组写入 metadata `code_deviations`（每条含 plan_said / actual_done / reason），供步骤6 汇总；无偏离则写空数组 `[]`
    - **写入 `code_review_fix_with_issues`**（v1.x 新增，可选，默认 `false`）：4 维度复检未通过标记。`true` 时步骤 5/6 入口输出警告，audit 终审会看到此标记（**不阻断流程**，仅作可见性提示）
 3. 全流程模式：编译通过 + 1.5 复检通过则**立即继续执行步骤5**；编译失败或 1.5 复检失败则中止，提示用户修复
+
+## MCP 工具（可选 + 降级）
+
+工作流 AI 工具按 [references/mcp_integration.md](../references/mcp_integration.md) 强证据逻辑判定可用性：
+
+- **强证据存在**：优先用 `mcp__<name>__<tool>` 工具调用
+- **强证据不存在**：走降级路径（原生 Bash / Read / Write / WebFetch 等），**不阻塞流程**
+
+本步骤推荐 MCP、配套降级路径详见 [references/mcp_per_step.md](../references/mcp_per_step.md) 本步骤行。

@@ -185,3 +185,12 @@ Free 阶段一次性完整覆盖全部 15 个角度。
 - □ Free 每个角度 ≥3 检查点（file:line），表格填满
 - □ Fixed 每维度有 file:line 证据 + 评分理由 ≥2 句实质
 - □ 无"整体通过""无问题"等空泛结论（每条结论有具体证据）
+
+## MCP 工具（可选 + 降级）
+
+工作流 AI 工具按 [references/mcp_integration.md](../references/mcp_integration.md) 强证据逻辑判定可用性：
+
+- **强证据存在**：优先用 `mcp__<name>__<tool>` 工具调用
+- **强证据不存在**：走降级路径（原生 Bash / Read / Write / WebFetch 等），**不阻塞流程**
+
+本步骤推荐 MCP、配套降级路径详见 [references/mcp_per_step.md](../references/mcp_per_step.md) 本步骤行。

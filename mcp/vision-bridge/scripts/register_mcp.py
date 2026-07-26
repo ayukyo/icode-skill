@@ -7,15 +7,29 @@
 
 示例:
     python3 scripts/register_mcp.py \\
-        /home/orbbec/skills/icode/mcp/vision-bridge/.venv/bin/python \\
-        /home/orbbec/skills/icode/mcp/vision-bridge/server.py \\
-        /home/orbbec/skills/icode/mcp/vision-bridge
+        <your_install_path>/.venv/bin/python \\
+        <your_install_path>/server.py \\
+        <your_install_path>
 """
 import json
 import sys
 from pathlib import Path
 
 CLAUDE_JSON = Path.home() / ".claude.json"
+
+
+def _configure_utf8_stdout() -> None:
+    """强制 stdout/stderr 用 UTF-8,兼容 Windows 默认 GBK 控制台。
+
+    Linux/macOS 默认就是 UTF-8,reconfigure 是 no-op,不影响行为。
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            try:
+                reconfigure(encoding="utf-8", errors="replace")
+            except Exception:
+                pass
 
 
 def main():
@@ -42,6 +56,7 @@ def main():
     }
     CLAUDE_JSON.write_text(json.dumps(cfg, ensure_ascii=False, indent=2))
 
+    _configure_utf8_stdout()
     print(f"✅ 已注册 vision-bridge 到 {CLAUDE_JSON}")
     print(f"   python: {python_path}")
     print(f"   server: {server_py}")

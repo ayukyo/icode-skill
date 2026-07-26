@@ -4,8 +4,18 @@
 #   ./install.sh                  # 增量同步+注册（开发期改完代码后跑这条同步）
 #   ./install.sh --full           # 完整重装: 清旧 venv、删旧安装目录、重新同步
 set -e
+
 HERE="$(cd "$(dirname "$0")" && pwd)"
 TARGET="${VISION_BRIDGE_TARGET:-$HOME/.claude/skills/icode/mcp/vision-bridge}"
+
+# 守卫: 防止脚本被复制到其他目录(如 /tmp)错误执行,导致污染 target。
+# 合法工程根必须同时存在 server.py 和 providers/。
+if [ ! -f "$HERE/server.py" ] || [ ! -d "$HERE/providers" ]; then
+  echo "❌ 当前目录不是 vision-bridge 工程根目录"
+  echo "   source: $HERE"
+  echo "   请 cd 到 mcp/vision-bridge 目录后重跑"
+  exit 1
+fi
 
 echo "📦 vision-bridge 安装"
 echo "   source: $HERE"
@@ -35,35 +45,62 @@ fi
 echo "✅ 代码已同步到 $TARGET"
 cd "$TARGET"
 
+# 探测 Python 解释器,避免 Git Bash 下命中 WindowsApps 的 python3 stub。
+# WindowsApps stub 跑 --version 无输出但 exit 0;真 Python 必有版本字符串。
+# Linux/macOS 的 python3 --version 永远有输出,逻辑等价无副作用。
+PYTHON_BIN=""
+for _py in python3 python; do
+  if command -v "$_py" >/dev/null 2>&1; then
+    _bin="$(command -v "$_py")"
+    if [ -n "$("$_bin" --version 2>&1 | grep -i 'python')" ]; then
+      PYTHON_BIN="$_bin"
+      break
+    fi
+  fi
+done
+if [ -z "$PYTHON_BIN" ]; then
+  echo "❌ 未找到可用的 python 或 python3"
+  exit 1
+fi
+
 # 2. venv (在 target 里建, 解耦开发仓)。
-#    兜底策略:python3 -m venv 失败(系统缺 python3-venv 包)→ 降级到 virtualenv
+#    兜底策略:$PYTHON_BIN -m venv 失败(系统缺 python3-venv 包)→ 降级到 virtualenv
 if [ ! -d "$TARGET/.venv" ]; then
   echo "📦 创建 venv..."
-  if python3 -m venv "$TARGET/.venv" 2>/dev/null; then
+  if "$PYTHON_BIN" -m venv "$TARGET/.venv"; then
     :
   else
-    echo "⚠ python3 -m venv 失败(常见: 系统未装 python3-venv), 降级到 virtualenv"
-    if ! python3 -c "import virtualenv" 2>/dev/null; then
+    echo "⚠ $PYTHON_BIN -m venv 失败(常见: 系统未装 python3-venv 包), 降级到 virtualenv"
+    if ! "$PYTHON_BIN" -c "import virtualenv" 2>/dev/null; then
       echo "❌ virtualenv pip 包也未装。请二选一:"
       echo "   • sudo apt install python3.10-venv    # Debian/Ubuntu 标准做法"
       echo "   • pip install --user virtualenv       # 用户级替代"
       echo "装好后重跑 ./install.sh"
       exit 1
     fi
-    python3 -m virtualenv "$TARGET/.venv"
+    "$PYTHON_BIN" -m virtualenv "$TARGET/.venv"
   fi
 fi
+
+# 探测 venv 可执行目录。Windows venv 在 Scripts/,Unix (Linux/macOS) 在 bin/。
+# 这样 install.sh 在两个平台都用同一份脚本,无需 fork。
+if [ -d "$TARGET/.venv/Scripts" ]; then
+  PYBIN="$TARGET/.venv/Scripts"
+else
+  PYBIN="$TARGET/.venv/bin"
+fi
+
 echo "📦 装依赖..."
-"$TARGET/.venv/bin/pip" install --quiet --disable-pip-version-check -U pip
+"$PYBIN/pip" install --quiet --disable-pip-version-check -U pip
 
 # pip 装包:清华源优先,fallback 默认 PyPI(海外/校园网友好)
 pip_install() {
-  if "$TARGET/.venv/bin/pip" install --quiet --disable-pip-version-check \
+  if "$PYBIN/pip" install --quiet --disable-pip-version-check \
        -i https://pypi.tuna.tsinghua.edu.cn/simple "$@" 2>/dev/null; then
     return 0
   fi
   echo "⚠ 清华源装包失败,重试默认 PyPI..."
-  "$TARGET/.venv/bin/pip" install --quiet --disable-pip-version-check "$@"
+  "$PYBIN/pip" install --quiet --disable-pip-version-check "$@"
 }
 pip_install -r "$TARGET/requirements.txt"
 
@@ -77,9 +114,9 @@ if [ ! -f "$TARGET/config.json" ]; then
 fi
 
 # 4. 注册到 ~/.claude.json
-PY="$TARGET/.venv/bin/python"
+PY="$PYBIN/python"
 SERVER="$TARGET/server.py"
-python3 "$TARGET/scripts/register_mcp.py" "$PY" "$SERVER" "$TARGET"
+"$PYTHON_BIN" "$TARGET/scripts/register_mcp.py" "$PY" "$SERVER" "$TARGET"
 
 echo ""
 echo "🎉 完成！"

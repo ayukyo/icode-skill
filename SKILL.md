@@ -1,6 +1,6 @@
 ---
 name: icode
-description: 端到端编码工作流（步骤 0~6，含可选需求初稿步骤与日志根因分析入口），支持分步手动调用：/icode help (帮助), /icode init [<粗略需求>] (需求初稿), /icode log [零散信息...] (日志根因分析→转修复需求), /icode start <需求> (全流程), /icode fast <需求> (精简全流程), /icode plan <需求> (计划), /icode review [N] (审查), /icode merge (定稿), /icode code (编码), /icode deepcheck (复检), /icode audit (终审), /icode doc [自然语言] (工程级知识库生成), /icode readme (交付报告), /icode status (工单状态), /icode list [关键词] (跨工程工单查找)
+description: 端到端编码工作流（步骤 0~6，含可选需求初稿步骤与日志根因分析入口），支持分步手动调用：/icode help (帮助), /icode install (MCP 环境检查+一键安装), /icode init [<粗略需求>] (需求初稿), /icode log [零散信息...] (日志根因分析→转修复需求), /icode start <需求> (全流程), /icode fast <需求> (精简全流程), /icode plan <需求> (计划), /icode review [N] (审查), /icode merge (定稿), /icode code (编码), /icode deepcheck (复检), /icode audit (终审), /icode doc [自然语言] (工程级知识库生成), /icode readme (交付报告), /icode status (工单状态), /icode list [关键词] (跨工程工单查找)
 ---
 
 **版本**: v2.0.0
@@ -19,6 +19,7 @@ description: 端到端编码工作流（步骤 0~6，含可选需求初稿步骤
 | 命令 | 功能 | 创建目录？ |
 |------|------|-----------|
 | `/icode help` | **帮助**：输出使用流程示例 | 否 |
+| `/icode install` | **MCP 环境检查+一键安装（独立步骤）**：跑 `mcp/install.sh` 扫描所有 `mcp/*/install.sh`，每个子工程自检环境（venv/Node/npm）并缺啥补啥、注册到 `~/.claude.json`。新 clone 仓库 / 新机器 / CI 初始化时跑一次。**不创建工单目录、不写工单 metadata、不参与 1~6 推进**（详见 [steps/install.md](steps/install.md)） | 否 |
 | `/icode log [零散信息...]` | **可选入口（日志根因分析）**：把"设备/服务日志+模糊症状"转为有对抗验证的根因报告，自动转修复需求 `00_init.md` 衔接步骤1。先基线检查（git diff/链路图）再日志侦察，对抗分析防确认偏误。**领域无关，每次调用都新建目录**（详见 [steps/log.md](steps/log.md)） | ✅ 每次都新建 |
 | `/icode init [<粗略需求>]` | **可选步骤0**：多轮对话产出 `00_init.md`（需求初稿，含链路图：before/after + 改动点，每轮动态更新）。**每次调用都新建目录，不复用、不续聊**（详见 [steps/00_init.md](steps/00_init.md)） | ✅ 每次都新建 |
 | `/icode start <需求>` | **全流程（full 模式）**：创建/复用目录 → 步骤1→6 串联。步骤2 review 默认 3 轮 + 对抗验证，步骤5 deepcheck 三阶段循环（**复用规则见下**） | ✅ 创建新目录 / 复用 |
@@ -407,16 +408,83 @@ ICODE_OUT_DIR=".icode_output/.icode_output_${LAST}"
 - **跨会话恢复**：运行 `ls -d .icode_output/.icode_output_*` 确认目录后，直接调用对应步骤即可
 - **中断恢复**：重新执行某步骤可覆盖该步骤输出
 
-## 可选增强：图片/视频理解
+## 可选增强：MCP 工具集（6 个 MCP，按需降级）
+
+icode 工作流可调用 6 个 MCP（`/icode install` 一键安装）。**每个 MCP 都是可选 + 降级**——用户可能不装，AI 必须按"强证据判定"逻辑自适应。
+
+**核心文档**：
+- [references/mcp_integration.md](references/mcp_integration.md)：**每个 MCP 的强证据 + 降级路径**（必读）
+- [references/mcp_per_step.md](references/mcp_per_step.md)：**步骤 × MCP 推荐矩阵**
+
+**判定逻辑**：AI 在每个步骤开始前，按 [references/thinking_core.md](references/thinking_core.md) 的"强证据"逻辑判定：
+- 证据 A：`Read ~/.claude.json` 的 `mcpServers.<name>` 段存在
+- 证据 B：当前会话 deferred tools 列表里有 `mcp__<name>__<tool>`
+
+**任一即视为"已配置可用"** → 优先用 MCP 工具；**否则走降级路径**（Bash/Read/Write/WebFetch/Grep 等原生工具）。**降级不是错误**。
+
+### 6 个 MCP 速览
+
+| MCP | 用途 | 触发场景 | 必装？ |
+|---|---|---|---|
+| **sequential-thinking** | 强制思考前置 | 所有步骤 | ✅ 必装 |
+| **vision-bridge** | 图片/视频理解 | 涉及媒体/UI | ✅ 必装（需 KEY） |
+| **memory** | 跨工单记忆 | 长期项目 | 🟡 推荐 |
+| **context7** | 库文档实时查询 | 步骤 0/1/4 | 🟢 推荐 |
+| **playwright** | 浏览器自动化 | 步骤 5/6（前端） | ⚠️ 仅前端项目 |
+| **serena** | LSP 语义编码 | 步骤 1/4/5 | 🟢 高增益（需 Python 3.10+ + uv） |
+
+### 速用示例
+
+```bash
+# 一键安装所有 7 个 mcp
+/icode install
+
+# 只装一个
+/icode install context7
+
+# 跳过自动装依赖（自己装）
+/icode install --no-auto-install
+
+# 对应卸载
+./mcp/uninstall.sh                  # 全部卸载
+./mcp/uninstall.sh playwright       # 只卸 playwright
+```
+
+### 工具命名约定
+
+实际工具名格式：`mcp__<server-name>__<tool-name>`
+
+- 示例：`mcp__sequential-thinking__sequentialthinking` / `mcp__vision-bridge__analyze_media` / `mcp__memory__read_graph` / `mcp__serena__find_symbol` / `mcp__playwright__browser_navigate`
+
+### sequential-thinking（强制思考前置）
+
+- **必装**。所有步骤必用，详见 [references/thinking_core.md](references/thinking_core.md)
+- 强证据：`mcp__sequential-thinking__sequentialthinking`（至少 3 步）
+- 降级：`### 结构化思考` 文字块（一项不可省）
+
+### vision-bridge（图片/视频理解）
 
 视觉理解是可选增强，**统一走 `mcp__vision-bridge__analyze_media` 工具**。
 
-- **装好 vision-bridge 后**：禁止把图片/视频作为附件直接传给 session 模型，必须通过该 MCP 工具
-- **装好但 config.json 缺必填字段（base_url/api_key/model）**：`analyze_media` 工具返回 fallback 提示字符串，session 模型按默认会话模型原生能力处理原图——**等同于未装 vision-bridge 的行为**，不报错、不阻塞
-- **未装 vision-bridge 时**：不做约定——session 模型按其原生多模态能力处理，是否能用、错误由用户自负
+- **装好 vision-bridge 且 `config.json` 配好三件套（base_url/api_key/model）**：`mcp__vision-bridge__analyze_media` 可用，**优先用 MCP 工具**走统一接口
+- **没装 vision-bridge，或装了但 `config.json` 三件套没填**：`analyze_media` 工具返回 fallback 提示字符串，**降级**——AI 不替用户判断原生能力
+  - 原生支不支持图片/视频 **视具体 session 模型而定**（Opus/Sonnet 一般支持，Haiku 可能部分支持）
+  - **用户自己把握**原生能力是否够用；AI 不假装"可以原生处理"
+  - 不报错、不阻塞
 - **vision-bridge 不绑任何平台**：任何 OpenAI Chat Completions 兼容端点都能用，**不推荐任何 provider 或模型名**——用户自己填 `base_url` / `api_key` / `model`
 - 安装：`cd ~/.claude/skills/icode/mcp/vision-bridge && ./install.sh`，三件套在生成的 `config.json` 里配（不入 `~/.claude.json`，不污染环境）
 - 详见 [mcp/vision-bridge/README.md](mcp/vision-bridge/README.md)
+
+### 其他 4 个 MCP（memory / context7 / playwright / serena）
+
+详细说明（强证据 / 降级路径 / 工具签名 / 依赖）见 [references/mcp_integration.md](references/mcp_integration.md)。
+
+**关键约定**：
+- 每个 MCP 都标注**强证据**和**降级路径**
+- **不阻塞**：MCP 不可用不是错误，降级操作**完全合规**
+- **不假设即装**：session 模型上下文**不能假设**任一 MCP 已装，必须先判定
+
+---
 
 > **关于外部工具调研**：对于"是否值得引入第三方代码工具以优化 iCode"的判断结论（如 Tree-sitter 图谱、blast-radius 思路等），沉淀在 [references/external-tools-research.md](references/external-tools-research.md) 作为调研笔记，**非 SKILL 集成、零必装依赖**，仅供未来用户决策时参考。
 

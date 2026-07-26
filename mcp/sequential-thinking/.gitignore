@@ -1,0 +1,12 @@
+# Python 缓存（register_mcp.py 运行时产生）
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+
+# 环境文件
+.env
+.env.local
+
+# 运行时缓存
+.cache/

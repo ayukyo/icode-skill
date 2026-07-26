@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# vision-bridge 卸载: 从 ~/.claude.json 移除 MCP server
+# sequential-thinking 卸载: 从 ~/.claude.json 移除 MCP server
 # 使用:
 #   ./uninstall.sh         # 移除注册
 set -e
 
-SERVER_NAME="vision-bridge"
+SERVER_NAME="sequential-thinking"
 
 # 探测 Python 解释器(避免 Git Bash 下命中 WindowsApps 的 python3 stub)
 PYTHON_BIN=""
@@ -22,7 +22,7 @@ if [ -z "$PYTHON_BIN" ]; then
   exit 1
 fi
 
-echo "🧹 卸载 vision-bridge"
+echo "🧹 卸载 sequential-thinking"
 # 让 Python 自己解析 ~/.claude.json(避免 bash 传 MSYS 路径给 Python 引发 FileNotFoundError)
 "$PYTHON_BIN" - <<PYEOF
 import json

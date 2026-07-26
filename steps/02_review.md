@@ -195,3 +195,12 @@
 6. **全流程模式**：
    - 若 `unresolved_issues_at_cap == true`：**暂停**全流程串联，输出 `⚠️ 步骤2 存在未解决问题，请手动决定是否继续 /icode merge 或回到 /icode plan`
    - 否则：**立即继续执行步骤3**
+
+## MCP 工具（可选 + 降级）
+
+工作流 AI 工具按 [references/mcp_integration.md](../references/mcp_integration.md) 强证据逻辑判定可用性：
+
+- **强证据存在**：优先用 `mcp__<name>__<tool>` 工具调用
+- **强证据不存在**：走降级路径（原生 Bash / Read / Write / WebFetch 等），**不阻塞流程**
+
+本步骤推荐 MCP、配套降级路径详见 [references/mcp_per_step.md](../references/mcp_per_step.md) 本步骤行。

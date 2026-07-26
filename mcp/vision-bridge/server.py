@@ -10,6 +10,18 @@ import os
 import sys
 from pathlib import Path
 
+# 强制 stdout/stderr 用 UTF-8,兼容 Windows 默认 GBK 控制台。
+# Linux/macOS 默认 UTF-8,这段是 no-op 无副作用。
+# 必须在创建 FastMCP 之前执行,避免 MCP 内部 hook sys.stdout 时拿到 GBK 流。
+# 出错用 errors='replace' 而非忽略,确保异常堆栈不会丢字。
+for _stream in (sys.stdout, sys.stderr):
+    _reconfigure = getattr(_stream, "reconfigure", None)
+    if _reconfigure is not None:
+        try:
+            _reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
 # 确保 server.py 所在目录 (即 vision-bridge/) 在 sys.path 第一位,
 # 这样 from providers.xxx 能解析到 ./providers/。
 _SERVER_DIR = Path(__file__).resolve().parent

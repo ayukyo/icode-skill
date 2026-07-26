@@ -301,3 +301,12 @@ AI 解析自然语言的「目标工程」+「动作」：
 
 - **段零消费**：`/icode init`/`log`/`plan`/`start`/`fast` 启动时段零自动检索（见 [dir_and_metadata.md](../references/dir_and_metadata.md)「段零·工程文档检索」段）；**doc 自身不写 `_inject_cache.json`**（工单目录缓存，doc 不创建工单）
 - **可重复**：多次 `/icode doc` 覆盖更新，手动编辑受确认门保护
+
+## MCP 工具（可选 + 降级）
+
+工作流 AI 工具按 [references/mcp_integration.md](../references/mcp_integration.md) 强证据逻辑判定可用性：
+
+- **强证据存在**：优先用 `mcp__<name>__<tool>` 工具调用
+- **强证据不存在**：走降级路径（原生 Bash / Read / Write / WebFetch 等），**不阻塞流程**
+
+本步骤推荐 MCP、配套降级路径详见 [references/mcp_per_step.md](../references/mcp_per_step.md) 本步骤行。

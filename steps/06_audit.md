@@ -165,3 +165,12 @@
 
 **自动化要求**：实现可用 Bash + python 一行（例如 `python3 -c "import json,sys; d=json.load(open(sys.argv[1])); ..."` 嵌入式调用）；如失败则降级为手工填写模板 + 标 `[未自动化]`。
 
+
+## MCP 工具（可选 + 降级）
+
+工作流 AI 工具按 [references/mcp_integration.md](../references/mcp_integration.md) 强证据逻辑判定可用性：
+
+- **强证据存在**：优先用 `mcp__<name>__<tool>` 工具调用
+- **强证据不存在**：走降级路径（原生 Bash / Read / Write / WebFetch 等），**不阻塞流程**
+
+本步骤推荐 MCP、配套降级路径详见 [references/mcp_per_step.md](../references/mcp_per_step.md) 本步骤行。
