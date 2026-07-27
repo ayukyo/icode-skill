@@ -23,7 +23,7 @@
 >
 > 1. ToolSearch 取 `mcp__sequential-thinking__sequentialthinking` schema 加载
 > 2. 实际调用该工具，至少 3 步，每步对应该步骤声明的子项之一
-> 3. 调用成功 → 完成思考；调用返回错误/超时 → 才能进入降级路径
+> 3. 调用成功 -> 完成思考；调用返回错误/超时 -> 才能进入降级路径
 >
 > **禁止误判场景**（历史实测的踩坑模式，逐条禁止）：
 >
@@ -37,13 +37,13 @@
 >
 > **配置证据组**（必须**同时**成立）：
 >
-> 1. 已实际 Read `~/.claude.json` 的 `mcpServers` **与** 项目根 `.mcp.json`（若有）→ **都**无 `sequential-thinking` server
+> 1. 已实际 Read `~/.claude.json` 的 `mcpServers` **与** 项目根 `.mcp.json`（若有）-> **都**无 `sequential-thinking` server
 > 2. 系统提示 deferred tools 列表**未**列出 `mcp__sequential-thinking__sequentialthinking`
 >
 > **运行证据组**（满足任一即可）：
 >
-> 1. 已实际调用 ToolSearch 取 schema → 确认无命中
-> 2. 已实际调用 `mcp__sequential-thinking__sequentialthinking` → 确认返回错误/超时
+> 1. 已实际调用 ToolSearch 取 schema -> 确认无命中
+> 2. 已实际调用 `mcp__sequential-thinking__sequentialthinking` -> 确认返回错误/超时
 >
 > 两组证据**任一组全部满足**才能合法走降级。**任一组都不满足即不可走降级**，必须坚持首选路径。
 >
@@ -53,8 +53,14 @@
 
 1. 输出 `ultrathink` 触发词（触发更长的内部推理 budget）
 2. **显式 Read 本步骤引用的 references 文件**（每步必须重新 Read，同会话已读不豁免——显式Read是深度思考的前置仪式，凭记忆会降级思考质量），Read 后在回复中输出确认行 `📖 已 Read references/xxx.md` 作为合规证据
-3. 完成结构化思考（MCP 优先，不可用则降级文字块），至少 3 步，每步对应该步骤声明的子项之一
-4. 不得跳过思考直接产出——所有 Write/Edit 必须在思考证据之后
+3. **MCP 调用 gate**（v2.2 新增，不可跳过）：在结构化思考开始前，先处理本步 🟢 MCP（按 [mcp_per_step.md](mcp_per_step.md)「强证据场景判定」）：
+   - 列出本步满足强证据场景的 🟢 MCP（**不含 sequential-thinking**，它由第 4 步承载；**不含 serena**，它由各 step 执行步骤内嵌点承载）
+   - 对每个 🟢 MCP：ToolSearch 取 `mcp__<name>__<tool>` schema -> **实际调用一次** -> 把调用结果（成功/空/失败）写进思考块「MCP 调用」段
+   - 调用失败/返回空 -> 思考块写明降级原因（MCP 不可用 / 无相关结果 / 不适用场景）才能跳过；**未经实际调用就标降级 = 反偷懒第 21 条违规**
+   - ⚪ MCP（强证据场景不满足）无需评估无需声明
+   - **本步若无 🟢 MCP**（全 ⚪）：gate 直接通过，思考块记"本步无 🟢 MCP（强证据场景均不满足）"
+4. 完成结构化思考（sequential-thinking MCP 优先，不可用则降级文字块），至少 3 步，每步对应该步骤声明的子项之一
+5. 不得跳过思考直接产出——所有 Write/Edit 必须在思考证据之后
 
 ## 层级关系（API 层 / Hook 层 / Prompt 层 概览）
 

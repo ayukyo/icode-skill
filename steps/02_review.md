@@ -48,6 +48,8 @@
 
 **步骤 2.3 — 逐文件通读（必须先执行）**：
 从步骤1计划中识别所有涉及的文件（新建文件、修改文件、依赖文件），逐一通读。
+
+**serena 依赖审查（v2.2 执行步骤内嵌）**：若工程有可索引源码且 serena 可用，对计划涉及的每个待改符号，ToolSearch 取 `mcp__serena__find_referencing_symbols` schema -> 调用找所有调用方（"这个函数被哪些地方调用？"），结果作为维度6"现有实现对照"的依赖关系证据；serena 不可用/无 LSP -> 降级 grep `'<symbol>('`，产物「MCP 调用记录」标降级。**未经实际调用 serena 就标降级 = 反偷懒第 21 条违规**。
 - 对每个现有源文件，从头到尾阅读：函数/结构体/宏定义签名、调用关系、命名风格、错误处理模式
 - 对每个计划新建文件，列出其对外的接口承诺
 
@@ -195,18 +197,17 @@
 6. **全流程模式**：
    - 若 `unresolved_issues_at_cap == true`：**暂停**全流程串联，输出 `⚠️ 步骤2 存在未解决问题，请手动决定是否继续 /icode merge 或回到 /icode plan`
    - 否则：**立即继续执行步骤3**
+## MCP 推荐（v2.2 强证据二元化）
 
-## MCP 推荐（v2.1+ 强制）
-
-按 [references/mcp_per_step.md](../references/mcp_per_step.md) 推荐，本步骤 MCP：
+按 [references/mcp_per_step.md](../references/mcp_per_step.md)「强证据场景判定」，本步骤 MCP：
 
 | MCP | 推荐级别 | 用途 |
 |-----|----------|------|
 | sequential-thinking | 🟢 | 强制思考 |
-| serena | 🟡 | 依赖关系审查（这个函数被哪些地方调用？） |
-| context7 | 🟡 | 库 API 核对 |
-| memory | 🟡 | 跨工单 ADR 借鉴 |
-| vision-bridge | ⚪ | 本步骤不推荐 |
+| serena | 🟢* | 依赖关系审查（这个函数被哪些地方调用？）--有可索引源码时（步骤 2.3 内嵌） |
+| vision-bridge | 🟢* | 截图分析--用户给图时 |
+| context7 | ⚪ | 本步骤不推荐 |
+| memory | ⚪ | 本步骤不推荐 |
 | playwright | ⚪ | 本步骤不推荐 |
 
-**强制约束（v2.1+）**：🟢 sequential-thinking 必须调；🟡 三项应调用，未调需在思考块说明。详见 [SKILL.md](../SKILL.md)「MCP 调用覆盖强制化」。
+**强制约束（v2.2）**：🟢 必须调（满足强证据场景）；🟢* 默认 🟢 但需满足强证据场景才必调（不满足降 ⚪，无需声明）；⚪ 无需评估。serena 由执行步骤内嵌点承载，其余 🟢/🟢* 由 [thinking_core.md](../references/thinking_core.md) MCP gate 承载。详见 [SKILL.md](../SKILL.md)「MCP 调用覆盖强制化」+ [mcp_per_step.md](../mcp_per_step.md)「双保险机制」。

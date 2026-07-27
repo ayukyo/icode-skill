@@ -127,7 +127,7 @@ Free 阶段一次性完整覆盖全部 15 个角度。
 - **偏离/冗余**：逆推有，计划没提
 - **调用模式与工程不一致**（新增维度，独立于上面两类代码-计划 diff）：对代码中每个"跨模块/跨端点/跨层"调用，grep 同文件/同模块既有同类调用的写法，核对新增调用是否对齐工程主导模式。**这层对比专门抓"计划自己写错调用模式、代码按计划实现了、代码-计划 diff 无偏离但模式本身错了"的情况**——计划-代码 diff 发现不了，必须对照工程既有模式才能发现。若新增调用与工程主导模式不符（如工程统一走路由、同函数既有同类调用走路由，新增却直调）→ 标 issue，**计入 has_issues**（即使代码与计划一致，计划本身可能错）
 
-- **blast-radius 三链自检（新增）**：对 `code_files` 每个文件，输出三条 grep 结果作为"修改影响面证据"，与 Reverse 逆推的"跨文件调用关系"段互相印证。任一链 0 命中即不合规（未扫 = 自欺）。
+- **blast-radius 三链自检（新增）**：对 `code_files` 每个文件，**serena 优先**（v2.2 执行步骤内嵌）：若 serena 可用，ToolSearch 取 `mcp__serena__find_referencing_symbols` schema -> 对每个改动符号调用找所有引用点（语义精准 vs grep 文本匹配）；serena 不可用/无 LSP -> 降级下方三条 grep，产物「MCP 调用记录」标"serena 降级-无 LSP"。**未经实际调用 serena 就标降级 = 反偷懒第 21 条违规**。grep 结果作为"修改影响面证据"，与 Reverse 逆推的"跨文件调用关系"段互相印证。任一链 0 命中即不合规（未扫 = 自欺）。
   1. **caller 链**：`grep -rn '<改动的 func/类/全局符号>(' <project>` —— 列出所有 caller（含行号）
   2. **import 链**：`grep -rn '<改动的 header>' <project>` 或等价的 `import/from` 检索 —— 列出所有依赖入口
   3. **test 链**：`grep -rln '<符号\|<路径>' <test 目录>` —— 列出覆盖测试；无测试时显式标 `[无测试覆盖-符号 X]`，**不静默跳过**（让 has_issues 路径可触发）
@@ -185,18 +185,17 @@ Free 阶段一次性完整覆盖全部 15 个角度。
 - □ Free 每个角度 ≥3 检查点（file:line），表格填满
 - □ Fixed 每维度有 file:line 证据 + 评分理由 ≥2 句实质
 - □ 无"整体通过""无问题"等空泛结论（每条结论有具体证据）
+## MCP 推荐（v2.2 强证据二元化）
 
-## MCP 推荐（v2.1+ 强制）
-
-按 [references/mcp_per_step.md](../references/mcp_per_step.md) 推荐，本步骤 MCP：
+按 [references/mcp_per_step.md](../references/mcp_per_step.md)「强证据场景判定」，本步骤 MCP：
 
 | MCP | 推荐级别 | 用途 |
 |-----|----------|------|
 | sequential-thinking | 🟢 | 强制思考 |
-| serena | 🟢 | 找所有调用点评估影响 |
-| playwright | 🟢 | 跑 E2E（前端项目） |
-| memory | 🟡 | 跨工单回归 |
-| vision-bridge | 🟡 | UI 截图复检 |
+| serena | 🟢* | 找所有调用点评估 blast-radius--有可索引源码时（Reverse 阶段内嵌） |
+| playwright | 🟢* | 跑 E2E--前端工程时 |
+| vision-bridge | 🟢* | UI 截图复检--用户给图时 |
 | context7 | ⚪ | 本步骤不推荐 |
+| memory | ⚪ | 本步骤不推荐 |
 
-**强制约束（v2.1+）**：🟢 三项必须调（sequential-thinking + serena + playwright）；🟡 memory/vision-bridge 应调用，未调需在思考块说明。详见 [SKILL.md](../SKILL.md)「MCP 调用覆盖强制化」。
+**强制约束（v2.2）**：🟢 必须调（满足强证据场景）；🟢* 默认 🟢 但需满足强证据场景才必调（不满足降 ⚪，无需声明）；⚪ 无需评估。serena 由执行步骤内嵌点承载，其余 🟢/🟢* 由 [thinking_core.md](../references/thinking_core.md) MCP gate 承载。详见 [SKILL.md](../SKILL.md)「MCP 调用覆盖强制化」+ [mcp_per_step.md](../mcp_per_step.md)「双保险机制」。

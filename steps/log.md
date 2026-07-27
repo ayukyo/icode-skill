@@ -217,18 +217,17 @@
 4. 步骤1完成后切换 status 为 `plan_done`，`completed_steps` 追加 `"1"`
 
 详细衔接规则见 [01_plan.md](01_plan.md)。
+## MCP 推荐（v2.2 强证据二元化）
 
-## MCP 推荐（v2.1+ 强制）
-
-按 [references/mcp_per_step.md](../references/mcp_per_step.md) 推荐，本步骤 MCP：
+按 [references/mcp_per_step.md](../references/mcp_per_step.md)「强证据场景判定」，本步骤 MCP：
 
 | MCP | 推荐级别 | 用途 |
 |-----|----------|------|
 | sequential-thinking | 🟢 | 强制思考 + 3 质疑者 spawn |
-| context7 | 🟡 | 库 API 行为查证 |
-| vision-bridge | 🟡 | 错误截图分析 |
-| memory | 🟡 | 跨工单记忆 |
+| context7 | 🟢* | 库 API 行为查证--涉及第三方库时 |
+| vision-bridge | 🟢* | 错误截图分析--用户给截图时 |
+| memory | 🟢* | read_graph 查跨工单记忆--本工程有历史工单时 |
 | serena | ⚪ | 本步骤不推荐 |
 | playwright | ⚪ | 本步骤不推荐 |
 
-**强制约束（v2.1+）**：🟢 sequential-thinking 必须调（对抗质疑者独立 spawn）；🟡 三项应调用，未调需在思考块「MCP 评估」段写明不适用原因。详见 [references/anti_laziness.md](../references/anti_laziness.md) 第 21 条。
+**强制约束（v2.2）**：🟢 必须调（满足强证据场景）；🟢* 默认 🟢 但需满足强证据场景才必调（不满足降 ⚪，无需声明）；⚪ 无需评估。serena 由执行步骤内嵌点承载，其余 🟢/🟢* 由 [thinking_core.md](../references/thinking_core.md) MCP gate 承载。详见 [SKILL.md](../SKILL.md)「MCP 调用覆盖强制化」+ [mcp_per_step.md](../mcp_per_step.md)「双保险机制」。

@@ -69,7 +69,7 @@
 3. **强制思考前置**（不可跳过，缺证据视为不合规；**必须先 Read [references/thinking_core.md](../references/thinking_core.md) 完整内容（核心规则每步必读）+ 按需 Read [references/thinking_detail.md](../references/thinking_detail.md) 对应小节（各步骤子项/历史参考）+ [references/anti_laziness.md](../references/anti_laziness.md) 完整内容**（不得凭概述/记忆执行，否则产出不合规））：本步骤子项（至少3步）= 需求分解 → 方案分析 → 风险评估。**若步骤2有历史参考，在此处「历史参考」小节记录命中工单 id 与 ADR/风险要点，作为思考输入**
 4. 自动迁移（如上「## 前置：schema 迁移」段）—— 迁移到 v1.1
 5. 撰写计划：
-   a. **先了解现有工程**：阅读项目中现有的代码，了解目录结构、现有架构模式、可复用模块
+   a. **先了解现有工程**：阅读项目中现有的代码，了解目录结构、现有架构模式、可复用模块 **serena 优先（v2.2 执行步骤内嵌）**：若工程有可索引源码（.py/.ts/.js/.c/.cpp/.rs/.go/.java 等）且 serena 可用（`~/.claude.json` 注册 + deferred 列表有 `mcp__serena__find_symbol`），先 ToolSearch 取 schema -> `find_symbol` 找 entry/导出符号 -> `find_referencing_symbols` 摸清关键调用链，结果作为 §1.5 工程结构快照输入；serena 不可用/无 LSP -> 降级 Read+Grep，产物「MCP 调用记录」标"serena 降级-无 LSP"。**未经实际调用 serena 就标降级 = 反偷懒第 21 条违规**。
    b. **撰写计划**：包含以下 10 个章节（缺一不可）：
 
 需求描述（包含所有对话中讨论过的细节；若复用 `00_init.md`，需引用该文档关键章节并展开）：
@@ -179,18 +179,17 @@
      - `["0"]`/`["log"]` → 下一步是步骤1
      - `["0","1"]` 或 `["1"]` 或 `["log","1"]` → 下一步是步骤2
      - `["0","1","2"]` 或 `["1","2"]` → 下一步是步骤3
+## MCP 推荐（v2.2 强证据二元化）
 
-## MCP 推荐（v2.1+ 强制）
-
-按 [references/mcp_per_step.md](../references/mcp_per_step.md) 推荐，本步骤 MCP：
+按 [references/mcp_per_step.md](../references/mcp_per_step.md)「强证据场景判定」，本步骤 MCP：
 
 | MCP | 推荐级别 | 用途 |
 |-----|----------|------|
 | sequential-thinking | 🟢 | 强制思考 |
-| context7 | 🟢 | 库 API 核对（用 v3 还是 v2？） |
-| serena | 🟢 | 理解代码结构（哪些函数被谁调用） |
-| vision-bridge | 🟡 | 涉及 UI 设计时识别截图 |
-| memory | 🟡 | 跨工单偏好/项目特性 |
+| serena | 🟢* | 理解代码结构（哪些函数被谁调用）--有可索引源码时（执行步骤 5a 内嵌） |
+| context7 | 🟢* | 库 API 核对（用 v3 还是 v2？）--涉及第三方库时 |
+| vision-bridge | 🟢* | 识别截图--用户给图时 |
+| memory | 🟢* | read_graph 查跨工单记忆--本工程有历史工单时 |
 | playwright | ⚪ | 本步骤不推荐 |
 
-**强制约束（v2.1+）**：🟢 三项必须调（sequential-thinking + context7 + serena）；🟡 vision-bridge/memory 应调用，未调需在思考块「MCP 评估」段写明不适用原因。详见 [SKILL.md](../SKILL.md)「MCP 调用覆盖强制化」。
+**强制约束（v2.2）**：🟢 必须调（满足强证据场景）；🟢* 默认 🟢 但需满足强证据场景才必调（不满足降 ⚪，无需声明）；⚪ 无需评估。serena 由执行步骤内嵌点承载，其余 🟢/🟢* 由 [thinking_core.md](../references/thinking_core.md) MCP gate 承载。详见 [SKILL.md](../SKILL.md)「MCP 调用覆盖强制化」+ [mcp_per_step.md](../mcp_per_step.md)「双保险机制」。

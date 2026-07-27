@@ -2,9 +2,13 @@
 """
 lint_mcp_coverage.py —— 检查 icode 工单产物文件是否含「MCP 调用记录」段
 
-按 anti_laziness.md 第 21 条 + SKILL.md v2.1 强制化要求，每个步骤产物文件必须含：
+按 anti_laziness.md 第 21 条 + SKILL.md v2.2 强证据二元化要求，每个步骤产物文件必须含：
 - 「MCP 调用记录」段（标题级别 ## 或更小）
-- 至少包含本步骤 mcp_per_step.md 推荐 MCP 的调用结果记录
+- 至少包含本步骤无条件 🟢 MCP（sequential-thinking）的调用结果记录
+
+注：v2.2 二元化后，非 sequential-thinking MCP 的 🟢\* 取决于强证据场景（有可索引源码/涉及
+第三方库/用户给图/前端工程/有历史工单），lint 无法静态判定，其强制由 A 层（执行步骤内嵌）
++ B 层（thinking_core gate）承载，不在 lint。lint 只做最低形式兜底：段存在 + sequential-thinking 出现。
 
 用法:
     python3 tools/lint_mcp_coverage.py <out_dir>
@@ -29,19 +33,22 @@ from pathlib import Path
 from typing import Dict, List, Tuple, Optional
 
 
-# 矩阵映射（与 mcp_per_step.md 一致）
+# 矩阵映射（v2.2 二元化：只静态强制无条件 🟢 的 sequential-thinking）
+# 其他 MCP（serena/context7/vision-bridge/playwright/memory）的 🟢* 取决于强证据场景，
+# lint 无法静态判定 -> 强制由 A 层（执行步骤内嵌）+ B 层（thinking_core gate）承载。
+# lint 只保证「段存在 + sequential-thinking 出现」，真实调用覆盖由 A+B 层 + audit 终审保障。
 MATRIX = {
-    "00_init.md": ["sequential-thinking", "context7", "vision-bridge", "memory", "serena"],
-    "log.md": ["sequential-thinking", "context7", "vision-bridge", "memory"],
-    "doc.md": ["sequential-thinking", "serena", "context7", "memory"],
-    "01_plan.md": ["sequential-thinking", "context7", "serena", "vision-bridge", "memory"],
-    "02_review.md": ["sequential-thinking", "serena", "context7", "memory"],
+    "00_init.md": ["sequential-thinking"],
+    "log.md": ["sequential-thinking"],
+    "doc.md": ["sequential-thinking"],
+    "01_plan.md": ["sequential-thinking"],
+    "02_review.md": ["sequential-thinking"],
     "03_merge.md": ["sequential-thinking"],
-    "04_code.md": ["sequential-thinking", "serena", "context7", "memory", "vision-bridge"],
-    "05_deepcheck.md": ["sequential-thinking", "serena", "playwright", "memory", "vision-bridge"],
-    "06_audit.md": ["sequential-thinking", "vision-bridge", "playwright", "serena", "memory"],
-    "07_readme.md": ["sequential-thinking", "vision-bridge"],
-    "fast.md": ["sequential-thinking", "serena", "context7", "vision-bridge", "memory"],
+    "04_code.md": ["sequential-thinking"],
+    "05_deepcheck.md": ["sequential-thinking"],
+    "06_audit.md": ["sequential-thinking"],
+    "07_readme.md": ["sequential-thinking"],
+    "fast.md": ["sequential-thinking"],
     "install.md": ["sequential-thinking"],
     "status.md": ["sequential-thinking"],
     "list.md": ["sequential-thinking"],

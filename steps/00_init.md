@@ -264,24 +264,17 @@
 3. 步骤1完成后正常切换 `status` 为 `plan_done`，`completed_steps` 追加 `"1"`
 
 详细衔接规则见 [01_plan.md](01_plan.md)。
+## MCP 推荐（v2.2 强证据二元化）
 
-## MCP 推荐（v2.1+ 强制）
-
-按 [references/mcp_per_step.md](../references/mcp_per_step.md) 推荐，本步骤 MCP：
+按 [references/mcp_per_step.md](../references/mcp_per_step.md)「强证据场景判定」，本步骤 MCP：
 
 | MCP | 推荐级别 | 用途 |
 |-----|----------|------|
 | sequential-thinking | 🟢 | 强制思考前置（每步必用） |
-| context7 | 🟢 | 库调研（用 React 19 还是 18？） |
-| vision-bridge | 🟡 | 识别用户给的设计图/截图 |
-| memory | 🟡 | 记录用户偏好（上次他说 NoSQL） |
-| serena | 🟡 | 理解代码结构（哪些是入口、哪些是 API） |
+| context7 | 🟢* | 库调研（用 React 19 还是 18？）--需求涉及第三方库时 |
+| vision-bridge | 🟢* | 识别用户给的设计图/截图--用户给图时 |
+| memory | 🟢* | read_graph 查跨工单偏好--本工程有历史工单时 |
+| serena | ⚪ | 本步骤不推荐 |
 | playwright | ⚪ | 本步骤不推荐 |
 
-**强制约束（v2.1+）**：
-
-- 🟢 必须调：MCP 强证据存在（`~/.claude.json` 注册 + tool 在 deferred 列表）就**必须调用**。未调用需在产物文件「MCP 调用记录」段写明降级原因
-- 🟡 应该调：MCP 强证据存在就**应该调用**。未调用需在本步骤思考块「MCP 评估」段写明不适用原因
-- ⚪ 不必调：无需评估
-
-**违规判定**：缺「MCP 调用记录」段 = [references/anti_laziness.md](../references/anti_laziness.md) 第 21 条违规，步骤 6 audit 拒收。详见 [SKILL.md](../SKILL.md) 中的「MCP 调用覆盖强制化（v2.1+）」章节。
+**强制约束（v2.2）**：🟢 必须调（满足强证据场景）；🟢* 默认 🟢 但需满足强证据场景才必调（不满足降 ⚪，无需声明）；⚪ 无需评估。serena 由执行步骤内嵌点承载，其余 🟢/🟢* 由 [thinking_core.md](../references/thinking_core.md) MCP gate 承载。详见 [SKILL.md](../SKILL.md)「MCP 调用覆盖强制化」+ [mcp_per_step.md](../mcp_per_step.md)「双保险机制」。

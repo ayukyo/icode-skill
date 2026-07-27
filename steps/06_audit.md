@@ -164,18 +164,17 @@
 - **禁止与其他段合并**：本段独立 H2 标题，便于将来 grep 工具检索"## schema 状态汇总"
 
 **自动化要求**：实现可用 Bash + python 一行（例如 `python3 -c "import json,sys; d=json.load(open(sys.argv[1])); ..."` 嵌入式调用）；如失败则降级为手工填写模板 + 标 `[未自动化]`。
+## MCP 推荐（v2.2 强证据二元化）
 
-## MCP 推荐（v2.1+ 强制）
-
-按 [references/mcp_per_step.md](../references/mcp_per_step.md) 推荐，本步骤 MCP：
+按 [references/mcp_per_step.md](../references/mcp_per_step.md)「强证据场景判定」，本步骤 MCP：
 
 | MCP | 推荐级别 | 用途 |
 |-----|----------|------|
 | sequential-thinking | 🟢 | 强制思考 |
-| vision-bridge | 🟢 | UI 截图分析 |
-| playwright | 🟢 | 真实 UI 验证（截图、交互） |
-| serena | 🟡 | 调用链审计 |
-| memory | 🟡 | 跨工单 verdict 标注 |
+| vision-bridge | 🟢* | UI 截图分析--用户给图时 |
+| playwright | 🟢* | 真实 UI 验证（截图、交互）--前端工程时 |
+| serena | ⚪ | 本步骤不推荐 |
+| memory | ⚪ | 本步骤不推荐 |
 | context7 | ⚪ | 本步骤不推荐 |
 
-**强制约束（v2.1+）**：🟢 三项必须调（sequential-thinking + vision-bridge + playwright）；🟡 serena/memory 应调用，未调需在思考块说明。详见 [SKILL.md](../SKILL.md)「MCP 调用覆盖强制化」。
+**强制约束（v2.2）**：🟢 必须调（满足强证据场景）；🟢* 默认 🟢 但需满足强证据场景才必调（不满足降 ⚪，无需声明）；⚪ 无需评估。serena 由执行步骤内嵌点承载，其余 🟢/🟢* 由 [thinking_core.md](../references/thinking_core.md) MCP gate 承载。详见 [SKILL.md](../SKILL.md)「MCP 调用覆盖强制化」+ [mcp_per_step.md](../mcp_per_step.md)「双保险机制」。

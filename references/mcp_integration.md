@@ -5,6 +5,8 @@
 > 安装入口：`/icode install`（详见 [steps/install.md](../steps/install.md)）
 >
 > 步骤 × MCP 推荐矩阵：[mcp_per_step.md](mcp_per_step.md)
+>
+> **v2.2 二元化**：推荐级别改为 🟢 必须调 / ⚪ 不必调（消除 🟡），按 [mcp_per_step.md](mcp_per_step.md)「强证据场景判定」执行。本文档的「强证据 + 降级路径」仍适用，下文各 MCP 的「触发场景」即 v2.2 强证据场景。
 
 ## 判定 MCP 是否可用
 

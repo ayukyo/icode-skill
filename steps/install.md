@@ -104,14 +104,13 @@ icode 工作流强依赖 MCP（每个 mcp 子工程自带 `install.sh` 提供一
 - vision-bridge 不删 `.venv`（要彻底清用 `--purge`，待 vision-bridge 升级时支持）
 - serena 缓存可手动 `uv cache clean`
 - npm/uv 缓存系统级保留（不删，下次装仍可用）
+## MCP 推荐（v2.2 强证据二元化）
 
-## MCP 推荐（v2.1+ 强制）
-
-按 [references/mcp_per_step.md](../references/mcp_per_step.md) 推荐，本步骤 MCP：
+按 [references/mcp_per_step.md](../references/mcp_per_step.md)「强证据场景判定」，本步骤 MCP：
 
 | MCP | 推荐级别 | 用途 |
 |-----|----------|------|
 | sequential-thinking | 🟢 | 强制思考（每步必用） |
 | 其他 5 个 | ⚪ | 本步骤不推荐 |
 
-**强制约束（v2.1+）**：🟢 sequential-thinking 必须调。详见 [SKILL.md](../SKILL.md)「MCP 调用覆盖强制化」。
+**强制约束（v2.2）**：🟢 必须调（满足强证据场景）；🟢* 默认 🟢 但需满足强证据场景才必调（不满足降 ⚪，无需声明）；⚪ 无需评估。serena 由执行步骤内嵌点承载，其余 🟢/🟢* 由 [thinking_core.md](../references/thinking_core.md) MCP gate 承载。详见 [SKILL.md](../SKILL.md)「MCP 调用覆盖强制化」+ [mcp_per_step.md](../mcp_per_step.md)「双保险机制」。

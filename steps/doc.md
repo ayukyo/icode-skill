@@ -84,7 +84,7 @@ AI 解析自然语言的「目标工程」+「动作」：
 
 **去重**：详见 dir_and_metadata.md 同段「去重」两步（先按归一化绝对路径合并 + 再按 `key = <url_basename_sanitized>_<sha256(url+":"+branch)[:12]>` 去重，key 格式含模块名前缀便于人眼辨认，见 [dir_and_metadata.md](../references/dir_and_metadata.md)「module_docs key 计算」）。输出 modules 列表（每个含 url+branch+key+commit+path+type），写进工程 _meta.json 的 `module_deps` 字段。
 
-**代码特征扫描**：用 Grep 扫描工程代码特征，按本表「动态章节」段（doc_template.md「五」）决定追加哪些章节（AI 根据工程实际技术栈选 grep 模式，**不硬编码框架名**）。汇总「章节规划清单」：固定（00/10/90/99）+ 命中的动态章节。
+**代码特征扫描**：**serena 优先**（v2.2 执行步骤内嵌）：若工程有可索引源码且 serena 可用，ToolSearch 取 `mcp__serena__find_symbol` schema -> `find_symbol` 识别 entry 函数/导出 API/关键数据结构（比 grep 精准 10 倍，按符号语义非文本匹配），结果作为 00_overview.md「核心模块清单」+「全栈图」输入；serena 不可用/无 LSP -> 降级 Grep 扫描，产物「MCP 调用记录」标降级。**未经实际调用 serena 就标降级 = 反偷懒第 21 条违规**。用 Grep 扫描工程代码特征，按本表「动态章节」段（doc_template.md「五」）决定追加哪些章节（AI 根据工程实际技术栈选 grep 模式，**不硬编码框架名**）。汇总「章节规划清单」：固定（00/10/90/99）+ 命中的动态章节。
 
 ### 3. 增量判定（非全量时）
 
@@ -303,18 +303,17 @@ AI 解析自然语言的「目标工程」+「动作」：
 
 - **段零消费**：`/icode init`/`log`/`plan`/`start`/`fast` 启动时段零自动检索（见 [dir_and_metadata.md](../references/dir_and_metadata.md)「段零·工程文档检索」段）；**doc 自身不写 `_inject_cache.json`**（工单目录缓存，doc 不创建工单）
 - **可重复**：多次 `/icode doc` 覆盖更新，手动编辑受确认门保护
+## MCP 推荐（v2.2 强证据二元化）
 
-## MCP 推荐（v2.1+ 强制）
-
-按 [references/mcp_per_step.md](../references/mcp_per_step.md) 推荐，本步骤 MCP：
+按 [references/mcp_per_step.md](../references/mcp_per_step.md)「强证据场景判定」，本步骤 MCP：
 
 | MCP | 推荐级别 | 用途 |
 |-----|----------|------|
 | sequential-thinking | 🟢 | 强制思考 |
-| serena | 🟢 | 理解代码结构（比 Read 精准 10 倍） |
-| context7 | 🟡 | 库文档实时查询 |
-| memory | 🟡 | 跨工程知识库经验 |
-| vision-bridge | ⚪ | 本步骤不推荐 |
+| serena | 🟢* | 理解代码结构（比 Read 精准 10 倍）--有可索引源码时（执行步骤内嵌） |
+| vision-bridge | 🟢* | 截图分析--用户给图时 |
+| context7 | ⚪ | 本步骤不推荐 |
+| memory | ⚪ | 本步骤不推荐 |
 | playwright | ⚪ | 本步骤不推荐 |
 
-**强制约束（v2.1+）**：🟢 sequential-thinking + serena 必须调；🟡 context7/memory 应调用，未调需在思考块说明。详见 [SKILL.md](../SKILL.md)「MCP 调用覆盖强制化」。
+**强制约束（v2.2）**：🟢 必须调（满足强证据场景）；🟢* 默认 🟢 但需满足强证据场景才必调（不满足降 ⚪，无需声明）；⚪ 无需评估。serena 由执行步骤内嵌点承载，其余 🟢/🟢* 由 [thinking_core.md](../references/thinking_core.md) MCP gate 承载。详见 [SKILL.md](../SKILL.md)「MCP 调用覆盖强制化」+ [mcp_per_step.md](../mcp_per_step.md)「双保险机制」。

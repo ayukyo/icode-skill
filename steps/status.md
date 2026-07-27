@@ -131,14 +131,13 @@ schema: {template_version 字段读取方式：直接读 metadata.template_versi
 ## 不需要强制思考前置
 
 默认只读模式与 `--scan-verdict`（只读+提示）不产出代码/计划/审查文件，**不需要强制思考前置**，不需要 Read references。`--verdict` 标注模式是结构化字段写入（非思考/审查/编码），同样不需要强制思考前置，但须遵守本文件「反偷懒」约束。
+## MCP 推荐（v2.2 强证据二元化）
 
-## MCP 推荐（v2.1+ 强制）
-
-按 [references/mcp_per_step.md](../references/mcp_per_step.md) 推荐，本步骤 MCP：
+按 [references/mcp_per_step.md](../references/mcp_per_step.md)「强证据场景判定」，本步骤 MCP：
 
 | MCP | 推荐级别 | 用途 |
 |-----|----------|------|
 | sequential-thinking | 🟢 | 强制思考（每步必用） |
 | 其他 5 个 | ⚪ | 本步骤不推荐 |
 
-**强制约束（v2.1+）**：🟢 sequential-thinking 必须调。详见 [SKILL.md](../SKILL.md)「MCP 调用覆盖强制化」。
+**强制约束（v2.2）**：🟢 必须调（满足强证据场景）；🟢* 默认 🟢 但需满足强证据场景才必调（不满足降 ⚪，无需声明）；⚪ 无需评估。serena 由执行步骤内嵌点承载，其余 🟢/🟢* 由 [thinking_core.md](../references/thinking_core.md) MCP gate 承载。详见 [SKILL.md](../SKILL.md)「MCP 调用覆盖强制化」+ [mcp_per_step.md](../mcp_per_step.md)「双保险机制」。

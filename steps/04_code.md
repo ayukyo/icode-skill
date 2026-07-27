@@ -45,6 +45,8 @@
 
 严格按定稿计划实施编码。
 
+**符号定位（serena 优先，v2.2 执行步骤内嵌）**：编码前对计划 §5 声明的待改符号，若工程有可索引源码且 serena 可用：ToolSearch 取 `mcp__serena__find_symbol` + `mcp__serena__find_referencing_symbols` schema -> `find_symbol` 定位待改符号 -> `find_referencing_symbols` 找所有调用点（按符号语义非文本匹配，比 grep 精准）-> 结果作为下方「准入三链预扫」的语义增强。serena 不可用/无 LSP -> 降级下方 grep 三链预扫，产物「MCP 调用记录」标"serena 降级-无 LSP，用 grep 三链替代"。**未经实际调用 serena 就标降级 = 反偷懒第 21 条违规**。
+
 **准入（强制三链预扫，每条按 `文件:行号` 给出至少 1 条命中否则禁止 Edit）**：
 
 > 受影响的"改/新增符号"必须在 Edit 前 **逐个** 输出三条 grep 结果；任一条 0 命中即不合规（先扩大范围，仍 0 命中则按"未找到、不存在"在计划中标注，不能默默跳过）。本预扫每一步强制落地，**禁止**仅凭直觉/经验跳过（旧工程代码稀疏时，0 命中本就是信号）。
@@ -107,18 +109,17 @@
    - **写入 `code_deviations`**：若有主动偏离（见硬性要求第8条），将偏离记录数组写入 metadata `code_deviations`（每条含 plan_said / actual_done / reason），供步骤6 汇总；无偏离则写空数组 `[]`
    - **写入 `code_review_fix_with_issues`**（v1.x 新增，可选，默认 `false`）：4 维度复检未通过标记。`true` 时步骤 5/6 入口输出警告，audit 终审会看到此标记（**不阻断流程**，仅作可见性提示）
 3. 全流程模式：编译通过 + 1.5 复检通过则**立即继续执行步骤5**；编译失败或 1.5 复检失败则中止，提示用户修复
+## MCP 推荐（v2.2 强证据二元化）
 
-## MCP 推荐（v2.1+ 强制）
-
-按 [references/mcp_per_step.md](../references/mcp_per_step.md) 推荐，本步骤 MCP：
+按 [references/mcp_per_step.md](../references/mcp_per_step.md)「强证据场景判定」，本步骤 MCP：
 
 | MCP | 推荐级别 | 用途 |
 |-----|----------|------|
 | sequential-thinking | 🟢 | 强制思考 |
-| serena | 🟢 | 按符号编辑、重命名引用追踪（game-changer） |
-| context7 | 🟢 | 实时查库 API（防训练知识过时） |
-| memory | 🟡 | 项目特性（用 gRPC v3 / API 路径前缀） |
-| vision-bridge | 🟡 | 涉及 UI 实现时截图参照 |
+| serena | 🟢* | 按符号编辑、重命名引用追踪（game-changer）--有可索引源码时（编码实施内嵌） |
+| context7 | 🟢* | 实时查库 API（防训练知识过时）--涉及第三方库时 |
+| vision-bridge | 🟢* | 涉及 UI 实现时截图参照--用户给图时 |
+| memory | ⚪ | 本步骤不推荐 |
 | playwright | ⚪ | 本步骤不推荐 |
 
-**强制约束（v2.1+）**：🟢 三项必须调（sequential-thinking + serena + context7）；🟡 memory/vision-bridge 应调用，未调需在思考块说明。详见 [SKILL.md](../SKILL.md)「MCP 调用覆盖强制化」。
+**强制约束（v2.2）**：🟢 必须调（满足强证据场景）；🟢* 默认 🟢 但需满足强证据场景才必调（不满足降 ⚪，无需声明）；⚪ 无需评估。serena 由执行步骤内嵌点承载，其余 🟢/🟢* 由 [thinking_core.md](../references/thinking_core.md) MCP gate 承载。详见 [SKILL.md](../SKILL.md)「MCP 调用覆盖强制化」+ [mcp_per_step.md](../mcp_per_step.md)「双保险机制」。
