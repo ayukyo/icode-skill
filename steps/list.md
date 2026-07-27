@@ -144,3 +144,14 @@
 # 包含 stale 工单（默认排除）
 /icode list --include-stale
 ```
+
+## MCP 推荐（v2.1+ 强制）
+
+按 [references/mcp_per_step.md](../references/mcp_per_step.md) 推荐，本步骤 MCP：
+
+| MCP | 推荐级别 | 用途 |
+|-----|----------|------|
+| sequential-thinking | 🟢 | 强制思考（每步必用） |
+| 其他 5 个 | ⚪ | 本步骤不推荐 |
+
+**强制约束（v2.1+）**：🟢 sequential-thinking 必须调。详见 [SKILL.md](../SKILL.md)「MCP 调用覆盖强制化」。

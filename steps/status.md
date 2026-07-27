@@ -131,3 +131,14 @@ schema: {template_version 字段读取方式：直接读 metadata.template_versi
 ## 不需要强制思考前置
 
 默认只读模式与 `--scan-verdict`（只读+提示）不产出代码/计划/审查文件，**不需要强制思考前置**，不需要 Read references。`--verdict` 标注模式是结构化字段写入（非思考/审查/编码），同样不需要强制思考前置，但须遵守本文件「反偷懒」约束。
+
+## MCP 推荐（v2.1+ 强制）
+
+按 [references/mcp_per_step.md](../references/mcp_per_step.md) 推荐，本步骤 MCP：
+
+| MCP | 推荐级别 | 用途 |
+|-----|----------|------|
+| sequential-thinking | 🟢 | 强制思考（每步必用） |
+| 其他 5 个 | ⚪ | 本步骤不推荐 |
+
+**强制约束（v2.1+）**：🟢 sequential-thinking 必须调。详见 [SKILL.md](../SKILL.md)「MCP 调用覆盖强制化」。

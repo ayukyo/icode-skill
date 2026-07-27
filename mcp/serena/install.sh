@@ -136,13 +136,163 @@ fi
 
 echo ""
 echo "🎉 完成!"
-echo "   首次调用 uvx 会自动从 git clone serena (约 50MB)。"
-echo "   ⚠️ 需要装至少一个 LSP server 才能用:"
-echo "      • Python:      pip install pyright"
-echo "      • JS/TS:       npm install -g typescript-language-server typescript"
-echo "      • C/C++:       系统装 clangd (apt install clangd / brew install clangd)"
-echo "      • Rust:        rustup component add rust-analyzer"
-echo "      • Java:        系统装 jdtls"
-echo "      • Go:          系统装 gopls"
+echo "   v2.1+ 已通过 uv tool install 持久化安装 serena-agent (含 serena CLI)。"
+echo "   后续启动秒级 (无 git fetch), 详见 scripts/register_mcp.py"
+
+# v2.1+: 自动探测 LSP server 状态（按 mcp_per_step.md 推荐 🟢 必装段）
+echo ""
+echo "🔍 探测 LSP server 状态（serena 必需）:"
+LSP_FOUND=0
+check_lsp() {
+    local cmd="$1"
+    local lang="$2"
+    local install_cmd="$3"
+    if command -v "$cmd" >/dev/null 2>&1; then
+        echo "  ✅ $lang ($cmd) — 可用"
+        LSP_FOUND=$((LSP_FOUND + 1))
+    else
+        echo "  ⚠️  $lang ($cmd) — 未装，建议: $install_cmd"
+    fi
+}
+check_lsp pyright                   "Python"     "pip install pyright"
+check_lsp clangd                     "C/C++"      "apt install clangd / brew install clangd"
+check_lsp typescript-language-server "JS/TS"      "npm install -g typescript-language-server typescript"
+check_lsp rust-analyzer              "Rust"       "rustup component add rust-analyzer"
+check_lsp jdtls                      "Java"       "系统装 jdtls"
+check_lsp gopls                      "Go"         "系统装 gopls"
+
+# v2.1+ 主动装兜底 LSP server：如果 LSP_FOUND == 0，主动 pip install pyright
+# pyright 是纯 Python 跨平台 LSP，无系统包管理器依赖，装上至少让 serena 能启动不超时
+# 用户工程是 C/JS/Rust 等其他语言时，serena 会按需提示装对应 LSP
+attempt_install_pyright() {
+    echo ""
+    echo "ℹ️  LSP server 覆盖不足（< 2），主动装 pyright（跨平台兜底）..."
+    # 优先用 pip（跨平台）
+    if command -v pip3 >/dev/null 2>&1; then
+        if pip3 install --user pyright 2>&1 | tail -3; then
+            return 0
+        fi
+    fi
+    if command -v pip >/dev/null 2>&1; then
+        if pip install --user pyright 2>&1 | tail -3; then
+            return 0
+        fi
+    fi
+    # npm fallback（pyright 也有 npm 包）
+    if command -v npm >/dev/null 2>&1; then
+        if npm install -g pyright 2>&1 | tail -3; then
+            return 0
+        fi
+    fi
+    return 1
+}
+
+if [ "$LSP_FOUND" -lt 2 ] && [ "${1:-}" != "--no-auto-install" ]; then
+    # LSP_FOUND < 2 时主动装 pyright 兜底（跨平台纯 Python，无系统依赖）
+    # 即使已有 rust-analyzer 等，pyright 仍能补充 Python 语言覆盖
+    if ! command -v pyright >/dev/null 2>&1; then
+        if attempt_install_pyright; then
+            # 装完重新探测
+            if command -v pyright >/dev/null 2>&1; then
+                echo "  ✅ Python (pyright) - 已自动安装"
+                LSP_FOUND=$((LSP_FOUND + 1))
+            fi
+        else
+            echo "  ⚠️  pyright 自动安装失败，请手动装"
+        fi
+    fi
+fi
+
+echo ""
+if [ "$LSP_FOUND" -eq 0 ]; then
+    echo "❌ 未检测到任何 LSP server -- serena 启动后 find_symbol 会超时不可用"
+    echo "   至少装一个 LSP server 后重启 Claude Code 才能用 serena 🟢 推荐"
+    echo "   跨平台兜底: pip install pyright"
+elif [ "$LSP_FOUND" -lt 2 ]; then
+    echo "⚠️  只检测到 $LSP_FOUND 个 LSP server -- serena 可用但语言覆盖不足"
+    echo "   按 SKILL.md v2.1 推荐: 至少装 2 个 LSP server 覆盖主力语言"
+    echo "   跨平台兜底: pip install pyright（已装则跳过）"
+else
+    echo "✅ 检测到 $LSP_FOUND 个 LSP server -- serena 🟢 可正常用"
+fi
+
+# v2.1+ 预下载 serena 期望位置的 clangd 19.1.2（避免 serena 启动时从 github 下载超时）
+# serena 的 solidlsp 库不读系统 clangd，非要自己下载 clangd 19.1.2 到 ~/.serena/language_servers/
+# 在 github.com 网络受限环境（中国典型）会超时失败，导致 find_symbol 不可用
+# 本段主动预下载（多镜像 fallback），让 serena 启动时直接用已下载的 clangd
+CLANGD_VERSION="19.1.2"
+CLANGD_TARGET_DIR="$HOME/.serena/language_servers/static/ClangdLanguageServer/clangd/clangd_${CLANGD_VERSION}"
+CLANGD_BIN="$CLANGD_TARGET_DIR/bin/clangd"
+
+if [ ! -x "$CLANGD_BIN" ] && [ "${1:-}" != "--no-auto-install" ]; then
+    echo ""
+    echo "🔍 预下载 serena 期望的 clangd ${CLANGD_VERSION}（避免 serena 启动时 github 下载超时）..."
+    # 探测 OS + 架构
+    _os="$(uname -s 2>/dev/null || echo Linux)"
+    _arch="$(uname -m 2>/dev/null || echo x86_64)"
+    case "$_os:$_arch" in
+        Linux:x86_64)   CLANGD_PKG="clangd-linux-${CLANGD_VERSION}.zip" ;;
+        Linux:aarch64)  CLANGD_PKG="clangd-linux-arm64-${CLANGD_VERSION}.zip" ;;
+        Darwin:x86_64|Darwin:arm64) CLANGD_PKG="clangd-mac-${CLANGD_VERSION}.zip" ;;
+        *)              CLANGD_PKG="" ;;
+    esac
+
+    if [ -z "$CLANGD_PKG" ]; then
+        echo "  ⚠️  不支持的平台 $_os:$_arch，跳过 clangd 预下载"
+        echo "      serena 启动时会自己尝试下载（可能超时）"
+    else
+        # 多镜像 fallback（github 直连 + 国内镜像）
+        GH_URL="https://github.com/clangd/clangd/releases/download/${CLANGD_VERSION}/${CLANGD_PKG}"
+        MIRRORS=(
+            "https://gh-proxy.com/${GH_URL}"
+            "https://mirror.ghproxy.com/${GH_URL}"
+            "https://ghfast.top/${GH_URL}"
+            "${GH_URL}"
+        )
+        CLANGD_DOWNLOADED=0
+        TMP_ZIP="$(mktemp -t clangd_XXXXXX.zip 2>/dev/null || mktemp).zip"
+        for mirror_url in "${MIRRORS[@]}"; do
+            echo "  -> 试 ${mirror_url}"
+            if wget -q --timeout=170 -O "$TMP_ZIP" "$mirror_url" 2>&1; then
+                # 验证 zip 完整性
+                if unzip -t "$TMP_ZIP" >/dev/null 2>&1; then
+                    CLANGD_DOWNLOADED=1
+                    echo "  ✅ 下载成功 (${mirror_url})"
+                    break
+                fi
+            fi
+            rm -f "$TMP_ZIP"
+        done
+
+        if [ "$CLANGD_DOWNLOADED" = "1" ]; then
+            mkdir -p "$CLANGD_TARGET_DIR"
+            TMP_EXTRACT="$(mktemp -d)"
+            if unzip -q "$TMP_ZIP" -d "$TMP_EXTRACT" 2>&1; then
+                # 找解压出的 clangd_19.1.2 目录
+                EXTRACTED_DIR=$(find "$TMP_EXTRACT" -maxdepth 1 -type d -name "clangd_*" | head -1)
+                if [ -n "$EXTRACTED_DIR" ]; then
+                    cp -r "$EXTRACTED_DIR"/* "$CLANGD_TARGET_DIR/"
+                    chmod +x "$CLANGD_BIN" 2>/dev/null
+                    if "$CLANGD_BIN" --version >/dev/null 2>&1; then
+                        echo "  ✅ clangd ${CLANGD_VERSION} 已装到 $CLANGD_BIN"
+                        echo "     $("$CLANGD_BIN" --version 2>&1 | head -1)"
+                    else
+                        echo "  ⚠️  clangd 装到 $CLANGD_BIN 但无法执行"
+                    fi
+                else
+                    echo "  ⚠️  解压成功但未找到 clangd_* 目录"
+                fi
+            else
+                echo "  ⚠️  解压失败"
+            fi
+            rm -rf "$TMP_EXTRACT" "$TMP_ZIP"
+        else
+            echo "  ⚠️  所有镜像下载失败，serena 启动时会自己尝试（可能超时）"
+            echo "      手动下载 $GH_URL 解压到 $CLANGD_TARGET_DIR/"
+        fi
+    fi
+fi
+
+echo ""
 echo "   完整语言支持: https://github.com/oraios/serena"
 echo "   ⚠️ 重启 Claude Code 让注册生效。"

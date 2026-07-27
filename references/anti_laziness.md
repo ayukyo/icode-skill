@@ -30,6 +30,15 @@
 20. **跨分支借鉴 project_docs / module_docs 不核对分支**：DOC 步骤生成的工程文档 `project_docs/<project_id>/<branch>/_meta.json`（**按分支分目录存储**，如 `project_docs/myproject/main/_meta.json` vs `project_docs/myproject/feature/_meta.json`，切分支跑 doc 自动落到对应分支目录、天然隔离不互相覆盖）+ 模块文档 `module_docs/<key>/_meta.json` 均**显式持久化分支字段**（`branch`/`head_commit` 或模块 `branch`/`current_commit`）。下游 init/plan/log/start/fast 段零注入此文档作思考输入时：①**段零只读当前分支子目录**（不交叉读 `<project_id>/` 下其他分支目录，避免跨分支复用——分支子目录隔离有第二层防误借鉴作用）；②但仍须比对当前 cwd `git rev-parse --abbrev-ref HEAD` + `git rev-parse --short HEAD` 与当前分支目录下 `_meta.json.branch` + `head_commit` 兜底：分支不一致（如 `_meta.json.branch = main` 但当前在 `feature`，或 stale 文件漂移导致子目录错位）→ **整个 project_docs 当 stale 处理**（按「stale 章节降级注入」只注简要说明 + ⚠️ 警告行，**绝不注正文**），因为"在 main 看到的"≠"在 feature 看到的"——接口/调用链/契约可能差很多，盲目照搬带歪下游 init/plan；③**模块文档分支与工程 pin 分支不一致**（如模块文档基于 `dev` 但工程 `.gitmodules` / `.repo/manifest.xml` pin 在 `main`）→ 同上，整个 module_docs 当 stale 降级注入；④**detached HEAD 视为特殊态**（`_meta.json.branch = null` 或分支目录落 `(detached)`）→ 跳过分支校验，只走 commit 一致性 + 锚点校验 + 不盲信约束。**禁止**：①仅看 commit 短哈希貌似一致（detached HEAD 切到任意 commit 都可能"碰巧"等于一个旧 commit）就当新鲜文档注入——**必须 branch 优先**，branch 不一致直接降级不注入正文；②**禁止**段零检索时跨分支混读（如当前在 `feature` 时把 `main` 子目录下章节也纳入候选集），即使 top-N 排序看似更相关——分支隔离是硬约束不是软推荐（实测踩坑：用户切到 feature 分支跑新需求，模型把 main 分支上的 module_docs 当新鲜参考注入，导致 ADR/接口完全跑偏）
 （项目目录布局 v1 → v2 迁移约束已降级到 doc.md 步骤 5.0.6，本条不再在 anti_laziness 重复——22 条 → 20 条）
 
+21. **跳过推荐 MCP（v2.1 新增）**：按 [references/mcp_per_step.md](../mcp_per_step.md) 推荐的 MCP（🟢 必须调 / 🟡 应该调），强证据存在（MCP 在 `~/.claude.json` 注册 且 tool 在 deferred tools 列表）但 AI 未调用且未在思考块「MCP 评估」段写明原因 = 合规问题。**偷工表现**：①默认只调 sequential-thinking（必用项），其他 MCP 全部跳过；②把 MCP 推荐 🟢 看作 🟡 "可选"，不调用无降级声明；③产物文件（01_plan.md / 02_review.md / 03_plan_final.md / 04_code_review_fix.md / 05_deepcheck.md / 06_audit.md / log_analysis.md / 00_init.md）不含「MCP 调用记录」段；④对 🟡 MCP 直接跳过不评估适用性。**必须**：①按 [references/mcp_per_step.md](../mcp_per_step.md) 推荐级别判定调用（🟢 必调 / 🟡 应该调 / ⚪ 不必调）；②每个产物文件必含「MCP 调用记录」段，每行注明调用结果 + 证据；③🟢 未调用需写降级原因（MCP 不可用 / LSP server 缺失 / 不适用场景）；④🟡 未调用需在思考块「MCP 评估」段写明不适用原因（不写 = 合规问题）。**反例**：plan 步骤推荐 sequential-thinking 🟢 + context7 🟡 + memory 🟡 + serena 🟢，但 AI 只调 sequential-thinking，其余 3 个 MCP 全部跳过且无降级声明——属第 21 条违规。属第 21 条违规。
+
+**v2.1.1 强化"先尝试调用"硬约束**（基于 demo-10 实测发现 AI 倾向"被动不调用"）：
+- 🟢 必须调的 MCP，**必须先实际调用一次**（ToolSearch 取 schema + 真实 tool_call），调用返回错误/超时/空结果才能标"降级"或"不适用"--不得未经实际调用就标"不适用"
+- 🟡 应该调的 MCP，**优先实际调用一次**评估适用性；若明确判断不适用（如 CLI 工程的 playwright），可在思考块「MCP 评估」段写明"工程类型不匹配"而不调用，但必须给出具体判断依据（如"demo 是 C CLI 工程无 UI，playwright 不适用"）
+- **反例 2（v2.1.1）**：memory 🟡 在 demo-10 全 6 步标"不适用"但从未实际调用 `mcp__memory__read_graph` 一次--属第 21 条违规（应先调用 read_graph 查跨工单记忆，确认无相关记忆后才标"不适用"）
+- **合规做法**：先 `mcp__memory__read_graph()` -> 返回空图 -> 思考块写"read_graph 返回空，无相关跨工单记忆，本步骤 memory 不适用" -> 产物文件 MCP 调用记录标"✅ 调用 read_graph 返回空图，不适用"
+
+
 ## 合规要求（正面执行）
 
 - 步骤定义里写"至少 N 步" / "至少 N 项" / "N 个维度"——**必须 ≥ N**，不得以"N-1 个已经够了"为由减少

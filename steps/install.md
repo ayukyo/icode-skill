@@ -104,3 +104,14 @@ icode 工作流强依赖 MCP（每个 mcp 子工程自带 `install.sh` 提供一
 - vision-bridge 不删 `.venv`（要彻底清用 `--purge`，待 vision-bridge 升级时支持）
 - serena 缓存可手动 `uv cache clean`
 - npm/uv 缓存系统级保留（不删，下次装仍可用）
+
+## MCP 推荐（v2.1+ 强制）
+
+按 [references/mcp_per_step.md](../references/mcp_per_step.md) 推荐，本步骤 MCP：
+
+| MCP | 推荐级别 | 用途 |
+|-----|----------|------|
+| sequential-thinking | 🟢 | 强制思考（每步必用） |
+| 其他 5 个 | ⚪ | 本步骤不推荐 |
+
+**强制约束（v2.1+）**：🟢 sequential-thinking 必须调。详见 [SKILL.md](../SKILL.md)「MCP 调用覆盖强制化」。

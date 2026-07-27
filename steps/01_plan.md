@@ -180,11 +180,17 @@
      - `["0","1"]` 或 `["1"]` 或 `["log","1"]` → 下一步是步骤2
      - `["0","1","2"]` 或 `["1","2"]` → 下一步是步骤3
 
-## MCP 工具（可选 + 降级）
+## MCP 推荐（v2.1+ 强制）
 
-工作流 AI 工具按 [references/mcp_integration.md](../references/mcp_integration.md) 强证据逻辑判定可用性：
+按 [references/mcp_per_step.md](../references/mcp_per_step.md) 推荐，本步骤 MCP：
 
-- **强证据存在**：优先用 `mcp__<name>__<tool>` 工具调用
-- **强证据不存在**：走降级路径（原生 Bash / Read / Write / WebFetch 等），**不阻塞流程**
+| MCP | 推荐级别 | 用途 |
+|-----|----------|------|
+| sequential-thinking | 🟢 | 强制思考 |
+| context7 | 🟢 | 库 API 核对（用 v3 还是 v2？） |
+| serena | 🟢 | 理解代码结构（哪些函数被谁调用） |
+| vision-bridge | 🟡 | 涉及 UI 设计时识别截图 |
+| memory | 🟡 | 跨工单偏好/项目特性 |
+| playwright | ⚪ | 本步骤不推荐 |
 
-本步骤推荐 MCP、配套降级路径详见 [references/mcp_per_step.md](../references/mcp_per_step.md) 本步骤行。
+**强制约束（v2.1+）**：🟢 三项必须调（sequential-thinking + context7 + serena）；🟡 vision-bridge/memory 应调用，未调需在思考块「MCP 评估」段写明不适用原因。详见 [SKILL.md](../SKILL.md)「MCP 调用覆盖强制化」。

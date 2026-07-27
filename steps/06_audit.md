@@ -165,12 +165,17 @@
 
 **自动化要求**：实现可用 Bash + python 一行（例如 `python3 -c "import json,sys; d=json.load(open(sys.argv[1])); ..."` 嵌入式调用）；如失败则降级为手工填写模板 + 标 `[未自动化]`。
 
+## MCP 推荐（v2.1+ 强制）
 
-## MCP 工具（可选 + 降级）
+按 [references/mcp_per_step.md](../references/mcp_per_step.md) 推荐，本步骤 MCP：
 
-工作流 AI 工具按 [references/mcp_integration.md](../references/mcp_integration.md) 强证据逻辑判定可用性：
+| MCP | 推荐级别 | 用途 |
+|-----|----------|------|
+| sequential-thinking | 🟢 | 强制思考 |
+| vision-bridge | 🟢 | UI 截图分析 |
+| playwright | 🟢 | 真实 UI 验证（截图、交互） |
+| serena | 🟡 | 调用链审计 |
+| memory | 🟡 | 跨工单 verdict 标注 |
+| context7 | ⚪ | 本步骤不推荐 |
 
-- **强证据存在**：优先用 `mcp__<name>__<tool>` 工具调用
-- **强证据不存在**：走降级路径（原生 Bash / Read / Write / WebFetch 等），**不阻塞流程**
-
-本步骤推荐 MCP、配套降级路径详见 [references/mcp_per_step.md](../references/mcp_per_step.md) 本步骤行。
+**强制约束（v2.1+）**：🟢 三项必须调（sequential-thinking + vision-bridge + playwright）；🟡 serena/memory 应调用，未调需在思考块说明。详见 [SKILL.md](../SKILL.md)「MCP 调用覆盖强制化」。

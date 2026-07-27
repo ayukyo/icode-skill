@@ -408,30 +408,66 @@ ICODE_OUT_DIR=".icode_output/.icode_output_${LAST}"
 - **跨会话恢复**：运行 `ls -d .icode_output/.icode_output_*` 确认目录后，直接调用对应步骤即可
 - **中断恢复**：重新执行某步骤可覆盖该步骤输出
 
-## 可选增强：MCP 工具集（6 个 MCP，按需降级）
+### MCP 调用覆盖强制化（v2.1+）
 
-icode 工作流可调用 6 个 MCP（`/icode install` 一键安装）。**每个 MCP 都是可选 + 降级**——用户可能不装，AI 必须按"强证据判定"逻辑自适应。
+> **核心原则**：MCP 工具是 icode 工作流的核心增强，不是装饰。SKILL.md 旧版本（v2.0）只把 MCP 当作"可选 + 降级"——导致 AI 默认只调 sequential-thinking（必用项），其他 MCP 全部跳过。**v2.1 起强制化**：
+
+**强制规则**：
+
+1. **每个步骤产物文件必须含「MCP 调用记录」段**（01_plan.md / 02_review.md / 03_plan_final.md / 04_code_review_fix.md / 05_deepcheck.md / 06_audit.md / log_analysis.md / 00_init.md）：
+   - 列本步骤按 [references/mcp_per_step.md](references/mcp_per_step.md) 推荐的 MCP
+   - 每行注明：调用成功 / 降级 / 不适用 + 证据
+   - 缺此段 = 反偷懒第 21 条违规，步骤6 audit 拒收
+
+2. **🟢 必须调的 MCP**：强证据存在必须调用，未调用需在「MCP 调用记录」写降级原因（MCP 不可用 / LSP server 缺失 / 不适用场景）
+
+3. **🟡 应该调的 MCP**：强证据存在应该调用，未调用需在思考块「MCP 评估」段写明原因
+
+4. **强制思考时**：除 sequential-thinking 外，每个 🟢 MCP 都必须实际尝试调用（ToolSearch + 调用），失败/降级才能跳过
+
+**降级路径仍然合规**：MCP 真的不可用（tool unavailable / LSP server 缺失），用 Bash/Read/Write/Grep 等原生工具替代——降级不是错误，但**必须显式声明**。
+
+**与 v2.0 的破兼容性变更**：
+
+| 项 | v2.0 | v2.1 |
+|---|---|---|
+| 🟢 语义 | "强证据优先"（推荐） | "必须调"（强制 + 降级声明）|
+| 🟡 语义 | "视情况"（可选） | "应该调"（思考块说明）|
+| 产物要求 | 无 | 必须含「MCP 调用记录」段 |
+| 覆盖率要求 | 无 | 反偷懒第 21 条 + audit 拒收 |
+
+详见 [references/mcp_per_step.md](references/mcp_per_step.md) 的"v2.1 强制化"段。
+
+## MCP 工具集（v2.1 强制化覆盖）
+
+icode 工作流可调用 6 个 MCP（`/icode install` 一键安装）。**v2.0 把 MCP 视为"可选 + 降级"，v2.1 改为分级强制调用**——按 [references/mcp_per_step.md](references/mcp_per_step.md) 推荐级别（🟢 必须调 / 🟡 应该调 / ⚪ 不必调）执行。
 
 **核心文档**：
 - [references/mcp_integration.md](references/mcp_integration.md)：**每个 MCP 的强证据 + 降级路径**（必读）
-- [references/mcp_per_step.md](references/mcp_per_step.md)：**步骤 × MCP 推荐矩阵**
+- [references/mcp_per_step.md](references/mcp_per_step.md)：**步骤 × MCP 推荐矩阵（v2.1 强制化）**
+- 本文件「MCP 调用覆盖强制化（v2.1+）」章节：强制规则
 
 **判定逻辑**：AI 在每个步骤开始前，按 [references/thinking_core.md](references/thinking_core.md) 的"强证据"逻辑判定：
 - 证据 A：`Read ~/.claude.json` 的 `mcpServers.<name>` 段存在
 - 证据 B：当前会话 deferred tools 列表里有 `mcp__<name>__<tool>`
 
-**任一即视为"已配置可用"** → 优先用 MCP 工具；**否则走降级路径**（Bash/Read/Write/WebFetch/Grep 等原生工具）。**降级不是错误**。
+**任一即视为"已配置可用"**：
+- 🟢 必须调 MCP → 立即调用
+- 🟡 应该调 MCP → 调用除非明确不适用（思考块说明）
+- ⚪ 不必调 MCP → 无需评估
+
+**未调用合规处理**：🟢 需在产物文件「MCP 调用记录」段写降级原因；🟡 需在思考块「MCP 评估」段写不适用原因。**降级路径仍然合规**（MCP 真不可用 → Bash/Read/Write/Grep 原生工具替代），但**必须显式声明**。
 
 ### 6 个 MCP 速览
 
-| MCP | 用途 | 触发场景 | 必装？ |
+| MCP | 用途 | 触发场景 | 推荐级别 |
 |---|---|---|---|
-| **sequential-thinking** | 强制思考前置 | 所有步骤 | ✅ 必装 |
-| **vision-bridge** | 图片/视频理解 | 涉及媒体/UI | ✅ 必装（需 KEY） |
-| **memory** | 跨工单记忆 | 长期项目 | 🟡 推荐 |
-| **context7** | 库文档实时查询 | 步骤 0/1/4 | 🟢 推荐 |
-| **playwright** | 浏览器自动化 | 步骤 5/6（前端） | ⚠️ 仅前端项目 |
-| **serena** | LSP 语义编码 | 步骤 1/4/5 | 🟢 高增益（需 Python 3.10+ + uv） |
+| **sequential-thinking** | 强制思考前置 | 所有步骤 | 🟢 必须调 |
+| **vision-bridge** | 图片/视频理解 | 涉及媒体/UI | 🟢 必须调（需 KEY） |
+| **memory** | 跨工单记忆 | 长期项目 | 🟡 应该调 |
+| **context7** | 库文档实时查询 | 步骤 0/1/4 | 🟢 必须调 |
+| **playwright** | 浏览器自动化 | 步骤 5/6（前端） | 🟡 应该调（仅前端项目） |
+| **serena** | LSP 语义编码 | 步骤 1/4/5 | 🟢 必须调（需 Python 3.10+ + uv） |
 
 ### 速用示例
 

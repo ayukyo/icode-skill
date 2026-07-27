@@ -217,11 +217,17 @@
 
 详细衔接规则见 [01_plan.md](01_plan.md)。
 
-## MCP 工具（可选 + 降级）
+## MCP 推荐（v2.1+ 强制）
 
-工作流 AI 工具按 [references/mcp_integration.md](../references/mcp_integration.md) 强证据逻辑判定可用性：
+按 [references/mcp_per_step.md](../references/mcp_per_step.md) 推荐，本步骤 MCP：
 
-- **强证据存在**：优先用 `mcp__<name>__<tool>` 工具调用
-- **强证据不存在**：走降级路径（原生 Bash / Read / Write / WebFetch 等），**不阻塞流程**
+| MCP | 推荐级别 | 用途 |
+|-----|----------|------|
+| sequential-thinking | 🟢 | 强制思考 + 3 质疑者 spawn |
+| context7 | 🟡 | 库 API 行为查证 |
+| vision-bridge | 🟡 | 错误截图分析 |
+| memory | 🟡 | 跨工单记忆 |
+| serena | ⚪ | 本步骤不推荐 |
+| playwright | ⚪ | 本步骤不推荐 |
 
-本步骤推荐 MCP、配套降级路径详见 [references/mcp_per_step.md](../references/mcp_per_step.md) 本步骤行。
+**强制约束（v2.1+）**：🟢 sequential-thinking 必须调（对抗质疑者独立 spawn）；🟡 三项应调用，未调需在思考块「MCP 评估」段写明不适用原因。详见 [references/anti_laziness.md](../references/anti_laziness.md) 第 21 条。

@@ -242,7 +242,7 @@ int calc_gcd(int a, int b, int *result)
  */
 int calc_lcm(int a, int b, int *result)
 {
-    int g, quotient, product;
+    int g, quotient;
 
     if (result == 0) {
         return CALC_ERR_INVALID;  /* 空指针 */
@@ -273,10 +273,9 @@ int calc_lcm(int a, int b, int *result)
 
     /* 先除后乘：避免 |a*b| 中间结果溢出 */
     quotient = a / g;
-    product = quotient * b;  /* 实际乘法（g 可能为 0？已通过零短路排除） */
 
-    /* 复用 mul_overflows 检查最终乘法（gcd=1 时退化为 |a|*|b|，仍可能溢出） */
-    (void)product;  /* 占位避免 unused 警告 */
+    /* 复用 mul_overflows 检查最终乘法（gcd=1 时退化为 |a|*|b|，仍可能溢出）
+     * 必须先检查再赋值，否则 product = quotient * b 在溢出时触发 UB */
     if (mul_overflows(quotient, b)) {
         return CALC_ERR_OVERFLOW;
     }
@@ -293,6 +292,12 @@ static int would_overflow_power(int base, int exp)
 {
     if (base == 0 || base == 1 || base == -1) {
         return 0;  /* base^exp 在 [-1, 1] 或 [0, 0]，不超 */
+    }
+    /* INT_MIN 安全处理：-INT_MIN 是 UB（INT_MIN 取反溢出），按 exp 区分
+     * INT_MIN^1 = INT_MIN（可表示，不溢出）；INT_MIN^2 = INT_MAX+1（必溢出）
+     * exp=0 不会到达本函数（calc_power 入口已 return 1） */
+    if (base == INT_MIN) {
+        return exp >= 2 ? 1 : 0;
     }
     double log_int_max = 31.0;  /* log2(2147483647) ≈ 31 */
     double log_base;

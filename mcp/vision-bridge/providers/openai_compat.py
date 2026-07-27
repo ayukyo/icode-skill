@@ -139,9 +139,11 @@ class OpenAICompatProvider(MediaProvider):
         return await self._chat(content=content, max_tokens=max_tokens)
 
     async def _chat(self, content: list, max_tokens: int) -> str:
+        # 拼接完整 URL 供错误提示用（v2.1+：404 等错误时帮用户排查 base_url 路径）
+        url = f"{self.base_url}/chat/completions"
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             r = await client.post(
-                f"{self.base_url}/chat/completions",
+                url,
                 headers={
                     "Authorization": f"Bearer {self.api_key}",
                     "Content-Type": "application/json",
@@ -152,6 +154,22 @@ class OpenAICompatProvider(MediaProvider):
                     "max_tokens": max_tokens,
                 },
             )
-            r.raise_for_status()
+            try:
+                r.raise_for_status()
+            except httpx.HTTPStatusError as e:
+                # 增强错误提示：输出实际请求 URL + 拼接路径 + 排查建议
+                # 典型场景：用户填了 /anthropic 等非 OpenAI 兼容路径 -> 404
+                raise RuntimeError(
+                    f"vision-bridge HTTP {r.status_code} {r.reason_phrase}\n"
+                    f"  实际请求 URL: {url}\n"
+                    f"  base_url: {self.base_url}\n"
+                    f"  model: {self.model}\n"
+                    f"  排查建议:\n"
+                    f"    - 404: base_url 路径错（OpenAI 兼容端点应为 .../v1，非 .../anthropic）\n"
+                    f"    - 401: api_key 错或过期\n"
+                    f"    - 404 model not found: model 名错或不被该端点支持\n"
+                    f"    - 网络超时: 检查 base_url 可达性 + timeout 配置（当前 {self.timeout}s）\n"
+                    f"  原始响应: {r.text[:200] if r.text else '(empty)'}"
+                ) from e
             data = r.json()
             return data["choices"][0]["message"]["content"]

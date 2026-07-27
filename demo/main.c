@@ -243,5 +243,25 @@ int main(void)
     rc = calc_eval("-99999999999", &result);
     printf("calc_eval(\"-99999999999\") rc=%d (expect %d OVERFLOW)\n", rc, CALC_ERR_OVERFLOW);
 
+    /* ---- 新增：calc_power INT_MIN/0/-1/10 边界测试（demo-10 修复后跑） ---- */
+    rc = calc_power(INT_MIN, 1, &result);  /* INT_MIN^1 = INT_MIN（成功，不溢出） */
+    printf("INT_MIN ^ 1 = %d (rc=%d, expect 0)\n", result, rc);
+
+    rc = calc_power(INT_MIN, 2, &result);  /* INT_MIN^2 必溢出（触发 would_overflow_power INT_MIN 特判） */
+    printf("INT_MIN ^ 2 rc=%d (expect %d OVERFLOW)\n", rc, CALC_ERR_OVERFLOW);
+
+    rc = calc_power(0, 5, &result);  /* 0^5 = 0（验证零底数幂边界） */
+    printf("0 ^ 5 = %d (rc=%d, expect 0)\n", result, rc);
+
+    rc = calc_power(-1, 3, &result);  /* (-1)^3 = -1（验证负 1 幂边界） */
+    printf("-1 ^ 3 = %d (rc=%d, expect 0)\n", result, rc);
+
+    rc = calc_power(10, 10, &result);  /* 10^10 必超 INT_MAX（验证 log 法估算） */
+    printf("10 ^ 10 rc=%d (expect %d OVERFLOW)\n", rc, CALC_ERR_OVERFLOW);
+
+    /* ---- 新增：calc_lcm INT_MIN 零替换路径测试 ---- */
+    rc = calc_lcm(INT_MIN, INT_MIN, &result);  /* 双 INT_MIN 替换后零短路 */
+    printf("lcm(INT_MIN, INT_MIN) = %d (rc=%d, expect 0 OK)\n", result, rc);
+
     return 0;
 }

@@ -108,11 +108,17 @@
    - **写入 `code_review_fix_with_issues`**（v1.x 新增，可选，默认 `false`）：4 维度复检未通过标记。`true` 时步骤 5/6 入口输出警告，audit 终审会看到此标记（**不阻断流程**，仅作可见性提示）
 3. 全流程模式：编译通过 + 1.5 复检通过则**立即继续执行步骤5**；编译失败或 1.5 复检失败则中止，提示用户修复
 
-## MCP 工具（可选 + 降级）
+## MCP 推荐（v2.1+ 强制）
 
-工作流 AI 工具按 [references/mcp_integration.md](../references/mcp_integration.md) 强证据逻辑判定可用性：
+按 [references/mcp_per_step.md](../references/mcp_per_step.md) 推荐，本步骤 MCP：
 
-- **强证据存在**：优先用 `mcp__<name>__<tool>` 工具调用
-- **强证据不存在**：走降级路径（原生 Bash / Read / Write / WebFetch 等），**不阻塞流程**
+| MCP | 推荐级别 | 用途 |
+|-----|----------|------|
+| sequential-thinking | 🟢 | 强制思考 |
+| serena | 🟢 | 按符号编辑、重命名引用追踪（game-changer） |
+| context7 | 🟢 | 实时查库 API（防训练知识过时） |
+| memory | 🟡 | 项目特性（用 gRPC v3 / API 路径前缀） |
+| vision-bridge | 🟡 | 涉及 UI 实现时截图参照 |
+| playwright | ⚪ | 本步骤不推荐 |
 
-本步骤推荐 MCP、配套降级路径详见 [references/mcp_per_step.md](../references/mcp_per_step.md) 本步骤行。
+**强制约束（v2.1+）**：🟢 三项必须调（sequential-thinking + serena + context7）；🟡 memory/vision-bridge 应调用，未调需在思考块说明。详见 [SKILL.md](../SKILL.md)「MCP 调用覆盖强制化」。

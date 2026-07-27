@@ -1,12 +1,63 @@
+# ============================================================
+# 顶层 .gitignore —— 单一来源，覆盖全工程
+# 整合原因：原 mcp/*/.gitignore 7 个文件内容 100% 重复
+#          + 防止 rsync --delete 误删 mcp/*/config.json 等用户本地配置
+# ============================================================
+
+# --- 1. 本地开发产物（demo/ 临时输出）---
 /.claude/
+/.icode_output/
+/.serena/
 /demo/.icode_output/
 /demo/calc_demo
 /demo/*.o
 /demo/log/
-/.icode_output/
-/.serena/
+/demo/.serena/
 
-# tools/tb：个人鉴权凭证与本地真实配置（同事各自用 tb_cookie.py 生成，勿提交）
+# --- 2. tools/tb：个人鉴权凭证与本地真实配置 ---
+# (同事各自用 tb_cookie.py 生成，勿提交)
 /tools/tb/scripts/.tb_cookie
 /tools/tb/config.json
 /tools/tb/scripts/__pycache__/
+/tools/__pycache__/
+
+# --- 3. MCP 子工程：Python 字节码 / 环境 / 缓存 / venv ---
+# 覆盖原 7 个 mcp/*/.gitignore 的全部规则（_lib/, context7/, serena/,
+# playwright/, sequential-thinking/, memory/, vision-bridge/）
+# 注意: ** 跨目录匹配, 覆盖 mcp/X/__pycache__/ 和 mcp/X/Y/__pycache__/
+/mcp/**/__pycache__/
+/mcp/**/*.pyc
+/mcp/**/*.pyo
+/mcp/**/*.egg-info/
+/mcp/**/.env
+/mcp/**/.env.local
+/mcp/**/.cache/
+/mcp/**/.venv/
+
+# --- 4. MCP 子工程：本地运行时配置（关键！防止 rsync --delete 误删）---
+/mcp/**/config.json
+/mcp/**/config.local.json
+
+# --- 5. 凭证与日志/临时文件 ---
+*.cookie
+*.token
+*.key
+*.log
+*.tmp
+*.swp
+*~
+
+# --- 6. 系统/编辑器临时文件 ---
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# --- 7. 备份文件 ---
+*.bak
+*.orig
+*.rej
+
+# --- 8. MCP 运行时临时目录 ---
+# playwright MCP 在 cwd 创建 page snapshot/截图缓存（page-YYYY-MM-DD*.yml）
+.playwright-mcp/
