@@ -34,6 +34,7 @@
 > - 分支/提交：main @ a3f2b1c (2026-07-06 12:30)
 > - 子模块（git submodule，v1 字段）：thirdparty/lib_algo → ...git @ c8d2f1a；thirdparty/lib_nav → ...git @ b9e4d3c
 > - 依赖子模块（按仓库+分支，段零跨仓库覆盖用）：module_a → module:module_a@main@a3f2b1c（module_docs/{key}/）；module_b → module:module_b@dev@b8c3d4e（module_docs/{key}/）
+> - 关联工程（姊妹/同族工程，段零跨工程检索用，优先填 project_id 即 project_docs 目录名；不知目录名可填工程名/产品代号，段零模糊匹配兜底；多个逗号分隔）：sister_project_a, sister_project_b（无关联则填"无"）
 > - 产品线/型号：{产品代号，无则填"未识别"}
 > - 章节归属模块：module_a
 > - 模板版本（v2 字段）：v2.0.0
@@ -89,6 +90,8 @@
 | 4 | **常见修改/问题 file:line 锚点表**（"想改 X → 看 `file.cpp:123`" ≥ 8 行） | AI | grep `file\.cpp:\d+` 行数 |
 | 5 | **角色化阅读路径表**（≥ 5 种角色：新人/改 bug/做新功能/查 API/优化性能 等） | 双 | 表格行数 |
 | 6 | **故障现象索引表**（≥ 5 行 "现象 → 排查点" 映射） | 双 | 表格行数 |
+
+> **overview 元信息块「关联工程」字段必填**（工程级，其他章节元信息块填同值）：从「工程定位与产品族」章节提炼姊妹/同族工程标识，优先填 project_id（即 `project_docs/` 目录名），不知目录名填工程名/产品代号（段零模糊匹配兜底），无关联填"无"。段零据此跨工程检索（见 [dir_and_metadata.md](dir_and_metadata.md)「段零·工程文档检索」步骤 3.6）
 
 #### workflow 业务流章节（4 项必含）
 

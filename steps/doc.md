@@ -206,7 +206,8 @@ AI 解析自然语言的「目标工程」+「动作」：
   - 若 `$DOC_DIR` 已存在（即分支子目录已建）→ 跳过迁移，走正常生成路径
   - **v1+v2 混合布局边缘**（罕见：用户已手动 mkdir 创建 `<id>/<branch>/` 但旧 `<id>/` 还有平铺章节）：检测到**同时存在**两个布局 → **不静默决定**：①自动备份 v1 平铺的 `<id>/*.md` + `<id>/_meta.json` 到 `<id>/_v1_legacy_backup_<timestamp>/`；②询问用户「检测到混合布局：v1 平铺的章节会被移到 `v1_legacy_backup_<timestamp>/` 子目录且不在段零检索范围，**v2 `<id>/<branch>/` 才是新主目录**。确认迁移？」→ 用户确认后按 v1→v2 路径正常处理；用户拒绝则按 v2 已存在路径处理（v1 数据进 backup 目录不参与检索）
   - **禁止**：直接写入新布局但**不迁移旧布局**——会让旧章节留在 `<id>/` 目录孤立、再下次 `/icode doc` 时被强制清空或判为"未迁移的孤儿"，数据丢失
-- 对每个待生成章节：读相关代码（Read/Grep）→ 按模板写正文（含十四项必含元素）→ 生成前 50 行四块（含「依赖子模块」字段 + **`template_version`**）→ Write 到 `$DOC_DIR/<NN>_<module>_<topic>.md`（十位桶，新增取 `max(NN)+1`）
+- 对每个待生成章节：读相关代码（Read/Grep）→ 按模板写正文（含十四项必含元素）→ 生成前 50 行四块（含「依赖子模块」+「关联工程」字段 + **`template_version`**）→ Write 到 `$DOC_DIR/<NN>_<module>_<topic>.md`（十位桶，新增取 `max(NN)+1`）
+- **00_overview「关联工程」字段必填**（工程级，其他章节元信息块填同值）：从「工程定位与产品族」章节提炼姊妹/同族工程标识，优先填 project_id（即 `project_docs/` 目录名），不知目录名可填工程名/产品代号（段零模糊匹配兜底）；无关联填"无"
 - 写 `_meta.json`（`project_id` / `project_type` / `git_root` / **`branch = git rev-parse --abbrev-ref HEAD`** / **`head_commit = git rev-parse --short HEAD`** 显式持久化分支与提交，**下游段零借鉴时用这两个字段比对当前 cwd 的 HEAD/分支是否还匹配，跨分支直接 stale 不注入正文，避免误导** / `module_deps` 含所有检测到的可读模块（已生成 `generated: true`、按需未生成 `generated: false`，见上「module_docs 生成范围」）/ `unresolved_modules` 含拉取失败的模块 / **`template_version: v2.0.0`** / **`stale_files`** —— **保留既有 stale_files 字段**，步骤 8 主动 stale 扫描会刷新；不要因为新增 template_version 而丢失 stale_files 数据，导致段零 stale 检测失效）
 - 单章失败→标记不拖垮
 
@@ -270,6 +271,7 @@ AI 解析自然语言的「目标工程」+「动作」：
 - **依赖子模块（按仓库+分支）**：从工程 _meta.json 的 `module_deps` 列表取，章节元信息块格式 `module_a → module:module_a@main@a3f2b1c（module_docs/<key>/）`
 - **被工程引用（模块章节 used_by）**：从模块 _meta.json 的 `used_by` 列表取（如 `myproject（git-root）, another_project（repo-root）`）
 - **产品线/型号**：grep 工程的产品型号宏/配置，推断不出填"未识别"
+- **关联工程（段零跨工程检索用）**：从工程「产品线/型号」+「工程定位与产品族」章节提炼姊妹/同族工程的 project_id（即 git 仓库根 basename，对应 `project_docs/` 目录名），多个逗号分隔；推断不出填"无"。段零据此检索关联工程 00_overview 作为参考候选
 - **章节归属模块**：与文件名 `<module>` 一致；跨模块章节填 `null`
 - **章节生成时间**：运行时 `date +%Y-%m-%dT%H:%M:%SZ`，**禁止写死**
 - **模板版本（v2 新增）**：`template_version`，与 [doc_template.md](../references/doc_template.md) 顶部 `<!-- SCHEMA_VERSION: v2.0.0 -->` 一致；**写入章节正文元信息块 + `_meta.json`**（双写防丢失）。缺失或 < 当前 SCHEMA_VERSION → 视为旧版本章节，触发模板版本迁移
