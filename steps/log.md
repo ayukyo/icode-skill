@@ -67,7 +67,7 @@
    - **现场还原**：基于预聚合 + 切片结果，跨节点抽时间线，按时间合并，每行打 `[节点名]` 前缀
    - **对照组**：捕捉重启前后/正常段vs异常段/同条件不同结果——对照组是定性"设备端 vs 环境"的铁证
    - **零号病人**：找首次异常出现的时刻，以及它之前的先兆
-   - **TB 评论研读（若有 TB 源）**：若步骤1 拉取了 TB 缺陷源，Read `{ICODE_OUT_DIR}/tb_source/<ID>/<ID>_meta.json` 的 `comments[]`（TB 评论原文，常含复现步骤/现象描述/排查记录）+ `title`/`note`（缺陷描述），作为症状补充证据纳入现场还原与对抗分析；复用场景下对比 `*_meta.prev.json` 识别新增评论
+   - **TB 评论研读（若有 TB 源，强制逐条不漏）**：若步骤1 拉取了 TB 缺陷源，Read `{ICODE_OUT_DIR}/tb_source/<ID>/<ID>_meta.json`，**逐条遍历 `comments[]` 数组**（不得只读前几条、不得跳过），每条取 `content.comment`（评论正文）、`content.creator`（评论人）、`created`（评论时间）三字段；`title`/`note` 为缺陷描述。**评论常含复现步骤/现象描述/排查记录/关键时间点/日志原文片段**（评论里可能直接贴了形如 `[节点] [级别] [文件:行] 原文` 的日志行加发生时刻），这些时间点与日志原文**必须回捞进本阶段「现场时间线」表**并标注来源「TB评论：评论人 时间」，作为症状补充证据纳入现场还原与对抗分析。**附件型评论**（`action=activity.comment.attachments`，`content.comment` 为空但 `content.files[]` 非空）不得当无评论跳过，须识别附件名（如「根因分析报告.md」）并提示已落盘可 Read。复用场景下对比 `*_meta.prev.json` 识别新增评论。**完整性自检**：研读完成后立即核对「已分析评论条数 == meta.json `comments[]` 长度」（写报告前再兜底一次），漏条视为不合规
    - 产出「现场时间线」表（时间|节点|事件），写入 `log_analysis.md`
 7. **阶段3 对抗根因分析**（复用 icode 步骤2 对抗模式：分析师+3质疑者+裁决优先级+诚实降级）：
    - **分析师提假设**：基于现场时间线+证据，提根因假设 H + 证据指针 E（具体日志行：节点+时间+原文）+ 置信度
@@ -169,7 +169,7 @@
 4. **鉴权失败（401）**：提示用户跑 `python3 ~/.claude/skills/icode/tools/tb/scripts/tb_cookie.py`（或手动把浏览器 cookie 粘进 `~/.claude/skills/icode/tools/tb/scripts/.tb_cookie`），**不阻塞**--若用户只想本地分析可放弃 TB 源、退回纯本地日志路径继续
 5. **溯源**：把 TB 源信息（`lib`/`num`/`pid`/`label`/`url`/`meta_path`）记入步骤9 metadata 的 `tb_source` 字段；在 `keywords` 里带上缺陷编号（如 `DEMO-26`），便于后续历史检索按缺陷号命中相似工单
 
-> 拉取产物（`{ICODE_OUT_DIR}/tb_source/<ID>/` 下的日志附件 + `<ID>_meta.json` 里的真实评论/描述）即作为阶段2「日志侦察 + 现场还原」的输入，走既有对抗根因分析流程，与本步骤下游各阶段无缝衔接。`<ID>_meta.json` 的 `comments`/`note` 可作为症状补充证据（评论里常含复现步骤/现象描述）。
+> 拉取产物（`{ICODE_OUT_DIR}/tb_source/<ID>/` 下的日志附件 + `<ID>_meta.json` 里的真实评论/描述）即作为阶段2「日志侦察 + 现场还原」的输入，走既有对抗根因分析流程，与本步骤下游各阶段无缝衔接。`<ID>_meta.json` 的评论文本在 `comments[].content.comment`（**非 `comments[]` 直接为字符串**，每条评论是对象），`note` 为缺陷描述，均可作为症状补充证据（评论里常含复现步骤/现象描述/关键时间点/日志原文片段，须逐条研读不漏、回捞进现场时间线，详见步骤6「TB 评论研读」）。
 
 ## 同 TB 单复用流程（步骤1 检测到旧工单且用户选复用时）
 
@@ -178,7 +178,7 @@
 1. **复用旧目录**：`ICODE_OUT_DIR` = 旧工单目录（如 `.icode_output/.icode_output_3`），不新建；读其 `.ico_metadata.json` 的 `ticket_id`，**步骤2 历史检索须排除此旧 ticket_id 防自参考**（与新建场景步骤2「本次工单尚未入索引故无需排除」不同）
 2. **切回分析态**：metadata `status` 从 `log_done` 切回 `log_in_progress`；`completed_steps` 仍含 `"log"`
 3. **重拉最新数据**：调 `python3 ~/.claude/skills/icode/tools/tb/scripts/tb_pull.py --domain <域名> --pid <pid> defect <LIB>-<NUM> --out {ICODE_OUT_DIR}/tb_source`。tb_pull 自动把旧 `<ID>_meta.json` 备份为 `<ID>_meta.prev.json`（不丢旧数据），再写最新全量 meta
-4. **识别新增**：读 `<ID>_meta.prev.json`（旧）与 `<ID>_meta.json`（新）对比，找出**新评论**（旧 comments 没有的）和**新附件**（旧 files 没有的、或同名新拉取的 `_1` 后缀文件）
+4. **识别新增**：读 `<ID>_meta.prev.json`（旧）与 `<ID>_meta.json`（新）对比，按 `created`（评论时间戳）+ `content.comment` 为键找出**新评论**（旧 `comments[]` 没有的，**新评论同样须逐条研读、回捞时间点/日志原文进现场时间线**，不得只看条数增量）；和**新附件**（旧 files 没有的、或同名新拉取的 `_1` 后缀文件）
 5. **增量对抗**：读旧 `log_analysis.md` 的「核心结论 + 对抗分析记录」-> 把新增评论/附件作**新证据** -> 重跑对抗（复用 icode 步骤2 对抗模式）。新证据可能：① 确认旧根因（追加佐证）/ ② 补充旧根因遗漏环节 / ③ **推翻旧根因**（标注「本次增量推翻旧结论」+推翻理由+新结论，旧结论不删但标已推翻）
 6. **追加增量段**：在 `log_analysis.md` 追加「## 增量分析（<日期>，TB 单更新）」段：新增评论/附件清单 + 新对抗结论（确认/补充/推翻）+ 最终根因
 7. **收尾**：metadata `status` 切回 `log_done`，更新 `tb_source.meta_path`（指向新 meta）；若根因变化刷新 `requirement_summary`/`keywords`；index 记录续期 `last_used_at`+`hit_count`，同步刷新 `requirement_summary`/`keywords`
@@ -205,6 +205,7 @@
 - **禁止伪造根因共识**——证据不足时必须降级"未定论"，不得凑根因
 - **每条根因结论必须能回指日志片段**——做不到回指的只进「待验证假设」
 - **禁止照抄历史工单根因**——历史参考只作启发，当前症状与历史必有差异
+- **禁止漏读/浅读 TB 评论**：TB 缺陷源的 `comments[]` 必须逐条遍历读 `content.comment`（评论文本嵌套在 `content.comment`，非数组直接为字符串），评论里的时间点/日志原文片段必须回捞进现场时间线；附件型评论（`content.comment` 为空但 `content.files[]` 非空）不得跳过；研读完成后立即核对已分析条数 == meta.json `comments[]` 长度，漏条视为不合规
 - **禁止向 TB 发任何写操作**（TB 缺陷源仅 GET 拉取）——严禁 POST 评论、回写结论、上传附件到 TB；分析结论只落本地 `log_analysis.md` + `00_init.md` 供人工审。`~/.claude/skills/icode/tools/tb/scripts/tb_pull.py` 本身只读无 POST，**AI 也不得自行用 Bash/requests 等任何工具向 TB 发写请求**（GET 拉取除外），违反视为越界操作
 
 ## 与步骤1的衔接
