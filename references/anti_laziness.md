@@ -30,15 +30,16 @@
 20. **跨分支借鉴 project_docs / module_docs 不核对分支**：DOC 步骤生成的工程文档 `project_docs/<project_id>/<branch>/_meta.json`（**按分支分目录存储**，如 `project_docs/myproject/main/_meta.json` vs `project_docs/myproject/feature/_meta.json`，切分支跑 doc 自动落到对应分支目录、天然隔离不互相覆盖）+ 模块文档 `module_docs/<key>/_meta.json` 均**显式持久化分支字段**（`branch`/`head_commit` 或模块 `branch`/`current_commit`）。下游 init/plan/log/start/fast 段零注入此文档作思考输入时：①**段零只读当前分支子目录**（不交叉读 `<project_id>/` 下其他分支目录，避免跨分支复用——分支子目录隔离有第二层防误借鉴作用）；②但仍须比对当前 cwd `git rev-parse --abbrev-ref HEAD` + `git rev-parse --short HEAD` 与当前分支目录下 `_meta.json.branch` + `head_commit` 兜底：分支不一致（如 `_meta.json.branch = main` 但当前在 `feature`，或 stale 文件漂移导致子目录错位）→ **整个 project_docs 当 stale 处理**（按「stale 章节降级注入」只注简要说明 + ⚠️ 警告行，**绝不注正文**），因为"在 main 看到的"≠"在 feature 看到的"——接口/调用链/契约可能差很多，盲目照搬带歪下游 init/plan；③**模块文档分支与工程 pin 分支不一致**（如模块文档基于 `dev` 但工程 `.gitmodules` / `.repo/manifest.xml` pin 在 `main`）→ 同上，整个 module_docs 当 stale 降级注入；④**detached HEAD 视为特殊态**（`_meta.json.branch = null` 或分支目录落 `(detached)`）→ 跳过分支校验，只走 commit 一致性 + 锚点校验 + 不盲信约束。**禁止**：①仅看 commit 短哈希貌似一致（detached HEAD 切到任意 commit 都可能"碰巧"等于一个旧 commit）就当新鲜文档注入——**必须 branch 优先**，branch 不一致直接降级不注入正文；②**禁止**段零检索时跨分支混读（如当前在 `feature` 时把 `main` 子目录下章节也纳入候选集），即使 top-N 排序看似更相关——分支隔离是硬约束不是软推荐（实测踩坑：用户切到 feature 分支跑新需求，模型把 main 分支上的 module_docs 当新鲜参考注入，导致 ADR/接口完全跑偏）
 （项目目录布局 v1 → v2 迁移约束已降级到 doc.md 步骤 5.0.6，本条不再在 anti_laziness 重复——22 条 → 20 条）
 
-21. **跳过推荐 MCP（v2.2 二元化）**：按 [references/mcp_per_step.md](../mcp_per_step.md) 推荐，**二元判定**（🟢 必须调 / ⚪ 不必调，**v2.2 消除 🟡"应该调"**）。强证据场景满足（MCP 在 `~/.claude.json` 注册 且 tool 在 deferred tools 列表 且 [mcp_per_step.md](../mcp_per_step.md)「强证据场景判定」满足）但 AI 未实际调用 = 合规问题。**偷工表现**：①默认只调 sequential-thinking（必用项），其他 🟢 MCP 全部跳过；②把 🟢 看作"可选"不调用无降级声明；③产物文件不含「MCP 调用记录」段；④未经实际调用就标"不适用"。**必须**：①按 [references/mcp_per_step.md](../mcp_per_step.md)「强证据场景判定」判定 🟢/⚪；②每个产物文件必含「MCP 调用记录」段，每行注明调用结果 + 证据；③🟢 未调用需写降级原因（MCP 不可用 / LSP server 缺失 / 调用返回空）；④⚪ MCP 无需记录（强证据场景不满足，不评估不声明）。**反例**：plan 步骤 serena 🟢（有可索引源码）但 AI 只调 sequential-thinking，serena 跳过且无降级声明--属第 21 条违规。
+21. **跳过推荐 MCP（v2.2 二元化，v2.3 精简产物）**：按 [references/mcp_per_step.md](../mcp_per_step.md) 推荐，**二元判定**（🟢 必须调 / ⚪ 不必调，**v2.2 消除 🟡"应该调"**）。强证据场景满足（MCP 在 `~/.claude.json` 注册 且 tool 在 deferred tools 列表 且 [mcp_per_step.md](../mcp_per_step.md)「强证据场景判定」满足）但 AI 未实际调用 = 合规问题。**偷工表现**：①默认只调 sequential-thinking（必用项），其他 🟢 MCP 全部跳过；②把 🟢 看作"可选"不调用无降级声明；③未经实际调用就标"不适用"。**必须**：①按 [mcp_per_step.md](../mcp_per_step.md)「强证据场景判定」判定 🟢/⚪；②🟢 满足强证据场景时**先实际调用**，调用返回错误/超时/空结果才标降级；③⚪ MCP（强证据场景不满足）无需调用无需声明；④**MCP 调用是 icode 工作流内部实现，产物文件（log_analysis.md / 00_init.md 等）不记录 MCP 调用信息**（v2.3 精简：消除 MCP 噪声对用户的干扰）。**反例**：plan 步骤 serena 🟢（有可索引源码）但 AI 只调 sequential-thinking，serena 跳过且无降级声明--属第 21 条违规。
 
 **v2.2 双保险强制触发**（治本"只触发 sequential-thinking"问题）：
 - **A 层·执行步骤内嵌**：serena 在 plan/code/deepcheck/doc/review 的执行步骤主体里有独立的"第 N 步"调用指令（非末尾推荐表），AI 顺序执行必然走到
 - **B 层·thinking_core MCP gate**：[thinking_core.md](../thinking_core.md) 通用流程第 3 步--思考块先列本步 🟢 MCP（不含 sequential-thinking/serena）-> ToolSearch 取 schema -> 实际调用一次 -> 结果进思考块。覆盖 context7/memory/vision-bridge/playwright
 - **硬约束**：🟢 MCP **必须先实际调用一次**（A 层内嵌点或 B 层 gate），调用返回错误/超时/空结果才能标"降级"或"不适用"--不得未经实际调用就标"不适用"
 - ⚪ MCP（强证据场景不满足）无需调用无需声明
-- **合规做法**：memory 🟢（有历史工单）-> 先 `mcp__memory__read_graph()` -> 返回空图 -> 思考块写"read_graph 返回空，无相关跨工单记忆" -> 产物 MCP 调用记录标"✅ 调用 read_graph 返回空图"
+- **合规做法**：memory 🟢（有历史工单）-> 先 `mcp__memory__read_graph()` -> 返回空图 -> 思考块标注结果，继续执行——不写入产物文件
 - **反例**：memory 在 demo 工程是 ⚪（强证据场景不满足：demo 无历史工单），无需调用；但若误标 🟢 又不调用 = 违规
+- **v2.3 产物精简**：MCP 调用是工作流内部细节，产物文件不包含 MCP 调用记录段，不产生"| serena | ⚪ N/A | ..."等冗长噪声
 
 ## 合规要求（正面执行）
 
@@ -55,6 +56,8 @@
 
 - 段零文档不盲信--/icode init/log/plan/start/fast 启动时段零注入的 project_docs / module_docs 章节是 /icode doc 生成时的**快照**，可能过时（即使未标 stale 也只是"未检测到过时"非"已验证最新"）。**凡涉及代码行为 / 位置 / 接口契约 / 调用链 / 错误码的断言，必须用 Read/Grep 实证当前代码后再纳入决策**，不得将注入的文档描述当作事实直接采信。文档只作"设计意图与模块关系"的启发，不作"代码事实"的依据（详见 [dir_and_metadata.md](dir_and_metadata.md)「不盲信约束」段）
 - 待决策倾向自审--步骤0 思考阶段「待决策倾向自审」子项**必须**逐条回溯现状盘点/影响面分析证据、主动找反证（非确认式）；回指到证据点级（file:line/接口，非节级）；证据须步骤4 Read/Grep 实证、段零快照不算；`00_init.md` 第5节持久化审计结果、思考块记过程（细则见第18条 + [thinking_detail.md](../references/thinking_detail.md) 步骤0 子项）
+
+22. **多轮产物增量精确化偷工（v2.3 实战补强）**：`/icode log` 产出的 `log_analysis.md` / `00_init.md` 是 write-once 固定产物，用户后续追问（修正症状/根因方向/前序场景/范围声明）时 AI 必须按 [steps/log.md](../steps/log.md)「阶段 5 增量精确化」对产物做**增量 Edit**（**不是 Write 新文件**）。偷工表现：①用户追问 5+ 轮后产物仍保持 write-once 原始内容（§0 一句话定性/§2.0 代码库归属/§3.1 前序场景/§9 范围外等章节未随用户新信息刷新）；②增量 Edit 后未在产物首行加 `## 增量精确化（YYYY-MM-DD HH:MM，来源：...）` 注释（审计须 grep 增量历史）；③涉及症状/根因/链路变化时未同步刷新 00_init.md §1/§2/§3 + 链路图 before/after。**必须**：①用户消息改变了 §0/§1/§2/§4 事实表述（症状修正/根因方向修正/前序场景补充/范围声明）→ AI 主动 Edit 对应章节 + 首行增量注释；②链路图与改动点清单每轮同步刷新；③不触发场景：普通对话噪音/要求重跑对抗的（按 §C 段处理）。**与第 9/13 条边界**：第 9 条针对"判断性结论未经独立对抗"的终局裁决，第 13 条针对日志分析偷工，本第 22 条针对**产物僵化不随多轮对话精确化**——三者互不重叠。
 
 ## 为什么强制
 

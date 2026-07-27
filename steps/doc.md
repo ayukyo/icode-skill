@@ -84,7 +84,7 @@ AI 解析自然语言的「目标工程」+「动作」：
 
 **去重**：详见 dir_and_metadata.md 同段「去重」两步（先按归一化绝对路径合并 + 再按 `key = <url_basename_sanitized>_<sha256(url+":"+branch)[:12]>` 去重，key 格式含模块名前缀便于人眼辨认，见 [dir_and_metadata.md](../references/dir_and_metadata.md)「module_docs key 计算」）。输出 modules 列表（每个含 url+branch+key+commit+path+type），写进工程 _meta.json 的 `module_deps` 字段。
 
-**代码特征扫描**：**serena 优先**（v2.2 执行步骤内嵌）：若工程有可索引源码且 serena 可用，ToolSearch 取 `mcp__serena__find_symbol` schema -> `find_symbol` 识别 entry 函数/导出 API/关键数据结构（比 grep 精准 10 倍，按符号语义非文本匹配），结果作为 00_overview.md「核心模块清单」+「全栈图」输入；serena 不可用/无 LSP -> 降级 Grep 扫描，产物「MCP 调用记录」标降级。**未经实际调用 serena 就标降级 = 反偷懒第 21 条违规**。用 Grep 扫描工程代码特征，按本表「动态章节」段（doc_template.md「五」）决定追加哪些章节（AI 根据工程实际技术栈选 grep 模式，**不硬编码框架名**）。汇总「章节规划清单」：固定（00/10/90/99）+ 命中的动态章节。
+**代码特征扫描**：**serena 优先**（v2.2 执行步骤内嵌）：若工程有可索引源码且 serena 可用，ToolSearch 取 `mcp__serena__find_symbol` schema -> `find_symbol` 识别 entry 函数/导出 API/关键数据结构（比 grep 精准 10 倍，按符号语义非文本匹配），结果作为 00_overview.md「核心模块清单」+「全栈图」输入；serena 不可用/无 LSP -> 降级 Grep 扫描，降级说明只进思考块，不写入产物文件。**未经实际调用 serena 就标降级 = 反偷懒第 21 条违规**。用 Grep 扫描工程代码特征，按本表「动态章节」段（doc_template.md「五」）决定追加哪些章节（AI 根据工程实际技术栈选 grep 模式，**不硬编码框架名**）。汇总「章节规划清单」：固定（00/10/90/99）+ 命中的动态章节。
 
 ### 3. 增量判定（非全量时）
 

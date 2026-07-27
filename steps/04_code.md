@@ -45,7 +45,7 @@
 
 严格按定稿计划实施编码。
 
-**符号定位（serena 优先，v2.2 执行步骤内嵌）**：编码前对计划 §5 声明的待改符号，若工程有可索引源码且 serena 可用：ToolSearch 取 `mcp__serena__find_symbol` + `mcp__serena__find_referencing_symbols` schema -> `find_symbol` 定位待改符号 -> `find_referencing_symbols` 找所有调用点（按符号语义非文本匹配，比 grep 精准）-> 结果作为下方「准入三链预扫」的语义增强。serena 不可用/无 LSP -> 降级下方 grep 三链预扫，产物「MCP 调用记录」标"serena 降级-无 LSP，用 grep 三链替代"。**未经实际调用 serena 就标降级 = 反偷懒第 21 条违规**。
+**符号定位（serena 优先，v2.2 执行步骤内嵌）**：编码前对计划 §5 声明的待改符号，若工程有可索引源码且 serena 可用：ToolSearch 取 `mcp__serena__find_symbol` + `mcp__serena__find_referencing_symbols` schema -> `find_symbol` 定位待改符号 -> `find_referencing_symbols` 找所有调用点（按符号语义非文本匹配，比 grep 精准）-> 结果作为下方「准入三链预扫」的语义增强。serena 不可用/无 LSP -> 降级下方 grep 三链预扫，降级说明只进思考块，不写入产物文件。**未经实际调用 serena 就标降级 = 反偷懒第 21 条违规**。
 
 **准入（强制三链预扫，每条按 `文件:行号` 给出至少 1 条命中否则禁止 Edit）**：
 
