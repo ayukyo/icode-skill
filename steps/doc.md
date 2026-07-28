@@ -264,6 +264,7 @@ AI 解析自然语言的「目标工程」+「动作」：
 ## 元信息块字段取值约定
 
 - **工程名 / 模块名**：默认 `basename($GIT_ROOT)`，可在章节文件手动改
+- **工程本地路径（project_path）**：`$GIT_ROOT` 绝对路径（段零 3.6 跨工程源码定位用，见 [dir_and_metadata.md](../references/dir_and_metadata.md)「段零·工程文档检索」步骤 3.6；步骤 2 冲突检测亦读此字段判同名分支是否同工程）；非 git 工程填空串
 - **Git 地址**：`git -C "$GIT_ROOT" remote get-url origin`（无 remote 填"无 remote"）
 - **分支/提交**：`git rev-parse --abbrev-ref HEAD` + `git rev-parse --short HEAD` + `git log -1 --format=%ci`
 - **项目类型 / 模块类型**：`PROJECT_TYPE`（`git-root` 或 `repo-root`），或模块的 `MODULE_TYPE`（`git-submodule`/`repo`/`cmake`/`monorepo`/`vendor`/`user`）

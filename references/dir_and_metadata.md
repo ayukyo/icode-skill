@@ -469,6 +469,15 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
 
 五入口启动时，与历史检索复用并行做段零检索，**候选合并后统一排序**注入（不分来源，最相关者胜）。除工程自身章节（`project_docs/`）外，自动覆盖工程依赖的模块共享文档（`module_docs/`，按仓库+分支 key 跨工程共享，详见「module_docs 工程模块库」段）。
 
+**段零步骤速查**（执行前必读导航；入口摘要仅索引到此 7 步，**不得凭摘要执行**，须读下文各步骤全文）：
+1. `resolve_project_id(cwd)` -> project_id + branch（步骤 1）
+2. 读 `project_docs/<id>/<branch>/*.md` 前 50 行 KEYS 匹配 -> project 候选（步骤 2，含 legacy 回退）
+3. 读 `_meta.json` `module_deps` -> `module_docs` 检索 -> module 候选（步骤 3，含 commit 校验）
+4. **3.5 反查父项目**（子仓库时，步骤 3.5）
+5. **3.6 关联工程检索**（读 00_overview「关联工程」字段 -> 跨工程读关联工程 00_overview 简要说明 + **源码路径定位** [project_path + manifest + 兜底] -> 关联工程候选，步骤 3.6）
+6. 合并排序 top-N（步骤 4）
+7. 注入（project/module/关联工程各策略 + stale 降级 + 防重复，步骤 5）
+
 ```text
 1. cwd → resolve_project_id(cwd) → (project_id, project_type)  # git-root 或 repo-root
 2. **DOC_DIR 分支过滤**（关键，多分支并存不交叉污染）：按 `resolve_project_id(cwd)` 算法算出 `<project_id>` + 当前分支 `<branch>`（sanitize 后），只读 `<DOC_DIR>=~/.claude/icode_data/project_docs/<project_id>/<branch_safe>/*.md`，**不交叉读其他分支子目录**（如当前在 `feature` 分支时不读 `main` 子目录，反之亦然）。理由：分支间代码差异大，跨分支工程文档互相借鉴必然失真。
@@ -493,11 +502,16 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
    ├─ 先精确 ls `~/.claude/icode_data/project_docs/<关联 project_id>/<branch_safe>/00_overview.md`
    ├─ 精确不存在且标识疑似工程名/代号 -> 遍历 `project_docs/*/<branch_safe>/00_overview.md` 元信息块的「工程名」「产品线/型号」字段模糊匹配关联标识，命中取其路径
    └─ 命中路径 -> 读前 50 行 -> KEYS 匹配 + 简要说明语义打分 -> 关联工程候选集（**只取 00_overview，不读其他章节**，控 token 且防跨工程失真）；**强制 stale 校验**（分支 + 祖先双校验，同步骤 5 project 章节）+ ⚠️ 跨工程警告「关联工程 `<id>` 文档为快照，代码可能已分叉，下游须 Read 实证」；来源标签「来源：project:关联 `<id>`」；无任何命中 -> ℹ️ 提示「关联工程 `<标识>` 未生成知识库或分支 `<branch>` 不匹配，可提示用户 `/icode doc`」，跳过
+   - **3.6 源码路径定位**（v2.3 新增，为下游 Read 实证关联工程源码提供线索；仅给工程根路径不注正文 file:line，防跨工程失真）：对每个命中的关联工程，读其 00_overview 元信息块的 `project_path` + `Git 地址`，三级定位本机源码根：
+     (a) **project_path 校验**：`project_path` 缺失/空（旧 v1 章节无此字段）则跳过本项进 (b)；`test -d <关联 project_path>` 有效 -> 取为源码线索（同机有效；绝对路径可能因换机器/换 clone 位置失效，故必校验）
+     (b) **manifest 匹配**（当前工程 repo-root 模式 + `.repo/manifest.xml` 存在时）：按关联工程 `Git 地址` 精确匹配 manifest `<project name="<git 地址>" path="<本地路径>" />`，命中取 `path`（相对 .repo 根，拼绝对路径）-- 同 repo 关联工程最可靠定位（manifest 是本机源码权威映射）
+     (c) **兜底**：(a)(b) 都失败 -> 标「源码不在本机/路径失效」，仅保留简要说明作方向参考，附提示「关联工程 `<id>` 源码未在本机定位到，如需 Read 实证请用户提供路径」
+     定位结果（源码根路径 or 「未定位」）随关联工程候选一并传递至步骤 5 注入
 4. 合并排序：project 候选 + module 候选 + 反查父项目章节 + 关联工程候选 + 历史检索段一/二候选 → 统一按相关度排序 → top-N（强相关≤2 + 弱相关≤1，总量≤3 条）
 5. 对每个 top-N 项（注入策略按来源区分）：
    - **project 章节**：stale 判定（查 `_meta.json.stale_files` + 运行时 `git diff` 兜底，见「stale 检测」）-- stale → slice=`section:<file>#stale-summary`，按「stale 章节降级注入」只注简要说明+警告（不读正文小节）；非 stale → 检查 template_version（见下文「质量信号」）：v2 → slice=`section:<file>#<anchor>` 正常注入；v1 → slice=`section:<file>#v1-summary` 降级注入摘要+升级提示不注正文（v1 章节模板过旧，注入质量不可控）。按 KEYS [小节锚点] 定点读对应小节（不读全章，≤1K token/条）→ 注入思考输入「历史参考」节
    - **module 章节**：按步骤3 commit 校验结果 -- 一致 → slice=`section:<file>#<anchor>` 注正文；不一致 → 降级注正文+警告（步骤3，须 Read 实证）
-   - **关联工程章节**：只注 00_overview 的「简要说明」+ ⚠️ 跨工程警告（**不注正文小节**，防跨工程代码分叉失真），slice=`section:<file>#cross-project-summary`；stale 则按「stale 章节降级注入」只注摘要+警告
+   - **关联工程章节**：注 00_overview 的「简要说明」+ ⚠️ 跨工程警告 + **本地源码路径线索**（步骤 3.6 源码定位结果：`project_path` 或 manifest path，`test -d` 校验有效才给；源码不在本机则注明「未定位」+ 提示用户给路径）（**不注正文小节**，防跨工程代码分叉失真），slice=`section:<file>#cross-project-summary`；stale 则按「stale 章节降级注入」只注摘要+警告+源码路径线索
    - 查 _inject_cache.json → 已注入的同 slice 跳过；否则注入并写缓存
    - 命中附来源标签：「来源：project:myproject」或「来源：module:module_a@main@a3f2b1c」
 ```
@@ -546,7 +560,7 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
 - ⚠️ **未生成模块警告**（若工程 `_meta.json.unresolved_modules` 非空）：输出「工程有 N 个未生成模块（拉取失败）：\`{name1}\`(\`{reason1}\`), \`{name2}\`(\`{reason2}\`)... — 子仓库代码本地化后重跑 /icode doc 时自动恢复」
 - ℹ️ **按需未生成模块提示**（若步骤 3 收集到 `generated == false` 的模块）：输出「工程有 N 个模块未生成 module_docs（按需未生成，上次 /icode doc 指定了其他模块聚焦）：\`{name1}\`, \`{name2}\`... - 可 \`/icode doc <name>\` 按需生成」
 
-**工程隔离**：段零严格按当前 cwd 的 project_id 检索**工程自身章节**（不跨 project 注入 `project_docs/` 正文），但**自动跨仓库跨分支覆盖依赖的 `module_docs/`**（多个 project 引用同一上游仓库同分支只一份，自动复用）。**关联工程**（姊妹/同族）通过 00_overview 元信息块「关联工程」字段显式声明，段零只检索其 00_overview「简要说明」+ ⚠️ 跨工程警告作为参考候选（**不注正文小节**，防跨工程代码分叉失真），不自动跨库注入全章。
+**工程隔离**：段零严格按当前 cwd 的 project_id 检索**工程自身章节**（不跨 project 注入 `project_docs/` 正文），但**自动跨仓库跨分支覆盖依赖的 `module_docs/`**（多个 project 引用同一上游仓库同分支只一份，自动复用）。**关联工程**（姊妹/同族）通过 00_overview 元信息块「关联工程」字段显式声明，段零只检索其 00_overview「简要说明」+ ⚠️ 跨工程警告 + **源码路径线索**（步骤 3.6 源码路径定位：project_path/manifest/兜底）作为参考候选（**不注正文小节**，防跨工程代码分叉失真），不自动跨库注入全章。
 
 
 

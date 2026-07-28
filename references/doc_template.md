@@ -29,6 +29,7 @@
 
 > **项目元信息**
 > - 工程名：myproject
+> - 工程本地路径（project_path，工程根绝对路径，段零 3.6 跨工程源码定位 + 冲突检测用）：/home/user/repos/myproject
 > - 项目类型：git-root（或 repo-root，.repo/manifest.xml 管理）
 > - Git 地址：git@example.com:user/myproject.git
 > - 分支/提交：main @ a3f2b1c (2026-07-06 12:30)

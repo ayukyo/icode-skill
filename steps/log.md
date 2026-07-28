@@ -42,7 +42,7 @@
      - `disproved`/`superseded`（`verdict_review_needed=true`，证伪前提依赖已变化）：**降级对抗质疑**--不硬反转，走 unknown A 层（扩读末轮+三问）+ 证伪前提+依赖变化提示（详见 SKILL.md「注入形式·按 verdict 分流」），让新需求重新评估前提是否仍成立
      - `superseded`：读 `superseded_by` 指针 + `correct_direction` + 替代工单根因摘要（≤0.8K/条）
      - 作为本次分析的启发——参考其根因方向与踩坑。**只进会话上下文，绝不写进 `log_analysis.md`**（唯一例外：实质借鉴可在该根因条目末尾加一句 `(参考相似工单 {ticket_id} 的同类根因)`）
-   - **段零·工程文档检索**（与历史检索并行，候选合并排序）：`resolve_project_id(cwd)`（支持 git-root / repo-root 双模式，`repo` 根模式从 cwd 向上找 `.repo/manifest.xml`）→ 计算 `<branch> = git rev-parse --abbrev-ref HEAD`（sanitize 后）→ `ls ~/.claude/icode_data/project_docs/<project_id>/<branch_safe>/*.md` 为主路径，逐章读前 50 行按 KEYS 匹配，**`legacy` 回退**：若该子目录不存在但 `<project_id>/` 下直接有 `00_overview.md`（v1 旧布局未跑过迁移）→ 回退读 `<project_id>/*.md` 并输 ⚠️ 提示迁移 → 读 `project_docs/<project_id>/<branch_safe>/_meta.json` 的 `module_deps` 列表（v1 旧布局回退时读 `<project_id>/_meta.json`），对每个 dep 查 `module_docs/<dep.key>/` → **反查父项目**（cwd 在子仓库 + path 匹配 manifest 的 `<project path>` → 父 repo-root 按其自己的 `<branch_safe>` 子目录也纳入检索）；命中按 `[小节锚点]` 定点读小节；无知识库则零命中（ℹ️ 不阻塞）。详见 [references/dir_and_metadata.md](../references/dir_and_metadata.md)「段零·工程文档检索」+「module_docs 工程模块库」段；**stale 章节降级注入摘要不注正文 + module commit 一致性校验**见「stale 章节降级注入」「步骤 3 commit 一致性校验」段
+   - **段零·工程文档检索**（与历史检索并行，候选合并排序；本入口检索时机：建目录后）：完整流程以 [references/dir_and_metadata.md](../references/dir_and_metadata.md)「段零·工程文档检索」+「module_docs 工程模块库」段为准（含步骤 1-5 + 3.5 反查父项目 + 3.6 关联工程检索 + 3.6 源码路径定位 [project_path+manifest+兜底]），**执行前必须 Read 该段全文（含顶部「段零步骤速查」导航），不得凭本行摘要执行**；stale 降级 / commit 校验 / 注入防重复等细节同该段
    - **注入防重复**（两源共用 `_inject_cache.json`）：无缓存则创建空 `{"ticket_id":"<本工单>","injections":[]}`；注入前按 `(source, ref_id, slice)` 查缓存去重，已注入的跳过。历史源 slice=`root_cause_evidence`；段零 slice=`section:<file>`。详见 [references/dir_and_metadata.md](../references/dir_and_metadata.md)「注入缓存机制」段
    - 零命中不注入，不强凑参考
 3. **阶段0 输入要素收敛**（最多1-2轮，不拖成长讨论）：
@@ -59,8 +59,8 @@
      - **核心警告**：设备型号只是 SKU，不能当代码库假设。设备型号 A 固件代码库实际可能是 B（姊妹产品命名差一个字母/前缀的高频坑）（某实战工单真实踩坑——姊妹产品复用的高频陷阱）
      - **必做三步**（写入 `log_analysis.md §2.0`）：
        1. **提取独特字符串**：从设备日志里抓取 ≥3 个独特标识符（如 `NodeStartupA` / `sensor_loc` / `SensorDriverB` / `prepare_mode_switch` 等节点名 / 模块名 / 驱动名 / 关键函数名）
-       2. **姊妹工程 git grep**：到阶段0 收集的姊妹工程清单（如有），逐个 `git grep -rn <独特字符串>`，找出真正代码库
-       3. **无姊妹工程清单时**：退到当前 cwd 工程 + `git submodule foreach` / `find . -name "*.md" | xargs grep` / 项目 metadata（如 `~/.claude/icode_data/projects.json`）找候选代码库
+       2. **姊妹工程 git grep**：**候选代码库路径来源优先级**--① 阶段0 用户收集的姊妹工程清单（如有） -> ② **用户未给清单时，优先用段零 3.6 命中的关联工程源码路径**（`project_path` / manifest path，见 [references/dir_and_metadata.md](../references/dir_and_metadata.md) 步骤 3.6 源码路径定位；DOC 关联工程字段经 3.6 自动定位，无需用户手动给清单） -> ③ 都没有见下步兜底；对每个候选路径逐个 `git grep -rn <独特字符串>`，找出真正代码库
+       3. **无姊妹工程清单且 3.6 无关联工程源码路径时**：退到当前 cwd 工程 + `git submodule foreach` / `find . -name "*.md" | xargs grep` / 项目 metadata（如 `~/.claude/icode_data/projects.json`）找候选代码库
      - **判定结果填入** §2.0：「设备型号 X → 实际代码库 Y（路径 Z）」，作为 §2.1 表格的前置
    - **git diff/status/log**：看相关代码改过没（含 submodule/subrepo）。若代码已被改过（AI/同事/其他分支 merge），问题可能在改动里
    - **画状态链路图**：从症状出发画完整数据流，标注每个状态的"谁写/谁读/谁清"。关键问题：这个状态谁写的？什么时候写？谁清的？清的时候有没有遗漏？**（v2.3 增补）**物理层状态（设备动力学 / 外部信号 / 环境因素）作为可选维度，避免漏判"为什么设备在动"类问题
