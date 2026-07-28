@@ -470,7 +470,7 @@ icode 工作流可调用 6 个 MCP（`/icode install` 一键安装）。**v2.2 �
 | **sequential-thinking** | 强制思考前置 | 所有步骤 | thinking_core 第 4 步 |
 | **serena** | LSP 语义编码 | plan/code/deepcheck/doc/review + 有可索引源码 | A 层·执行步骤内嵌 |
 | **context7** | 库文档实时查询 | init/plan/code + 涉及第三方库 | B 层·thinking_core gate |
-| **vision-bridge** | 图片/视频理解 | 任意步骤 + 用户**显式要求**分析图片/视频（用户给图等同显式要求 / TB 缺陷源附件含视频/图片时**默认仅提示**不主动调，防纯文字模型场景报错，用户显式说"请分析附件"后才调，详见 [steps/log.md](steps/log.md)「TB 附件提示与可选分析」） | B 层·thinking_core gate |
+| **vision-bridge** | 图片/视频理解 | 任意步骤 + 用户给图(直接调) / TB 缺陷源附件含视频/图片时 **vision-bridge 可用则主动调**(视频先用 ffmpeg 本地抽帧省钱；不可用时仅提示不主动调，防纯文字模型报错)，详见 [steps/log.md](steps/log.md)「TB 附件分析与 ffmpeg 抽帧」 | B 层·thinking_core gate |
 | **playwright** | 浏览器自动化 | deepcheck/audit + 前端工程 | B 层·thinking_core gate |
 | **memory** | 跨工单记忆 | init/plan + 本工程有历史工单 | B 层·thinking_core gate |
 
@@ -507,7 +507,7 @@ icode 工作流可调用 6 个 MCP（`/icode install` 一键安装）。**v2.2 �
 
 视觉理解是可选增强，**统一走 `mcp__vision-bridge__analyze_media` 工具**。
 
-- **TB 缺陷源附件视频/图片（实战补强，默认仅提示不主动调）**：log 步骤拉取 TB 缺陷源后，`tb_source/<ID>/` 下若含视频(`*.mp4`/`*.mov`/`*.avi` 等)/图片(`*.png`/`*.jpg`/`*.jpeg` 等)，**默认仅在对话中提示**用户「检测到 TB 附件含视频/图片,如需分析请显式要求」——**不主动调** vision-bridge。**不主动调的原因**：① 防纯文字模型场景默认调报错（模型本身不支持图片/视频，vision-bridge 调用返回空或失败）；② 用户可能只关心日志根因，不在乎附件内容。**用户显式说"请分析附件"/"请看视频/图片"后才调**（防"分析错时间点"走弯路），详见 [steps/log.md](steps/log.md)「TB 附件提示与可选分析」与「TB 视频/图片附件研读」（反偷懒第 23 条 含 vision-bridge 不可用 / 用户未显式要求 豁免条款）
+- **TB 缺陷源附件视频/图片（实战补强,v2.4）**：log 步骤拉取 TB 缺陷源后,`tb_source/<ID>/` 下若含视频(`*.mp4`/`*.mov`/`*.avi` 等)/图片(`*.png`/`*.jpg`/`*.jpeg` 等),**vision-bridge 可用则主动调**——视频先用 ffmpeg 本地提取关键帧(免费),再传图片帧给 vision-bridge 分析(省 API 额度)。vision-bridge 不可用时仅提示附件清单不主动调(防纯文字模型报错)。详见 [steps/log.md](steps/log.md)「TB 附件分析与 ffmpeg 抽帧」与「TB 视频/图片附件研读」(反偷懒第 23 条含 vision-bridge 不可用豁免条款)
 - **装好 vision-bridge 且 `config.json` 配好三件套（base_url/api_key/model）**：`mcp__vision-bridge__analyze_media` 可用，**优先用 MCP 工具**走统一接口
 - **没装 vision-bridge，或装了但 `config.json` 三件套没填**：`analyze_media` 工具返回 fallback 提示字符串，**降级**——AI 不替用户判断原生能力
   - 原生支不支持图片/视频 **视具体 session 模型而定**（Opus/Sonnet 一般支持，Haiku 可能部分支持）

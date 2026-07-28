@@ -25,7 +25,7 @@
 | **sequential-thinking** | 所有步骤（强制思考前置，已嵌入 thinking_core） | 无 |
 | **serena** | plan/code/deepcheck/doc/review 步骤 **且** 工程有可索引源码（.py/.ts/.js/.jsx/.tsx/.vue/.c/.cpp/.h/.rs/.go/.java/.kt 等，非空非 demo-skeleton） | 其余步骤 / 无可索引源码 |
 | **context7** | init/plan/code 步骤 **且** 需求或代码涉及第三方库（package.json/Cargo.toml/go.mod/requirements.txt/pom.xml/build.gradle 等声明依赖，且需求触及该库 API） | 其余步骤 / 不涉及第三方库 |
-| **vision-bridge** | 任意步骤 **且** 用户**显式要求**分析图片/截图/视频——包括 (a) 用户主动提供图片/截图/视频（会话中含媒体附件/路径，等同显式要求）或 (b) 用户对 TB 缺陷源拉取的附件**显式说"请分析附件 / 请看视频/图片"**（TB 附件清单由 [steps/log.md](../steps/log.md)「TB 附件提示与可选分析」段在 TB 拉取后输出给用户决定，**默认仅提示不主动调**——防纯文字模型场景默认调报错） | 未显式要求永远不调（防纯文字模型场景误触发）；vision-bridge 未安装 / `~/.claude/skills/icode/mcp/vision-bridge/config.json` 三件套未配齐时不主动调 |
+| **vision-bridge** | 任意步骤 **且** (a) 用户主动提供图片/截图/视频（会话中含媒体附件/路径，直接调） **或** (b) TB 缺陷源拉取的附件含视频/图片（`{ICODE_OUT_DIR}/tb_source/<ID>/` 下，**vision-bridge 可用则主动调**：视频先用 ffmpeg 本地提取关键帧再传图片帧给 vision-bridge 省钱——见 [steps/log.md](../steps/log.md)「TB 附件分析与 ffmpeg 抽帧」段） | vision-bridge 未安装 / `~/.claude/skills/icode/mcp/vision-bridge/config.json` 三件套未配齐 → 仅提示不主动调（防纯文字模型报错）；ffmpeg 不可用时降级为直接传视频（需用户确认，可能耗 API 额度） |
 | **playwright** | deepcheck/audit 步骤 **且** 前端工程（含 .html/.jsx/.tsx/.vue 或 package.json 含 react/vue） | CLI/后端/嵌入式工程 |
 | **memory** | init/plan 步骤 **且** 本工程历史工单数 ≥ 1（`~/.claude/icode_data/index.json` 中本 project_path 工单数 ≥ 1） | 新工程首个工单 / demo |
 
@@ -63,7 +63,7 @@
 
 ### 0 log（日志根因分析）
 - **context7**：库 API 行为查证——仅涉及第三方库行为时
-- **vision-bridge**：TB 附件视频/图片可选分析 + 错误截图分析——TB 拉取的附件含视频/图片时**默认仅提示**(详见 [steps/log.md](../steps/log.md)「TB 附件提示与可选分析」与「TB 视频/图片附件研读」),用户显式要求"请分析附件/请看视频/图片"时才调;或用户主动给截图时直接调。**不主动调**的原因:防纯文字模型场景默认调报错。视频/图片里的时间点/现象是日志侦察的"零号病人"指引——但**前提是用户已显式要求分析附件**
+- **vision-bridge**：TB 附件视频/图片主动分析——TB 拉取的附件含视频/图片时 **vision-bridge 可用则主动调**（视频先用 ffmpeg 本地提取关键帧再传图片帧省钱，详见 [steps/log.md](../steps/log.md)「TB 附件分析与 ffmpeg 抽帧」）；用户主动给截图时直接调。vision-bridge 不可用时仅提示附件清单不主动调（防纯文字模型报错）
 
 ### doc（工程知识库生成）
 - **serena**：理解代码结构（入口/API/IPC）——有可索引源码时，**比 Read 精准 10 倍**

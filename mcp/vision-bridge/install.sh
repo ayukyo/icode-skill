@@ -104,6 +104,19 @@ pip_install() {
 }
 pip_install -r "$TARGET/requirements.txt"
 
+# 2.5. ffmpeg 检测（视频抽关键帧依赖，非硬性阻断）
+echo ""
+if command -v ffmpeg >/dev/null 2>&1; then
+  echo "✅ ffmpeg 已安装 ($(ffmpeg -version 2>&1 | head -1))"
+else
+  echo "⚠️ ffmpeg 未安装。视频分析将无法本地提取关键帧（会直接传视频给 vision-bridge 耗费 API 额度）"
+  echo "   安装方法:"
+  echo "     • sudo apt install ffmpeg          # Debian/Ubuntu"
+  echo "     • brew install ffmpeg              # macOS"
+  echo "     • winget install ffmpeg            # Windows"
+  echo "   装好后如需视频抽帧功能,重新跑 ./install.sh 即可。"
+fi
+
 # 3. 引导 config
 if [ ! -f "$TARGET/config.json" ]; then
   cp "$TARGET/config.example.json" "$TARGET/config.json"
