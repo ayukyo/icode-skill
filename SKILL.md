@@ -288,7 +288,7 @@ ICODE_OUT_DIR=".icode_output/.icode_output_${LAST}"
 
 ### 反偷懒约束（所有步骤必须遵守，硬性总则）
 
-完整规则**必须先 Read [references/anti_laziness.md](references/anti_laziness.md)**（不得凭概述/记忆执行，否则产出不合规——见反偷懒第15条）。核心要点：16条典型偷懒行为 + 正面合规要求；引用 references 必须每步重新 Read 输出 `📖 已 Read` 确认行；思考块每子项≥2句实质内容；用户授权例外须显式记录。
+完整规则**必须先 Read [references/anti_laziness.md](references/anti_laziness.md)**（不得凭概述/记忆执行，否则产出不合规——见反偷懒第15条）。核心要点：23条典型偷懒行为 + 正面合规要求；引用 references 必须每步重新 Read 输出 `📖 已 Read` 确认行；思考块每子项≥2句实质内容；用户授权例外须显式记录。
 
 ### 全流程串联规则
 
@@ -470,7 +470,7 @@ icode 工作流可调用 6 个 MCP（`/icode install` 一键安装）。**v2.2 �
 | **sequential-thinking** | 强制思考前置 | 所有步骤 | thinking_core 第 4 步 |
 | **serena** | LSP 语义编码 | plan/code/deepcheck/doc/review + 有可索引源码 | A 层·执行步骤内嵌 |
 | **context7** | 库文档实时查询 | init/plan/code + 涉及第三方库 | B 层·thinking_core gate |
-| **vision-bridge** | 图片/视频理解 | 任意步骤 + 用户给图 | B 层·thinking_core gate |
+| **vision-bridge** | 图片/视频理解 | 任意步骤 + 用户**显式要求**分析图片/视频（用户给图等同显式要求 / TB 缺陷源附件含视频/图片时**默认仅提示**不主动调，防纯文字模型场景报错，用户显式说"请分析附件"后才调，详见 [steps/log.md](steps/log.md)「TB 附件提示与可选分析」） | B 层·thinking_core gate |
 | **playwright** | 浏览器自动化 | deepcheck/audit + 前端工程 | B 层·thinking_core gate |
 | **memory** | 跨工单记忆 | init/plan + 本工程有历史工单 | B 层·thinking_core gate |
 
@@ -507,6 +507,7 @@ icode 工作流可调用 6 个 MCP（`/icode install` 一键安装）。**v2.2 �
 
 视觉理解是可选增强，**统一走 `mcp__vision-bridge__analyze_media` 工具**。
 
+- **TB 缺陷源附件视频/图片（实战补强，默认仅提示不主动调）**：log 步骤拉取 TB 缺陷源后，`tb_source/<ID>/` 下若含视频(`*.mp4`/`*.mov`/`*.avi` 等)/图片(`*.png`/`*.jpg`/`*.jpeg` 等)，**默认仅在对话中提示**用户「检测到 TB 附件含视频/图片,如需分析请显式要求」——**不主动调** vision-bridge。**不主动调的原因**：① 防纯文字模型场景默认调报错（模型本身不支持图片/视频，vision-bridge 调用返回空或失败）；② 用户可能只关心日志根因，不在乎附件内容。**用户显式说"请分析附件"/"请看视频/图片"后才调**（防"分析错时间点"走弯路），详见 [steps/log.md](steps/log.md)「TB 附件提示与可选分析」与「TB 视频/图片附件研读」（反偷懒第 23 条 含 vision-bridge 不可用 / 用户未显式要求 豁免条款）
 - **装好 vision-bridge 且 `config.json` 配好三件套（base_url/api_key/model）**：`mcp__vision-bridge__analyze_media` 可用，**优先用 MCP 工具**走统一接口
 - **没装 vision-bridge，或装了但 `config.json` 三件套没填**：`analyze_media` 工具返回 fallback 提示字符串，**降级**——AI 不替用户判断原生能力
   - 原生支不支持图片/视频 **视具体 session 模型而定**（Opus/Sonnet 一般支持，Haiku 可能部分支持）
@@ -558,7 +559,7 @@ icode 工作流可调用 6 个 MCP（`/icode install` 一键安装）。**v2.2 �
 |---------|------|--------|
 | [references/thinking_core.md](references/thinking_core.md) | 强制思考前置核心（每步必读：MCP+降级文字块/结构化思考/Read references） |
 | [references/thinking_detail.md](references/thinking_detail.md) | 强制思考前置细节（按需读：各步骤子项速查/历史参考小节） |（ultrathink/MCP/降级文字块/各步子项） | 所有 step |
-| [references/anti_laziness.md](references/anti_laziness.md) | 反偷懒约束（16条偷懒行为+合规要求+references必读+确认行） | 所有 step |
+| [references/anti_laziness.md](references/anti_laziness.md) | 反偷懒约束（23条偷懒行为+合规要求+references必读+确认行） | 所有 step |
 | [references/adversarial.md](references/adversarial.md) | 对抗分析模式（3质疑者/裁决优先级/诚实降级/证据回指） | 02_review / log |
 | [references/dir_and_metadata.md](references/dir_and_metadata.md) | 目录管理 + ticket_id 生成 + 全局索引写入（含LRU淘汰） + metadata 模板 + **注入缓存机制（防重复注入，两源共用）** + **project_docs 工程文档库 + 段零检索** | init / log / plan / start / fast / doc |
 | [references/doc_template.md](references/doc_template.md) | icode doc 章节模板：前 50 行四块结构（项目元信息/KEYS/简要说明/目录）+ 十位桶编号 + 自适应 grep 关键词表 + 99 章审计策略 + **v2.0.0 双视角必含元素清单（14 项）+ 业务流独立成章 + 英文首次中文备注 + 链路中文说明 + 质量审视检查清单 + 模板版本自举迁移** | doc |
