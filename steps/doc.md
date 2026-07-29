@@ -106,7 +106,7 @@ AI 解析自然语言的「目标工程」+「动作」：
 
 ### 4. 强制思考前置（不可跳过）
 
-**必须先 Read [references/thinking_core.md](../references/thinking_core.md) 完整内容（核心规则每步必读）+ 按需 Read [references/thinking_detail.md](../references/thinking_detail.md) 对应小节 + [references/anti_laziness.md](../references/anti_laziness.md) + [references/doc_template.md](../references/doc_template.md) 完整内容**（不得凭概述执行）。子项（≥4步）= 扫描结果分析 → 章节规划 → 元信息字段准备 → 风险评估（手动编辑/冲突）。
+**必须按 [references/thinking_core.md](../references/thinking_core.md)「强制思考前置·统一契约」段执行三件套 Read + Read [references/doc_template.md](../references/doc_template.md) 完整内容**（doc 模板多 Read 场景）。子项（≥4步）= 扫描结果分析 → 章节规划 → 元信息字段准备 → 风险评估（手动编辑/冲突）。
 
 ### 5. 生成 module_docs（依赖）+ 工程章节
 
@@ -305,16 +305,12 @@ AI 解析自然语言的「目标工程」+「动作」：
 - **段零消费**：`/icode init`/`log`/`plan`/`start`/`fast` 启动时段零自动检索（见 [dir_and_metadata.md](../references/dir_and_metadata.md)「段零·工程文档检索」段）；**doc 自身不写 `_inject_cache.json`**（工单目录缓存，doc 不创建工单）
 - **可重复**：多次 `/icode doc` 覆盖更新，手动编辑受确认门保护
 ## MCP 推荐（v2.2 强证据二元化）
-
-按 [references/mcp_per_step.md](../references/mcp_per_step.md)「强证据场景判定」，本步骤 MCP：
-
 | MCP | 推荐级别 | 用途 |
 |-----|----------|------|
-| sequential-thinking | 🟢 | 强制思考 |
 | serena | 🟢* | 理解代码结构（比 Read 精准 10 倍）--有可索引源码时（执行步骤内嵌） |
 | vision-bridge | 🟢* | 截图分析--用户给图时 |
 | context7 | ⚪ | 本步骤不推荐 |
 | memory | ⚪ | 本步骤不推荐 |
 | playwright | ⚪ | 本步骤不推荐 |
 
-**强制约束（v2.2）**：🟢 必须调（满足强证据场景）；🟢* 默认 🟢 但需满足强证据场景才必调（不满足降 ⚪，无需声明）；⚪ 无需评估。serena 由执行步骤内嵌点承载，其余 🟢/🟢* 由 [thinking_core.md](../references/thinking_core.md) MCP gate 承载。详见 [SKILL.md](../SKILL.md)「MCP 调用覆盖强制化」+ [mcp_per_step.md](../mcp_per_step.md)「双保险机制」。
+**强制约束（v2.2）**：🟢/🟢*/⚪ 语义 + 双保险机制（执行步骤内嵌 + thinking_core gate）详见 [SKILL.md「MCP 调用覆盖强制化」](../SKILL.md) + [references/mcp_per_step.md「双保险机制」](../references/mcp_per_step.md)；本步骤表内的 🟢/🟢* 标注按上方真源判定。

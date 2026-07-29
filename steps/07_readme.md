@@ -211,7 +211,7 @@ eval("2147483648") rc=3 (expect 3 OVERFLOW)
 
 ## 强制思考前置
 
-**必须先 Read [references/thinking_core.md](../references/thinking_core.md) 完整内容（核心规则每步必读）+ 按需 Read [references/thinking_detail.md](../references/thinking_detail.md) 对应小节（各步骤子项/历史参考）+ [references/anti_laziness.md](../references/anti_laziness.md) 完整内容**（不得凭概述/记忆执行，否则产出不合规）。本步骤子项（至少4步）= 通读产物要点 → 识别报告类型(log/功能) → 提炼自包含内容 → 规划章节结构。
+**必须按 [references/thinking_core.md](../references/thinking_core.md)「强制思考前置·统一契约」段执行三件套 Read**。本步骤子项（至少4步）= 通读产物要点 → 识别报告类型(log/功能) → 提炼自包含内容 → 规划章节结构。
 
 ## 执行流程
 
@@ -244,13 +244,9 @@ eval("2147483648") rc=3 (expect 3 OVERFLOW)
 
 用户可多次 `/icode readme` 覆盖更新（每次重新提取最新产物内容）。
 ## MCP 推荐（v2.2 强证据二元化）
-
-按 [references/mcp_per_step.md](../references/mcp_per_step.md)「强证据场景判定」，本步骤 MCP：
-
 | MCP | 推荐级别 | 用途 |
 |-----|----------|------|
-| sequential-thinking | 🟢 | 强制思考 |
 | vision-bridge | 🟢* | 附加 UI 截图--用户给图时 |
 | 其他 4 个 | ⚪ | 本步骤不推荐 |
 
-**强制约束（v2.2）**：🟢 必须调（满足强证据场景）；🟢* 默认 🟢 但需满足强证据场景才必调（不满足降 ⚪，无需声明）；⚪ 无需评估。serena 由执行步骤内嵌点承载，其余 🟢/🟢* 由 [thinking_core.md](../references/thinking_core.md) MCP gate 承载。详见 [SKILL.md](../SKILL.md)「MCP 调用覆盖强制化」+ [mcp_per_step.md](../mcp_per_step.md)「双保险机制」。
+**强制约束（v2.2）**：🟢/🟢*/⚪ 语义 + 双保险机制（执行步骤内嵌 + thinking_core gate）详见 [SKILL.md「MCP 调用覆盖强制化」](../SKILL.md) + [references/mcp_per_step.md「双保险机制」](../references/mcp_per_step.md)；本步骤表内的 🟢/🟢* 标注按上方真源判定。

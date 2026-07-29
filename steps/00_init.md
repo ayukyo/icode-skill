@@ -31,7 +31,7 @@
    - **有参数**（`/icode init <粗略需求>`）：将参数作为初始需求，结合步骤2历史参考（若有），**构思**第一版 `00_init.md` 各章节内容框架（此时不深入读代码，代码细节留给步骤4）
    - **无参数**（`/icode init`）：**构思**空模板版 `00_init.md`（各章节内容写"待补"），然后主动询问用户"这次想做什么？"开启对话
 4. **了解现有工程**：阅读项目中相关代码，识别现状、可复用模块、相关接口（**先于思考**，为步骤5的"现状盘点/影响面分析"提供代码依据）
-5. **强制思考前置**（不可跳过，缺证据视为不合规；**必须先 Read [references/thinking_core.md](../references/thinking_core.md) 完整内容（核心规则每步必读）+ 按需 Read [references/thinking_detail.md](../references/thinking_detail.md) 对应小节（各步骤子项/历史参考）+ [references/anti_laziness.md](../references/anti_laziness.md) 完整内容**（不得凭概述/记忆执行，否则产出不合规））：本步骤子项（至少5步）= 需求分解 → 现状盘点（基于步骤4读码结果） → 影响面分析（基于步骤4读码结果） → 待决策项识别 → 待决策倾向自审（逐条回溯现状盘点/影响面证据，主动找反证；无反证保留、有反证修正并记反证依据）。**若步骤2有历史参考，在此处「历史参考」小节记录命中工单 id 与要点，作为思考输入**
+5. **强制思考前置**（不可跳过，缺证据视为不合规；按 [references/thinking_core.md](../references/thinking_core.md)「强制思考前置·统一契约」段执行））：本步骤子项（至少5步）= 需求分解 → 现状盘点（基于步骤4读码结果） → 影响面分析（基于步骤4读码结果） → 待决策项识别 → 待决策倾向自审（逐条回溯现状盘点/影响面证据，主动找反证；无反证保留、有反证修正并记反证依据）。**若步骤2有历史参考，在此处「历史参考」小节记录命中工单 id 与要点，作为思考输入**
 6. 使用 Write 工具写入 `{ICODE_OUT_DIR}/00_init.md`（模板见下文）。**第 6 节链路图初稿**（一图流总览）：before 画步骤 4 读码所得现状链路（关键节点标 file:line），after 画构思的改动后链路并标 `[+]`/`[~]`/`[-]`，改动点清单对齐第 3 节新增需求点；无参数/信息不足时画已知部分 + `?` 待补，**不得整节留空或仅写"待补"**
 7. 创建 `{ICODE_OUT_DIR}/.ico_metadata.json`：
 
@@ -265,16 +265,12 @@
 
 详细衔接规则见 [01_plan.md](01_plan.md)。
 ## MCP 推荐（v2.2 强证据二元化）
-
-按 [references/mcp_per_step.md](../references/mcp_per_step.md)「强证据场景判定」，本步骤 MCP：
-
 | MCP | 推荐级别 | 用途 |
 |-----|----------|------|
-| sequential-thinking | 🟢 | 强制思考前置（每步必用） |
 | context7 | 🟢* | 库调研（用 React 19 还是 18？）--需求涉及第三方库时 |
 | vision-bridge | 🟢* | 识别用户给的设计图/截图--用户给图时 |
 | memory | 🟢* | read_graph 查跨工单偏好--本工程有历史工单时 |
 | serena | ⚪ | 本步骤不推荐 |
 | playwright | ⚪ | 本步骤不推荐 |
 
-**强制约束（v2.2）**：🟢 必须调（满足强证据场景）；🟢* 默认 🟢 但需满足强证据场景才必调（不满足降 ⚪，无需声明）；⚪ 无需评估。serena 由执行步骤内嵌点承载，其余 🟢/🟢* 由 [thinking_core.md](../references/thinking_core.md) MCP gate 承载。详见 [SKILL.md](../SKILL.md)「MCP 调用覆盖强制化」+ [mcp_per_step.md](../mcp_per_step.md)「双保险机制」。
+**强制约束（v2.2）**：🟢/🟢*/⚪ 语义 + 双保险机制（执行步骤内嵌 + thinking_core gate）详见 [SKILL.md「MCP 调用覆盖强制化」](../SKILL.md) + [references/mcp_per_step.md「双保险机制」](../references/mcp_per_step.md)；本步骤表内的 🟢/🟢* 标注按上方真源判定。

@@ -41,7 +41,7 @@ icode 工作流强依赖 MCP（每个 mcp 子工程自带 `install.sh` 提供一
 
 ## 执行步骤
 
-1. **强制思考前置**（不可跳过，缺证据视为不合规；**必须先 Read [references/thinking_core.md](../references/thinking_core.md) 完整内容（核心规则每步必读）+ 按需 Read [references/thinking_detail.md](../references/thinking_detail.md) 对应小节 + [references/anti_laziness.md](../references/anti_laziness.md) 完整内容**）：本步骤子项（至少 3 步）=
+1. **强制思考前置**（不可跳过，缺证据视为不合规；按 [references/thinking_core.md](../references/thinking_core.md)「强制思考前置·统一契约」段执行）：本步骤子项（至少 3 步）=
    - 本次作用域明确（本步骤直接调用 `mcp/install.sh`，不读写工程文件）
    - 当前 `~/.claude.json` mcpServers 段速读（了解现状，避免重复注册）
    - 执行结果逐项验证（不只看 install.sh 退出码，还要确认每个 mcpServer 已写入）
@@ -104,13 +104,8 @@ icode 工作流强依赖 MCP（每个 mcp 子工程自带 `install.sh` 提供一
 - vision-bridge 不删 `.venv`（要彻底清用 `--purge`，待 vision-bridge 升级时支持）
 - serena 缓存可手动 `uv cache clean`
 - npm/uv 缓存系统级保留（不删，下次装仍可用）
-## MCP 推荐（v2.2 强证据二元化）
+## MCP 推荐
 
-按 [references/mcp_per_step.md](../references/mcp_per_step.md)「强证据场景判定」，本步骤 MCP：
+本步骤仅用 sequential-thinking 强制思考（见 [references/mcp_per_step.md](../references/mcp_per_step.md)「通用前置」段）。其他 5 个 MCP 本步骤不推荐。
 
-| MCP | 推荐级别 | 用途 |
-|-----|----------|------|
-| sequential-thinking | 🟢 | 强制思考（每步必用） |
-| 其他 5 个 | ⚪ | 本步骤不推荐 |
-
-**强制约束（v2.2）**：🟢 必须调（满足强证据场景）；🟢* 默认 🟢 但需满足强证据场景才必调（不满足降 ⚪，无需声明）；⚪ 无需评估。serena 由执行步骤内嵌点承载，其余 🟢/🟢* 由 [thinking_core.md](../references/thinking_core.md) MCP gate 承载。详见 [SKILL.md](../SKILL.md)「MCP 调用覆盖强制化」+ [mcp_per_step.md](../mcp_per_step.md)「双保险机制」。
+**强制约束（v2.2）**：🟢/🟢*/⚪ 语义 + 双保险机制（执行步骤内嵌 + thinking_core gate）详见 [SKILL.md「MCP 调用覆盖强制化」](../SKILL.md) + [references/mcp_per_step.md「双保险机制」](../references/mcp_per_step.md)；本步骤表内的 🟢/🟢* 标注按上方真源判定。

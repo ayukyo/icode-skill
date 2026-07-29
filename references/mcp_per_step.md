@@ -34,23 +34,27 @@
 - memory 的工单数探测：Read `~/.claude/icode_data/index.json` 按本工程 project_path 计数
 - vision-bridge/playwright 的工程类型/媒体探测：按会话上下文 + 工程文件判定
 
+## 通用前置（所有步骤必用，v2.4 去重）
+
+> **所有步骤**必用 `sequential-thinking` 🟢（承载「强制思考前置」，**每步至少 3 步 + 每步对应该步骤声明的子项之一**）。详见 [references/thinking_core.md](../references/thinking_core.md)「通用流程」第 4 步。**该行为是默认常量，不在下方矩阵中重复标注**。
+
 ## 推荐矩阵（v2.2 二元化）
 
-> 矩阵只标默认推荐；实际执行按上方「强证据场景判定」动态判定。强证据场景不满足时，即使下表标 🟢 也降为 ⚪。
+> 矩阵只标**除 sequential-thinking 外的**MCP 默认推荐；sequential-thinking 见上方「通用前置」。实际执行按上方「强证据场景判定」动态判定。强证据场景不满足时，即使下表标 🟢 也降为 ⚪。
 
-| Step | sequential-thinking | serena | context7 | vision-bridge | playwright | memory |
-|---|---|---|---|---|---|---|
-| **0 init** | 🟢 | ⚪ | 🟢* | 🟢* | ⚪ | 🟢* |
-| **0 log** | 🟢 | ⚪ | 🟢* | 🟢* | ⚪ | 🟢* |
-| **doc** | 🟢 | 🟢* | ⚪ | 🟢* | ⚪ | ⚪ |
-| **1 plan** | 🟢 | 🟢* | 🟢* | 🟢* | ⚪ | 🟢* |
-| **2 review** | 🟢 | 🟢* | ⚪ | 🟢* | ⚪ | ⚪ |
-| **3 merge** | 🟢 | ⚪ | ⚪ | ⚪ | ⚪ | ⚪ |
-| **4 code** | 🟢 | 🟢* | 🟢* | 🟢* | ⚪ | ⚪ |
-| **5 deepcheck** | 🟢 | 🟢* | ⚪ | 🟢* | 🟢* | ⚪ |
-| **6 audit** | 🟢 | ⚪ | ⚪ | 🟢* | 🟢* | ⚪ |
-| **7 readme** | 🟢 | ⚪ | ⚪ | 🟢* | ⚪ | ⚪ |
-| **install/status/list** | 🟢 | ⚪ | ⚪ | ⚪ | ⚪ | ⚪ |
+| Step | serena | context7 | vision-bridge | playwright | memory |
+|---|---|---|---|---|---|
+| **0 init** | ⚪ | 🟢* | 🟢* | ⚪ | 🟢* |
+| **0 log** | ⚪ | 🟢* | 🟢* | ⚪ | 🟢* |
+| **doc** | 🟢* | ⚪ | 🟢* | ⚪ | ⚪ |
+| **1 plan** | 🟢* | 🟢* | 🟢* | ⚪ | 🟢* |
+| **2 review** | 🟢* | ⚪ | 🟢* | ⚪ | ⚪ |
+| **3 merge** | ⚪ | ⚪ | ⚪ | ⚪ | ⚪ |
+| **4 code** | 🟢* | 🟢* | 🟢* | ⚪ | ⚪ |
+| **5 deepcheck** | 🟢* | ⚪ | 🟢* | 🟢* | ⚪ |
+| **6 audit** | ⚪ | ⚪ | 🟢* | 🟢* | ⚪ |
+| **7 readme** | ⚪ | ⚪ | 🟢* | ⚪ | ⚪ |
+| **install/status/list** | ⚪ | ⚪ | ⚪ | ⚪ | ⚪ |
 
 `🟢*` = 默认 🟢，但实际需满足强证据场景才必调（不满足降为 ⚪，无需声明）。
 

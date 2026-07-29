@@ -53,13 +53,27 @@
    | 字段 | 来源 | 宽度 | 颜色规则 |
    |------|------|------|---------|
    | TICKET-ID | `ticket_id` | 自适应（最长对齐） | 基础 |
-   | PROJECT | `project_path` 短化 | 30 字符 | 基础 |
+   | PROJECT | `project_path` 智能截断（见下） | 60 字符 | 基础 |
    | STATUS | `status` | 14 字符 | `completed` 灰 / 含 `in_progress` 黄 / 其他 绿 |
    | WORKLOAD | `workload_estimate` | 7 字符 | `large` 粗体红 / `medium` 黄 / `small` 灰 / 缺失 `-` |
    | LAST-USED | `last_used_at` | 16 字符（`YYYY-MM-DD HH:MM`） | 基础 |
    | SCHEMA | `template_version` | 9 字符（`v1.1`/`v0`/`unknown`/`-`） | `v1.1+` 绿 / `v0` 黄 / `unknown` 灰 / 缺失 `-` |
    | VERDICT | `verdict` | 11 字符 | `disproved` 红 / `superseded` 蓝 / `verified` 绿 / `unknown` 灰 |
    | SUMMARY | `requirement_summary` | 60 字符截断（超长加 `…`） | 基础 |
+
+   **PROJECT 列智能截断算法**（修默认 30 字符截断导致 path 不可见的痛点）：
+
+   1. **完整路径 ≤ 60 字符**：原样显示
+   2. **完整路径 > 60 字符**：按以下优先级智能截断
+      - **优先一**：`$HOME` 替换为 `~`（如 `/home/user/myproject` → `~/myproject`），剩余若仍超 60 字符进行下一级
+      - **优先二**：保留 basename + 关键父路径段（保留 basename 和最后 N 级父目录，体现工程身份而非纯路径）
+      - **最终兜底**：从路径尾部取 60 字符，前缀加 `…`（如 `…ng-project-name/subdir/.icode_output`），保留可点击的尾部信息
+   3. **截断示例**：
+      - `/home/user/myproject` → `~/myproject`（19 字符）
+      - `/home/user/very-long-namespace-name/myproject` → `~/very-long-namespace-name/myproject`（41 字符，原样）
+      - `/home/user/very-long-namespace-name/myproject/.icode_output` → `~/…/.icode_output/`（智能缩中段）
+      - `/home/user/very-long-namespace-name/myproject/.icode_output/.icode_output_3` → `~/<truncated header>…myproject/.icode_output_3`（保留尾段）
+   4. **绝对优先**：保留的最后一段必须是工单目录名（`.icode_output_N`），让用户能直接 `cd` 进去
 
    **stale 工单**（如 `--include-stale` 显式包含）：`STATUS` 列前缀 `[stale] `，`SUMMARY` 后缀 ` [stale_reason: X]`
 
@@ -144,13 +158,8 @@
 # 包含 stale 工单（默认排除）
 /icode list --include-stale
 ```
-## MCP 推荐（v2.2 强证据二元化）
+## MCP 推荐
 
-按 [references/mcp_per_step.md](../references/mcp_per_step.md)「强证据场景判定」，本步骤 MCP：
+本步骤仅用 sequential-thinking 强制思考（见 [references/mcp_per_step.md](../references/mcp_per_step.md)「通用前置」段）。其他 5 个 MCP 本步骤不推荐。
 
-| MCP | 推荐级别 | 用途 |
-|-----|----------|------|
-| sequential-thinking | 🟢 | 强制思考（每步必用） |
-| 其他 5 个 | ⚪ | 本步骤不推荐 |
-
-**强制约束（v2.2）**：🟢 必须调（满足强证据场景）；🟢* 默认 🟢 但需满足强证据场景才必调（不满足降 ⚪，无需声明）；⚪ 无需评估。serena 由执行步骤内嵌点承载，其余 🟢/🟢* 由 [thinking_core.md](../references/thinking_core.md) MCP gate 承载。详见 [SKILL.md](../SKILL.md)「MCP 调用覆盖强制化」+ [mcp_per_step.md](../mcp_per_step.md)「双保险机制」。
+**强制约束（v2.2）**：🟢/🟢*/⚪ 语义 + 双保险机制（执行步骤内嵌 + thinking_core gate）详见 [SKILL.md「MCP 调用覆盖强制化」](../SKILL.md) + [references/mcp_per_step.md「双保险机制」](../references/mcp_per_step.md)；本步骤表内的 🟢/🟢* 标注按上方真源判定。

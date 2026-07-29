@@ -33,7 +33,7 @@
    - 若 `.ico_metadata.json.status == "review_in_progress"`，**续跑**（审查中断未终止）：从 metadata 恢复 `total_rounds` / `clean_rounds` / `extended_rounds` / `pending_verification` 字段；`max_rounds` / `absolute_cap` 按**新参数优先**原则——若 `param_max_rounds` 非空，则 `max_rounds = param_max_rounds`、`absolute_cap = max(10, param_max_rounds × 2)`，并更新 metadata；否则沿用 metadata 旧值（首次执行时写入）。**场景一 `FAST_LOCKED=true` 时强制 `max_rounds=1`（覆盖上述决策）**。读取所有已存在的 `review_round_*.json` 汇总历史问题，跳过已完成轮次，从当前 `total_rounds` 继续
    - 输出续跑信息：`▶ 步骤2 续跑，从第{total_rounds}轮开始（已完成{total_rounds-1}轮，当前轮数上限{max_rounds}，已扩展{extended_rounds}次，硬上限{absolute_cap}轮）`
    - 否则**首轮初始化**（status 为 `plan_done`/`review_done`/其他非 in_progress 态）：`status=review_done` 表示上一轮审查已收敛终止，再调 `/icode review` 视为**重新审查**——`clean_rounds = 0`, `total_rounds = 1`, `extended_rounds = 0`，`max_rounds` 由参数决定（`param_max_rounds` 非空用 `param_max_rounds`，否则默认 3），`absolute_cap = max(10, max_rounds × 2)`，设 `status = review_in_progress`，将 `max_rounds` / `absolute_cap` / `extended_rounds` 写入 metadata。**场景一 `FAST_LOCKED=true` 时强制 `max_rounds=1`（覆盖上述决策）**。**重新审查会覆盖旧 `review_round_*.json` 与 `02_review.md`**——若用户想在中断处续跑，应确保 status 是 `review_in_progress`（中断态）而非 `review_done`（终止态）
-4. **强制思考前置**（不可跳过，缺证据视为不合规；**必须先 Read [references/thinking_core.md](../references/thinking_core.md) 完整内容（核心规则每步必读）+ 按需 Read [references/thinking_detail.md](../references/thinking_detail.md) 对应小节（各步骤子项/历史参考）+ [references/anti_laziness.md](../references/anti_laziness.md) 完整内容**（不得凭概述/记忆执行，否则产出不合规）；基于上述第3步「分步续跑检测」的判定结果选择思考路径）：
+4. **强制思考前置**（不可跳过，缺证据视为不合规；按 [references/thinking_core.md](../references/thinking_core.md)「强制思考前置·统一契约」段执行）；基于上述第3步「分步续跑检测」的判定结果选择思考路径）：
    - **首轮**（`total_rounds == 1`）子项（至少3步）：需求分解 → 独立方案构思 → 对比要点预判
    - **续跑**（`total_rounds > 1`）子项（至少3步）：回顾历史轮次问题 → 增量审查范围界定 → 跨章节影响预判
 5. 输出步骤确认：`▶ 步骤2 审查开始（{max_rounds}轮内完成；如最后一轮仍有新问题，自动延长 +2 轮，最多扩展至 {absolute_cap} 轮）`
@@ -62,6 +62,11 @@
 
 **步骤 2.5 — 逐维审查（6个维度，全部覆盖）**：
 1. 逻辑合理性、2. 流程完整性、3. 场景覆盖度、4. 风险遗漏、5. 落地可行性、6. 现有实现对照
+
+> **维度 4「风险遗漏」v2.4 增补子项（防"语义碰撞"型根因遗漏）**：本修改涉及的状态值若来自外部模块（SDK / 其他进程 / 共享库），必须额外勾对以下 3 条（缺失任一视为审查不完整，对抗验证可直接攻击「未做跨模块枚举对照」）。**前置证据**：log 工单应已 Read `log_analysis.md §2.2 跨模块枚举对照表`，本维度审查以该表为对照基线；init 工单无此表，按 plan §4.5 维度 2 子项的「跨模块枚举对齐」设计态独立审查：
+> - [ ] 是否对照了上下游枚举定义（两侧 file:line 都贴出）？是否存在「同名不同义」风险（如上游某枚举值 N = 终局态，下游某枚举值 N = 过渡态，或反之）？
+> - [ ] 修复是否落在正确的边界层——优先「数据入口一次归一化」，避免「N 处散补丁」（后者会让修改面膨胀、未来同类型根因再次出现时无收敛点）？是否识别出哪些消费者不受本修复影响（如 nav 转发保留原值）？
+> - [ ] 归一化后是否保留原始值用于日志 / 调试（双值日志），防止归一化后丢失上游语义信息导致二次定位困难？
 
 > **数值/数学边界自检**（针对涉及数值计算的算法，如 lcm、gcd、pow、sqrt 等）：审查计划中的"预期结果"必须**自行验证数学正确性**，不能照搬历史经验。常见陷阱：
 > - `46341² ≈ 2.147×10⁹` < INT_MAX，不溢出（√INT_MAX≈46340.95）
@@ -198,16 +203,12 @@
    - 若 `unresolved_issues_at_cap == true`：**暂停**全流程串联，输出 `⚠️ 步骤2 存在未解决问题，请手动决定是否继续 /icode merge 或回到 /icode plan`
    - 否则：**立即继续执行步骤3**
 ## MCP 推荐（v2.2 强证据二元化）
-
-按 [references/mcp_per_step.md](../references/mcp_per_step.md)「强证据场景判定」，本步骤 MCP：
-
 | MCP | 推荐级别 | 用途 |
 |-----|----------|------|
-| sequential-thinking | 🟢 | 强制思考 |
 | serena | 🟢* | 依赖关系审查（这个函数被哪些地方调用？）--有可索引源码时（步骤 2.3 内嵌） |
 | vision-bridge | 🟢* | 截图分析--用户给图时 |
 | context7 | ⚪ | 本步骤不推荐 |
 | memory | ⚪ | 本步骤不推荐 |
 | playwright | ⚪ | 本步骤不推荐 |
 
-**强制约束（v2.2）**：🟢 必须调（满足强证据场景）；🟢* 默认 🟢 但需满足强证据场景才必调（不满足降 ⚪，无需声明）；⚪ 无需评估。serena 由执行步骤内嵌点承载，其余 🟢/🟢* 由 [thinking_core.md](../references/thinking_core.md) MCP gate 承载。详见 [SKILL.md](../SKILL.md)「MCP 调用覆盖强制化」+ [mcp_per_step.md](../mcp_per_step.md)「双保险机制」。
+**强制约束（v2.2）**：🟢/🟢*/⚪ 语义 + 双保险机制（执行步骤内嵌 + thinking_core gate）详见 [SKILL.md「MCP 调用覆盖强制化」](../SKILL.md) + [references/mcp_per_step.md「双保险机制」](../references/mcp_per_step.md)；本步骤表内的 🟢/🟢* 标注按上方真源判定。

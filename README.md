@@ -88,71 +88,33 @@ cd ~/.claude/skills/icode/mcp/vision-bridge
 
 ## 可选：从 Teambition 拉缺陷单日志分析
 
-`/icode log` 的零散输入含 Teambition 项目 URL（`/project/<pid>/` 路径）或 `<LIB>-<NUM>`（如 `DEMO-26`）时，可选自动拉取缺陷单的标题/描述/评论/日志附件，落到 `{ICODE_OUT_DIR}/tb_source/` 作为日志根因分析输入。
-
-```bash
-/icode log 分析 https://tb.example.com/project/<pid> DEMO-26 问题
-# 配置（可选）：URL+单号用法不配 config 也行；多项目快捷时建 ~/.claude/skills/icode/tools/tb/config.json；cookie 用 ~/.claude/skills/icode/tools/tb/scripts/tb_cookie.py --domain <域名> 取
-# 仅拉取 + 分析，不回写 TB；无 TB 引用时 log 走纯本地日志路径，行为不变
-```
-
-多项目文本配置与 cookie 详见 `~/.claude/skills/icode/tools/tb/README.md`。
+`/icode log` 的零散输入含 Teambition 项目 URL 或 `<LIB>-<NUM>`（如 `DEMO-26`）时，可选自动拉取缺陷单的标题/描述/评论/日志附件作为分析输入；详见 [SKILL.md「使用流程示例·方式 D2」](SKILL.md) 段。配置（多项目 + cookie）详见 `~/.claude/skills/icode/tools/tb/README.md`。
 
 ## 命令一览
 
-| 命令 | 功能 | 创建目录 |
-| ---- | ---- | -------- |
-| `/icode help` | 帮助：输出使用流程示例 | 否 |
-| `/icode log [零散信息...]` | 可选入口：日志根因分析→转修复需求 `00_init.md`（领域无关，每次都新建目录） | ✅ 每次都新建 |
-| `/icode init [<粗略需求>]` | 可选步骤0：多轮对话产出需求初稿 `00_init.md`（每次调用都新建目录） | ✅ 每次都新建 |
-| `/icode start <需求>` | 全流程：创建/复用目录 → 步骤1→6 | ✅ / 复用 |
-| `/icode fast <需求>` | 精简全流程：plan→review(1轮无对抗)→merge→code→deepcheck(Reverse)→audit（耗时约为全流程 65%） | ✅ / 复用 |
-| `/icode plan <需求>` | 仅步骤1：拟定项目计划 | ✅ / 复用 |
-| `/icode review [N]` | 仅步骤2：专项审查计划（N=软上限轮数，默认3；仍有问题时自动延长 +2 轮） | 否 |
-| `/icode merge` | 仅步骤3：合并审查意见定稿 | 否 |
-| `/icode code` | 仅步骤4：落地编码实施 | 否 |
-| `/icode deepcheck` | 仅步骤5：三阶段递进复检（Reverse → Fixed → Free，fast 模式仅 Reverse） | 否 |
-| `/icode audit` | 仅步骤6：终极终审 + 统一修复（产出 06_audit.md） | 否 |
-| `/icode readme` | 可选步骤7：生成交付报告（面向人的自包含总结，动态文件名，智能识别功能/查BUG模板） | 否 |
-| `/icode doc [自然语言]` | 工程级知识库生成（独立步骤）：扫描代码特征生成全局知识库章节，供 init/log/plan/start/fast 段零自动检索注入。不创建工单目录、不参与 1~6 推进 | 否（写全局 `project_docs/`） |
-| `/icode status` | 只读：查当前工单状态（不创建目录/不写文件） | 否 |
-| `/icode list [关键词]` | 跨工程工单查找：表格展示全索引工单，支持 `--project` / `--status` / `--since` / `--limit` / `--no-color` 过滤。**纯只读不跳转** | 否（纯只读，跨工程） |
+| 命令 | 功能 |
+| ---- | ---- |
+| `/icode help` | 帮助：输出使用流程示例 |
+| `/icode log [零散信息...]` | 可选入口：日志根因分析→转修复需求 `00_init.md`（领域无关，每次都新建目录） |
+| `/icode init [<粗略需求>]` | 可选步骤 0：多轮对话产出需求初稿 `00_init.md` |
+| `/icode start <需求>` | 全流程：创建/复用目录 → 步骤 1→6 |
+| `/icode fast <需求>` | 精简全流程：plan→review(1轮无对抗)→merge→code→deepcheck(Reverse)→audit（耗时约 65%） |
+| `/icode plan <需求>` | 仅步骤 1：拟定项目计划 |
+| `/icode review [N]` | 仅步骤 2：专项审查计划（N=软上限轮数，默认 3） |
+| `/icode merge` | 仅步骤 3：合并审查意见定稿 |
+| `/icode code` | 仅步骤 4：落地编码实施 |
+| `/icode deepcheck` | 仅步骤 5：三阶段递进复检（Reverse → Fixed → Free） |
+| `/icode audit` | 仅步骤 6：终极终审 + 统一修复（产出 `06_audit.md`） |
+| `/icode readme` | 可选步骤 7：生成交付报告（面向人的自包含总结） |
+| `/icode doc [自然语言]` | 工程级知识库生成（独立步骤）：扫描代码特征生成全局知识库章节，供段零自动检索注入 |
+| `/icode status` | 只读：查当前工单状态 |
+| `/icode list [关键词]` | 跨工程工单查找（纯只读） |
 
-> `/icode start` / `/icode plan` / `/icode fast` 启动时若最新 `.icode_output/.icode_output_N/` 为入口态（status 为 `init_in_progress` 或 `log_done`，即 init/log 产出了 `00_init.md` 但未进步骤1），**询问用户"复用/新建"**——选复用则把 `00_init.md` 作需求输入（来自 log 则同时读 `log_analysis.md` 作背景）；非入口态带参直接新建。
+> 完整命令一览（含「创建目录？」列 + 复用规则 + `--verdict`/`--scan-verdict` 等参数详解）见 [SKILL.md「调用命令」段](SKILL.md)。
 
-## 执行方式
+## 执行方式 / 目录结构 / 工作流程
 
-所有步骤在主会话中执行，使用当前会话模型。不主动切换，用户可自行 `/model`。
-
-## 目录结构
-
-```text
-.icode_output/                # 统一父目录，收纳所有产物
-└── .icode_output_N/          # N 自动递增（每次需求新建）
-    ├── .ico_metadata.json      # 元信息（状态、代码文件列表）
-    ├── log_analysis.md         # 入口 log（可选）：日志根因分析报告
-    ├── 00_init.md              # 步骤0（可选）/ 入口 log：需求初稿（每轮对话增量更新）
-    ├── 01_plan.md              # 步骤1：项目计划
-    ├── 02_review.md            # 步骤2：审查报告
-    ├── review_round_*.json     # 步骤2：各轮审查详情（JSON）
-    ├── 03_plan_final.md        # 步骤3：定稿计划（末尾预留"实现偏差备忘"段，步骤6回写）
-    ├── 05_deepcheck.md          # 步骤5：三阶段复检（Reverse/Fixed/Free 合并）
-    ├── 06_audit.md             # 步骤6：终审报告（含修复日志段）
-    └── {动态文件名}.md        # 步骤7（可选）：交付报告（/icode readme 生成，面向人的自包含总结）
-```
-
-## 工作流程
-
-```text
-[入口 log(可选)] 日志根因分析 → 转修复需求 00_init.md
-[步骤0(可选)] 需求初稿对话 → 00_init.md
-       ↓（start/plan/fast 无参 → 询问复用/新建）
-[步骤1] 拟定计划 → [步骤2] 专项审查 → [步骤3] 合并定稿
-                                              ↓
-[步骤6] 终审修复(含偏差回写) ← [步骤5] 循环复检 ← [步骤4] 编码实施
-
-fast 模式（/icode fast）：步骤2 固定 1 轮无对抗，步骤5 只跑 Reverse；产物与 full 模式结构对齐
-```
+执行方式（主会话 + 不主动切换模型）+ 目录结构（含 `.icode_output_N/` 产物收纳）+ 工作流程（步骤 1→6 数据流图 + fast 模式分支）详见 [SKILL.md「通用规则」段](SKILL.md)。
 
 ## 许可证
 

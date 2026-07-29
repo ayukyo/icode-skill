@@ -88,69 +88,33 @@ See [mcp/vision-bridge/README.md](mcp/vision-bridge/README.md).
 
 ## Optional: pull a Teambition defect's logs for analysis
 
-When `/icode log` scattered input contains a Teambition project URL (a `/project/<pid>/` path) or a `<LIB>-<NUM>` (e.g. `DEMO-26`), it can optionally auto-pull the defect's title/description/comments/log attachments into `{ICODE_OUT_DIR}/tb_source/` as input for log root-cause analysis.
-
-```bash
-/icode log analyze https://tb.example.com/project/<pid> defect DEMO-26
-# Config (optional): URL+ticket usage works without config (AI extracts domain+pid from URL, passes --domain --pid); build config.json only for multi-project shortcuts; cookie via ~/.claude/skills/icode/tools/tb/scripts/tb_cookie.py --domain <your-TB-domain>
-# Pull & analyze only, never writes back to TB; without a TB reference, log stays on the local-log path, unchanged
-```
-
-See `~/.claude/skills/icode/tools/tb/README.md` for multi-project text config and cookie setup.
+When `/icode log` scattered input contains a Teambition project URL or a `<LIB>-<NUM>` (e.g. `DEMO-26`), it can optionally auto-pull the defect's title/description/comments/log attachments as analysis input; see the `Usage Examples · Mode D2` section of [SKILL.md](SKILL.md). Multi-project config and cookie setup details: see `~/.claude/skills/icode/tools/tb/README.md`.
 
 ## Commands
 
-| Command | Description | Creates Dir? |
-| --- | --- | --- |
-| `/icode help` | Help: show usage examples | No |
-| `/icode log [scattered info...]` | Optional entry: log root-cause analysis → fix requirement `00_init.md` (domain-agnostic, always fresh) | Yes (always fresh) |
-| `/icode init [<rough req>]` | Optional Step 0: multi-turn dialogue → `00_init.md` (always creates a fresh directory) | Yes (always fresh) |
-| `/icode start <req>` | Full flow: create/reuse dir → steps 1–6 | Yes / Reuse |
-| `/icode fast <req>` | Trimmed full flow: plan→review(1 round, no adversarial)→merge→code→deepcheck(Reverse only)→audit (~65% of full-flow cost) | Yes / Reuse |
-| `/icode plan <req>` | Step 1 only: draft project plan | Yes / Reuse |
-| `/icode review [N]` | Step 2 only: review the plan (N=soft cap rounds, default 3; auto-extends +2 if issues remain) | No |
-| `/icode merge` | Step 3 only: merge reviews & finalize | No |
-| `/icode code` | Step 4 only: implement code | No |
-| `/icode deepcheck` | Step 5 only: three-phase progressive check (Reverse → Fixed → Free; fast mode runs Reverse only) | No |
-| `/icode audit` | Step 6 only: final audit + fix (produces `06_audit.md`) | No |
-| `/icode readme` | Optional Step 7: generate delivery report (self-contained summary, dynamic filename, smart feature/bugfix template) | No |
-| `/icode doc [natural language]` | Project-level knowledge base (standalone step): scans code features to generate global knowledge-base chapters; auto-retrieved/injected by init/log/plan/start/fast phase-zero. No ticket dir, not part of steps 1–6 | No (writes global `project_docs/`) |
-| `/icode status` | Read-only: query current ticket status (no dir/file created) | No |
-| `/icode list [keywords]` | Cross-project ticket search: tabulated view of all indexed tickets, supports `--project` / `--status` / `--since` / `--limit` / `--no-color` / `--include-stale` filtering. **Pure read-only, no jump** | No (pure read-only, cross-project) |
+| Command | Description |
+| --- | --- |
+| `/icode help` | Help: show usage examples |
+| `/icode log [scattered info...]` | Optional entry: log root-cause analysis → fix requirement `00_init.md` (domain-agnostic, always fresh) |
+| `/icode init [<rough req>]` | Optional Step 0: multi-turn dialogue → `00_init.md` (always creates a fresh directory) |
+| `/icode start <req>` | Full flow: create/reuse dir → steps 1–6 |
+| `/icode fast <req>` | Trimmed full flow: plan→review(1 round, no adversarial)→merge→code→deepcheck(Reverse only)→audit (~65% of full-flow cost) |
+| `/icode plan <req>` | Step 1 only: draft project plan |
+| `/icode review [N]` | Step 2 only: review the plan (N=soft cap rounds, default 3) |
+| `/icode merge` | Step 3 only: merge reviews & finalize |
+| `/icode code` | Step 4 only: implement code |
+| `/icode deepcheck` | Step 5 only: three-phase progressive check (Reverse → Fixed → Free; fast mode runs Reverse only) |
+| `/icode audit` | Step 6 only: final audit + fix (produces `06_audit.md`) |
+| `/icode readme` | Optional Step 7: generate delivery report (self-contained summary, dynamic filename) |
+| `/icode doc [natural language]` | Project-level knowledge base (standalone step): scans code features to generate global knowledge-base chapters; auto-retrieved/injected by init/log/plan/start/fast phase-zero |
+| `/icode status` | Read-only: query current ticket status (no dir/file created) |
+| `/icode list [keywords]` | Cross-project ticket search: tabulated view of all indexed tickets. **Pure read-only, no jump** |
 
-> When `/icode start` / `/icode plan` / `/icode fast` is launched and the latest `.icode_output/.icode_output_N/` is in entry state (status `init_in_progress` or `log_done`, i.e. init/log produced `00_init.md` but hasn't entered Step 1), it **asks the user "reuse/new"** — reuse takes `00_init.md` as input (from log, also reads `log_analysis.md` as background); non-entry state with args creates fresh.
+> Full commands table (incl. "Creates Dir?" column + reuse rules + `--verdict`/`--scan-verdict` flag details): see the `Commands` section of [SKILL.md](SKILL.md).
 
-## Execution
+## Execution / Directory Structure / Workflow
 
-All steps run in the main session with the current model. No automatic model switching — use `/model` manually if needed.
-
-## Directory Structure
-
-```text
-.icode_output/                # Unified parent dir, holds all outputs
-└── .icode_output_N/          # N auto-increments (new per requirement)
-    ├── .ico_metadata.json      # Metadata (status, code file list)
-    ├── log_analysis.md         # Entry log (optional): log root-cause analysis report
-    ├── 00_init.md              # Step 0 (optional) / Entry log: Requirement draft (incrementally updated)
-    ├── 01_plan.md              # Step 1: Project plan
-    ├── 02_review.md            # Step 2: Review report
-    ├── review_round_*.json     # Step 2: Per-round review details (JSON)
-    ├── 03_plan_final.md        # Step 3: Finalized plan (reserves "implementation deviation memo" section at the end, written back by Step 6)
-    ├── 05_deepcheck.md          # Step 5: Three-phase deepcheck (Reverse/Fixed/Free merged)
-    ├── 06_audit.md             # Step 6: Audit report (incl. fix log section)
-    └── {dynamic_name}.md      # Step 7 (optional): delivery report (generated by /icode readme, self-contained summary)
-```
-
-## Workflow
-
-```text
-[Entry log (optional)] Log root-cause analysis → fix requirement 00_init.md
-[Step 0 (optional)] Requirement Draft Dialogue → 00_init.md
-       ↓ (start/plan no args → ask reuse/new)
-[Step 1] Plan → [Step 2] Review → [Step 3] Finalize
-                                          ↓
-[Step 6] Audit (incl. deviation writeback) ← [Step 5] Deep Check ← [Step 4] Code
-```
+Execution (main session + no automatic model switching) + Directory Structure (`.icode_output_N/` output layout) + Workflow (Steps 1→6 data-flow diagram + fast-mode branch): see the `General Rules` section of [SKILL.md](SKILL.md).
 
 ## License
 

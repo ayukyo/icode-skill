@@ -143,22 +143,18 @@ fi
 
 fast 模式的"精简"不等于"偷懒"：
 
-1. **每步仍必须执行强制思考前置**（先 Read `references/thinking_core.md` 完整内容（核心规则每步必读）+ 按需 Read `references/thinking_detail.md` 对应小节 + `references/anti_laziness.md` 完整内容，缺证据视为不合规）
+1. **每步仍必须执行强制思考前置**（按 `references/thinking_core.md`「强制思考前置·统一契约」段执行三件套 Read，缺证据视为不合规）
 2. **每步仍必须产出对应产物文件**（不跳过 01_plan.md / 02_review.md / 03_plan_final.md / 05_deepcheck.md / 06_audit.md）
 3. **入口警告必须如实打印**（不静默跳过提示）
 4. **跳过对抗验证不是"省略证据"**，而是承认 fast 模式下没有对抗资源——用户自负其责
 5. **fast 模式不能用于：声称"做了深度审查"**——明确"1 轮无对抗"的边界，避免误导后续读者
 ## MCP 推荐（v2.2 强证据二元化）
-
-按 [references/mcp_per_step.md](../references/mcp_per_step.md)「强证据场景判定」，本步骤 MCP：
-
 | MCP | 推荐级别 | 用途 |
 |-----|----------|------|
-| sequential-thinking | 🟢 | 串联各步骤的强制思考 |
 | serena | 🟢* | 代码理解 + 符号编辑--有可索引源码时（plan/deepcheck 内嵌） |
 | context7 | 🟢* | 库 API 核对--涉及第三方库时 |
 | vision-bridge | 🟢* | UI 截图--用户给图时 |
 | memory | 🟢* | read_graph 查跨工单记忆--有历史工单时 |
 | playwright | ⚪ | fast 模式不跑 E2E |
 
-**强制约束（v2.2）**：🟢 必须调（满足强证据场景）；🟢* 默认 🟢 但需满足强证据场景才必调（不满足降 ⚪，无需声明）；⚪ 无需评估。serena 由执行步骤内嵌点承载，其余 🟢/🟢* 由 [thinking_core.md](../references/thinking_core.md) MCP gate 承载。详见 [SKILL.md](../SKILL.md)「MCP 调用覆盖强制化」+ [mcp_per_step.md](../mcp_per_step.md)「双保险机制」。
+**强制约束（v2.2）**：🟢/🟢*/⚪ 语义 + 双保险机制（执行步骤内嵌 + thinking_core gate）详见 [SKILL.md「MCP 调用覆盖强制化」](../SKILL.md) + [references/mcp_per_step.md「双保险机制」](../references/mcp_per_step.md)；本步骤表内的 🟢/🟢* 标注按上方真源判定。

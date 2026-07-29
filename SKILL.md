@@ -282,13 +282,14 @@ ICODE_OUT_DIR=".icode_output/.icode_output_${LAST}"
 
 所有步骤（含可选步骤0）在主会话中执行，使用当前会话模型。**不主动切换模型**，用户如需切换可手动 `/model`。
 
-### 强制思考前置（所有步骤必须遵守）
+### 强制思考前置 + 反偷懒约束（所有步骤必须遵守，硬性总则）
 
-完整规则**必须先 Read [references/thinking_core.md](references/thinking_core.md) 完整内容（核心规则每步必读）+ 按需 Read [references/thinking_detail.md](references/thinking_detail.md) 对应小节**（不得凭概述/记忆执行，否则产出不合规——见反偷懒第15条）。核心要点：每步开始前先 `ultrathink`，首选 `sequential-thinking` MCP 至少3步，MCP 不可用降级 `### 结构化思考` 文字块；每步思考子项见各 step 文件 + thinking.md。
+完整规则见下表两真源（步骤执行前**必须** Read 完整内容，不得凭 SKILL.md 概述或记忆执行——见反偷懒第 15 条）：
 
-### 反偷懒约束（所有步骤必须遵守，硬性总则）
-
-完整规则**必须先 Read [references/anti_laziness.md](references/anti_laziness.md)**（不得凭概述/记忆执行，否则产出不合规——见反偷懒第15条）。核心要点：23条典型偷懒行为 + 正面合规要求；引用 references 必须每步重新 Read 输出 `📖 已 Read` 确认行；思考块每子项≥2句实质内容；用户授权例外须显式记录。
+| 主题 | 真源 | 核心要点 |
+|------|------|---------|
+| 强制思考前置 | [references/thinking_core.md](references/thinking_core.md)（每步必读）+ [references/thinking_detail.md](references/thinking_detail.md)（按需读） | 每步开始前先 `ultrathink`，首选 `sequential-thinking` MCP 至少 3 步；MCP 不可用降级 `### 结构化思考` 文字块；思考子项见各 step 文件 |
+| 反偷懒约束 | [references/anti_laziness.md](references/anti_laziness.md) | 23 条典型偷懒行为 + 正面合规要求；引用 references 必须每步重新 Read 输出 `📖 已 Read` 确认行；思考块每子项 ≥2 句实质内容 |
 
 ### 全流程串联规则
 
