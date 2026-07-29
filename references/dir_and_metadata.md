@@ -235,6 +235,19 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
 > | 跨模块数（`code_files` 顶层目录数） | 1 | 2-3 | ≥4 |
 > | 大改词命中（`keywords` + `00_init.md` 第 3 节） | 0 | 1-2 | ≥3 |
 > - **每轮重评**：步骤 0 多轮对话期间每轮重评，**仅刷 `workload_estimate`+`workload_reason`，不刷 `requirement_points` 等检索字段**（防索引膨胀）
+> **`task_timeout_seconds` 字段**（spawn 等待超时阈值，v2.4 新增，可选，默认 `120`）：
+>
+> - 数值类型，整数秒，作用于步骤 2.5.5 / 步骤 log 阶段3 / 步骤 5 Free A6 三处 spawn 3 质疑者子代理（详见 [adversarial.md](adversarial.md)「显式等待 + 超时机制」段）
+> - 默认值：缺失视为 `120`（120 秒）；`0` 或负数视为非法 → 静默回落 `120`（防误配 0 导致瞬时超时误降级）
+> - 写入约定：可在入口/步骤1 metadata 更新时按工程场景配置（如重型分析工单可调至 180-300；轻量可缩至 60）；建议最小不低于 30s（过短会过早触发重试链路）
+> - 字段缺失兼容：旧 metadata 无 `task_timeout_seconds` 视为 `120`，不阻塞后续步骤
+> **`no_spawn_env` flag 字段**（环境结构性无 spawn 工具标记，v2.4 新增，可选，默认 `false`）：
+>
+> - 布尔类型，标记当前 icode 环境是否**结构性**不支持 Agent 工具 spawn（区别于 transient 失败/超时/截断）
+> - 默认值：缺失视为 `false`（环境有 spawn 工具但本轮未成功——属 transient 失败，走超时/重试链路）
+> - 判定方法：环境启动时检测 `Agent` 工具是否可用 + 至少 1 次成功 spawn（如 sentinel 试探）；不可用时由 Claude Code runtime 置 `true`
+> - 作用：决定是否允许"主代理代行三视角判断"——**仅** `no_spawn_env = true` 时允许；`false` 时**硬禁止**主代理代行（即使部分子代理未回结果，详见 [adversarial.md](adversarial.md)「环境无 spawn 工具场景」第 4 步 flag 门控）
+> - 字段缺失兼容：旧 metadata 无 `no_spawn_env` 视为 `false`，不阻塞现有 spawn 协议
 
 ### `/icode log` 产出后
 
