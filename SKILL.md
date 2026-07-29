@@ -92,7 +92,7 @@ description: 端到端编码工作流（步骤 0~6，含可选需求初稿步骤
 /icode status                          # 可选：随时查当前工单状态（只读，不创建目录）
 /icode list                             # 跨工程查找：列全索引所有工单
 /icode list mcu                         # 关键词搜索（ticket_id/summary/keywords）
-/icode list --project rl2601 --since 30d # 按工程+时间过滤
+/icode list --project myproject --since 30d # 按工程+时间过滤
 /icode list --status completed --no-color | less  # 禁用颜色便于管道
 ```
 

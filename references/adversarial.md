@@ -76,9 +76,12 @@
 **正确失败处理链路**（按顺序）：
 
 1. **检测失败**：子代理返回空 / 无 schema 结构 / 无 verdict 字段 / 只剩开场白无裁决 → 判定本次 spawn 失败
-2. **重试 1 次**：重新 spawn 同一质疑者，**换措辞**（强化"先给 verdict 再给依据、读文件范围仅限喂你的路径"），**换 subagent_type 兜底**（general-purpose 仍失败可换 `claude`）
-3. **重试仍失败 → 诚实降级**：该条结论的对抗验证置为**未完成**，按裁决优先级的"兜底"档处理——降级为 `needs_more_evidence`，标 `[未验证-子代理对抗失败]`，计入 `pending_verification`，**绝不伪造 confirmed**
-4. **留痕**：在 `adversarial_verification` 字段记录"子代理对抗失败，已重试1次仍无果，诚实降级为待验证"，附失败质疑者角色 + 失败现象
+2. **重试 2 次（v2.6 强制，治"子代理失败未重试就降级"）**：
+   - **第 1 次重试**：重新 spawn 同一质疑者，**换措辞**（强化"先给 verdict 再给依据、读文件范围仅限喂你的路径、**必须返回 JSON verdict 不得输出长篇调研报告**"），subagent_type 不变（仍 `general-purpose`）
+   - **重试前强制**：每次重试前**必须先 Read [anti_laziness.md](anti_laziness.md) 第 8 条**确认对抗独立性（防主代理自演倾向在重试时复活）
+   - **第 2 次重试**：第 1 次重试仍失败 -> **强制换 subagent_type**（`general-purpose` -> `claude`），再 spawn 一次，prompt 同样含"必须返回 JSON verdict"约束
+3. **重试 2 次仍失败 -> 诚实降级**：该条结论的对抗验证置为**未完成**，按裁决优先级的"兜底"档处理--降级为 `needs_more_evidence`，标 `[未验证-子代理对抗失败]`，计入 `pending_verification`，**绝不伪造 confirmed**
+4. **留痕**：在 `adversarial_verification` 字段记录"子代理对抗失败，已重试 2 次（含 1 次换 subagent_type）仍无果，诚实降级为待验证"，附失败质疑者角色 + 失败现象 + 两次重试的 subagent_type
 
 > **为什么宁可降级也不自演**：诚实承认"这条没验成"比"自己点头说过了"可信。`needs_more_evidence` 让步骤3定稿时知道这条需重点复核；伪造 `confirmed` 则把未经独立验证的结论混入定稿，埋下隐患。对抗失败是"少验了一条"，自演是"骗自己验过了"——后者危害更大。
 

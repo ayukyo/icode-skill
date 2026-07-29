@@ -23,14 +23,14 @@
 | MCP | 🟢 强证据场景（满足即必调） | ⚪ 否则 |
 |-----|---------------------------|--------|
 | **sequential-thinking** | 所有步骤（强制思考前置，已嵌入 thinking_core） | 无 |
-| **serena** | plan/code/deepcheck/doc/review 步骤 **且** 工程有可索引源码（.py/.ts/.js/.jsx/.tsx/.vue/.c/.cpp/.h/.rs/.go/.java/.kt 等，非空非 demo-skeleton） | 其余步骤 / 无可索引源码 |
+| **serena** | log/plan/code/deepcheck/doc/review 步骤 **且** 工程有可索引源码（.py/.ts/.js/.jsx/.tsx/.vue/.c/.cpp/.h/.rs/.go/.java/.kt 等，非空非 demo-skeleton）**且** log 步骤额外要求：根因假设涉及代码符号/引用/持有链/跨文件调用时必调（绑定「代码事实验证门」，仅 Read 不算替代） | 其余步骤 / 无可索引源码 |
 | **context7** | init/plan/code 步骤 **且** 需求或代码涉及第三方库（package.json/Cargo.toml/go.mod/requirements.txt/pom.xml/build.gradle 等声明依赖，且需求触及该库 API） | 其余步骤 / 不涉及第三方库 |
 | **vision-bridge** | 任意步骤 **且** (a) 用户主动提供图片/截图/视频（会话中含媒体附件/路径，直接调） **或** (b) TB 缺陷源拉取的附件含视频/图片（`{ICODE_OUT_DIR}/tb_source/<ID>/` 下，**vision-bridge 可用则主动调**：视频先用 ffmpeg 本地提取关键帧再传图片帧给 vision-bridge 省钱——见 [steps/log.md](../steps/log.md)「TB 附件分析与 ffmpeg 抽帧」段） | vision-bridge 未安装 / `~/.claude/skills/icode/mcp/vision-bridge/config.json` 三件套未配齐 → 仅提示不主动调（防纯文字模型报错）；ffmpeg 不可用时降级为直接传视频（需用户确认，可能耗 API 额度） |
 | **playwright** | deepcheck/audit 步骤 **且** 前端工程（含 .html/.jsx/.tsx/.vue 或 package.json 含 react/vue） | CLI/后端/嵌入式工程 |
 | **memory** | init/plan 步骤 **且** 本工程历史工单数 ≥ 1（`~/.claude/icode_data/index.json` 中本 project_path 工单数 ≥ 1） | 新工程首个工单 / demo |
 
 **判定执行**：
-- serena/context7 的"可索引源码"/"第三方库"探测：步骤 1 plan 开始时 `ls` 顶层 + grep 依赖文件，结果写入 `01_plan.md` §1.5
+- serena/context7 的"可索引源码"/"第三方库"探测：步骤 1 plan 开始时 `ls` 顶层 + grep 依赖文件，结果写入 `01_plan.md` §1.5；**log 步骤开始时同样探测**（根因假设涉及代码时按相同判定走 serena 强证据场景），结果写入 `log_analysis.md §2.0`
 - memory 的工单数探测：Read `~/.claude/icode_data/index.json` 按本工程 project_path 计数
 - vision-bridge/playwright 的工程类型/媒体探测：按会话上下文 + 工程文件判定
 
@@ -45,7 +45,7 @@
 | Step | serena | context7 | vision-bridge | playwright | memory |
 |---|---|---|---|---|---|
 | **0 init** | ⚪ | 🟢* | 🟢* | ⚪ | 🟢* |
-| **0 log** | ⚪ | 🟢* | 🟢* | ⚪ | 🟢* |
+| **0 log** | 🟢* | 🟢* | 🟢* | ⚪ | 🟢* |
 | **doc** | 🟢* | ⚪ | 🟢* | ⚪ | ⚪ |
 | **1 plan** | 🟢* | 🟢* | 🟢* | ⚪ | 🟢* |
 | **2 review** | 🟢* | ⚪ | 🟢* | ⚪ | ⚪ |
@@ -68,6 +68,8 @@
 ### 0 log（日志根因分析）
 - **context7**：库 API 行为查证——仅涉及第三方库行为时
 - **vision-bridge**：TB 附件视频/图片主动分析——TB 拉取的附件含视频/图片时 **vision-bridge 可用则主动调**（视频先用 ffmpeg 本地提取关键帧再传图片帧省钱，详见 [steps/log.md](../steps/log.md)「TB 附件分析与 ffmpeg 抽帧」）；用户主动给截图时直接调。vision-bridge 不可用时仅提示附件清单不主动调（防纯文字模型报错）
+
+- **serena**：根因涉及的代码符号/引用/持有链定位（`find_symbol` 定位定义 / `find_referencing_symbols` 找谁调用 / `find_implementations` 找实现 / `search_for_pattern` 模式检索）--根因假设涉及代码行为时**必调**（绑定 log 阶段3「代码事实验证门」，仅 Read 实读不算替代：Read 是文本层，serena 是语义符号层，互补非替代）。有可索引源码时必调；serena 不可用（未装/LSP 不支持该语言/无源码）降级 ripgrep/grep 并显式声明 `serena 不可用(<原因>)，降级 ripgrep/grep`
 
 ### doc（工程知识库生成）
 - **serena**：理解代码结构（入口/API/IPC）——有可索引源码时，**比 Read 精准 10 倍**

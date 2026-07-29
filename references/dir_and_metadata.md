@@ -89,7 +89,7 @@ Read `~/.claude/icode_data/index.json`（不存在则创建 `{"version":"1","upd
 - `verdict_premise_deps` = `[]` / `verdict_review_needed` = `false`（**新增**：硬复活字段，默认空/false；`disproved`/`superseded` 标注时按需填 `verdict_premise_deps` 支持依赖变化检测）
 - 写回 index.json，置 metadata `indexed = true`、`ticket_id = {生成的 ticket_id}`
 - **写后唯一性验证（强制硬检查，防 AI 偷懒漏检冲突）**：写回后 Python 验证 `tickets` 数组 `ticket_id` 全局唯一：
-  - **同 ticket_id 不同 project_path**（工程名冲突未加后缀）-> 自动给**后写入的**（`created_at` 较晚）追加 `project_path` 短 hash 后缀（`sha256(project_path)[:4]`，如 `mowerware_rl2601-14-a3f2`），同步该工单 `metadata.ticket_id` + 重新排序
+  - **同 ticket_id 不同 project_path**（工程名冲突未加后缀）-> 自动给**后写入的**（`created_at` 较晚）追加 `project_path` 短 hash 后缀（`sha256(project_path)[:4]`，如 `myproject-14-a3f2`），同步该工单 `metadata.ticket_id` + 重新排序
   - **同 ticket_id 同 project_path**（真重复条目，手工误操作）-> 去重，保留 `status` 最靠后的（流程最接近完成），删另一个
   - 修正后重新写回 index.json（原子写）
 - **写入后执行 LRU 淘汰**（见下方「索引淘汰规则」）

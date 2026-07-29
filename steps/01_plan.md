@@ -69,7 +69,7 @@
 3. **强制思考前置**（不可跳过，缺证据视为不合规；按 [references/thinking_core.md](../references/thinking_core.md)「强制思考前置·统一契约」段执行））：本步骤子项（至少3步）= 需求分解 → 方案分析 → 风险评估。**若步骤2有历史参考，在此处「历史参考」小节记录命中工单 id 与 ADR/风险要点，作为思考输入**
 4. 自动迁移（如上「## 前置：schema 迁移」段）—— 迁移到 v1.1
 5. 撰写计划：
-   a. **先了解现有工程**：阅读项目中现有的代码，了解目录结构、现有架构模式、可复用模块 **serena 优先（v2.2 执行步骤内嵌）**：若工程有可索引源码（.py/.ts/.js/.c/.cpp/.rs/.go/.java 等）且 serena 可用（`~/.claude.json` 注册 + deferred 列表有 `mcp__serena__find_symbol`），先 ToolSearch 取 schema -> `find_symbol` 找 entry/导出符号 -> `find_referencing_symbols` 摸清关键调用链，结果作为 §1.5 工程结构快照输入；serena 不可用/无 LSP -> 降级 Read+Grep，降级说明只进思考块，不写入产物文件。**未经实际调用 serena 就标降级 = 反偷懒第 21 条违规**。
+   a. **先了解现有工程**：阅读项目中现有的代码，了解目录结构、现有架构模式、可复用模块 **serena 优先（v2.2 执行步骤内嵌）**：若工程有可索引源码（.py/.ts/.js/.c/.cpp/.rs/.go/.java 等）且 serena 可用（`~/.claude.json` 注册 + deferred 列表有 `mcp__serena__find_symbol`），先 ToolSearch 取 schema -> `find_symbol` 找 entry/导出符号 -> `find_referencing_symbols` 摸清关键调用链，结果作为 §1.5 工程结构快照输入；serena 不可用/无 LSP -> 降级 Read+Grep，降级说明只进思考块，不写入产物文件。**未经实际调用 serena 就标降级 = 反偷懒第 21 条违规。**步骤末尾按反偷懒第 21 条 v2.6 自检门输出 `serena 调用: <工具 x N>` 或 `serena 降级: <原因>`，无记录 = 违规****。
    b. **撰写计划**：包含以下 10 个章节（缺一不可）：
 
 需求描述（包含所有对话中讨论过的细节；若复用 `00_init.md`，需引用该文档关键章节并展开）：
