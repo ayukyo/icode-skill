@@ -1,6 +1,6 @@
 # MCP 工具集成与降级路径
 
-> icode 工作流可调用 6 个 MCP（`/icode install` 一键安装）。**用户可能不装全部**，每个 MCP 都是**可选 + 降级**的。
+> icode 工作流可调用 7 个 MCP（`/icode install` 一键安装）。**用户可能不装全部**，每个 MCP 都是**可选 + 降级**的。
 >
 > 安装入口：`/icode install`（详见 [steps/install.md](../steps/install.md)）
 >
@@ -19,7 +19,7 @@
 
 ---
 
-## 6 个 MCP 的强证据 + 降级路径
+## 7 个 MCP 的强证据 + 降级路径
 
 ### ① sequential-thinking（**必装**）
 
@@ -71,18 +71,29 @@
 - **安装**：首次跑 `mcp/install.sh` 会**主动装 uv**（参见 [install.sh 主动安装逻辑](../mcp/serena/install.sh)）
 - **当前状态**：uv 已装、注册成功
 
+### ⑦ cheap-research（**可选 · 降本场景**）
+
+- **强证据**：`~/.claude.json` 的 `mcpServers.cheap-research` 段存在 + `config.json` 三件套（base_url/api_key/model）已填
+- **强证据满足**：`mcp__cheap-research__summarize(text)` / `__retrieve_similar(query, candidates)` / `__fill_template(template, data)` / `__extract(text, schema)` / `__audit_facts(repo_path)` 等 14 工具返回结构化 dict，**子代理优先用 MCP 工具**
+- **降级**（没装 / 装了没填三件套）：主会话 / 子代理走 `Agent(model="haiku")` 兜底（方案 A），不阻塞主流程
+- **触发场景**：长上下文压缩（log / doc / init / deepcheck）、历史工单检索（init / plan / start / fast / log）、模板填充（readme / audit / list）、结构化提取（doc 99_code_facts_audit）—— 22 个入选子任务（单闸门：价值 ≥ 3 ★ + 低风险）
+- **不接管决策**：所有高风险子任务（3 质疑者对抗 / 架构决策 / 终审裁决 / 修复方案 / 用户对话）一律不交给 cheap-research
+- **触发场景详见**：[mcp_per_step.md](mcp_per_step.md) 强证据场景表 + [references/cheap-subagent-research.md](cheap-subagent-research.md) 完整研究文档
+- **当前状态**：14 工具 + 43 个自检用例全过，dev_repo 完成；**未同步到已安装目录**（等用户指令）
+
 ---
 
 ## 工具命名约定
 
 - 实际工具名格式：`mcp__<server-name>__<tool-name>`
-- server-name 用 kebab-case（`sequential-thinking` / `vision-bridge`）
-- tool-name 用 snake_case（`sequentialthinking` / `analyze_media` / `find_symbol`）
+- server-name 用 kebab-case（`sequential-thinking` / `vision-bridge` / `cheap-research`）
+- tool-name 用 snake_case（`sequentialthinking` / `analyze_media` / `find_symbol` / `summarize`）
 - 示例：
   - `mcp__sequential-thinking__sequentialthinking`
   - `mcp__vision-bridge__analyze_media`
   - `mcp__serena__find_symbol`
   - `mcp__playwright__browser_navigate`
+  - `mcp__cheap-research__summarize`
 
 ## AI 执行时的工作流
 
@@ -104,5 +115,6 @@
 | 前端项目 | 上述 + playwright |
 | 重编码项目 | 上述 + serena（需 Python 3.10+ + uv + LSP） |
 | 长期项目 | 上述 + memory（跨工单积累） |
+| **降本场景** | 上述 + **cheap-research**（仅 22 个低风险子任务；3 质疑者对抗 / 架构决策 / 终审裁决 / 修复方案一律不走） |
 
 完整安装：`/icode install`（一键扫描 `mcp/` 目录里所有 `install.sh`）

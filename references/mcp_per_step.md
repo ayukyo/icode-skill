@@ -28,6 +28,7 @@
 | **vision-bridge** | 任意步骤 **且** (a) 用户主动提供图片/截图/视频（会话中含媒体附件/路径，直接调） **或** (b) TB 缺陷源拉取的附件含视频/图片（`{ICODE_OUT_DIR}/tb_source/<ID>/` 下，**vision-bridge 可用则主动调**：视频先用 ffmpeg 本地提取关键帧再传图片帧给 vision-bridge 省钱——见 [steps/log.md](../steps/log.md)「TB 附件分析与 ffmpeg 抽帧」段） | vision-bridge 未安装 / `~/.claude/skills/icode/mcp/vision-bridge/config.json` 三件套未配齐 → 仅提示不主动调（防纯文字模型报错）；ffmpeg 不可用时降级为直接传视频（需用户确认，可能耗 API 额度） |
 | **playwright** | deepcheck/audit 步骤 **且** 前端工程（含 .html/.jsx/.tsx/.vue 或 package.json 含 react/vue） | CLI/后端/嵌入式工程 |
 | **memory** | init/plan 步骤 **且** 本工程历史工单数 ≥ 1（`~/.claude/icode_data/index.json` 中本 project_path 工单数 ≥ 1） | 新工程首个工单 / demo |
+| **cheap-research** | log/doc 步骤 **且** 走单闸门入选的 22 个子任务（长上下文压缩 / 历史检索 / 模板填充 / 结构化提取 / 代码事实审计） | **不接管决策**：3 质疑者对抗 / 架构决策 / 终审裁决 / 修复方案 / 用户对话一律不走；推理敏感度中等的"灰区"也不走（零灰区原则） |
 
 **判定执行**：
 - serena/context7 的"可索引源码"/"第三方库"探测：步骤 1 plan 开始时 `ls` 顶层 + grep 依赖文件，结果写入 `01_plan.md` §1.5；**log 步骤开始时同样探测**（根因假设涉及代码时按相同判定走 serena 强证据场景），结果写入 `log_analysis.md §2.0`
@@ -42,21 +43,22 @@
 
 > 矩阵只标**除 sequential-thinking 外的**MCP 默认推荐；sequential-thinking 见上方「通用前置」。实际执行按上方「强证据场景判定」动态判定。强证据场景不满足时，即使下表标 🟢 也降为 ⚪。
 
-| Step | serena | context7 | vision-bridge | playwright | memory |
-|---|---|---|---|---|---|
-| **0 init** | ⚪ | 🟢* | 🟢* | ⚪ | 🟢* |
-| **0 log** | 🟢* | 🟢* | 🟢* | ⚪ | 🟢* |
-| **doc** | 🟢* | ⚪ | 🟢* | ⚪ | ⚪ |
-| **1 plan** | 🟢* | 🟢* | 🟢* | ⚪ | 🟢* |
-| **2 review** | 🟢* | ⚪ | 🟢* | ⚪ | ⚪ |
-| **3 merge** | ⚪ | ⚪ | ⚪ | ⚪ | ⚪ |
-| **4 code** | 🟢* | 🟢* | 🟢* | ⚪ | ⚪ |
-| **5 deepcheck** | 🟢* | ⚪ | 🟢* | 🟢* | ⚪ |
-| **6 audit** | ⚪ | ⚪ | 🟢* | 🟢* | ⚪ |
-| **7 readme** | ⚪ | ⚪ | 🟢* | ⚪ | ⚪ |
-| **install/status/list** | ⚪ | ⚪ | ⚪ | ⚪ | ⚪ |
+| Step | serena | context7 | vision-bridge | playwright | memory | **cheap-research** |
+|---|---|---|---|---|---|---|
+| **0 init** | ⚪ | 🟢* | 🟢* | ⚪ | 🟢* | ⚪ |
+| **0 log** | 🟢* | 🟢* | 🟢* | ⚪ | 🟢* | **🟡** |
+| **doc** | 🟢* | ⚪ | 🟢* | ⚪ | ⚪ | **🟡** |
+| **1 plan** | 🟢* | 🟢* | 🟢* | ⚪ | 🟢* | ⚪ |
+| **2 review** | 🟢* | ⚪ | 🟢* | ⚪ | ⚪ | ⚪ |
+| **3 merge** | ⚪ | ⚪ | ⚪ | ⚪ | ⚪ | ⚪ |
+| **4 code** | 🟢* | 🟢* | 🟢* | ⚪ | ⚪ | ⚪ |
+| **5 deepcheck** | 🟢* | ⚪ | 🟢* | 🟢* | ⚪ | ⚪ |
+| **6 audit** | ⚪ | ⚪ | 🟢* | 🟢* | ⚪ | ⚪ |
+| **7 readme** | ⚪ | ⚪ | 🟢* | ⚪ | ⚪ | ⚪ |
+| **install/status/list** | ⚪ | ⚪ | ⚪ | ⚪ | ⚪ | ⚪ |
 
 `🟢*` = 默认 🟢，但实际需满足强证据场景才必调（不满足降为 ⚪，无需声明）。
+`🟡` = cheap-research 专属标记：**强烈推荐**（仅 log / doc 出现）—— 该入口 cheap-research 价值密度最高（长上下文压缩 + 模板填充 + 信息提取是甜点）。Not 🟢，因为它仍可选（v2.2 二元化下 🟢 是"必调"，cheap-research 不强制）；用户用了收益大，但未装仍可走 Agent(model="haiku") 兜底。
 
 ## 详细说明（强证据场景下的用途）
 
@@ -71,9 +73,12 @@
 
 - **serena**：根因涉及的代码符号/引用/持有链定位（`find_symbol` 定位定义 / `find_referencing_symbols` 找谁调用 / `find_implementations` 找实现 / `search_for_pattern` 模式检索）--根因假设涉及代码行为时**必调**（绑定 log 阶段3「代码事实验证门」，仅 Read 实读不算替代：Read 是文本层，serena 是语义符号层，互补非替代）。有可索引源码时必调；serena 不可用（未装/LSP 不支持该语言/无源码）降级 ripgrep/grep 并显式声明 `serena 不可用(<原因>)，降级 ripgrep/grep`
 
+- **cheap-research**（🟡 强烈推荐）：长上下文压缩（log 阶段 0/1/2）+ 8.6 memory 沉淀 + TB 缺陷源拉取。**不接管决策**：阶段 3 链路图分析 / 阶段 4 根因假设 / 阶段 6+7 对抗分析 / 阶段 8 修复建议 / 追问机制一律不走（高风险子任务）
+
 ### doc（工程知识库生成）
 - **serena**：理解代码结构（入口/API/IPC）——有可索引源码时，**比 Read 精准 10 倍**
 - **vision-bridge**：截图分析——仅用户给图时
+- **cheap-research**（🟡 强烈推荐）：项目代码事实审计（`audit_facts`） + 章节模板填充（`fill_template`）+ 进度输出（`fill_template`）+ 6 级模块识别（`scan_modules`）+ 增量判定（`scan_patterns`/`diff_summary`）。**不接管决策**：意图识别走主会话（推理敏感度中等），把控"该写哪章"的决策
 
 ### 1 plan（拟定计划）
 - **serena**：理解代码结构（哪些函数被谁调用）——有可索引源码时（**执行步骤 5.0 内嵌**）
@@ -134,5 +139,6 @@
 - **vision-bridge 不可用**：用户自负原生多模态能力，标降级
 - **playwright 不可用**：Bash + curl 兜底（无 JS 渲染），标降级
 - **memory 不可用**：本对话手动笔记兜底，标降级
+- **cheap-research 不可用**：主会话 / 子代理走 `Agent(model="haiku")` 兜底（Claude 家族最便宜模型）。整体 token 节省幅度下降，但工作流不阻塞
 
 **降级不是错误，但必须显式声明**（先实际调用一次，失败/空才能标降级）。

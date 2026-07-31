@@ -51,6 +51,31 @@ If vision-bridge is installed but `config.json` doesn't have the three required 
 
 See [mcp/vision-bridge/README.md](mcp/vision-bridge/README.md).
 
+## Optional Enhancement: Cheap LLM Inference (cheap-research)
+
+To reduce the main session's token consumption, cheap-research offloads long-context compression, history retrieval, template filling, and structured extraction sub-tasks to a cheap model (via `mcp__cheap-research__*` tools). It **does not take over decisions** — 3-skeptic adversarial verification, architecture decisions, final audit, and fix proposals never go through cheap-research.
+
+**Inclusion gate** (single-threshold): value ≥ 3 ★ + low risk = 22 sub-tasks; covers log / doc / readme / init / plan / review / start / fast and other entry points.
+
+### Install cheap-research
+
+```bash
+cd ~/.claude/skills/icode/mcp/cheap-research
+./install.sh                          # auto: venv + install deps + register to ~/.claude.json
+# edit the generated config.json with your base_url / api_key / model
+# restart Claude Code to take effect
+```
+
+### Platform-agnostic, like vision-bridge
+
+Any OpenAI Chat Completions-compatible endpoint works — fill in your platform's base_url and model, **no recommended defaults**. Local Ollama is also a valid provider (`provider: local_ollama`).
+
+### Fallback when unconfigured
+
+If cheap-research is installed but `config.json` is missing the required fields, the tool returns a fallback hint dict and the session model handles the task — **behaves the same as when cheap-research isn't installed**. No error, no blocking.
+
+See [mcp/cheap-research/README.md](mcp/cheap-research/README.md) and [references/cheap-subagent-research.md](references/cheap-subagent-research.md).
+
 ## Quick Start
 
 ```bash

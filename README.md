@@ -51,6 +51,31 @@ cd ~/.claude/skills/icode/mcp/vision-bridge
 
 详见 [mcp/vision-bridge/README.md](mcp/vision-bridge/README.md)。
 
+## 可选增强：便宜 LLM 推理（cheap-research）
+
+为降低主会话的 token 消耗，cheap-research 把"长上下文压缩 / 历史检索 / 模板填充 / 结构化提取"等子任务**转交便宜模型**（仍走 `mcp__cheap-research__*` 工具）。**不接管决策**：3 质疑者对抗 / 架构决策 / 终审裁决 / 修复方案一律不交给 cheap-research。
+
+**入选条件**（单闸门）：价值 ≥ 3 ★ + 低风险 = 22 个子任务入选，覆盖 log / doc / readme / init / plan / review / start / fast 等入口。
+
+### 安装 cheap-research
+
+```bash
+cd ~/.claude/skills/icode/mcp/cheap-research
+./install.sh                          # 自动:创 venv + 装依赖 + 注册到 ~/.claude.json
+# 编辑生成的 config.json 填你的 base_url / api_key / model
+# 重启 Claude Code 即生效
+```
+
+### 跟 vision-bridge 一样的不锁平台
+
+任何 OpenAI Chat Completions 兼容端点都能用——你用什么平台就填什么 base_url 和 model，**没有任何推荐值**。本地 Ollama 也是 provider 之一（`provider: local_ollama`）。
+
+### 缺配置时降级
+
+如果 cheap-research 装了但 `config.json` 还没填三件套，工具调用会返回 fallback 提示 dict，session 模型按默认会话模型处理——**等同于未装 cheap-research 的行为**。不报错、不阻塞。
+
+详见 [mcp/cheap-research/README.md](mcp/cheap-research/README.md) 与 [references/cheap-subagent-research.md](references/cheap-subagent-research.md)。
+
 ## 快速开始
 
 ```bash

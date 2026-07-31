@@ -1,0 +1,20 @@
+{
+  "_doc_1": "cheap-research 不推荐任何 provider。填你平台的真实值即可。",
+  "_doc_2": "可选 provider: openai_compat | local_ollama。",
+  "_doc_3": "openai_compat: 任意 OpenAI Chat Completions 兼容端点, 必需下面 base_url/api_key/model 三件套。",
+  "_doc_4": "local_ollama: 本地 Ollama 服务 (默认 http://localhost:11434/v1), 零 KEY, 仅需 model (如 qwen2.5:7b)。",
+
+  "provider": "openai_compat",
+
+  "_base_url_doc": "你的 API 端点, 不带尾 /。比如 https://api.openai.com/v1 或 http://localhost:11434/v1",
+  "base_url": "",
+
+  "_api_key_doc": "你的 API KEY。在你平台的开发者后台申请。local_ollama 时可填任意字符串。",
+  "api_key": "",
+
+  "_model_doc": "你平台提供的便宜/快速/轻量模型名。建议: GPT-4o-mini / Gemini-Flash / qwen2.5:7b / Claude Haiku 等。",
+  "model": "",
+
+  "_timeout_doc": "可选: HTTP 超时秒, 默认 60。",
+  "timeout": 60
+}
