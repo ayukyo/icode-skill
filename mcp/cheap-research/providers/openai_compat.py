@@ -182,31 +182,40 @@ class OpenAICompatProvider(LLMProvider):
         # 如果有 schema, 尝试解析 JSON
         parsed: Any = None
         if schema is not None:
+            # 容错 1: 提取 ```json ... ``` 块（用 find 防 substring not found）
+            if "```json" in content:
+                start = content.find("```json")
+                if start != -1:
+                    start += len("```json")
+                    end = content.find("```", start)
+                    if end != -1:
+                        content = content[start:end].strip()
+                    else:
+                        # 结尾 ``` 被截断，取 start 之后全部
+                        content = content[start:].strip()
+            # 容错 2: 提取首个 { ... } 块（防模型输出前后多余文本 / 截断）
+            if "{" in content:
+                first_brace = content.find("{")
+                last_brace = content.rfind("}")
+                if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
+                    content = content[first_brace:last_brace + 1]
+
+            # 尝试解析 + 容错 3: 修复常见 JSON 格式错误（数组/对象元素间缺逗号）
             try:
-                # 容错 1: 提取 ```json ... ``` 块（用 find 防 substring not found）
-                if "```json" in content:
-                    start = content.find("```json")
-                    if start != -1:
-                        start += len("```json")
-                        end = content.find("```", start)
-                        if end != -1:
-                            content = content[start:end].strip()
-                        else:
-                            # 结尾 ``` 被截断，取 start 之后全部
-                            content = content[start:].strip()
-                # 容错 2: 提取首个 { ... } 块（防模型输出前后多余文本 / 截断）
-                if "{" in content:
-                    first_brace = content.find("{")
-                    last_brace = content.rfind("}")
-                    if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
-                        content = content[first_brace:last_brace + 1]
                 parsed = json.loads(content)
-            except (json.JSONDecodeError, ValueError) as e:
-                return _make_error(
-                    "schema_parse_failed",
-                    f"cheap-research 输出非 JSON: {e}; raw: {content[:200]}",
-                    self.model,
-                )
+            except (json.JSONDecodeError, ValueError):
+                # 修复尝试：字符串结尾 " 后跟换行+空白+字符串开头 " 之间缺逗号
+                # 匹配: "..." \n    "..."  ->  "...",\n    "..."
+                # 用 \s*（零或多个空白）而非 \s+，因为 " 后可能直接是 \n
+                repaired = re.sub(r'"\s*\n\s*"', '",\n    "', content)
+                try:
+                    parsed = json.loads(repaired)
+                except (json.JSONDecodeError, ValueError) as e:
+                    return _make_error(
+                        "schema_parse_failed",
+                        f"cheap-research 输出非 JSON: {e}; raw: {content[:200]}",
+                        self.model,
+                    )
 
         # 用量 + 成本估算
         usage = data.get("usage", {})

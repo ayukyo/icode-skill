@@ -77,6 +77,13 @@ int calc_gcd(int a, int b, int *result);
 int calc_lcm(int a, int b, int *result);
 
 /*
+ * 整数最大值 max(a, b)
+ * 始终成功：*result = (a > b) ? a : b，返回 CALC_OK
+ * 任意 int 都有较大值（含 INT_MIN/INT_MAX），无失败路径
+ */
+int calc_max(int a, int b, int *result);
+
+/*
  * 字符串表达式求值器（递归下降 parser）
  * 支持：四则（+ - * /）+ 一元负号 + 括号 + 空格容忍
  * 长度限制：256 字符

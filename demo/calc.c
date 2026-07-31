@@ -478,6 +478,12 @@ static int parse_expr(ParserState *st, int *out)
     return CALC_OK;
 }
 
+/* 整数最大值 max(a, b) - 始终成功，无失败路径 */
+int calc_max(int a, int b, int *result) {
+    *result = (a > b) ? a : b;
+    return CALC_OK;
+}
+
 int calc_eval(const char *expr, int *result)
 {
     int final_value;

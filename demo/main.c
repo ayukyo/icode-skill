@@ -263,5 +263,11 @@ int main(void)
     rc = calc_lcm(INT_MIN, INT_MIN, &result);  /* 双 INT_MIN 替换后零短路 */
     printf("lcm(INT_MIN, INT_MIN) = %d (rc=%d, expect 0 OK)\n", result, rc);
 
+    /* ---- 新增：calc_max 测试 ---- */
+    rc = calc_max(3, 5, &result);  printf("max(3,5)=%d rc=%d (expect 5,0)\n", result, rc);
+    rc = calc_max(5, 3, &result);  printf("max(5,3)=%d rc=%d (expect 5,0)\n", result, rc);
+    rc = calc_max(4, 4, &result);  printf("max(4,4)=%d rc=%d (expect 4,0)\n", result, rc);
+    rc = calc_max(INT_MIN, INT_MAX, &result);  printf("max(INT_MIN,INT_MAX)=%d rc=%d (expect INT_MAX,0)\n", result, rc);
+
     return 0;
 }
