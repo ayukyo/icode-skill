@@ -71,6 +71,12 @@ class OpenAICompatProvider(LLMProvider):
         max_tokens: int = 2048,
         temperature: float = 0.3,  # 0.3 是便宜模型经验值（比默认 1.0 更稳）；需要调整改源码
     ) -> dict:
+        # 防御性最小值校验：调用方可能传太小的 max_tokens 导致 JSON 截断
+        # schema 输出（JSON）至少 2048；纯文本输出至少 512
+        min_tokens = 2048 if schema is not None else 512
+        if max_tokens < min_tokens:
+            max_tokens = min_tokens
+
         # 如果有 schema, 在 prompt 末尾追加"按 JSON schema 输出"
         final_prompt = prompt
         if schema is not None:
