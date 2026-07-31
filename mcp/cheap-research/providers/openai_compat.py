@@ -19,6 +19,7 @@
 """
 import asyncio
 import json
+import re
 from typing import Any
 
 import httpx
@@ -164,15 +165,24 @@ class OpenAICompatProvider(LLMProvider):
         """解析 API 响应。"""
         content = data["choices"][0]["message"]["content"]
 
+        # 剥离推理模型的 <think>...</think> 标签（MiniMax-M3 / DeepSeek-R1 等）
+        # 这些模型输出格式: <think>思考过程...</think>\n实际回答
+        content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
+
         # 如果有 schema, 尝试解析 JSON
         parsed: Any = None
         if schema is not None:
             try:
-                # 容错: 提取 ```json ... ``` 块
+                # 容错 1: 提取 ```json ... ``` 块
                 if "```json" in content:
                     start = content.index("```json") + len("```json")
                     end = content.index("```", start)
                     content = content[start:end].strip()
+                # 容错 2: 提取首个 { ... } 块（防模型输出前后多余文本）
+                elif "{" in content and "}" in content:
+                    first_brace = content.index("{")
+                    last_brace = content.rindex("}")
+                    content = content[first_brace:last_brace + 1]
                 parsed = json.loads(content)
             except (json.JSONDecodeError, ValueError) as e:
                 return _make_error(
