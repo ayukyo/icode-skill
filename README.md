@@ -132,6 +132,7 @@ cd ~/.claude/skills/icode/mcp/cheap-research
 | `/icode audit` | 仅步骤 6：终极终审 + 统一修复（产出 `06_audit.md`） |
 | `/icode readme` | 可选步骤 7：生成交付报告（面向人的自包含总结） |
 | `/icode doc [自然语言]` | 工程级知识库生成（独立步骤）：扫描代码特征生成全局知识库章节，供段零自动检索注入 |
+| `/icode limit [自然语言]` | 项目约束红线（独立步骤）：定义和维护本工程的红线/约束/禁区。主存全局 + 单 checkout 覆盖（自动 gitignore），追加式演进。plan 步骤引用作为硬基线 |
 | `/icode status` | 只读：查当前工单状态 |
 | `/icode list [关键词]` | 跨工程工单查找（纯只读） |
 

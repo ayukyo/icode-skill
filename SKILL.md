@@ -1,6 +1,6 @@
 ---
 name: icode
-description: 端到端编码工作流（步骤 0~6，含可选需求初稿步骤与日志根因分析入口），支持分步手动调用：/icode help (帮助), /icode install (MCP 环境检查+一键安装), /icode init [<粗略需求>] (需求初稿), /icode log [零散信息...] (日志根因分析→转修复需求), /icode start <需求> (全流程), /icode fast <需求> (精简全流程), /icode plan <需求> (计划), /icode review [N] (审查), /icode merge (定稿), /icode code (编码), /icode deepcheck (复检), /icode audit (终审), /icode doc [自然语言] (工程级知识库生成), /icode readme (交付报告), /icode status (工单状态), /icode list [关键词] (跨工程工单查找)
+description: 端到端编码工作流（步骤 0~6，含可选需求初稿步骤与日志根因分析入口），支持分步手动调用：/icode help (帮助), /icode install (MCP 环境检查+一键安装), /icode init [<粗略需求>] (需求初稿), /icode log [零散信息...] (日志根因分析→转修复需求), /icode start <需求> (全流程), /icode fast <需求> (精简全流程), /icode plan <需求> (计划), /icode review [N] (审查), /icode merge (定稿), /icode code (编码), /icode deepcheck (复检), /icode audit (终审), /icode doc [自然语言] (工程级知识库生成), /icode limit [自然语言] (项目约束红线), /icode readme (交付报告), /icode status (工单状态), /icode list [关键词] (跨工程工单查找)
 ---
 
 **版本**: v2.0.0
@@ -43,6 +43,7 @@ description: 端到端编码工作流（步骤 0~6，含可选需求初稿步骤
 | `/icode audit` | **仅步骤6**：终极终审 + 统一修复（产出 `{ICODE_OUT_DIR}/06_audit.md`） | 用最新目录 |
 | `/icode readme` | **可选步骤7**：生成交付报告（面向人的自包含总结，动态文件名，智能识别功能/查BUG模板）。步骤6完成后手动触发 | 用最新目录 |
 | `/icode doc [自然语言]` | **工程级知识库生成（独立步骤）**：扫描工程代码特征，生成/维护 `~/.claude/icode_data/project_docs/<project_id>/<branch>/` 下的工程知识库章节（架构/IPC/术语表/代码事实审计，**按分支分目录**，切分支跑 doc 不互相覆盖），**同时检测工程依赖的独立模块**（git submodule / `repo` 管理 / CMake FetchContent / monorepo / vendor / 用户配置，6 级优先级）并生成 `~/.claude/icode_data/module_docs/{key}/` 模块共享文档（**按仓库+分支 key 跨工程共享**，同一上游仓库同分支只一份），供 init/log/plan/start/fast 段零自动跨仓库检索注入。**去参数化**——目标工程与动作（全量/增量/新增）由自然语言识别。**v1 单级布局自动迁移**：检测到旧 `<project_id>/` 平铺布局时自动迁移到 `<project_id>/<branch>/`（保留所有字段 + 备份 `_meta.json.v1_migrated_from`，详见 doc.md 步骤 5）。**不创建工单目录、不写工单 metadata、不参与步骤1~6推进**（详见 [steps/doc.md](steps/doc.md)） | 否（写全局 `project_docs/` 和 `module_docs/`） |
+| `/icode limit [自然语言]` | **项目约束红线（独立步骤）**：定义和维护本工程的红线/约束/禁区。**主存**：`~/.claude/icode_data/limits/<project_id>.md`（全局，跨 checkout 共享，团队私有不上传）；**覆盖**：`<project_root>/.icode_output/limit.local/<project_id>.md`（单 checkout，自动 gitignore）。**local 完全覆盖 main**。**追加式演进**——每次调用增量追加新红线条目（编号自增），不覆盖、不 diff。对齐 `/icode doc` 模式：无描述→全局扫描显示当前约束（合并视图）；有描述→针对操作生成/追加新条目。**plan 步骤硬基线**——plan §3/§4/§6 引用 limit 条目作为设计依据（柔性提示：plan 入口检测不到 limit 建议生成但不阻断）。**不创建工单目录、不写工单 metadata、不参与步骤1~6推进**（详见 [steps/limit.md](steps/limit.md)） | 否（写全局 `limits/` + 工程根 `.icode_output/limit.local/`，自动 gitignore） |
 | `/icode status` | **状态查询/verdict 标注**：默认只读查当前工单状态（含 `mode`/`verdict` 字段 + 全局索引工单数）；`--verdict <ticket_id> <verified|disproved|superseded> "<reason>" [--correct "<正确方向>"] [--source <machine_test|review|user|auto_signal>]` 手动标注工单方向结论（双写 metadata+index，幂等覆盖刷新 `verdict_at`）；`--scan-verdict` 批量扫描 unknown 完成态工单的 00_init 末轮/06_audit 证伪信号并提示标注（详见 [steps/status.md](steps/status.md)） | 否（默认只读；`--verdict`/`--scan-verdict` 写 metadata+全局索引，不写工程内源码文件） |
 | `/icode list [关键词]` | **跨工程工单查找**：从全局索引 `~/.claude/icode_data/index.json` 全量读取，表格化展示所有工单（ticker-id/project/status/workload/last-used/verdict/summary），支持 `--project <path>` / `--status <status>` / `--since <duration>` / `--limit N` / `--no-color` / `--include-stale` 过滤。**纯查询不跳转**——不创建目录、不写 metadata、不改任何文件（详见 [steps/list.md](steps/list.md)） | 否（纯只读，跨工程） |
 
@@ -240,6 +241,7 @@ ICODE_OUT_DIR=".icode_output/.icode_output_${LAST}"
 - `indexed`：是否已写入全局索引（防重复写入）
 - `ticket_id`：本工单在全局索引中的唯一键（`{工程名}-{N}`，冲突时带 hash 后缀）。步骤0写索引时持久化到 metadata；**跳过步骤0直接 `/icode plan`/`/icode start` 的常规新建目录情况**，在步骤1首次写索引时生成并回填 metadata。供后续步骤检索时排除当前工单
 - `code_deviations`：步骤4 编码时主动偏离定稿计划的记录数组（每条含 `plan_said`/`actual_done`/`reason`），供步骤6 终审汇总回写到 `03_plan_final.md` 的「实现偏差备忘」段；无偏离写空数组 `[]`
+- `limit_refs`（本次新增，可选，默认 `[]`）：plan 步骤引用的 limit 红线编号数组，每条 `{redline_no: int, source: "main"|"local", title: str}`，`source` 区分主存全局约定 vs 单 checkout 覆盖。plan §3 架构设计 / §4 ADR / §6 异常处理引用 limit 条目时记录。**字段缺失视为 `[]`（向后兼容旧 metadata）**。详见 [steps/limit.md](steps/limit.md)
 - `code_review_fix_with_issues`（新增，可选，默认 `false`）：步骤4末尾 1.5「Code Review Fix」4 维度复检未通过标记（同事提示词 4 维度闭环在 04_code 末尾的工程化复检）。`true` 时步骤5/6 入口输出警告，audit 终审会看到此标记——**不阻断流程**，仅作可见性提示，让后续 reviewer/历史检索知道本工单 4 维度复检未通过。**字段缺失视为 `false`（向后兼容旧 metadata）**
 - `mode`（新增，可选，默认 `"full"`）：工单模式。`"full"` = `/icode start` 全流程（步骤2 默认 3 轮 + 对抗，步骤5 三阶段循环）；`"fast"` = `/icode fast` 精简全流程（步骤2 固定 1 轮无对抗，步骤5 只跑 Reverse）。**字段缺失视为 `"full"`（向后兼容旧 metadata）**。详见 [steps/fast.md](steps/fast.md)
 - `max_rounds`（新增，可选，默认 3）：步骤2 review 软上限轮数。`mode="full"` 时由 `/icode review N` 参数决定（默认 3）；`mode="fast"` 时**自动串联下强制为 1**，但**单步命令（`/icode review N`）在 fast 工单上调用时 N 优先级最高**——用户用参数 N 显式表达 fast→full 升级意图时，按 N 轮跑（详见 [references/dir_and_metadata.md](references/dir_and_metadata.md)「步骤2/5 读 mode 字段的契约」段）。**字段缺失视为 3**
@@ -406,6 +408,13 @@ ICODE_OUT_DIR=".icode_output/.icode_output_${LAST}"
 - **Git 安全**：禁止执行任何 Git 危险操作（`git reset --hard`、`git push --force` 等），**也禁止 `git commit` 和 `git push`**
 - **`.icode_output/` 父目录及其下的 `.icode_output_N/` 目录无需用户确认**：该目录下创建/写入/修改 `.md`/`.json`/`.log` 文件均为安全操作
 - **工程污染防护**：`.icode_output/` 是 icode 产物目录，建议在工程 `.gitignore` 中加入 `.icode_output/`，避免产物误提交；icode 本身**不自动修改工程的 `.gitignore`**（工程配置由用户掌控）。历史检索的全局索引位于 `~/.claude/icode_data/`，不在任何工程内，无污染风险；`/icode doc` 的工程文档库位于 `~/.claude/icode_data/project_docs/`，同样不在任何工程内、不写工程内任何文件（用户工程内已有 `doc/workflows/` 等历史文档时，忽略不读取不迁移不删除，从零生成到全局）
+
+> **`.icode_output/` 父目录语义（本次新增，含 limit.local 子目录）**：
+> `.icode_output/` 父目录下含两类内容——
+> 1. `.icode_output/.icode_output_N/` 子目录 = 工单产物（每工单一目录，跟随工单生命周期，详见各步骤执行步骤）
+> 2. `.icode_output/limit.local/` 子目录 = **项目约束红线的单 checkout 覆盖**（`/icode limit` 步骤产物，团队私有约定，自动 gitignore。limit 主存始终在全局 `~/.claude/icode_data/limits/<project_id>.md`，跨 checkout 共享；local 完全覆盖 main。详见 [steps/limit.md](steps/limit.md)）
+>
+> `.icode_output/` 父目录默认 gitignore 不上传——这同时承担"产物容器 + 项目配置"两种角色，**与上方「工程污染防护」建议的 gitignore 策略一致，无需特殊白名单配置**
 - **跨会话恢复**：运行 `ls -d .icode_output/.icode_output_*` 确认目录后，直接调用对应步骤即可
 - **中断恢复**：重新执行某步骤可覆盖该步骤输出
 
@@ -551,6 +560,7 @@ icode 工作流可调用 7 个 MCP（`/icode install` 一键安装）。**v2.2 �
 | 6 | `audit` | [steps/06_audit.md](steps/06_audit.md) |
 | 7 | `readme` | [steps/07_readme.md](steps/07_readme.md) |
 | doc | `doc` | [steps/doc.md](steps/doc.md) |
+| limit | `limit` | [steps/limit.md](steps/limit.md)（独立步骤，不参与 1~6 流程推进；plan 步骤硬基线引用源） |
 | - | `status` | [steps/status.md](steps/status.md) |
 
 **执行步骤时，必须先读取对应的 `steps/XX_*.md` 文件，按其中的详细指令执行。**

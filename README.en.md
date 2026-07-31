@@ -132,6 +132,7 @@ When `/icode log` scattered input contains a Teambition project URL or a `<LIB>-
 | `/icode audit` | Step 6 only: final audit + fix (produces `06_audit.md`) |
 | `/icode readme` | Optional Step 7: generate delivery report (self-contained summary, dynamic filename) |
 | `/icode doc [natural language]` | Project-level knowledge base (standalone step): scans code features to generate global knowledge-base chapters; auto-retrieved/injected by init/log/plan/start/fast phase-zero |
+| `/icode limit [natural language]` | Project constraint red lines (standalone step): define and maintain this project's red lines / constraints / forbidden zones. Main store is global + single-checkout override (auto gitignored), append-only evolution. Referenced as hard baseline by the plan step |
 | `/icode status` | Read-only: query current ticket status (no dir/file created) |
 | `/icode list [keywords]` | Cross-project ticket search: tabulated view of all indexed tickets. **Pure read-only, no jump** |
 
