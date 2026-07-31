@@ -78,7 +78,11 @@ class OpenAICompatProvider(LLMProvider):
             final_prompt = (
                 f"{prompt}\n\n"
                 f"请严格按以下 JSON schema 输出 (只输出 JSON, 不要其他内容):\n"
-                f"```json\n{schema_str}\n```"
+                f"```json\n{schema_str}\n```\n\n"
+                f"重要约束:\n"
+                f"1. 字符串值内的双引号必须用 \\\\\" 转义, 或改用单引号/书名号《》\n"
+                f"2. 不要在字符串值内使用未转义的双引号\n"
+                f"3. 输出纯 JSON, 不要包裹在代码块中"
             )
 
         url = f"{self.base_url}/chat/completions"
@@ -173,16 +177,23 @@ class OpenAICompatProvider(LLMProvider):
         parsed: Any = None
         if schema is not None:
             try:
-                # 容错 1: 提取 ```json ... ``` 块
+                # 容错 1: 提取 ```json ... ``` 块（用 find 防 substring not found）
                 if "```json" in content:
-                    start = content.index("```json") + len("```json")
-                    end = content.index("```", start)
-                    content = content[start:end].strip()
-                # 容错 2: 提取首个 { ... } 块（防模型输出前后多余文本）
-                elif "{" in content and "}" in content:
-                    first_brace = content.index("{")
-                    last_brace = content.rindex("}")
-                    content = content[first_brace:last_brace + 1]
+                    start = content.find("```json")
+                    if start != -1:
+                        start += len("```json")
+                        end = content.find("```", start)
+                        if end != -1:
+                            content = content[start:end].strip()
+                        else:
+                            # 结尾 ``` 被截断，取 start 之后全部
+                            content = content[start:].strip()
+                # 容错 2: 提取首个 { ... } 块（防模型输出前后多余文本 / 截断）
+                if "{" in content:
+                    first_brace = content.find("{")
+                    last_brace = content.rfind("}")
+                    if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
+                        content = content[first_brace:last_brace + 1]
                 parsed = json.loads(content)
             except (json.JSONDecodeError, ValueError) as e:
                 return _make_error(

@@ -193,7 +193,7 @@ def get_provider():
 @mcp.tool()
 async def summarize(
     text: str,
-    max_tokens: int = 512,
+    max_tokens: int = 8192,
     focus: str = "",
 ) -> dict:
     """长上下文压缩。
@@ -334,7 +334,7 @@ async def retrieve_similar(
     result = await provider.invoke(
         prompt=prompt,
         schema=schema,
-        max_tokens=1500,
+        max_tokens=8192,
     )
 
     if "error" in result:
@@ -403,7 +403,7 @@ async def fill_template(
     return await provider.invoke(
         prompt=prompt,
         schema=schema,
-        max_tokens=2048,
+        max_tokens=8192,
     )
 
 
@@ -447,7 +447,7 @@ async def extract(
     result = await provider.invoke(
         prompt=prompt,
         schema=schema,
-        max_tokens=2048,
+        max_tokens=8192,
     )
 
     if "error" in result:
@@ -575,7 +575,7 @@ async def audit_facts(
     result = await provider.invoke(
         prompt=prompt,
         schema=schema,
-        max_tokens=2048,
+        max_tokens=8192,
     )
 
     if "error" in result:
@@ -1299,7 +1299,7 @@ async def diff_summary(
     text_a: str,
     text_b: str,
     focus: str = "",
-    max_tokens: int = 1024,
+    max_tokens: int = 8192,
 ) -> dict:
     """差异摘要。
 
@@ -1360,7 +1360,7 @@ async def diff_summary(
 async def generate_filename(
     context: dict,
     prefix: str = "feature",
-    max_tokens: int = 256,
+    max_tokens: int = 8192,
 ) -> dict:
     """文件名生成（readme / 文档存储）。
 
@@ -1415,7 +1415,7 @@ async def generate_filename(
 async def select_template(
     context: dict,
     options: list | None = None,
-    max_tokens: int = 256,
+    max_tokens: int = 8192,
 ) -> dict:
     """模板选择（readme / 文档）。
 
