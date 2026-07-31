@@ -4,6 +4,7 @@
 所有 5 核心工具（summarize / retrieve_similar / fill_template / extract / audit_facts）都基于本文件。
 """
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -208,6 +209,111 @@ def safe_read_text(path: Path, max_chars: int = 8000) -> str | None:
         return truncate_text(content, max_chars)
     except (OSError, UnicodeDecodeError):
         return None
+
+
+# ---------------------------------------------------------------------------
+# Prompt 注入防护（v1.0）：过滤常见注入模式
+# ---------------------------------------------------------------------------
+
+# 常见 prompt 注入关键词（不区分大小写）
+_INJECTION_PATTERNS = [
+    re.compile(r"ignore\s+(previous|all|above)\s+instructions?", re.IGNORECASE),
+    re.compile(r"disregard\s+(previous|all|above)\s+(instructions?|prompts?)", re.IGNORECASE),
+    re.compile(r"forget\s+(everything|all|previous)", re.IGNORECASE),
+    re.compile(r"system\s*:\s*you\s+are\s+now", re.IGNORECASE),
+    re.compile(r"<\|im_start\|>", re.IGNORECASE),  # ChatML 注入
+    re.compile(r"</?system>", re.IGNORECASE),       # system 标签劫持
+    re.compile(r"\bDAN\s+mode\b", re.IGNORECASE),   # 经典 DAN 注入
+    re.compile(r"pretend\s+(to\s+be|you\s+are)", re.IGNORECASE),
+]
+
+
+def sanitize_for_llm(text: str, max_chars: int = 8000) -> str:
+    """sanitize 文本，移除/标记常见 prompt 注入。
+
+    返回 truncate 后的安全文本。
+    - 长度截断（同 truncate_text）
+    - 标记注入模式（不删除，避免误伤合法代码）
+
+    Args:
+        text: 原始文本
+        max_chars: 最大字符数
+
+    Returns:
+        安全的文本 + 注入警告注释
+    """
+    truncated = truncate_text(text, max_chars)
+    matches = []
+    for pattern in _INJECTION_PATTERNS:
+        for m in pattern.finditer(truncated):
+            matches.append(m.group(0))
+
+    if matches:
+        # 标记注入警告（不删除，避免误伤）
+        warning = f"\n\n[PROMPT_INJECTION_DETECTED: {len(matches)} 个疑似注入模式: {matches[:3]}...]"
+        return truncated + warning
+    return truncated
+
+
+# ---------------------------------------------------------------------------
+# 语言适配（trace_refs 用）
+# ---------------------------------------------------------------------------
+
+# 各语言的"符号边界"模式
+LANGUAGE_SYMBOL_PATTERNS = {
+    "python": {
+        # module.Class.method / module.func
+        "symbol_pattern": r"\b[a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)*\b",
+        "exclude_dirs": {".venv", "venv", "__pycache__", ".pytest_cache", ".tox", "build", "dist"},
+    },
+    "cpp": {
+        # Class::method / Class<T>::method / ns::Class::method
+        "symbol_pattern": r"\b[a-zA-Z_][a-zA-Z0-9_]*(?:::[a-zA-Z_][a-zA-Z0-9_]*)*\b",
+        "exclude_dirs": {"build", "cmake-build-debug", "cmake-build-release", ".vs", ".vscode"},
+    },
+    "javascript": {
+        # module.Class.method / ns.Class.method
+        "symbol_pattern": r"\b[a-zA-Z_$][a-zA-Z0-9_$]*(?:\.[a-zA-Z_$][a-zA-Z0-9_$]*)*\b",
+        "exclude_dirs": {"node_modules", "dist", "build", ".next"},
+    },
+    "go": {
+        # pkg.Func / pkg.Method
+        "symbol_pattern": r"\b[a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)*\b",
+        "exclude_dirs": {"vendor", "node_modules"},
+    },
+    "rust": {
+        # crate::module::function / module::function
+        "symbol_pattern": r"\b[a-zA-Z_][a-zA-Z0-9_]*(?:::[a-zA-Z_][a-zA-Z0-9_]*)*\b",
+        "exclude_dirs": {"target", "node_modules"},
+    },
+}
+
+
+def detect_language_from_ext(ext: str) -> str:
+    """从文件扩展名检测语言。"""
+    ext = ext.lower().lstrip(".")
+    lang_map = {
+        "py": "python", "pyi": "python",
+        "cpp": "cpp", "cc": "cpp", "cxx": "cpp", "hpp": "cpp", "hxx": "cpp", "h": "cpp",
+        "js": "javascript", "jsx": "javascript", "ts": "javascript", "tsx": "javascript",
+        "mjs": "javascript", "cjs": "javascript",
+        "go": "go",
+        "rs": "rust",
+    }
+    return lang_map.get(ext, "python")  # 默认 python 风格
+
+
+def build_symbol_regex(symbol: str, language: str = "python") -> re.Pattern:
+    """根据语言构建符号匹配正则。
+
+    解决 C++ 模板 `MyClass<T>::method` 匹配错、Python `module.Class.method` 边界等问题。
+    """
+    lang_cfg = LANGUAGE_SYMBOL_PATTERNS.get(language, LANGUAGE_SYMBOL_PATTERNS["python"])
+    # 转义符号中的正则元字符
+    escaped = re.escape(symbol)
+    # 单词边界 + 完整符号
+    pattern = r"\b" + escaped + r"\b"
+    return re.compile(pattern)
 
 
 def safe_run_git(repo_path: Path, args: list[str]) -> str | None:

@@ -124,4 +124,4 @@ session 模型只看工具返回结构化 dict，**永远不直接调 LLM API**�
 - **未装 cheap-research**：走 Agent(model="haiku") 兜底（不阻塞）
 - **不接管决策**：3 质疑者对抗 / 架构决策 / 终审裁决 / 修复方案一律不走本工具
 
-详见 [references/cheap-subagent-research.md](../../references/cheap-subagent-research.md)。
+详见 [mcp/cheap-research/server.py](server.py) 与 14 工具自检用例（tests/）。

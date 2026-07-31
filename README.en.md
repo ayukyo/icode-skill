@@ -74,7 +74,7 @@ Any OpenAI Chat Completions-compatible endpoint works — fill in your platform'
 
 If cheap-research is installed but `config.json` is missing the required fields, the tool returns a fallback hint dict and the session model handles the task — **behaves the same as when cheap-research isn't installed**. No error, no blocking.
 
-See [mcp/cheap-research/README.md](mcp/cheap-research/README.md) and [references/cheap-subagent-research.md](references/cheap-subagent-research.md).
+See [mcp/cheap-research/README.md](mcp/cheap-research/README.md).
 
 ## Quick Start
 

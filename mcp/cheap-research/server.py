@@ -70,6 +70,9 @@ from _utils import (  # noqa: E402
     iter_source_files,
     safe_read_text,
     safe_run_git,
+    sanitize_for_llm,
+    detect_language_from_ext,
+    build_symbol_regex,
     DEFAULT_SOURCE_EXTS,
     DEFAULT_EXCLUDE_DIRS,
 )
@@ -730,9 +733,11 @@ async def trace_refs(
         return make_error_response(p)
     scope = p
 
-    # 编译正则（单词边界，更准确）
+    # 编译正则（v1.0 修复：语言适配，build_symbol_regex 处理 C++ 模板 / Python 包路径）
+    # 默认 python 风格，正则仍按单词边界；具体语言正则由 build_symbol_regex 处理
     try:
-        symbol_re = re.compile(r"\b" + re.escape(symbol) + r"\b")
+        # 默认 regex（Python 风格）
+        default_regex = re.compile(r"\b" + re.escape(symbol) + r"\b")
     except re.error as e:
         return make_error_response(f"symbol 正则错误: {e}")
 
@@ -743,6 +748,13 @@ async def trace_refs(
         content = safe_read_text(f, max_chars=100000)
         if content is None:
             continue
+        # 按文件语言构建更精确的正则（v1.0 修复：避免 C++ 模板 `MyClass<T>::method` 误识别）
+        lang = detect_language_from_ext(f.suffix)
+        try:
+            symbol_re = build_symbol_regex(symbol, lang)
+        except re.error:
+            # 退化到默认 regex
+            symbol_re = default_regex
         lines = content.splitlines()
         for line_no, line in enumerate(lines, 1):
             if symbol_re.search(line):
@@ -1021,12 +1033,48 @@ async def parse_project_id(
             "model": "parse_project_id",
         }
 
+    # v1.0 修复：submodule 检测（之前只返 basename，submodule 路径错误）
+    # 如果 repo_path 是 git submodule 内的目录，project_id 应反映 submodule 路径
+    repo_root_resolved = Path(repo_root).resolve()
+    is_submodule = False
+    submodule_path = None
+    try:
+        # 检查每个父目录是否有 .gitmodules
+        current = repo.parent
+        while current != current.parent:
+            gitmodules = current / ".gitmodules"
+            if gitmodules.exists():
+                # 找到 .gitmodules 上级目录（submodule 顶层）
+                rel_path = repo.resolve().relative_to(current.resolve())
+                # 检查 .gitmodules 是否包含此路径
+                try:
+                    gm_content = gitmodules.read_text(encoding="utf-8", errors="replace")
+                    # 解析 [submodule "name"] 段 + path
+                    for m in re.finditer(
+                        r'\[submodule\s+"([^"]+)"\][^[]*?path\s*=\s*(\S+)',
+                        gm_content, re.DOTALL
+                    ):
+                        if m.group(2) == str(rel_path):
+                            is_submodule = True
+                            submodule_path = f"{current.name}/{rel_path}"
+                            project_id = f"{current.name}/{rel_path}"
+                            break
+                except (OSError, UnicodeDecodeError):
+                    pass
+                if is_submodule:
+                    break
+            current = current.parent
+    except (OSError, ValueError):
+        pass
+
     return {
         "answer": {
             "project_id": project_id,
             "branch": branch or "",
             "repo_root": repo_root,
             "is_git_repo": True,
+            "is_submodule": is_submodule,
+            "submodule_path": submodule_path,
         },
         "model": "parse_project_id",
     }
@@ -1116,10 +1164,24 @@ async def scan_modules(
             content = safe_read_text(cf, max_chars=20000)
             if not content:
                 continue
-            for match in re.finditer(r'(?:FetchContent_Declare|add_subdirectory)\s*\(\s*(\S+)', content):
+            # v1.0 修复：移除注释（避免 # 开头的模块名误识别）
+            # CMake 行内注释：# 后面到行尾
+            # CMake 块注释：#[[ ... ]]（暂不处理大块注释，普通 # 注释足够）
+            content_no_comments = re.sub(r'#[^\n]*', '', content)
+            # 用 DOTALL 支持跨行 FetchContent_Declare(
+            for match in re.finditer(
+                r'(?:FetchContent_Declare|add_subdirectory)\s*\(\s*(\S+)',
+                content_no_comments,
+                re.DOTALL,
+            ):
+                # 提取第一个非空白 token 作为模块名（去除变量 ${} 等）
+                name_candidate = match.group(1).strip().rstrip(')')
+                # 跳过变量引用（如 ${...}）和字符串
+                if name_candidate.startswith('$') or name_candidate.startswith('"'):
+                    continue
                 modules.append({
-                    "path": f"<cmake:{match.group(1)}>",
-                    "name": match.group(1),
+                    "path": f"<cmake:{name_candidate}>",
+                    "name": name_candidate,
                     "type": "cmake",
                     "priority": 3,
                     "source_file": str(cf),

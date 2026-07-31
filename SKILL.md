@@ -529,7 +529,7 @@ icode 工作流可调用 6 个 MCP（`/icode install` 一键安装）。**v2.2 �
 
 ---
 
-> **关于外部工具调研**：对于"是否值得引入第三方代码工具以优化 iCode"的判断结论（如 Tree-sitter 图谱、blast-radius 思路等），沉淀在 [references/external-tools-research.md](references/external-tools-research.md) 作为调研笔记，**非 SKILL 集成、零必装依赖**，仅供未来用户决策时参考。
+> **关于外部工具调研**：对于"是否值得引入第三方代码工具以优化 iCode"的判断结论（如 Tree-sitter 图谱、blast-radius 思路等），**非 SKILL 集成、零必装依赖**——iCode 主流程不依赖、不推荐、不安装任何外部工具。
 
 ## 各步骤详细规则
 

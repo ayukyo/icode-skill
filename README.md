@@ -74,7 +74,7 @@ cd ~/.claude/skills/icode/mcp/cheap-research
 
 如果 cheap-research 装了但 `config.json` 还没填三件套，工具调用会返回 fallback 提示 dict，session 模型按默认会话模型处理——**等同于未装 cheap-research 的行为**。不报错、不阻塞。
 
-详见 [mcp/cheap-research/README.md](mcp/cheap-research/README.md) 与 [references/cheap-subagent-research.md](references/cheap-subagent-research.md)。
+详见 [mcp/cheap-research/README.md](mcp/cheap-research/README.md)。
 
 ## 快速开始
 
