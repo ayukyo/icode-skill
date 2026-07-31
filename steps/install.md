@@ -70,6 +70,26 @@ icode 工作流强依赖 MCP（每个 mcp 子工程自带 `install.sh` 提供一
 - **网络不可达**（如 curl 拉 astral.sh 失败）：提示用户手动装，或传 `--no-auto-install` 跳过自动装
 - **vision-bridge 的 config.json 三件套（base_url/api_key/model）未填**：install.sh 只生成模板，不阻断；mcpServer 启动时 UnconfiguredProvider 会回退提示
 
+## 已知体验问题（2026-08 新增）
+
+`/icode install` 一键装完后，**部分 MCP 启动行为可能影响首次体验**——提前说明便于排查：
+
+- **serena dashboard 自动开浏览器 → 默认后台运行（v3.1+）**
+  - **症状**：每次新会话启动 serena 时，默认会自动打开 `http://127.0.0.1:<随机端口>/dashboard/` 浏览器
+  - **解决**：v3.1+ `mcp/serena/install.sh` 默认注册 `--open-web-dashboard false`（后台运行，不弹浏览器）
+  - **如想看 dashboard**：访问 `http://127.0.0.1:<端口>/dashboard/`（端口可在 Claude Code 日志或 `ss -tlnp | grep serena` 查看）
+  - **如想恢复自动开浏览器**：编辑 `~/.claude.json` 把 serena args 里的 `--open-web-dashboard false` 去掉
+
+- **cheap-research 装完需 KEY**（必装 KEY 才能用）
+  - **症状**：cheap-research 是便宜 LLM 推理 MCP（承担长上下文压缩/历史检索/模板填充等子任务），**装完首次启动会 fallback 提示"未配置 platform"**
+  - **解决**：编辑 `~/.claude/skills/icode/mcp/cheap-research/config.json` 填三件套（`provider` / `base_url` / `api_key` / `model`），不绑任何平台
+  - **降级**：未装或未配置 → Agent(`model="haiku"`) 兜底（不报错不阻塞）
+
+- **vision-bridge 未配置时 fallback 提示**
+  - **症状**：vision-bridge 装完没填 config.json 时，工具调用返回 fallback 字符串，AI 不会自动处理图片/视频
+  - **解决**：编辑 `~/.claude/skills/icode/mcp/vision-bridge/config.json` 填三件套
+  - **降级**：AI 按 session 模型原生能力处理（user 自负其责）
+
 ## 验收标准
 
 - ✅ `mcp/install.sh` 退出 0（serena 失败不阻塞其他）
