@@ -116,6 +116,9 @@ model:    qwen2.5:7b
 
 session 模型只看工具返回结构化 dict，**永远不直接调 LLM API**。
 
+> **输入纯净度建议**：14 个工具都依赖 LLM 输出能严格按 schema 输出 JSON。server.py 的 _parse_response 有 4 道容错闸门：剥离 think 标签 → 提取 json 代码块 → brace-matching 提取最外层 {...} → 修复数组元素间缺逗号。**实测在 prompt 里加一句"只输出 JSON，不要前后缀文本"显著降低容错失败率**——容错是 last resort，不是默认行为。
+
+
 ---
 
 ## SKILL 端约定（与 icode 主工作流）

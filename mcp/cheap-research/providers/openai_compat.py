@@ -41,6 +41,40 @@ def _make_error(error_code: str, message: str, model: str = "unknown") -> dict:
     }
 
 
+def _extract_outer_json(text: str) -> str | None:
+    """提取最外层 {...}, 处理嵌套 {} / 字符串字面量里的 } / 多段 JSON 文本夹杂。
+
+    为什么不用 find('{') + rfind('}')：对 `前文 {"a":1} 中间文 {"b":2} 后文` 这种
+    输出, rfind 会跑到最后一段, 跨段截取把中间的"非 JSON 文本"也喂给 json.loads。
+    本算法走 brace-matching, 字符串字面量内 `}` 不计入深度, 真正定位最外层结束。
+    """
+    start = text.find("{")
+    if start == -1:
+        return None
+    depth = 0
+    in_string = False
+    escape = False
+    for i in range(start, len(text)):
+        c = text[i]
+        if escape:
+            escape = False
+            continue
+        if in_string and c == "\\":
+            escape = True
+            continue
+        if c == '"':
+            in_string = not in_string
+            continue
+        if not in_string:
+            if c == "{":
+                depth += 1
+            elif c == "}":
+                depth -= 1
+                if depth == 0:
+                    return text[start:i + 1]
+    return None
+
+
 class OpenAICompatProvider(LLMProvider):
     """完全驱动 OpenAI Chat Completions 兼容 API 的通用 provider.
 
@@ -195,10 +229,9 @@ class OpenAICompatProvider(LLMProvider):
                         content = content[start:].strip()
             # 容错 2: 提取首个 { ... } 块（防模型输出前后多余文本 / 截断）
             if "{" in content:
-                first_brace = content.find("{")
-                last_brace = content.rfind("}")
-                if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
-                    content = content[first_brace:last_brace + 1]
+                extracted = _extract_outer_json(content)
+                if extracted is not None:
+                    content = extracted
 
             # 尝试解析 + 容错 3: 修复常见 JSON 格式错误（数组/对象元素间缺逗号）
             try:

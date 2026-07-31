@@ -138,7 +138,7 @@ description: 端到端编码工作流（步骤 0~6，含可选需求初稿步骤
 | 级别 | 含义 | 触发后行为 | 典型场景 |
 |---|---|---|---|
 | **L1·致命** | 阻塞流程的前置条件不满足 | **报错退出**，流程不可继续 | cwd 不在 git 仓库 / 强制产物文件缺失 / MCP 完全不可用 |
-| **L2·关键** | 重要约束未满足 | **强提示 user 确认**，user 必须显式同意才继续（不默认继续） | plan §3 架构设计完全缺失 / review 触达 `absolute_cap` 仍有新问题 |
+| **L2·关键** | 重要约束未满足 | **强提示 user 确认**，user 必须显式同意才继续（不默认继续）。**例外**：02_review `absolute_cap` 触达时流程已不可继续（必须回步骤 1 修订计划），按 user 决定（默认继续，避免触发即卡死；详见 [steps/02_review.md](steps/02_review.md) L2 声明） | plan §3 架构设计完全缺失 / review 触达 `absolute_cap` 仍有新问题 |
 | **L3·重要** | 重要检查项未通过 | **警告**，记入 metadata，**流程继续**（user 后续可手动回看） | plan §10 checklist ❌ > 3 条 / audit §6.7 视角 A 失败 / 步骤 4 编译失败（带 `code_compile_failed=true`） |
 | **L4·参考** | 软性建议 | **柔性提示**，不影响流程 | limit 不存在 / cheap-research 未装 / vision-bridge 未装 / init 末轮理解核对清单用户不回复 |
 
@@ -590,7 +590,9 @@ icode 工作流可调用 7 个 MCP（`/icode install` 一键安装）。**v2.2 �
 | 7 | `readme` | [steps/07_readme.md](steps/07_readme.md) |
 | doc | `doc` | [steps/doc.md](steps/doc.md) |
 | limit | `limit` | [steps/limit.md](steps/limit.md)（独立步骤，不参与 1~6 流程推进；plan 步骤硬基线引用源） |
+| - | `install` | [steps/install.md](steps/install.md)（独立 MCP 装/同步步骤）|
 | - | `status` | [steps/status.md](steps/status.md) |
+| - | `list` | [steps/list.md](steps/list.md)（跨工程工单查找，纯查询） |
 
 **执行步骤时，必须先读取对应的 `steps/XX_*.md` 文件，按其中的详细指令执行。**
 
