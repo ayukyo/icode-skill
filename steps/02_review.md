@@ -4,6 +4,17 @@
 **产出**: `{ICODE_OUT_DIR}/02_review.md`
 **会话**: 主会话
 
+## 本步骤 L1/L2 检查项声明
+
+按 SKILL.md「强制阻断边界矩阵」定义，本步骤触发的检查项：
+
+| 级别 | 检查项 | 触发后行为 |
+|---|---|---|
+| **L1·致命** | 前置产物缺失（`01_plan.md` 不存在） | 报错退出，提示先跑 `/icode plan` |
+| **L2·关键** | 触达 `absolute_cap = max(10, N×2)` 仍有新问题 | 落盘告警 + 强提示 user 回步骤 1 修计划（**不自动阻断**，user 决定） |
+
+**L3·重要**（矩阵段定义）：每轮 `clean_rounds` 未达 2 但有 new_issues 进自动延长（流程继续）。
+
 > **fast 模式行为（区分两种场景）**（`metadata.mode == "fast"`）：详见 [steps/fast.md](fast.md)。「自动串联」与「单步升级」两类场景行为不同，判定依据是用户**是否带参 N**：
 >
 > - **场景一·自动串联**（`/icode fast` 调起步骤2，**未带参 N**，`param_max_rounds` 为空）：fast 精简语义，**固定 1 轮、无对抗验证**——`max_rounds` 强制为 1、跳过步骤 2.5.5 对抗（步骤 2.5 产出 issue 直接标 `verification_status=confirmed` 计入 `new_issues`，**降级为单视角审查**，由用户自负其责）、循环控制 `total_rounds >= 1` 直接终止。输出标记：`▶ 步骤2 fast 模式：1 轮审查，无对抗验证`

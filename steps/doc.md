@@ -33,7 +33,14 @@ if [ -z "$GIT_ROOT" ]; then
     GIT_ROOT="$REPO_ROOT"
     PROJECT_TYPE="repo-root"
   else
-    echo "错误：cwd 不在 git 仓库或 repo 管理的项目内"
+    echo "❌ 错误：cwd 不在 git 仓库或 repo 管理的项目内"
+    echo ""
+    echo "💡 解决方案："
+    echo "   /icode doc 必须在 git 仓库或 repo 管理的项目根目录下运行"
+    echo "   1. 检查当前目录：pwd（确认你在工程根目录）"
+    echo "   2. 如果不在 git 仓库：cd 到 git 仓库根目录"
+    echo "   3. 如果不在 repo 管理项目：使用 Google repo 工具管理（或 cd 到 .repo/ 所在目录）"
+    echo "   4. 如果工程根不在 cwd：cd <工程根> 后再跑 /icode doc"
     exit 1
   fi
 fi

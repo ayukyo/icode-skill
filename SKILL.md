@@ -18,13 +18,13 @@ description: 端到端编码工作流（步骤 0~6，含可选需求初稿步骤
 
 | 命令 | 功能 | 创建目录？ |
 |------|------|-----------|
-| `/icode help` | **帮助**：输出使用流程示例 | 否 |
-| `/icode install` | **MCP 环境检查+一键安装（独立步骤）**：跑 `mcp/install.sh` 扫描所有 `mcp/*/install.sh`，每个子工程自检环境（venv/Node/npm）并缺啥补啥、注册到 `~/.claude.json`。新 clone 仓库 / 新机器 / CI 初始化时跑一次。**不创建工单目录、不写工单 metadata、不参与 1~6 推进**（详见 [steps/install.md](steps/install.md)） | 否 |
-| `/icode log [零散信息...]` | **可选入口（日志根因分析）**：把"设备/服务日志+模糊症状"转为有对抗验证的根因报告，自动转修复需求 `00_init.md` 衔接步骤1。先基线检查（git diff/链路图）再日志侦察，对抗分析防确认偏误。**领域无关，每次调用都新建目录**（详见 [steps/log.md](steps/log.md)） | ✅ 每次都新建 |
-| `/icode init [<粗略需求>]` | **可选步骤0**：多轮对话产出 `00_init.md`（需求初稿，含链路图：before/after + 改动点，每轮动态更新）。**每次调用都新建目录，不复用、不续聊**（详见 [steps/00_init.md](steps/00_init.md)） | ✅ 每次都新建 |
-| `/icode start <需求>` | **全流程（full 模式）**：创建/复用目录 → 步骤1→6 串联。步骤2 review 默认 3 轮 + 对抗验证，步骤5 deepcheck 三阶段循环（**复用规则见下**） | ✅ 创建新目录 / 复用 |
-| `/icode fast <需求>` | **精简全流程（fast 模式）**：plan → review(1轮无对抗) → merge → code → deepcheck(Reverse 单阶段) → audit。耗时约为全流程 65%，产物结构与 full 对齐（详见 [steps/fast.md](steps/fast.md)）。入口打印警告、用户自负其责 | ✅ 创建新目录 / 复用 |
-| `/icode plan <需求>` | **仅步骤1**：拟定项目计划（**复用规则见下**） | ✅ 创建新目录 / 复用 |
+| `[辅助]` `/icode help` | **帮助**：输出使用流程示例 | 否 |
+| `[辅助]` `/icode install` | **MCP 环境检查+一键安装（独立步骤）**：跑 `mcp/install.sh` 扫描所有 `mcp/*/install.sh`，每个子工程自检环境（venv/Node/npm）并缺啥补啥、注册到 `~/.claude.json`。新 clone 仓库 / 新机器 / CI 初始化时跑一次。**不创建工单目录、不写工单 metadata、不参与 1~6 推进**（详见 [steps/install.md](steps/install.md)） | 否 |
+| `[入口]` `/icode log [零散信息...]` | **可选入口（日志根因分析）**：把"设备/服务日志+模糊症状"转为有对抗验证的根因报告，自动转修复需求 `00_init.md` 衔接步骤1。先基线检查（git diff/链路图）再日志侦察，对抗分析防确认偏误。**领域无关，每次调用都新建目录**（详见 [steps/log.md](steps/log.md)） | ✅ 每次都新建 |
+| `[入口]` `/icode init [<粗略需求>]` | **可选步骤0**：多轮对话产出 `00_init.md`（需求初稿，含链路图：before/after + 改动点，每轮动态更新）。**每次调用都新建目录，不复用、不续聊**（详见 [steps/00_init.md](steps/00_init.md)） | ✅ 每次都新建 |
+| `[流程]` `/icode start <需求>` | **全流程（full 模式）**：创建/复用目录 → 步骤1→6 串联。步骤2 review 默认 3 轮 + 对抗验证，步骤5 deepcheck 三阶段循环（**复用规则见下**） | ✅ 创建新目录 / 复用 |
+| `[流程]` `/icode fast <需求>` | **精简全流程（fast 模式）**：plan → review(1轮无对抗) → merge → code → deepcheck(Reverse 单阶段) → audit。耗时约为全流程 65%，产物结构与 full 对齐（详见 [steps/fast.md](steps/fast.md)）。入口打印警告、用户自负其责 | ✅ 创建新目录 / 复用 |
+| `[流程]` `/icode plan <需求>` | **仅步骤1**：拟定项目计划（**复用规则见下**） | ✅ 创建新目录 / 复用 |
 
 > **步骤0 init 状态转换时机**（避免状态机歧义）：
 > - `init` 调用：建新目录，立即写 `status=init_in_progress` + `completed_steps=["0"]` 落盘
@@ -36,16 +36,16 @@ description: 端到端编码工作流（步骤 0~6，含可选需求初稿步骤
 > - `log` 调用：建新目录，写 `status=log_done` + `completed_steps=["log"]` 落盘
 > - 用户决定进入步骤1（调 `start`/`plan`）：**start/plan 调用时立即**把 status 从 `log_done` 切换为 `plan_done`，`completed_steps` 追加 `"1"`（与 init→start 复用规则一致）
 > - **不得在 log 阶段把 status 切换为 plan_done**——只有 start/plan 显式复用时才切换
-| `/icode review [N]` | **仅步骤2**：多轮循环审查 + 独立质疑者对抗验证（N=软上限轮数，默认3；如最后一轮仍有新问题自动延长 +2 轮，最多扩展至 `max(10, N×2)`）。`mode=="fast"` 时强制 1 轮无对抗 | 用最新目录 |
-| `/icode merge` | **仅步骤3**：合并审查意见定稿 | 用最新目录 |
-| `/icode code` | **仅步骤4**：落地编码实施（含**末尾 1.5 子段"Code Review Fix" 4 维度复检**——核对实施是否与计划设计的 4 维度一致。复检失败轻/重度分流回代码修复或重设计，不强制阻断；详见 [steps/04_code.md](steps/04_code.md)） | 用最新目录 |
-| `/icode deepcheck` | **仅步骤5**：三阶段递进复检（Reverse → Fixed → Free）。`mode=="fast"` 时只跑 Reverse 阶段 | 用最新目录 |
-| `/icode audit` | **仅步骤6**：终极终审 + 统一修复（产出 `{ICODE_OUT_DIR}/06_audit.md`） | 用最新目录 |
-| `/icode readme` | **可选步骤7**：生成交付报告（面向人的自包含总结，动态文件名，智能识别功能/查BUG模板）。步骤6完成后手动触发 | 用最新目录 |
-| `/icode doc [自然语言]` | **工程级知识库生成（独立步骤）**：扫描工程代码特征，生成/维护 `~/.claude/icode_data/project_docs/<project_id>/<branch>/` 下的工程知识库章节（架构/IPC/术语表/代码事实审计，**按分支分目录**，切分支跑 doc 不互相覆盖），**同时检测工程依赖的独立模块**（git submodule / `repo` 管理 / CMake FetchContent / monorepo / vendor / 用户配置，6 级优先级）并生成 `~/.claude/icode_data/module_docs/{key}/` 模块共享文档（**按仓库+分支 key 跨工程共享**，同一上游仓库同分支只一份），供 init/log/plan/start/fast 段零自动跨仓库检索注入。**去参数化**——目标工程与动作（全量/增量/新增）由自然语言识别。**v1 单级布局自动迁移**：检测到旧 `<project_id>/` 平铺布局时自动迁移到 `<project_id>/<branch>/`（保留所有字段 + 备份 `_meta.json.v1_migrated_from`，详见 doc.md 步骤 5）。**不创建工单目录、不写工单 metadata、不参与步骤1~6推进**（详见 [steps/doc.md](steps/doc.md)） | 否（写全局 `project_docs/` 和 `module_docs/`） |
-| `/icode limit [自然语言]` | **项目约束红线（独立步骤）**：定义和维护本工程的红线/约束/禁区。**主存**：`~/.claude/icode_data/limits/<project_id>.md`（全局，跨 checkout 共享，团队私有不上传）；**覆盖**：`<project_root>/.icode_output/limit.local/<project_id>.md`（单 checkout，自动 gitignore）。**local 完全覆盖 main**。**追加式演进**——每次调用增量追加新红线条目（编号自增），不覆盖、不 diff。对齐 `/icode doc` 模式：无描述→全局扫描显示当前约束（合并视图）；有描述→针对操作生成/追加新条目。**plan 步骤硬基线**——plan §3/§4/§6 引用 limit 条目作为设计依据（柔性提示：plan 入口检测不到 limit 建议生成但不阻断）。**不创建工单目录、不写工单 metadata、不参与步骤1~6推进**（详见 [steps/limit.md](steps/limit.md)） | 否（写全局 `limits/` + 工程根 `.icode_output/limit.local/`，自动 gitignore） |
-| `/icode status` | **状态查询/verdict 标注**：默认只读查当前工单状态（含 `mode`/`verdict` 字段 + 全局索引工单数）；`--verdict <ticket_id> <verified|disproved|superseded> "<reason>" [--correct "<正确方向>"] [--source <machine_test|review|user|auto_signal>]` 手动标注工单方向结论（双写 metadata+index，幂等覆盖刷新 `verdict_at`）；`--scan-verdict` 批量扫描 unknown 完成态工单的 00_init 末轮/06_audit 证伪信号并提示标注（详见 [steps/status.md](steps/status.md)） | 否（默认只读；`--verdict`/`--scan-verdict` 写 metadata+全局索引，不写工程内源码文件） |
-| `/icode list [关键词]` | **跨工程工单查找**：从全局索引 `~/.claude/icode_data/index.json` 全量读取，表格化展示所有工单（ticker-id/project/status/workload/last-used/verdict/summary），支持 `--project <path>` / `--status <status>` / `--since <duration>` / `--limit N` / `--no-color` / `--include-stale` 过滤。**纯查询不跳转**——不创建目录、不写 metadata、不改任何文件（详见 [steps/list.md](steps/list.md)） | 否（纯只读，跨工程） |
+| `[流程]` `/icode review [N]` | **仅步骤2**：多轮循环审查 + 独立质疑者对抗验证（N=软上限轮数，默认3；如最后一轮仍有新问题自动延长 +2 轮，最多扩展至 `max(10, N×2)`）。`mode=="fast"` 时强制 1 轮无对抗 | 用最新目录 |
+| `[流程]` `/icode merge` | **仅步骤3**：合并审查意见定稿 | 用最新目录 |
+| `[流程]` `/icode code` | **仅步骤4**：落地编码实施（含**末尾 1.5 子段"Code Review Fix" 4 维度复检**——核对实施是否与计划设计的 4 维度一致。复检失败轻/重度分流回代码修复或重设计，不强制阻断；详见 [steps/04_code.md](steps/04_code.md)） | 用最新目录 |
+| `[流程]` `/icode deepcheck` | **仅步骤5**：三阶段递进复检（Reverse → Fixed → Free）。`mode=="fast"` 时只跑 Reverse 阶段 | 用最新目录 |
+| `[流程]` `/icode audit` | **仅步骤6**：终极终审 + 统一修复（产出 `{ICODE_OUT_DIR}/06_audit.md`） | 用最新目录 |
+| `[流程]` `/icode readme` | **可选步骤7**：生成交付报告（面向人的自包含总结，动态文件名，智能识别功能/查BUG模板）。步骤6完成后手动触发 | 用最新目录 |
+| `[工程]` `/icode doc [自然语言]` | **工程级知识库生成（独立步骤）**：扫描工程代码特征，生成/维护 `~/.claude/icode_data/project_docs/<project_id>/<branch>/` 下的工程知识库章节（架构/IPC/术语表/代码事实审计，**按分支分目录**，切分支跑 doc 不互相覆盖），**同时检测工程依赖的独立模块**（git submodule / `repo` 管理 / CMake FetchContent / monorepo / vendor / 用户配置，6 级优先级）并生成 `~/.claude/icode_data/module_docs/{key}/` 模块共享文档（**按仓库+分支 key 跨工程共享**，同一上游仓库同分支只一份），供 init/log/plan/start/fast 段零自动跨仓库检索注入。**去参数化**——目标工程与动作（全量/增量/新增）由自然语言识别。**v1 单级布局自动迁移**：检测到旧 `<project_id>/` 平铺布局时自动迁移到 `<project_id>/<branch>/`（保留所有字段 + 备份 `_meta.json.v1_migrated_from`，详见 doc.md 步骤 5）。**不创建工单目录、不写工单 metadata、不参与步骤1~6推进**（详见 [steps/doc.md](steps/doc.md)） | 否（写全局 `project_docs/` 和 `module_docs/`） |
+| `[配置]` `/icode limit [自然语言]` | **项目约束红线（独立步骤）**：定义和维护本工程的红线/约束/禁区。**主存**：`~/.claude/icode_data/limits/<project_id>.md`（全局，跨 checkout 共享，团队私有不上传）；**覆盖**：`<project_root>/.icode_output/limit.local/<project_id>.md`（单 checkout，自动 gitignore）。**local 完全覆盖 main**。**追加式演进**——每次调用增量追加新红线条目（编号自增），不覆盖、不 diff。对齐 `/icode doc` 模式：无描述→全局扫描显示当前约束（合并视图）；有描述→针对操作生成/追加新条目。**plan 步骤硬基线**——plan §3/§4/§6 引用 limit 条目作为设计依据（柔性提示：plan 入口检测不到 limit 建议生成但不阻断）。**不创建工单目录、不写工单 metadata、不参与步骤1~6推进**（详见 [steps/limit.md](steps/limit.md)） | 否（写全局 `limits/` + 工程根 `.icode_output/limit.local/`，自动 gitignore） |
+| `[查询]` `/icode status` | **状态查询/verdict 标注**：默认只读查当前工单状态（含 `mode`/`verdict` 字段 + 全局索引工单数）；`--verdict <ticket_id> <verified|disproved|superseded> "<reason>" [--correct "<正确方向>"] [--source <machine_test|review|user|auto_signal>]` 手动标注工单方向结论（双写 metadata+index，幂等覆盖刷新 `verdict_at`）；`--scan-verdict` 批量扫描 unknown 完成态工单的 00_init 末轮/06_audit 证伪信号并提示标注（详见 [steps/status.md](steps/status.md)） | 否（默认只读；`--verdict`/`--scan-verdict` 写 metadata+全局索引，不写工程内源码文件） |
+| `[查询]` `/icode list [关键词]` | **跨工程工单查找**：从全局索引 `~/.claude/icode_data/index.json` 全量读取，表格化展示所有工单（ticker-id/project/status/workload/last-used/verdict/summary），支持 `--project <path>` / `--status <status>` / `--since <duration>` / `--limit N` / `--no-color` / `--include-stale` 过滤。**纯查询不跳转**——不创建目录、不写 metadata、不改任何文件（详见 [steps/list.md](steps/list.md)） | 否（纯只读，跨工程） |
 
 > **`/icode start` / `/icode plan` / `/icode fast` 的目录复用规则**：启动时检查最新 `.icode_output/.icode_output_N/` 目录：
 > - **入口态有歧义 → 一律问用户**（无论是否带参）：最新目录 status 为 `init_in_progress` 或 `log_done`（即 init/log 产出了 `00_init.md` 但还没进步骤1，且无 `01_plan.md`）时，**必须问用户**："检测到最近有未完成的初稿/根因 `<摘要>`，是 ① 在此基础上继续（复用目录）/ ② 开全新需求（新建目录）？"——用户选①则复用（命令行参数作为需求补充输入，`00_init.md` 为主体），选②则新建
@@ -131,6 +131,28 @@ description: 端到端编码工作流（步骤 0~6，含可选需求初稿步骤
 
 ## 通用规则
 
+### 强制阻断边界矩阵
+
+按检查项的**严重级别**定义统一的"是否阻断流程"语义，避免规则散落在各 step 文件里：
+
+| 级别 | 含义 | 触发后行为 | 典型场景 |
+|---|---|---|---|
+| **L1·致命** | 阻塞流程的前置条件不满足 | **报错退出**，流程不可继续 | cwd 不在 git 仓库 / 强制产物文件缺失 / MCP 完全不可用 |
+| **L2·关键** | 重要约束未满足 | **强提示 user 确认**，user 必须显式同意才继续（不默认继续） | plan §3 架构设计完全缺失 / review 触达 `absolute_cap` 仍有新问题 |
+| **L3·重要** | 重要检查项未通过 | **警告**，记入 metadata，**流程继续**（user 后续可手动回看） | plan §10 checklist ❌ > 3 条 / audit §6.7 视角 A 失败 / 步骤 4 编译失败（带 `code_compile_failed=true`） |
+| **L4·参考** | 软性建议 | **柔性提示**，不影响流程 | limit 不存在 / cheap-research 未装 / vision-bridge 未装 / init 末轮理解核对清单用户不回复 |
+
+**各步骤声明的 L1/L2 检查项**：详见对应 step 文件头部的「本步骤 L1/L2 检查项声明」段（已声明 5 个：plan / review / code / deepcheck / audit）。
+- `steps/01_plan.md` 头部 → L1（前置产物缺失）/ L2（§3 缺失 + §10 ❌ > 3）
+- `steps/02_review.md` 头部 → L1（前置产物缺失）/ L2（触达 `absolute_cap`）
+- `steps/04_code.md` 头部 → L1（前置产物缺失）/ L2（Code Review Fix 全失败）
+- `steps/05_deepcheck.md` 头部 → L1（前置产物缺失）
+- `steps/06_audit.md` 头部 → L1（前置产物缺失）
+
+**L3·重要** 检查项（不强制阻断，警告后流程继续）也已在各 step 头部声明段标注。
+
+> **新增/修改检查项时**：明确标注其 L 级别，写在 step 文件头部声明段。不明确的不算 L1-L4（默认按现有流程行为）。
+
 ### 目录管理
 
 **创建新目录**（用于 `init`，以及 `start` / `plan` / `fast` 在不满足复用条件时）：
@@ -172,7 +194,14 @@ fi
 ```bash
 LAST=$(ls -d .icode_output/.icode_output_* 2>/dev/null | grep -oP '(?<=\.icode_output_)\d+' | sort -n | tail -1)
 if [ -z "$LAST" ]; then
-  echo "错误：没有找到 .icode_output/.icode_output_N 目录，请先运行 /icode start <需求> 或 /icode init"
+  echo "❌ 错误：没有找到 .icode_output/.icode_output_N 目录"
+  echo ""
+  echo "💡 解决方案：先运行以下命令之一创建工单："
+  echo "   /icode init <需求>     # 多轮对话产出 00_init.md（可选步骤 0）"
+  echo "   /icode log <零散信息>  # 日志根因分析入口（领域无关）"
+  echo "   /icode start <需求>    # 全流程（创建新目录 + 步骤 1→6 串联）"
+  echo "   /icode plan <需求>     # 仅步骤 1（创建新目录）"
+  echo "   /icode fast <需求>     # 精简全流程（fast 模式）"
   exit 1
 fi
 ICODE_OUT_DIR=".icode_output/.icode_output_${LAST}"

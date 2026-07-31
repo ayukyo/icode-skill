@@ -4,6 +4,16 @@
 **产出**: `{ICODE_OUT_DIR}/05_deepcheck.md`（合并三阶段产物，不再单独存 JSON）
 **会话**: 主会话
 
+## 本步骤 L1/L2 检查项声明
+
+按 SKILL.md「强制阻断边界矩阵」定义，本步骤触发的检查项：
+
+| 级别 | 检查项 | 触发后行为 |
+|---|---|---|
+| **L1·致命** | 前置产物缺失（`03_plan_final.md` 或步骤 4 代码文件不存在） | 报错退出，提示先跑 `/icode merge` 或 `/icode code` |
+
+**L3·重要**（矩阵段定义）：Reverse/Fixed/Free 任一阶段发现 issue → 进修复循环（最多 2 轮，clean 后退出）；阶段间切换不阻断。
+
 > **fast 模式降级**（`metadata.mode == "fast"`）：fast 模式下本步骤**只跑 Reverse 阶段**，完成后直接终止，不切换 Fixed / Free。详见 [steps/fast.md](fast.md)。具体行为：
 >
 > - Reverse 跑完后，`deepcheck_phase` **不切到 `"fixed"`**，状态直接置 `deepcheck_done`
