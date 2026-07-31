@@ -196,6 +196,7 @@ Free 阶段一次性完整覆盖全部 15 个角度。
 | serena | 🟢* | 找所有调用点评估 blast-radius--有可索引源码时（Reverse 阶段内嵌） |
 | playwright | 🟢* | 跑 E2E--前端工程时 |
 | vision-bridge | 🟢* | UI 截图复检--用户给图时 |
+| **cheap-research** | 🟢* | **降本**：Reverse 阶段 diff_summary（计划vs代码差异）+ summarize（长审查输出压缩）。不接管决策：Fixed/Free 阶段/3 质疑者对抗走主会话 |
 | context7 | ⚪ | 本步骤不推荐 |
 | memory | ⚪ | 本步骤不推荐 |
 

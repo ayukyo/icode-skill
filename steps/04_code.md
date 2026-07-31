@@ -116,6 +116,7 @@
 | serena | 🟢* | 按符号编辑、重命名引用追踪（game-changer）--有可索引源码时（编码实施内嵌） |
 | context7 | 🟢* | 实时查库 API（防训练知识过时）--涉及第三方库时 |
 | vision-bridge | 🟢* | 涉及 UI 实现时截图参照--用户给图时 |
+| **cheap-research** | 🟢* | **降本**：apply_migration（schema 迁移 ops 生成不执行，主会话审核后手动执行）。不接管决策：关键设计/编码实施/Code Review Fix 走主会话 |
 | memory | ⚪ | 本步骤不推荐 |
 | playwright | ⚪ | 本步骤不推荐 |
 

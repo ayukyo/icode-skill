@@ -443,7 +443,7 @@ ICODE_OUT_DIR=".icode_output/.icode_output_${LAST}"
 
 ## MCP 工具集（v2.2 双保险承载）
 
-icode 工作流可调用 6 个 MCP（`/icode install` 一键安装）。**v2.2 双保险承载**：🟢 MCP 由执行步骤内嵌（serena）+ thinking_core gate（其余）双驱动，确保真实触发--按 [references/mcp_per_step.md](references/mcp_per_step.md) 推荐级别（🟢 必须调 / ⚪ 不必调，**消除 🟡**）执行。
+icode 工作流可调用 7 个 MCP（`/icode install` 一键安装）。**v2.2 双保险承载**：🟢 MCP 由执行步骤内嵌（serena）+ thinking_core gate（其余）双驱动，确保真实触发--按 [references/mcp_per_step.md](references/mcp_per_step.md) 推荐级别（🟢 必须调 / ⚪ 不必调，**消除 🟡**）执行。
 
 **核心文档**：
 - [references/mcp_integration.md](references/mcp_integration.md)：**每个 MCP 的强证据 + 降级路径**（必读）
@@ -464,7 +464,7 @@ icode 工作流可调用 6 个 MCP（`/icode install` 一键安装）。**v2.2 �
 
 **未调用合规处理**：🟢 需在产物文件「MCP 调用记录」段写降级原因（先实际调用一次，失败/空才能降级）；⚪ 无需记录。
 
-### 6 个 MCP 速览
+### 7 个 MCP 速览
 
 | MCP | 用途 | 🟢 强证据场景 | 承载层 |
 |---|---|---|---|
@@ -474,6 +474,9 @@ icode 工作流可调用 6 个 MCP（`/icode install` 一键安装）。**v2.2 �
 | **vision-bridge** | 图片/视频理解 | 任意步骤 + 用户给图(直接调) / TB 缺陷源附件含视频/图片时 **vision-bridge 可用则主动调**(视频先用 ffmpeg 本地抽帧省钱；不可用时仅提示不主动调，防纯文字模型报错)，详见 [steps/log.md](steps/log.md)「TB 附件分析与 ffmpeg 抽帧」 | B 层·thinking_core gate |
 | **playwright** | 浏览器自动化 | deepcheck/audit + 前端工程 | B 层·thinking_core gate |
 | **memory** | 跨工单记忆 | init/plan + 本工程有历史工单 | B 层·thinking_core gate |
+| **cheap-research** | 便宜 LLM 推理（降本） | init/log/doc/plan/review/code/deepcheck/audit/readme + 单闸门入选的 22 个子任务（长上下文压缩/历史检索/模板填充/结构化提取/代码事实审计/模式扫描/符号追溯/差异摘要等）；未装走 Agent(model="haiku") 兜底。**不接管决策**：3 质疑者对抗/架构决策/终审裁决/修复方案一律不走（零灰区原则） | B 层·thinking_core gate + 执行步骤内嵌 |
+
+> cheap-research 跟 vision-bridge 模式完全对齐（用户自己配 URL/KEY/模型，不锁平台），详见 [mcp/cheap-research/README.md](mcp/cheap-research/README.md) + [references/mcp_integration.md](references/mcp_integration.md) ⑦ 段 + [references/mcp_per_step.md](references/mcp_per_step.md) 矩阵。
 
 ### 速用示例
 

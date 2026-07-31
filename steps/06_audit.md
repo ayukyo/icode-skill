@@ -168,6 +168,7 @@
 | MCP | 推荐级别 | 用途 |
 |-----|----------|------|
 | vision-bridge | 🟢* | UI 截图分析--用户给图时 |
+| **cheap-research** | 🟢* | **降本**：fill_template（6.4 交付报告提示+偏差备忘）+ summarize（schema 状态汇总）。不接管决策：6.1 终审裁决/6.2 强制修复走主会话 |
 | playwright | 🟢* | 真实 UI 验证（截图、交互）--前端工程时 |
 | serena | ⚪ | 本步骤不推荐 |
 | memory | ⚪ | 本步骤不推荐 |

@@ -244,6 +244,7 @@
 | context7 | 🟢* | 库 API 核对（用 v3 还是 v2？）--涉及第三方库时 |
 | vision-bridge | 🟢* | 识别截图--用户给图时 |
 | memory | 🟢* | read_graph 查跨工单记忆--本工程有历史工单时 |
+| **cheap-research** | 🟢* | **降本**：audit_facts（跨工程代码事实审计）+ retrieve_similar（历史 ADR 检索）+ apply_migration（schema 迁移 ops 生成不执行）。不接管决策：4 维度设计态/风险评估/接口误用预审走主会话 |
 | playwright | ⚪ | 本步骤不推荐 |
 
 **强制约束（v2.2）**：🟢/🟢*/⚪ 语义 + 双保险机制（执行步骤内嵌 + thinking_core gate）详见 [SKILL.md「MCP 调用覆盖强制化」](../SKILL.md) + [references/mcp_per_step.md「双保险机制」](../references/mcp_per_step.md)；本步骤表内的 🟢/🟢* 标注按上方真源判定。

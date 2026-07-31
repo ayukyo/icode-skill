@@ -438,6 +438,7 @@
 | context7 | 🟢* | 库 API 行为查证--涉及第三方库时 |
 | vision-bridge | 🟢* | 错误截图分析--用户给截图时 |
 | memory | 🟢* | read_graph 查跨工单记忆--本工程有历史工单时 |
+| **cheap-research** | 🟢* | **降本甜点**：summarize（阶段 0/1/2 长上下文压缩：输入采集+基线检查+日志侦察）+ extract（8.6 memory 沉淀）+ fetch_remote（TB 缺陷源拉取）+ fill_template（TB 评论回复）。不接管决策：阶段 3 链路图/阶段 4 根因假设/阶段 6+7 对抗/阶段 8 修复建议/追问机制走主会话（高风险） |
 | serena | ⚪ | 本步骤不推荐 |
 | playwright | ⚪ | 本步骤不推荐 |
 

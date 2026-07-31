@@ -28,7 +28,7 @@
 | **vision-bridge** | 任意步骤 **且** (a) 用户主动提供图片/截图/视频（会话中含媒体附件/路径，直接调） **或** (b) TB 缺陷源拉取的附件含视频/图片（`{ICODE_OUT_DIR}/tb_source/<ID>/` 下，**vision-bridge 可用则主动调**：视频先用 ffmpeg 本地提取关键帧再传图片帧给 vision-bridge 省钱——见 [steps/log.md](../steps/log.md)「TB 附件分析与 ffmpeg 抽帧」段） | vision-bridge 未安装 / `~/.claude/skills/icode/mcp/vision-bridge/config.json` 三件套未配齐 → 仅提示不主动调（防纯文字模型报错）；ffmpeg 不可用时降级为直接传视频（需用户确认，可能耗 API 额度） |
 | **playwright** | deepcheck/audit 步骤 **且** 前端工程（含 .html/.jsx/.tsx/.vue 或 package.json 含 react/vue） | CLI/后端/嵌入式工程 |
 | **memory** | init/plan 步骤 **且** 本工程历史工单数 ≥ 1（`~/.claude/icode_data/index.json` 中本 project_path 工单数 ≥ 1） | 新工程首个工单 / demo |
-| **cheap-research** | log/doc 步骤 **且** 走单闸门入选的 22 个子任务（长上下文压缩 / 历史检索 / 模板填充 / 结构化提取 / 代码事实审计） | **不接管决策**：3 质疑者对抗 / 架构决策 / 终审裁决 / 修复方案 / 用户对话一律不走；推理敏感度中等的"灰区"也不走（零灰区原则） |
+| **cheap-research** | init/log/doc/plan/review/code/deepcheck/audit/readme 步骤 **且** 走单闸门入选的 22 个子任务（长上下文压缩 / 历史检索 / 模板填充 / 结构化提取 / 代码事实审计 / 模式扫描 / 符号追溯 / 差异摘要 / 文件名生成 / 模板选择 / schema 迁移 / 模块识别 / project_id 解析 / 远程拉取） | **不接管决策**：3 质疑者对抗 / 架构决策 / 终审裁决 / 修复方案 / 用户对话一律不走；推理敏感度中等的"灰区"也不走（零灰区原则）；merge/install/list 无入选子任务 |
 
 **判定执行**：
 - serena/context7 的"可索引源码"/"第三方库"探测：步骤 1 plan 开始时 `ls` 顶层 + grep 依赖文件，结果写入 `01_plan.md` §1.5；**log 步骤开始时同样探测**（根因假设涉及代码时按相同判定走 serena 强证据场景），结果写入 `log_analysis.md §2.0`
@@ -45,20 +45,20 @@
 
 | Step | serena | context7 | vision-bridge | playwright | memory | **cheap-research** |
 |---|---|---|---|---|---|---|
-| **0 init** | ⚪ | 🟢* | 🟢* | ⚪ | 🟢* | ⚪ |
-| **0 log** | 🟢* | 🟢* | 🟢* | ⚪ | 🟢* | **🟡** |
-| **doc** | 🟢* | ⚪ | 🟢* | ⚪ | ⚪ | **🟡** |
-| **1 plan** | 🟢* | 🟢* | 🟢* | ⚪ | 🟢* | ⚪ |
-| **2 review** | 🟢* | ⚪ | 🟢* | ⚪ | ⚪ | ⚪ |
+| **0 init** | ⚪ | 🟢* | 🟢* | ⚪ | 🟢* | 🟢* |
+| **0 log** | 🟢* | 🟢* | 🟢* | ⚪ | 🟢* | 🟢* |
+| **doc** | 🟢* | ⚪ | 🟢* | ⚪ | ⚪ | 🟢* |
+| **1 plan** | 🟢* | 🟢* | 🟢* | ⚪ | 🟢* | 🟢* |
+| **2 review** | 🟢* | ⚪ | 🟢* | ⚪ | ⚪ | 🟢* |
 | **3 merge** | ⚪ | ⚪ | ⚪ | ⚪ | ⚪ | ⚪ |
-| **4 code** | 🟢* | 🟢* | 🟢* | ⚪ | ⚪ | ⚪ |
-| **5 deepcheck** | 🟢* | ⚪ | 🟢* | 🟢* | ⚪ | ⚪ |
-| **6 audit** | ⚪ | ⚪ | 🟢* | 🟢* | ⚪ | ⚪ |
-| **7 readme** | ⚪ | ⚪ | 🟢* | ⚪ | ⚪ | ⚪ |
-| **install/status/list** | ⚪ | ⚪ | ⚪ | ⚪ | ⚪ | ⚪ |
+| **4 code** | 🟢* | 🟢* | 🟢* | ⚪ | ⚪ | 🟢* |
+| **5 deepcheck** | 🟢* | ⚪ | 🟢* | 🟢* | ⚪ | 🟢* |
+| **6 audit** | ⚪ | ⚪ | 🟢* | 🟢* | ⚪ | 🟢* |
+| **7 readme** | ⚪ | ⚪ | 🟢* | ⚪ | ⚪ | 🟢* |
+| **install/list** | ⚪ | ⚪ | ⚪ | ⚪ | ⚪ | ⚪ |
+| **status** | ⚪ | ⚪ | ⚪ | ⚪ | ⚪ | 🟢* |
 
 `🟢*` = 默认 🟢，但实际需满足强证据场景才必调（不满足降为 ⚪，无需声明）。
-`🟡` = cheap-research 专属标记：**强烈推荐**（仅 log / doc 出现）—— 该入口 cheap-research 价值密度最高（长上下文压缩 + 模板填充 + 信息提取是甜点）。Not 🟢，因为它仍可选（v2.2 二元化下 🟢 是"必调"，cheap-research 不强制）；用户用了收益大，但未装仍可走 Agent(model="haiku") 兜底。
 
 ## 详细说明（强证据场景下的用途）
 
@@ -67,18 +67,20 @@
 - **vision-bridge**：识别用户给的设计图/截图——仅用户给图时
 - **memory**：read_graph 查跨工单偏好——仅本工程有历史工单时
 
+
+- **cheap-research**（🟢*）：现状盘点（`summarize` 压缩工程结构长文）+ 历史工单匹配（`retrieve_similar` 从全局索引筛相似工单）。**不接管决策**：需求点抽取 / 4 维度验证清单 / 链路图绘制走主会话（推理敏感）
 ### 0 log（日志根因分析）
 - **context7**：库 API 行为查证——仅涉及第三方库行为时
 - **vision-bridge**：TB 附件视频/图片主动分析——TB 拉取的附件含视频/图片时 **vision-bridge 可用则主动调**（视频先用 ffmpeg 本地提取关键帧再传图片帧省钱，详见 [steps/log.md](../steps/log.md)「TB 附件分析与 ffmpeg 抽帧」）；用户主动给截图时直接调。vision-bridge 不可用时仅提示附件清单不主动调（防纯文字模型报错）
 
 - **serena**：根因涉及的代码符号/引用/持有链定位（`find_symbol` 定位定义 / `find_referencing_symbols` 找谁调用 / `find_implementations` 找实现 / `search_for_pattern` 模式检索）--根因假设涉及代码行为时**必调**（绑定 log 阶段3「代码事实验证门」，仅 Read 实读不算替代：Read 是文本层，serena 是语义符号层，互补非替代）。有可索引源码时必调；serena 不可用（未装/LSP 不支持该语言/无源码）降级 ripgrep/grep 并显式声明 `serena 不可用(<原因>)，降级 ripgrep/grep`
 
-- **cheap-research**（🟡 强烈推荐）：长上下文压缩（log 阶段 0/1/2）+ 8.6 memory 沉淀 + TB 缺陷源拉取。**不接管决策**：阶段 3 链路图分析 / 阶段 4 根因假设 / 阶段 6+7 对抗分析 / 阶段 8 修复建议 / 追问机制一律不走（高风险子任务）
+- **cheap-research**（🟢*）：长上下文压缩（log 阶段 0/1/2）+ 8.6 memory 沉淀 + TB 缺陷源拉取。**不接管决策**：阶段 3 链路图分析 / 阶段 4 根因假设 / 阶段 6+7 对抗分析 / 阶段 8 修复建议 / 追问机制一律不走（高风险子任务）
 
 ### doc（工程知识库生成）
 - **serena**：理解代码结构（入口/API/IPC）——有可索引源码时，**比 Read 精准 10 倍**
 - **vision-bridge**：截图分析——仅用户给图时
-- **cheap-research**（🟡 强烈推荐）：项目代码事实审计（`audit_facts`） + 章节模板填充（`fill_template`）+ 进度输出（`fill_template`）+ 6 级模块识别（`scan_modules`）+ 增量判定（`scan_patterns`/`diff_summary`）。**不接管决策**：意图识别走主会话（推理敏感度中等），把控"该写哪章"的决策
+- **cheap-research**（🟢*）：项目代码事实审计（`audit_facts`） + 章节模板填充（`fill_template`）+ 进度输出（`fill_template`）+ 6 级模块识别（`scan_modules`）+ 增量判定（`scan_patterns`/`diff_summary`）。**不接管决策**：意图识别走主会话（推理敏感度中等），把控"该写哪章"的决策
 
 ### 1 plan（拟定计划）
 - **serena**：理解代码结构（哪些函数被谁调用）——有可索引源码时（**执行步骤 5.0 内嵌**）
@@ -86,10 +88,14 @@
 - **vision-bridge**：识别截图——仅用户给图时
 - **memory**：read_graph 查跨工单记忆——仅有历史工单时
 
+
+- **cheap-research**（🟢*）：跨工程代码事实审计（`audit_facts` 抽取 README/CLAUDE.md/入口文件关键事实）+ 历史 ADR 检索（`retrieve_similar` 从全局索引找相似工单的 ADR+风险）+ schema 迁移（`apply_migration` 生成 ops 不执行）。**不接管决策**：4 维度设计态固化 / 风险评估 / 接口误用预审 / 端到端路径推演走主会话（推理敏感/中风险灰区不做）
 ### 2 review（审查）
 - **serena**：依赖关系审查（"这个函数被哪些地方调用？"）——有可索引源码时
 - **vision-bridge**：截图分析——仅用户给图时
 
+
+- **cheap-research**（🟢*）：第 N 轮增量审查（`diff_summary` 摘要计划/代码差异）+ 维度结果结构化（`fill_template` 填审查维度模板）+ 历史相似 issue 检索（`retrieve_similar`）+ grep 模式扫描（`scan_patterns` 找 TODO/FIXME/重复模式）+ 引用追溯（`trace_refs` 找符号引用）。**不接管决策**：3 质疑者对抗验证 / 审查意见合成走主会话（高风险）
 ### 3 merge（合并审查意见）
 - **sequential-thinking**：仅此（结构化合并审查点）
 
@@ -98,20 +104,32 @@
 - **context7**：实时查库 API——仅涉及第三方库时
 - **vision-bridge**：截图分析——仅用户给图时
 
+
+- **cheap-research**（🟢*）：schema 迁移（`apply_migration` 生成 ops 不执行，主会话审核后手动执行）。**不接管决策**：关键设计 / 编码实施 / Code Review Fix 4 维度复检走主会话（推理敏感）。死代码清理 / 批量补全 / 格式化不入选（价值 < 3 ★）
 ### 5 deepcheck（复检）
 - **serena**：找所有调用点评估 blast-radius——有可索引源码时（**执行步骤内嵌**）
 - **playwright**：跑 E2E——仅前端工程时
 - **vision-bridge**：截图分析——仅用户给图时
 
+
+- **cheap-research**（🟢*）：Reverse 阶段原文对比（`diff_summary` 对比计划与代码差异）+ 阶段摘要压缩（`summarize` 压缩长审查输出）。**不接管决策**：Fixed/Free 阶段 / 3 质疑者对抗（A6）走主会话（高风险）
 ### 6 audit（终审）
 - **playwright**：真实 UI 验证——仅前端工程时
 - **vision-bridge**：UI 截图分析——仅用户给图时
 
+
+- **cheap-research**（🟢*）：6.4 交付报告提示（`fill_template`）+ schema 状态汇总（`summarize`）+ 实现偏差备忘（`fill_template`）。**不接管决策**：6.1 终审报告裁决 / 6.2 强制修复 / 6.3 最终交付走主会话（高风险）
 ### 7 readme（交付报告）
 - **vision-bridge**：附加 UI 截图——仅用户给图时
 
-### install / status / list
+
+- **cheap-research**（🟢*）：文件名生成（`generate_filename`）+ 智能模板选择（`select_template` 功能/查BUG）+ 模板填充（`fill_template` 7 个段落）+ 已知限制检索（`retrieve_similar` 查历史 BUG 防重复）。**不接管决策**：风险章节提炼走主会话（推理敏感度中等，灰区不做）
+### install / list
+- **sequential-thinking**：仅此（install 装依赖；list 纯查询内置 index.json + 过滤 + 表格化，不需 cheap-research）
+
+### status
 - **sequential-thinking**：仅此
+- **cheap-research**（🟢*）：`--scan-verdict` 批量扫描时用 `extract` 提取 00_init 末轮/06_audit 证伪信号（结构化抽取，低风险）。**不接管决策**：verdict 标注走主会话（用户决策）
 
 ## 调用覆盖率强制化规则（v2.2）
 

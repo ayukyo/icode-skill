@@ -208,6 +208,7 @@
 |-----|----------|------|
 | serena | 🟢* | 依赖关系审查（这个函数被哪些地方调用？）--有可索引源码时（步骤 2.3 内嵌） |
 | vision-bridge | 🟢* | 截图分析--用户给图时 |
+| **cheap-research** | 🟢* | **降本**：diff_summary（增量审查）+ fill_template（维度结果）+ retrieve_similar（历史 issue）+ scan_patterns（grep 扫描）+ trace_refs（引用追溯）。不接管决策：3 质疑者对抗/审查合成走主会话 |
 | context7 | ⚪ | 本步骤不推荐 |
 | memory | ⚪ | 本步骤不推荐 |
 | playwright | ⚪ | 本步骤不推荐 |

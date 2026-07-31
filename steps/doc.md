@@ -309,6 +309,7 @@ AI 解析自然语言的「目标工程」+「动作」：
 |-----|----------|------|
 | serena | 🟢* | 理解代码结构（比 Read 精准 10 倍）--有可索引源码时（执行步骤内嵌） |
 | vision-bridge | 🟢* | 截图分析--用户给图时 |
+| **cheap-research** | 🟢* | **降本甜点**：audit_facts（代码事实审计）+ fill_template（章节+进度模板）+ scan_modules（6 级模块识别）+ scan_patterns/diff_summary（增量判定）+ parse_project_id。不接管决策：意图识别走主会话 |
 | context7 | ⚪ | 本步骤不推荐 |
 | memory | ⚪ | 本步骤不推荐 |
 | playwright | ⚪ | 本步骤不推荐 |
