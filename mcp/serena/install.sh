@@ -134,6 +134,45 @@ fi
 # 用 uvx 启动 serena(首次调用会自动从 git clone + 装包)
 "$PYTHON_BIN" "$HERE/scripts/register_mcp.py"
 
+# ── serena-doctor 部署 ──
+# 1. 软链到 ~/.local/bin/（确保 PATH 可见）
+SERENA_DOCTOR_BIN="$HOME/.local/bin/serena-doctor"
+if [ -f "$HERE/scripts/serena-doctor" ]; then
+  mkdir -p "$HOME/.local/bin"
+  ln -sf "$HERE/scripts/serena-doctor" "$SERENA_DOCTOR_BIN"
+  echo "  ✅ serena-doctor 已部署到 $SERENA_DOCTOR_BIN"
+else
+  echo "  ⚠️  scripts/serena-doctor 未找到，跳过部署"
+fi
+
+# 2. 注入规则到 ~/.claude/CLAUDE.md
+CLAUDE_RULES_FILE="$HERE/claude-rules.md"
+"$PYTHON_BIN" - "$CLAUDE_RULES_FILE" <<'PYEOF'
+import sys
+from pathlib import Path
+
+claude_md = Path.home() / ".claude" / "CLAUDE.md"
+rules_file = Path(sys.argv[1])
+
+if not claude_md.exists() or not rules_file.exists():
+    sys.exit(0)
+
+content = claude_md.read_text()
+if "serena-doctor:rules-start" in content:
+    print("  ℹ️  CLAUDE.md 规则已存在，跳过注入")
+    sys.exit(0)
+
+rules = rules_file.read_text()
+marker = "能用 serena 解决的就不用其他工具（serena 不可用降级 ripgrep/grep 并显式声明）"
+if marker not in content:
+    print("  ⚠️  CLAUDE.md 未找到标记行，跳过注入")
+    sys.exit(0)
+
+new_content = content.replace(marker, marker + "\n\n" + rules)
+claude_md.write_text(new_content)
+print("  ✅ 规则已注入 ~/.claude/CLAUDE.md")
+PYEOF
+
 echo ""
 echo "🎉 完成!"
 echo "   v2.1+ 已通过 uv tool install 持久化安装 serena-agent (含 serena CLI)。"

@@ -51,5 +51,39 @@ else:
         print(f"ℹ️ ~/.claude.json 未注册 $SERVER_NAME, 跳过")
 PYEOF
 
+# ── serena-doctor 清理 ──
+# 1. 删除软链
+if [ -L "$HOME/.local/bin/serena-doctor" ]; then
+  rm -f "$HOME/.local/bin/serena-doctor"
+  echo "  ✅ 已删除 ~/.local/bin/serena-doctor"
+fi
+
+# 2. 从 CLAUDE.md 移除规则
+"$PYTHON_BIN" - <<'PYEOF'
+import sys
+from pathlib import Path
+
+claude_md = Path.home() / ".claude" / "CLAUDE.md"
+if not claude_md.exists():
+    sys.exit(0)
+
+content = claude_md.read_text()
+start_marker = "<!-- serena-doctor:rules-start -->"
+end_marker = "<!-- serena-doctor:rules-end -->"
+
+start_idx = content.find(start_marker)
+end_idx = content.find(end_marker)
+
+if start_idx != -1 and end_idx != -1:
+    end_idx = end_idx + len(end_marker)
+    new_content = content[:start_idx] + content[end_idx:]
+    while "\n\n\n" in new_content:
+        new_content = new_content.replace("\n\n\n", "\n\n")
+    claude_md.write_text(new_content)
+    print("  ✅ 已从 ~/.claude/CLAUDE.md 移除 serena-doctor 规则")
+else:
+    print("  ℹ️  CLAUDE.md 中未找到 serena-doctor 规则，跳过")
+PYEOF
+
 echo ""
 echo "👉 重启 Claude Code 生效"
