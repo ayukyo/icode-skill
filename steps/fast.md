@@ -48,14 +48,9 @@ fi
 
 复用语义：复用入口态目录时，命令参数作补充输入，主体需求取自 `00_init.md`。
 
-### 2. 历史检索（与 `/icode start` 计划模式一致）
+> **历史检索 + 段零工程文档检索**：委托给步骤4 串联执行的 [01_plan.md](01_plan.md) 步骤2，fast 不单独检索。原因：slice 与 plan 完全相同（历史 `adr_risks` / 段零 `section:<file>`），`_inject_cache.json` 按 `(source, ref_id, slice)` 去重兜底，fast 单独检索是冗余动作（检索白跑，注入被 plan 截胡），与 fast 省 token 目标矛盾。详见 [SKILL.md](../SKILL.md)「历史检索复用」段。
 
-- 读 `~/.claude/icode_data/index.json`，**两段式检索**：段一 keywords Jaccard 粗筛取 ≤10 候选（零 token，可复活预扫后排除剩余 stale/当前 `ticket_id`），段二候选 keywords+requirement_points 精读打分选 top-N 命中（N 由梯度决定，明确无关则 0 条），过时校验后**按 `verdict` 分流注入**（`disproved`/`superseded` 反转避坑不注 ADR + 证伪前提断言验证；`verdict_review_needed=true` 降级对抗质疑防漏过；`unknown` 扩读 `00_init.md` 末轮+对抗质疑；详见 [01_plan.md](01_plan.md) 注入分支 + SKILL.md「注入形式·按 verdict 分流」）
-- 排除当前 `ticket_id`，不自我参考
-- **段零·工程文档检索**（与历史检索并行，候选合并排序；本入口检索时机：目录管理+需求来源确定后）：完整流程以 [references/dir_and_metadata.md](../references/dir_and_metadata.md)「段零·工程文档检索」+「module_docs 工程模块库」段为准（含步骤 1-5 + 3.5 反查父项目 + 3.6 关联工程检索 + 3.6 源码路径定位 [project_path+manifest+兜底]），**执行前必须 Read 该段全文（含顶部「段零步骤速查」导航），不得凭本行摘要执行**；stale 降级 / commit 校验 / 注入防重复等细节同该段
-- **注入防重复**（两源共用 `_inject_cache.json`）：无缓存则创建空 `{"ticket_id":"<本工单>","injections":[]}`；注入前按 `(source, ref_id, slice)` 查缓存去重，已注入的跳过。历史源 slice=`adr_risks`；段零 slice=`section:<file>`。详见 [references/dir_and_metadata.md](../references/dir_and_metadata.md)「注入缓存机制」段
-
-### 3. 创建 metadata
+### 2. 创建 metadata
 
 `/icode fast` 新建目录时，`.ico_metadata.json` 写入：
 
@@ -82,7 +77,7 @@ fi
 
 复用入口态目录时，沿用现有 metadata，只追加/更新 `mode="fast"`、`max_rounds=1`。
 
-### 4. 入口警告
+### 3. 入口警告
 
 启动时打印（**不阻塞**）：
 
@@ -94,7 +89,7 @@ fi
    - 复杂需求（跨模块/新架构/安全敏感）建议改用 /icode start 全流程
 ```
 
-### 5. 串联执行
+### 4. 串联执行
 
 按以下顺序调用对应步骤文件：
 

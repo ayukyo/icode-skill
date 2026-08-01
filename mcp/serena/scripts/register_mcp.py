@@ -139,12 +139,12 @@ def main():
         # 默认加 --open-web-dashboard false (后台运行, 不自动打开浏览器; 端口仍是随机的, 需要时手动访问)
         cfg["mcpServers"][SERVER_NAME] = {
             "command": serena_bin,
-            "args": ["start-mcp-server", "--open-web-dashboard", "false"],
+            "args": ["start-mcp-server", "--project-from-cwd", "--open-web-dashboard", "false"],
         }
         CLAUDE_JSON.write_text(json.dumps(cfg, ensure_ascii=False, indent=2))
         print(f"✅ 已注册 {SERVER_NAME} 到 {CLAUDE_JSON}")
         print(f"   command: {serena_bin}")
-        print(f"   args: start-mcp-server --open-web-dashboard false")
+        print(f"   args: start-mcp-server --project-from-cwd --open-web-dashboard false")
         print(f"   ⚠️ 重启 Claude Code 后生效")
         print(f"   ✅ v2.1+ 优化: 已持久化安装, 启动秒级 (无 git fetch)")
     else:
