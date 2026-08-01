@@ -36,7 +36,7 @@
   - 原生支不支持图片/视频 **视具体 session 模型而定**（Opus/Sonnet 一般支持，Haiku 可能部分支持）
   - **用户自己把握**原生能力是否够用；AI 不假装"可以原生处理"
   - 不报错、不阻塞
-- **触发场景**：涉及图片/视频/UI 截图（用户主动提供时直接调）**或 TB 缺陷源拉取的附件含视频/图片**（`{ICODE_OUT_DIR}/tb_source/<ID>/` 下）—— vision-bridge 可用则主动调（视频先用 ffmpeg 本地提取关键帧省钱，详见 [steps/log.md](../steps/log.md)「TB 附件分析与 ffmpeg 抽帧」）；vision-bridge 不可用时仅提示附件清单不主动调（防纯文字模型报错）
+- **触发场景**：涉及图片/视频/UI 截图（用户主动提供时直接调）**或 TB 缺陷源拉取的附件含视频/图片**（`{ICODE_OUT_DIR}/tb_source/<ID>/` 下）—— vision-bridge 可用则主动调（视频先用 ffmpeg 本地提取关键帧省钱，详见 [steps/log.md](../steps/log.md)「附件分析（含本地路径 + TB 源）与 ffmpeg 抽帧」）；vision-bridge 不可用时仅提示附件清单不主动调（防纯文字模型报错）
 - **当前状态**：已装（用户在 `config.json` 填三件套后可用）
 
 ### ③ memory（推荐）
