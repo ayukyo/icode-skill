@@ -456,6 +456,10 @@ def cmd_all(dry_run: bool) -> int:
                 with open(project_yml, "w") as f:
                     yaml.dump(config, f, allow_unicode=True, default_flow_style=False)
 
+                # 同时修复 C++ 软链（missing 分支不会进入 elif cc_symlink_ok）
+                if cc_symlink_ok is False:
+                    _ensure_compile_commands_symlink(p, dry_run=False)
+
             results.append({
                 "path": str(p),
                 "status": "fixed",
