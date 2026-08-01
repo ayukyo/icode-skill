@@ -221,6 +221,17 @@ ICODE_OUT_DIR=".icode_output/.icode_output_${LAST}"
 
 缺失则报错并提示需要先执行哪一步。
 
+### serena 配置自愈（前置准备，需要 serena-doctor）
+
+所有 icode 步骤执行前，若 `serena-doctor` 可用（`which serena-doctor`），自动检查当前项目 serena 配置：
+
+1. 检测 `project_path` 是否有 `.serena/project.yml`
+2. 无 → 调 `serena-doctor init <project_path>`（自动探测语言，配齐 language_servers）
+3. 已有 `.serena/` 但语言不全 → 调 `serena-doctor fix <project_path>`（补缺失语言 + C++ 软链）
+4. `serena-doctor` 不可用 → 跳过，按全局 CLAUDE.md 规则处理
+
+**级别**：L4·参考（不影响流程，serena-doctor 可用时才执行）
+
 ### 元信息文件（`.ico_metadata.json`）
 
 ```json
