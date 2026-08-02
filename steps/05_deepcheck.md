@@ -194,6 +194,10 @@ Free 阶段一次性完整覆盖全部 15 个角度。
 - 终止后更新 `.ico_metadata.json`：`status = deepcheck_done`，`completed_steps` 追加 `"5"`
 - 全流程模式：**立即继续执行步骤6**
 
+
+**over-design 复检（v2.7，反偷懒第 26 条）**：Reverse/Fixed/Free 阶段均核对 plan 修复方案分档 + 实施范围。检查点：①plan 修复方案分 A/B/C 三档？②实施范围 = A 档 + 确认的 B 档（B 需 `confirmed_B_fixes`）？③B/C 混入 A 主方案或超范围实施 = issue。与步骤2 over-design 检查对齐。
+
+
 ## 完成前自检（必须填，未填项标 ❌=不合规）
 
 - □ Reverse/Fixed/Free 三阶段都输出了 `📖 已 Read` 确认行（列出实际 Read 的代码文件）
