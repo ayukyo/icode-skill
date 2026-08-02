@@ -95,7 +95,7 @@
    - **注入防重复**（两源共用 `_inject_cache.json`）：无缓存则创建空 `{"ticket_id":"<本工单>","injections":[]}`；注入前按 `(source, ref_id, slice)` 查缓存去重，已注入的跳过。历史源 slice=`adr_risks`；段零 slice=`section:<file>`。详见 [references/dir_and_metadata.md](../references/dir_and_metadata.md)「注入缓存机制」段
    - 零命中不注入，不强凑参考
 
-3. **强制思考前置**（不可跳过，缺证据视为不合规；按 [references/thinking_core.md](../references/thinking_core.md)「强制思考前置·统一契约」段执行））：本步骤子项（至少3步）= 需求分解 → 方案分析 → 风险评估。**若步骤2有历史参考，在此处「历史参考」小节记录命中工单 id 与 ADR/风险要点，作为思考输入**
+3. **强制思考前置**（不可跳过，缺证据视为不合规；按 [references/thinking_core.md](../references/thinking_core.md)「强制思考前置·统一契约」段执行）：本步骤子项（至少3步）= 需求分解 → 方案分析 → 风险评估。**若步骤2有历史参考，在此处「历史参考」小节记录命中工单 id 与 ADR/风险要点，作为思考输入**
 4. 自动迁移（如上「## 前置：schema 迁移」段）—— 迁移到 v1.1
 5. 撰写计划：
    a. **先了解现有工程**：阅读项目中现有的代码，了解目录结构、现有架构模式、可复用模块 **serena 优先（v2.2 执行步骤内嵌）**：若工程有可索引源码（.py/.ts/.js/.c/.cpp/.rs/.go/.java 等）且 serena 可用（`~/.claude.json` 注册 + deferred 列表有 `mcp__serena__find_symbol`），先 ToolSearch 取 schema -> `find_symbol` 找 entry/导出符号 -> `find_referencing_symbols` 摸清关键调用链，结果作为 §1.5 工程结构快照输入；serena 不可用/无 LSP -> 降级 Read+Grep，降级说明只进思考块，不写入产物文件。**未经实际调用 serena 就标降级 = 反偷懒第 21 条违规。**步骤末尾按反偷懒第 21 条 v2.6 自检门输出 `serena 调用: <工具 x N>` 或 `serena 降级: <原因>`，无记录 = 违规****。
@@ -270,7 +270,7 @@
         - 有实质反驳 → 修正方案 / 补证据 / 降级标 `[未验证-对抗不通过]`
         - 2 轮后仍有质疑 → 标 `[部分通过]`，剩余质疑点写入「方案对抗验证记录」末尾「残余风险」段
         - 环境无 spawn 工具（`no_spawn_env = true`）→ 主代理代行三视角独立判断，但不得自演一致假共识；产物文件强制明示「主代理代行（环境无 spawn 工具）」
-        - 子代理超时/失败 → 按 [references/adversarial.md](../references/adversarial.md)「子代理失败处理」重试 1 次 → 仍失败标 `[未验证-子代理对抗失败]`，**禁止主代理补齐为代理代行**
+        - 子代理超时/失败 → 按 [references/adversarial.md](../references/adversarial.md)「子代理失败处理」重试 2 次（含 1 次换 subagent_type） → 仍失败标 `[未验证-子代理对抗失败]`，**禁止主代理补齐为代理代行**
       - **产物**：将对抗记录追加到 `01_plan.md` 末尾「方案对抗验证记录」章节（与「断言验证记录」并列），每条记录注质疑者 spawn Agent ID 或「主代理代行」标注
       - **与现有「c. 断言验证」的关系**：断言验证是「静态核对」（接口存在吗？模式对吗？），对抗验证是「动态攻击」（方案撑得住第三方攻击吗？）——两者互补，前者治「细节错」，后者治「方向错」，缺一不可
 

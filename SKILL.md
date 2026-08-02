@@ -3,7 +3,7 @@ name: icode
 description: 端到端编码工作流（步骤 0~6，含可选需求初稿步骤与日志根因分析入口），支持分步手动调用：/icode help (帮助), /icode install (MCP 环境检查+一键安装), /icode init [<粗略需求>] (需求初稿), /icode log [零散信息...] (日志根因分析→转修复需求), /icode start <需求> (全流程), /icode fast <需求> (精简全流程), /icode plan <需求> (计划), /icode review [N] (审查), /icode merge (定稿), /icode code (编码), /icode deepcheck (复检), /icode audit (终审), /icode doc [自然语言] (工程级知识库生成), /icode limit [自然语言] (项目约束红线), /icode readme (交付报告), /icode status (工单状态), /icode list [关键词] (跨工程工单查找)
 ---
 
-**版本**: v2.0.0
+**版本**: v2.7.0
 
 # ICode 全流程编码工作流（步骤 0 + 1~6）
 
@@ -333,7 +333,7 @@ ICODE_OUT_DIR=".icode_output/.icode_output_${LAST}"
 | 主题 | 真源 | 核心要点 |
 |------|------|---------|
 | 强制思考前置 | [references/thinking_core.md](references/thinking_core.md)（每步必读）+ [references/thinking_detail.md](references/thinking_detail.md)（按需读） | 每步开始前先 `ultrathink`，首选 `sequential-thinking` MCP 至少 3 步；MCP 不可用降级 `### 结构化思考` 文字块；思考子项见各 step 文件 |
-| 反偷懒约束 | [references/anti_laziness.md](references/anti_laziness.md) | 23 条典型偷懒行为 + 正面合规要求；引用 references 必须每步重新 Read 输出 `📖 已 Read` 确认行；思考块每子项 ≥2 句实质内容 |
+| 反偷懒约束 | [references/anti_laziness.md](references/anti_laziness.md) | 26 条典型偷懒行为 + 正面合规要求；引用 references 必须每步重新 Read 输出 `📖 已 Read` 确认行；思考块每子项 ≥2 句实质内容 |
 
 ### 全流程串联规则
 
@@ -466,12 +466,9 @@ ICODE_OUT_DIR=".icode_output/.icode_output_${LAST}"
 
 **强制规则**：
 
-1. **每个步骤产物文件必须含「MCP 调用记录」段**（01_plan.md / 02_review.md / 03_plan_final.md / 04_code_review_fix.md / 05_deepcheck.md / 06_audit.md / log_analysis.md / 00_init.md）：
-   - 列本步骤满足强证据场景的 🟢 MCP（按 [references/mcp_per_step.md](references/mcp_per_step.md)「强证据场景判定」）
-   - 每行注明：调用成功 / 降级 / 不适用 + 证据
-   - 缺此段 = 反偷懒第 21 条违规，步骤6 audit 拒收
+1. **产物文件不记录 MCP 调用信息**（v2.3 精简，消除 MCP 噪声对用户的干扰）：MCP 调用结果只进**思考块**「MCP 调用」段（按 [references/thinking_core.md](references/thinking_core.md) 通用流程第 3 步 gate + 各 step 执行步骤内嵌点），不写入 01_plan.md / 02_review.md / 03_plan_final.md / 04_code_review_fix.md / 05_deepcheck.md / 06_audit.md / log_analysis.md / 00_init.md 等产物文件。**serena 调用记录行同理写思考块**（见 anti_laziness 第 21 条 v2.6 自检门）
 
-2. **🟢 必须调的 MCP**：强证据场景满足 + MCP 可用 -> **必须实际调用一次**（双保险承载），失败/空才能降级。降级需在「MCP 调用记录」写明原因（MCP 不可用 / LSP server 缺失 / 调用返回空）
+2. **🟢 必须调的 MCP**：强证据场景满足 + MCP 可用 -> **必须实际调用一次**（双保险承载），失败/空才能降级。降级需在思考块「MCP 调用」段写明原因（MCP 不可用 / LSP server 缺失 / 调用返回空）
 
 3. **⚪ 不必调的 MCP**：强证据场景不满足 -> 无需评估、无需声明、无需记录
 
@@ -513,7 +510,7 @@ icode 工作流可调用 7 个 MCP（`/icode install` 一键安装）。**v2.2 �
 - context7 / memory / vision-bridge / playwright -> B 层（thinking_core gate）
 - sequential-thinking -> thinking_core 通用流程第 4 步（结构化思考载体）
 
-**未调用合规处理**：🟢 需在产物文件「MCP 调用记录」段写降级原因（先实际调用一次，失败/空才能降级）；⚪ 无需记录。
+**未调用合规处理**：🟢 需在思考块「MCP 调用」段写降级原因（先实际调用一次，失败/空才能降级）；⚪ 无需记录。
 
 ### 7 个 MCP 速览
 
@@ -617,8 +614,8 @@ icode 工作流可调用 7 个 MCP（`/icode install` 一键安装）。**v2.2 �
 | 共享文件 | 内容 | 引用方 |
 |---------|------|--------|
 | [references/thinking_core.md](references/thinking_core.md) | 强制思考前置核心（每步必读：MCP+降级文字块/结构化思考/Read references） |
-| [references/thinking_detail.md](references/thinking_detail.md) | 强制思考前置细节（按需读：各步骤子项速查/历史参考小节） |（ultrathink/MCP/降级文字块/各步子项） | 所有 step |
-| [references/anti_laziness.md](references/anti_laziness.md) | 反偷懒约束（23条偷懒行为+合规要求+references必读+确认行） | 所有 step |
+| [references/thinking_detail.md](references/thinking_detail.md) | 强制思考前置细节（按需读：各步骤子项速查/历史参考小节） | 所有 step |
+| [references/anti_laziness.md](references/anti_laziness.md) | 反偷懒约束（26条偷懒行为+合规要求+references必读+确认行） | 所有 step |
 | [references/adversarial.md](references/adversarial.md) | 对抗分析模式（3质疑者/裁决优先级/诚实降级/证据回指） | 02_review / log |
 | [references/dir_and_metadata.md](references/dir_and_metadata.md) | 目录管理 + ticket_id 生成 + 全局索引写入（含LRU淘汰） + metadata 模板 + **注入缓存机制（防重复注入，两源共用）** + **project_docs 工程文档库 + 段零检索** | init / log / plan / start / fast / doc |
 | [references/doc_template.md](references/doc_template.md) | icode doc 章节模板：前 50 行四块结构（项目元信息/KEYS/简要说明/目录）+ 十位桶编号 + 自适应 grep 关键词表 + 99 章审计策略 + **v2.0.0 双视角必含元素清单（14 项）+ 业务流独立成章 + 英文首次中文备注 + 链路中文说明 + 质量审视检查清单 + 模板版本自举迁移** | doc |

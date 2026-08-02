@@ -216,7 +216,7 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
 
 > **verdict 字段族**（方向结论，可选，详见 SKILL.md「verdict 字段族」）：所有入口模板均可选；**创建时可不写**（缺失视为 `"unknown"`，向后兼容旧 metadata）；需标注时回填 `verdict`+`verdict_reason`+`correct_direction`+`verdict_source`+`verdict_at`（`superseded` 额外填 `superseded_by`；`disproved`/`superseded` 可选填 `verdict_premise_deps` 支持硬复活），途径见 `/icode status --verdict`（[steps/status.md](../steps/status.md)）/ 步骤6 终审（[steps/06_audit.md](../steps/06_audit.md)）/ 批量识别扫描。**索引首次写入时 verdict 固定 `"unknown"`、关联字段 null、premise_deps `[]`/review_needed `false`**（见「全局索引写入」段）
 
-> **`workload_estimate` 字段族**（工作量评估，v3 新增）：由步骤 0 init 收尾时自动评估，辅助用户决定走 `/icode start` 还是 `/icode fast`。详见 SKILL.md「workload_estimate 字段族」与 [steps/00_init.md](../steps/00_init.md)「步骤 9 工作量评估」段：
+> **`workload_estimate` 字段族**（工作量评估，v2 新增）：由步骤 0 init 收尾时自动评估，辅助用户决定走 `/icode start` 还是 `/icode fast`。详见 SKILL.md「workload_estimate 字段族」与 [steps/00_init.md](../steps/00_init.md)「步骤 9 工作量评估」段：
 > - `workload_estimate`（可选，枚举，默认 `"medium"`）：工作量等级。`"small"` 建议 `/icode fast`，`"medium"` 建议 `/icode start`，`"large"` **必须** `/icode start`
 > - `workload_reason`（可选，≤80 token）：评估理由
 > - **字段缺失兼容**：旧 metadata 无 `workload_estimate` 视为 `"medium"`（中性默认），不阻塞后续步骤

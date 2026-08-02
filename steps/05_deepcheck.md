@@ -109,14 +109,14 @@ Free 阶段一次性完整覆盖全部 15 个角度。
 > **spawn 等待规格**（**v2.4 增补**，引用 [references/adversarial.md](../references/adversarial.md)「显式等待 + 超时机制」段）：spawn 3 质疑者必须**显式等 verdict**——同步 `Agent` spawn（`run_in_background: false`）或异步 + `TaskOutput` 等结果，**禁止 spawn 后不等待直接进入下一步**；超时 `TIMEOUT_SECONDS = 120`（可由 metadata.task_timeout_seconds 覆盖），超时触发重试 1 次（换措辞 + 可换 subagent_type 兜底），二次仍超时走 `[未验证-子代理对抗失败]`。**禁止**未等待就标 `[未验证-子代理对抗失败]`——该标签留给「确认失败」的子代理，不得给「仍在跑/返回晚」的子代理（2026-07-29 实测踩坑）。判定状态四态枚举（`sync_ok` / `timeout_retry_used` / `still_failed_after_retry` / `env_no_spawn`）必须写入 `adversarial_verification` 字段便于审计。
 > **主代理代行硬禁止**（**v2.4 实战补强**）：`no_spawn_env = false` 时**禁止**主代理代行三视角判断！即使部分子代理未回结果（如 1/3 返回 verdict、2/3 超时），其余未回子代理必须按「子代理失败处理」失败链路降级（标 `[未验证-子代理对抗失败]`），不得"补齐"为代理代行。主代理代行**仅在** `no_spawn_env = true`（结构性无 spawn 工具）时允许——环境启动检测 `Agent` 工具不可用时置 true。
 
-子代理失败时按 adversarial.md「子代理失败处理」重试1次→仍失败诚实降级为 `[未验证-子代理对抗失败]`，**绝不改由主代理自演裁决**。
+子代理失败时按 adversarial.md「子代理失败处理」重试 2 次（含 1 次换 subagent_type）→仍失败诚实降级为 `[未验证-子代理对抗失败]`，**绝不改由主代理自演裁决**。
 
 ## 执行步骤
 
 1. 检测最新目录，确定 `ICODE_OUT_DIR`
 2. 读取 `03_plan_final.md` 和 `.ico_metadata.json`
    - 若 `.ico_metadata.json.code_compile_failed == true`，输出 `⚠️ 步骤4编译失败，仍继续复检` 警告
-3. **强制思考前置**（不可跳过，缺证据视为不合规；按 [references/thinking_core.md](../references/thinking_core.md)「强制思考前置·统一契约」段执行））：本步骤子项（至少3步）= 梳理代码清单 → 回顾计划要点 → 制定逆推/Fixed/Free 检查策略
+3. **强制思考前置**（不可跳过，缺证据视为不合规；按 [references/thinking_core.md](../references/thinking_core.md)「强制思考前置·统一契约」段执行）：本步骤子项（至少3步）= 梳理代码清单 → 回顾计划要点 → 制定逆推/Fixed/Free 检查策略
 4. **分步续跑**：若 `status == "deepcheck_in_progress"`，从 metadata 恢复 `deepcheck_total_rounds` / `deepcheck_clean_rounds` / `deepcheck_phase`，同时读取已存在的 `05_deepcheck.md`（若含「Reverse 逆推」段则跳过 Reverse）
 5. 否则初始化 `deepcheck_clean_rounds = 0`, `deepcheck_total_rounds = 1`, `deepcheck_phase = "reverse"`, `status = deepcheck_in_progress`
 6. 输出：`▶ 步骤5 复检开始`

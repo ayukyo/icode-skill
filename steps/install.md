@@ -9,18 +9,19 @@
 
 icode 工作流强依赖 MCP（每个 mcp 子工程自带 `install.sh` 提供一键安装）。`/icode install` 用于**一次性检查 + 安装**所有 `mcp/*/` 子工程下的 MCP。新 clone 本工程、新机器、CI 初始化都应跑一次。
 
-**当前 6 个声明的 MCP**：
+**当前 7 个声明的 MCP**：
 
 | MCP | 形态 | 对 icode 工作流的增益 | KEY |
 |---|---|---|---|
 | **sequential-thinking** | npm | 强制思考前置（每步必用） | ❌ |
-| **vision-bridge** | Python venv | 图片/视频理解（步骤 0 init/6 audit） | ✅ 必装 |
+| **vision-bridge** | Python venv | 图片/视频理解（步骤 0 init/6 audit） | ✅ 推荐装（需配三件套） |
 | **memory** | npm | 跨工单记忆 | ❌ |
 | **context7** | npm | 库文档实时查询，步骤 0/1/4 | ❌ |
 | **serena** | Python + uv | LSP 语义编码，步骤 1/4/5 | ❌ |
 | **playwright** ⚠️ | npm | 浏览器自动化，步骤 5/6（**仅前端项目**） | ❌ |
+| **cheap-research** | Python venv | 便宜 LLM 推理降本（22 子任务），未装走 Agent(model="haiku") 兜底 | ✅ 推荐装（需 KEY） |
 
-> 完整说明见各 `mcp/<name>/README.md`。**只有 vision-bridge 是我们设计的、必须 KEY 才能用**。无需 KEY 即可安装（serena 仅需 Python ≥ 3.10 + uv）。
+> 完整说明见各 `mcp/<name>/README.md`。**vision-bridge 和 cheap-research 是我们自研的、需配 KEY（三件套）才能用**。其余无需 KEY 即可安装（serena 仅需 Python ≥ 3.10 + uv）。
 >
 > **⚠️ playwright 警告**：24 个工具 schema 永久加载到 system prompt，**非前端项目 token 性价比低**。建议：前端项目保留，全部项目通用时不装。
 
@@ -28,14 +29,14 @@ icode 工作流强依赖 MCP（每个 mcp 子工程自带 `install.sh` 提供一
 
 | 命令 | 行为 |
 |---|---|
-| `/icode install` | 默认 = 一键安装所有 6 个 mcp（触发自动安装 uv 等依赖） |
+| `/icode install` | 默认 = 一键安装所有 7 个 mcp（触发自动安装 uv 等依赖） |
 | `/icode install <name>` | 只装指定 mcp（如 `/icode install filesystem`） |
 | `/icode install --no-auto-install` | 跳过自动装依赖（依赖缺失时直接给手动步骤，不联网下载） |
 
 **对称卸载**（虽然不是 `/icode` 命令，但同样属于本步骤的核心操作）：
 
 ```bash
-./mcp/uninstall.sh              # 一键卸载所有 6 个 mcp
+./mcp/uninstall.sh              # 一键卸载所有 7 个 mcp
 ./mcp/uninstall.sh <name>       # 只卸载指定 mcp
 ```
 
@@ -47,7 +48,7 @@ icode 工作流强依赖 MCP（每个 mcp 子工程自带 `install.sh` 提供一
    - 执行结果逐项验证（不只看 install.sh 退出码，还要确认每个 mcpServer 已写入）
 2. **运行 `bash <工程根>/mcp/install.sh [<name>] [--no-auto-install]`**（cwd 必须在 icode-skill 工程根；用 `git rev-parse --show-toplevel` 解析工程根，失败则报错"请在 icode-skill 工程根内运行"）
 3. install.sh 顶层脚本会：
-   - 扫描 `mcp/*/install.sh`（含 6 个声明的子工程，**新加 mcp 自动被识别**）
+   - 扫描 `mcp/*/install.sh`（含 7 个声明的子工程，**新加 mcp 自动被识别**）
    - 逐个 `bash <子工程>/install.sh`，每个子工程 install.sh 自带：
      - 环境探测（Python/Node/npx/uv 等）
      - **缺啥补啥**（如 serena 主动装 uv；vision-bridge 建 venv；npm 类懒加载）
@@ -80,7 +81,7 @@ icode 工作流强依赖 MCP（每个 mcp 子工程自带 `install.sh` 提供一
   - **如想看 dashboard**：访问 `http://127.0.0.1:<端口>/dashboard/`（端口可在 Claude Code 日志或 `ss -tlnp | grep serena` 查看）
   - **如想恢复自动开浏览器**：编辑 `~/.claude.json` 把 serena args 里的 `--open-web-dashboard false` 去掉
 
-- **cheap-research 装完需 KEY**（必装 KEY 才能用）
+- **cheap-research 装完需 KEY**（必填 KEY 才能用）
   - **症状**：cheap-research 是便宜 LLM 推理 MCP（承担长上下文压缩/历史检索/模板填充等子任务），**装完首次启动会 fallback 提示"未配置 platform"**
   - **解决**：编辑 `~/.claude/skills/icode/mcp/cheap-research/config.json` 填三件套（`provider` / `base_url` / `api_key` / `model`），不绑任何平台
   - **降级**：未装或未配置 → Agent(`model="haiku"`) 兜底（不报错不阻塞）
@@ -119,13 +120,13 @@ icode 工作流强依赖 MCP（每个 mcp 子工程自带 `install.sh` 提供一
 
 ## 卸载时机
 
-卸载 6 个 mcp 用 `mcp/uninstall.sh`（顶层脚本）。**注意**：
+卸载 7 个 mcp 用 `mcp/uninstall.sh`（顶层脚本）。**注意**：
 - 仅移除 `~/.claude.json` 注册项
 - vision-bridge 不删 `.venv`（要彻底清用 `--purge`，待 vision-bridge 升级时支持）
 - serena 缓存可手动 `uv cache clean`
 - npm/uv 缓存系统级保留（不删，下次装仍可用）
 ## MCP 推荐
 
-本步骤仅用 sequential-thinking 强制思考（见 [references/mcp_per_step.md](../references/mcp_per_step.md)「通用前置」段）。其他 5 个 MCP 本步骤不推荐。
+本步骤仅用 sequential-thinking 强制思考（见 [references/mcp_per_step.md](../references/mcp_per_step.md)「通用前置」段）。其他 6 个 MCP 本步骤不推荐。
 
 **强制约束（v2.2）**：🟢/🟢*/⚪ 语义 + 双保险机制（执行步骤内嵌 + thinking_core gate）详见 [SKILL.md「MCP 调用覆盖强制化」](../SKILL.md) + [references/mcp_per_step.md「双保险机制」](../references/mcp_per_step.md)；本步骤表内的 🟢/🟢* 标注按上方真源判定。

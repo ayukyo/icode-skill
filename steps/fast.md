@@ -48,7 +48,7 @@ fi
 
 复用语义：复用入口态目录时，命令参数作补充输入，主体需求取自 `00_init.md`。
 
-> **历史检索 + 段零工程文档检索**：委托给步骤4 串联执行的 [01_plan.md](01_plan.md) 步骤2，fast 不单独检索。原因：slice 与 plan 完全相同（历史 `adr_risks` / 段零 `section:<file>`），`_inject_cache.json` 按 `(source, ref_id, slice)` 去重兜底，fast 单独检索是冗余动作（检索白跑，注入被 plan 截胡），与 fast 省 token 目标矛盾。详见 [SKILL.md](../SKILL.md)「历史检索复用」段。
+> **历史检索 + 段零工程文档检索**：委托给串联执行的 [01_plan.md](01_plan.md) 步骤2（plan 步骤2，非 icode 步骤4），fast 不单独检索。原因：slice 与 plan 完全相同（历史 `adr_risks` / 段零 `section:<file>`），`_inject_cache.json` 按 `(source, ref_id, slice)` 去重兜底，fast 单独检索是冗余动作（检索白跑，注入被 plan 截胡），与 fast 省 token 目标矛盾。详见 [SKILL.md](../SKILL.md)「历史检索复用」段。
 
 ### 2. 创建 metadata
 

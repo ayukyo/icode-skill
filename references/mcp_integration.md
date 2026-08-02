@@ -28,7 +28,7 @@
 - **触发场景**：**所有步骤**（强制思考前置）
 - **当前状态**：已装
 
-### ② vision-bridge（**必装**）
+### ② vision-bridge（**推荐装，需配三件套**）
 
 - **强证据**：`~/.claude.json` 的 `mcpServers.vision-bridge` 段存在 + `config.json` 三件套（base_url/api_key/model）已填
 - **强证据满足**：`mcp__vision-bridge__analyze_media(media_path, prompt)` 返回文本，**优先用 MCP 工具**
@@ -110,7 +110,7 @@
 
 | 场景 | 推荐安装 |
 |---|---|
-| 全新 clone icode-skill | sequential-thinking + vision-bridge（必装） |
+| 全新 clone icode-skill | sequential-thinking（必装） + vision-bridge（推荐装，需配三件套） |
 | 纯后端项目 | sequential-thinking + vision-bridge + context7 |
 | 前端项目 | 上述 + playwright |
 | 重编码项目 | 上述 + serena（需 Python 3.10+ + uv + LSP） |

@@ -30,12 +30,12 @@
 1. 检测最新目录，确定 `ICODE_OUT_DIR`
 2. 读取 `03_plan_final.md` 和 `.ico_metadata.json` 的 `code_files` 列表 + `code_deviations`（步骤4主动偏离记录，供6.2偏差备忘汇总）
 3. 额外读取 `05_deepcheck.md`（若存在）
-4. **强制思考前置**（不可跳过，缺证据视为不合规；按 [references/thinking_core.md](../references/thinking_core.md)「强制思考前置·统一契约」段执行））：本步骤子项（至少3步）= 构建追溯矩阵（计划功能点→代码位置）→ 汇步骤历史 → 规划 6 维度审计策略
+4. **强制思考前置**（不可跳过，缺证据视为不合规；按 [references/thinking_core.md](../references/thinking_core.md)「强制思考前置·统一契约」段执行）：本步骤子项（至少3步）= 构建追溯矩阵（计划功能点→代码位置）→ 汇步骤历史 → 规划 6 维度审计策略
 5. 输出：`▶ 步骤6 终审开始`
 6. **重新读取所有代码文件**
 7. 执行终审
 
-### 审核维度（6个，全部覆盖）
+### 审核维度（7个，全部覆盖）
 
 1. **实施完整度** — 计划所有功能点 100% 落地，每个功能点必须给出代码证据位置
 2. **执行精准度** — 实现与计划一致，偏差处必须指出（文件+行号）
@@ -169,7 +169,7 @@
 
 - □ 输出了 `📖 已 Read` 确认行（列出实际 Read 的代码文件）
 - □ 未复用步骤5结论，独立列了"步骤5未覆盖/更深层角度"并逐个查
-- □ 6 维度每维度有 file:line 证据 + 评分理由 ≥2 句实质
+- □ 7 维度每维度有 file:line 证据 + 评分理由 ≥2 句实质（含 §6.7 原始需求收敛）
 - □ 无"无新问题""整体通过"等空泛结论（每条结论有具体证据）
 - □ 终审时确认了 verdict（默认 `unknown` 不阻塞流程；标注 `verified`/`disproved`/`superseded` 时回填 `verdict_reason`/`correct_direction`/`verdict_source`/`verdict_at`，双写 metadata + index 同步）
 
