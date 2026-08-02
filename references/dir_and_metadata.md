@@ -184,7 +184,7 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
 1. **容量上限 200 条**：tickets 数组超 200 时触发淘汰
 2. **永久保留**：`hit_count >= 20` **且 `verdict != "disproved"`** 的工单永久不淘汰（被复用≥20 次的高价值工单）。**例外**：`verdict="disproved"` 的工单即使 `hit_count >= 20` 也不永久保留--被证伪的方案不应作为高价值正面参考永久保留（仍可被反转注入避坑，但走正常淘汰流）
 3. **未完成态保留**：`status` 为 `init_in_progress`/`log_done`/`log_in_progress`/`review_in_progress`/`deepcheck_in_progress`/`code_in_progress` 的工单**默认**不淘汰（流程未结束）——**但有超时降级例外**（见规则 5）
-4. **LRU 淘汰**：超上限时，在**可淘汰集**中淘汰 `last_used_at` 最老的（数组末尾），直到条目数 ≤ 200。**可淘汰集** = `hit_count < 20` 且满足下列**任一**：① `stale=false` 且 `status = completed/review_done/deepcheck_done/plan_done/plan_finalized`（正常已完成/推进态）；② `stale=true` 且 `stale_reason = timeout`（规则 5 超时降级的僵尸未完成态，status 仍 in_progress 但已降级可淘汰）。**`stale=true` 且 `stale_reason != timeout` 的软 stale 工单不在可淘汰集**（保留待 checkout 变化后复活重评）
+4. **LRU 淘汰**：超上限时，在**可淘汰集**中淘汰 `last_used_at` 最老的（数组末尾），直到条目数 ≤ 200。**可淘汰集** = `hit_count < 20` 且满足下列**任一**：① `stale=false` 且 `status = completed/code_done/review_done/deepcheck_done/plan_done/plan_finalized`（正常已完成/推进态）；② `stale=true` 且 `stale_reason = timeout`（规则 5 超时降级的僵尸未完成态，status 仍 in_progress 但已降级可淘汰）。**`stale=true` 且 `stale_reason != timeout` 的软 stale 工单不在可淘汰集**（保留待 checkout 变化后复活重评）
 5. **僵尸未完成态超时降级**：未完成态工单（init/log/review/deepcheck/code in_progress）若 `last_used_at` 距当前**超过 30 天**无更新，视为"建了就扔"的僵尸工单——**不删 status，改置 `stale=true`+`stale_reason=timeout`**（复用 stale 机制，不污染 status 语义），降级后该条不再受规则 3 的未完成态保护，**纳入规则 4 可淘汰集②**（status 仍 in_progress，由可淘汰集②的 `stale_reason=timeout` 判定可淘汰）。**触发时机**：每次写索引触发淘汰扫描时，顺带检查所有未完成态工单是否超时。区分"正在用"（30 天内有更新）与"建了就扔"（超时）。**timeout 为硬 stale**：复活条件 `stale_reason != timeout` 排除它，超时降级不复活、直接走淘汰
 6. **淘汰不报错**：静默移除，用户无感
 
@@ -199,7 +199,7 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
 
 入口命令（init/log）和步骤1常规新建目录时创建。完整字段定义见 SKILL.md「元信息文件」段，此处仅列入口创建时的最小模板：
 
-> **`template_version` 字段**（schema 版本，自 [v1.1 升级](steps/01_plan.md) 起所有新建工单默认带）：
+> **`template_version` 字段**（schema 版本，自 [v1.1 升级](../steps/01_plan.md) 起所有新建工单默认带）：
 >
 > - 默认值：`"v1.1"`（新增工单一律带；旧工单缺字段视为 `"v0"`，会在第一次进入步骤 1 / 步骤 4 / 步骤 5 时自动迁移补全）
 > - 当前生效版本：v1.1（含 §1.5 工程结构快照 / 三链预扫段 / blast-radius 三链自检段）

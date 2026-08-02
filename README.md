@@ -1,163 +1,190 @@
-# ICode — 全流程编码工作流（步骤 0 + 1~6，含日志根因分析入口 + 工程级知识库生成）
+<div align="center">
 
-ICode 是一个 Claude Code 技能（Skill），将需求到交付拆解为严格步骤，每步可单独调用，手动切换模型时操作更灵活。
+# ICode — End-to-End Coding Workflow for Claude Code
 
-- **入口命令（可选）**：`/icode log` 日志根因分析（领域无关）→ 转修复需求；`/icode init` 需求初稿对话
-- **步骤 0（可选）**：需求初稿对话，多轮迭代后落档为 `00_init.md`
-- **步骤 1~6**：拟定计划 → 审查 → 定稿 → 编码 → 复检 → 终审
+**6-step workflow: Plan → Review → Finalize → Code → Deep Check → Audit.** Run all at once, or step-by-step and switch models between steps.
 
-## 特性
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Claude Code](https://img.shields.io/badge/Claude%20Code-Skill-8A2BE2.svg)](SKILL.md)
+[![Version](https://img.shields.io/badge/version-v2.10.0-blue.svg)](SKILL.md)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/ayukyo/icode-skill/issues)
 
-- **闭环交付**：(可选) 需求初稿 → 计划 → 审查 → 定稿 → 编码 → 复检 → 终审，每步可独立调用，主会话执行、不切换模型
-- **双模式**：`/icode start` 全流程（多轮审查 + 对抗验证）/ `/icode fast` 精简（1 轮无对抗，约 65% 耗时），自动串联步骤 1→6
-- **防偷懒质量门**：三阶段复检（Reverse/Fixed/Free）、Plan 断言实证验证、ADR 决策记录、对抗验证（独立质疑者——证据不足不确认、诚实降级不伪造共识）
-- **跨工程历史检索**：init/log/plan/start 启动时自动检索相似历史工单按命令分流注入，只进会话、不污染工程产物
-- **工程级知识库**（`/icode doc`）：生成全局工程知识库（跨仓库跨分支共享，模块文档只生成一次复用），供段零自动检索注入，开发时无需手动告知参考文档
-- **防重复注入**：历史检索与工程文档检索共用缓存去重，避免同开发链路重复注入
-- **防偷懒强化**：步骤5/6 强制 Read 确认行 + 证据 file:line + 自检清单，步骤2 对抗强制 Agent ID
-- **两个可选入口**：`/icode log` 日志根因分析（先基线检查再对抗分析，领域无关）→ 转修复需求；`/icode init` 多轮需求初稿对话 → `00_init.md`
-- **产物与状态管理**：统一收纳在 `.icode_output/.icode_output_N/`，`.ico_metadata.json` 记录状态/代码文件，支持跨会话恢复与断点续跑
-- **可选 TB 缺陷源**：`/icode log` 零散输入含 Teambition 项目 URL 或 `<LIB>-<NUM>` 时，可选拉取缺陷单的标题/描述/评论/日志附件作为分析输入（多项目文本配置，仅拉取分析、不回写 TB；无 TB 引用时走纯本地日志路径，行为不变）
-- **可选视觉理解**（`mcp/vision-bridge`）：可装可不装的图片/视频理解 MCP——**不绑任何平台**，只要你的 provider 提供 OpenAI Chat Completions 兼容接口就能用（OpenAI / Claude / Gemini / 国内厂商 / 自建 / OpenRouter 全部支持）。装好后 SKILL 工作流统一走 `mcp__vision-bridge__analyze_media` 工具；未装时 session 模型按原生能力处理，由用户自负其责。详见 [mcp/vision-bridge/README.md](mcp/vision-bridge/README.md) 与 [SKILL.md](SKILL.md) 的「可选增强」段
+</div>
 
-## 安装
+ICode is a Claude Code Skill that breaks the journey from requirement to delivery into strict, individually invokable steps. It adds a **quality gate, adversarial review, cross-project memory, and crash recovery** on top of vanilla Claude Code — without locking you into a single model or a single pass.
 
-将本仓库克隆到 Claude Code skills 目录：
+## Why ICode?
+
+| Concern | Vanilla Claude Code | ICode |
+|---|---|---|
+| Process discipline | Depends on your prompt | Hard 6-step gates + L1–L4 blocking matrix |
+| Review quality | Single-perspective self-review | Independent skeptic sub-agents with adversarial verification (self-delegation forbidden) |
+| Laziness resistance | None | 27 hard anti-laziness rules + mandatory Read confirmation lines + file:line evidence |
+| Reusing past decisions | Every ticket starts cold | Cross-project history retrieval with a global index + **verdict-based anti-misleading injection** (disproved tickets inject the trap, not the ADR) |
+| Project knowledge | None | `/icode doc` generates a global per-project/branch knowledge base, auto-injected at phase zero |
+| Crash recovery | Restart from scratch | `.ico_metadata.json` status + round counters enable resumable runs at any step |
+| Cost control | Everything on the main model | `cheap-research` offloads 22 low-risk sub-tasks to cheap models; `/icode fast` ≈ 65% of full-flow cost |
+| Model freedom | Manual | Every step is a separate command, so you can switch models between steps |
+
+## Quick Start
 
 ```bash
-git clone <repo-url> ~/.claude/skills/icode
+# 1) Install into your skills directory (needs one-time setup)
+git clone https://github.com/ayukyo/icode-skill ~/.claude/skills/icode
+
+# 2) Install the 7 MCP servers the workflow relies on (self-checking, fills in what's missing)
+/icode install
+
+# 3) Run a full flow
+/icode start Implement MCU rain sensor I2C driver
 ```
 
-## 可选增强：图片/视频理解
+Or run step by step (switch models between steps anytime):
 
-视觉理解是可选增强，**未装不影响主工作流**。装了后所有图片/视频处理统一通过 `mcp__vision-bridge__analyze_media` 工具，不污染 session 模型。
+```bash
+/icode plan Implement MCU rain sensor I2C driver   # Step 1: Draft plan
+/icode review                                       # Step 2: Review plan (soft cap 3 rounds; auto-extends if issues remain)
+/icode merge                                        # Step 3: Merge & finalize
+/icode code                                         # Step 4: Code implementation
+/icode deepcheck                                    # Step 5: Iterative re-review
+/icode audit                                        # Step 6: Final audit & fix
+```
 
-### 安装 vision-bridge
+Other entry points:
+
+```bash
+# Trimmed full flow (fast mode: single-file/small changes; ~65% of full-flow cost)
+/icode fast "Add isqrt function to calc.c"          # plan→review(1 round, no adversarial)→merge→code→deepcheck(Reverse only)→audit
+
+# Requirement unclear? Draft it in conversation first
+/icode init Record sensor data re-bag                # Step 0: kick-off draft + dialogue
+
+# From a bug log: analyze root cause first, then fix
+/icode log ~/work/log/service-anomaly "no response after startup"   # Entry: log root-cause analysis → fix requirement
+
+# Project-level knowledge base (standalone step, runs anytime)
+/icode doc myproject                                 # Generate/update this project's knowledge base chapters
+```
+
+## The Workflow
+
+```text
+  /icode log (optional)        /icode init (optional)
+  log root-cause analysis ─┐    requirement draft ─┐
+                           └──────────┬────────────┘
+                                      ▼
+  ┌────────┐   ┌────────┐   ┌────────┐   ┌────────┐   ┌────────┐   ┌────────┐
+  │ Plan   │ → │ Review │ → │ Merge  │ → │ Code   │ → │ Deep   │ → │ Audit  │
+  │ Step 1 │   │ Step 2 │   │ Step 3 │   │ Step 4 │   │ Check  │   │ Step 6 │
+  └────────┘   └────────┘   └────────┘   └────────┘   │ Step 5 │   └────────┘
+                                                       └────────┘
+       /icode start = steps 1→6 chained  |  /icode fast = trimmed chain (~65% cost)
+```
+
+Every step produces a real artifact in `.icode_output/.icode_output_N/` (plan → review → final plan → code → deep-check report → audit report), tracked by `.ico_metadata.json` for cross-session recovery and resumable runs.
+
+## Features
+
+- **Closed-loop delivery**: (optional) Requirement Draft → Plan → Review → Finalize → Code → Deep Check → Audit; each step callable independently, runs in the main session without model switching
+- **Dual modes**: `/icode start` full flow (multi-round review + adversarial verification) / `/icode fast` trimmed (1 round, no adversarial, ~65% cost)
+- **Anti-laziness quality gates**: triple-phase deepcheck (Reverse/Fixed/Free), plan assertion verification, ADR decision records, adversarial verification (independent skeptics — insufficient evidence is never confirmed, honest downgrade over fake consensus)
+- **Cross-project history retrieval**: init/log/plan/start auto-search similar past tickets and inject by command; references stay in-session, never pollute project artifacts. **Verdict-based injection** prevents disproved/superseded tickets from misleading new work
+- **Project-level knowledge base** (`/icode doc`): global per-project/per-branch knowledge base (module docs generated once and reused across projects), auto-retrieved and injected by phase-zero search
+- **Anti-duplicate injection**: history retrieval and project-doc retrieval share an injection cache, avoiding repeated injection within one dev chain
+- **Decision anchors** (v2.8): steps pass concise decision summaries (`.decision_anchors.json`) downstream — saves tokens, keeps reasoning continuity
+- **Resumable runs**: `.ico_metadata.json` status + round counters support crash recovery at steps 2/4/5
+- **Two optional entries**: `/icode log` log root-cause analysis (baseline check first, then adversarial analysis; domain-agnostic) → fix requirement; `/icode init` multi-turn requirement draft → `00_init.md`
+- **Project constraint red lines** (`/icode limit`): define this project's forbidden zones / constraints; the plan step treats them as a hard baseline (plan → implementation → audit convergence)
+
+## Installation
+
+Clone this repository into your Claude Code skills directory:
+
+```bash
+git clone https://github.com/ayukyo/icode-skill ~/.claude/skills/icode
+```
+
+Then run the MCP environment check + one-click install (scans `mcp/*/install.sh`, self-checks venv/Node/npm per sub-project, fills in what's missing, registers to `~/.claude.json`):
+
+```bash
+/icode install
+```
+
+New clone / new machine / CI bootstrap → run once. The workflow degrades gracefully if optional MCPs aren't installed (declared downgrade paths, never blocks).
+
+## Optional Enhancements
+
+Both are platform-agnostic: point them at any OpenAI Chat Completions-compatible endpoint (OpenAI / Claude / Gemini / Chinese vendors / self-hosted / OpenRouter / local Ollama). Not installing either doesn't affect the main workflow.
+
+### Image/Video Understanding (vision-bridge)
 
 ```bash
 cd ~/.claude/skills/icode/mcp/vision-bridge
-./install.sh                          # 自动:创 venv + 装依赖 + 注册到 ~/.claude.json
-# 编辑生成的 config.json 填你的 base_url / api_key / model
-# 重启 Claude Code 即生效
+./install.sh                          # auto: venv + install deps + register to ~/.claude.json
+# edit the generated config.json with your base_url / api_key / model
+# restart Claude Code to take effect
 ```
 
-### 不绑任何平台
+All image/video handling flows through `mcp__vision-bridge__analyze_media`. Videos are pre-sampled locally with ffmpeg to save API quota. When unconfigured, it returns a fallback hint and session models fall back to native capability — no error, no blocking.
 
-任何 OpenAI Chat Completions 兼容端点都能用——你用什么平台就填什么 base_url 和 model，**没有任何推荐值**。
-
-### 缺配置时怎么办？
-
-如果 vision-bridge 装了但 `config.json` 还没填三件套（`base_url` / `api_key` / `model`），`analyze_media` 工具会返回 fallback 提示字符串，session 模型按默认会话模型原生能力处理原图——**等同于未装 vision-bridge 的行为**。不报错、不阻塞。
-
-详见 [mcp/vision-bridge/README.md](mcp/vision-bridge/README.md)。
-
-## 可选增强：便宜 LLM 推理（cheap-research）
-
-为降低主会话的 token 消耗，cheap-research 把"长上下文压缩 / 历史检索 / 模板填充 / 结构化提取"等子任务**转交便宜模型**（仍走 `mcp__cheap-research__*` 工具）。**不接管决策**：3 质疑者对抗 / 架构决策 / 终审裁决 / 修复方案一律不交给 cheap-research。
-
-**入选条件**（单闸门）：价值 ≥ 3 ★ + 低风险 = 22 个子任务入选，覆盖 log / doc / readme / init / plan / review / start / fast 等入口。
-
-### 安装 cheap-research
+### Cheap LLM Inference (cheap-research)
 
 ```bash
 cd ~/.claude/skills/icode/mcp/cheap-research
-./install.sh                          # 自动:创 venv + 装依赖 + 注册到 ~/.claude.json
-# 编辑生成的 config.json 填你的 base_url / api_key / model
-# 重启 Claude Code 即生效
+./install.sh                          # auto: venv + install deps + register to ~/.claude.json
+# edit the generated config.json with your base_url / api_key / model
+# restart Claude Code to take effect
 ```
 
-### 跟 vision-bridge 一样的不锁平台
+Offloads 22 low-risk sub-tasks (long-context compression / history retrieval / template filling / structured extraction / code-fact audit / pattern scanning / symbol tracing / diff summaries) to a cheap model. It **never takes over decisions** — 3-skeptic adversarial verification, architecture decisions, final audit, and fix proposals stay on the main session (zero gray area).
 
-任何 OpenAI Chat Completions 兼容端点都能用——你用什么平台就填什么 base_url 和 model，**没有任何推荐值**。本地 Ollama 也是 provider 之一（`provider: local_ollama`）。
+## Commands
 
-### 缺配置时降级
+| Command | Description |
+| --- | --- |
+| `/icode help` | Help: show usage examples |
+| `/icode log [scattered info...]` | Optional entry: log root-cause analysis → fix requirement `00_init.md` (domain-agnostic) |
+| `/icode init [<rough req>]` | Optional Step 0: multi-turn dialogue → `00_init.md` |
+| `/icode start <req>` | Full flow: create/reuse dir → steps 1–6 |
+| `/icode fast <req>` | Trimmed full flow: plan→review(1 round, no adversarial)→merge→code→deepcheck(Reverse only)→audit (~65% cost) |
+| `/icode plan <req>` | Step 1 only: draft project plan |
+| `/icode review [N]` | Step 2 only: review the plan (N=soft cap rounds, default 3) |
+| `/icode merge` | Step 3 only: merge reviews & finalize |
+| `/icode code` | Step 4 only: implement code |
+| `/icode deepcheck` | Step 5 only: three-phase progressive check (Reverse → Fixed → Free) |
+| `/icode audit` | Step 6 only: final audit + fix (produces `06_audit.md`) |
+| `/icode readme` | Optional Step 7: generate delivery report |
+| `/icode doc [natural language]` | Project-level knowledge base (standalone step), auto-injected at phase zero |
+| `/icode limit [natural language]` | Project constraint red lines (standalone step); hard baseline for the plan step |
+| `/icode status` | Read-only: query current ticket status (+ `--verdict` annotation) |
+| `/icode list [keywords]` | Cross-project ticket search (pure read-only) |
 
-如果 cheap-research 装了但 `config.json` 还没填三件套，工具调用会返回 fallback 提示 dict，session 模型按默认会话模型处理——**等同于未装 cheap-research 的行为**。不报错、不阻塞。
+> Full command details (incl. "Creates Dir?" column + reuse rules + `--verdict`/`--scan-verdict` flags): see the [SKILL.md](SKILL.md) `Commands` section.
 
-详见 [mcp/cheap-research/README.md](mcp/cheap-research/README.md)。
+## Execution / Directory Structure / Workflow
 
-## 快速开始
+Execution (main session + no automatic model switching) + Directory Structure (`.icode_output_N/` output layout) + Workflow (Steps 1→6 data-flow + fast-mode branch + reuse rules): see the [SKILL.md](SKILL.md) `General Rules` section.
+
+## Demo
+
+`demo/` is a minimal C calculator project (`calc.h` / `calc.c` / `main.c` / `Makefile`), **purpose-built for end-to-end testing of the icode workflow** — all five invocation modes (A full-flow / B step-by-step / C init→start / D log→start / E fast trimmed) can be run against it.
 
 ```bash
-# 一步走完全流程
-/icode start 实现MCU雨量传感器I2C驱动
-
-# 或者分步执行
-/icode plan 实现MCU雨量传感器I2C驱动   # 步骤1：拟定计划
-/icode review                          # 步骤2：专项审查（软上限3轮，仍有问题时自动延长）
-/icode review 5                        # 步骤2：指定5轮审查
-/icode merge                           # 步骤3：合并定稿
-/icode code                            # 步骤4：编码实施
-/icode deepcheck                       # 步骤5：循环复检
-/icode audit                           # 步骤6：终极终审
-
-# 精简全流程（fast 模式：单文件/小改动场景，耗时约为全流程 65%）
-/icode fast 给 calc.c 增加 isqrt 函数   # plan→review(1轮无对抗)→merge→code→deepcheck(Reverse)→audit
-
-# 工程级知识库生成（独立步骤，任意时刻可跑，不参与 1~6 流程）
-/icode doc                              # 无描述→全局扫描各工程知识库 stale 状态
-/icode doc myproject                    # 检查该工程更新（增量优先：git diff 命中章节才重生成）
-/icode doc 重新生成 myproject           # 全量重生成（触发确认门，保护手动编辑）
-# 生成后，后续 /icode init|log|plan|start|fast 启动时段零自动检索注入相关章节
-
-# 需求不明确时，先讨论再进入流程
-/icode init 录制传感器数据转包              # 步骤0：起一稿，进入对话
-# ... 多轮对话补充需求，文档 00_init.md 每轮都被增量更新 ...
-/icode start                             # 无参→检测到 init 入口态，询问"复用/新建"，选复用则把 00_init.md 作需求输入，进入步骤1→6
-
-# 从 bug 日志分析切入修复（先查根因，再修复）
-/icode log ~/work/log/服务异常 "启动后无响应"      # 入口：分析日志根因，产出 log_analysis.md + 修复需求 00_init.md
-# ... 对抗分析收敛后根因确定；若质疑可继续对话重跑被质疑分支 ...
-/icode start                             # 无参→检测到 log_done 入口态，询问"复用/新建"，选复用则把 00_init.md（修复需求）作输入，进入步骤1→6
+cd demo && make && ./calc_demo   # confirm the baseline builds and runs
 ```
 
-## 可选：从 Teambition 拉缺陷单日志分析
+Example test requirements:
 
-`/icode log` 的零散输入含 Teambition 项目 URL 或 `<LIB>-<NUM>`（如 `DEMO-26`）时，可选自动拉取缺陷单的标题/描述/评论/日志附件作为分析输入；详见 [SKILL.md「使用流程示例·方式 D2」](SKILL.md) 段。配置（多项目 + cookie）详见 `~/.claude/skills/icode/tools/tb/README.md`。
+- **Mode A**: `cd demo && /icode start add modulo and power operations to the calculator, plus integer overflow checks`
+- **Mode B (step-by-step)**: `cd demo && /icode plan add isqrt to calc.c` then `/icode review` `/icode merge` `/icode code` `/icode deepcheck` `/icode audit`
+- **Mode C (init then start)**: `cd demo && /icode init add new feature to calculator` (multi-turn dialogue to clarify) → `/icode start`
+- **Mode D (log then start)**: `cd demo && /icode log <log_path> "symptom"` → outputs root cause + fix requirement → `/icode start`
+- **Mode E (fast trimmed)**: `cd demo && /icode fast add isqrt to calc.c` (~65% time cost)
 
-## 命令一览
+## License
 
-| 命令 | 功能 |
-| ---- | ---- |
-| `/icode help` | 帮助：输出使用流程示例 |
-| `/icode log [零散信息...]` | 可选入口：日志根因分析→转修复需求 `00_init.md`（领域无关，每次都新建目录） |
-| `/icode init [<粗略需求>]` | 可选步骤 0：多轮对话产出需求初稿 `00_init.md` |
-| `/icode start <需求>` | 全流程：创建/复用目录 → 步骤 1→6 |
-| `/icode fast <需求>` | 精简全流程：plan→review(1轮无对抗)→merge→code→deepcheck(Reverse)→audit（耗时约 65%） |
-| `/icode plan <需求>` | 仅步骤 1：拟定项目计划 |
-| `/icode review [N]` | 仅步骤 2：专项审查计划（N=软上限轮数，默认 3） |
-| `/icode merge` | 仅步骤 3：合并审查意见定稿 |
-| `/icode code` | 仅步骤 4：落地编码实施 |
-| `/icode deepcheck` | 仅步骤 5：三阶段递进复检（Reverse → Fixed → Free） |
-| `/icode audit` | 仅步骤 6：终极终审 + 统一修复（产出 `06_audit.md`） |
-| `/icode readme` | 可选步骤 7：生成交付报告（面向人的自包含总结） |
-| `/icode doc [自然语言]` | 工程级知识库生成（独立步骤）：扫描代码特征生成全局知识库章节，供段零自动检索注入 |
-| `/icode limit [自然语言]` | 项目约束红线（独立步骤）：定义和维护本工程的红线/约束/禁区。主存全局 + 单 checkout 覆盖（自动 gitignore），追加式演进。plan 步骤引用作为硬基线 |
-| `/icode status` | 只读：查当前工单状态 |
-| `/icode list [关键词]` | 跨工程工单查找（纯只读） |
+MIT — see [LICENSE](LICENSE).
 
-> 完整命令一览（含「创建目录？」列 + 复用规则 + `--verdict`/`--scan-verdict` 等参数详解）见 [SKILL.md「调用命令」段](SKILL.md)。
+---
 
-## 执行方式 / 目录结构 / 工作流程
-
-执行方式（主会话 + 不主动切换模型）+ 目录结构（含 `.icode_output_N/` 产物收纳）+ 工作流程（步骤 1→6 数据流图 + fast 模式分支）详见 [SKILL.md「通用规则」段](SKILL.md)。
-
-## 许可证
-
-MIT
-
-## DEMO（用于测试 icode 流程）
-
-`demo/` 是一个最小 C 计算器工程（`calc.h`/`calc.c`/`main.c`/`Makefile`），**专门用来端到端测试 icode 工作流**——五种调用方式（A 全流程 / B 分步 / C init→start / D log→start / E fast 精简）都可在此工程里真实跑通：步骤1 计划、步骤4 编码、步骤5 复检、步骤6 编译验证都有真实代码可操作。
-
-```bash
-cd demo && make && ./calc_demo   # 确认基线可编译可运行
-```
-
-测试示例需求：
-
-- **方式A**： `cd demo && /icode start 给计算器增加取模和幂运算功能，并补全整数溢出检查`
-- **方式B（分步）**： `cd demo && /icode plan 给计算器增加 isqrt 函数` 然后逐步 `/icode review` `/icode merge` `/icode code` `/icode deepcheck` `/icode audit`
-- **方式C（先 init 后 start）**： `cd demo && /icode init 计算器加新功能`（多轮对话澄清需求）→ `/icode start`
-- **方式D（先 log 后 start）**： `cd demo && /icode log <log路径> "症状描述"` → 产出根因 + 修复需求 → `/icode start`
-- **方式E（fast 精简）**： `cd demo && /icode fast 给 calc.c 增加 isqrt 函数`（耗时约 65%）
+[中文文档](README.zh-CN.md)

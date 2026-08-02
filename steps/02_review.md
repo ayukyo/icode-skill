@@ -111,7 +111,7 @@
 **输出对抗记录**：把每个质疑者的裁决 + 依据 + 最终状态汇总写入 `adversarial_verification` 字段（见步骤 2.6 JSON 结构）。**每个质疑者必须记录独立 spawn 的 Agent ID**（如 `agentId: ac32afbc15a278f3f`）——无 Agent ID=未独立 spawn=自演=不合规，必须重跑对抗。裁决结果分桶：`confirmed` 进 `new_issues`、`refuted` 进 `refuted_issues`、`needs_more_evidence` 进 `pending_verification`。
 
 
-**步骤 2.5.6 - over-design 审查（v2.7，反偷懒第 26 条）**：检查 plan 修复方案是否分 A/B/C 三档呈现。检查点：①分档？②A 档真根因（非兜底）？③B 档标注"A 修复后触发概率"？④机制层修复是否被误归 B 档（应按"不改会复现吗"判定）？⑤A 档标"跨工程"是否有证据（非借跨工程逃避实施）？判定：B/C 混入 A 档主方案 = `confirmed` issue（需 plan 修订分档）。对抗质疑者追问补："这个修改点是 A 还是 B？B 在 A 修复后还会触发吗？机制层不改会复现吗？A 档标跨工程有证据吗？"
+**步骤 2.5.6 - over-design 审查（v2.7，反偷懒第 26 条）**：检查 plan 修复方案是否分 A/B/C 三档呈现。检查点：①分档？②A 档真根因（非兜底）？③B 档标注"A 修复后触发概率"？④机制层修复是否被误归 B 档（应按"不改会复现吗"判定）？⑤A 档标"跨工程"是否有证据（非借跨工程逃避实施）？判定：B/C 混入 A 档主方案 = `confirmed` issue（需 plan 修订分档）。**核对 metadata.fix_tiers**：plan 未把分档落盘（字段缺失但 `03_plan_final.md` §4.5 有分档文本）→ 提示 plan 补落盘；落盘分档与文本分档不一致 → `confirmed` issue（需 plan 修订）。对抗质疑者追问补："这个修改点是 A 还是 B？B 在 A 修复后还会触发吗？机制层不改会复现吗？A 档标跨工程有证据吗？"
 
 **步骤 2.5.7 — 语义重复函数检测（轻量 top 5）**：
 

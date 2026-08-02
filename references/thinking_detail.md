@@ -20,7 +20,7 @@
 
 ## 历史参考小节（仅 init/plan/log/start 历史检索命中时 Read）
 
-若该步骤启动时历史检索命中（init/plan/log/start），在强制思考文字块里加一节「历史参考」，**按命中工单的 `verdict` 分流标注 + 注入要点**，作为思考输入。详见 SKILL.md「历史检索复用·注入形式·按 verdict 分流」段。
+若该步骤启动时历史检索命中（init/plan/log/start），在强制思考文字块里加一节「历史参考」，**按命中工单的 `verdict` 分流标注 + 注入要点**，作为思考输入。详见 SKILL.md「历史检索复用」节（注入形式·按 verdict 分流）。
 
 **按 verdict 分流标注**（字段缺失视为 `unknown`，向后兼容旧工单）：
 

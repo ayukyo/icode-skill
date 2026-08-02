@@ -31,7 +31,7 @@ schema: {template_version 字段读取方式：直接读 metadata.template_versi
 索引工单: {全局索引 tickets 数} 条（stale: {stale=true 条数} 条 / disproved: {verdict=disproved 条数} 条）（用 `json.load` 全量解析 `~/.claude/icode_data/index.json` 的 `tickets` 数组取长度并统计 stale=true / verdict=disproved 数，禁止按行截断--「前 50 行」仅适用于 project_docs 章节）
 ```
 
-**`status` -> 中文说明映射**（与 SKILL.md「status 字段枚举」表一致）：
+**`status` -> 中文说明映射**（与 SKILL.md `status` 字段枚举表一致）：
 
 | status | 中文说明 |
 |--------|----------|

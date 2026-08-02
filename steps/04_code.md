@@ -94,7 +94,7 @@
 用 Write 工具创建/修改每个代码文件。
 
 
-**修复方案三档实施（v2.7，反偷懒第 26 条）**：默认只实施 A 档（根因修复）；B 档需 metadata `confirmed_B_fixes: [...]` 记录用户显式确认才实施；C 档不实施（范围外）。A 档跨工程（plan 标注）时本工程无可实施 A 档，不强行造 A 档、不把 B 当 A 实施，只做确认的 B 档 + commit/工单注明"A 档转交 <X>"。Code Review Fix 复检核对：实施范围 = A 档 + 确认的 B 档，超范围实施 = issue。详见 anti_laziness 第 26 条
+**修复方案三档实施（v2.7，反偷懒第 26 条）**：默认只实施 A 档（根因修复）；B 档需 metadata `confirmed_B_fixes: [...]` 记录用户显式确认才实施；C 档不实施（范围外）。A 档跨工程（plan 标注）时本工程无可实施 A 档，不强行造 A 档、不把 B 当 A 实施，只做确认的 B 档 + commit/工单注明"A 档转交 <X>"。Code Review Fix 复检核对：实施范围 = A 档 + 确认的 B 档（**先 Read metadata.fix_tiers 读 plan 分档**，字段缺失则从 `03_plan_final.md` §4.5 文本读），超范围实施 = issue。实施 B 档前必须把用户确认记录写入 `confirmed_B_fixes` 数组。详见 anti_laziness 第 26 条
 
 
 ## 强制操作（完成后必须执行）
@@ -120,7 +120,7 @@
      - **测试失败**（非 0 退出码或超时）→ 把失败输出（尾部 ≤50 行，防 token 爆）加入上下文 → AI 修复 → 重跑（最多 3 次，复用编译验证的重试机制）
      - **3 次仍失败** → 设 `metadata.test_failures=true` + `metadata.test_outcome=fail`，代码仍写入（**不阻断**，L3 警告，与 `code_compile_failed` 同级），进入 Code Review Fix
      - **test_cmd=null** → 设 `metadata.test_outcome=skipped`，跳过测试验证，进入 Code Review Fix
-   - **Code Review Fix（4 维度复检，1 的强制子段）**：编译+测试验证后**必须执行**（**所有工单都触发**，不论 init/log 入口）。**作用**：核对实施是否与计划设计的 4 维度一致——同事提示词"修 bug 后做代码 review 修复，确保没有逻辑 bug 和副作用，确保没有竞态死锁问题，确保解决了日志反映的问题"的工程化复检机制
+   - **1.5 子段·Code Review Fix（4 维度复检，1 的强制子段）**：编译+测试验证后**必须执行**（**所有工单都触发**，不论 init/log 入口）。**作用**：核对实施是否与计划设计的 4 维度一致——同事提示词"修 bug 后做代码 review 修复，确保没有逻辑 bug 和副作用，确保没有竞态死锁问题，确保解决了日志反映的问题"的工程化复检机制
      - **强制思考前置**（不可跳过）：本步骤子项（至少3步）= 读计划设计的 4 维度基线 → 列实施对照点 → 预判复检偏差
      - **对照基线读取**（**任一缺失则视为设计遗漏**，须先回到 `/icode plan` 补设计）：
        - log 工单：必须 Read `03_plan_final.md`「4.5 修复方案设计 + 4 维度设计态固化」段（log 工单必填）+ `log_analysis.md` §7 + `00_init.md` §5

@@ -70,8 +70,10 @@ fi
 # 核心命令
 # --filter=':- .gitignore'  : rsync 自动读 dev_repo 顶层 .gitignore 并应用排除规则
 # --exclude                 : 额外硬排除开发仓库本地产物 (防止 .gitignore 漏配)
-rsync -avc "${RSYNC_ARGS[@]}" \
-  --filter=':- .gitignore' \
+# --delete                  : 镜像同步语义——删除目标端 dev_repo 已不存在的文件
+#                            (dev repo 删除的文件会同步删除; --no-delete 可关闭)
+#                            被 .gitignore 排除的 mcp/*/config.json 等用户配置不受影响
+rsync -avc --delete "${RSYNC_ARGS[@]}" \
   --filter=':- .gitignore' \
   --exclude='.git/' \
   --exclude='.claude/' \

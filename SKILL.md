@@ -3,7 +3,7 @@ name: icode
 description: 端到端编码工作流（步骤 0~6，含可选需求初稿步骤与日志根因分析入口），支持分步手动调用：/icode help (帮助), /icode install (MCP 环境检查+一键安装), /icode init [<粗略需求>] (需求初稿), /icode log [零散信息...] (日志根因分析→转修复需求), /icode start <需求> (全流程), /icode fast <需求> (精简全流程), /icode plan <需求> (计划), /icode review [N] (审查), /icode merge (定稿), /icode code (编码), /icode deepcheck (复检), /icode audit (终审), /icode doc [自然语言] (工程级知识库生成), /icode limit [自然语言] (项目约束红线), /icode readme (交付报告), /icode status (工单状态), /icode list [关键词] (跨工程工单查找)
 ---
 
-**版本**: v2.7.0
+**版本**: v2.10.0
 
 # ICode 全流程编码工作流（步骤 0 + 1~6）
 
@@ -44,7 +44,7 @@ description: 端到端编码工作流（步骤 0~6，含可选需求初稿步骤
 | `[流程]` `/icode readme` | **可选步骤7**：生成交付报告（面向人的自包含总结，动态文件名，智能识别功能/查BUG模板）。步骤6完成后手动触发 | 用最新目录 |
 | `[工程]` `/icode doc [自然语言]` | **工程级知识库生成（独立步骤）**：扫描工程代码特征，生成/维护 `~/.claude/icode_data/project_docs/<project_id>/<branch>/` 下的工程知识库章节（架构/IPC/术语表/代码事实审计，**按分支分目录**，切分支跑 doc 不互相覆盖），**同时检测工程依赖的独立模块**（git submodule / `repo` 管理 / CMake FetchContent / monorepo / vendor / 用户配置，6 级优先级）并生成 `~/.claude/icode_data/module_docs/{key}/` 模块共享文档（**按仓库+分支 key 跨工程共享**，同一上游仓库同分支只一份），供 init/log/plan/start/fast 段零自动跨仓库检索注入。**去参数化**——目标工程与动作（全量/增量/新增）由自然语言识别。**v1 单级布局自动迁移**：检测到旧 `<project_id>/` 平铺布局时自动迁移到 `<project_id>/<branch>/`（保留所有字段 + 备份 `_meta.json.v1_migrated_from`，详见 doc.md 步骤 5）。**不创建工单目录、不写工单 metadata、不参与步骤1~6推进**（详见 [steps/doc.md](steps/doc.md)） | 否（写全局 `project_docs/` 和 `module_docs/`） |
 | `[配置]` `/icode limit [自然语言]` | **项目约束红线（独立步骤）**：定义和维护本工程的红线/约束/禁区。**主存**：`~/.claude/icode_data/limits/<project_id>.md`（全局，跨 checkout 共享，团队私有不上传）；**覆盖**：`<project_root>/.icode_output/limit.local/<project_id>.md`（单 checkout，自动 gitignore）。**local 完全覆盖 main**。**追加式演进**——每次调用增量追加新红线条目（编号自增），不覆盖、不 diff。对齐 `/icode doc` 模式：无描述→全局扫描显示当前约束（合并视图）；有描述→针对操作生成/追加新条目。**plan 步骤硬基线**——plan §3/§4/§6 引用 limit 条目作为设计依据（柔性提示：plan 入口检测不到 limit 建议生成但不阻断）。**不创建工单目录、不写工单 metadata、不参与步骤1~6推进**（详见 [steps/limit.md](steps/limit.md)） | 否（写全局 `limits/` + 工程根 `.icode_output/limit.local/`，自动 gitignore） |
-| `[查询]` `/icode status` | **状态查询/verdict 标注**：默认只读查当前工单状态（含 `mode`/`verdict` 字段 + 全局索引工单数）；`--verdict <ticket_id> <verified|disproved|superseded> "<reason>" [--correct "<正确方向>"] [--source <machine_test|review|user|auto_signal>]` 手动标注工单方向结论（双写 metadata+index，幂等覆盖刷新 `verdict_at`）；`--scan-verdict` 批量扫描 unknown 完成态工单的 00_init 末轮/06_audit 证伪信号并提示标注（详见 [steps/status.md](steps/status.md)） | 否（默认只读；`--verdict`/`--scan-verdict` 写 metadata+全局索引，不写工程内源码文件） |
+| `[查询]` `/icode status` | **状态查询/verdict 标注**：默认只读查当前工单状态（含 `mode`/`verdict` 字段 + 全局索引工单数）；`--verdict <ticket_id> <verified\|disproved\|superseded> "<reason>" [--correct "<正确方向>"] [--source <machine_test|review|user|auto_signal>]` 手动标注工单方向结论（双写 metadata+index，幂等覆盖刷新 `verdict_at`）；`--scan-verdict` 批量扫描 unknown 完成态工单的 00_init 末轮/06_audit 证伪信号并提示标注（详见 [steps/status.md](steps/status.md)） | 否（默认只读；`--verdict`/`--scan-verdict` 写 metadata+全局索引，不写工程内源码文件） |
 | `[查询]` `/icode list [关键词]` | **跨工程工单查找**：从全局索引 `~/.claude/icode_data/index.json` 全量读取，表格化展示所有工单（ticker-id/project/status/workload/last-used/verdict/summary），支持 `--project <path>` / `--status <status>` / `--since <duration>` / `--limit N` / `--no-color` / `--include-stale` 过滤。**纯查询不跳转**——不创建目录、不写 metadata、不改任何文件（详见 [steps/list.md](steps/list.md)） | 否（纯只读，跨工程） |
 
 > **`/icode start` / `/icode plan` / `/icode fast` 的目录复用规则**：启动时检查最新 `.icode_output/.icode_output_N/` 目录：
@@ -115,7 +115,7 @@ description: 端到端编码工作流（步骤 0~6，含可选需求初稿步骤
 #    - 步骤5 deepcheck 只跑 Reverse 阶段（跳过 Fixed/Free）
 #    - 依赖 plan+1 轮 review+Reverse 单阶段+audit 四道关卡
 #    - 复杂需求（跨模块/新架构/安全敏感）建议改用 /icode start 全流程
-# 产物：01_plan.md, 02_review.md, 03_plan_final.md, 05_deepcheck.md, 06_audit.md（与 full 模式结构对齐）
+# 产物：01_plan.md, 02_review.md, 03_plan_final.md, 04_code_review_fix.md, 05_deepcheck.md, 06_audit.md（与 full 模式结构对齐）
 ```
 
 ```bash
@@ -287,7 +287,8 @@ ICODE_OUT_DIR=".icode_output/.icode_output_${LAST}"
 - `mode`（新增，可选，默认 `"full"`）：工单模式。`"full"` = `/icode start` 全流程（步骤2 默认 3 轮 + 对抗，步骤5 三阶段循环）；`"fast"` = `/icode fast` 精简全流程（步骤2 固定 1 轮无对抗，步骤5 只跑 Reverse）。**字段缺失视为 `"full"`（向后兼容旧 metadata）**。详见 [steps/fast.md](steps/fast.md)
 - `max_rounds`（新增，可选，默认 3）：步骤2 review 软上限轮数。`mode="full"` 时由 `/icode review N` 参数决定（默认 3）；`mode="fast"` 时**自动串联下强制为 1**，但**单步命令（`/icode review N`）在 fast 工单上调用时 N 优先级最高**——用户用参数 N 显式表达 fast→full 升级意图时，按 N 轮跑（详见 [references/dir_and_metadata.md](references/dir_and_metadata.md)「步骤2/5 读 mode 字段的契约」段）。**字段缺失视为 3**
 
-- `fix_tiers`（新增，可选，默认 `null`）：修复方案三档分级（反偷懒第 26 条）。`{"A": ["A1..."], "B": ["B1..."], "C": ["C1..."]}` 供 review/code/audit 核对实施范围。**字段缺失视为 `null`（向后兼容旧 metadata）**
+- `fix_tiers`（新增，可选，默认 `null`）：修复方案三档分级（反偷懒第 26 条）。`{"A": ["A1..."], "B": ["B1..."], "C": ["C1..."]}` 供 review/code/audit 核对实施范围。**由步骤1 plan §4.5 落盘**（每档 1-2 条一句话摘要），步骤2/4/6 核对实施范围时读取；字段缺失视为 `null`，从 `03_plan_final.md` §4.5 文本读（向后兼容旧 metadata）
+- `confirmed_B_fixes`（新增，可选，默认 `[]`）：步骤4 实施 B 档兜底修复前记录的**用户显式确认清单**（每条含 B 档内容简述）。**字段缺失视为 `[]`（向后兼容旧 metadata）**。仅当用户显式确认后才实施 B 档并记录；未确认的 B 档不实施
 - `anchors_enabled`（v2.8 新增，可选，默认 `true`）：决策锚点机制开关。`true` 时各步骤完成后写 `.decision_anchors.json` + 下游启动读（传递关键决策摘要，省 token + 不丢上下文）；`false` 跳过。详见 [references/decision_anchors.md](references/decision_anchors.md)。**字段缺失视为 `true`（向后兼容旧 metadata）**
 
 > **`verdict` 字段族（方向结论，v2 新增）**--与 `status` 流程态正交：`status` 表示"流程走到哪步"，`verdict` 表示"方案方向对不对"。用于历史检索注入分流，防止已被证伪/取代的工单误导新需求（详见下文「历史检索复用·注入分流」段）：
@@ -625,9 +626,9 @@ icode 工作流可调用 7 个 MCP（`/icode install` 一键安装）。**v2.2 �
 
 | 共享文件 | 内容 | 引用方 |
 |---------|------|--------|
-| [references/thinking_core.md](references/thinking_core.md) | 强制思考前置核心（每步必读：MCP+降级文字块/结构化思考/Read references） |
+| [references/thinking_core.md](references/thinking_core.md) | 强制思考前置核心（每步必读：MCP+降级文字块/结构化思考/Read references） | 所有 step |
 | [references/thinking_detail.md](references/thinking_detail.md) | 强制思考前置细节（按需读：各步骤子项速查/历史参考小节） | 所有 step |
-| [references/anti_laziness.md](references/anti_laziness.md) | 反偷懒约束（26条偷懒行为+合规要求+references必读+确认行） | 所有 step |
+| [references/anti_laziness.md](references/anti_laziness.md) | 反偷懒约束（27条偷懒行为+合规要求+references必读+确认行） | 所有 step |
 | [references/adversarial.md](references/adversarial.md) | 对抗分析模式（3质疑者/裁决优先级/诚实降级/证据回指） | 02_review / log |
 | [references/dir_and_metadata.md](references/dir_and_metadata.md) | 目录管理 + ticket_id 生成 + 全局索引写入（含LRU淘汰） + metadata 模板 + **注入缓存机制（防重复注入，两源共用）** + **project_docs 工程文档库 + 段零检索** | init / log / plan / start / fast / doc |
 | [references/doc_template.md](references/doc_template.md) | icode doc 章节模板：前 50 行四块结构（项目元信息/KEYS/简要说明/目录）+ 十位桶编号 + 自适应 grep 关键词表 + 99 章审计策略 + **v2.0.0 双视角必含元素清单（14 项）+ 业务流独立成章 + 英文首次中文备注 + 链路中文说明 + 质量审视检查清单 + 模板版本自举迁移** | doc |
