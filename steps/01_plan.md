@@ -11,12 +11,16 @@
 | 级别 | 检查项 | 触发后行为 |
 |---|---|---|
 | **L1·致命** | 前置产物缺失（复用 init 工单时 `00_init.md` 不存在） | 报错退出，提示先跑 init |
-| **L2·关键** | plan §3 架构设计**完全缺失**（章节空白） | 强提示 user 确认是否继续（不默认继续） |
-| **L2·关键** | plan §10 checklist ❌ 项 > 3 条 | metadata 写 `checklist_status="fail"`，警告 user 是否回 init 修订（不默认阻断） |
+| **L2·关键** | plan §3 架构设计**完全缺失**（章节空白） | 警告 + 记入 metadata + 流程继续（不阻断；audit 会看到此标记） |
+| **L2·关键** | plan §10 checklist ❌ 项 > 3 条 | metadata 写 `checklist_status="fail"` + 警告 + 流程继续（不阻断；audit 会看到） |
 
 **L3·重要**（矩阵段定义）：plan §10 checklist 部分失败 / 柔性提示检测不到 limit → 警告，**流程继续**（详见 [SKILL.md 阻断矩阵段](../SKILL.md)）。
 
 在**当前会话**中直接撰写计划，保留所有历史对话中的需求上下文。
+
+## 决策锚点（启动时读，v2.8）
+
+若 `metadata.anchors_enabled != false`，Read `{ICODE_OUT_DIR}/.decision_anchors.json`（init 写，不存在则跳过），获取 init 的 `requirement_digest`/`key_decisions`/`design_4dims` 作 plan 上下文。详见 [references/decision_anchors.md](../references/decision_anchors.md)。
 
 ## 前置：limit 硬基线（柔性提示）
 
@@ -316,6 +320,10 @@
      - `["0"]`/`["log"]` → 下一步是步骤1
      - `["0","1"]` 或 `["1"]` 或 `["log","1"]` → 下一步是步骤2
      - `["0","1","2"]` 或 `["1","2"]` → 下一步是步骤3
+## 决策锚点（步骤1 完成后写，v2.8）
+
+步骤1 写完 `01_plan.md` + metadata 后，若 `metadata.anchors_enabled != false`，刷新 `.decision_anchors.json`：刷新 `requirement_digest` + `key_decisions`（ADR 摘要）+ `design_4dims`（plan §4.5 4 维度设计态）。详见 [references/decision_anchors.md](../references/decision_anchors.md)。
+
 ## MCP 推荐（v2.2 强证据二元化）
 | MCP | 推荐级别 | 用途 |
 |-----|----------|------|

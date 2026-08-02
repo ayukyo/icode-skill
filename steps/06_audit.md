@@ -19,6 +19,8 @@
 
 ## 前置校验
 
+> **读决策锚点**（v2.8，启动时）：若 `metadata.anchors_enabled != false`，Read `{ICODE_OUT_DIR}/.decision_anchors.json`（不存在则跳过），获取上游关键决策摘要（requirement_digest/key_decisions/design_4dims/deviations/open_risks）作本步骤上下文，不替代产物。详见 [references/decision_anchors.md](../references/decision_anchors.md)。
+
 检查 `{ICODE_OUT_DIR}/03_plan_final.md` 和步骤4创建的代码文件是否存在，缺失则报错。
 
 ## 代码新鲜度
@@ -37,7 +39,7 @@
 
 ### 审核维度（7个，全部覆盖）
 
-1. **实施完整度** — 计划所有功能点 100% 落地，每个功能点必须给出代码证据位置
+1. **实施完整度** — 计划所有功能点 100% 落地，每个功能点必须给出代码证据位置。**测试核对**（v2.8 新增）：Read `metadata.test_cmd`/`test_outcome`/`test_failures`--`test_outcome=pass` 强化完整度证据；`test_outcome=fail` -> 测试未通过的功能点不算 100% 落地，扣分并记入问题清单（按 6.2 强制修复流程）；`test_outcome=skipped` -> 标注"本工程无测试套件，完整度仅靠静态审查"，不扣分
 2. **执行精准度** — 实现与计划一致，偏差处必须指出（文件+行号）
 3. **方案偏离度** — 偏离项必须明确列出
 4. **代码质量** — 可读性、性能、安全性、**注释完备性**（导出函数/接口/关键分支/数据结构注释是否齐全，对照步骤4 第6条）、**日志覆盖**（关键路径错误返回/状态跳转/外部交互/决策分支/降级重试是否有日志可排查，对照步骤4 第7条）、**优雅度6条**（①复用优先 ②风格对齐 ③调用链模式一致 ④最小侵入 ⑤接口克制 ⑥调用路径选择（架构一致性）——新增跨模块/跨端点调用 grep 工程既有同类调用对齐主导模式，不得绕过已注册路由/接收器直调，同函数内既有同类调用必须一致；对照步骤4 第9条）
@@ -170,6 +172,7 @@
 - □ 输出了 `📖 已 Read` 确认行（列出实际 Read 的代码文件）
 - □ 未复用步骤5结论，独立列了"步骤5未覆盖/更深层角度"并逐个查
 - □ 7 维度每维度有 file:line 证据 + 评分理由 ≥2 句实质（含 §6.7 原始需求收敛）
+- □ 测试结果已核对（§6.1 测试核对：`test_outcome` 值 + 失败项是否记入问题清单）
 - □ 无"无新问题""整体通过"等空泛结论（每条结论有具体证据）
 - □ 终审时确认了 verdict（默认 `unknown` 不阻塞流程；标注 `verified`/`disproved`/`superseded` 时回填 `verdict_reason`/`correct_direction`/`verdict_source`/`verdict_at`，双写 metadata + index 同步）
 
@@ -212,6 +215,10 @@
 - **禁止与其他段合并**：本段独立 H2 标题，便于将来 grep 工具检索"## schema 状态汇总"
 
 **自动化要求**：实现可用 Bash + python 一行（例如 `python3 -c "import json,sys; d=json.load(open(sys.argv[1])); ..."` 嵌入式调用）；如失败则降级为手工填写模板 + 标 `[未自动化]`。
+## 决策锚点（步骤6 完成后写，v2.8）
+
+步骤6 终审后，若 `metadata.anchors_enabled != false`，最终刷新 `.decision_anchors.json`：刷新 `deviations` + `open_risks`（终审汇总）。详见 [references/decision_anchors.md](../references/decision_anchors.md)。
+
 ## MCP 推荐（v2.2 强证据二元化）
 | MCP | 推荐级别 | 用途 |
 |-----|----------|------|

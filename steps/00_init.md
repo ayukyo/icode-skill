@@ -318,6 +318,10 @@
 3. 步骤1完成后正常切换 `status` 为 `plan_done`，`completed_steps` 追加 `"1"`
 
 详细衔接规则见 [01_plan.md](01_plan.md)。
+## 决策锚点（步骤0 完成后写，v2.8）
+
+步骤0 首轮 + 每轮对话后，若 `metadata.anchors_enabled != false`，Write/刷新 `{ICODE_OUT_DIR}/.decision_anchors.json`：写 `requirement_digest` + `key_decisions`（待决策倾向）+ `design_4dims`（init §7 4 维度）。详见 [references/decision_anchors.md](../references/decision_anchors.md)。
+
 ## MCP 推荐（v2.2 强证据二元化）
 | MCP | 推荐级别 | 用途 |
 |-----|----------|------|

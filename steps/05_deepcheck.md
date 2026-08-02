@@ -24,6 +24,8 @@
 
 ## 前置校验
 
+> **读决策锚点**（v2.8，启动时）：若 `metadata.anchors_enabled != false`，Read `{ICODE_OUT_DIR}/.decision_anchors.json`（不存在则跳过），获取上游关键决策摘要（requirement_digest/key_decisions/design_4dims/deviations/open_risks）作本步骤上下文，不替代产物。详见 [references/decision_anchors.md](../references/decision_anchors.md)。
+
 检查 `{ICODE_OUT_DIR}/03_plan_final.md` 和步骤4创建的代码文件是否存在，缺失则报错并提示先执行 `/icode code`。
 
 ## 前置：Code Review Fix 复检产物读取（**软依赖，不阻塞**）
@@ -115,7 +117,7 @@ Free 阶段一次性完整覆盖全部 15 个角度。
 
 1. 检测最新目录，确定 `ICODE_OUT_DIR`
 2. 读取 `03_plan_final.md` 和 `.ico_metadata.json`
-   - 若 `.ico_metadata.json.code_compile_failed == true`，输出 `⚠️ 步骤4编译失败，仍继续复检` 警告
+   - 若 `.ico_metadata.json.code_compile_failed == true`，输出 `⚠️ 步骤4编译失败，仍继续复检` 警告；若 `test_failures == true`，输出 `⚠️ 步骤4测试未通过（test_outcome=fail），重点复检测试失败相关功能点` 警告
 3. **强制思考前置**（不可跳过，缺证据视为不合规；按 [references/thinking_core.md](../references/thinking_core.md)「强制思考前置·统一契约」段执行）：本步骤子项（至少3步）= 梳理代码清单 → 回顾计划要点 → 制定逆推/Fixed/Free 检查策略
 4. **分步续跑**：若 `status == "deepcheck_in_progress"`，从 metadata 恢复 `deepcheck_total_rounds` / `deepcheck_clean_rounds` / `deepcheck_phase`，同时读取已存在的 `05_deepcheck.md`（若含「Reverse 逆推」段则跳过 Reverse）
 5. 否则初始化 `deepcheck_clean_rounds = 0`, `deepcheck_total_rounds = 1`, `deepcheck_phase = "reverse"`, `status = deepcheck_in_progress`
@@ -204,6 +206,10 @@ Free 阶段一次性完整覆盖全部 15 个角度。
 - □ Free 每个角度 ≥3 检查点（file:line），表格填满
 - □ Fixed 每维度有 file:line 证据 + 评分理由 ≥2 句实质
 - □ 无"整体通过""无问题"等空泛结论（每条结论有具体证据）
+## 决策锚点（步骤5 完成后写，v2.8）
+
+步骤5 复检完成后，若 `metadata.anchors_enabled != false`，刷新 `.decision_anchors.json`：刷新 `open_risks`（deepcheck 残留风险）。详见 [references/decision_anchors.md](../references/decision_anchors.md)。
+
 ## MCP 推荐（v2.2 强证据二元化）
 | MCP | 推荐级别 | 用途 |
 |-----|----------|------|

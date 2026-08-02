@@ -11,7 +11,7 @@
 | 级别 | 检查项 | 触发后行为 |
 |---|---|---|
 | **L1·致命** | 前置产物缺失（`01_plan.md` 不存在） | 报错退出，提示先跑 `/icode plan` |
-| **L2·关键** | 触达 `absolute_cap = max(10, N×2)` 仍有新问题 | 落盘告警 + 强提示 user 回步骤 1 修计划（**不自动阻断**，user 决定） |
+| **L2·关键** | 触达 `absolute_cap = max(10, N×2)` 仍有新问题 | 落盘告警 + 记入 metadata（`unresolved_issues_at_cap=true`）+ 流程继续（不阻断；user 可事后回 plan 修订） |
 
 **L3·重要**（矩阵段定义）：每轮 `clean_rounds` 未达 2 但有 new_issues 进自动延长（流程继续）。
 
@@ -27,6 +27,8 @@
 - **终止条件**：以下任一满足即终止——(a) 连续 2 轮无新问题；(b) 触达 `absolute_cap`（若此时仍有新问题，落盘告警并提示用户回到步骤1修计划）；(c) `clean_rounds < 2` 但 `total_rounds > max_rounds`（已用满轮数预算但未达连续2轮 clean，正常终止，详见「循环控制」）
 
 ## 前置校验
+
+> **读决策锚点**（v2.8，启动时）：若 `metadata.anchors_enabled != false`，Read `{ICODE_OUT_DIR}/.decision_anchors.json`（不存在则跳过），获取上游关键决策摘要（requirement_digest/key_decisions/design_4dims/deviations/open_risks）作本步骤上下文，不替代产物。详见 [references/decision_anchors.md](../references/decision_anchors.md)。
 
 检查 `{ICODE_OUT_DIR}/01_plan.md` 和 `{ICODE_OUT_DIR}/.ico_metadata.json` 是否存在，缺失则报错。
 
