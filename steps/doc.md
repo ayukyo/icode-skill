@@ -89,6 +89,41 @@ AI 解析自然语言的「目标工程」+「动作」：
 
 **monorepo 启发式补充判别条件**（dir_and_metadata 表未含，doc.md 步骤 2 独有）：子目录**不在工程根 `.gitignore` 中**（避免误把工程内辅助目录当独立模块）+ **子目录有自己的 README**（含 `## ` 等 markdown 标题）。
 
+**Google `repo` 嵌套子项目路径推导**（dir_and_metadata 表未含，doc.md 步骤 2 独有）：当工程由 Google `repo` 工具管理时，子项目**不一定是 `${GIT_ROOT}/<module_name>` 字面路径** —— 部分模块会嵌套在业务父项目子目录下（如 `<业务父项目 A>/<模块 A1>` / `<业务父项目 B>/<模块 B1>` 等典型模式）。**禁止用字面 `${GIT_ROOT}/<module_name>` 判定 path**，否则会误判 `path_gone`。正确做法：
+
+```bash
+# 1. 优先从 .repo/projects/*.git worktree 路径（不受 maxdepth 限制，最权威）
+#    .repo/projects/<name>.git 是 git bare 仓库，路径即 manifest <project path> 的真实位置
+worktree_path="${GIT_ROOT}/.repo/projects/<module_name>.git"
+if [ -d "$worktree_path" ]; then
+  realpath "$worktree_path"
+fi
+
+# 2. fallback: 从 manifest 解析 <project path="..."> 字段（manifest 缺 path 字段时无输出）
+python3 -c "
+import xml.etree.ElementTree as ET
+m = ET.parse('${GIT_ROOT}/.repo/manifest.xml').getroot()
+for p in m.findall('project'):
+    if p.get('name') == '<project_name>':
+        path = p.get('path')
+        print(path if path else 'NO_PATH_ATTR_FALLBACK_TO_FIND')
+"
+
+# 3. fallback: find -maxdepth 3 全局搜索（兼容 monorepo + 嵌套 >2 层场景）
+#    不建议用 maxdepth 1（漏检嵌套）+ 慎用 maxdepth 4+（易误中辅助目录）
+find "${GIT_ROOT}" -maxdepth 3 -name "<module_name>" -type d
+```
+
+**优先级与回退**：
+
+1. **首选方案 1**：`.repo/projects/<name>.git` 是 git bare 仓库，路径即 manifest `<project path>` 字段的真实位置——**不受 maxdepth 限制、不依赖 manifest 字段、不依赖 grep/find 遍历**，是嵌套任意层都正确的终极 fallback
+2. **次选方案 2**：manifest 解析；若 manifest 缺 `path` 属性（早期 manifest.xml 简写模式可能省略），输出 `NO_PATH_ATTR_FALLBACK_TO_FIND` 提示，AI 立刻知道要跳到方案 3
+3. **末选方案 3**：`find -maxdepth 3` 兜底（覆盖嵌套 ≤3 层）；若仍找不到 → 报错"嵌套深度超 3 层或路径异常，请用户人工指定"
+
+**触发条件**：用户工程用 Google `repo` 管理，且业务上把多个 git 子项目按业务域分组到父项目目录（典型模式：`<业务域分组目录>/<模块名>`，如测试设备组 / 传感器组 / 网络管理组等业务分组容器）。`/icode doc` 检查 / 段零检索时遇到 "path_gone" 但 `find -maxdepth 3` 能找到 → 即嵌套场景，path 字段需补全为真实嵌套路径。
+
+若返回多条结果，优先取 `.repo/projects/*.git` 中同名 entry 的 worktree 路径（最权威）；若无 `.repo`（如纯 monorepo），按 README + `.gitignore` 综合判别。**写入 `_meta.json.module_deps[].path` 字段时必须用真实嵌套路径**（不是字面 `<module_name>`），否则后续段零检索 / git diff 锚点校验会因 path 不匹配而失效。
+
 **去重**：详见 dir_and_metadata.md 同段「去重」两步（先按归一化绝对路径合并 + 再按 `key = <url_basename_sanitized>_<sha256(url+":"+branch)[:12]>` 去重，key 格式含模块名前缀便于人眼辨认，见 [dir_and_metadata.md](../references/dir_and_metadata.md)「module_docs key 计算」）。输出 modules 列表（每个含 url+branch+key+commit+path+type），写进工程 _meta.json 的 `module_deps` 字段。
 
 **代码特征扫描**：**serena 优先**（v2.2 执行步骤内嵌）：若工程有可索引源码且 serena 可用，ToolSearch 取 `mcp__serena__find_symbol` schema -> `find_symbol` 识别 entry 函数/导出 API/关键数据结构（比 grep 精准 10 倍，按符号语义非文本匹配），结果作为 00_overview.md「核心模块清单」+「全栈图」输入；serena 不可用/无 LSP -> 降级 Grep 扫描，降级说明只进思考块，不写入产物文件。**未经实际调用 serena 就标降级 = 反偷懒第 21 条违规**。用 Grep 扫描工程代码特征，按本表「动态章节」段（doc_template.md「五」）决定追加哪些章节（AI 根据工程实际技术栈选 grep 模式，**不硬编码框架名**）。汇总「章节规划清单」：固定（00/10/90/99）+ 命中的动态章节。

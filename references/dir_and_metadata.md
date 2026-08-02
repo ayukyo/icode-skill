@@ -738,7 +738,7 @@ key = <url_basename_sanitized> + "_" + sha256(repo_url + ":" + branch)[:12]
 | # | 方式 | 识别 | 提取 URL + branch | commit 获取 |
 | --- | --- | --- | --- | --- |
 | 1 | git submodule | `.gitmodules` | url + `git config -f .gitmodules submodule.<name>.branch` | `git submodule status` |
-| 2 | `repo` 管理 | `.repo/manifest.xml` | `<remote fetch>` + `<project name>` 拼 URL，`<project revision>` = branch | `cd <submodule_path> && git rev-parse HEAD` |
+| 2 | `repo` 管理 | `.repo/manifest.xml` | `<remote fetch>` + `<project name>` 拼 URL，`<project revision>` = branch | `cd <submodule_path> && git rev-parse HEAD`（**`<submodule_path>` 来自 manifest `<project path="...">` 字段，非字面 `${GIT_ROOT}/<project name>`**——见本表下嵌套路径推导说明） |
 | 3 | CMake FetchContent | `CMakeLists.txt` 扫 `FetchContent_Declare` | `GIT_REPOSITORY` + `GIT_TAG` | 通常不可用（build 目录未下载），fallback 警告 |
 | 4 | monorepo 启发式 | 无 .gitmodules + 多子目录各自有 README + 独立构建文件（CMakeLists/package.json/Cargo.toml/Makefile） | 子目录路径，branch 标 "unknown" | 不可用 |
 | 5 | vendor 扫描 | `vendor/<lib>/` 子目录 | 子目录路径，type="vendor-no-git" | 不可用 |
@@ -752,6 +752,30 @@ key = <url_basename_sanitized> + "_" + sha256(repo_url + ":" + branch)[:12]
 
 - **git submodule**：`git submodule foreach 'git archive HEAD | tar -x -C $tmp/<name>'`（或逐个 `cd <submodule> && git archive HEAD | tar -x -C $tmp`）
 - **`repo` 子仓库**：`cd <submodule_path> && git archive HEAD | tar -x -C $tmp`
+
+**`repo` 嵌套子项目路径推导（与 doc.md 步骤 2 联动）**：`<submodule_path>` **必须从 manifest `<project path="...">` 字段取**，**禁止用字面 `${GIT_ROOT}/<project name>`**——业务上常把多个 git 子项目按业务域分组到父项目目录（典型模式：`<业务域分组目录>/<模块名>`，如测试设备组 / 传感器组 / 网络管理组等业务分组容器），路径可能是 `<业务父项目 A>/<模块 A1>` 等嵌套形式。错误推导会把这些模块误判为 `path_gone`。推荐：
+
+```bash
+# 1. 首选 .repo/projects/*.git worktree 路径（最权威、不受 maxdepth 限制）
+worktree_path="${GIT_ROOT}/.repo/projects/<project_name>.git"
+if [ -d "$worktree_path" ]; then
+  realpath "$worktree_path"
+fi
+
+# 2. fallback: 从 manifest 取 path（manifest 缺 path 字段时输出 NO_PATH_ATTR 提示）
+python3 -c "
+import xml.etree.ElementTree as ET
+m = ET.parse('${GIT_ROOT}/.repo/manifest.xml').getroot()
+for p in m.findall('project'):
+    if p.get('name') == '<project_name>':
+        path = p.get('path')
+        print(path if path else 'NO_PATH_ATTR_FALLBACK_TO_FIND')
+"
+
+# 3. 末选: find -maxdepth 3 兼容 monorepo + 嵌套 >2 层场景
+find "${GIT_ROOT}" -maxdepth 3 -name "<project_name>" -type d
+```
+
 - **monorepo/vendor**：直接读子目录文件（不需 archive）
 - **CMake FetchContent**：通常 build 目录未下载，fallback 警告「依赖模块代码未本地化，跳过生成」
 
