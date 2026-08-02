@@ -182,6 +182,90 @@ Free 阶段一次性完整覆盖全部 15 个角度。
 | A1 计划实施一致性 | <file:line> | <file:line> | <file:line> | pass/issue |
 | A2~A15 | ... | ... | ... | ... |
 
+### 阶段 4 — Dedup（语义重复函数检测完整版）
+
+> **强证据场景判定**（v2.2 二元化，详见 [references/mcp_per_step.md §5 deepcheck](../references/mcp_per_step.md)）：
+>
+> - serena 🟢（`mcp__serena__find_symbol` 可用）
+> - cheap-research 🟢（`mcp__cheap-research__extract` 可用）
+> - **函数数 ≥ 50**
+>
+> **任一不满足 → 整个 §9.4 跳过**，在思考块 `MCP 调用` 段写明降级原因，不写产物文件。
+>
+> **复用 §2.5.7 产物**：检测 `{ICODE_OUT_DIR}/<ticket>/dedup/categorized.json` 是否存在（由 §2 02_review §2.5.7 生成）→ **复用避免重跑分类阶段**（节省 haiku 调用的 token）。
+
+**执行步骤**（AI 直接照填）：
+
+1. **复用检测**：Read `{ICODE_OUT_DIR}/<ticket>/dedup/` 目录，分别判定：
+   - `catalog.json` 存在 → 跳过第 2 步
+   - `categorized.json` 存在 → 跳过第 3 步
+   - 否则按需重跑
+2. **抽取阶段**（如 catalog.json 不存在，ripgrep 优先 + serena 降级）：
+
+   **优先用 ripgrep**（同 §2.5.7 第 1 步命令）：
+
+   ```bash
+   rg -n --no-heading \
+     -e '^(static\s+)?[a-zA-Z_][a-zA-Z0-9_]*\s+[*&]?[a-zA-Z_][a-zA-Z0-9_]*\s*\(' \
+     -e '^(static\s+)?[a-zA-Z_][a-zA-Z0-9_]*\s*\(' \
+     -e '^(async\s+)?function\s+[a-zA-Z_][a-zA-Z0-9_]*\s*\(' \
+     -e '^(async\s+)?(const|let|var)\s+[a-zA-Z_][a-zA-Z0-9_]*\s*=\s*(async\s+)?\(' \
+     -e '^(async\s+)?(const|let|var)\s+[a-zA-Z_][a-zA-Z0-9_]*\s*=\s*(async\s+)?function' \
+     -e '^def\s+[a-zA-Z_][a-zA-Z0-9_]*\s*\(' \
+     -e '^func\s+(\([^)]*\)\s+)?[a-zA-Z_][a-zA-Z0-9_]*\s*\(' \
+     -e '^(pub\s+)?fn\s+[a-zA-Z_][a-zA-Z0-9_]*\s*\(' \
+     -e '^\s+(public|private|protected)?\s*(static\s+)?[a-zA-Z_][a-zA-Z0-9_*]+\s+[a-zA-Z_][a-zA-Z0-9_]*\s*\(' \
+     --glob '!*.test.*' --glob '!*.spec.*' --glob '!**/__tests__/**' \
+     "$PROJECT_ROOT" | head -2000
+   ```
+
+   **ripgrep 降级**：调 `mcp__serena__get_symbols_overview` + N 次 `mcp__serena__find_symbol(name, include_body=true)`。**双降级**：ripgrep + serena 都不可用 → 整个 §9.4 跳过
+3. **分类阶段**（如 categorized.json 不存在）：调 `mcp__cheap-research__extract`（haiku）**双层分类**（parent + sub）→ `dedup/categorized.json`。**双层 schema** + **后处理映射（只映射 parent_category）** 同 §2.5.7 第 3 步。
+4. **拆分阶段**：Claude 直接做——**按 sub_category 拆分** `categorized.json`（不按 parent_category——避免跨家族合并），**仅保留 3+ 函数的 sub_category**（< 3 不值得分析），输出 → `dedup/duplicates/<sub_category>.json`
+5. **找重复阶段（高质量模型逐类）**：同 §2.5.7 第 5 步——**简化 schema** + **主代理 try 两种解析格式**（A: JSON 数组字符串; B: 分隔符纯文本）+ **用 categorized.json 回填 file/line**
+6. **报告生成**：在 05_deepcheck.md 末尾追加 `## 语义重复检测报告（§9.4 完整全量）` 段，按 HIGH/MEDIUM/LOW 三段展示：
+
+   ```markdown
+   ## 语义重复检测报告（§9.4 完整全量）
+
+   **函数总数**：{N} | **扫描类别数**：{K}/25 | **生成时间**：{ISO timestamp}
+   **复用**：dedup_categorized.json {复用/重跑}
+
+   ### HIGH 置信度重复（建议立即合并）
+   | Intent | Category | 推荐保留 | 应删除函数 |
+   |--------|----------|----------|-----------|
+   | ...    | ...      | ...      | ...       |
+
+   ### MEDIUM 置信度重复（建议人工审查）
+   | Intent | Category | 推荐保留 | 差异点 |
+   |--------|----------|----------|--------|
+   | ...    | ...      | ...      | ...    |
+
+   ### LOW 置信度（可能相关，时间允许时复核）
+   | Intent | Category | 函数对 |
+   |--------|----------|--------|
+   | ...    | ...      | ...    |
+
+   **中间产物**：`{ICODE_OUT_DIR}/<ticket>/dedup/{catalog,categorized,duplicates/*.json}`
+   ```
+
+7. **产物文件附加**：每条 HIGH/MEDIUM 重复函数对同时作为 issue 计入**dedup 内部 `has_issues` 计数器**（**不与 Reverse/Fixed/Free 的 `has_issues` 共享**——dedup 是独立扫描，不触发整体循环），`evidence_pointer` 指向 `dedup/duplicates/<category>.json:<line>`，`suggestion` 写"合并为 `<survivor>` + 删除其他实现"，`verification_status` 直接标 `confirmed`（已用高质量模型推理，无需再走 §5 A6 独立 3 质疑者对抗——单视角推理质量足够（详细理由同 §2.5.7））
+
+**降级路径**：
+
+- serena 不可用 → 整个 §9.4 跳过，记 `[降级-serena 不可用]`
+- cheap-research 不可用 → 整个 §9.4 跳过，记 `[降级-cheap-research 不可用]`
+- 函数数 < 50 → 输出 `▶ §9.4 跳过：函数数 {N} < 50，工程规模太小无需 dedup`，整个 §9.4 结束
+- 函数数 > 500 → 分批（每批 100），合并结果
+- extract 返回 `schema_validation_failed` → 重试 1 次（自动改 instruction 加"严格按 schema 输出"），仍失败标"分类降级-单类跳过"
+- 高质量模型某类返回空数组 → 该类跳过（无重复），不报错
+
+**反偷懒第 21 条合规**（v2.6 自检门）：步骤末尾在思考块输出 `serena 调用: find_symbol x 1` + `cheap-research 调用: extract x {1+1+K}` 或对应降级声明，**无记录 = 违规**。
+
+**与 §5 A6 独立 3 质疑者 spawn 规则的衔接**：dedup 的 issue **不进入** Free 阶段 A6 的 3 质疑者独立 spawn 流程。理由：dedup 用高质量模型单次推理 + cheap-research schema 强约束 + 22 类预定义约束 = 等效"强约束推理"，质量足够；重复 3 次 spawn 成本翻 3 倍但收益边际递减。这是 §9.4 阶段的**显式例外**——A6 规则继续约束 Free 阶段深检 issue。
+
+**与循环控制段的关系**：dedup 是独立扫描，不参与 Reverse/Fixed/Free 的整体循环。dedup 内部修复循环（has_issues=true 时）：修复**重复函数本身**（合并为 survivor，删除其他实现）→ 重新调 serena `find_symbol` 抽新 catalog → 重新调高质量模型找剩余重复。修完 → 写 `dedup_report.md` + 追加 05_deepcheck.md 摘要 → 进入原「循环控制」段继续 Reverse/Fixed/Free 的整体判定。**绝不可让 dedup 的 issue 触发 Reverse/Fixed/Free 重跑**——重复函数修复与计划/代码逆推无关。
+
 ### 循环控制
 
 - `deepcheck_total_rounds += 1`

@@ -96,6 +96,8 @@
 
 
 - **cheap-research**（🟢*）：第 N 轮增量审查（`diff_summary` 摘要计划/代码差异）+ 维度结果结构化（`fill_template` 填审查维度模板）+ 历史相似 issue 检索（`retrieve_similar`）+ grep 模式扫描（`scan_patterns` 找 TODO/FIXME/重复模式）+ 引用追溯（`trace_refs` 找符号引用）。**不接管决策**：3 质疑者对抗验证 / 审查意见合成走主会话（高风险）
+- **dedup 子阶段**：见 §2.5.7。**强证据** = serena 🟢 + cheap-research 🟢 + 函数数 ≥ 50 → 调 `mcp__serena__find_symbol` 抽函数 + `mcp__cheap-research__extract`（haiku 分类 + 高质量模型找 top 5 重复）。**降级**：函数数 < 50 / serena 不可用 / cheap-research 不可用 → 整个 §2.5.7 跳过
+
 ### 3 merge（合并审查意见）
 - **sequential-thinking**：仅此（结构化合并审查点）
 
@@ -113,6 +115,8 @@
 
 
 - **cheap-research**（🟢*）：Reverse 阶段原文对比（`diff_summary` 对比计划与代码差异）+ 阶段摘要压缩（`summarize` 压缩长审查输出）。**不接管决策**：Fixed/Free 阶段 / 3 质疑者对抗（A6）走主会话（高风险）
+- **dedup 子阶段**：见 §9.4。**强证据** = serena 🟢 + cheap-research 🟢 + 函数数 ≥ 50 → 全量 dedup（5 阶段：抽取→分类→拆分→高质量模型逐类找重复→报告）。**降级**：函数数 < 50 / serena 不可用 / cheap-research 不可用 → 整个 §9.4 跳过。**复用**：检测 `dedup_categorized.json` 是否已由 §2 02_review 生成 → 复用避免重跑分类
+
 ### 6 audit（终审）
 - **playwright**：真实 UI 验证——仅前端工程时
 - **vision-bridge**：UI 截图分析——仅用户给图时

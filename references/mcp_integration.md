@@ -81,6 +81,33 @@
 - **触发场景详见**：[mcp_per_step.md](mcp_per_step.md) 强证据场景表 + 14 工具入参/出参 schema（见 [mcp/cheap-research/server.py](../mcp/cheap-research/server.py)）
 - **当前状态**：14 工具 + 43 个自检用例全过，dev_repo 完成；**未同步到已安装目录**（等用户指令）
 
+### ⑧ serena + cheap-research 组合：dedup 子阶段
+
+- **复用 MCP**：⑥ serena（`get_symbols_overview` + `find_symbol`，LSP 语义级，作为 ripgrep 降级）+ ⑦ cheap-research（`extract` 用 haiku 分类 + 高质量模型找重复）
+- **强证据**：02_review/05_deepcheck 步骤中 + serena 🟢 + cheap-research 🟢 + **函数数 ≥ 50**
+- **触发场景**：
+  - **02_review §2.5.7（轻量 top 5）**：ripgrep 抽所有函数 → `mcp__cheap-research__extract`(haiku) 分类（wrapper object schema）→ 后处理映射到 25 类 → 取 top 5 类别逐类调高质量模型找重复
+  - **05_deepcheck §9.4（完整全量）**：完整 5 阶段（抽取→分类→拆分→高质量模型逐类找重复→报告）。分别检测 catalog.json/categorized.json 是否已由 §2 生成 → 复用避免重跑
+- **中间产物路径**：`{ICODE_OUT_DIR}/<ticket>/dedup/{catalog,categorized,duplicates/*.json}`
+- **最终报告**：进 step 产物 .md（02_review.md §2.5.7 / 05_deepcheck.md §9.4）的 `## 语义重复检测报告` 段（HIGH/MEDIUM/LOW 三段 + top 5 重复函数对）
+- **降级路径**：
+  - 函数数 < 50 → 整个 §2.5.7/§9.4 跳过（避免 LLM 成本浪费）
+  - 函数数 > 500 → 分批（每批 100），合并结果
+  - ripgrep 抽不到 / 不可用 → 降级 serena `get_symbols_overview` + N 次 `find_symbol`（N+1 成本高）
+  - ripgrep + serena 都不可用 → 整个 dedup 跳过
+  - cheap-research 不可用 → 整个 dedup 跳过（不降级主代理自跑，因为 高质量模型分类 + 找重复是高成本子任务）
+  - 高质量模型某类返回空数组 → 该类跳过（无重复），不报错
+
+- **已知限制**：
+  - **cheap-research schema 不支持 `enum` 类型**——`{"enum": [...]}` 报 `'enum' is not valid under any of the given schemas`。改用 `string` + prompt 强约束
+  - **cheap-research LLM 把 array-of-objects 退化为 single object**——多次确认，schema `{"type": "array", "items": {...}}` 时 LLM 仍返回单个 object。**必须用 wrapper object 模式** `{"results": [...]}` 规避
+  - **cheap-research LLM 不严格遵守 25 类清单**——即使 prompt 强约束，LLM 仍返回"Number Parsing"/"Math"/"String Manipulation"等自由类别。**必须主代理在写入 categorized.json 前做后处理映射**（见 §2.5.7/§9.4 第 3 步映射表）
+  - **serena `find_symbol` 不支持批量抽取**——必须 name_path_pattern；批量方案：`get_symbols_overview` 拿名字 + 逐个 `find_symbol(include_body=true)`（N+1 调用成本高）
+  - extract 返回 schema_validation_failed → 重试 1 次（自动改 instruction），仍失败标"分类降级"
+- **类别清单（共 25 类）**：
+  - 通用类 22：file-ops / string-utils / validation / error-handling / http-api / date-time / data-transform / database / logging / config / async-utils / testing / ui-helpers / crypto / provider-impl / tool-impl / event-handling / session-management / compaction / other（19）+ file-ops/string-utils 子类补 3 = 22
+  - iCode 扩展 3 类（嵌入式场景）：**hardware-abstraction**（硬件抽象：传感器/GPIO/中断）/ **protocol-impl**（通信协议：MQTT/Modbus/CAN/串口）/ **build-system**（构建脚本：CMake/Make/Bazel）
+
 ---
 
 ## 工具命名约定
