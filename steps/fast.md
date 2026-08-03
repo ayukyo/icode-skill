@@ -50,6 +50,7 @@ fi
 
 > **历史检索 + 段零工程文档检索**：委托给串联执行的 [01_plan.md](01_plan.md) 步骤2（plan 步骤2，非 icode 步骤4），fast 不单独检索。原因：slice 与 plan 完全相同（历史 `adr_risks` / 段零 `section:<file>`），`_inject_cache.json` 按 `(source, ref_id, slice)` 去重兜底，fast 单独检索是冗余动作（检索白跑，注入被 plan 截胡），与 fast 省 token 目标矛盾。详见 [SKILL.md](../SKILL.md)「历史检索复用」段。
 
+> **段零只读当前分支子目录是反交叉污染设计，不要误读为"被覆盖"**：详见 [steps/doc.md](doc.md) 顶部「⚠️ 多分支设计·反偷懒强约束」段（`dir_and_metadata.md:496`「DOC_DIR 分支过滤」），跨分支不交叉读是为防止跨分支借鉴失真；用户反馈"看不到其他分支文档"时**默认不是 bug**，应先 `ls project_docs/<id>/` 看是否有多分支子目录再判。
 ### 2. 创建 metadata
 
 `/icode fast` 新建目录时，`.ico_metadata.json` 写入：

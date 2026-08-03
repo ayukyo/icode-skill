@@ -26,6 +26,7 @@
    - **`/icode init` 注入分支**：命中工单只读其 `requirement_points`（需求要点清单，≤500 token/条），作为后续讨论的启发——提示用户"上次相似需求曾关注过这些点，本次是否也需要考虑"。**只进会话上下文，绝不写进 `00_init.md`**。
    - **段零·工程文档检索**（与历史检索并行，候选合并排序；本入口检索时机：建目录后）：完整流程以 [references/dir_and_metadata.md](../references/dir_and_metadata.md)「段零·工程文档检索」+「module_docs 工程模块库」段为准（含步骤 1-5 + 3.5 反查父项目 + 3.6 关联工程检索 + 3.6 源码路径定位 [project_path+manifest+兜底]），**执行前必须 Read 该段全文（含顶部「段零步骤速查」导航），不得凭本行摘要执行**；stale 降级 / commit 校验 / 注入防重复等细节同该段
    - **注入防重复**（两源共用 `_inject_cache.json`）：无缓存则创建空 `{"ticket_id":"<本工单>","injections":[]}`（ticket_id 读 metadata，暂无填空串）；注入前按 `(source, ref_id, slice)` 查缓存去重，已注入的跳过。历史源 slice=`requirement_points`；段零 slice=`section:<file>`。详见 [references/dir_and_metadata.md](../references/dir_and_metadata.md)「注入缓存机制」段
+   - **段零只读当前分支子目录是反交叉污染设计，不要误读为"被覆盖"**：详见 [steps/doc.md](doc.md) 顶部「⚠️ 多分支设计·反偷懒强约束」段（`dir_and_metadata.md:496`「DOC_DIR 分支过滤」），跨分支不交叉读是为防止跨分支借鉴失真；用户反馈"看不到其他分支文档"时**默认不是 bug**，应先 `ls project_docs/<id>/` 看是否有多分支子目录再判
    - 零命中不注入，不强凑参考
 3. 处理输入参数（**两种都支持**，本步骤只**构思内容框架**，实际 Write 在步骤6；深度读代码在步骤4）：
    - **有参数**（`/icode init <粗略需求>`）：将参数作为初始需求，结合步骤2历史参考（若有），**构思**第一版 `00_init.md` 各章节内容框架（此时不深入读代码，代码细节留给步骤4）

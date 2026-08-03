@@ -7,6 +7,81 @@
 
 > **核心设计哲学**（必须先 Read [references/dir_and_metadata.md](../references/dir_and_metadata.md)「project_docs 工程文档库」段 + [references/doc_template.md](../references/doc_template.md)）：**零配置/零状态/零索引文件**——只有章节 .md，前 50 行四块自带身份证，文件系统即数据库。
 
+## ⚠️ 多分支设计 · 反偷懒强约束（必读，防止误判"覆盖"）
+
+> **本段是 icode-skill doc 步骤对"多分支机制"的统一设计语义说明**——任何 AI 在执行 `/icode doc` 或解释用户"被覆盖"反馈前，**必须先 Read 本段全文**；只读概要不算。后续正文会把每个机制在某一行展开，本段只做**总览 + 索引**。
+
+### 1. 设计目标（为什么按分支隔离）
+
+工程代码在多分支并行开发时差异巨大。文档不按分支隔离会引发三种灾难：
+
+1. **跨分支借鉴失真**——`main` 分支文档里说有模块 X，但当前在 `feature` 分支代码里 X 不存在或根本不一样，AI 借鉴工程文档会生成错误代码
+2. **跨分支增量判错**——`git diff` 上次 doc commit 与本次 commit 时，若没按分支过滤，diff 会把"跨分支差异"误报为"代码变了"，触发 doc 频繁全量重生成浪费 token
+3. **跨分支手动编辑丢失**——一个分支改了文档，另一分支 doc 全量重生成会把改动冲掉
+
+**核心契约**：`project_docs/<id>/<BRANCH_SAFE>/` 子目录天然隔离每个分支的工程文档；`module_docs/<url+branch> key/` 子目录天然隔离每个上游仓库+分支的模块文档；**段零检索只在当前 cwd HEAD 分支对应的子目录内读，不交叉**。
+
+### 2. 机制总览（3 层隔离，写作时必须知道在哪一层）
+
+| 维度 | 隔离粒度 | 存储位置 | 跨分支是否交集 |
+|------|----------|----------|----------------|
+| **工程文档** | `<project_id>/<BRANCH_SAFE>/` 两层目录 | `~/.claude/icode_data/project_docs/<id>/<branch>/*.md` | **不交集**（子目录天然隔离） |
+| **模块文档** | `<url_basename_sanitized>_<sha256(url+":"+branch)[:12]>/` 复合 key | `~/.claude/icode_data/module_docs/<key>/*.md` | **不交集**（同 url 不同 branch → 不同 key；同 url 同 branch → 同一 key 但 commit 可变） |
+| **段零检索** | 只读当前 cwd HEAD 分支对应的子目录 | `dir_and_metadata.md`「DOC_DIR 分支过滤」段实现 | **不交集**（不交叉读其他分支子目录正文，避免跨分支借鉴失真） |
+
+### 3. 五大边界（用户/AI 高频踩坑）
+
+| 边界 | 实际行为 | 详见 |
+|------|----------|------|
+| **v1 → v2 旧布局迁移** | v1（平铺 `project_docs/<id>/00_overview.md`）**确实会互相覆盖**（v1 无分支隔离）；v2 起天然隔离。**v1 → v2 仅在跑一次 `/icode doc` 时自动触发** | 正文 §5.0.6 / §5.1 |
+| **detached HEAD 工程** | 落到 `(detached)` 子目录单独记录，**不会与任何分支子目录混在一起** | 正文 §「project_id 解析」段 BRANCH 推导 |
+| **同名 fork 不同 URL** | `<url_basename_sanitized>` 相同但 hash(URL+branch)不同 → **不同 key**（自动区分，不要手动合并） | `dir_and_metadata.md:660-667` |
+| **同 url 同 branch 不同 commit** | key 不含 commit；`current_commit` 不一致时 doc 全量重生成覆盖（`dir_and_metadata.md:667`：key 不含 commit；`dir_and_metadata.md:512`：commit 不匹配触发降级注入） | **有意行为**——"同一份代码不同 commit 只保留最新一份 doc"；要看历史 commit 外部 git 查看即可 |
+| **branch 字符串 sanitize 撞名** | branch 名含 sanitize 字符集（9 种字符：反斜杠/斜杠/冒号/星号/问号/双引号/小于号/大于号/竖线）任一字符时会被 sanitize 函数抹平，可能与同 sanitized 后的其他分支撞名（后者写覆盖前者） | 用户创建分支避免用这 9 种字符（git 常用斜杠 `/` 但 icode sanitize 时抹平） |
+
+### 4. 三大常见误解 × 正确理解（逐条对照，禁止误判）
+
+| 误解（用户/AI 反馈常见说法） | 实际行为 | 正确理解 |
+|------------------------------|----------|----------|
+| "切分支跑 doc，原分支的工程文档被覆盖成新分支的" | doc 写到 `<id>/<新分支>/` 子目录，**原分支子目录里章节仍在** | 工程按分支分子目录天然隔离，原分支 doc 是"看不到"而非"被覆盖"。`ls project_docs/<id>/` 应看到多个 `*/` 子目录 |
+| "切分支后段零检索只列新分支章节，原分支的不见了" | 段零按当前 cwd 分支过滤，**不交叉读其他分支子目录正文**（避免跨分支借鉴失真） | 这是**显式反交叉污染设计**，不是 bug。需要看其他分支章节，临时切换分支或 `ls project_docs/<id>/*/` 列举子目录 |
+| "同 url+同 branch 的模块 doc 被新 commit 覆盖了"（详见 §3 第 4 行同边界） | key 不含 commit；`current_commit` 不一致时 doc 全量重生成覆盖 | **有意行为**，语义是"同一份代码不同 commit 只保留最新一份 doc"。要看历史版本，外部 git 查看对应 commit 即可 |
+
+### 5. 反偷懒强制条款（违反一条即不合规）
+
+1. **执行前必读本段**——执行 doc 任何子步骤（尤其是"全量重生成""主动 stale 扫描""模板迁移""模块全量重生成"）前，**必须先 Read 本段全文**；不读就直接复述"被覆盖了"作为 bug → 反偷懒第 21 条违规
+2. **遇"被覆盖"反馈的处置**——永远先按本段"三大误解 × 正确理解"表 + "五大边界"表逐条排查，给出根因 + 诊断命令（`ls project_docs/<id>/` 看分支子目录布局、`cat project_docs/<id>/<branch>/_meta.json` 看工程元信息、`cat module_docs/<key>/_meta.json` 看模块元信息），**禁止默认就是 bug**
+3. **跨工程/跨模块上下文**——跨工程 doc 借鉴仅看 `00_overview.md`（`dir_and_metadata.md:517`），**不交叉读其他章节**，防止跨工程/跨分支借鉴失真
+4. **分支名边界两类单独走**：detached HEAD → `(detached)` 子目录；branch 名含 sanitize 字符（`\ / : * ? " < > |` 9 种）→ 被 `tr '/\\:*?"<>|' '_'` 抹平成同名 key，两个 git 分支合并到同一 BRANCH_SAFE 子目录，**后者写会覆盖前者**。**两种都落到独立子目录名，不会与正常分支子目录混**；用户反馈"看不到分支文档"时，先 `git -C "$GIT_ROOT" rev-parse --abbrev-ref HEAD` 看实际分支名 + 用 §3 表第 5 行的 sanitize 规则重算 BRANCH_SAFE 是否撞了别分支
+5. **commit / 祖先双源硬约束**（两场景语义独立，合并理解）：
+
+   - **`/icode doc` 生成时**：
+     - **模块层** — `module_docs/<key>/_meta.json.current_commit` 不等于当前模块 commit → 全量重生成覆盖（`doc.md` 步骤 5「模块全量重生成」）
+     - **工程层** — `git merge-base --is-ancestor <prev> HEAD` 退出 1（跨分支/分叉/fork）→ 按全量重生成处理（`<prev>` 与 `HEAD` 不在同一祖先链，`git diff` 不可信）
+   - **段零检索时**（`dir_and_metadata.md:534-543`，含 stale 检测 + 分支校验 + 祖先校验）：
+     - **分支不一致** — 整个工程文档 stale，降级注入只注摘要 + 警告，不读章节正文
+     - **commit 不匹配** — 模块层降级注入；工程层走"祖先 + diff"校验，不直接判 stale（`dir_and_metadata.md:512`）
+
+### 6. 正文索引（各机制在哪一行展开，需要时直接 Read）
+
+| 机制 | 所在位置 | 关键句 |
+|------|----------|--------|
+| 工程 doc 分支子目录公式 | 正文 §「project_id 解析」第 1 步 BRANCH_SAFE 推导 | `DOC_DIR = ~/.claude/icode_data/project_docs/<id>/<BRANCH_SAFE>/` |
+| 冲突检测（同名工程/分支实为不同 git_root） | 正文 §「project_id 解析」末尾 | 追加 hash 后缀，`PROJECT_ID` + `BRANCH_SAFE` + GIT_ROOT sha256 前 4 字符 |
+| v1 → v2 自动迁移 | 正文 §5.0.6、§5.1 | 7 步迁移流程 + `_meta.json.v1_migrated_from` 备份 |
+| 增量判定（跨分支按全量） | 正文 §3「增量判定」中祖先合法性校验 | `git merge-base --is-ancestor` 退出 1 → 按全量处理 |
+| 模块 key 计算 | `dir_and_metadata.md:658` | `key = <url_basename_sanitized> + "_" + sha256(repo_url + ":" + branch)[:12]` |
+| 模块 commit 推进触发覆盖 | `dir_and_metadata.md:667`、正文 §5 模块全量重生成 | key 不含 commit，但 `current_commit` 不一致时按全量重生成覆盖 |
+| 段零 DOC_DIR 分支过滤 | `dir_and_metadata.md:496`「DOC_DIR 分支过滤」段 | "按 `resolve_project_id(cwd)` 算出 `BRANCH_SAFE`，只读 `<DOC_DIR>` 子目录，不交叉读其他分支子目录" |
+| 段零 stale 检测（分支+祖先双校验） | `dir_and_metadata.md:534-543`（stale 检测 + 分支校验 + 祖先校验） | 分支不一致 → 整个工程文档 stale；祖先不合法 → 走"祖先 + diff"校验，不直接判 stale |
+| 跨工程/跨分支上下文借鉴边界 | `dir_and_metadata.md:516-518` | 跨工程借鉴仅看 `00_overview.md`，不读其他章节 |
+
+### 7. 嵌入式入口（写代码时随时可调用，别忘了）
+
+- **本文档「project_id 解析」段**（行 93-133，下方 `git -C "$GIT_ROOT" rev-parse --abbrev-ref HEAD` 立即拿到当前分支名 + BRANCH_SAFE 推导）
+- **`dir_and_metadata.md` 「project_docs 工程文档库」段（行 434）+ 「module_docs 工程模块库」段（行 624）+ 「段零·工程文档检索」段（行 481）**
+- **`dir_and_metadata.md:496`「DOC_DIR 分支过滤」段**（段零 AI 必读）
+
 ## 前置校验
 
 1. cwd 必须在 git 仓库或 `repo` 管理的项目内：
@@ -201,8 +276,8 @@ find "${GIT_ROOT}" -maxdepth 3 -name "<module_name>" -type d
 > **触发条件**：`ls project_docs/<id>/00_overview.md` 直接存在 + 无分支子目录
 >
 > **迁移 7 步**：
-> 1. `mkdir -p project_docs/<id>/<branch_safe>/` 创建新分支子目录
-> 2. `mv project_docs/<id>/00_overview.md project_docs/<id>/<branch_safe>/` 移动所有章节
+> 1. `mkdir -p project_docs/<id>/<BRANCH_SAFE>/` 创建新分支子目录
+> 2. `mv project_docs/<id>/00_overview.md project_docs/<id>/<BRANCH_SAFE>/` 移动所有章节
 > 3. 复制所有 `_meta.json` 字段到新位置（含 `module_deps` / `unresolved_modules` / `stale_files` / `project_id` / `project_type` / `git_root` 全集）
 > 4. 旧 `project_docs/<id>/_meta.json` 备份为 `_meta.json.v1_migrated_from`（**禁止直接覆盖**）
 > 5. 删旧空目录（`rmdir project_docs/<id>/`；如非空说明漏迁章节须重试）
@@ -238,7 +313,7 @@ find "${GIT_ROOT}" -maxdepth 3 -name "<module_name>" -type d
 
 - **v1 → v2 自动迁移（关键，兼容现有旧数据）**：写入 `$DOC_DIR/_meta.json` 前先检测旧 v1 单级布局：
   - 若 `~/.claude/icode_data/project_docs/<PROJECT_ID>/` 目录下**直接平铺** `00_overview.md` / `*.md` / `_meta.json`（无分支子目录）→ 是 v1 旧布局，**必须先迁移再写**：
-    1. `mkdir -p $DOC_DIR`（即 `<project_id>/<branch_safe>/`）
+    1. `mkdir -p $DOC_DIR`（即 `<project_id>/<BRANCH_SAFE>/`）
     2. 把旧 `<project_id>/*.md` 全部 `mv` 到 `$DOC_DIR/`
     3. 把旧 `<project_id>/_meta.json` `mv` 到 `$DOC_DIR/`
     4. 读旧 `_meta.json` 的 `project_type` + `git_root` + `module_deps` + `unresolved_modules` + `stale_files`（**全部字段不丢**），按 [dir_and_metadata.md](../references/dir_and_metadata.md)「工程 _meta.json 模板」格式重写到 `$DOC_DIR/_meta.json`（字段集：`project_id` + `project_type` + `git_root` + `branch` + `head_commit` + `module_deps` + `unresolved_modules` + `stale_files` + `template_version`）
