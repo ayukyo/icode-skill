@@ -99,7 +99,11 @@
    - **不得不标记默认为已对抗**——无标记的 §6 被视为"主代理偷懒未对抗"而非"环境不可用"
 4. **主代理代行有条件**（**`no_spawn_env` flag 严格门控**，不同于自演）：
    - **前置 flag**：`no_spawn_env = true`（环境结构性无 spawn 工具）—— 这是**唯一允许**主代理代行的场景
-   - **flag 判定方法**：环境启动时检测 `Agent` 工具是否可用 + 至少 1 次成功 spawn（如 sentinel 试探）；不可用时置 `no_spawn_env = true`
+   - **flag 判定方法**（ToolSearch 一步判定，不需要 sentinel）：
+     1. 调 `ToolSearch(query="select:Agent")` 取 Agent 工具 schema
+     2. 命中 → `no_spawn_env = false`（可用，后续按「显式等待 + 超时机制」执行）
+     3. 未命中 → `no_spawn_env = true`，标记原因 `"Agent tool not in session tool list"`
+     4. 判定结果写入 `adversarial_verification` 字段（`env_no_spawn` 或 `sync_ok`）
    - **flag = false 时硬禁止**（**v2.4 实战补强，防误用**）：**禁止主代理代行**！即使部分子代理未回结果（如 1/3 返回 verdict、2/3 超时），其余未回子代理应按上方「子代理失败处理」失败链路降级（标 `[未验证-子代理对抗失败]`），**不得"补齐"为代理代行**——这正是本轮（2026-07-29）实测踩坑
    - 代行时主代理在 §6 三个子章节写"主代理代行（环境无 spawn 工具）"+ 各自的独立判断，但**必须**：
      - 三个视角的推理各自独立（不得"证据也发现没问题、替代也没发现竞争解释、充分性也觉得够了"这种一致假共识）

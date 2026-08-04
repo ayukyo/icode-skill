@@ -245,7 +245,7 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
 >
 > - 布尔类型，标记当前 icode 环境是否**结构性**不支持 Agent 工具 spawn（区别于 transient 失败/超时/截断）
 > - 默认值：缺失视为 `false`（环境有 spawn 工具但本轮未成功——属 transient 失败，走超时/重试链路）
-> - 判定方法：环境启动时检测 `Agent` 工具是否可用 + 至少 1 次成功 spawn（如 sentinel 试探）；不可用时由 Claude Code runtime 置 `true`
+> - 判定方法：调 `ToolSearch(query="select:Agent")` 取 Agent 工具 schema，命中则 `false`，未命中则 `true`（详见 [adversarial.md](adversarial.md)「环境无 spawn 工具场景」flag 判定方法）
 > - 作用：决定是否允许"主代理代行三视角判断"——**仅** `no_spawn_env = true` 时允许；`false` 时**硬禁止**主代理代行（即使部分子代理未回结果，详见 [adversarial.md](adversarial.md)「环境无 spawn 工具场景」第 4 步 flag 门控）
 > - 字段缺失兼容：旧 metadata 无 `no_spawn_env` 视为 `false`，不阻塞现有 spawn 协议
 
