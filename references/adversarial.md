@@ -20,6 +20,8 @@
 
 每个质疑者 spawn 时**必须**满足以下规格，否则极易失败（实测痛点：默认/误用 Explore 子代理 → 只调研不裁决 → 调研阶段耗尽额度被截断、只返回开场白）：
 
+0. **先加载 Agent 工具**（v2.4 实战补强，防"新会话 deferred tool 未加载误判 no_spawn_env"）：调 `ToolSearch(query="select:Agent")` 取 Agent 工具 schema 并加载。加载成功 -> 继续后续 spawn 步骤；加载失败（ToolSearch 返回无命中）-> 走「环境无 spawn 工具场景」降级。**禁止跳过 ToolSearch 直接判定 no_spawn_env**--Agent 是 deferred tool，新会话初始工具列表不含，必须主动加载。**必须用 `select:Agent` 精确加载**（关键词搜索如 `"Agent spawn"` 会漏项，实测只返回 TaskOutput 等非 Agent 工具）
+
 1. **`subagent_type: "general-purpose"`**——**禁止用 `Explore`**（Explore 是只读搜索代理，擅长定位代码、不擅长裁决判断，长指令下倾向先调研后输出、被截断在调研阶段）
 2. **用 `schema` 参数强制 StructuredOutput**——子代理必须调用结构化输出工具返回如下对象，不得输出长篇自然语言调研报告：
    ```json
@@ -99,7 +101,7 @@
    - **不得不标记默认为已对抗**——无标记的 §6 被视为"主代理偷懒未对抗"而非"环境不可用"
 4. **主代理代行有条件**（**`no_spawn_env` flag 严格门控**，不同于自演）：
    - **前置 flag**：`no_spawn_env = true`（环境结构性无 spawn 工具）—— 这是**唯一允许**主代理代行的场景
-   - **flag 判定方法**（ToolSearch 一步判定，不需要 sentinel）：
+   - **flag 判定方法**（注：正常流程中 Agent 已在 spawn 规格第 0 条通过 `ToolSearch(query="select:Agent")` 加载成功，此处仅用于记录判定结果。若第 0 条加载失败才到此处判定）：
      1. 调 `ToolSearch(query="select:Agent")` 取 Agent 工具 schema
      2. 命中 → `no_spawn_env = false`（可用，后续按「显式等待 + 超时机制」执行）
      3. 未命中 → `no_spawn_env = true`，标记原因 `"Agent tool not in session tool list"`
