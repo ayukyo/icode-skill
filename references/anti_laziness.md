@@ -36,6 +36,13 @@
 
 **自检门（v2.6 新增，治"serena 经常没调用"）**：每个涉及代码的步骤（log/plan/code/review/deepcheck）末尾反偷懒自检**必须在思考块输出 serena 调用记录行**（不写入产物文件，对齐 v2.3 产物精简）：`serena 调用: <工具名(find_symbol/find_referencing_symbols/find_implementations/search_for_pattern) x N 次>` 或 `serena 降级: <具体原因>`。**无调用记录且无降级声明 = 第 21 条违规**（审计 grep `serena 调用` / `serena 降级` 核查，留痕是治本--规则有了但执行跳过的根因是无留痕不可追溯）。
 
+**v2.11 serena LSP 激活兜底（治"deferred 有工具但 LSP 配置不确定"）**：serena MCP 工具在 deferred 列表中（`mcp__serena__find_symbol` 等可见）说明 serena server 已注册，但 LSP 后端可能因项目切换/启动时 CWD 不同而未初始化。此时**不可直接降级**，必须先尝试激活当前工程：
+1. **先调 `mcp__serena__activate_project`**（ToolSearch 取 schema -> 实际调用），serena 会在当前 CWD 搜索 `.serena/project.yml` 或 `.git` 初始化 LSP
+2. **激活成功**（返回含 project info）-> 再调 `find_symbol`/`find_referencing_symbols` 等语义工具
+3. **激活失败**（报 No active project / 超时 / 返回空）-> 再按「降级链」走 ripgrep/grep
+4. **降级声明格式**：`serena 不可用(activate_project 失败: <具体错误>)，降级为 ripgrep/grep`
+**核心原则**：serena 工具在 deferred 列表中 → **必须先实际调用 activate_project**，未调 activate_project 就标"LSP 配置不确定"降级 = 第 21 条违规。**禁止凭"当前会话 LSP server 配置不确定"直接降级**——这是 v2.10 实测踩坑模式，AI 跳过 activate_project 直接 grep。
+
 **v2.2 双保险强制触发**（治本"只触发 sequential-thinking"问题）：
 - **A 层·执行步骤内嵌**：serena 在 plan/code/deepcheck/doc/review 的执行步骤主体里有独立的"第 N 步"调用指令（非末尾推荐表），AI 顺序执行必然走到
 - **B 层·thinking_core MCP gate**：[thinking_core.md](thinking_core.md) 通用流程第 3 步--思考块先列本步 🟢 MCP（不含 sequential-thinking/serena）-> ToolSearch 取 schema -> 实际调用一次 -> 结果进思考块。覆盖 context7/memory/vision-bridge/playwright

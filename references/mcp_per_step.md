@@ -23,7 +23,7 @@
 | MCP | 🟢 强证据场景（满足即必调） | ⚪ 否则 |
 |-----|---------------------------|--------|
 | **sequential-thinking** | 所有步骤（强制思考前置，已嵌入 thinking_core） | 无 |
-| **serena** | log/plan/code/deepcheck/doc/review 步骤 **且** 工程有可索引源码（.py/.ts/.js/.jsx/.tsx/.vue/.c/.cpp/.h/.rs/.go/.java/.kt 等，非空非 demo-skeleton）**且** log 步骤额外要求：根因假设涉及代码符号/引用/持有链/跨文件调用时必调（绑定「代码事实验证门」，仅 Read 不算替代） | 其余步骤 / 无可索引源码 |
+| **serena** | log/plan/code/deepcheck/doc/review 步骤 **且** 工程有可索引源码（.py/.ts/.js/.jsx/.tsx/.vue/.c/.cpp/.h/.rs/.go/.java/.kt 等，非空非 demo-skeleton）**且** log 步骤额外要求：根因假设涉及代码符号/引用/持有链/跨文件调用时必调（绑定「代码事实验证门」，仅 Read 不算替代）。**LSP 配置不确定时先调 activate_project 兜底**：serena 工具在 deferred 列表中但 LSP 状态未知时，必须先 `mcp__serena__activate_project` 激活当前工程，激活成功再调 find_symbol 等，激活失败才降级（详见 [anti_laziness.md](../references/anti_laziness.md)「v2.11 serena LSP 激活兜底」段） | 其余步骤 / 无可索引源码 |
 | **context7** | init/plan/code 步骤 **且** 需求或代码涉及第三方库（package.json/Cargo.toml/go.mod/requirements.txt/pom.xml/build.gradle 等声明依赖，且需求触及该库 API） | 其余步骤 / 不涉及第三方库 |
 | **vision-bridge** | 任意步骤 **且** (a) 用户主动提供图片/截图/视频（会话中含媒体附件/路径，直接调） **或** (b) TB 缺陷源拉取的附件含视频/图片（`{ICODE_OUT_DIR}/tb_source/<ID>/` 下，**vision-bridge 可用则主动调**：视频先用 ffmpeg 本地提取关键帧再传图片帧给 vision-bridge 省钱——见 [steps/log.md](../steps/log.md)「附件分析（含本地路径 + TB 源）与 ffmpeg 抽帧」段） **或** (c) `/icode log` 本地日志目录含视频/图片文件（`find <log_dir> -type f \( -name '*.mp4' -o -name '*.mov' -o -name '*.png' -o -name '*.jpg' -o -name '*.jpeg' \)`，**vision-bridge 可用则主动调**，行为同 (b) 的 ffmpeg 抽帧流程） | vision-bridge 未安装 / `~/.claude/skills/icode/mcp/vision-bridge/config.json` 三件套未配齐 → 仅提示不主动调（防纯文字模型报错）；ffmpeg 不可用时降级为直接传视频（需用户确认，可能耗 API 额度） |
 | **playwright** | deepcheck/audit 步骤 **且** 前端工程（含 .html/.jsx/.tsx/.vue 或 package.json 含 react/vue） | CLI/后端/嵌入式工程 |
