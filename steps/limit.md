@@ -5,7 +5,7 @@
 - 主存：`~/.claude/icode_data/limits/<project_id>.md`（全局，跨 checkout 共享）
 - 覆盖：`<project_root>/.icode_output/limit.local/<project_id>.md`（单 checkout，自动 gitignore）
 **会话**: 主会话
-**定位**: **项目约束红线生成与维护，独立步骤**。不创建 `.icode_output_N/`、不写 `.ico_metadata.json`、不更新工单 `completed_steps`/`status`。产物供 `/icode plan`/`start`/`fast` 启动时**作为硬基线引用**（plan §3 架构设计/§4 ADR/§6 异常处理须呼应 limit 条目）。
+**定位**: **项目约束红线生成与维护，独立步骤**。不创建 `.icode_output_N/`、不写 `.ico_metadata.json`、不更新工单 `completed_steps`/`status`。产物供 `/icode plan`/`start`/`fast` 启动时**作为硬基线引用**（plan §3 架构设计/§4 ADR/§6 异常处理须呼应 limit 条目）；**亦供 `/icode log` 根因分析时作为对照清单**（log 步骤4 limit 红线检查点读取，逐条对照根因假设是否违反约定红线）。
 
 > **核心设计哲学**：
 > - **约定 vs 事实分离** —— limit 是"代码应该这样写"的约定（团队私有，不上传），doc 是"代码长这样"的事实快照（独立于仓库全局可索引）。两者职责严格分离。
