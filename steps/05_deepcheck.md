@@ -123,6 +123,32 @@ Free 阶段一次性完整覆盖全部 15 个角度。
 5. 否则初始化 `deepcheck_clean_rounds = 0`, `deepcheck_total_rounds = 1`, `deepcheck_phase = "reverse"`, `status = deepcheck_in_progress`
 6. 输出：`▶ 步骤5 复检开始`
 
+### 前置强制执行门（v2.11 新增·防"只写结论不执行"）
+
+> **续跑跳过**：若步骤 2 读取的 `.ico_metadata.json` 中 `status` 已是 `"deepcheck_in_progress"`（说明是步骤 4 分步续跑恢复），跳过本门，直接进入恢复的 `deepcheck_phase` 对应阶段。
+
+**非续跑时，在写入 05_deepcheck.md 任何内容之前，必须依次完成以下动作。未完成即写产物 = 跳过步骤 = 严重违规，不可交付。**
+
+1. **Read 所有代码文件**：Read 步骤4 产出的每个 `.c`/`.cpp`/`.py`/`.ts`/`.go` 等代码文件，输出 `📖 已 Read 代码文件（最新版）：<file1>, <file2>, ...` 确认行
+2. **Read 计划产物**：Read `03_plan_final.md`（计划定稿）和 `.ico_metadata.json`（含 code_files 列表）
+3. **Read 上游复检产物**：若 `{ICODE_OUT_DIR}/04_code_review_fix.md` 存在则 Read，记录未通过维度
+4. **输出 Reverse 逆推要点**：在思考块列出至少 3 个具体逆推方向（如：关键函数签名、数据结构、跨文件调用模式），不可笼统写"理解代码"
+
+**只有以上 4 步全部完成，才能进入「阶段 1 — Reverse」**。思考前置证据（sequential-thinking 或文字块）不可替代上述 Read 确认行——思考是思考，读代码是读代码，缺一不可。
+
+### 阶段间强制校验门（v2.11 新增·防"阶段偷工"）
+
+**每个阶段开始前，必须完成以下检查才能进入下一个阶段**：
+
+| 检查项 | Reverse 前 | Fixed 前 | Free 前 |
+|--------|-----------|---------|--------|
+| 已 Read 代码文件（最新版）并输出确认行 | ✅ 必须 | ✅ 必须 | ✅ 必须 |
+| 上阶段产物已写入 05_deepcheck.md | N/A | ✅ 必须含 Reverse 段 | ✅ 必须含 Reverse + Fixed 段 |
+| 上阶段 has_issues 已处理（修复/分流） | N/A | ✅ Reverse issue 已分流 | ✅ Fixed issue 已分流 |
+| 思考块列出本阶段检查策略 | ✅ ≥3 方向 | ✅ 7 维度覆盖策略 | ✅ 15 角度全覆盖策略 |
+
+**任一检查项不满足 → 不切换阶段**，必须回补。禁止"先切阶段再补"（切了就不会补了——v2.10 实测踩坑模式）。
+
 ### 阶段 1 — Reverse（逆推）
 
 **重新读取所有代码文件** + 输出 `📖 已 Read` 确认行。基于代码**逆推**需求规格——不允许参考计划或需求文档，只从代码推断。
