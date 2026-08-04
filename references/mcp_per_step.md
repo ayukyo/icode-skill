@@ -75,12 +75,12 @@
 
 - **serena**：根因涉及的代码符号/引用/持有链定位（`find_symbol` 定位定义 / `find_referencing_symbols` 找谁调用 / `find_implementations` 找实现 / `search_for_pattern` 模式检索）--根因假设涉及代码行为时**必调**（绑定 log 阶段3「代码事实验证门」，仅 Read 实读不算替代：Read 是文本层，serena 是语义符号层，互补非替代）。有可索引源码时必调；serena 不可用（未装/LSP 不支持该语言/无源码）降级 ripgrep/grep 并显式声明 `serena 不可用(<原因>)，降级 ripgrep/grep`
 
-- **cheap-research**（🟢*）：长上下文压缩（log 阶段 0/1/2）+ 8.6 memory 沉淀 + TB 缺陷源拉取。**不接管决策**：阶段 3 链路图分析 / 阶段 4 根因假设 / 阶段 6+7 对抗分析 / 阶段 8 修复建议 / 追问机制一律不走（高风险子任务）
+- **cheap-research**（🟢*）：长上下文压缩（log 阶段 0/1/2）+ 8.6 memory 沉淀 + TB 缺陷源拉取（`fetch_remote`）。**不接管决策**：阶段 3 链路图分析 / 阶段 4 根因假设 / 阶段 6+7 对抗分析 / 阶段 8 修复建议 / 追问机制一律不走（高风险子任务）
 
 ### doc（工程知识库生成）
 - **serena**：理解代码结构（入口/API/IPC）——有可索引源码时，**比 Read 精准 10 倍**
 - **vision-bridge**：截图分析——仅用户给图时
-- **cheap-research**（🟢*）：项目代码事实审计（`audit_facts`） + 章节模板填充（`fill_template`）+ 进度输出（`fill_template`）+ 6 级模块识别（`scan_modules`）+ 增量判定（`scan_patterns`/`diff_summary`）。**不接管决策**：意图识别走主会话（推理敏感度中等），把控"该写哪章"的决策
+- **cheap-research**（🟢*）：项目代码事实审计（`audit_facts`） + 章节模板填充（`fill_template`）+ 进度输出（`fill_template`）+ 6 级模块识别（`scan_modules`）+ 增量判定（`scan_patterns`/`diff_summary`）+ 远程依赖 README 拉取（`fetch_remote` 拉模块仓库 README 作为模块文档参考输入）。**不接管决策**：意图识别走主会话（推理敏感度中等），把控"该写哪章"的决策
 
 ### 1 plan（拟定计划）
 - **serena**：理解代码结构（哪些函数被谁调用）——有可索引源码时（**执行步骤 5.0 内嵌**）
@@ -95,7 +95,7 @@
 - **vision-bridge**：截图分析——仅用户给图时
 
 
-- **cheap-research**（🟢*）：第 N 轮增量审查（`diff_summary` 摘要计划/代码差异）+ 维度结果结构化（`fill_template` 填审查维度模板）+ 历史相似 issue 检索（`retrieve_similar`）+ grep 模式扫描（`scan_patterns` 找 TODO/FIXME/重复模式）+ 引用追溯（`trace_refs` 找符号引用）。**不接管决策**：3 质疑者对抗验证 / 审查意见合成走主会话（高风险）
+- **cheap-research**（🟢*）：第 N 轮增量审查（`diff_summary` 摘要计划/代码差异）+ 审查输出压缩（`summarize` 压缩审查结果供 merge 消费）+ 维度结果结构化（`fill_template` 填审查维度模板）+ 历史相似 issue 检索（`retrieve_similar`）+ grep 模式扫描（`scan_patterns` 找 TODO/FIXME/重复模式）+ 引用追溯（`trace_refs` 找符号引用）。**不接管决策**：3 质疑者对抗验证 / 审查意见合成走主会话（高风险）
 - **dedup 子阶段**：见 §2.5.7。**强证据** = serena 🟢 + cheap-research 🟢 + 函数数 ≥ 50 → 调 `mcp__serena__find_symbol` 抽函数 + `mcp__cheap-research__extract`（haiku 分类 + 高质量模型找 top 5 重复）。**降级**：函数数 < 50 / serena 不可用 / cheap-research 不可用 → 整个 §2.5.7 跳过
 
 ### 3 merge（合并审查意见）
@@ -122,7 +122,7 @@
 - **vision-bridge**：UI 截图分析——仅用户给图时
 
 
-- **cheap-research**（🟢*）：6.4 交付报告提示（`fill_template`）+ schema 状态汇总（`summarize`）+ 实现偏差备忘（`fill_template`）。**不接管决策**：6.1 终审报告裁决 / 6.2 强制修复 / 6.3 最终交付走主会话（高风险）
+- **cheap-research**（🟢*）：计划vs代码差异摘要（`diff_summary` 对比计划与实现）+ 6.4 交付报告提示（`fill_template`）+ schema 状态汇总（`summarize`）+ 实现偏差备忘（`fill_template`）。**不接管决策**：6.1 终审报告裁决 / 6.2 强制修复 / 6.3 最终交付走主会话（高风险）
 ### 7 readme（交付报告）
 - **vision-bridge**：附加 UI 截图——仅用户给图时
 

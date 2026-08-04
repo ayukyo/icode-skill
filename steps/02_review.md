@@ -442,7 +442,8 @@
    - 输出告警：`⚠️ 步骤2 触达硬上限{absolute_cap}轮仍有未解决问题，建议回到步骤1`
 
 5. **终止后更新 metadata**：`status = review_done`，`completed_steps` 追加 `"2"`，保留 `extended_rounds` / `unresolved_issues_at_cap` / `pending_verification` 字段供后续步骤参考
-6. **全流程模式**：
+6. **审查输出压缩（供 merge 步骤消费）**：调 `mcp__cheap-research__summarize` 压缩本轮审查输出（`review_round_*.json` 的 `new_issues` + 对抗裁决 + 维度审查结论），摘要 ≈ 300-500 token，写入 `{ICODE_OUT_DIR}/_review_summary.md`（**仅含**：审查轮次 + 总问题数 + 关键 HIGH 问题 + 未解决标记）。**降级**（cheap-research 不可用）：跳过，`_review_summary.md` 不存在时 merge 步骤直接读各轮 JSON 原文。
+7. **全流程模式**：
    - 若 `unresolved_issues_at_cap == true`：**暂停**全流程串联，输出 `⚠️ 步骤2 存在未解决问题，请手动决定是否继续 /icode merge 或回到 /icode plan`
    - 否则：**立即继续执行步骤3**
 ## MCP 推荐（v2.2 强证据二元化）
@@ -450,7 +451,7 @@
 |-----|----------|------|
 | serena | 🟢* | 依赖关系审查（这个函数被哪些地方调用？）--有可索引源码时（步骤 2.3 内嵌） |
 | vision-bridge | 🟢* | 截图分析--用户给图时 |
-| **cheap-research** | 🟢* | **降本**：diff_summary（增量审查）+ fill_template（维度结果）+ retrieve_similar（历史 issue）+ scan_patterns（grep 扫描）+ trace_refs（引用追溯）。不接管决策：3 质疑者对抗/审查合成走主会话 |
+| **cheap-research** | 🟢* | **降本**：diff_summary（增量审查）+ summarize（审查输出压缩，供 merge 步骤消费）+ fill_template（维度结果）+ retrieve_similar（历史 issue）+ scan_patterns（grep 扫描）+ trace_refs（引用追溯）。不接管决策：3 质疑者对抗/审查合成走主会话 |
 | context7 | ⚪ | 本步骤不推荐 |
 | memory | ⚪ | 本步骤不推荐 |
 | playwright | ⚪ | 本步骤不推荐 |

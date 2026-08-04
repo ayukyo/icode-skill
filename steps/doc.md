@@ -301,6 +301,7 @@ find "${GIT_ROOT}" -maxdepth 3 -name "<module_name>" -type d
 - **反例（禁止）**：**不得因数量大而全部降级、把模块内容塞进 `project_docs` 章节替代 module_docs**（历史 bug：某工程 34 个 `repo` 子项目时 AI 把模块塞进 project_docs 章节，module_docs 一个没生成）；全量时可读模块数量过多（如超过 10 个）时，应**分批生成或提示用户分次 `/icode doc <name>` 聚焦**，而非降级塞 project_docs
 
 - 对每个**待生成**的 module（按上述范围筛后的列表，非全量 modules）：
+  - 有远程 URL 的模块（git submodule / `repo` 子项目）：先调 `mcp__cheap-research__fetch_remote` 拉取其远程 README（从模块 `repo_url` 推导 raw 文件 URL，如 GitHub 类平台 `{repo_url_raw}/HEAD/README.md`；**SSH 格式 `git@` 需转为 HTTPS**）。返回内容作为模块文档生成的参考输入。**降级**（fetch_remote 不可用/URL 格式不兼容/SSRF 拦截）：跳过，仅靠本地代码生成，不阻塞。**不接管决策**：模块文档内容仍由主代理基于本地代码 + 远程 README 参考综合生成，fetch_remote 只提供额外参考源。
   - 克隆/读取该 module 的代码到临时目录（git submodule 用 `git submodule foreach 'git archive HEAD | tar -x -C $tmp/<name>'`；repo 子仓库用 `cd <submodule_path> && git archive HEAD | tar -x -C $tmp`；monorepo/vendor 直接读子目录；CMake FetchContent 通常 build 目录未下载，fallback 警告）
   - 按 [doc_template.md](../references/doc_template.md)「九、模块章节模板」+「十四项必含元素」生成章节（前 50 行四块 + 必含元素清单 + 模板自适应 grep 表；KEYS 按 doc_template.md「七」提取）
   - Write 到 `$HOME/.claude/icode_data/module_docs/<key>/<NN>_<topic>.md`（十位桶）
@@ -426,7 +427,7 @@ find "${GIT_ROOT}" -maxdepth 3 -name "<module_name>" -type d
 |-----|----------|------|
 | serena | 🟢* | 理解代码结构（比 Read 精准 10 倍）--有可索引源码时（执行步骤内嵌） |
 | vision-bridge | 🟢* | 截图分析--用户给图时 |
-| **cheap-research** | 🟢* | **降本甜点**：audit_facts（代码事实审计）+ fill_template（章节+进度模板）+ scan_modules（6 级模块识别）+ scan_patterns/diff_summary（增量判定）+ parse_project_id。不接管决策：意图识别走主会话 |
+| **cheap-research** | 🟢* | **降本甜点**：audit_facts（代码事实审计）+ fill_template（章节+进度模板）+ scan_modules（6 级模块识别）+ scan_patterns/diff_summary（增量判定）+ parse_project_id + fetch_remote（拉远程依赖 README 作模块文档输入）。不接管决策：意图识别走主会话 |
 | context7 | ⚪ | 本步骤不推荐 |
 | memory | ⚪ | 本步骤不推荐 |
 | playwright | ⚪ | 本步骤不推荐 |
