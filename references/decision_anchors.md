@@ -40,7 +40,7 @@ icode 步骤间靠产物文件（00_init.md / 01_plan.md 等）传递信息，�
 | code（步骤4）| 追加 `deviations`（同步 `code_deviations`）+ 刷新 `open_risks` | metadata + `04_code_review_fix.md` |
 | deepcheck（步骤5）| 刷新 `open_risks`（deepcheck 残留风险）| `05_deepcheck.md` |
 | audit（步骤6）| 最终刷新 `deviations` + `open_risks` | `06_audit.md` |
-| patch（v2.13 新增）| 追加 `patch_summary`（本次补丁一句话摘要）+ 刷新 `open_risks`（补丁残留风险）| `08_patch.md` Patch N 段「验证/收尾」 |
+| patch（v2.13 新增）| 追加 `patch_summary`（本次补丁一句话摘要）+ 刷新 `open_risks`（补丁残留风险）；**追问刷新**（同一 Patch N 内追问导致结论变化时，覆盖刷新 `patch_summary` 为最新摘要）| `08_patch.md` Patch N 段「验证/收尾」 |
 
 **写规则**：增量刷新（保留上游写的字段，只刷新本步骤负责的字段）；`updated_at`/`updated_by` 每次写时更新。
 
