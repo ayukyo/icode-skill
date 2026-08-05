@@ -23,12 +23,12 @@
 | MCP | 🟢 强证据场景（满足即必调） | ⚪ 否则 |
 |-----|---------------------------|--------|
 | **sequential-thinking** | 所有步骤（强制思考前置，已嵌入 thinking_core） | 无 |
-| **serena** | log/plan/code/deepcheck/doc/review 步骤 **且** 工程有可索引源码（.py/.ts/.js/.jsx/.tsx/.vue/.c/.cpp/.h/.rs/.go/.java/.kt 等，非空非 demo-skeleton）**且** log 步骤额外要求：根因假设涉及代码符号/引用/持有链/跨文件调用时必调（绑定「代码事实验证门」，仅 Read 不算替代）。**LSP 配置不确定时先调 activate_project 兜底**：serena 工具在 deferred 列表中但 LSP 状态未知时，必须先 `mcp__serena__activate_project` 激活当前工程，激活成功再调 find_symbol 等，激活失败才降级（详见 [anti_laziness.md](../references/anti_laziness.md)「v2.11 serena LSP 激活兜底」段）。**目标代码在子仓库/嵌套 git 仓库时同样先激活目标仓库**：`git -C <目标目录> rev-parse --show-toplevel` ≠ 当前激活项目根 → 无 `<子仓库根>/.serena/project.yml` 先 `serena-doctor init/fix <子仓库根>` → `activate_project(<子仓库根>)` 激活成功再查，激活失败才降级（v2.12 多 git 根激活，详见 [anti_laziness.md](../references/anti_laziness.md) 第 21 条 v2.12 段） | 其余步骤 / 无可索引源码 |
+| **serena** | log/plan/code/deepcheck/doc/review/patch 步骤 **且** 工程有可索引源码（.py/.ts/.js/.jsx/.tsx/.vue/.c/.cpp/.h/.rs/.go/.java/.kt 等，非空非 demo-skeleton）**且** log 步骤额外要求：根因假设涉及代码符号/引用/持有链/跨文件调用时必调（绑定「代码事实验证门」，仅 Read 不算替代）。**LSP 配置不确定时先调 activate_project 兜底**：serena 工具在 deferred 列表中但 LSP 状态未知时，必须先 `mcp__serena__activate_project` 激活当前工程，激活成功再调 find_symbol 等，激活失败才降级（详见 [anti_laziness.md](../references/anti_laziness.md)「v2.11 serena LSP 激活兜底」段）。**目标代码在子仓库/嵌套 git 仓库时同样先激活目标仓库**：`git -C <目标目录> rev-parse --show-toplevel` ≠ 当前激活项目根 → 无 `<子仓库根>/.serena/project.yml` 先 `serena-doctor init/fix <子仓库根>` → `activate_project(<子仓库根>)` 激活成功再查，激活失败才降级（v2.12 多 git 根激活，详见 [anti_laziness.md](../references/anti_laziness.md) 第 21 条 v2.12 段） | 其余步骤 / 无可索引源码 |
 | **context7** | init/plan/code 步骤 **且** 需求或代码涉及第三方库（package.json/Cargo.toml/go.mod/requirements.txt/pom.xml/build.gradle 等声明依赖，且需求触及该库 API） | 其余步骤 / 不涉及第三方库 |
 | **vision-bridge** | 任意步骤 **且** (a) 用户主动提供图片/截图/视频（会话中含媒体附件/路径，直接调） **或** (b) TB 缺陷源拉取的附件含视频/图片（`{ICODE_OUT_DIR}/tb_source/<ID>/` 下，**vision-bridge 可用则主动调**：视频先用 ffmpeg 本地提取关键帧再传图片帧给 vision-bridge 省钱——见 [steps/log.md](../steps/log.md)「附件分析（含本地路径 + TB 源）与 ffmpeg 抽帧」段） **或** (c) `/icode log` 本地日志目录含视频/图片文件（`find <log_dir> -type f \( -name '*.mp4' -o -name '*.mov' -o -name '*.png' -o -name '*.jpg' -o -name '*.jpeg' \)`，**vision-bridge 可用则主动调**，行为同 (b) 的 ffmpeg 抽帧流程） | vision-bridge 未安装 / `~/.claude/skills/icode/mcp/vision-bridge/config.json` 三件套未配齐 → 仅提示不主动调（防纯文字模型报错）；ffmpeg 不可用时降级为直接传视频（需用户确认，可能耗 API 额度） |
 | **playwright** | deepcheck/audit 步骤 **且** 前端工程（含 .html/.jsx/.tsx/.vue 或 package.json 含 react/vue） | CLI/后端/嵌入式工程 |
 | **memory** | init/plan 步骤 **且** 本工程历史工单数 ≥ 1（`~/.claude/icode_data/index.json` 中本 project_path 工单数 ≥ 1） | 新工程首个工单 / demo |
-| **cheap-research** | init/log/doc/plan/review/code/deepcheck/audit/readme 步骤 **且** 走单闸门入选的 22 个子任务（长上下文压缩 / 历史检索 / 模板填充 / 结构化提取 / 代码事实审计 / 模式扫描 / 符号追溯 / 差异摘要 / 文件名生成 / 模板选择 / schema 迁移 / 模块识别 / project_id 解析 / 远程拉取） | **不接管决策**：3 质疑者对抗 / 架构决策 / 终审裁决 / 修复方案 / 用户对话一律不走；推理敏感度中等的"灰区"也不走（零灰区原则）；merge/install/list 无入选子任务 |
+| **cheap-research** | init/log/doc/plan/review/code/deepcheck/audit/readme/patch 步骤 **且** 走单闸门入选的 22 个子任务（长上下文压缩 / 历史检索 / 模板填充 / 结构化提取 / 代码事实审计 / 模式扫描 / 符号追溯 / 差异摘要 / 文件名生成 / 模板选择 / schema 迁移 / 模块识别 / project_id 解析 / 远程拉取） | **不接管决策**：3 质疑者对抗 / 架构决策 / 终审裁决 / 修复方案 / 用户对话一律不走；推理敏感度中等的"灰区"也不走（零灰区原则）；merge/install/list 无入选子任务 |
 
 **判定执行**：
 
@@ -56,6 +56,7 @@
 | **5 deepcheck** | 🟢* | ⚪ | 🟢* | 🟢* | ⚪ | 🟢* |
 | **6 audit** | ⚪ | ⚪ | 🟢* | 🟢* | ⚪ | 🟢* |
 | **7 readme** | ⚪ | ⚪ | 🟢* | ⚪ | ⚪ | 🟢* |
+| **patch**（v2.13 新增）| 🟢* | 🟢* | 🟢* | 🟢* | 🟢* | 🟢* |
 | **install/list** | ⚪ | ⚪ | ⚪ | ⚪ | ⚪ | ⚪ |
 | **status** | ⚪ | ⚪ | ⚪ | ⚪ | ⚪ | 🟢* |
 
@@ -129,6 +130,18 @@
 
 
 - **cheap-research**（🟢*）：文件名生成（`generate_filename`）+ 智能模板选择（`select_template` 功能/查BUG）+ 模板填充（`fill_template` 7 个段落）+ 已知限制检索（`retrieve_similar` 查历史 BUG 防重复）。**不接管决策**：风险章节提炼走主会话（推理敏感度中等，灰区不做）
+
+### patch（追加修改，v2.13 新增）
+
+> **全场景开放步骤**：patch 不预设任何 MCP 不适用——测试发现的问题可能涉及 UI 截图/视频证据、前端行为、第三方库、历史工单记忆等。除 sequential-thinking 必用外全部 🟢*，**满足强证据场景才必调，不满足自动降 ⚪ 无需声明**。
+
+- **serena**：阶段2 符号定位 + 调用点追踪——有可索引源码时（**执行步骤内嵌**，同 4 code 规则）
+- **context7**：涉及第三方库 API 时实时查库（同 code 规则）
+- **vision-bridge**：用户测试发现问题带截图/视频证据 / TB 缺陷源附件含媒体时（同 log 附件规则）
+- **playwright**：前端工程且补丁需浏览器行为验证时（同 deepcheck/audit 规则）
+- **memory**：本工程历史工单数 ≥1 且新问题疑与历史工单/既有决策相关时（同 init/plan 规则）
+- **cheap-research**（🟢*）：阶段1 现状摘要（`summarize` 压缩长产物/长日志）。**不接管决策**：增量计划 / 修改决策 / 复检结论走主会话（与 code 同级，推理敏感不走）
+
 ### install / list
 - **sequential-thinking**：仅此（install 装依赖；list 纯查询内置 index.json + 过滤 + 表格化，不需 cheap-research）
 

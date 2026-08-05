@@ -21,6 +21,15 @@
 
 检查 `{ICODE_OUT_DIR}/03_plan_final.md` 是否存在，不存在则报错并提示先执行 `/icode merge`。
 
+## 前置：patch 配合（v2.13）
+
+> 工单可能已走过 `/icode patch` 追加修改（`{ICODE_OUT_DIR}/08_patch.md` 存在且有 Patch 段，或 `metadata.patch_count > 0`）。本步骤启动时 **Read `08_patch.md`**（不存在则跳过本段，走原流程），按以下规则配合：
+
+1. **在 patch 基础上实施**：本步骤的实施基准 = `03_plan_final.md` 计划 + `08_patch.md` 已落地的修改。Write 已由 patch 改过的文件时**保留 patch 修改**（只叠加本步骤的改动，不整文件覆盖回计划版）
+2. **patch 与计划设计冲突**：patch 改动的符号/行为与 `03_plan_final.md` 设计不一致时，**不得擅自把代码改回计划版**——记入 metadata `code_deviations`（`plan_said`=计划说法 / `actual_done`=patch 实际做法 / `reason`）+ 在步骤输出中提示用户"patch 修改与计划冲突，以 patch 为准已记录偏离"
+3. **三链预扫范围扩展**：除计划 §5 声明的符号外，`08_patch.md` 最新 Patch N 段涉及的符号同样逐个预扫（caller/import/test 三链）
+4. **产物记录**：本步骤对 patch 修改的叠加/偏离处理，写入 `04_code_review_fix.md` 或步骤输出，供步骤5/6 回溯
+
 ## 前置：schema 迁移（自动/幂等/原子）
 
 > 自动识别 + 自动迁移：用户无需任何操作，进入步骤 4 时若检测到 `.ico_metadata.json.template_version` 缺失或旧于当前版本，**自动**在已存在的 `03_plan_final.md` 末尾追加新段、补写 metadata、原子落盘；幂等（已含迁移段则跳过），失败兜底静默（不阻塞主流程）。

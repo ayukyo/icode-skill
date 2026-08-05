@@ -1,9 +1,9 @@
 ---
 name: icode
-description: 端到端编码工作流（步骤 0~6，含可选需求初稿步骤与日志根因分析入口），支持分步手动调用：/icode help (帮助), /icode install (MCP 环境检查+一键安装), /icode init [<粗略需求>] (需求初稿), /icode log [零散信息...] (日志根因分析→转修复需求), /icode start <需求> (全流程), /icode fast <需求> (精简全流程), /icode plan <需求> (计划), /icode review [N] (审查), /icode merge (定稿), /icode code (编码), /icode deepcheck (复检), /icode audit (终审), /icode doc [自然语言] (工程级知识库生成), /icode limit [自然语言] (项目约束红线), /icode readme (交付报告), /icode status (工单状态), /icode list [关键词] (跨工程工单查找)
+description: 端到端编码工作流（步骤 0~6，含可选需求初稿步骤与日志根因分析入口），支持分步手动调用：/icode help (帮助), /icode install (MCP 环境检查+一键安装), /icode init [<粗略需求>] (需求初稿), /icode log [零散信息...] (日志根因分析→转修复需求), /icode start <需求> (全流程), /icode fast <需求> (精简全流程), /icode plan <需求> (计划), /icode review [N] (审查), /icode merge (定稿), /icode code (编码), /icode deepcheck (复检), /icode audit (终审), /icode patch [问题或新需求] (追加修改：主流程后/中途继续改), /icode doc [自然语言] (工程级知识库生成), /icode limit [自然语言] (项目约束红线), /icode readme (交付报告), /icode status (工单状态), /icode list [关键词] (跨工程工单查找)
 ---
 
-**版本**: v2.12.0
+**版本**: v2.13.0
 
 # ICode 全流程编码工作流（步骤 0 + 1~6）
 
@@ -42,6 +42,7 @@ description: 端到端编码工作流（步骤 0~6，含可选需求初稿步骤
 | `[流程]` `/icode deepcheck` | **仅步骤5**：三阶段递进复检（Reverse → Fixed → Free）。`mode=="fast"` 时只跑 Reverse 阶段 | 用最新目录 |
 | `[流程]` `/icode audit` | **仅步骤6**：终极终审 + 统一修复（产出 `{ICODE_OUT_DIR}/06_audit.md`） | 用最新目录 |
 | `[流程]` `/icode readme` | **可选步骤7**：生成交付报告（面向人的自包含总结，动态文件名，智能识别功能/查BUG模板）。步骤6完成后手动触发 | 用最新目录 |
+| `[独立]` `/icode patch [问题或新需求...]` | **追加修改（独立步骤，v2.13 新增）**：主流程完成后（`completed`）或中途（步骤1~5任一状态）继续修改既有工单——测试发现问题 / 后续新需求，在既有工单上打补丁。**轻量四段式**（重审现状 → 增量计划 → 最小实施 → 反向复检），**不靠会话记忆靠磁盘产物重载上下文**（治"越问上下文越爆炸"）。产物 `08_patch.md` 追加式（每次调用追加 Patch N 段）。**不改变 status/completed_steps**（completed 保持 completed），靠 `patch_count`/`patch_history` 记录（详见 [steps/08_patch.md](steps/08_patch.md)） | 用最新目录 |
 | `[工程]` `/icode doc [自然语言]` | **工程级知识库生成（独立步骤）**：扫描工程代码特征，生成/维护 `~/.claude/icode_data/project_docs/<project_id>/<branch>/` 下的工程知识库章节（架构/IPC/术语表/代码事实审计，**按分支分目录**，切分支跑 doc 不互相覆盖），**同时检测工程依赖的独立模块**（git submodule / `repo` 管理 / CMake FetchContent / monorepo / vendor / 用户配置，6 级优先级）并生成 `~/.claude/icode_data/module_docs/{key}/` 模块共享文档（**按仓库+分支 key 跨工程共享**，同一上游仓库同分支只一份），供 init/log/plan/start/fast 段零自动跨仓库检索注入。**去参数化**——目标工程与动作（全量/增量/新增）由自然语言识别。**v1 单级布局自动迁移**：检测到旧 `<project_id>/` 平铺布局时自动迁移到 `<project_id>/<branch>/`（保留所有字段 + 备份 `_meta.json.v1_migrated_from`，详见 doc.md 步骤 5）。**不创建工单目录、不写工单 metadata、不参与步骤1~6推进**（详见 [steps/doc.md](steps/doc.md)） | 否（写全局 `project_docs/` 和 `module_docs/`） |
 | `[配置]` `/icode limit [自然语言]` | **项目约束红线（独立步骤）**：定义和维护本工程的红线/约束/禁区。**主存**：`~/.claude/icode_data/limits/<project_id>.md`（全局，跨 checkout 共享，团队私有不上传）；**覆盖**：`<project_root>/.icode_output/limit.local/<project_id>.md`（单 checkout，自动 gitignore）。**local 完全覆盖 main**。**追加式演进**——每次调用增量追加新红线条目（编号自增），不覆盖、不 diff。对齐 `/icode doc` 模式：无描述→全局扫描显示当前约束（合并视图）；有描述→针对操作生成/追加新条目。**plan 步骤硬基线**——plan §3/§4/§6 引用 limit 条目作为设计依据（柔性提示：plan 入口检测不到 limit 建议生成但不阻断）。**log 步骤对照清单**——log 步骤4 limit 红线检查点读取，逐条对照根因假设是否违反约定红线（柔性提示：log 入口检测不到 limit 不阻断）。**不创建工单目录、不写工单 metadata、不参与步骤1~6推进**（详见 [steps/limit.md](steps/limit.md)） | 否（写全局 `limits/` + 工程根 `.icode_output/limit.local/`，自动 gitignore） |
 | `[查询]` `/icode status` | **状态查询/verdict 标注**：默认只读查当前工单状态（含 `mode`/`verdict` 字段 + 全局索引工单数）；`--verdict <ticket_id> <verified\|disproved\|superseded> "<reason>" [--correct "<正确方向>"] [--source <machine_test|review|user|auto_signal>]` 手动标注工单方向结论（双写 metadata+index，幂等覆盖刷新 `verdict_at`）；`--scan-verdict` 批量扫描 unknown 完成态工单的 00_init 末轮/06_audit 证伪信号并提示标注（详见 [steps/status.md](steps/status.md)） | 否（默认只读；`--verdict`/`--scan-verdict` 写 metadata+全局索引，不写工程内源码文件） |
@@ -55,7 +56,7 @@ description: 端到端编码工作流（步骤 0~6，含可选需求初稿步骤
 > - **无参且无入口态可复用 → 报错**：提示先 init/log 或带参新建。
 > 详见下文「目录管理」段落（bash 脚本 `REUSE=2` 分支即"一律问"行为，散文与脚本逐行对齐）。
 
-> **历史检索复用**：`/icode init`、`/icode plan`、`/icode start`、`/icode fast`、`/icode log` 启动时会自动检索全局索引中相似历史工单并按命令分流注入参考（init→需求要点 / plan/start/fast→ADR+风险 / log→根因结论+证据），详见下文「历史检索复用」段落。**`/icode fast` 的检索委托给紧随的 plan 步骤2**（slice 相同，`_inject_cache.json` 去重兜底，fast 不单独检索）。`/icode review`/`merge`/`code`/`deepcheck`/`audit` 不触发检索。
+> **历史检索复用**：`/icode init`、`/icode plan`、`/icode start`、`/icode fast`、`/icode log` 启动时会自动检索全局索引中相似历史工单并按命令分流注入参考（init→需求要点 / plan/start/fast→ADR+风险 / log→根因结论+证据），详见下文「历史检索复用」段落。**`/icode fast` 的检索委托给紧随的 plan 步骤2**（slice 相同，`_inject_cache.json` 去重兜底，fast 不单独检索）。`/icode review`/`merge`/`code`/`deepcheck`/`audit`/`patch` 不触发检索。
 
 ### 帮助说明（`/icode help`）
 
@@ -129,6 +130,16 @@ description: 端到端编码工作流（步骤 0~6，含可选需求初稿步骤
 # 生成后，后续 /icode init|log|plan|start|fast 启动时段零自动检索注入相关章节（无需手动告知参考文档）
 ```
 
+```bash
+# 方式G：主流程后的追加修改（patch 独立步骤，测试发现问题 / 继续迭代）
+/icode start 实现MCU雨量传感器I2C驱动   # 主流程 1→6 走完（或走到任意步骤）
+# ... 你测试后发现某个场景行为不对 ...
+/icode patch 测试发现超时阈值场景下读数跳变    # 独立步骤：重审现状 → 增量计划 → 最小修改 → 反向复检
+# 产出：08_patch.md（追加 Patch N 段）+ 06_audit.md 末尾补丁记录 + metadata.patch_history
+/icode patch 还发现 I2C 复位时序有问题          # 连续多轮补丁：再追加 Patch N+1，不新建工单
+# 特点：靠磁盘产物重载上下文（换会话/换模型可继续），不靠会话记忆，上下文不爆炸
+```
+
 ## 通用规则
 
 ### 强制阻断边界矩阵
@@ -142,12 +153,13 @@ description: 端到端编码工作流（步骤 0~6，含可选需求初稿步骤
 | **L3·重要** | 重要检查项未通过 | **警告**，记入 metadata，**流程继续**（user 后续可手动回看） | plan §10 checklist ❌ > 3 条 / audit §6.7 视角 A 失败 / 步骤 4 编译失败（带 `code_compile_failed=true`） |
 | **L4·参考** | 软性建议 | **柔性提示**，不影响流程 | limit 不存在 / cheap-research 未装 / vision-bridge 未装 / init 末轮理解核对清单用户不回复 |
 
-**各步骤声明的 L1/L2 检查项**：详见对应 step 文件头部的「本步骤 L1/L2 检查项声明」段（已声明 5 个：plan / review / code / deepcheck / audit）。
+**各步骤声明的 L1/L2 检查项**：详见对应 step 文件头部的「本步骤 L1/L2 检查项声明」段（已声明 6 个：plan / review / code / deepcheck / audit / patch）。
 - `steps/01_plan.md` 头部 → L1（前置产物缺失）/ L2（§3 缺失 + §10 ❌ > 3）
 - `steps/02_review.md` 头部 → L1（前置产物缺失）/ L2（触达 `absolute_cap`，警告+记 metadata+继续）
 - `steps/04_code.md` 头部 → L1（前置产物缺失）/ L2（Code Review Fix 全失败）
 - `steps/05_deepcheck.md` 头部 → L1（前置产物缺失）
 - `steps/06_audit.md` 头部 → L1（前置产物缺失）
+- `steps/08_patch.md` 头部 → L1（无最新工单目录 / 入口态）/ L2（复检发现新引入问题，警告+记 metadata+继续）
 
 **L3·重要** 检查项（不强制阻断，警告后流程继续）也已在各 step 头部声明段标注。
 
@@ -190,7 +202,7 @@ fi
 
 > **复用决策三档**：`REUSE=2`（入口态有歧义）→ 必须问用户"复用 / 新建"，按答复定；`REUSE=0`（非入口态）→ 带参新建、无参报错。复用时将 `00_init.md` 作为步骤1主要需求输入（命令行参数作补充）。
 
-**检测最新目录**（用于 `review`/`merge`/`code`/`deepcheck`/`audit`）：
+**检测最新目录**（用于 `review`/`merge`/`code`/`deepcheck`/`audit`/`patch`）：
 ```bash
 LAST=$(ls -d .icode_output/.icode_output_* 2>/dev/null | grep -oP '(?<=\.icode_output_)\d+' | sort -n | tail -1)
 if [ -z "$LAST" ]; then
@@ -216,6 +228,7 @@ ICODE_OUT_DIR=".icode_output/.icode_output_${LAST}"
 | code | `{ICODE_OUT_DIR}/03_plan_final.md` |
 | deepcheck | `{ICODE_OUT_DIR}/03_plan_final.md` + 步骤4代码文件 |
 | audit | `{ICODE_OUT_DIR}/03_plan_final.md` + 步骤4代码文件 |
+| patch | `{ICODE_OUT_DIR}/.ico_metadata.json`（且 status 非入口态 `init_in_progress`/`log_done`） |
 
 > **通用依赖**：所有步骤均依赖 `{ICODE_OUT_DIR}/.ico_metadata.json`（读取 status/completed_steps/续跑字段等），上表仅列出各步骤**额外**要求的产物文件。`init`/`plan`/`start` 因会创建 metadata，无前置校验。
 
@@ -291,6 +304,8 @@ ICODE_OUT_DIR=".icode_output/.icode_output_${LAST}"
 - `fix_tiers`（新增，可选，默认 `null`）：修复方案三档分级（反偷懒第 26 条）。`{"A": ["A1..."], "B": ["B1..."], "C": ["C1..."]}` 供 review/code/audit 核对实施范围。**由步骤1 plan §4.5 落盘**（每档 1-2 条一句话摘要），步骤2/4/6 核对实施范围时读取；字段缺失视为 `null`，从 `03_plan_final.md` §4.5 文本读（向后兼容旧 metadata）
 - `confirmed_B_fixes`（新增，可选，默认 `[]`）：步骤4 实施 B 档兜底修复前记录的**用户显式确认清单**（每条含 B 档内容简述）。**字段缺失视为 `[]`（向后兼容旧 metadata）**。仅当用户显式确认后才实施 B 档并记录；未确认的 B 档不实施
 - `anchors_enabled`（v2.8 新增，可选，默认 `true`）：决策锚点机制开关。`true` 时各步骤完成后写 `.decision_anchors.json` + 下游启动读（传递关键决策摘要，省 token + 不丢上下文）；`false` 跳过。详见 [references/decision_anchors.md](references/decision_anchors.md)。**字段缺失视为 `true`（向后兼容旧 metadata）**
+- `patch_count`（v2.13 新增，可选，默认 `0`）：追加修改次数（`/icode patch` 调用次数累计）。`/icode patch` 启动时读它确定本次 `Patch N` 序号（N = patch_count + 1），完成后写回新值。**不改变 `status`/`completed_steps`**——patch 是横向追加非纵向推进。**字段缺失视为 `0`（向后兼容旧 metadata）**
+- `patch_history`（v2.13 新增，可选，默认 `[]`）：追加修改历史数组，每次 `/icode patch` 完成**追加**一条 `{"patch_no": N, "summary": "一句话（≤100 token）", "files": ["相对项目根路径..."], "at": "时间", "status": "done"|"issues"}`（`issues` = 阶段4 复检发现新引入问题且当场未修复，L2 警告不阻断）。供回读工单演进链 / 历史检索 / 06_audit 补丁记录对齐。**字段缺失视为 `[]`（向后兼容旧 metadata）**。详见 [steps/08_patch.md](steps/08_patch.md)
 
 > **`verdict` 字段族（方向结论，v2 新增）**--与 `status` 流程态正交：`status` 表示"流程走到哪步"，`verdict` 表示"方案方向对不对"。用于历史检索注入分流，防止已被证伪/取代的工单误导新需求（详见下文「历史检索复用·注入分流」段）：
 > - `verdict`（可选，默认 `"unknown"`）：枚举 `"unknown"`（未判定，旧工单默认）/`"verified"`（已验证有效，实机通过/终审高分/已上线无回退）/`"disproved"`（核心方案被证伪/已回退，如某"暂停数据流"方案实机发现语义是"重置状态"而非"冻结"，从根上不可行）/`"superseded"`（被替代方案取代，指向 `superseded_by`）。**字段缺失视为 `"unknown"`（向后兼容旧工单，走原注入逻辑 + 对抗质疑兜底）**
@@ -344,6 +359,19 @@ ICODE_OUT_DIR=".icode_output/.icode_output_${LAST}"
 `/icode start` 执行步骤1后，如果会话断开，恢复时必须读取 `.ico_metadata.json` 的 `completed_steps`，从最后一个完成步骤的下一步继续。不可跳过未完成的步骤。
 
 **续跑判定规则**：以 `completed_steps` 中**编号 1~6 范围内最大的已完成步骤**为基准推进下一步。`"0"` 和 `"log"` 仅作为"已走过步骤0/log入口"的标记，**不影响**推进逻辑。例：`["0"]`/`["log"]` → 下一步是步骤1；`["0","1"]`/`["log","1"]` → 下一步是步骤2。
+
+**patch 不参与推进判定（v2.13）**：`/icode patch` 是横向追加修改，**不改** `status`/`completed_steps`，不影响续跑判定——`completed` 工单 patch 后仍是 `completed`，`code_done` 工单 patch 后仍是 `code_done`（补丁记录在 `patch_count`/`patch_history` 字段 + `08_patch.md` 产物，详见 [steps/08_patch.md](steps/08_patch.md)）。
+
+**patch 与主流程步骤的配合（v2.13）**：patch 插在不同步骤之间时，后续代码相关步骤的**计划侧基准须纳入补丁**（补丁的增量计划/实施是已落地的设计依据），否则会覆盖 patch 修改或误判为偏离：
+
+| 后续步骤 | patch 的影响 | 配合规则（各步骤文件已声明） |
+|---|---|---|
+| 步骤2 review / 步骤3 merge | 无（只动计划文档，不碰代码） | 不需要配合 |
+| **步骤4 code** | Write 按 `03_plan_final.md` 实施会**覆盖 patch 已改的代码** | 启动 Read `08_patch.md` → **在 patch 基础上实施**（保留 patch 修改，只叠加本步骤改动）；patch 与计划设计冲突 → 记 `code_deviations` + 提示用户（见 [steps/04_code.md](steps/04_code.md)「前置：patch 配合」） |
+| **步骤5 deepcheck** | Reverse 逆推对比计划时，patch 修改**误判为"偏离/冗余"** | 启动 Read `08_patch.md` → Reverse 对比基准扩展：patch 已记录修改**视为已计划**不标偏离；追溯矩阵纳入 Patch 功能点（见 [steps/05_deepcheck.md](steps/05_deepcheck.md)「前置：patch 配合」） |
+| **步骤6 audit** | 追溯矩阵不含 patch 功能点；重跑 audit 可能**覆盖补丁记录段** | 启动 Read `08_patch.md` → 追溯矩阵纳入 Patch 功能点；`diff_summary` 对比文本含补丁计划；已含「补丁记录」段则重跑后保留（见 [steps/06_audit.md](steps/06_audit.md)「前置：patch 配合」） |
+
+统一规则：**步骤 4/5/6（代码相关步骤）启动时 Read `{ICODE_OUT_DIR}/08_patch.md`**（存在且有 Patch 段才需配合；不存在走原流程）。步骤 2/3 只动计划文档、不碰代码，无需读补丁。决策锚点 `patch_summary` 已随 patch 刷新，下游读锚点时可感知补丁存在（[references/decision_anchors.md](references/decision_anchors.md)）。
 
 步骤 2/5 的 `*_in_progress` 状态 + 轮次计数器支持**断点续跑**（步骤0的 `init_in_progress` 不参与，详见上节"两种语义"）；步骤 4 的 `code_in_progress`（编译失败时保留）支持**整体续跑**——重跑步骤4时**在已写入的代码基础上继续修复**（编译失败时代码文件和 `code_files` 已保留落盘，不丢弃、不从计划重新编码），不带轮次断点。
 
@@ -641,6 +669,7 @@ icode 工作流可调用 7 个 MCP（`/icode install` 一键安装）。**v2.2 �
 | 5 | `deepcheck` | [steps/05_deepcheck.md](steps/05_deepcheck.md) |
 | 6 | `audit` | [steps/06_audit.md](steps/06_audit.md) |
 | 7 | `readme` | [steps/07_readme.md](steps/07_readme.md) |
+| patch | `patch` | [steps/08_patch.md](steps/08_patch.md)（独立步骤，主流程后/中途追加修改，不参与 1~6 推进） |
 | doc | `doc` | [steps/doc.md](steps/doc.md) |
 | limit | `limit` | [steps/limit.md](steps/limit.md)（独立步骤，不参与 1~6 流程推进；plan 步骤硬基线引用源） |
 | - | `install` | [steps/install.md](steps/install.md)（独立 MCP 装/同步步骤）|
@@ -654,8 +683,8 @@ icode 工作流可调用 7 个 MCP（`/icode install` 一键安装）。**v2.2 �
 解决「步骤间只传产物文件，AI 思考推理不传」痛点。各步骤完成后写 `.decision_anchors.json`（关键决策摘要），下游启动时读，**不用重读产物全文**。锚点是精炼摘要非产物备份。
 
 - **文件**：`{ICODE_OUT_DIR}/.decision_anchors.json`（工单目录内，与 `.ico_metadata.json` 平级）
-- **写时机**：init/plan/code/deepcheck/audit 完成后（L3 自动，AI 主动提炼）
-- **读时机**：plan/review/code/deepcheck/audit 启动时（L4 自动）
+- **写时机**：init/plan/code/deepcheck/audit 完成后（L3 自动，AI 主动提炼）；patch 完成后追加 `patch_summary` + 刷新 `open_risks`（增量刷新，不覆盖主流程字段）
+- **读时机**：plan/review/code/deepcheck/audit/patch 启动时（L4 自动）
 - **开关**：`metadata.anchors_enabled`（默认 `true`，`false` 跳过，向后兼容旧工单）
 - **完整规则**：[references/decision_anchors.md](references/decision_anchors.md)
 

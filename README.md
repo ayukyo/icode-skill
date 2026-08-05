@@ -154,6 +154,7 @@ Offloads 22 low-risk sub-tasks (long-context compression / history retrieval / t
 | `/icode deepcheck` | Step 5 only: three-phase progressive check (Reverse → Fixed → Free) |
 | `/icode audit` | Step 6 only: final audit + fix (produces `06_audit.md`) |
 | `/icode readme` | Optional Step 7: generate delivery report |
+| `/icode patch [issue or new need]` | Follow-up modification (standalone step): keep modifying an existing ticket after/between main steps — test findings / new needs. Lightweight 4-phase (re-survey → incremental plan → minimal change → reverse re-check), context reloaded from disk artifacts (continuable across sessions), appended to `08_patch.md` |
 | `/icode doc [natural language]` | Project-level knowledge base (standalone step), auto-injected at phase zero |
 | `/icode limit [natural language]` | Project constraint red lines (standalone step); hard baseline for the plan step |
 | `/icode status` | Read-only: query current ticket status (+ `--verdict` annotation) |

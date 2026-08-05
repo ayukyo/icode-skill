@@ -28,6 +28,15 @@
 
 检查 `{ICODE_OUT_DIR}/03_plan_final.md` 和步骤4创建的代码文件是否存在，缺失则报错并提示先执行 `/icode code`。
 
+## 前置：patch 配合（v2.13）
+
+> 工单可能已走过 `/icode patch` 追加修改（`{ICODE_OUT_DIR}/08_patch.md` 存在且有 Patch 段，或 `metadata.patch_count > 0`）。本步骤启动时 **Read `08_patch.md`**（不存在则跳过本段，走原流程），按以下规则配合：
+
+1. **Reverse 对比基准扩展**：Reverse 逆推后与计划对比时，计划侧输入 = `03_plan_final.md` + `08_patch.md` 全部 Patch 段（补丁的增量计划/实施是已落地的设计依据）——**patch 已记录的修改视为"已计划"**，不标"偏离/冗余"；代码中**未在** `08_patch.md` 记录的修改仍按偏离处理。**续跑场景**：`deepcheck_in_progress` 中断态期间存在补丁修改时，续跑**不跳过 Reverse**（有补丁必须重跑逆推覆盖更新，见「执行步骤」第 4 步）
+2. **追溯矩阵扩展**：Fixed/Free 阶段的计划-代码追溯矩阵 = `03_plan_final.md` 功能点 + `08_patch.md` Patch 功能点（补丁功能点标注"补丁"来源）
+3. **patch 修改照常全维度检查**：patch 引入的代码照常进 Reverse 逆推（行为/边界/错误处理）与 Fixed/Free 全维度（含计划实施一致性、优雅度 6 条、竞态/边界）——补丁记录"已计划"只豁免"计划外修改"误报，**不豁免质量检查**（patch 引入的新问题照常标 issue、进修复循环）
+4. **blast-radius 三链自检范围扩展**：`code_files` + `08_patch.md` 最新 Patch N 段涉及的符号一并纳入三链扫描
+
 ## 前置：Code Review Fix 复检产物读取（**软依赖，不阻塞**）
 
 **目的**：读取步骤4末尾 1.5 复检产物 `04_code_review_fix.md`（若存在），让 deepcheck 知道哪些 4 维度未通过项需要重点复检。
@@ -119,7 +128,7 @@ Free 阶段一次性完整覆盖全部 15 个角度。
 2. 读取 `03_plan_final.md` 和 `.ico_metadata.json`
    - 若 `.ico_metadata.json.code_compile_failed == true`，输出 `⚠️ 步骤4编译失败，仍继续复检` 警告；若 `test_failures == true`，输出 `⚠️ 步骤4测试未通过（test_outcome=fail），重点复检测试失败相关功能点` 警告
 3. **强制思考前置**（不可跳过，缺证据视为不合规；按 [references/thinking_core.md](../references/thinking_core.md)「强制思考前置·统一契约」段执行）：本步骤子项（至少3步）= 梳理代码清单 → 回顾计划要点 → 制定逆推/Fixed/Free 检查策略
-4. **分步续跑**：若 `status == "deepcheck_in_progress"`，从 metadata 恢复 `deepcheck_total_rounds` / `deepcheck_clean_rounds` / `deepcheck_phase`，同时读取已存在的 `05_deepcheck.md`（若含「Reverse 逆推」段则跳过 Reverse）
+4. **分步续跑**：若 `status == "deepcheck_in_progress"`，从 metadata 恢复 `deepcheck_total_rounds` / `deepcheck_clean_rounds` / `deepcheck_phase`，同时读取已存在的 `05_deepcheck.md`（若含「Reverse 逆推」段 **且 `metadata.patch_count` 为 0/缺失（无补丁修改）** 则跳过 Reverse；**有补丁（`patch_count > 0`）时不跳过**——补丁修改必须重新纳入 Reverse 逆推，重跑 Reverse 覆盖更新逆推段，再进入后续阶段）
 5. 否则初始化 `deepcheck_clean_rounds = 0`, `deepcheck_total_rounds = 1`, `deepcheck_phase = "reverse"`, `status = deepcheck_in_progress`
 6. 输出：`▶ 步骤5 复检开始`
 
