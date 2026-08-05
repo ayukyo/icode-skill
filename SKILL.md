@@ -3,7 +3,7 @@ name: icode
 description: 端到端编码工作流（步骤 0~6，含可选需求初稿步骤与日志根因分析入口），支持分步手动调用：/icode help (帮助), /icode install (MCP 环境检查+一键安装), /icode init [<粗略需求>] (需求初稿), /icode log [零散信息...] (日志根因分析→转修复需求), /icode start <需求> (全流程), /icode fast <需求> (精简全流程), /icode plan <需求> (计划), /icode review [N] (审查), /icode merge (定稿), /icode code (编码), /icode deepcheck (复检), /icode audit (终审), /icode doc [自然语言] (工程级知识库生成), /icode limit [自然语言] (项目约束红线), /icode readme (交付报告), /icode status (工单状态), /icode list [关键词] (跨工程工单查找)
 ---
 
-**版本**: v2.11.0
+**版本**: v2.12.0
 
 # ICode 全流程编码工作流（步骤 0 + 1~6）
 
@@ -228,7 +228,8 @@ ICODE_OUT_DIR=".icode_output/.icode_output_${LAST}"
 1. 检测 `project_path` 是否有 `.serena/project.yml`
 2. 无 → 调 `serena-doctor init <project_path>`（自动探测语言，配齐 language_servers）
 3. 已有 `.serena/` 但语言不全 → 调 `serena-doctor fix <project_path>`（补缺失语言 + C++ 软链）
-4. `serena-doctor` 不可用 → 跳过，按全局 CLAUDE.md 规则处理
+4. **目标代码位于子仓库/嵌套 git 仓库时**（`git -C <目标目录> rev-parse --show-toplevel` ≠ `project_path`）：对子仓库根同样执行 1-3（init/fix 子仓库路径），确保子仓库 `.serena/project.yml` 就绪——这是 v2.12 多 git 根激活的前置（详见 [references/anti_laziness.md](references/anti_laziness.md) 第 21 条 v2.12 段）
+5. `serena-doctor` 不可用 → 跳过，按全局 CLAUDE.md 规则处理
 
 **级别**：L4·参考（不影响流程，serena-doctor 可用时才执行）
 

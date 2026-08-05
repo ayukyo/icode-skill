@@ -32,7 +32,7 @@
 
 21. **跳过推荐 MCP（v2.2 二元化，v2.3 精简产物）**：按 [references/mcp_per_step.md](mcp_per_step.md) 推荐，**二元判定**（🟢 必须调 / ⚪ 不必调，**v2.2 消除 🟡"应该调"**）。强证据场景满足（MCP 在 `~/.claude.json` 注册 且 tool 在 deferred tools 列表 且 [mcp_per_step.md](mcp_per_step.md)「强证据场景判定」满足）但 AI 未实际调用 = 合规问题。**偷工表现**：①默认只调 sequential-thinking（必用项），其他 🟢 MCP 全部跳过；②把 🟢 看作"可选"不调用无降级声明；③未经实际调用就标"不适用"。**必须**：①按 [mcp_per_step.md](mcp_per_step.md)「强证据场景判定」判定 🟢/⚪；②🟢 满足强证据场景时**先实际调用**，调用返回错误/超时/空结果才标降级；③⚪ MCP（强证据场景不满足）无需调用无需声明；④**MCP 调用是 icode 工作流内部实现，产物文件（log_analysis.md / 00_init.md 等）不记录 MCP 调用信息**（v2.3 精简：消除 MCP 噪声对用户的干扰）。**反例**：plan 步骤 serena 🟢（有可索引源码）但 AI 只调 sequential-thinking，serena 跳过且无降级声明--属第 21 条违规。
 
-**v2.6 serena 硬强制增补（治"serena 经常没调用"）**：serena 从"推荐"升级为**代码事实验证门的前置强制步骤**。**serena 强证据场景**（满足即 🟢 必调，不调 = 本条违规）：①当前工程有可索引源码（git 仓库 + 代码文件 `.c`/`.cpp`/`.py`/`.ts`/`.go`/`.rs`/`.java` 等）；②且需符号/引用/定义/实现/模式查询（定位类/函数/变量定义、找谁调用 X、找接口的所有实现、跨文件模式检索）。**必调工具**：`mcp__serena__find_symbol`（定位定义）/ `find_referencing_symbols`（找引用方）/ `find_declaration`（找声明）/ `find_implementations`（找实现）/ `search_for_pattern`（模式检索，支持 glob 过滤）。**绑定点**：各 step「代码事实验证门」（log 阶段3 / plan / code / review / deepcheck）**必须先调 serena 再进对抗/编码**，仅 Read 实读不算替代（Read 是文本层，serena 是语义符号层，互补非替代）。**降级链**：serena（LSP 语义符号）-> ripgrep（文本）-> grep。**不必调场景**（⚪，需显式声明降级）：纯文档仓/无源码/纯配置分析/serena 未装或 LSP 不支持该语言。**降级声明格式**：`serena 不可用(<具体原因：未装/LSP 不支持 X 语言/无源码>)，降级为 ripgrep/grep`。**反例（v2.6）**：log 步骤定位根因涉及某跨线程锁持有链，AI 仅用 grep 搜关键词未调 `find_referencing_symbols` 追引用方 -> 漏掉跨文件持有者 -> 属第 21 条违规。
+**v2.6 serena 硬强制增补（治"serena 经常没调用"）**：serena 从"推荐"升级为**代码事实验证门的前置强制步骤**。**serena 强证据场景**（满足即 🟢 必调，不调 = 本条违规）：①当前工程有可索引源码（git 仓库 + 代码文件 `.c`/`.cpp`/`.py`/`.ts`/`.go`/`.rs`/`.java` 等；**目标代码位于子仓库/嵌套 git 仓库时按子仓库自身判定**——`git -C <目标目录> rev-parse --show-toplevel` 的实际 git 根 ≠ 当前激活项目根，子仓库有可索引源码同样满足，先激活子仓库再查，不得以"子仓库未被索引"直接降级，流程见 v2.12 段）；②且需符号/引用/定义/实现/模式查询（定位类/函数/变量定义、找谁调用 X、找接口的所有实现、跨文件模式检索）。**必调工具**：`mcp__serena__find_symbol`（定位定义）/ `find_referencing_symbols`（找引用方）/ `find_declaration`（找声明）/ `find_implementations`（找实现）/ `search_for_pattern`（模式检索，支持 glob 过滤）。**绑定点**：各 step「代码事实验证门」（log 阶段3 / plan / code / review / deepcheck）**必须先调 serena 再进对抗/编码**，仅 Read 实读不算替代（Read 是文本层，serena 是语义符号层，互补非替代）。**降级链**：serena（LSP 语义符号）-> ripgrep（文本）-> grep。**不必调场景**（⚪，需显式声明降级）：纯文档仓/无源码/纯配置分析/serena 未装或 LSP 不支持该语言。**降级声明格式**：`serena 不可用(<具体原因：未装/LSP 不支持 X 语言/无源码/子仓库未索引(activate_project <子仓库路径> 失败: <具体错误>)>)，降级为 ripgrep/grep`。**反例（v2.6）**：log 步骤定位根因涉及某跨线程锁持有链，AI 仅用 grep 搜关键词未调 `find_referencing_symbols` 追引用方 -> 漏掉跨文件持有者 -> 属第 21 条违规。
 
 **自检门（v2.6 新增，治"serena 经常没调用"）**：每个涉及代码的步骤（log/plan/code/review/deepcheck）末尾反偷懒自检**必须在思考块输出 serena 调用记录行**（不写入产物文件，对齐 v2.3 产物精简）：`serena 调用: <工具名(find_symbol/find_referencing_symbols/find_implementations/search_for_pattern) x N 次>` 或 `serena 降级: <具体原因>`。**无调用记录且无降级声明 = 第 21 条违规**（审计 grep `serena 调用` / `serena 降级` 核查，留痕是治本--规则有了但执行跳过的根因是无留痕不可追溯）。
 
@@ -42,6 +42,17 @@
 3. **激活失败**（报 No active project / 超时 / 返回空）-> 再按「降级链」走 ripgrep/grep
 4. **降级声明格式**：`serena 不可用(activate_project 失败: <具体错误>)，降级为 ripgrep/grep`
 **核心原则**：serena 工具在 deferred 列表中 → **必须先实际调用 activate_project**，未调 activate_project 就标"LSP 配置不确定"降级 = 第 21 条违规。**禁止凭"当前会话 LSP server 配置不确定"直接降级**——这是 v2.10 实测踩坑模式，AI 跳过 activate_project 直接 grep。
+
+**v2.12 serena 多 git 根激活（治"目标代码在子仓库未被索引"）**：serena 项目 = 一个 git 根一个 `.serena/project.yml`，一次只激活一个项目；父仓库 + 子仓库/嵌套 git 仓库（`repo` 管理多子仓库 / git submodule / 嵌套 `.git` 目录）场景下，当前激活项目的索引**不含**子仓库代码，`find_symbol` 查不到符号。此时**不可直接降级**，必须先激活目标代码所在的 git 根：
+
+1. **判定子仓库**：`git -C <目标代码目录> rev-parse --show-toplevel` 得实际 git 根；与当前激活项目根（`get_current_config` 或上次 `activate_project` 返回的 project 路径）比对，不一致 → 子仓库场景
+2. **配置就绪**：无 `<子仓库根>/.serena/project.yml` → 先 `serena-doctor init <子仓库根>`（语言不全则 `serena-doctor fix <子仓库根>`）
+3. **激活目标仓库**：ToolSearch 取 `mcp__serena__activate_project` schema -> 实际调用 `activate_project(project=<子仓库根>)`（工具支持传项目目录路径，与传注册名等效）
+4. **激活成功** -> 再调 `find_symbol`/`find_referencing_symbols` 等语义工具；查完**不强制切回**父项目，下次符号查询按目标代码所在 git 根重新判定，按需切换激活
+5. **激活失败**（报错/超时/返回空）-> 再按「降级链」走 ripgrep/grep
+6. **降级声明格式**：`serena 不可用(子仓库未索引: activate_project <子仓库根> 失败: <具体错误>)，降级为 ripgrep/grep`
+
+**核心原则**：目标代码在子仓库 → **必须先实际尝试激活子仓库**（含 serena-doctor init/fix 前置），未尝试激活就以"子仓库未被索引"标降级 = 第 21 条违规。**禁止凭"当前激活项目查不到子仓库符号"直接降级**——这是实测踩坑模式（C++ 子仓库未被索引，AI 直接降级 Read/Grep 而未尝试激活子仓库），与 v2.10 跳过 activate_project 同构。
 
 **v2.2 双保险强制触发**（治本"只触发 sequential-thinking"问题）：
 - **A 层·执行步骤内嵌**：serena 在 plan/code/deepcheck/doc/review 的执行步骤主体里有独立的"第 N 步"调用指令（非末尾推荐表），AI 顺序执行必然走到

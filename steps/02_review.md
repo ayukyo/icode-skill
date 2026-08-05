@@ -62,7 +62,7 @@
 **步骤 2.3 — 逐文件通读（必须先执行）**：
 从步骤1计划中识别所有涉及的文件（新建文件、修改文件、依赖文件），逐一通读。
 
-**serena 依赖审查（v2.2 执行步骤内嵌）**：若工程有可索引源码且 serena 可用，对计划涉及的每个待改符号，ToolSearch 取 `mcp__serena__find_referencing_symbols` schema -> 调用找所有调用方（"这个函数被哪些地方调用？"），结果作为维度6"现有实现对照"的依赖关系证据；serena 不可用/无 LSP -> 降级 grep `'<symbol>('`，降级说明只进思考块，不写入产物文件。**未经实际调用 serena 就标降级 = 反偷懒第 21 条违规。**步骤末尾按反偷懒第 21 条 v2.6 自检门输出 `serena 调用: <工具 x N>` 或 `serena 降级: <原因>`，无记录 = 违规****。
+**serena 依赖审查（v2.2 执行步骤内嵌）**：若工程有可索引源码且 serena 可用，对计划涉及的每个待改符号，ToolSearch 取 `mcp__serena__find_referencing_symbols` schema -> 调用找所有调用方（"这个函数被哪些地方调用？"），结果作为维度6"现有实现对照"的依赖关系证据；目标代码在子仓库/嵌套 git 仓库时（`git -C <dir> rev-parse --show-toplevel` ≠ 当前激活项目根），先 `serena-doctor init/fix` 子仓库根 + `activate_project(<子仓库根>)` 激活目标仓库再查（v2.12，详见 anti_laziness 第 21 条 v2.12 段）；激活失败才降级。serena 不可用/无 LSP -> 降级 grep `'<symbol>('`，降级说明只进思考块，不写入产物文件。**未经实际调用 serena 就标降级 = 反偷懒第 21 条违规。**步骤末尾按反偷懒第 21 条 v2.6 自检门输出 `serena 调用: <工具 x N>` 或 `serena 降级: <原因>`，无记录 = 违规****。
 - 对每个现有源文件，从头到尾阅读：函数/结构体/宏定义签名、调用关系、命名风格、错误处理模式
 - 对每个计划新建文件，列出其对外的接口承诺
 
@@ -119,7 +119,7 @@
 
 > **强证据场景判定**（v2.2 二元化，详见 [references/mcp_per_step.md §2 review](../references/mcp_per_step.md)）：
 >
-> - serena 🟢（`mcp__serena__find_symbol` 可用）
+> - serena 🟢（`mcp__serena__find_symbol` 可用；目标代码在子仓库时先按 v2.12 激活子仓库）
 > - cheap-research 🟢（`mcp__cheap-research__extract` 可用）
 > - **函数数 ≥ 50**（serena `find_symbol` 输出长度判定）
 >

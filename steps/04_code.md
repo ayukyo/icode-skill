@@ -58,7 +58,7 @@
 
 严格按定稿计划实施编码。
 
-**符号定位（serena 优先，v2.2 执行步骤内嵌）**：编码前对计划 §5 声明的待改符号，若工程有可索引源码且 serena 可用：ToolSearch 取 `mcp__serena__find_symbol` + `mcp__serena__find_referencing_symbols` schema -> `find_symbol` 定位待改符号 -> `find_referencing_symbols` 找所有调用点（按符号语义非文本匹配，比 grep 精准）-> 结果作为下方「准入三链预扫」的语义增强。serena 不可用/无 LSP -> 降级下方 grep 三链预扫，降级说明只进思考块，不写入产物文件。**未经实际调用 serena 就标降级 = 反偷懒第 21 条违规。**步骤末尾按反偷懒第 21 条 v2.6 自检门输出 `serena 调用: <工具 x N>` 或 `serena 降级: <原因>`，无记录 = 违规****。
+**符号定位（serena 优先，v2.2 执行步骤内嵌）**：编码前对计划 §5 声明的待改符号，若工程有可索引源码且 serena 可用：ToolSearch 取 `mcp__serena__find_symbol` + `mcp__serena__find_referencing_symbols` schema -> `find_symbol` 定位待改符号 -> `find_referencing_symbols` 找所有调用点（按符号语义非文本匹配，比 grep 精准）-> 结果作为下方「准入三链预扫」的语义增强。目标代码在子仓库/嵌套 git 仓库时（`git -C <dir> rev-parse --show-toplevel` ≠ 当前激活项目根），先 `serena-doctor init/fix` 子仓库根 + `activate_project(<子仓库根>)` 激活目标仓库再查（v2.12，详见 anti_laziness 第 21 条 v2.12 段）；激活失败才降级。serena 不可用/无 LSP -> 降级下方 grep 三链预扫，降级说明只进思考块，不写入产物文件。**未经实际调用 serena 就标降级 = 反偷懒第 21 条违规。**步骤末尾按反偷懒第 21 条 v2.6 自检门输出 `serena 调用: <工具 x N>` 或 `serena 降级: <原因>`，无记录 = 违规****。
 
 **准入（强制三链预扫，每条按 `文件:行号` 给出至少 1 条命中否则禁止 Edit）**：
 

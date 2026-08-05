@@ -23,7 +23,7 @@
 | MCP | 🟢 强证据场景（满足即必调） | ⚪ 否则 |
 |-----|---------------------------|--------|
 | **sequential-thinking** | 所有步骤（强制思考前置，已嵌入 thinking_core） | 无 |
-| **serena** | log/plan/code/deepcheck/doc/review 步骤 **且** 工程有可索引源码（.py/.ts/.js/.jsx/.tsx/.vue/.c/.cpp/.h/.rs/.go/.java/.kt 等，非空非 demo-skeleton）**且** log 步骤额外要求：根因假设涉及代码符号/引用/持有链/跨文件调用时必调（绑定「代码事实验证门」，仅 Read 不算替代）。**LSP 配置不确定时先调 activate_project 兜底**：serena 工具在 deferred 列表中但 LSP 状态未知时，必须先 `mcp__serena__activate_project` 激活当前工程，激活成功再调 find_symbol 等，激活失败才降级（详见 [anti_laziness.md](../references/anti_laziness.md)「v2.11 serena LSP 激活兜底」段） | 其余步骤 / 无可索引源码 |
+| **serena** | log/plan/code/deepcheck/doc/review 步骤 **且** 工程有可索引源码（.py/.ts/.js/.jsx/.tsx/.vue/.c/.cpp/.h/.rs/.go/.java/.kt 等，非空非 demo-skeleton）**且** log 步骤额外要求：根因假设涉及代码符号/引用/持有链/跨文件调用时必调（绑定「代码事实验证门」，仅 Read 不算替代）。**LSP 配置不确定时先调 activate_project 兜底**：serena 工具在 deferred 列表中但 LSP 状态未知时，必须先 `mcp__serena__activate_project` 激活当前工程，激活成功再调 find_symbol 等，激活失败才降级（详见 [anti_laziness.md](../references/anti_laziness.md)「v2.11 serena LSP 激活兜底」段）。**目标代码在子仓库/嵌套 git 仓库时同样先激活目标仓库**：`git -C <目标目录> rev-parse --show-toplevel` ≠ 当前激活项目根 → 无 `<子仓库根>/.serena/project.yml` 先 `serena-doctor init/fix <子仓库根>` → `activate_project(<子仓库根>)` 激活成功再查，激活失败才降级（v2.12 多 git 根激活，详见 [anti_laziness.md](../references/anti_laziness.md) 第 21 条 v2.12 段） | 其余步骤 / 无可索引源码 |
 | **context7** | init/plan/code 步骤 **且** 需求或代码涉及第三方库（package.json/Cargo.toml/go.mod/requirements.txt/pom.xml/build.gradle 等声明依赖，且需求触及该库 API） | 其余步骤 / 不涉及第三方库 |
 | **vision-bridge** | 任意步骤 **且** (a) 用户主动提供图片/截图/视频（会话中含媒体附件/路径，直接调） **或** (b) TB 缺陷源拉取的附件含视频/图片（`{ICODE_OUT_DIR}/tb_source/<ID>/` 下，**vision-bridge 可用则主动调**：视频先用 ffmpeg 本地提取关键帧再传图片帧给 vision-bridge 省钱——见 [steps/log.md](../steps/log.md)「附件分析（含本地路径 + TB 源）与 ffmpeg 抽帧」段） **或** (c) `/icode log` 本地日志目录含视频/图片文件（`find <log_dir> -type f \( -name '*.mp4' -o -name '*.mov' -o -name '*.png' -o -name '*.jpg' -o -name '*.jpeg' \)`，**vision-bridge 可用则主动调**，行为同 (b) 的 ffmpeg 抽帧流程） | vision-bridge 未安装 / `~/.claude/skills/icode/mcp/vision-bridge/config.json` 三件套未配齐 → 仅提示不主动调（防纯文字模型报错）；ffmpeg 不可用时降级为直接传视频（需用户确认，可能耗 API 额度） |
 | **playwright** | deepcheck/audit 步骤 **且** 前端工程（含 .html/.jsx/.tsx/.vue 或 package.json 含 react/vue） | CLI/后端/嵌入式工程 |
@@ -31,7 +31,8 @@
 | **cheap-research** | init/log/doc/plan/review/code/deepcheck/audit/readme 步骤 **且** 走单闸门入选的 22 个子任务（长上下文压缩 / 历史检索 / 模板填充 / 结构化提取 / 代码事实审计 / 模式扫描 / 符号追溯 / 差异摘要 / 文件名生成 / 模板选择 / schema 迁移 / 模块识别 / project_id 解析 / 远程拉取） | **不接管决策**：3 质疑者对抗 / 架构决策 / 终审裁决 / 修复方案 / 用户对话一律不走；推理敏感度中等的"灰区"也不走（零灰区原则）；merge/install/list 无入选子任务 |
 
 **判定执行**：
-- serena/context7 的"可索引源码"/"第三方库"探测：步骤 1 plan 开始时 `ls` 顶层 + grep 依赖文件，结果写入 `01_plan.md` §1.5；**log 步骤开始时同样探测**（根因假设涉及代码时按相同判定走 serena 强证据场景），结果写入 `log_analysis.md §2.0`
+
+- serena/context7 的"可索引源码"/"第三方库"探测：步骤 1 plan 开始时 `ls` 顶层 + grep 依赖文件，结果写入 `01_plan.md` §1.5；**log 步骤开始时同样探测**（根因假设涉及代码时按相同判定走 serena 强证据场景），结果写入 `log_analysis.md §2.0`。**子仓库场景**：目标代码在嵌套 git 仓库时（`git -C <目标目录> rev-parse --show-toplevel` ≠ 当前项目根），按子仓库自身判定可索引性（有 `.serena/project.yml` 或可 `serena-doctor init` 即可索引），结果同样写入 §1.5 / §2.0
 - memory 的工单数探测：Read `~/.claude/icode_data/index.json` 按本工程 project_path 计数
 - vision-bridge/playwright 的工程类型/媒体探测：按会话上下文 + 工程文件判定
 
@@ -73,12 +74,12 @@
 - **context7**：库 API 行为查证——仅涉及第三方库行为时
 - **vision-bridge**：TB 附件视频/图片主动分析 + 本地日志视频/图片分析——TB 拉取的附件含视频/图片时 **vision-bridge 可用则主动调**（视频先用 ffmpeg 本地提取关键帧再传图片帧省钱，详见 [steps/log.md](../steps/log.md)「附件分析（含本地路径 + TB 源）与 ffmpeg 抽帧」）；用户主动给截图时直接调；本地日志目录含视频/图片文件时扫目录后主动调。vision-bridge 不可用时仅提示附件清单不主动调（防纯文字模型报错）
 
-- **serena**：根因涉及的代码符号/引用/持有链定位（`find_symbol` 定位定义 / `find_referencing_symbols` 找谁调用 / `find_implementations` 找实现 / `search_for_pattern` 模式检索）--根因假设涉及代码行为时**必调**（绑定 log 阶段3「代码事实验证门」，仅 Read 实读不算替代：Read 是文本层，serena 是语义符号层，互补非替代）。有可索引源码时必调；serena 不可用（未装/LSP 不支持该语言/无源码）降级 ripgrep/grep 并显式声明 `serena 不可用(<原因>)，降级 ripgrep/grep`
+- **serena**：根因涉及的代码符号/引用/持有链定位（`find_symbol` 定位定义 / `find_referencing_symbols` 找谁调用 / `find_implementations` 找实现 / `search_for_pattern` 模式检索）--根因假设涉及代码行为时**必调**（绑定 log 阶段3「代码事实验证门」，仅 Read 实读不算替代：Read 是文本层，serena 是语义符号层，互补非替代）。有可索引源码时必调；serena 不可用（未装/LSP 不支持该语言/无源码）降级 ripgrep/grep 并显式声明 `serena 不可用(<原因>)，降级 ripgrep/grep`；目标代码在子仓库/嵌套 git 仓库时先激活目标仓库再查（v2.12，判定见上方 serena 行）
 
 - **cheap-research**（🟢*）：长上下文压缩（log 阶段 0/1/2）+ 8.6 memory 沉淀 + TB 缺陷源拉取（`fetch_remote`）。**不接管决策**：阶段 3 链路图分析 / 阶段 4 根因假设 / 阶段 6+7 对抗分析 / 阶段 8 修复建议 / 追问机制一律不走（高风险子任务）
 
 ### doc（工程知识库生成）
-- **serena**：理解代码结构（入口/API/IPC）——有可索引源码时，**比 Read 精准 10 倍**
+- **serena**：理解代码结构（入口/API/IPC）——有可索引源码时，**比 Read 精准 10 倍**；目标代码在子仓库时先激活子仓库（v2.12）
 - **vision-bridge**：截图分析——仅用户给图时
 - **cheap-research**（🟢*）：项目代码事实审计（`audit_facts`） + 章节模板填充（`fill_template`）+ 进度输出（`fill_template`）+ 6 级模块识别（`scan_modules`）+ 增量判定（`scan_patterns`/`diff_summary`）+ 远程依赖 README 拉取（`fetch_remote` 拉模块仓库 README 作为模块文档参考输入）。**不接管决策**：意图识别走主会话（推理敏感度中等），把控"该写哪章"的决策
 
@@ -91,7 +92,7 @@
 
 - **cheap-research**（🟢*）：跨工程代码事实审计（`audit_facts` 抽取 README/CLAUDE.md/入口文件关键事实）+ 历史 ADR 检索（`retrieve_similar` 从全局索引找相似工单的 ADR+风险）+ schema 迁移（`apply_migration` 生成 ops 不执行）。**不接管决策**：4 维度设计态固化 / 风险评估 / 接口误用预审 / 端到端路径推演走主会话（推理敏感/中风险灰区不做）
 ### 2 review（审查）
-- **serena**：依赖关系审查（"这个函数被哪些地方调用？"）——有可索引源码时
+- **serena**：依赖关系审查（"这个函数被哪些地方调用？"）——有可索引源码时；目标代码在子仓库时先激活子仓库（v2.12）
 - **vision-bridge**：截图分析——仅用户给图时
 
 

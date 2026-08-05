@@ -66,6 +66,7 @@
 - **强证据**：`mcp__serena__find_symbol` / `mcp__serena__find_referencing_symbols` / `mcp__serena__replace_symbol_body` / `mcp__serena__insert_after_symbol`
 - **降级**：`Read <file>` + `Grep "<pattern>"`（无符号语义，按文本匹配）
 - **触发场景**：步骤 1 plan（理解代码结构）、步骤 4 code（按符号编辑）、步骤 5 deepcheck（找所有调用点）
+- **多 git 根（v2.12）**：目标代码在子仓库/嵌套 git 仓库时（`git -C <dir> rev-parse --show-toplevel` ≠ 当前激活项目根），先 `serena-doctor init/fix` 子仓库根 + `activate_project(<子仓库根>)` 激活目标仓库再查，激活失败才降级（详见 anti_laziness 第 21 条 v2.12 段）
 - **⚠️ 依赖**：Python 3.10+ + uv + LSP server（`pyright` / `typescript-language-server` 等）
 - **⚠️ 启动慢**：首次跑 `uvx --from git+...` 需 git clone + 装包约 30s，**之后缓存秒启**
 - **安装**：首次跑 `mcp/install.sh` 会**主动装 uv**（参见 [install.sh 主动安装逻辑](../mcp/serena/install.sh)）
