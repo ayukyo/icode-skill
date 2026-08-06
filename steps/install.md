@@ -19,7 +19,7 @@ icode 工作流强依赖 MCP（每个 mcp 子工程自带 `install.sh` 提供一
 | **context7** | npm | 库文档实时查询，步骤 0/1/4 | ❌ |
 | **serena** | Python + uv | LSP 语义编码，步骤 1/4/5 | ❌ |
 | **playwright** ⚠️ | npm | 浏览器自动化，步骤 5/6（**仅前端项目**） | ❌ |
-| **cheap-research** | Python venv | 便宜 LLM 推理降本（22 子任务），未装走 Agent(model="haiku") 兜底 | ✅ 推荐装（需 KEY） |
+| **cheap-research** | Python venv | 便宜 LLM 推理降本（23 子任务），未装走 Agent(model="haiku") 兜底 | ✅ 推荐装（需 KEY） |
 
 > 完整说明见各 `mcp/<name>/README.md`。**vision-bridge 和 cheap-research 是我们自研的、需配 KEY（三件套）才能用**。其余无需 KEY 即可安装（serena 仅需 Python ≥ 3.10 + uv）。
 >

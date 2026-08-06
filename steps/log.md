@@ -128,6 +128,14 @@
    - **对照组**：捕捉重启前后/正常段vs异常段/同条件不同结果——对照组是定性"设备端 vs 环境"的铁证
    - **零号病人**：找首次异常出现的时刻，以及它之前的先兆
    - **TB 评论研读（若有 TB 源，强制逐条不漏）**：若步骤1 拉取了 TB 缺陷源，Read `{ICODE_OUT_DIR}/tb_source/<ID>/<ID>_meta.json`，**逐条遍历 `comments[]` 数组**（不得只读前几条、不得跳过），每条取 `content.comment`（评论正文）、`content.creator`（评论人）、`created`（评论时间）三字段；`title`/`note` 为缺陷描述。**评论常含复现步骤/现象描述/排查记录/关键时间点/日志原文片段**（评论里可能直接贴了形如 `[节点] [级别] [文件:行] 原文` 的日志行加发生时刻），这些时间点与日志原文**必须回捞进本阶段「现场时间线」表**并标注来源「TB评论：评论人 时间」，作为症状补充证据纳入现场还原与对抗分析。**附件型评论**（`action=activity.comment.attachments`，`content.comment` 为空但 `content.files[]` 非空）不得当无评论跳过，须识别附件名（如「根因分析报告.md」）并提示已落盘可 Read。复用场景下对比 `*_meta.prev.json` 识别新增评论。**完整性自检**：研读完成后立即核对「已分析评论条数 == meta.json `comments[]` 长度」（写报告前再兜底一次），漏条视为不合规
+   - **TB 评论预提取（可选加速，cheap-research extract，v2.14 新增）**：评论数 ≥ 8 条（`comments[]` 长度）**且** cheap-research 可用（MCP 已装 + `config.json` 三件套已配）时，先调 `mcp__cheap-research__extract` 批量预提取评论要点，主会话再基于预提取结果回读高价值评论原文——省逐条通读 token，**不降低证据完整性**（完整性自检 + 高价值回读双保留，不违反反偷懒第 23 条）：
+     - **分批**：评论数组序列化文本按 **8000 字符**分批（extract 的 `text` 参数自动截断到 8000 字符，超长必须分批，每批调一次），`index` 字段贯穿原始 `comments[]` 下标
+     - **schema**（wrapper object 模式，防 array-of-objects 退化，已实测验证）：`{"type":"object","properties":{"results":{"type":"array","items":{"type":"object","properties":{"index":{"type":"integer"},"creator":{"type":"string"},"created":{"type":"string"},"key_points":{"type":"array","items":{"type":"string"}},"log_snippets":{"type":"array","items":{"type":"string"}},"evidence_timepoints":{"type":"array","items":{"type":"string"}}},"required":["index","creator","key_points"]}}},"required":["results"]}`
+     - **instruction 必含**："每条评论提取 index / creator / created / key_points(核心要点数组，含复现步骤/怀疑方向/补充信息，每条 ≤30 字) / log_snippets(评论中引用的日志原文片段，逐字保留) / evidence_timepoints(关键时间点)；不要漏任何一条评论"
+     - **解析容错**（同 §2.5.7 模式）：extract 返回的数组字段为 string 时按 `|` 拆分（主代理 try 链式解析）；`schema_validation_failed` → 重试 1 次（instruction 加"严格按 schema 输出"）→ 仍失败 → 该批降级主会话逐条读
+     - **完整性自检不变**（防委托后漏条）：预提取后仍核对「已分析评论条数 == meta.json `comments[]` 长度」——extract 结果缺失的 `index` 对应评论必须主会话 Read 原文补齐（补读算已分析）
+     - **高价值评论强制回读原文**：含复现步骤/日志原文片段/关键时间点的评论，主会话必须 Read 原文确认后再回捞进「现场时间线」（预提取只作草稿，回捞以原文为准）
+     - **降级**：cheap-research 不可用 / extract 失败 → 主会话逐条读（现有路径，行为 100% 一致）
    - **TB 视频/图片附件研读（vision-bridge 可用则主动调,与 TB 评论研读并列）**：若 TB 缺陷源附件含视频(`*.mp4`/`*.mov`/`*.avi` 等)/图片(`*.png`/`*.jpg`/`*.jpeg` 等),**vision-bridge 可用时主动逐个调** `mcp__vision-bridge__analyze_media`(视频先用 ffmpeg 本地提取关键帧省钱——见「附件分析（含本地路径 + TB 源）与 ffmpeg 抽帧」段);或复用 §1 已落盘的附件分析结果但须独立回捞证据点。**视频/图片里提取的时间点(界面时钟)+ 现象描述 + 用户操作 + APP 状态必须回捞进「现场时间线」表**并标注来源「TB附件:<文件名> <时间点>」,与 TB 评论来源并列、交叉验证。**完整性自检**(vision-bridge 可用时适用):「已分析附件数 == meta.json `files[]` 中视频/图片附件数」(漏个视为不合规,反偷懒第 23 条);复用场景下对比 `*_meta.prev.json` 识别新增附件;vision-bridge 不可用时仅记录附件清单不适用本自检
    - 产出「前序场景状态链 + 现场时间线」双表，写入 `log_analysis.md §3.1/§3.2`
 7. **阶段3 对抗根因分析**（复用 icode 步骤2 对抗模式：分析师+3质疑者+裁决优先级+诚实降级）：
@@ -460,7 +468,7 @@
 | context7 | 🟢* | 库 API 行为查证--涉及第三方库时 |
 | vision-bridge | 🟢* | 错误截图分析 + 本地日志视频/图片分析--用户给截图或本地日志目录含视频/图片时 |
 | memory | 🟢* | read_graph 查跨工单记忆--本工程有历史工单时 |
-| **cheap-research** | 🟢* | **降本甜点**：summarize（阶段 0/1/2 长上下文压缩：输入采集+基线检查+日志侦察）+ extract（8.6 memory 沉淀）+ fetch_remote（TB 缺陷源拉取）+ fill_template（TB 评论回复）。不接管决策：阶段 3 链路图/阶段 4 根因假设/阶段 6+7 对抗/阶段 8 修复建议/追问机制走主会话（高风险） |
+| **cheap-research** | 🟢* | **降本甜点**：summarize（阶段 0/1/2 长上下文压缩：输入采集+基线检查+日志侦察）+ extract（8.6 memory 沉淀 + 阶段2 TB 评论预提取，评论 ≥ 8 条时）+ fetch_remote（TB 缺陷源拉取）+ fill_template（TB 评论回复）。不接管决策：阶段 3 链路图/阶段 4 根因假设/阶段 6+7 对抗/阶段 8 修复建议/追问机制走主会话（高风险） |
 | serena | 🟢* | 根因涉及代码符号/引用/持有链定位（代码事实验证门，步骤3 内嵌） |
 | playwright | ⚪ | 本步骤不推荐 |
 

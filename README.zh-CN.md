@@ -65,7 +65,7 @@ cd ~/.claude/skills/icode/mcp/vision-bridge
 
 为降低主会话的 token 消耗，cheap-research 把"长上下文压缩 / 历史检索 / 模板填充 / 结构化提取"等子任务**转交便宜模型**（仍走 `mcp__cheap-research__*` 工具）。**不接管决策**：3 质疑者对抗 / 架构决策 / 终审裁决 / 修复方案一律不交给 cheap-research。
 
-**入选条件**（单闸门）：价值 ≥ 3 ★ + 低风险 = 22 个子任务入选，覆盖 log / doc / readme / init / plan / review / start / fast 等入口。
+**入选条件**（单闸门）：价值 ≥ 3 ★ + 低风险 = 23 个子任务入选（含 TB 评论预提取），覆盖 log / doc / readme / init / plan / review / start / fast 等入口。
 
 ### 安装 cheap-research
 

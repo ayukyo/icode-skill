@@ -28,7 +28,7 @@
 | **vision-bridge** | 任意步骤 **且** (a) 用户主动提供图片/截图/视频（会话中含媒体附件/路径，直接调） **或** (b) TB 缺陷源拉取的附件含视频/图片（`{ICODE_OUT_DIR}/tb_source/<ID>/` 下，**vision-bridge 可用则主动调**：视频先用 ffmpeg 本地提取关键帧再传图片帧给 vision-bridge 省钱——见 [steps/log.md](../steps/log.md)「附件分析（含本地路径 + TB 源）与 ffmpeg 抽帧」段） **或** (c) `/icode log` 本地日志目录含视频/图片文件（`find <log_dir> -type f \( -name '*.mp4' -o -name '*.mov' -o -name '*.png' -o -name '*.jpg' -o -name '*.jpeg' \)`，**vision-bridge 可用则主动调**，行为同 (b) 的 ffmpeg 抽帧流程） | vision-bridge 未安装 / `~/.claude/skills/icode/mcp/vision-bridge/config.json` 三件套未配齐 → 仅提示不主动调（防纯文字模型报错）；ffmpeg 不可用时降级为直接传视频（需用户确认，可能耗 API 额度） |
 | **playwright** | deepcheck/audit 步骤 **且** 前端工程（含 .html/.jsx/.tsx/.vue 或 package.json 含 react/vue） | CLI/后端/嵌入式工程 |
 | **memory** | init/plan 步骤 **且** 本工程历史工单数 ≥ 1（`~/.claude/icode_data/index.json` 中本 project_path 工单数 ≥ 1） | 新工程首个工单 / demo |
-| **cheap-research** | init/log/doc/plan/review/code/deepcheck/audit/readme/patch 步骤 **且** 走单闸门入选的 22 个子任务（长上下文压缩 / 历史检索 / 模板填充 / 结构化提取 / 代码事实审计 / 模式扫描 / 符号追溯 / 差异摘要 / 文件名生成 / 模板选择 / schema 迁移 / 模块识别 / project_id 解析 / 远程拉取） | **不接管决策**：3 质疑者对抗 / 架构决策 / 终审裁决 / 修复方案 / 用户对话一律不走；推理敏感度中等的"灰区"也不走（零灰区原则）；merge/install/list 无入选子任务 |
+| **cheap-research** | init/log/doc/plan/review/code/deepcheck/audit/readme/patch 步骤 **且** 走单闸门入选的 23 个子任务（长上下文压缩 / 历史检索 / 模板填充 / 结构化提取 / TB 评论预提取 / 代码事实审计 / 模式扫描 / 符号追溯 / 差异摘要 / 文件名生成 / 模板选择 / schema 迁移 / 模块识别 / project_id 解析 / 远程拉取） | **不接管决策**：3 质疑者对抗 / 架构决策 / 终审裁决 / 修复方案 / 用户对话一律不走；推理敏感度中等的"灰区"也不走（零灰区原则）；merge/install/list 无入选子任务 |
 
 **判定执行**：
 
@@ -77,7 +77,7 @@
 
 - **serena**：根因涉及的代码符号/引用/持有链定位（`find_symbol` 定位定义 / `find_referencing_symbols` 找谁调用 / `find_implementations` 找实现 / `search_for_pattern` 模式检索）--根因假设涉及代码行为时**必调**（绑定 log 阶段3「代码事实验证门」，仅 Read 实读不算替代：Read 是文本层，serena 是语义符号层，互补非替代）。有可索引源码时必调；serena 不可用（未装/LSP 不支持该语言/无源码）降级 ripgrep/grep 并显式声明 `serena 不可用(<原因>)，降级 ripgrep/grep`；目标代码在子仓库/嵌套 git 仓库时先激活目标仓库再查（v2.12，判定见上方 serena 行）
 
-- **cheap-research**（🟢*）：长上下文压缩（log 阶段 0/1/2）+ 8.6 memory 沉淀 + TB 缺陷源拉取（`fetch_remote`）。**不接管决策**：阶段 3 链路图分析 / 阶段 4 根因假设 / 阶段 6+7 对抗分析 / 阶段 8 修复建议 / 追问机制一律不走（高风险子任务）
+- **cheap-research**（🟢*）：长上下文压缩（log 阶段 0/1/2）+ 8.6 memory 沉淀 + TB 缺陷源拉取（`fetch_remote`）+ **阶段2 TB 评论预提取**（`extract`，评论 ≥ 8 条时批量预提取要点，主会话回读高价值评论原文；详见 [steps/log.md](../steps/log.md)「TB 评论预提取」段）。**不接管决策**：阶段 3 链路图分析 / 阶段 4 根因假设 / 阶段 6+7 对抗分析 / 阶段 8 修复建议 / 追问机制一律不走（高风险子任务）
 
 ### doc（工程知识库生成）
 - **serena**：理解代码结构（入口/API/IPC）——有可索引源码时，**比 Read 精准 10 倍**；目标代码在子仓库时先激活子仓库（v2.12）

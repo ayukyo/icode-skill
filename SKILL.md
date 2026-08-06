@@ -3,7 +3,7 @@ name: icode
 description: 端到端编码工作流（步骤 0~6，含可选需求初稿步骤与日志根因分析入口），支持分步手动调用：/icode help (帮助), /icode install (MCP 环境检查+一键安装), /icode init [<粗略需求>] (需求初稿), /icode log [零散信息...] (日志根因分析→转修复需求), /icode start <需求> (全流程), /icode fast <需求> (精简全流程), /icode plan <需求> (计划), /icode review [N] (审查), /icode merge (定稿), /icode code (编码), /icode deepcheck (复检), /icode audit (终审), /icode patch [问题或新需求] (追加修改：主流程后/中途继续改), /icode doc [自然语言] (工程级知识库生成), /icode limit [自然语言] (项目约束红线), /icode readme (交付报告), /icode status (工单状态), /icode list [关键词] (跨工程工单查找)
 ---
 
-**版本**: v2.13.0
+**版本**: v2.14.0
 
 # ICode 全流程编码工作流（步骤 0 + 1~6）
 
@@ -592,7 +592,7 @@ icode 工作流可调用 7 个 MCP（`/icode install` 一键安装）。**v2.2 �
 | **vision-bridge** | 图片/视频理解 | 任意步骤 + 用户给图(直接调) / TB 缺陷源附件含视频/图片时 **vision-bridge 可用则主动调**(视频先用 ffmpeg 本地抽帧省钱；不可用时仅提示不主动调，防纯文字模型报错)，详见 [steps/log.md](steps/log.md)「附件分析（含本地路径 + TB 源）与 ffmpeg 抽帧」 | B 层·thinking_core gate |
 | **playwright** | 浏览器自动化 | deepcheck/audit + 前端工程 | B 层·thinking_core gate |
 | **memory** | 跨工单记忆 | init/plan + 本工程有历史工单 | B 层·thinking_core gate |
-| **cheap-research** | 便宜 LLM 推理（降本） | init/log/doc/plan/review/code/deepcheck/audit/readme + 单闸门入选的 22 个子任务（长上下文压缩/历史检索/模板填充/结构化提取/代码事实审计/模式扫描/符号追溯/差异摘要等）；未装走 Agent(model="haiku") 兜底。**不接管决策**：3 质疑者对抗/架构决策/终审裁决/修复方案一律不走（零灰区原则） | B 层·thinking_core gate + 执行步骤内嵌 |
+| **cheap-research** | 便宜 LLM 推理（降本） | init/log/doc/plan/review/code/deepcheck/audit/readme + 单闸门入选的 23 个子任务（长上下文压缩/历史检索/模板填充/结构化提取/TB 评论预提取/代码事实审计/模式扫描/符号追溯/差异摘要等）；未装走 Agent(model="haiku") 兜底。**不接管决策**：3 质疑者对抗/架构决策/终审裁决/修复方案一律不走（零灰区原则） | B 层·thinking_core gate + 执行步骤内嵌 |
 
 > cheap-research 跟 vision-bridge 模式完全对齐（用户自己配 URL/KEY/模型，不锁平台），详见 [mcp/cheap-research/README.md](mcp/cheap-research/README.md) + [references/mcp_integration.md](references/mcp_integration.md) ⑦ 段 + [references/mcp_per_step.md](references/mcp_per_step.md) 矩阵。
 

@@ -23,7 +23,7 @@ ICode is a Claude Code Skill that breaks the journey from requirement to deliver
 | Reusing past decisions | Every ticket starts cold | Cross-project history retrieval with a global index + **verdict-based anti-misleading injection** (disproved tickets inject the trap, not the ADR) |
 | Project knowledge | None | `/icode doc` generates a global per-project/branch knowledge base, auto-injected at phase zero |
 | Crash recovery | Restart from scratch | `.ico_metadata.json` status + round counters enable resumable runs at any step |
-| Cost control | Everything on the main model | `cheap-research` offloads 22 low-risk sub-tasks to cheap models; `/icode fast` ≈ 65% of full-flow cost |
+| Cost control | Everything on the main model | `cheap-research` offloads 23 low-risk sub-tasks to cheap models; `/icode fast` ≈ 65% of full-flow cost |
 | Model freedom | Manual | Every step is a separate command, so you can switch models between steps |
 
 ## Quick Start
@@ -136,7 +136,7 @@ cd ~/.claude/skills/icode/mcp/cheap-research
 # restart Claude Code to take effect
 ```
 
-Offloads 22 low-risk sub-tasks (long-context compression / history retrieval / template filling / structured extraction / code-fact audit / pattern scanning / symbol tracing / diff summaries) to a cheap model. It **never takes over decisions** — 3-skeptic adversarial verification, architecture decisions, final audit, and fix proposals stay on the main session (zero gray area).
+Offloads 23 low-risk sub-tasks (long-context compression / history retrieval / template filling / structured extraction / TB-comment pre-extraction / code-fact audit / pattern scanning / symbol tracing / diff summaries) to a cheap model. It **never takes over decisions** — 3-skeptic adversarial verification, architecture decisions, final audit, and fix proposals stay on the main session (zero gray area).
 
 ## Commands
 
