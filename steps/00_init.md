@@ -369,4 +369,17 @@
 | serena | ⚪ | 本步骤不推荐 |
 | playwright | ⚪ | 本步骤不推荐 |
 
+**vision-bridge 触发与降级判定（init 专用）**：
+
+`🟢*` 标签需**显式判定**后才执行 ToolSearch——防止"用户文字描述截图"被误判为"已传图"而触发空调用报错（实测盲区，纯文本模型或 vision-bridge 未装时必现）。复用模式见用户级 skill `tb-attachment-default-hint` 的 Variant B 段。
+
+- **触发条件**：用户**实际传图**（系统消息含媒体附件 / 用户消息含本地图片路径 / 用户消息引用了前序消息中的图片）。**仅文字描述"截图/设计图"无实际附件 → 不触发**。
+- **可用性判定**（三项全满足才调，任一缺失即降级）：
+  1. Read `~/.claude.json` 的 `mcpServers.vision-bridge` 段存在
+  2. 系统提示 deferred tools 列表含 `mcp__vision-bridge__analyze_media`
+  3. Read `~/.claude/skills/icode/mcp/vision-bridge/config.json` 三件套（`base_url` / `api_key` / `model`）已填
+- **可用** → ToolSearch 取 schema → 调 `mcp__vision-bridge__analyze_media` 识别图片，结果写入 §2 现状盘点或 §3 需求点（按内容归属）
+- **不可用** → 仅在思考块写 `vision-bridge 不可用(<具体缺失项>)，用户图片未分析`，**不视为违规、不阻塞流程**
+- **不触发**（最常见）：用户仅文字描述"截图/设计图"无实际附件 → 🟢* → ⚪，不评估不声明
+
 **强制约束（v2.2）**：🟢/🟢*/⚪ 语义 + 双保险机制（执行步骤内嵌 + thinking_core gate）详见 [SKILL.md「MCP 调用覆盖强制化」](../SKILL.md) + [references/mcp_per_step.md「双保险机制」](../references/mcp_per_step.md)；本步骤表内的 🟢/🟢* 标注按上方真源判定。
