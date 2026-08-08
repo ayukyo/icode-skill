@@ -54,6 +54,8 @@
 
 **核心原则**：目标代码在子仓库 → **必须先实际尝试激活子仓库**（含 serena-doctor init/fix 前置），未尝试激活就以"子仓库未被索引"标降级 = 第 21 条违规。**禁止凭"当前激活项目查不到子仓库符号"直接降级**——这是实测踩坑模式（C++ 子仓库未被索引，AI 直接降级 Read/Grep 而未尝试激活子仓库），与 v2.10 跳过 activate_project 同构。
 
+**v2.16 repo 多 git 根 git 操作（补本条 v2.12 的 git grep/log 层，治「主仓库 0 命中误判不存在」）**：v2.12 管 serena 语义检索，本条管 **git 命令行检索**。repo 管理多子仓库场景，主仓库 `git grep` / `git log -S` 对子仓库代码**必然 0 命中**（子仓库被主仓库 `.gitignore`，`.git` 是指向子仓库真实 git 目录的符号链接）——主仓库检索 0 命中**不能判定「不存在」**，须 `grep -r` 扫子仓库路径或 `git -C <子仓>` 在子仓库内检索。**判断功能何时引入/部署产物含某版本，用 `git -C <子仓> log/show <hash>`，禁止用源码 mtime 推断**（mtime 只反映工作区最后编辑，不反映 git 历史/编译时刻；mtime 推断为间接推断，须标不确定性，细则见 [adversarial.md](adversarial.md)「证据获取方法可靠性约束」）。
+
 **v2.2 双保险强制触发**（治本"只触发 sequential-thinking"问题）：
 - **A 层·执行步骤内嵌**：serena 在 plan/code/deepcheck/doc/review 的执行步骤主体里有独立的"第 N 步"调用指令（非末尾推荐表），AI 顺序执行必然走到
 - **B 层·thinking_core MCP gate**：[thinking_core.md](thinking_core.md) 通用流程第 3 步--思考块先列本步 🟢 MCP（不含 sequential-thinking/serena）-> ToolSearch 取 schema -> 实际调用一次 -> 结果进思考块。覆盖 context7/memory/vision-bridge/playwright
