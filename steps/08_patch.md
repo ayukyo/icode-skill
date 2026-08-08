@@ -1,6 +1,6 @@
 # 步骤 8（独立步骤）— 追加修改 patch
 
-**命令**: `/icode patch [问题描述或新需求...]`
+**命令**: `/icode patch [问题描述或新需求...]`（可选 `--listen` → 阶段 4「1.5 实机部署验证」，连设备部署 + 轮询监听 + 增量分析；无 `--listen` 默认跳过 1.5）
 **产出**: `{ICODE_OUT_DIR}/08_patch.md`（追加式，每次调用追加一个 `Patch N` 段）
 **会话**: 主会话
 
@@ -201,6 +201,15 @@ LAST=$(ls -d .icode_output/.icode_output_* 2>/dev/null | grep -oP '(?<=\.icode_o
 **强制思考前置**（不可跳过）：本步骤子项（至少 3 步）= 列本次修改点 → 逐点预判破坏面 → 定复检断言（**分析验证型分支**：= 列分析结论 → 预判结论薄弱点 → 定反向质疑策略）
 
 1. **编译验证 + 测试验证**：与 [04_code.md](04_code.md)「强制操作」段同规则——编译最多 3 次；通过后探测并跑测试（`metadata.test_cmd` 存在则直接复用，缺失则按 04_code 探测规则）；退出码捕获防管道误判（重定向输出到临时文件再读，禁 `| tail` 后取 `$?`）。**分析验证型分支**：免编译/测试，改为「结论验证」（见阶段 2 分支判定）
+
+**1.5 实机部署验证（`/icode patch --listen` 触发）**：
+- **触发**：仅当 `/icode patch --listen` 调用时执行；无 `--listen` → 跳过 1.5（保持可选，不阻断）
+- **读配置**：Read `~/.claude/icode_data/device_config/<project_id>.json`（**单文件多连接**，模板 [templates/device_config.json.template](../templates/device_config.json.template)）。文件不存在或 `deploy_enabled=false` → **不静默跳过**，提示"⚠️ `--listen` 显式要求实机验证，需在 `~/.claude/icode_data/device_config/<project_id>.json` 配置连接（或去掉 `--listen`）"
+- **部署**：按 `connections[].deploy` 命令部署编译产物到设备——**deploy 是配置项**（用户填真实命令，SKILL 不预设），按需选 connection（adb / ssh / serial）
+- **轮询监听 LOG**：按 `connections[].log` 命令**轮询拉取新增 LOG**（ssh 场景通常看**某目录下多份文件**——log 命令应覆盖该目录全部相关文件，如 `ls <log_dir>/*.log` 或多文件合并）——AI 回合制无法真·阻塞监听，用"快照对比增量"：**对每份文件**取上次快照之后的新增行，禁伪实时
+- **增量分析**：每批新增 LOG 增量分析，验证部署后行为（关键状态 / 数据链路 / 告警），异常点记录 file:line 证据
+- **衔接**：部署后分析发现问题 → 走阶段 2 v2.14「部署后验证发现型」分支
+
 2. **反向验证清单（固定表格，禁止只写"编译通过"）**——每条检查项必须给 file:line 证据（或显式写"不涉及"），写进 Patch N 段「验证」小节：
 
    | 检查项 | 证据（file:line） | 结论 |

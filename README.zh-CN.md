@@ -141,7 +141,7 @@ cd ~/.claude/skills/icode/mcp/cheap-research
 | `/icode deepcheck` | 仅步骤 5：三阶段递进复检（Reverse → Fixed → Free） |
 | `/icode audit` | 仅步骤 6：终极终审 + 统一修复（产出 `06_audit.md`） |
 | `/icode readme` | 可选步骤 7：生成交付报告（面向人的自包含总结） |
-| `/icode patch [问题或新需求]` | 追加修改（独立步骤）：主流程后/中途继续改——测试发现问题 / 新需求，在既有工单上打补丁。轻量四段式（重审现状→增量计划→最小实施→反向复检），靠磁盘产物重载上下文（换会话可继续），产出 `08_patch.md` 追加式 |
+| `/icode patch [问题或新需求]` | 追加修改（独立步骤）：主流程后/中途继续改——测试发现问题 / 新需求，在既有工单上打补丁。轻量四段式（重审现状→增量计划→最小实施→反向复检），靠磁盘产物重载上下文（换会话可继续），产出 `08_patch.md` 追加式；可选 `--listen` → 实机部署验证（连设备部署 + 轮询监听 LOG + 增量分析；先配 `~/.claude/icode_data/device_config/<project_id>.json`，模板 `templates/device_config.json.template`，单文件多连接 adb/ssh/串口） |
 | `/icode doc [自然语言]` | 工程级知识库生成（独立步骤）：扫描代码特征生成全局知识库章节，供段零自动检索注入 |
 | `/icode limit [自然语言]` | 项目约束红线（独立步骤）：定义和维护本工程的红线/约束/禁区。主存全局 + 单 checkout 覆盖（自动 gitignore），追加式演进。plan 步骤引用作为硬基线 |
 | `/icode status` | 只读：查当前工单状态 |

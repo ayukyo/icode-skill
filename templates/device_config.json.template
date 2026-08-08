@@ -1,0 +1,33 @@
+{
+  "project_id": "<project_id>",
+  "device_config": {
+    "deploy_enabled": false,
+    "note": "安装本 SKILL 后，复制本模板到 ~/.claude/icode_data/device_config/<project_id>.json 并填写真实值。deploy_enabled=false 时 patch 跳过实机部署验证（可选）。deploy/log 均为配置项，由用户按工程实际情况填写。支持单个连接或多个连接，patch 验证时按 name 选用。",
+    "connections": [
+      {
+        "name": "adb_main",
+        "type": "adb",
+        "serial": "<设备序列号>",
+        "deploy": "adb -s <serial> push <artifact> <target>",
+        "log": "adb -s <serial> logcat"
+      },
+      {
+        "name": "ssh_main",
+        "type": "ssh",
+        "host": "<ip>",
+        "user": "<user>",
+        "deploy": "scp <artifact> <user>@<host>:<target>",
+        "log": "ssh <user>@<host> 'ls <log_dir>/*.log 2>/dev/null'",
+        "log_note": "ssh 场景通常看某目录下多份日志文件，log 命令应覆盖该目录下全部相关文件（如 ls <log_dir>/*.log 列出，或用 tail 合并多文件）；轮询时对每份文件做快照对比增量"
+      },
+      {
+        "name": "serial_debug",
+        "type": "serial",
+        "port": "/dev/ttyUSB0",
+        "baud": 115200,
+        "deploy": "",
+        "log": "minicom -D <port> -b <baud>"
+      }
+    ]
+  }
+}
