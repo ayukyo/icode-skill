@@ -18,9 +18,9 @@
         "port": 22,
         "user": "<user>",
         "password": "",
-        "deploy": "scp <artifact> <user>@<host>:<target>",
-        "log": "ssh <user>@<host> 'find <log_dir> -type f -newer /tmp/.icode_marker 2>/dev/null'",
-        "log_note": "ssh 场景看某目录下多份日志文件，且常含多层子目录（如 daily/、boot/ 子目录），用递归 find 覆盖全部层；增量用 marker 文件记录上次轮询时间，marker 放日志目录外（如 /tmp/.icode_marker）避免被 find 自身算作日志；每轮轮询后 touch marker 只取新增/变更文件；追加式单文件场景可改用 tail"
+        "deploy": "把 <artifact> 部署到 <target> 并重启对应进程（无重启步骤可省略）",
+        "log": "查看 <log_dir> 目录（含多层子目录）下新增的日志",
+        "log_note": "deploy/log 用自然语言描述意图，AI 结合本连接的 host/port/user 组装实际 scp/ssh 命令——地址/密码等连接信息只在连接字段填一次，不在 deploy/log 重复。ssh 日志常含多层子目录，AI 用递归 find + marker 做增量（marker 放日志目录外，如 /tmp/.icode_marker，避免被 find 算作日志），每轮 touch 后只取新增/变更文件；追加式单文件可改用 tail"
       },
       {
         "name": "serial_debug",

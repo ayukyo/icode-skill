@@ -205,8 +205,8 @@ LAST=$(ls -d .icode_output/.icode_output_* 2>/dev/null | grep -oP '(?<=\.icode_o
 **1.5 实机部署验证（`/icode patch --listen` 触发）**：
 - **触发**：仅当 `/icode patch --listen` 调用时执行；无 `--listen` → 跳过 1.5（保持可选，不阻断）
 - **读配置**：Read `~/.claude/icode_data/device_config/<project_id>.json`（**单文件多连接**，模板 [templates/device_config.json.template](../templates/device_config.json.template)）。文件不存在或 `deploy_enabled=false` → **不静默跳过**，提示"⚠️ `--listen` 显式要求实机验证，需在 `~/.claude/icode_data/device_config/<project_id>.json` 配置连接（或去掉 `--listen`）"
-- **部署**：按 `connections[].deploy` 命令部署编译产物到设备——**deploy 是配置项**（用户填真实命令，SKILL 不预设），按需选 connection（adb / ssh / serial）
-- **轮询监听 LOG**：按 `connections[].log` 命令**轮询拉取新增 LOG**——ssh 场景通常看**某目录下多份文件且含多层子目录**（如 `daily/`、`boot/`），用**递归 `find <log_dir> -type f -newer /tmp/.icode_marker`** 覆盖全部层，marker 放**日志目录外**（如 `/tmp/.icode_marker`）避免被 find 计入；AI 回合制无法真·阻塞监听，用"marker 增量"：每轮 `touch marker` 后只取**有写入**的文件——活跃设备会命中多个 node 日志，属预期（此时靠下面四步过滤），禁伪实时
+- **部署**：`connections[].deploy` 是**自然语言意图**（用户描述要做什么，如"把产物部署到 X 并重启 Y"，**不要求写 shell 命令**）——AI 结合 `connections` 的 host/port/user 组装实际 scp/ssh 命令执行，地址/密码只在连接字段填一次。**部署前先备份设备旧产物**（如 `cp <target> <target>.bak_r<N>`，与代码侧 rollback 对应）；**部署后确认进程加载新产物**（必要时重启进程/服务——新产物未加载 → 见「死胡同检测」①，勿误判为"修复没生效"）
+- **轮询监听 LOG**：`connections[].log` 是**自然语言意图**（如"查看 X 目录下新增日志"），AI 结合连接信息组装实际命令**轮询拉取新增 LOG**——ssh 场景通常看**某目录下多份文件且含多层子目录**（如 `daily/`、`boot/`），用**递归 `find <log_dir> -type f -newer /tmp/.icode_marker`** 覆盖全部层，marker 放**日志目录外**（如 `/tmp/.icode_marker`）避免被 find 计入；AI 回合制无法真·阻塞监听，用"marker 增量"：每轮 `touch marker` 后只取**有写入**的文件——活跃设备会命中多个 node 日志，属预期（此时靠下面四步过滤），禁伪实时
 - **智能监听分析（四步，必须按序执行）**：
   1. **特征注入**：先从 Patch N「增量计划」的 diff 提取本次修改涉及的**关键特征**（LOG tag / 关键字 / 相关 node 名 / 错误码），作为监听过滤基准——只分析命中特征的日志
   2. **过滤定位**：即使增量返回**多子目录多文件**（如 `<node_a>/daily/`、`<node_b>/boot/` 等几十个），**不逐文件全读**——先对增量文件按特征 `grep` 命中片段，只读命中内容，其余跳过；无任何命中 → 判定"修改后代码未走到"，疑点
