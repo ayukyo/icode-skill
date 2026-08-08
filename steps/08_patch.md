@@ -1,6 +1,6 @@
 # 步骤 8（独立步骤）— 追加修改 patch
 
-**命令**: `/icode patch [问题描述或新需求...]`（可选 `--listen` → 阶段 4「1.5 实机部署验证」，连设备部署 + 轮询监听 + 增量分析；无 `--listen` 默认跳过 1.5）
+**命令**: `/icode patch [问题描述或新需求...]`（可选 `--listen` → 阶段 4「1.5 实机部署验证」，连设备部署 + 轮询监听 + 智能监听分析；无 `--listen` 默认跳过 1.5）
 **产出**: `{ICODE_OUT_DIR}/08_patch.md`（追加式，每次调用追加一个 `Patch N` 段）
 **会话**: 主会话
 
@@ -206,8 +206,12 @@ LAST=$(ls -d .icode_output/.icode_output_* 2>/dev/null | grep -oP '(?<=\.icode_o
 - **触发**：仅当 `/icode patch --listen` 调用时执行；无 `--listen` → 跳过 1.5（保持可选，不阻断）
 - **读配置**：Read `~/.claude/icode_data/device_config/<project_id>.json`（**单文件多连接**，模板 [templates/device_config.json.template](../templates/device_config.json.template)）。文件不存在或 `deploy_enabled=false` → **不静默跳过**，提示"⚠️ `--listen` 显式要求实机验证，需在 `~/.claude/icode_data/device_config/<project_id>.json` 配置连接（或去掉 `--listen`）"
 - **部署**：按 `connections[].deploy` 命令部署编译产物到设备——**deploy 是配置项**（用户填真实命令，SKILL 不预设），按需选 connection（adb / ssh / serial）
-- **轮询监听 LOG**：按 `connections[].log` 命令**轮询拉取新增 LOG**（ssh 场景通常看**某目录下多份文件**——log 命令应覆盖该目录全部相关文件，如 `ls <log_dir>/*.log` 或多文件合并）——AI 回合制无法真·阻塞监听，用"快照对比增量"：**对每份文件**取上次快照之后的新增行，禁伪实时
-- **增量分析**：每批新增 LOG 增量分析，验证部署后行为（关键状态 / 数据链路 / 告警），异常点记录 file:line 证据
+- **轮询监听 LOG**：按 `connections[].log` 命令**轮询拉取新增 LOG**——ssh 场景通常看**某目录下多份文件且含多层子目录**（如 `daily/`、`boot/`），用**递归 `find <log_dir> -type f -newer /tmp/.icode_marker`** 覆盖全部层，marker 放**日志目录外**（如 `/tmp/.icode_marker`）避免被 find 计入；AI 回合制无法真·阻塞监听，用"marker 增量"：每轮 `touch marker` 后只取**有写入**的文件——活跃设备会命中多个 node 日志，属预期（此时靠下面四步过滤），禁伪实时
+- **智能监听分析（四步，必须按序执行）**：
+  1. **特征注入**：先从 Patch N「增量计划」的 diff 提取本次修改涉及的**关键特征**（LOG tag / 关键字 / 相关 node 名 / 错误码），作为监听过滤基准——只分析命中特征的日志
+  2. **过滤定位**：即使增量返回**多子目录多文件**（如 `<node_a>/daily/`、`<node_b>/boot/` 等几十个），**不逐文件全读**——先对增量文件按特征 `grep` 命中片段，只读命中内容，其余跳过；无任何命中 → 判定"修改后代码未走到"，疑点
+  3. **链路检查**：沿本次修改涉及的重要链路 node **按序核对**——各 node 打印是否按预期顺序出现、链路上有无 error / fatal / 断言中断（`grep -n "error|fatal|assert"` 扫链路相关日志）
+  4. **成功判定**：特征打印出现 + 链路关键点正常 + 无本次修改相关的 error → 判定「修复生效 / 链路通」，记录 file:line 证据；否则 → 标记疑点（缺哪个特征 / 哪处 error / 链路断在哪）走「衔接」分支。日志只证明"代码执行到打印点"，不 100% 证明逻辑全对——`--listen` 定位是快速看修复是否生效、链路是否断，非最终验收
 - **衔接**：部署后分析发现问题 → 走阶段 2 v2.14「部署后验证发现型」分支
 
 2. **反向验证清单（固定表格，禁止只写"编译通过"）**——每条检查项必须给 file:line 证据（或显式写"不涉及"），写进 Patch N 段「验证」小节：

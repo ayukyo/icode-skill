@@ -15,10 +15,12 @@
         "name": "ssh_main",
         "type": "ssh",
         "host": "<ip>",
+        "port": 22,
         "user": "<user>",
+        "password": "",
         "deploy": "scp <artifact> <user>@<host>:<target>",
-        "log": "ssh <user>@<host> 'ls <log_dir>/*.log 2>/dev/null'",
-        "log_note": "ssh 场景通常看某目录下多份日志文件，log 命令应覆盖该目录下全部相关文件（如 ls <log_dir>/*.log 列出，或用 tail 合并多文件）；轮询时对每份文件做快照对比增量"
+        "log": "ssh <user>@<host> 'find <log_dir> -type f -newer /tmp/.icode_marker 2>/dev/null'",
+        "log_note": "ssh 场景看某目录下多份日志文件，且常含多层子目录（如 daily/、boot/ 子目录），用递归 find 覆盖全部层；增量用 marker 文件记录上次轮询时间，marker 放日志目录外（如 /tmp/.icode_marker）避免被 find 自身算作日志；每轮轮询后 touch marker 只取新增/变更文件；追加式单文件场景可改用 tail"
       },
       {
         "name": "serial_debug",
