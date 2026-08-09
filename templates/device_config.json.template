@@ -2,7 +2,7 @@
   "project_id": "<project_id>",
   "device_config": {
     "deploy_enabled": false,
-    "note": "安装本 SKILL 后，复制本模板到 ~/.claude/icode_data/device_config/<project_id>.json 并填写真实值。**<project_id> 必须等于 `basename(git rev-parse --show-toplevel)`**（在 git 仓库内运行时；不区分子目录，不得用 ticket_id 前缀或外层目录别名）。**文件名与文件内 project_id 字段必须一致**，否则 /icode patch --listen 读不到并给出缺失诊断。deploy_enabled=false 时 patch 跳过实机部署验证（可选）。deploy/log 均为配置项，由用户按工程实际情况填写。支持单个连接或多个连接，patch 验证时按 name 选用。**若 deploy 意图引用编译规范（如「参考 LIMIT 文档编译命令规范」），AI 部署前会先 Read LIMIT 对应红线按规范编译；deploy 无编译指令且 patch 涉及代码修改则按 04_code 探测规则，无需在本字段写编译命令**。",
+    "note": "安装本 SKILL 后，复制本模板到 ~/.claude/icode_data/device_config/<project_id>.json 并填写真实值。**<project_id> 必须等于 `basename(git rev-parse --show-toplevel)`**（在 git 仓库内运行时；不区分子目录，不得用 ticket_id 前缀或外层目录别名）。**文件名与文件内 project_id 字段必须一致**，否则 /icode patch --listen 读不到并给出缺失诊断。deploy_enabled=false 时 patch 跳过实机部署验证（可选）。deploy/log 均为配置项，由用户按工程实际情况填写。支持单个连接或多个连接，patch 验证时按 name 选用。**若 deploy 意图引用编译规范（如「参考 LIMIT 文档编译命令规范」），AI 部署前会先 Read LIMIT 对应红线按规范编译；deploy 无编译指令且 patch 涉及代码修改则按 04_code 探测规则，无需在本字段写编译命令**。**deploy 意图含「重启设备/reboot」时：AI 会在重启前记录设备指纹（hostname + 网卡 MAC/序列号），重启后轮询重连（每 5~10s 试连，上限约 120s），连上后核对指纹一致才确认同一台设备并开始监听，连错（非目标设备）则停止报告——无需在本字段写重连/校验命令**。",
     "connections": [
       {
         "name": "adb_main",
