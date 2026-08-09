@@ -29,7 +29,7 @@ N. **强制思考前置**（不可跳过，缺证据视为不合规；按 [refer
 
 1. **[thinking_core.md](thinking_core.md) 完整内容**（每步必读）——核心规则 + MCP gate + 思考载体（首选 sequential-thinking、降级文字块）
 2. **[thinking_detail.md](thinking_detail.md) 对应小节**（按需 Read）——各步骤思考子项 + 历史参考小节
-3. **[anti_laziness.md](anti_laziness.md) 完整内容**——30 条偷工反例 + 正面合规要求
+3. **[anti_laziness.md](anti_laziness.md) 完整内容**——31 条偷工反例 + 正面合规要求
 
 **多 Read 追加**：本步骤额外要求 Read 其他 references 时，**追加**在 step 文件强制思考前置段落末，格式 `+ Read [references/xxx.md](../references/xxx.md) 完整内容` 即可。当前已识别的多 Read 场景：
 
