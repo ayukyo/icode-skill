@@ -43,15 +43,17 @@ N. **强制思考前置**（不可跳过，缺证据视为不合规；按 [refer
 - **首选**：调用 `sequential-thinking` MCP 工具（`mcp__sequential-thinking__sequentialthinking`），至少 3 步（步骤定义里另有要求除外，如至少 4~5 步），每步对应该步骤声明的子项之一。上下文能看到该 tool_call 记录即为合规证据。
 - **降级**：若当前环境未配置该 MCP（`~/.claude.json` 的 `mcpServers` 与项目根 `.mcp.json` 均无 `sequential-thinking` server，或已配置但 ToolSearch 取不到/调用失败），则必须以显式的「结构化思考」文字块替代——在回复中先输出一个 `### 结构化思考` 块，逐项完成该步骤要求的子项（每项一小段，不可省略），再进入产出。该文字块即为合规证据。
 
-> **判定 MCP 是否可用**（关键：MCP 工具为懒加载，且 AI 解析 deferred 列表不可靠——实测部分模型在长逗号列表中漏匹配工具名。**治本：跳过列表解析，直接 ToolSearch 验证**）：
+> **判定 MCP 是否可用**（三态判定：① 工具直接可见 → 直接调用；② 不可见 → ToolSearch 验证；③ 调用报错 → 降级。**先走第 0 判据**）：
 >
-> **第一步·直接 ToolSearch 验证**（不依赖 AI 对 deferred 列表的文本解析）：
+> **第 0 判据·直接可见即可用**（**最高优先级**，先于任何 ToolSearch / Read 配置文件步骤）：若当前会话工具列表（顶层工具定义或已加载工具集）中**已直接存在**对应 MCP 工具的完整 schema 定义 → **直接调用**即可（工具名按语义识别：标准形态 `mcp__<server>__<tool>` 如 `mcp__sequential-thinking__sequentialthinking`，或代理前缀形态 `__<proxy>_<tool>` 也算直接可见），**无需 ToolSearch、无需 Read `~/.claude.json`**。ToolSearch 仅用于"列表里看不到但怀疑有（懒加载）"的场景——直接可见是最强可用证据，绕过它去查 ToolSearch 并拿空结果判"不可用"是本段要消灭的误判根因。
+>
+> **第一步·直接 ToolSearch 验证**（仅当列表**不可见**时走此步；不依赖 AI 对 deferred 列表的文本解析）：
 >
 > 1. **直接调用 ToolSearch**：`query="select:mcp__sequential-thinking__sequentialthinking"` 取 schema
 > 2. **ToolSearch 返回 schema** → 工具可用，进入「第二步·首选路径执行」
 > 3. **ToolSearch 返回空/无命中** → 再 Read `~/.claude.json` 确认是否配置了 `sequential-thinking` server：
 >    - `~/.claude.json` 有配置 → 用 `query="sequential-thinking"`（模糊搜索）再试一次 ToolSearch
->    - `~/.claude.json` 无配置 → 进入「降级路径」
+>    - `~/.claude.json` 无配置 → 也用 `query="sequential-thinking"`（模糊搜索）再试一次 ToolSearch（与下方配置缺失组前置 ① 对齐）→ 仍无命中 → 进入「降级路径」
 >
 > **第二步·首选路径执行**（ToolSearch 确认 schema 可用后）：
 >
@@ -63,22 +65,23 @@ N. **强制思考前置**（不可跳过，缺证据视为不合规；按 [refer
 >
 > - ⛔ **未实际调用 ToolSearch 就判定"deferred tools 无 X"** —— 这是早期版本的踩坑根因：AI 试图手动解析系统提示中的 deferred 列表但匹配失败。**必须直接调 ToolSearch，不以 AI 文本解析结果为判断依据**
 > - ⛔ **ToolSearch 首次精确搜索无命中但 ~/.claude.json 有配置时不再试模糊搜索** —— 必须再试一次模糊搜索，ToolSearch 对某些工具名的精确匹配可能因前缀差异（`mcp__` vs server 名）失败
+> - ⛔ **ToolSearch 用模糊词查询并以其空结果判"工具不存在"** —— 精确 `select:` 优先（`query="select:mcp__<name>__<tool>"`）；模糊词（如 `query="sequential-thinking"`）仅允许在精确无命中后按上方流程作**补充重试**，其空结果**不能单独作为"工具不存在"依据**（模糊词可能不匹配，且非 deferred 工具本就不在 ToolSearch 池内）
 > - ⛔ **未实际调用 `mcp__sequential-thinking__sequentialthinking` 就判定"调用失败"** —— 必须有真实的调用返回错误/超时证据
 > - ⛔ **看到顶层工具列表里没有该 MCP 就判定"不可用"** —— 顶层看不到 ≡ deferred 池可见，是懒加载不是缺失
+> - ⛔ **工具已在当前工具列表直接可见（完整 schema），却绕过直接调用去 ToolSearch、并以空结果判"不可用"** —— 直接可见 = 可直接调用（走第 0 判据）；ToolSearch 空结果只对"未直接暴露"场景有判定意义
 > - ⛔ **凭记忆推断未经 Read 配置文件判定"无 server"** —— 必须实际 Read `~/.claude.json`，未读到配置才能说"无 server"
 >
-> **降级路径的合法前置**（满足以下**任一组**即可走降级文字块）：
+> **降级路径的合法前置**（满足以下**任一组**即可走降级文字块；降级声明**必须**按下表固定模板原样输出，不得自拟其他措辞——AI 自拟的泛化声明会漏掉"配置有 server"等关键区分信息，造成"配置了却报不可用"的误解）：
 >
-> **配置缺失组**（必须同时满足）：
-> 1. 已实际 ToolSearch 取 schema（精确 + 模糊各至少 1 次）-> 均无命中
-> 2. 已实际 Read `~/.claude.json` 的 `mcpServers` **与** 项目根 `.mcp.json`（若有）-> **都**无 `sequential-thinking` server
+> | 组 | 必须同时满足 | 降级声明固定模板（原样输出，确认行格式与 steps/08_patch.md 一致） |
+> |----|------------|-------------------------------------|
+> | **配置缺失组** | ① ToolSearch 取 schema（精确 + 模糊各至少 1 次）→ 均无命中；② Read `~/.claude.json` 的 `mcpServers` **与** 项目根 `.mcp.json`（若有）→ **都**无 `sequential-thinking` server | `强制思考: 降级文字块（未配置 server：~/.claude.json 与 .mcp.json 均无 sequential-thinking，可运行 mcp/sequential-thinking/install.sh 安装）` |
+> | **解析失败组** | ① ToolSearch 取 schema（精确 + 模糊各至少 1 次）→ 均无命中；② Read 配置 → 至少**一处**有 `sequential-thinking` server | `强制思考: 降级文字块（ToolSearch 解析失败，配置有 server——本会话未连接/工具未暴露，请运行 /mcp 检查连接状态或重开会话；工具本身已装，思考按文字块照常完成）` |
+> | **调用失败组** | ① ToolSearch 取 schema ≥1 次 → **有命中**；② 实际调用工具 ≥1 次 → 返回错误/超时 | `强制思考: 降级文字块（ToolSearch 命中但调用失败：<具体错误>）` |
 >
-> **解析失败组**（必须同时满足）：
-> 1. 已实际 ToolSearch 取 schema（精确 + 模糊各至少 1 次）-> 均无命中
-> 2. 已实际 Read `~/.claude.json` 的 `mcpServers` **与** 项目根 `.mcp.json`（若有）-> 至少**一处**有 `sequential-thinking` server
-> 3. 降级声明**必须注明**"ToolSearch 解析失败，配置有 server"（区别于配置缺失组），并**提示用户运行 `/mcp` 检查 sequential-thinking 连接状态**（配置存在 ≠ 本会话已连接——MCP 连接是会话级快照，server 未连接时 ToolSearch 恒空，需重连或重开会话恢复；思考质量不受降级影响，按文字块照常完成）
+> > **解析失败组根因认知**：配置存在 ≠ 本会话已连接——MCP 连接是会话级快照，server 未连接/工具未暴露时 ToolSearch 恒空；部分会话经代理接入（如 litellm）时 MCP 工具以 `__<proxy>_<tool>` 前缀暴露、不在 ToolSearch deferred 池内，此时 ToolSearch 对**所有** MCP 工具恒空（含已装好可用的），属命名/连接差异、**不代表未安装**。此组降级合法，思考质量不受影响，无需反复怀疑配置缺失。
 >
-> **两组均不满足即不可走降级**，必须坚持首选路径。
+> **三组均不满足即不可走降级**，必须坚持首选路径。
 >
 > **两种载体任选其一即可，但思考环节本身不可省略**——未呈现任一形式的思考证据，该步骤产出视为不合规。
 
@@ -88,7 +91,7 @@ N. **强制思考前置**（不可跳过，缺证据视为不合规；按 [refer
 2. **显式 Read 本步骤引用的 references 文件**（每步必须重新 Read，同会话已读不豁免——显式Read是深度思考的前置仪式，凭记忆会降级思考质量），Read 后在回复中输出确认行 `📖 已 Read references/xxx.md` 作为合规证据
 3. **MCP 调用 gate**（不可跳过）：在结构化思考开始前，先处理本步 🟢 MCP（按 [mcp_per_step.md](mcp_per_step.md)「强证据场景判定」）：
    - 列出本步满足强证据场景的 🟢 MCP（**不含 sequential-thinking**，它由第 4 步承载；其余 🟢 MCP 由本 gate + 各 step 执行步骤内嵌点承载）
-   - 对每个 🟢 MCP：ToolSearch 取 `mcp__<name>__<tool>` schema -> **实际调用一次** -> 把调用结果（成功/空/失败）写进思考块「MCP 调用」段
+   - 对每个 🟢 MCP：**若该工具已在工具列表直接可见（完整 schema）则直接调用**，不可见才 ToolSearch 取 `mcp__<name>__<tool>` schema -> **实际调用一次** -> 把调用结果（成功/空/失败）写进思考块「MCP 调用」段
    - 调用失败/返回空 -> 思考块写明降级原因（MCP 不可用 / 无相关结果 / 不适用场景）才能跳过；**未经实际调用就标降级 = 反偷懒第 21 条违规**
    - ⚪ MCP（强证据场景不满足）无需评估无需声明
    - **本步若无 🟢 MCP**（全 ⚪）：gate 直接通过，思考块记"本步无 🟢 MCP（强证据场景均不满足）"

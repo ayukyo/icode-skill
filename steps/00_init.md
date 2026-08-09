@@ -375,7 +375,7 @@
 - **触发条件**：用户**实际传图**（系统消息含媒体附件 / 用户消息含本地图片路径 / 用户消息引用了前序消息中的图片）。**仅文字描述"截图/设计图"无实际附件 → 不触发**。
 - **可用性判定**（三项全满足才调，任一缺失即降级）：
   1. Read `~/.claude.json` 的 `mcpServers.vision-bridge` 段存在
-  2. 系统提示 deferred tools 列表含 `mcp__vision-bridge__analyze_media`
+  2. 工具可在当前会话直接调用（工具列表直接可见 `mcp__vision-bridge__analyze_media` 或代理前缀形态，或 ToolSearch 可取 schema）
   3. Read `~/.claude/skills/icode/mcp/vision-bridge/config.json` 三件套（`base_url` / `api_key` / `model`）已填
 - **可用** → ToolSearch 取 schema → 调 `mcp__vision-bridge__analyze_media` 识别图片，结果写入 §2 现状盘点或 §3 需求点（按内容归属）
 - **不可用** → 仅在思考块写 `vision-bridge 不可用(<具体缺失项>)，用户图片未分析`，**不视为违规、不阻塞流程**

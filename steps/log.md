@@ -382,7 +382,7 @@
    - **无条件记录附件清单**(文件名+大小+类型)到 `log_analysis.md §1`「附件清单」小节（可空章节，无视频/图片时该小节不存在）
 2. **判定 vision-bridge 可用性**：
    - Read `~/.claude.json` 的 `mcpServers.vision-bridge` 段存在
-   - 系统提示 deferred tools 列表含 `mcp__vision-bridge__analyze_media`
+   - 工具可在当前会话直接调用（工具列表直接可见 `mcp__vision-bridge__analyze_media` 或代理前缀形态，或 ToolSearch 可取 schema）
    - Read `~/.claude/skills/icode/mcp/vision-bridge/config.json` 三件套(`base_url`/`api_key`/`model`)已填
    - **三项全满足 → vision-bridge 可用，走「分析流程」**
    - **任一缺失 → vision-bridge 不可用**，降级为「附件清单已记录，vision-bridge 不可用(<具体缺失项>)」，**不主动调、不视为违规**
@@ -404,7 +404,7 @@
    - **ffmpeg 不可用**：降级为直接传视频给 vision-bridge（需提示用户「ffmpeg 不可用,直接分析视频可能消耗 API 额度」），或仅分析图片附件
 2. **枚举关键帧**：`ls {ICODE_OUT_DIR}/frames_*.jpg` 列出所有关键帧文件（TB 源关键帧在 `{ICODE_OUT_DIR}/tb_source/<ID>/` 子目录下，本地路径关键帧在 `{ICODE_OUT_DIR}/` 根目录下）
 3. **调 vision-bridge MCP 分析图片帧**（视频经 ffmpeg 抽帧后传图片，不传视频——省 API 额度）：
-   - ToolSearch 取 `mcp__vision-bridge__analyze_media` schema
+   - **若工具已在列表直接可见则直接调用**，不可见才 ToolSearch 取 `mcp__vision-bridge__analyze_media` schema
    - 对每个**图片附件**和每个**关键帧图片**实际调用一次，prompt 模板："提取图片中的时间点(界面时钟)、显示内容、用户操作序列、状态栏信息、错误提示" (针对 APP 录屏场景)；或 "提取图片中的错误提示/状态信息/界面元素/版本号" (针对错误截图场景)
 4. **整理分析结果**(写入 `log_analysis.md §1`「附件分析结果」小节，可空章节允许留空)：
    - **时间点清单**：视频界面时钟时间(从关键帧图片读取) + 对应设备端日志时段推断(**视频时间点与设备端时间往往有偏移,需在阶段1 §2.1 状态链路图阶段估算**)

@@ -13,7 +13,7 @@
 按 [thinking_core.md](thinking_core.md) 的"强证据"逻辑（**任一即视为"已配置可用"**）：
 
 - **证据 A（强证据）**：`~/.claude.json` 的 `mcpServers.<name>` 段存在
-- **证据 B（强证据）**：当前会话 deferred tools 列表里有 `mcp__<name>__<tool>`
+- **证据 B（强证据）**：工具可在当前会话**直接调用**——工具列表直接可见（完整 schema，按语义识别：标准 `mcp__<name>__<tool>` 或代理前缀 `__<proxy>_<tool>` 形态）或 ToolSearch 可取 schema（不可见时按 [thinking_core.md](thinking_core.md) 第 0 判据）
 
 **强证据不存在 → 走降级路径**。**本文档路径：可装可降级，不阻塞流程。**
 
@@ -113,7 +113,7 @@
 
 1. **本步骤开始前**：判定本步骤推荐的 MCP（见 [mcp_per_step.md](mcp_per_step.md)）是否可用
    - 查 `~/.claude.json` 的 `mcpServers`：用 `Read` 工具
-   - 查当前会话 deferred tools：system prompt 中如有列名即视为可用
+   - 查当前会话工具列表：工具**直接可见**（按语义识别，含代理前缀形态）即视为可用；不可见再 ToolSearch 取 schema（见 [thinking_core.md](thinking_core.md) 第 0 判据）
 2. **如有强证据**：优先用 MCP 工具（省事且返回更结构化）
 3. **无强证据**：走降级路径（Bash / Read / Write / WebFetch 等原生工具）
 4. **不阻塞**：MCP 不可用不是错误，**降级操作完全是合规的**

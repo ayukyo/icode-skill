@@ -549,7 +549,7 @@ test -f "{ICODE_OUT_DIR}/03_plan_final.md" && python3 -c "import json,sys; d=jso
 
 4. **双保险承载**：
    - **A 层·执行步骤内嵌**：cheap-research 等在各 step 执行步骤主体里有独立的调用指令（非末尾推荐表），AI 顺序执行必然走到
-   - **B 层·thinking_core MCP gate**：[references/thinking_core.md](references/thinking_core.md) 通用流程第 3 步--思考块先列本步 🟢 MCP -> ToolSearch 取 schema -> 实际调用 -> 结果进思考块。覆盖 context7/memory/vision-bridge/playwright
+   - **B 层·thinking_core MCP gate**：[references/thinking_core.md](references/thinking_core.md) 通用流程第 3 步--思考块先列本步 🟢 MCP（工具已在列表直接可见则直接调用，不可见才 ToolSearch 取 schema）-> 实际调用 -> 结果进思考块。覆盖 context7/memory/vision-bridge/playwright
 
 **降级路径仍然合规**：MCP 真的不可用（tool unavailable / LSP server 缺失），用 Bash/Read/Write/Grep 等原生工具替代--降级不是错误，但**必须先实际调用一次，失败/空才能标降级**，且**必须显式声明**。
 
@@ -605,7 +605,7 @@ icode 工作流可调用 6 个 MCP（`/icode install` 一键安装）。**双保
 
 **判定逻辑**：AI 在每个步骤开始时，按 [references/mcp_per_step.md](references/mcp_per_step.md)「强证据场景判定」判定每个 MCP 是否 🟢：
 - 证据 A：`Read ~/.claude.json` 的 `mcpServers.<name>` 段存在
-- 证据 B：当前会话 deferred tools 列表里有 `mcp__<name>__<tool>`
+- 证据 B：工具可在当前会话直接调用（工具列表直接可见——按语义识别，标准 `mcp__<name>__<tool>` 或代理前缀 `__<proxy>_<tool>` 形态——或 ToolSearch 可取 schema）
 - **强证据场景满足**（如 context7 在 plan 步骤 + 需求涉及第三方库）+ 证据 A/B 任一 -> 🟢 必须调
 - 强证据场景不满足 -> ⚪ 无需评估
 

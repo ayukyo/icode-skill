@@ -76,7 +76,7 @@ cd <你的 icode-skill 仓库>/mcp/sequential-thinking
 - **装好后**：icode 工作流每步的「强制思考前置」必须首选 `sequential-thinking` MCP
 - **未装好**：走降级文字块路径，但工作流仍可运行（思考环节不省略，只换载体）
 - **判定 MCP 是否可用**的严谨逻辑见 [references/thinking_core.md](../../references/thinking_core.md)——
-  简言之：deferred tools 列表里能看到 `mcp__sequential-thinking__sequentialthinking` 即视为"已配置可用"
+  简言之：工具列表直接可见（标准 `mcp__sequential-thinking__sequentialthinking` 或代理前缀形态）或 ToolSearch 取到 schema 即视为"已配置可用"
 
 ---
 
