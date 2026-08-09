@@ -5,19 +5,19 @@
 >
 > 历史参考小节（init/plan/log/start 检索命中时）按 verdict 分流标注在 [thinking_detail.md](thinking_detail.md)「历史参考小节」段。
 
-## v2.4 实战补强总览（2026-07-29）
+## 强证据化总览
 
-本节为 v2.4 实战补强的索引——按时间顺序列出本轮 3 项实战补强 + 落地点，避免补强散落各 step 文件后无人能找全。各补强的真源仍在对应文件，本节只起导航作用。
+本节为强证据化机制索引——列出 3 项机制 + 落地点，避免机制散落各 step 文件后无人能找全。各机制的真源仍在对应文件，本节只起导航作用。
 
-| # | 实战补强 | 真源 | 落地点 |
+| # | 机制 | 真源 | 落地点 |
 |---|---------|------|--------|
 | 1 | **跨层枚举对齐修复模式**（防"同值不同义"型根因遗漏） | cross-layer-enum-normalization-pattern（外部参考案例，不随仓库分发） | log.md §2.1 对照表生成 + §0 §2.2 占位 + §3.1 扫描字段 + 阶段3「上游语义追问」；01_plan.md §4 ADR 场景 + §4.5 维度 2 子项；02_review.md 维度 4 风险遗漏子项；04_code.md 优雅度6条第 7 条 + 维度 4 复检双值日志 |
 | 2 | **段零文档/姐妹工程/关联工程检索强证据化**（防"只看自己工程代码"） | [references/dir_and_metadata.md](dir_and_metadata.md)「段零·工程文档检索」段（含 3.5 反查父项目 + **3.6 关联工程源码路径定位三级兜底**）+ [references/anti_laziness.md](anti_laziness.md) 第 24 条 | log.md §2.0 自动发现姐妹工程 + 段零 3.6 关联工程源码路径（project_path + manifest + 兜底三级）+ §2.1 段零文档盘点 + 阶段3 对抗质疑者 prompt 喂入 |
 | 3 | **TB 附件视频/图片研读强制化**（防"分析错时间点"） | [references/anti_laziness.md](anti_laziness.md) 第 23 条 | log.md「附件分析（含本地路径 + TB 源）与 ffmpeg 抽帧」段 |
 
-## 强制思考前置·统一契约（step 文件如何引用本文件，v2.4 去重）
+## 强制思考前置·统一契约（step 文件如何引用本文件）
 
-> 所有 step 文件的「强制思考前置」段落**统一**用本契约引用，不可重新展开三件套 Read 长句（防重复；本段为真源，各 step 文件若展开完整长句则视为与本段重复——v2.4 文档去重改造）。
+> 所有 step 文件的「强制思考前置」段落**统一**用本契约引用，不可重新展开三件套 Read 长句（防重复；本段为真源，各 step 文件若展开完整长句则视为与本段重复）。
 
 每个 step 文件的「强制思考前置」段落**必须**按以下统一结构（不展开三件套 Read 长句）：
 
@@ -45,7 +45,7 @@ N. **强制思考前置**（不可跳过，缺证据视为不合规；按 [refer
 
 > **判定 MCP 是否可用**（关键：MCP 工具为懒加载，且 AI 解析 deferred 列表不可靠——实测部分模型在长逗号列表中漏匹配工具名。**治本：跳过列表解析，直接 ToolSearch 验证**）：
 >
-> **第一步·直接 ToolSearch 验证**（不依赖 AI 对 deferred 列表的文本解析，v2.11 治本改动）：
+> **第一步·直接 ToolSearch 验证**（不依赖 AI 对 deferred 列表的文本解析）：
 >
 > 1. **直接调用 ToolSearch**：`query="select:mcp__sequential-thinking__sequentialthinking"` 取 schema
 > 2. **ToolSearch 返回 schema** → 工具可用，进入「第二步·首选路径执行」
@@ -61,7 +61,7 @@ N. **强制思考前置**（不可跳过，缺证据视为不合规；按 [refer
 >
 > **禁止误判场景**（历史实测的踩坑模式，逐条禁止）：
 >
-> - ⛔ **未实际调用 ToolSearch 就判定"deferred tools 无 X"** —— 这是 v2.10 之前的踩坑根因：AI 试图手动解析系统提示中的 deferred 列表但匹配失败。**必须直接调 ToolSearch，不以 AI 文本解析结果为判断依据**
+> - ⛔ **未实际调用 ToolSearch 就判定"deferred tools 无 X"** —— 这是早期版本的踩坑根因：AI 试图手动解析系统提示中的 deferred 列表但匹配失败。**必须直接调 ToolSearch，不以 AI 文本解析结果为判断依据**
 > - ⛔ **ToolSearch 首次精确搜索无命中但 ~/.claude.json 有配置时不再试模糊搜索** —— 必须再试一次模糊搜索，ToolSearch 对某些工具名的精确匹配可能因前缀差异（`mcp__` vs server 名）失败
 > - ⛔ **未实际调用 `mcp__sequential-thinking__sequentialthinking` 就判定"调用失败"** —— 必须有真实的调用返回错误/超时证据
 > - ⛔ **看到顶层工具列表里没有该 MCP 就判定"不可用"** —— 顶层看不到 ≡ deferred 池可见，是懒加载不是缺失
@@ -86,8 +86,8 @@ N. **强制思考前置**（不可跳过，缺证据视为不合规；按 [refer
 
 1. 输出 `ultrathink` 触发词（触发更长的内部推理 budget）
 2. **显式 Read 本步骤引用的 references 文件**（每步必须重新 Read，同会话已读不豁免——显式Read是深度思考的前置仪式，凭记忆会降级思考质量），Read 后在回复中输出确认行 `📖 已 Read references/xxx.md` 作为合规证据
-3. **MCP 调用 gate**（v2.2 新增，不可跳过）：在结构化思考开始前，先处理本步 🟢 MCP（按 [mcp_per_step.md](mcp_per_step.md)「强证据场景判定」）：
-   - 列出本步满足强证据场景的 🟢 MCP（**不含 sequential-thinking**，它由第 4 步承载；**不含 serena**，它由各 step 执行步骤内嵌点承载）
+3. **MCP 调用 gate**（不可跳过）：在结构化思考开始前，先处理本步 🟢 MCP（按 [mcp_per_step.md](mcp_per_step.md)「强证据场景判定」）：
+   - 列出本步满足强证据场景的 🟢 MCP（**不含 sequential-thinking**，它由第 4 步承载；其余 🟢 MCP 由本 gate + 各 step 执行步骤内嵌点承载）
    - 对每个 🟢 MCP：ToolSearch 取 `mcp__<name>__<tool>` schema -> **实际调用一次** -> 把调用结果（成功/空/失败）写进思考块「MCP 调用」段
    - 调用失败/返回空 -> 思考块写明降级原因（MCP 不可用 / 无相关结果 / 不适用场景）才能跳过；**未经实际调用就标降级 = 反偷懒第 21 条违规**
    - ⚪ MCP（强证据场景不满足）无需评估无需声明

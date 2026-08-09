@@ -17,11 +17,11 @@
 
 ## 前置校验
 
-> **读决策锚点**（v2.8，启动时）：若 `metadata.anchors_enabled != false`，Read `{ICODE_OUT_DIR}/.decision_anchors.json`（不存在则跳过），获取上游关键决策摘要（requirement_digest/key_decisions/design_4dims/deviations/open_risks）作本步骤上下文，不替代产物。详见 [references/decision_anchors.md](../references/decision_anchors.md)。
+> **读决策锚点**（启动时）：若 `metadata.anchors_enabled != false`，Read `{ICODE_OUT_DIR}/.decision_anchors.json`（不存在则跳过），获取上游关键决策摘要（requirement_digest/key_decisions/design_4dims/deviations/open_risks）作本步骤上下文，不替代产物。详见 [references/decision_anchors.md](../references/decision_anchors.md)。
 
 检查 `{ICODE_OUT_DIR}/03_plan_final.md` 是否存在，不存在则报错并提示先执行 `/icode merge`。
 
-## 前置：patch 配合（v2.13）
+## 前置：patch 配合
 
 > 工单可能已走过 `/icode patch` 追加修改（`{ICODE_OUT_DIR}/08_patch.md` 存在且有 Patch 段，或 `metadata.patch_count > 0`）。本步骤启动时 **Read `08_patch.md`**（不存在则跳过本段，走原流程），按以下规则配合：
 
@@ -67,7 +67,7 @@
 
 严格按定稿计划实施编码。
 
-**符号定位（serena 优先，v2.2 执行步骤内嵌）**：编码前对计划 §5 声明的待改符号，若工程有可索引源码且 serena 可用：ToolSearch 取 `mcp__serena__find_symbol` + `mcp__serena__find_referencing_symbols` schema -> `find_symbol` 定位待改符号 -> `find_referencing_symbols` 找所有调用点（按符号语义非文本匹配，比 grep 精准）-> 结果作为下方「准入三链预扫」的语义增强。目标代码在子仓库/嵌套 git 仓库时（`git -C <dir> rev-parse --show-toplevel` ≠ 当前激活项目根），先 `serena-doctor init/fix` 子仓库根 + `activate_project(<子仓库根>)` 激活目标仓库再查（v2.12，详见 anti_laziness 第 21 条 v2.12 段）；激活失败才降级。serena 不可用/无 LSP -> 降级下方 grep 三链预扫，降级说明只进思考块，不写入产物文件。**未经实际调用 serena 就标降级 = 反偷懒第 21 条违规。**步骤末尾按反偷懒第 21 条 v2.6 自检门输出 `serena 调用: <工具 x N>` 或 `serena 降级: <原因>`，无记录 = 违规****。
+**符号定位（grep 优先）**：编码前对计划 §5 声明的待改符号，用 `grep -rn '<符号>'` 定位待改符号定义、`grep -rn '<符号>('` 找所有调用点（跨仓库/子仓库见 anti_laziness 第 21 条「跨仓库/子仓库检索」段），结果作为下方「准入三链预扫」的增强输入。检索结果只进思考块，不写入产物文件。
 
 **准入（强制三链预扫，每条按 `文件:行号` 给出至少 1 条命中否则禁止 Edit）**：
 
@@ -98,12 +98,12 @@
    - **最小侵入**：只改必要的文件/函数，不顺手重构既有变量名/函数签名/注释格式；git diff 应只有"新增+必要修改"，无无关改动
    - **接口克制**：新增导出函数/类只暴露必要接口，能 static 就不 public，不为"将来可能用到"预留参数（YAGNI）
    - **调用路径选择（架构一致性）**：新增跨模块/跨端点/跨层调用时，grep 同文件/同模块既有同类调用——若工程有主导模式（如统一走路由/事件分发而非直调），必须沿用，不得以"内部触发更简单"为由另选直调；若路由/接收器/事件总线已注册，优先走已建链路而非直调绕过；**同函数内既有同类调用是最强信号**，新增调用必须与之风格一致。编译通过 ≠ 调用模式正确——编译器无法区分"风格异物"，必须 grep 既有模式实证
-   - **（v2.4 增补）跨层翻译纯函数化 + 测试覆盖度**：跨层翻译逻辑（外部模块枚举值映射到本模块契约）必须提取为 `constexpr noexcept` 纯函数，**禁止内联在消费点**——便于独立单测且未来新增消费点直接复用；测试必须做到 ① **枚举穷举覆盖**（每个枚举值都有独立断言）、② **条件组合覆盖**（多条件与/或的矩阵）、③ **语义级断言**（每条断言带人类可读标签如 "external NOT_INIT does not terminate"）
+   - **跨层翻译纯函数化 + 测试覆盖度**：跨层翻译逻辑（外部模块枚举值映射到本模块契约）必须提取为 `constexpr noexcept` 纯函数，**禁止内联在消费点**——便于独立单测且未来新增消费点直接复用；测试必须做到 ① **枚举穷举覆盖**（每个枚举值都有独立断言）、② **条件组合覆盖**（多条件与/或的矩阵）、③ **语义级断言**（每条断言带人类可读标签如 "external NOT_INIT does not terminate"）
 
 用 Write 工具创建/修改每个代码文件。
 
 
-**修复方案三档实施（v2.7，反偷懒第 26 条）**：默认只实施 A 档（根因修复）；B 档需 metadata `confirmed_B_fixes: [...]` 记录用户显式确认才实施；C 档不实施（范围外）。A 档跨工程（plan 标注）时本工程无可实施 A 档，不强行造 A 档、不把 B 当 A 实施，只做确认的 B 档 + commit/工单注明"A 档转交 <X>"。Code Review Fix 复检核对：实施范围 = A 档 + 确认的 B 档（**先 Read metadata.fix_tiers 读 plan 分档**，字段缺失则从 `03_plan_final.md` §4.5 文本读），超范围实施 = issue。实施 B 档前必须把用户确认记录写入 `confirmed_B_fixes` 数组。详见 anti_laziness 第 26 条
+**修复方案三档实施（反偷懒第 26 条）**：默认只实施 A 档（根因修复）；B 档需 metadata `confirmed_B_fixes: [...]` 记录用户显式确认才实施；C 档不实施（范围外）。A 档跨工程（plan 标注）时本工程无可实施 A 档，不强行造 A 档、不把 B 当 A 实施，只做确认的 B 档 + commit/工单注明"A 档转交 <X>"。Code Review Fix 复检核对：实施范围 = A 档 + 确认的 B 档（**先 Read metadata.fix_tiers 读 plan 分档**，字段缺失则从 `03_plan_final.md` §4.5 文本读），超范围实施 = issue。实施 B 档前必须把用户确认记录写入 `confirmed_B_fixes` 数组。详见 anti_laziness 第 26 条
 
 
 ## 强制操作（完成后必须执行）
@@ -136,9 +136,9 @@
        - init 工单：必须 Read `03_plan_final.md`「4.5 修复方案设计 + 4 维度设计态固化」段（init 工单必填）+ `00_init.md` §7
      - **4 维度复检清单**（每维度独立勾对，每条须给 file:line 证据）：
        - **维度 1 根因闭环（log 工单）**：H/P/V 三件套是否落实 → Read 实读 P 修复点代码核对实际实现是否与设计一致 → V 是否可观测（日志/返回值/状态变化）→ 反向验证（H 错则 P 是否仍有效）
-       - **维度 2 逻辑+扩大修改**：实施 vs 计划设计的逻辑 5 类（边界/状态/异常/时序/数值）覆盖度 → git diff 最小侵入核对（每行变更回指根因/需求点）→ 优雅度6条（复用/风格/调用链/最小侵入/接口克制/调用路径）→ 三链预扫（如有新增符号）。**（v2.14 新增）布尔表达式短路自检**：对本次修改的每个含 `&&` / `||` 的复合布尔表达式——检查 `&&` 前置条件中已出现的变量是否在 `||` 后续分支中重复（前置已保证为真 → `||` 该项恒真短路，后续逻辑被完全跳过）；检查 `||` 分支任一项是否被前置 `&&` 完全覆盖（整个 `||` 退化）。发现冗余必须化简并记录
+       - **维度 2 逻辑+扩大修改**：实施 vs 计划设计的逻辑 5 类（边界/状态/异常/时序/数值）覆盖度 → git diff 最小侵入核对（每行变更回指根因/需求点）→ 优雅度6条（复用/风格/调用链/最小侵入/接口克制/调用路径）→ 三链预扫（如有新增符号）。**布尔表达式短路自检**：对本次修改的每个含 `&&` / `||` 的复合布尔表达式——检查 `&&` 前置条件中已出现的变量是否在 `||` 后续分支中重复（前置已保证为真 → `||` 该项恒真短路，后续逻辑被完全跳过）；检查 `||` 分支任一项是否被前置 `&&` 完全覆盖（整个 `||` 退化）。发现冗余必须化简并记录
        - **维度 3 竞态死锁**：实施 vs 计划设计的 10 条清单覆盖度（不涉及的标 N/A）→ 锁/原子/内存序/超时是否按设计落实 → 是否引入新竞态死锁风险
-       - **维度 4 日志反映**：V 可观测性是否落实（关键路径日志是否写到位）→ 根因-日志-修复对齐 → 日志级别/风格一致 → 无敏感信息泄露。**（v2.4 增补）双值日志**：若修复涉及状态归一化 / 映射，归一化后的关键路径日志是否同时保留原始值（如 `status={} published_status={}`），防止归一化后丢失上游语义信息导致二次定位困难
+       - **维度 4 日志反映**：V 可观测性是否落实（关键路径日志是否写到位）→ 根因-日志-修复对齐 → 日志级别/风格一致 → 无敏感信息泄露。**双值日志**：若修复涉及状态归一化 / 映射，归一化后的关键路径日志是否同时保留原始值（如 `status={} published_status={}`），防止归一化后丢失上游语义信息导致二次定位困难
      - **复检产出**：写入 `{ICODE_OUT_DIR}/04_code_review_fix.md`（4 维度勾对表 + 未通过维度清单）
      - **复检失败处理**（**轻/重度分流**，不强制阻断）：
        - **轻度失败**（设计与实施不一致，但设计本身正确）：标 `code_review_fix_with_issues=true` + 未通过清单 → 提示用户"实施偏离计划设计，回到代码修复 → 重跑本子段"
@@ -151,22 +151,21 @@
      - 1.5 复检通过 → `status = code_done`，`completed_steps` 追加 `"4"`（**`code_review_fix_with_issues = false`**）
      - 1.5 复检失败（轻/重度） → `status` 保持 `code_in_progress`，`completed_steps` **不**追加 `"4"`（**`code_review_fix_with_issues = true`**）
      - 编译失败（1.5 未执行） → `status = code_in_progress`，`code_compile_failed = true`，`completed_steps` **不**追加 `"4"`
-   - **写入测试字段**（v2.8 新增）：`test_cmd`（探测/配置的测试命令，null 表示无测试套件）、`test_outcome`（`pass`/`fail`/`skipped`）、`test_failures`（3 次重试仍失败置 true）。**测试失败不阻断流程**（与编译失败同级 L3），步骤5/6 入口检测 `test_failures=true` 时输出警告
+   - **写入测试字段**：`test_cmd`（探测/配置的测试命令，null 表示无测试套件）、`test_outcome`（`pass`/`fail`/`skipped`）、`test_failures`（3 次重试仍失败置 true）。**测试失败不阻断流程**（与编译失败同级 L3），步骤5/6 入口检测 `test_failures=true` 时输出警告
    - **写入 `code_deviations`**：若有主动偏离（见硬性要求第8条），将偏离记录数组写入 metadata `code_deviations`（每条含 plan_said / actual_done / reason），供步骤6 汇总；无偏离则写空数组 `[]`
    - **写入 `code_review_fix_with_issues`**（v1.x 新增，可选，默认 `false`）：4 维度复检未通过标记。`true` 时步骤 5/6 入口输出警告，audit 终审会看到此标记（**不阻断流程**，仅作可见性提示）
 3. 全流程模式：编译通过 + 测试通过（或 `test_cmd=null` 跳过）+ 1.5 复检通过则**立即继续执行步骤5**；编译失败或 1.5 复检失败则中止，提示用户修复。**测试失败（`test_failures=true`）不中止**（L3 警告，步骤5 继续复检）
-## 决策锚点（步骤4 完成后写，v2.8）
+## 决策锚点（步骤4 完成后写）
 
 步骤4 编码+测试验证后，若 `metadata.anchors_enabled != false`，刷新 `.decision_anchors.json`：追加 `deviations`（同步 `code_deviations`）+ 刷新 `open_risks`。详见 [references/decision_anchors.md](../references/decision_anchors.md)。
 
-## MCP 推荐（v2.2 强证据二元化）
+## MCP 推荐（强证据二元化）
 | MCP | 推荐级别 | 用途 |
 |-----|----------|------|
-| serena | 🟢* | 按符号编辑、重命名引用追踪（game-changer）--有可索引源码时（编码实施内嵌） |
 | context7 | 🟢* | 实时查库 API（防训练知识过时）--涉及第三方库时 |
 | vision-bridge | 🟢* | 涉及 UI 实现时截图参照--用户给图时 |
 | **cheap-research** | 🟢* | **降本**：apply_migration（schema 迁移 ops 生成不执行，主会话审核后手动执行）。不接管决策：关键设计/编码实施/Code Review Fix 走主会话 |
 | memory | ⚪ | 本步骤不推荐 |
 | playwright | ⚪ | 本步骤不推荐 |
 
-**强制约束（v2.2）**：🟢/🟢*/⚪ 语义 + 双保险机制（执行步骤内嵌 + thinking_core gate）详见 [SKILL.md「MCP 调用覆盖强制化」](../SKILL.md) + [references/mcp_per_step.md「双保险机制」](../references/mcp_per_step.md)；本步骤表内的 🟢/🟢* 标注按上方真源判定。
+**强制约束**：🟢/🟢*/⚪ 语义 + 双保险机制（执行步骤内嵌 + thinking_core gate）详见 [SKILL.md「MCP 调用覆盖强制化」](../SKILL.md) + [references/mcp_per_step.md「双保险机制」](../references/mcp_per_step.md)；本步骤表内的 🟢/🟢* 标注按上方真源判定。

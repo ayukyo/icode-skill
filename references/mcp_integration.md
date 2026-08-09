@@ -1,12 +1,12 @@
 # MCP 工具集成与降级路径
 
-> icode 工作流可调用 7 个 MCP（`/icode install` 一键安装）。**用户可能不装全部**，每个 MCP 都是**可选 + 降级**的。
+> icode 工作流可调用 6 个 MCP（`/icode install` 一键安装）。**用户可能不装全部**，每个 MCP 都是**可选 + 降级**的。
 >
 > 安装入口：`/icode install`（详见 [steps/install.md](../steps/install.md)）
 >
 > 步骤 × MCP 推荐矩阵：[mcp_per_step.md](mcp_per_step.md)
 >
-> **v2.2 二元化**：推荐级别改为 🟢 必须调 / ⚪ 不必调（消除 🟡），按 [mcp_per_step.md](mcp_per_step.md)「强证据场景判定」执行。本文档的「强证据 + 降级路径」仍适用，下文各 MCP 的「触发场景」即 v2.2 强证据场景。
+> **二元化**：推荐级别为 🟢 必须调 / ⚪ 不必调（无 🟡），按 [mcp_per_step.md](mcp_per_step.md)「强证据场景判定」执行。本文档的「强证据 + 降级路径」适用，下文各 MCP 的「触发场景」即强证据场景。
 
 ## 判定 MCP 是否可用
 
@@ -19,7 +19,7 @@
 
 ---
 
-## 7 个 MCP 的强证据 + 降级路径
+## 6 个 MCP 的强证据 + 降级路径
 
 ### ① sequential-thinking（**必装**）
 
@@ -61,18 +61,7 @@
 - **⚠️ token 警告**：24 个工具 schema 永久加载，**非前端项目慎装**
 - **当前状态**：工程内置（用户决策：保留）；包名 `@playwright/mcp`（原 `@microsoft/playwright-mcp` 已 404）
 
-### ⑥ serena（高增益）
-
-- **强证据**：`mcp__serena__find_symbol` / `mcp__serena__find_referencing_symbols` / `mcp__serena__replace_symbol_body` / `mcp__serena__insert_after_symbol`
-- **降级**：`Read <file>` + `Grep "<pattern>"`（无符号语义，按文本匹配）
-- **触发场景**：步骤 1 plan（理解代码结构）、步骤 4 code（按符号编辑）、步骤 5 deepcheck（找所有调用点）
-- **多 git 根（v2.12）**：目标代码在子仓库/嵌套 git 仓库时（`git -C <dir> rev-parse --show-toplevel` ≠ 当前激活项目根），先 `serena-doctor init/fix` 子仓库根 + `activate_project(<子仓库根>)` 激活目标仓库再查，激活失败才降级（详见 anti_laziness 第 21 条 v2.12 段）
-- **⚠️ 依赖**：Python 3.10+ + uv + LSP server（`pyright` / `typescript-language-server` 等）
-- **⚠️ 启动慢**：首次跑 `uvx --from git+...` 需 git clone + 装包约 30s，**之后缓存秒启**
-- **安装**：首次跑 `mcp/install.sh` 会**主动装 uv**（参见 [install.sh 主动安装逻辑](../mcp/serena/install.sh)）
-- **当前状态**：uv 已装、注册成功
-
-### ⑦ cheap-research（**可选 · 降本场景**）
+### ⑥ cheap-research（**可选 · 降本场景**）
 
 - **强证据**：`~/.claude.json` 的 `mcpServers.cheap-research` 段存在 + `config.json` 三件套（base_url/api_key/model）已填
 - **强证据满足**：`mcp__cheap-research__summarize(text)` / `__retrieve_similar(query, candidates)` / `__fill_template(template, data)` / `__extract(text, schema)` / `__audit_facts(repo_path)` 等 14 工具返回结构化 dict，**子代理优先用 MCP 工具**
@@ -82,10 +71,10 @@
 - **触发场景详见**：[mcp_per_step.md](mcp_per_step.md) 强证据场景表 + 14 工具入参/出参 schema（见 [mcp/cheap-research/server.py](../mcp/cheap-research/server.py)）
 - **当前状态**：14 工具 + 43 个自检用例全过，dev_repo 完成；**未同步到已安装目录**（等用户指令）
 
-### ⑧ serena + cheap-research 组合：dedup 子阶段
+### ⑦ cheap-research 单跑：dedup 子阶段
 
-- **复用 MCP**：⑥ serena（`get_symbols_overview` + `find_symbol`，LSP 语义级，作为 ripgrep 降级）+ ⑦ cheap-research（`extract` 用 haiku 分类 + 高质量模型找重复）
-- **强证据**：02_review/05_deepcheck 步骤中 + serena 🟢 + cheap-research 🟢 + **函数数 ≥ 50**
+- **复用 MCP**：⑥ cheap-research（`extract` 用 haiku 分类 + 高质量模型找重复）；函数抽取用 ripgrep（catalog.json）
+- **强证据**：02_review/05_deepcheck 步骤中 + cheap-research 🟢 + **函数数 ≥ 50**
 - **触发场景**：
   - **02_review §2.5.7（轻量 top 5）**：ripgrep 抽所有函数 → `mcp__cheap-research__extract`(haiku) 分类（wrapper object schema）→ 后处理映射到 25 类 → 取 top 5 类别逐类调高质量模型找重复
   - **05_deepcheck §9.4（完整全量）**：完整 5 阶段（抽取→分类→拆分→高质量模型逐类找重复→报告）。分别检测 catalog.json/categorized.json 是否已由 §2 生成 → 复用避免重跑
@@ -94,8 +83,7 @@
 - **降级路径**：
   - 函数数 < 50 → 整个 §2.5.7/§9.4 跳过（避免 LLM 成本浪费）
   - 函数数 > 500 → 分批（每批 100），合并结果
-  - ripgrep 抽不到 / 不可用 → 降级 serena `get_symbols_overview` + N 次 `find_symbol`（N+1 成本高）
-  - ripgrep + serena 都不可用 → 整个 dedup 跳过
+  - ripgrep 抽不到 / 不可用 → 整个 dedup 跳过
   - cheap-research 不可用 → 整个 dedup 跳过（不降级主代理自跑，因为 高质量模型分类 + 找重复是高成本子任务）
   - 高质量模型某类返回空数组 → 该类跳过（无重复），不报错
 
@@ -103,7 +91,6 @@
   - **cheap-research schema 不支持 `enum` 类型**——`{"enum": [...]}` 报 `'enum' is not valid under any of the given schemas`。改用 `string` + prompt 强约束
   - **cheap-research LLM 把 array-of-objects 退化为 single object**——多次确认，schema `{"type": "array", "items": {...}}` 时 LLM 仍返回单个 object。**必须用 wrapper object 模式** `{"results": [...]}` 规避
   - **cheap-research LLM 不严格遵守 25 类清单**——即使 prompt 强约束，LLM 仍返回"Number Parsing"/"Math"/"String Manipulation"等自由类别。**必须主代理在写入 categorized.json 前做后处理映射**（见 §2.5.7/§9.4 第 3 步映射表）
-  - **serena `find_symbol` 不支持批量抽取**——必须 name_path_pattern；批量方案：`get_symbols_overview` 拿名字 + 逐个 `find_symbol(include_body=true)`（N+1 调用成本高）
   - extract 返回 schema_validation_failed → 重试 1 次（自动改 instruction），仍失败标"分类降级"
 - **类别清单（共 25 类）**：
   - 通用类 22：file-ops / string-utils / validation / error-handling / http-api / date-time / data-transform / database / logging / config / async-utils / testing / ui-helpers / crypto / provider-impl / tool-impl / event-handling / session-management / compaction / other（19）+ file-ops/string-utils 子类补 3 = 22
@@ -115,11 +102,10 @@
 
 - 实际工具名格式：`mcp__<server-name>__<tool-name>`
 - server-name 用 kebab-case（`sequential-thinking` / `vision-bridge` / `cheap-research`）
-- tool-name 用 snake_case（`sequentialthinking` / `analyze_media` / `find_symbol` / `summarize`）
+- tool-name 用 snake_case（`sequentialthinking` / `analyze_media` / `resolve-library-id` / `summarize`）
 - 示例：
   - `mcp__sequential-thinking__sequentialthinking`
   - `mcp__vision-bridge__analyze_media`
-  - `mcp__serena__find_symbol`
   - `mcp__playwright__browser_navigate`
   - `mcp__cheap-research__summarize`
 
@@ -141,7 +127,6 @@
 | 全新 clone icode-skill | sequential-thinking（必装） + vision-bridge（推荐装，需配三件套） |
 | 纯后端项目 | sequential-thinking + vision-bridge + context7 |
 | 前端项目 | 上述 + playwright |
-| 重编码项目 | 上述 + serena（需 Python 3.10+ + uv + LSP） |
 | 长期项目 | 上述 + memory（跨工单积累） |
 | **降本场景** | 上述 + **cheap-research**（仅 23 个低风险子任务；3 质疑者对抗 / 架构决策 / 终审裁决 / 修复方案一律不走） |
 

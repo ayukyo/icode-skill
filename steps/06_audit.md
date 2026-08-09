@@ -15,16 +15,16 @@
 **L3·重要**（矩阵段定义）：
 - §6.7 视角 A（原始需求）失败 → 走 §6.2 强制修复流程（user 决定）
 - §6.7 视角 B（limit）失败 → 同上（但 `limit_refs` 空数组跳过视角 B，旧工程向后兼容）
-- §6.7 视角 C（必要性）失败（v2.11）→ 同上（删除重复实现或改为复用现有实现）
+- §6.7 视角 C（必要性）失败 → 同上（删除重复实现或改为复用现有实现）
 - 6 维度评分有 ❌ → 走 §6.2 修复，**不阻断流程**
 
 ## 前置校验
 
-> **读决策锚点**（v2.8，启动时）：若 `metadata.anchors_enabled != false`，Read `{ICODE_OUT_DIR}/.decision_anchors.json`（不存在则跳过），获取上游关键决策摘要（requirement_digest/key_decisions/design_4dims/deviations/open_risks）作本步骤上下文，不替代产物。详见 [references/decision_anchors.md](../references/decision_anchors.md)。
+> **读决策锚点**（启动时）：若 `metadata.anchors_enabled != false`，Read `{ICODE_OUT_DIR}/.decision_anchors.json`（不存在则跳过），获取上游关键决策摘要（requirement_digest/key_decisions/design_4dims/deviations/open_risks）作本步骤上下文，不替代产物。详见 [references/decision_anchors.md](../references/decision_anchors.md)。
 
 检查 `{ICODE_OUT_DIR}/03_plan_final.md` 和步骤4创建的代码文件是否存在，缺失则报错。
 
-## 前置：patch 配合（v2.13）
+## 前置：patch 配合
 
 > 工单可能已走过 `/icode patch` 追加修改（`{ICODE_OUT_DIR}/08_patch.md` 存在且有 Patch 段，或 `metadata.patch_count > 0`）。本步骤启动时 **Read `08_patch.md`**（不存在则跳过本段，走原流程），按以下规则配合：
 
@@ -49,7 +49,7 @@
 7. **计划vs代码差异摘要**：用已读取的 `03_plan_final.md` 内容（步骤2）和代码文件内容（步骤6），调 `mcp__cheap-research__diff_summary(text_a=计划文本, text_b=实现文本, focus="计划vs代码偏离")`，输出差异摘要（偏离项 + 未实现功能点 + 新增功能点，≤500 token）。**降级**（cheap-research 不可用）：主代理手动对比，不阻塞。**结果供 6.1 维度 2「执行精准度」+ 维度 3「方案偏离度」直接引用**。
 8. **执行终审**
 
-### 前置强制执行门（v2.11 新增·防"复用步骤5结论跳过审计"）
+### 前置强制执行门（防"复用步骤5结论跳过审计"）
 
 **在写入 06_audit.md 任何内容之前，必须依次完成以下动作。未完成即写产物 = 跳过步骤 = 严重违规。**
 
@@ -63,7 +63,7 @@
 
 ### 审核维度（7个，全部覆盖）
 
-1. **实施完整度** — 计划所有功能点 100% 落地，每个功能点必须给出代码证据位置。**三档实施范围核对**（v2.7，反偷懒第 26 条）：Read `metadata.fix_tiers`（plan 落盘的三档分级）→ A 档必做项全部落地、B 档仅实施 `confirmed_B_fixes` 确认项、C 档未混入；字段缺失视为 null，从 `03_plan_final.md` §4.5 文本读。**测试核对**（v2.8 新增）：Read `metadata.test_cmd`/`test_outcome`/`test_failures`--`test_outcome=pass` 强化完整度证据；`test_outcome=fail` -> 测试未通过的功能点不算 100% 落地，扣分并记入问题清单（按 6.2 强制修复流程）；`test_outcome=skipped` -> 标注"本工程无测试套件，完整度仅靠静态审查"，不扣分
+1. **实施完整度** — 计划所有功能点 100% 落地，每个功能点必须给出代码证据位置。**三档实施范围核对**（反偷懒第 26 条）：Read `metadata.fix_tiers`（plan 落盘的三档分级）→ A 档必做项全部落地、B 档仅实施 `confirmed_B_fixes` 确认项、C 档未混入；字段缺失视为 null，从 `03_plan_final.md` §4.5 文本读。**测试核对**：Read `metadata.test_cmd`/`test_outcome`/`test_failures`--`test_outcome=pass` 强化完整度证据；`test_outcome=fail` -> 测试未通过的功能点不算 100% 落地，扣分并记入问题清单（按 6.2 强制修复流程）；`test_outcome=skipped` -> 标注"本工程无测试套件，完整度仅靠静态审查"，不扣分
 2. **执行精准度** — 实现与计划一致，偏差处必须指出（文件+行号）
 3. **方案偏离度** — 偏离项必须明确列出
 4. **代码质量** — 可读性、性能、安全性、**注释完备性**（导出函数/接口/关键分支/数据结构注释是否齐全，对照步骤4 第6条）、**日志覆盖**（关键路径错误返回/状态跳转/外部交互/决策分支/降级重试是否有日志可排查，对照步骤4 第7条）、**优雅度6条**（①复用优先 ②风格对齐 ③调用链模式一致 ④最小侵入 ⑤接口克制 ⑥调用路径选择（架构一致性）——新增跨模块/跨端点调用 grep 工程既有同类调用对齐主导模式，不得绕过已注册路由/接收器直调，同函数内既有同类调用必须一致；对照步骤4 第9条）、**事务性/非事务性步骤分离**（多步骤业务流程须区分**事务性步骤**（主流程结果，失败应失败/回滚）与**非事务性/展示增强步骤**（APP/DP 展示数据上报、底图刷新、通知）——主事务已提交后执行的非事务性步骤，其失败**不得推翻/阻断已提交事务**，降级告警保留事务成功，识别「展示失败→误判整体失败→伪失败」；详见 08_patch 阶段2）
@@ -80,10 +80,10 @@
    **§6.7 三视角对照**：
    - **视角 A（需求角度）**：user 原始需求 vs 实际产物（防"user 想要的没做"）
    - **视角 B（limit 角度）**：plan 引用的 limit vs 实际产物（防"plan 说遵循 limit 但代码违反"）
-   - **视角 C（必要性角度，v2.11 防重复实现）**：实际产物 vs 现有实现（防"实现了不该实现的功能"）——对最终产物的每个新增功能点，按 [references/necessity_check.md](../references/necessity_check.md) 全工程检索等价实现（`rg -in '<需求关键词>'` + Read 命中处行为链），检查新实现是否与现有实现重复（**含"新实现写出来也不会执行到（被已有入口/拦截先返回挡掉）"的情形**——比"功能近似"更确凿的重复）。格式见下方视角 C 表
+   - **视角 C（必要性角度，防重复实现）**：实际产物 vs 现有实现（防"实现了不该实现的功能"）——对最终产物的每个新增功能点，按 [references/necessity_check.md](../references/necessity_check.md) 全工程检索等价实现（`rg -in '<需求关键词>'` + Read 命中处行为链），检查新实现是否与现有实现重复（**含"新实现写出来也不会执行到（被已有入口/拦截先返回挡掉）"的情形**——比"功能近似"更确凿的重复）。格式见下方视角 C 表
    - 三视角都通过 → §6.7 收敛；任一未通过 → 走 §6.2 修复流程
 
-   **视角 C 必要性收敛表**（v2.11）：
+   **视角 C 必要性收敛表**：
    ```markdown
    | 功能点 | 现有实现（file:line） | 新实现（file:line） | 关系 | 收敛判定 |
    |--------|---------------------|--------------------|------|---------|
@@ -114,7 +114,7 @@
 
    **与 limit 红线协同**：如果本工程有 limit（`~/.claude/icode_data/limits/<id>.md`），§6.7 还要额外核对**实际产物是否与 limit 红线一致**（与 plan §10 #6 + §3/§4/§6 引用契约形成三层验证：plan 引用 → 实施遵循 → audit 收敛）。
 
-### 部署后验证建议（audit 附加输出，v2.14 新增）
+### 部署后验证建议（audit 附加输出）
 
 > **目的**：audit 是静态分析，无法实机验证。当检测到静态分析覆盖不到的运行时风险时，输出**部署后验证建议**（非阻断，只给用户预期，不新增步骤、不强制实机流程）。
 
@@ -212,7 +212,7 @@
 
 > 交付报告（原 6.4 文档化）已拆为独立步骤7 `/icode readme`，用户按需手动触发。步骤6 不再自动生成报告。详见 [07_readme.md](07_readme.md)。
 
-## 补丁记录（/icode patch 追加，v2.13）
+## 补丁记录（/icode patch 追加）
 
 > 本段**不是**步骤6 的正文内容，而是后续 `/icode patch` 调用时**运行时追加**的说明——供回读区分主流程结论与补丁演进：
 
@@ -220,7 +220,7 @@
 - **不覆盖原正文**——6.1 终审报告 / 6.2 修复 / 实现偏差备忘保持原样，补丁影响单独成段
 - 追加式演进：多次 patch 多次追加，每段带 Patch N 编号，回读即得完整演进链
 - 补丁的完整记录（增量计划/实施/验证）在 `08_patch.md` 的对应 Patch N 段，本段仅摘要
-- **追问补充行**（v2.13，与「patch 会话语义」配套）：同一 Patch N 内用户追问导致**代码修改或结论变化**时，在原补丁记录段内追加一行 `- Patch N 追问补充：<变化摘要>`（不新增段、不改原行）——与 `08_patch.md` 的「追问补充」小节对应；纯补充信息不改变结论 → 不追加
+- **追问补充行**（与「patch 会话语义」配套）：同一 Patch N 内用户追问导致**代码修改或结论变化**时，在原补丁记录段内追加一行 `- Patch N 追问补充：<变化摘要>`（不新增段、不改原行）——与 `08_patch.md` 的「追问补充」小节对应；纯补充信息不改变结论 → 不追加
 
 ## 完成前自检（必须填，未填项标 ❌=不合规）
 
@@ -270,18 +270,17 @@
 - **禁止与其他段合并**：本段独立 H2 标题，便于将来 grep 工具检索"## schema 状态汇总"
 
 **自动化要求**：实现可用 Bash + python 一行（例如 `python3 -c "import json,sys; d=json.load(open(sys.argv[1])); ..."` 嵌入式调用）；如失败则降级为手工填写模板 + 标 `[未自动化]`。
-## 决策锚点（步骤6 完成后写，v2.8）
+## 决策锚点（步骤6 完成后写）
 
 步骤6 终审后，若 `metadata.anchors_enabled != false`，最终刷新 `.decision_anchors.json`：刷新 `deviations` + `open_risks`（终审汇总）。详见 [references/decision_anchors.md](../references/decision_anchors.md)。
 
-## MCP 推荐（v2.2 强证据二元化）
+## MCP 推荐（强证据二元化）
 | MCP | 推荐级别 | 用途 |
 |-----|----------|------|
 | vision-bridge | 🟢* | UI 截图分析--用户给图时 |
 | **cheap-research** | 🟢* | **降本**：diff_summary（计划vs代码差异摘要）+ fill_template（6.4 交付报告提示+偏差备忘）+ summarize（schema 状态汇总）。不接管决策：6.1 终审裁决/6.2 强制修复走主会话 |
 | playwright | 🟢* | 真实 UI 验证（截图、交互）--前端工程时 |
-| serena | ⚪ | 本步骤不推荐 |
 | memory | ⚪ | 本步骤不推荐 |
 | context7 | ⚪ | 本步骤不推荐 |
 
-**强制约束（v2.2）**：🟢/🟢*/⚪ 语义 + 双保险机制（执行步骤内嵌 + thinking_core gate）详见 [SKILL.md「MCP 调用覆盖强制化」](../SKILL.md) + [references/mcp_per_step.md「双保险机制」](../references/mcp_per_step.md)；本步骤表内的 🟢/🟢* 标注按上方真源判定。
+**强制约束**：🟢/🟢*/⚪ 语义 + 双保险机制（执行步骤内嵌 + thinking_core gate）详见 [SKILL.md「MCP 调用覆盖强制化」](../SKILL.md) + [references/mcp_per_step.md「双保险机制」](../references/mcp_per_step.md)；本步骤表内的 🟢/🟢* 标注按上方真源判定。

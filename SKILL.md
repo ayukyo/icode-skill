@@ -3,7 +3,7 @@ name: icode
 description: 端到端编码工作流（步骤 0~6，含可选需求初稿步骤与日志根因分析入口），支持分步手动调用：/icode help (帮助), /icode install (MCP 环境检查+一键安装), /icode init [<粗略需求>] (需求初稿), /icode log [零散信息...] (日志根因分析→转修复需求), /icode start <需求> (全流程), /icode fast <需求> (精简全流程), /icode plan <需求> (计划), /icode review [N] (审查), /icode merge (定稿), /icode code (编码), /icode deepcheck (复检), /icode audit (终审), /icode patch [问题或新需求] (追加修改：主流程后/中途继续改), /icode doc [自然语言] (工程级知识库生成), /icode limit [自然语言] (项目约束红线), /icode readme (交付报告), /icode status (工单状态), /icode list [关键词] (跨工程工单查找)
 ---
 
-**版本**: v2.16.0
+**版本**: v2.17.0
 
 # ICode 全流程编码工作流（步骤 0 + 1~6）
 
@@ -47,7 +47,7 @@ description: 端到端编码工作流（步骤 0~6，含可选需求初稿步骤
 | `[流程]` `/icode deepcheck` | **仅步骤5**：三阶段递进复检（Reverse → Fixed → Free）。`mode=="fast"` 时只跑 Reverse 阶段 | 用最新目录 |
 | `[流程]` `/icode audit` | **仅步骤6**：终极终审 + 统一修复（产出 `{ICODE_OUT_DIR}/06_audit.md`） | 用最新目录 |
 | `[流程]` `/icode readme` | **可选步骤7**：生成交付报告（面向人的自包含总结，动态文件名，智能识别功能/查BUG模板）。步骤6完成后手动触发 | 用最新目录 |
-| `[独立]` `/icode patch [问题或新需求...]` | **追加修改（独立步骤，v2.13 新增）**：主流程完成后（`completed`）或中途（步骤1~5任一状态）继续修改既有工单——测试发现问题 / 后续新需求，在既有工单上打补丁。**轻量四段式**（重审现状 → 增量计划 → 最小实施 → 反向复检，含**分析验证型分支**：纯分析无代码修改时豁免实施/编译、改「结论验证」，但**端到端代码追溯/证据方法可靠性/链路完整性结论验证不豁免**（v2.15 收紧）），**不靠会话记忆靠磁盘产物重载上下文**（治"越问上下文越爆炸"）。产物 `08_patch.md` 追加式（每次**显式调用**追加 Patch N 段；**会话内追问/补充归入当前 Patch N，不新增段**）。**不改变 status/completed_steps**（completed 保持 completed），靠 `patch_count`/`patch_history` 记录（详见 [steps/08_patch.md](steps/08_patch.md)） | 用最新目录 |
+| `[独立]` `/icode patch [问题或新需求...]` | **追加修改（独立步骤）**：主流程完成后（`completed`）或中途（步骤1~5任一状态）继续修改既有工单——测试发现问题 / 后续新需求，在既有工单上打补丁。**轻量四段式**（重审现状 → 增量计划 → 最小实施 → 反向复检，含**分析验证型分支**：纯分析无代码修改时豁免实施/编译、改「结论验证」，但**端到端代码追溯/证据方法可靠性/链路完整性结论验证不豁免），**不靠会话记忆靠磁盘产物重载上下文**（治"越问上下文越爆炸"）。产物 `08_patch.md` 追加式（每次**显式调用**追加 Patch N 段；**会话内追问/补充归入当前 Patch N，不新增段**）。**不改变 status/completed_steps**（completed 保持 completed），靠 `patch_count`/`patch_history` 记录（详见 [steps/08_patch.md](steps/08_patch.md)） | 用最新目录 |
 | `[工程]` `/icode doc [自然语言]` | **工程级知识库生成（独立步骤）**：扫描工程代码特征，生成/维护 `~/.claude/icode_data/project_docs/<project_id>/<branch>/` 下的工程知识库章节（架构/IPC/术语表/代码事实审计，**按分支分目录**，切分支跑 doc 不互相覆盖），**同时检测工程依赖的独立模块**（git submodule / `repo` 管理 / CMake FetchContent / monorepo / vendor / 用户配置，6 级优先级）并生成 `~/.claude/icode_data/module_docs/{key}/` 模块共享文档（**按仓库+分支 key 跨工程共享**，同一上游仓库同分支只一份），供 init/log/plan/start/fast 段零自动跨仓库检索注入。**去参数化**——目标工程与动作（全量/增量/新增）由自然语言识别。**v1 单级布局自动迁移**：检测到旧 `<project_id>/` 平铺布局时自动迁移到 `<project_id>/<branch>/`（保留所有字段 + 备份 `_meta.json.v1_migrated_from`，详见 doc.md 步骤 5）。**不创建工单目录、不写工单 metadata、不参与步骤1~6推进**（详见 [steps/doc.md](steps/doc.md)） | 否（写全局 `project_docs/` 和 `module_docs/`） |
 | `[配置]` `/icode limit [自然语言]` | **项目约束红线（独立步骤）**：定义和维护本工程的红线/约束/禁区。**主存**：`~/.claude/icode_data/limits/<project_id>.md`（全局，跨 checkout 共享，团队私有不上传）；**覆盖**：`<project_root>/.icode_output/limit.local/<project_id>.md`（单 checkout，自动 gitignore）。**local 完全覆盖 main**。**追加式演进**——每次调用增量追加新红线条目（编号自增），不覆盖、不 diff。对齐 `/icode doc` 模式：无描述→全局扫描显示当前约束（合并视图）；有描述→针对操作生成/追加新条目。**plan 步骤硬基线**——plan §3/§4/§6 引用 limit 条目作为设计依据（柔性提示：plan 入口检测不到 limit 建议生成但不阻断）。**log 步骤对照清单**——log 步骤4 limit 红线检查点读取，逐条对照根因假设是否违反约定红线（柔性提示：log 入口检测不到 limit 不阻断）。**不创建工单目录、不写工单 metadata、不参与步骤1~6推进**（详见 [steps/limit.md](steps/limit.md)） | 否（写全局 `limits/` + 工程根 `.icode_output/limit.local/`，自动 gitignore） |
 | `[查询]` `/icode status` | **状态查询/verdict 标注**：默认只读查当前工单状态（含 `mode`/`verdict` 字段 + 全局索引工单数）；`--verdict <ticket_id> <verified\|disproved\|superseded> "<reason>" [--correct "<正确方向>"] [--source <machine_test|review|user|auto_signal>]` 手动标注工单方向结论（双写 metadata+index，幂等覆盖刷新 `verdict_at`）；`--scan-verdict` 批量扫描 unknown 完成态工单的 00_init 末轮/06_audit 证伪信号并提示标注（详见 [steps/status.md](steps/status.md)） | 否（默认只读；`--verdict`/`--scan-verdict` 写 metadata+全局索引，不写工程内源码文件） |
@@ -239,18 +239,6 @@ ICODE_OUT_DIR=".icode_output/.icode_output_${LAST}"
 
 缺失则报错并提示需要先执行哪一步。
 
-### serena 配置自愈（前置准备，需要 serena-doctor）
-
-所有 icode 步骤执行前，若 `serena-doctor` 可用（`which serena-doctor`），自动检查当前项目 serena 配置：
-
-1. 检测 `project_path` 是否有 `.serena/project.yml`
-2. 无 → 调 `serena-doctor init <project_path>`（自动探测语言，配齐 language_servers）
-3. 已有 `.serena/` 但语言不全 → 调 `serena-doctor fix <project_path>`（补缺失语言 + C++ 软链）
-4. **目标代码位于子仓库/嵌套 git 仓库时**（`git -C <目标目录> rev-parse --show-toplevel` ≠ `project_path`）：对子仓库根同样执行 1-3（init/fix 子仓库路径），确保子仓库 `.serena/project.yml` 就绪——这是 v2.12 多 git 根激活的前置（详见 [references/anti_laziness.md](references/anti_laziness.md) 第 21 条 v2.12 段）
-5. `serena-doctor` 不可用 → 跳过，按全局 CLAUDE.md 规则处理
-
-**级别**：L4·参考（不影响流程，serena-doctor 可用时才执行）
-
 ### 元信息文件（`.ico_metadata.json`）
 
 ```json
@@ -302,15 +290,15 @@ ICODE_OUT_DIR=".icode_output/.icode_output_${LAST}"
 - `code_deviations`：步骤4 编码时主动偏离定稿计划的记录数组（每条含 `plan_said`/`actual_done`/`reason`），供步骤6 终审汇总回写到 `03_plan_final.md` 的「实现偏差备忘」段；无偏离写空数组 `[]`
 - `limit_refs`（本次新增，可选，默认 `[]`）：plan 步骤引用的 limit 红线编号数组，每条 `{redline_no: int, source: "main"|"local", title: str}`，`source` 区分主存全局约定 vs 单 checkout 覆盖。plan §3 架构设计 / §4 ADR / §6 异常处理引用 limit 条目时记录。**字段缺失视为 `[]`（向后兼容旧 metadata）**。详见 [steps/limit.md](steps/limit.md)
 - `code_review_fix_with_issues`（新增，可选，默认 `false`）：步骤4末尾 1.5「Code Review Fix」4 维度复检未通过标记（同事提示词 4 维度闭环在 04_code 末尾的工程化复检）。`true` 时步骤5/6 入口输出警告，audit 终审会看到此标记——**不阻断流程**，仅作可见性提示，让后续 reviewer/历史检索知道本工单 4 维度复检未通过。**字段缺失视为 `false`（向后兼容旧 metadata）**
-- `test_cmd`/`test_outcome`/`test_failures`/`test_timeout`（v2.8 新增，测试集成字段）：`test_cmd`=探测/配置的测试命令字符串（null=无测试套件，步骤4 自动探测 Makefile/package.json/pytest.ini/go.mod/CMakeLists.txt/Cargo.toml/pom.xml）；`test_outcome`=枚举 `pass`/`fail`/`skipped`（默认 `skipped`）；`test_failures`=bool（步骤4 测试 3 次重试仍失败置 true，L3 警告不阻断，与 `code_compile_failed` 同级）；`test_timeout`=int 秒（默认 120）。借鉴 aider `auto_test` 机制（一手验证 Aider-AI/aider base_coder.py:1616），icode 增加自动探测。详见 [steps/04_code.md](steps/04_code.md)「编译验证 + 测试验证」段。**字段缺失视为 null/skipped/false/120（向后兼容旧 metadata）**
+- `test_cmd`/`test_outcome`/`test_failures`/`test_timeout`（测试集成字段）：`test_cmd`=探测/配置的测试命令字符串（null=无测试套件，步骤4 自动探测 Makefile/package.json/pytest.ini/go.mod/CMakeLists.txt/Cargo.toml/pom.xml）；`test_outcome`=枚举 `pass`/`fail`/`skipped`（默认 `skipped`）；`test_failures`=bool（步骤4 测试 3 次重试仍失败置 true，L3 警告不阻断，与 `code_compile_failed` 同级）；`test_timeout`=int 秒（默认 120）。借鉴 aider `auto_test` 机制（一手验证 Aider-AI/aider base_coder.py:1616），icode 增加自动探测。详见 [steps/04_code.md](steps/04_code.md)「编译验证 + 测试验证」段。**字段缺失视为 null/skipped/false/120（向后兼容旧 metadata）**
 - `mode`（新增，可选，默认 `"full"`）：工单模式。`"full"` = `/icode start` 全流程（步骤2 默认 3 轮 + 对抗，步骤5 三阶段循环）；`"fast"` = `/icode fast` 精简全流程（步骤2 固定 1 轮无对抗，步骤5 只跑 Reverse）。**字段缺失视为 `"full"`（向后兼容旧 metadata）**。详见 [steps/fast.md](steps/fast.md)
 - `max_rounds`（新增，可选，默认 3）：步骤2 review 软上限轮数。`mode="full"` 时由 `/icode review N` 参数决定（默认 3）；`mode="fast"` 时**自动串联下强制为 1**，但**单步命令（`/icode review N`）在 fast 工单上调用时 N 优先级最高**——用户用参数 N 显式表达 fast→full 升级意图时，按 N 轮跑（详见 [references/dir_and_metadata.md](references/dir_and_metadata.md)「步骤2/5 读 mode 字段的契约」段）。**字段缺失视为 3**
 
 - `fix_tiers`（新增，可选，默认 `null`）：修复方案三档分级（反偷懒第 26 条）。`{"A": ["A1..."], "B": ["B1..."], "C": ["C1..."]}` 供 review/code/audit 核对实施范围。**由步骤1 plan §4.5 落盘**（每档 1-2 条一句话摘要），步骤2/4/6 核对实施范围时读取；字段缺失视为 `null`，从 `03_plan_final.md` §4.5 文本读（向后兼容旧 metadata）
 - `confirmed_B_fixes`（新增，可选，默认 `[]`）：步骤4 实施 B 档兜底修复前记录的**用户显式确认清单**（每条含 B 档内容简述）。**字段缺失视为 `[]`（向后兼容旧 metadata）**。仅当用户显式确认后才实施 B 档并记录；未确认的 B 档不实施
-- `anchors_enabled`（v2.8 新增，可选，默认 `true`）：决策锚点机制开关。`true` 时各步骤完成后写 `.decision_anchors.json` + 下游启动读（传递关键决策摘要，省 token + 不丢上下文）；`false` 跳过。详见 [references/decision_anchors.md](references/decision_anchors.md)。**字段缺失视为 `true`（向后兼容旧 metadata）**
-- `patch_count`（v2.13 新增，可选，默认 `0`）：追加修改次数（`/icode patch` 调用次数累计）。`/icode patch` 启动时读它确定本次 `Patch N` 序号（N = patch_count + 1），完成后写回新值。**不改变 `status`/`completed_steps`**——patch 是横向追加非纵向推进。**字段缺失视为 `0`（向后兼容旧 metadata）**
-- `patch_history`（v2.13 新增，可选，默认 `[]`）：追加修改历史数组，每次 `/icode patch` 完成**追加**一条 `{"patch_no": N, "summary": "一句话（≤100 token）", "files": ["相对项目根路径..."], "at": "时间", "status": "done"|"issues"}`（`issues` = 阶段4 复检发现新引入问题且当场未修复，L2 警告不阻断）。供回读工单演进链 / 历史检索 / 06_audit 补丁记录对齐。**字段缺失视为 `[]`（向后兼容旧 metadata）**。详见 [steps/08_patch.md](steps/08_patch.md)
+- `anchors_enabled`（可选，默认 `true`）：决策锚点机制开关。`true` 时各步骤完成后写 `.decision_anchors.json` + 下游启动读（传递关键决策摘要，省 token + 不丢上下文）；`false` 跳过。详见 [references/decision_anchors.md](references/decision_anchors.md)。**字段缺失视为 `true`（向后兼容旧 metadata）**
+- `patch_count`（可选，默认 `0`）：追加修改次数（`/icode patch` 调用次数累计）。`/icode patch` 启动时读它确定本次 `Patch N` 序号（N = patch_count + 1），完成后写回新值。**不改变 `status`/`completed_steps`**——patch 是横向追加非纵向推进。**字段缺失视为 `0`（向后兼容旧 metadata）**
+- `patch_history`（可选，默认 `[]`）：追加修改历史数组，每次 `/icode patch` 完成**追加**一条 `{"patch_no": N, "summary": "一句话（≤100 token）", "files": ["相对项目根路径..."], "at": "时间", "status": "done"|"issues"}`（`issues` = 阶段4 复检发现新引入问题且当场未修复，L2 警告不阻断）。供回读工单演进链 / 历史检索 / 06_audit 补丁记录对齐。**字段缺失视为 `[]`（向后兼容旧 metadata）**。详见 [steps/08_patch.md](steps/08_patch.md)
 
 > **`verdict` 字段族（方向结论，v2 新增）**--与 `status` 流程态正交：`status` 表示"流程走到哪步"，`verdict` 表示"方案方向对不对"。用于历史检索注入分流，防止已被证伪/取代的工单误导新需求（详见下文「历史检索复用·注入分流」段）：
 > - `verdict`（可选，默认 `"unknown"`）：枚举 `"unknown"`（未判定，旧工单默认）/`"verified"`（已验证有效，实机通过/终审高分/已上线无回退）/`"disproved"`（核心方案被证伪/已回退，如某"暂停数据流"方案实机发现语义是"重置状态"而非"冻结"，从根上不可行）/`"superseded"`（被替代方案取代，指向 `superseded_by`）。**字段缺失视为 `"unknown"`（向后兼容旧工单，走原注入逻辑 + 对抗质疑兜底）**
@@ -365,9 +353,9 @@ ICODE_OUT_DIR=".icode_output/.icode_output_${LAST}"
 
 **续跑判定规则**：以 `completed_steps` 中**编号 1~6 范围内最大的已完成步骤**为基准推进下一步。`"0"` 和 `"log"` 仅作为"已走过步骤0/log入口"的标记，**不影响**推进逻辑。例：`["0"]`/`["log"]` → 下一步是步骤1；`["0","1"]`/`["log","1"]` → 下一步是步骤2。
 
-**patch 不参与推进判定（v2.13）**：`/icode patch` 是横向追加修改，**不改** `status`/`completed_steps`，不影响续跑判定——`completed` 工单 patch 后仍是 `completed`，`code_done` 工单 patch 后仍是 `code_done`（补丁记录在 `patch_count`/`patch_history` 字段 + `08_patch.md` 产物，详见 [steps/08_patch.md](steps/08_patch.md)）。
+**patch 不参与推进判定**：`/icode patch` 是横向追加修改，**不改** `status`/`completed_steps`，不影响续跑判定——`completed` 工单 patch 后仍是 `completed`，`code_done` 工单 patch 后仍是 `code_done`（补丁记录在 `patch_count`/`patch_history` 字段 + `08_patch.md` 产物，详见 [steps/08_patch.md](steps/08_patch.md)）。
 
-**patch 与主流程步骤的配合（v2.13）**：patch 插在不同步骤之间时，后续代码相关步骤的**计划侧基准须纳入补丁**（补丁的增量计划/实施是已落地的设计依据），否则会覆盖 patch 修改或误判为偏离：
+**patch 与主流程步骤的配合**：patch 插在不同步骤之间时，后续代码相关步骤的**计划侧基准须纳入补丁**（补丁的增量计划/实施是已落地的设计依据），否则会覆盖 patch 修改或误判为偏离：
 
 | 后续步骤 | patch 的影响 | 配合规则（各步骤文件已声明） |
 |---|---|---|
@@ -398,7 +386,7 @@ ICODE_OUT_DIR=".icode_output/.icode_output_${LAST}"
 - 每条记录：`ticket_id`(`{工程名}-{N}`，工程名冲突时追加 `project_path` 短 hash 后缀保唯一)、`project_path`、`out_dir`、`requirement_summary`(≤100 token)、`requirement_points`(≤8 条)、`keywords`(≤8个)、`has_00_init`/`has_plan`、`status`、`created_at`、`last_used_at`(检索命中时更新，LRU淘汰依据)、`hit_count`(检索命中+1，达20永久保留)、`stale`(默认false，过时校验失败置true，软stale可复活)、`stale_reason`(失败原因`anchor_gone`/`checkout_mismatch`/`path_gone`/`semantic_deviation`/`timeout`)、`stale_checked_commit`(上次评估时HEAD，可复活判据)、`created_commit`(创建时HEAD，commit上下文判据，非git仓库为null)、`created_branch`(`--abbrev-ref HEAD`)、`tb_source`（可选，null 或 {lib,num,pid,label}：TB 缺陷单溯源，log 步骤按 lib+num+pid 检索同单复用）、`verdict`/`verdict_reason`/`correct_direction`/`verdict_source`/`verdict_at`/`superseded_by`/`verdict_premise_deps`/`verdict_review_needed`（方向结论字段族，默认 `verdict="unknown"` 其余 null/[]/false，详见上「verdict 字段族」；检索注入按 verdict 分流，`disproved`/`superseded` 不续期 hit_count、不享受永久保留、排序降权，详见「索引淘汰规则」）。**`has_00_init` 语义 = 该工单是否已产出 `00_init.md`（走过 init 或 log，log 也会产出 00_init.md），与"是否走过步骤0 init"解耦**——log 未走过 init 但产出 00_init.md 故也为 true
 - **只存指针和摘要，不存产物正文**。产物仍在各工程 `.icode_output/`，工程隔离不破坏。
 - **LRU 淘汰**（防 index.json 无限膨胀）：索引是检索缓存非档案。容量上限 200 条；`hit_count >= 20` 且 `verdict != "disproved"` 永久保留（被复用≥20 次的高价值工单；`disproved` 不永久保留，详见「索引淘汰规则」）；未完成态（init/log/review/deepcheck/code in_progress）默认不淘汰，但**超时降级**（`last_used_at` 超 30 天无更新->置 `stale=true`+`stale_reason=timeout` 解除保护、纳入可淘汰，不新增 status 值；timeout 为硬 stale 不复活）；超上限时在**可淘汰集**淘汰 `last_used_at` 最老的：① `hit_count < 20` 且 `stale=false` 完成态，或 ② `stale=true` 且 `stale_reason=timeout` 的超时降级僵尸（status 仍 in_progress）；**软 stale（非 timeout）保留不淘汰待复活**。另**主动 stale 扫描**：每次写索引顺带校验最旧 K 条锚点，失效置 `stale=true`。检索命中**原子同步**更新 `last_used_at`+`hit_count` 续期。淘汰只删索引条目，产物保留各工程。**排序**：tickets 数组按复合键 `(verdict_priority, hit_count)` 降序、同值按 `last_used_at` 降序（`verdict_priority`: verified>unknown>superseded>disproved，详见「索引淘汰规则」）（高价值近期项在前，段一粗筛扫 keywords 快+淘汰从末尾）。详见 [references/dir_and_metadata.md](references/dir_and_metadata.md)「索引淘汰规则」
-- **过时校验**（防注入过时信息）：索引存的是工单当时的摘要，工程迭代后老工单 ADR/需求可能已过时。**两处触发**：①检索命中准备注入前（被动）；②每次写索引触发淘汰后，主动 Grep 校验最旧 K 条代码锚点（主动）。锚点失效→置 `stale=true` 跳过注入（即使 hit_count 高也不注入）。stale 工单保留索引留追溯，不再续期，不再被段一粗筛命中。**project_docs 工程文档同样有过时校验**：段零注入前被动 stale 检测（命中 KEYS 文件位置或正文目录前缀即标 stale，降级注入不注正文）+ `/icode doc` 末尾主动 stale 扫描（全库锚点校验写 `_meta.json.stale_files`，见 [steps/doc.md](steps/doc.md) 步骤8）+ module_docs commit 一致性校验（同分支不同 commit 降级注入+警告）。**历史工单 stale 校验 v2**：commit 上下文比对（`created_commit` vs 当前 HEAD：同提交高置信注入/后代跑锚点/祖先分叉软stale）+ top-N 注入前语义偏离 checklist（抓"锚点在但语义变"）+ stale 可复活（checkout 变化重评，解决临时旧提交误判）+ **Git 操作只读白名单**（禁 checkout/reset/commit 等写操作与网络操作，详见「过时校验·Git 操作安全白名单」）。详见 [references/dir_and_metadata.md](references/dir_and_metadata.md)「检索命中续期 + 过时校验」「索引淘汰规则·主动 stale 扫描」「project_docs 主动 stale 扫描」「段零·工程文档检索·步骤 3 commit 一致性校验」
+- **过时校验**（防注入过时信息）：索引存的是工单当时的摘要，工程迭代后老工单 ADR/需求可能已过时。**两处触发**：①检索命中准备注入前（被动）；②每次写索引触发淘汰后，主动 Grep 校验最旧 K 条代码锚点（主动）。锚点失效→置 `stale=true` 跳过注入（即使 hit_count 高也不注入）。stale 工单保留索引留追溯，不再续期，不再被段一粗筛命中。**project_docs 工程文档同样有过时校验**：段零注入前被动 stale 检测（命中 KEYS 文件位置或正文目录前缀即标 stale，降级注入不注正文）+ `/icode doc` 末尾主动 stale 扫描（全库锚点校验写 `_meta.json.stale_files`，见 [steps/doc.md](steps/doc.md) 步骤8）+ module_docs commit 一致性校验（同分支不同 commit 降级注入+警告）。**历史工单 stale 校验**：commit 上下文比对（`created_commit` vs 当前 HEAD：同提交高置信注入/后代跑锚点/祖先分叉软stale）+ top-N 注入前语义偏离 checklist（抓"锚点在但语义变"）+ stale 可复活（checkout 变化重评，解决临时旧提交误判）+ **Git 操作只读白名单**（禁 checkout/reset/commit 等写操作与网络操作，详见「过时校验·Git 操作安全白名单」）。详见 [references/dir_and_metadata.md](references/dir_and_metadata.md)「检索命中续期 + 过时校验」「索引淘汰规则·主动 stale 扫描」「project_docs 主动 stale 扫描」「段零·工程文档检索·步骤 3 commit 一致性校验」
 
 **写索引时机**（**`keywords` 是段一粗筛的检索索引，所有入口首次写索引时必须填 ≤8 个技术关键词、不得为空**——空 keywords 的工单无法被粗筛命中，等于检索盲区）：
 - `/icode log` 产出 `log_analysis.md` + `00_init.md` 后：**首次生成 `ticket_id`**（`{工程名}-{N}`，冲突加 hash 后缀）并回填 metadata，写入 `requirement_summary`（根因摘要）+`requirement_points`（修复要点）+`keywords`（≤8个，从根因/症状提炼）+`has_00_init=true`+`status=log_done`+`last_used_at=当前`+`hit_count=0`+`stale=false`+`stale_reason=null`+`stale_checked_commit=null`+`created_commit`（`git rev-parse HEAD` 只读，非git仓库为null）+`created_branch`+`tb_source`（{lib,num,pid,label}，从 metadata 读，无 TB 源时 null），**写后执行LRU淘汰 + 主动 stale 扫描**
@@ -497,34 +485,24 @@ ICODE_OUT_DIR=".icode_output/.icode_output_${LAST}"
 - **跨会话恢复**：运行 `ls -d .icode_output/.icode_output_*` 确认目录后，直接调用对应步骤即可
 - **中断恢复**：重新执行某步骤可覆盖该步骤输出
 
-### MCP 调用覆盖强制化（v2.2 强证据二元化）
+### MCP 调用覆盖强制化（强证据二元化）
 
-> **核心问题**：v2.0/v2.1 实测发现 AI 默认只调 sequential-thinking（必用项），其他 MCP 全部跳过--根因是"形式强制"（产物必含记录段）而非"执行强制"（流程必走调用）。**v2.2 治本**：消除 🟡"应该调"模糊地带，二元化（🟢 必须调 / ⚪ 不必调），并用**双保险**把 🟢 MCP 写进执行流：
+> **核心问题**：AI 默认只调 sequential-thinking（必用项），其他 MCP 全部跳过--根因是"形式强制"（产物必含记录段）而非"执行强制"（流程必走调用）。**治本**：消除 🟡"应该调"模糊地带，二元化（🟢 必须调 / ⚪ 不必调），并用**双保险**把 🟢 MCP 写进执行流：
 
 **强制规则**：
 
-1. **产物文件不记录 MCP 调用信息**（v2.3 精简，消除 MCP 噪声对用户的干扰）：MCP 调用结果只进**思考块**「MCP 调用」段（按 [references/thinking_core.md](references/thinking_core.md) 通用流程第 3 步 gate + 各 step 执行步骤内嵌点），不写入 01_plan.md / 02_review.md / 03_plan_final.md / 04_code_review_fix.md / 05_deepcheck.md / 06_audit.md / log_analysis.md / 00_init.md 等产物文件。**serena 调用记录行同理写思考块**（见 anti_laziness 第 21 条 v2.6 自检门）
-
+1. **产物文件不记录 MCP 调用信息**（消除 MCP 噪声对用户的干扰）：MCP 调用结果只进**思考块**「MCP 调用」段（按 [references/thinking_core.md](references/thinking_core.md) 通用流程第 3 步 gate + 各 step 执行步骤内嵌点），不写入 01_plan.md / 02_review.md / 03_plan_final.md / 04_code_review_fix.md / 05_deepcheck.md / 06_audit.md / log_analysis.md / 00_init.md 等产物文件。
 2. **🟢 必须调的 MCP**：强证据场景满足 + MCP 可用 -> **必须实际调用一次**（双保险承载），失败/空才能降级。降级需在思考块「MCP 调用」段写明原因（MCP 不可用 / LSP server 缺失 / 调用返回空）
 
 3. **⚪ 不必调的 MCP**：强证据场景不满足 -> 无需评估、无需声明、无需记录
 
-4. **双保险承载**（v2.2 治本）：
-   - **A 层·执行步骤内嵌**：serena 在 plan/code/deepcheck/doc/review 的执行步骤主体里有独立的调用指令（非末尾推荐表），AI 顺序执行必然走到
+4. **双保险承载**：
+   - **A 层·执行步骤内嵌**：cheap-research 等在各 step 执行步骤主体里有独立的调用指令（非末尾推荐表），AI 顺序执行必然走到
    - **B 层·thinking_core MCP gate**：[references/thinking_core.md](references/thinking_core.md) 通用流程第 3 步--思考块先列本步 🟢 MCP -> ToolSearch 取 schema -> 实际调用 -> 结果进思考块。覆盖 context7/memory/vision-bridge/playwright
 
 **降级路径仍然合规**：MCP 真的不可用（tool unavailable / LSP server 缺失），用 Bash/Read/Write/Grep 等原生工具替代--降级不是错误，但**必须先实际调用一次，失败/空才能标降级**，且**必须显式声明**。
 
-**与 v2.0/v2.1 的破兼容性变更**：
-
-| 项 | v2.0 | v2.1 | v2.2 |
-|---|---|---|---|
-| 🟢 语义 | "强证据优先"（推荐） | "必须调"（强制+降级声明） | "必须调"（双保险承载） |
-| 🟡 语义 | "视情况"（可选） | "应该调"（思考块说明） | **消除**（二元化，升 🟢 或降 ⚪） |
-| ⚪ 语义 | 不必调 | 不必调 | 不必调（强证据场景不满足，无需评估） |
-| 承载方式 | 末尾推荐表 | 末尾推荐表 + 产物记录段 | **执行步骤内嵌 + thinking_core gate**（治本） |
-
-详见 [references/mcp_per_step.md](references/mcp_per_step.md) 的"v2.2 二元化"段。
+详见 [references/mcp_per_step.md](references/mcp_per_step.md)。
 
 ### 工具调用模式规范（连续执行约束）
 
@@ -564,35 +542,33 @@ Bash ls dir_a
 
 **本规则与 MCP 调用覆盖强制化的关系**：MCP 调用覆盖强制化决定"哪些 MCP 必须调"（内容维度），本规则决定"如何调"（模式维度）——两条规则配套使用，缺一不可。
 
-## MCP 工具集（v2.2 双保险承载）
+## MCP 工具集（双保险承载）
 
-icode 工作流可调用 7 个 MCP（`/icode install` 一键安装）。**v2.2 双保险承载**：🟢 MCP 由执行步骤内嵌（serena）+ thinking_core gate（其余）双驱动，确保真实触发--按 [references/mcp_per_step.md](references/mcp_per_step.md) 推荐级别（🟢 必须调 / ⚪ 不必调，**消除 🟡**）执行。
+icode 工作流可调用 6 个 MCP（`/icode install` 一键安装）。**双保险承载**：🟢 MCP 由执行步骤内嵌 + thinking_core gate 双驱动，确保真实触发--按 [references/mcp_per_step.md](references/mcp_per_step.md) 推荐级别（🟢 必须调 / ⚪ 不必调，**消除 🟡**）执行。
 
 **核心文档**：
 - [references/mcp_integration.md](references/mcp_integration.md)：**每个 MCP 的强证据 + 降级路径**（必读）
-- [references/mcp_per_step.md](references/mcp_per_step.md)：**步骤 × MCP 推荐矩阵（v2.2 强证据二元化）**
+- [references/mcp_per_step.md](references/mcp_per_step.md)：**步骤 × MCP 推荐矩阵（强证据二元化）**
 - [references/thinking_core.md](references/thinking_core.md)：**MCP gate（通用流程第 3 步）**
-- 本文件「MCP 调用覆盖强制化（v2.2）」章节：强制规则
+- 本文件「MCP 调用覆盖强制化」章节：强制规则
 
 **判定逻辑**：AI 在每个步骤开始时，按 [references/mcp_per_step.md](references/mcp_per_step.md)「强证据场景判定」判定每个 MCP 是否 🟢：
 - 证据 A：`Read ~/.claude.json` 的 `mcpServers.<name>` 段存在
 - 证据 B：当前会话 deferred tools 列表里有 `mcp__<name>__<tool>`
-- **强证据场景满足**（如 serena 在 plan 步骤 + 工程有可索引源码）+ 证据 A/B 任一 -> 🟢 必须调
+- **强证据场景满足**（如 context7 在 plan 步骤 + 需求涉及第三方库）+ 证据 A/B 任一 -> 🟢 必须调
 - 强证据场景不满足 -> ⚪ 无需评估
 
 **🟢 MCP 承载**：
-- serena -> A 层（执行步骤内嵌点）
 - context7 / memory / vision-bridge / playwright -> B 层（thinking_core gate）
 - sequential-thinking -> thinking_core 通用流程第 4 步（结构化思考载体）
 
 **未调用合规处理**：🟢 需在思考块「MCP 调用」段写降级原因（先实际调用一次，失败/空才能降级）；⚪ 无需记录。
 
-### 7 个 MCP 速览
+### 6 个 MCP 速览
 
 | MCP | 用途 | 🟢 强证据场景 | 承载层 |
 |---|---|---|---|
 | **sequential-thinking** | 强制思考前置 | 所有步骤 | thinking_core 第 4 步 |
-| **serena** | LSP 语义编码 | plan/code/deepcheck/doc/review + 有可索引源码 | A 层·执行步骤内嵌 |
 | **context7** | 库文档实时查询 | init/plan/code + 涉及第三方库 | B 层·thinking_core gate |
 | **vision-bridge** | 图片/视频理解 | 任意步骤 + 用户给图(直接调) / TB 缺陷源附件含视频/图片时 **vision-bridge 可用则主动调**(视频先用 ffmpeg 本地抽帧省钱；不可用时仅提示不主动调，防纯文字模型报错)，详见 [steps/log.md](steps/log.md)「附件分析（含本地路径 + TB 源）与 ffmpeg 抽帧」 | B 层·thinking_core gate |
 | **playwright** | 浏览器自动化 | deepcheck/audit + 前端工程 | B 层·thinking_core gate |
@@ -604,7 +580,7 @@ icode 工作流可调用 7 个 MCP（`/icode install` 一键安装）。**v2.2 �
 ### 速用示例
 
 ```bash
-# 一键安装所有 7 个 mcp
+# 一键安装所有 6 个 mcp
 /icode install
 
 # 只装一个
@@ -622,7 +598,7 @@ icode 工作流可调用 7 个 MCP（`/icode install` 一键安装）。**v2.2 �
 
 实际工具名格式：`mcp__<server-name>__<tool-name>`
 
-- 示例：`mcp__sequential-thinking__sequentialthinking` / `mcp__vision-bridge__analyze_media` / `mcp__memory__read_graph` / `mcp__serena__find_symbol` / `mcp__playwright__browser_navigate`
+- 示例：`mcp__sequential-thinking__sequentialthinking` / `mcp__vision-bridge__analyze_media` / `mcp__memory__read_graph` / `mcp__playwright__browser_navigate`
 
 ### sequential-thinking（强制思考前置）
 
@@ -634,8 +610,8 @@ icode 工作流可调用 7 个 MCP（`/icode install` 一键安装）。**v2.2 �
 
 视觉理解是可选增强，**统一走 `mcp__vision-bridge__analyze_media` 工具**。
 
-- **TB 缺陷源附件视频/图片（实战补强,v2.4）**：log 步骤拉取 TB 缺陷源后,`tb_source/<ID>/` 下若含视频(`*.mp4`/`*.mov`/`*.avi` 等)/图片(`*.png`/`*.jpg`/`*.jpeg` 等),**vision-bridge 可用则主动调**——视频先用 ffmpeg 本地提取关键帧(免费),再传图片帧给 vision-bridge 分析(省 API 额度)。vision-bridge 不可用时仅提示附件清单不主动调(防纯文字模型报错)。详见 [steps/log.md](steps/log.md)「附件分析（含本地路径 + TB 源）与 ffmpeg 抽帧」与「TB 视频/图片附件研读」(反偷懒第 23 条含 vision-bridge 不可用豁免条款)
-- **本地日志目录视频/图片（v2.7 新增）**：`/icode log` 分析本地日志时,日志目录下若含视频/图片文件,vision-bridge 可用则主动调（扫目录枚举,视频同走 ffmpeg 抽帧,行为同 TB 源模式）。详见 [steps/log.md](steps/log.md)「附件分析（含本地路径 + TB 源）与 ffmpeg 抽帧」段
+- **TB 缺陷源附件视频/图片**：log 步骤拉取 TB 缺陷源后,`tb_source/<ID>/` 下若含视频(`*.mp4`/`*.mov`/`*.avi` 等)/图片(`*.png`/`*.jpg`/`*.jpeg` 等),**vision-bridge 可用则主动调**——视频先用 ffmpeg 本地提取关键帧(免费),再传图片帧给 vision-bridge 分析(省 API 额度)。vision-bridge 不可用时仅提示附件清单不主动调(防纯文字模型报错)。详见 [steps/log.md](steps/log.md)「附件分析（含本地路径 + TB 源）与 ffmpeg 抽帧」与「TB 视频/图片附件研读」(反偷懒第 23 条含 vision-bridge 不可用豁免条款)
+- **本地日志目录视频/图片**：`/icode log` 分析本地日志时,日志目录下若含视频/图片文件,vision-bridge 可用则主动调（扫目录枚举,视频同走 ffmpeg 抽帧,行为同 TB 源模式）。详见 [steps/log.md](steps/log.md)「附件分析（含本地路径 + TB 源）与 ffmpeg 抽帧」段
 - **装好 vision-bridge 且 `config.json` 配好三件套（base_url/api_key/model）**：`mcp__vision-bridge__analyze_media` 可用，**优先用 MCP 工具**走统一接口
 - **没装 vision-bridge，或装了但 `config.json` 三件套没填**：`analyze_media` 工具返回 fallback 提示字符串，**降级**——AI 不替用户判断原生能力
   - 原生支不支持图片/视频 **视具体 session 模型而定**（Opus/Sonnet 一般支持，Haiku 可能部分支持）
@@ -645,7 +621,7 @@ icode 工作流可调用 7 个 MCP（`/icode install` 一键安装）。**v2.2 �
 - 安装：`cd ~/.claude/skills/icode/mcp/vision-bridge && ./install.sh`，三件套在生成的 `config.json` 里配（不入 `~/.claude.json`，不污染环境）
 - 详见 [mcp/vision-bridge/README.md](mcp/vision-bridge/README.md)
 
-### 其他 4 个 MCP（memory / context7 / playwright / serena）
+### 其他 3 个 MCP（memory / context7 / playwright）
 
 详细说明（强证据 / 降级路径 / 工具签名 / 依赖）见 [references/mcp_integration.md](references/mcp_integration.md)。
 
@@ -683,7 +659,7 @@ icode 工作流可调用 7 个 MCP（`/icode install` 一键安装）。**v2.2 �
 
 **执行步骤时，必须先读取对应的 `steps/XX_*.md` 文件，按其中的详细指令执行。**
 
-## 决策锚点机制（v2.8，步骤间思考传递）
+## 决策锚点机制（步骤间思考传递）
 
 解决「步骤间只传产物文件，AI 思考推理不传」痛点。各步骤完成后写 `.decision_anchors.json`（关键决策摘要），下游启动时读，**不用重读产物全文**。锚点是精炼摘要非产物备份。
 
@@ -705,5 +681,5 @@ icode 工作流可调用 7 个 MCP（`/icode install` 一键安装）。**v2.2 �
 | [references/adversarial.md](references/adversarial.md) | 对抗分析模式（3质疑者/裁决优先级/诚实降级/证据回指） | 02_review / log |
 | [references/dir_and_metadata.md](references/dir_and_metadata.md) | 目录管理 + ticket_id 生成 + 全局索引写入（含LRU淘汰） + metadata 模板 + **注入缓存机制（防重复注入，两源共用）** + **project_docs 工程文档库 + 段零检索** | init / log / plan / start / fast / doc |
 | [references/doc_template.md](references/doc_template.md) | icode doc 章节模板：前 50 行四块结构（项目元信息/KEYS/简要说明/目录）+ 十位桶编号 + 自适应 grep 关键词表 + 99 章审计策略 + **v2.0.0 双视角必含元素清单（14 项）+ 业务流独立成章 + 英文首次中文备注 + 链路中文说明 + 质量审视检查清单 + 模板版本自举迁移** | doc |
-| [references/necessity_check.md](references/necessity_check.md) | **现有功能覆盖度检查（v2.11 防重复实现机制）**：触发时机 + 执行命令（全工程检索 + Read 命中处行为链）+ 三类判定（已覆盖/部分/未覆盖）+ 各步骤落点（init §2.X/预筛列、plan 前置/断言/ADR/对抗、review 维度7、deepcheck Reverse 对比、audit 视角 C） | init / plan / review / deepcheck / audit |
-| [references/first_activation_path.md](references/first_activation_path.md) | **首次激活路径一致性检查（v2.14 新增）**：静态分析盲区（"写了从没实机执行过"的死路径既有 bug）+ 触发条件 + 检测法（软信号、不阻断）+ 双侧校验一致性核对清单 + 部署后验证建议下游输出 | plan（断言⑤）/ deepcheck（Reverse）/ audit（部署后建议）/ patch（部署后验证发现） |
+| [references/necessity_check.md](references/necessity_check.md) | **现有功能覆盖度检查（防重复实现机制）**：触发时机 + 执行命令（全工程检索 + Read 命中处行为链）+ 三类判定（已覆盖/部分/未覆盖）+ 各步骤落点（init §2.X/预筛列、plan 前置/断言/ADR/对抗、review 维度7、deepcheck Reverse 对比、audit 视角 C） | init / plan / review / deepcheck / audit |
+| [references/first_activation_path.md](references/first_activation_path.md) | **首次激活路径一致性检查**：静态分析盲区（"写了从没实机执行过"的死路径既有 bug）+ 触发条件 + 检测法（软信号、不阻断）+ 双侧校验一致性核对清单 + 部署后验证建议下游输出 | plan（断言⑤）/ deepcheck（Reverse）/ audit（部署后建议）/ patch（部署后验证发现） |

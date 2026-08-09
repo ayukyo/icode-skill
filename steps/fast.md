@@ -144,14 +144,13 @@ fast 模式的"精简"不等于"偷懒"：
 3. **入口警告必须如实打印**（不静默跳过提示）
 4. **跳过对抗验证不是"省略证据"**，而是承认 fast 模式下没有对抗资源——用户自负其责
 5. **fast 模式不能用于：声称"做了深度审查"**——明确"1 轮无对抗"的边界，避免误导后续读者
-## MCP 推荐（v2.2 强证据二元化）
+## MCP 推荐（强证据二元化）
 | MCP | 推荐级别 | 用途 |
 |-----|----------|------|
-| serena | 🟢* | 代码理解 + 符号编辑--有可索引源码时（plan/deepcheck 内嵌） |
 | context7 | 🟢* | 库 API 核对--涉及第三方库时 |
 | vision-bridge | 🟢* | UI 截图--用户给图时 |
 | memory | 🟢* | read_graph 查跨工单记忆--有历史工单时 |
 | playwright | ⚪ | fast 模式不跑 E2E |
 | **cheap-research** | 🟢* | **降本增强**：plan（audit_facts/retrieve_similar/apply_migration）+ review（diff_summary/summarize/fill_template/scan_patterns/trace_refs）+ code（apply_migration）+ deepcheck（diff_summary/summarize）+ audit（diff_summary/fill_template/summarize）每步都有单闸门入选子任务；未装走 Agent(model="haiku") 兜底，不阻塞。**不接管决策**：3 质疑者对抗/架构决策/终审裁决/修复方案一律不走（零灰区原则）。详见 [mcp_per_step.md](../references/mcp_per_step.md) |
 
-**强制约束（v2.2）**：🟢/🟢*/⚪ 语义 + 双保险机制（执行步骤内嵌 + thinking_core gate）详见 [SKILL.md「MCP 调用覆盖强制化」](../SKILL.md) + [references/mcp_per_step.md「双保险机制」](../references/mcp_per_step.md)；本步骤表内的 🟢/🟢* 标注按上方真源判定。
+**强制约束**：🟢/🟢*/⚪ 语义 + 双保险机制（执行步骤内嵌 + thinking_core gate）详见 [SKILL.md「MCP 调用覆盖强制化」](../SKILL.md) + [references/mcp_per_step.md「双保险机制」](../references/mcp_per_step.md)；本步骤表内的 🟢/🟢* 标注按上方真源判定。

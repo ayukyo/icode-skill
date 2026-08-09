@@ -1,6 +1,6 @@
 # 首次激活路径（First-Activation Path）一致性检查
 
-> 共享机制文档（v2.14 新增）：供 [01_plan.md](../steps/01_plan.md) §5c 断言⑤ / [05_deepcheck.md](../steps/05_deepcheck.md) 阶段1 Reverse / [06_audit.md](../steps/06_audit.md) 部署后验证建议 / [08_patch.md](../steps/08_patch.md) 部署后验证发现分支 引用。**定义在本文档，各步骤只做精简内联 + 回指**，避免同一概念碎片化散落在多处。
+> 共享机制文档：供 [01_plan.md](../steps/01_plan.md) §5c 断言⑤ / [05_deepcheck.md](../steps/05_deepcheck.md) 阶段1 Reverse / [06_audit.md](../steps/06_audit.md) 部署后验证建议 / [08_patch.md](../steps/08_patch.md) 部署后验证发现分支 引用。**定义在本文档，各步骤只做精简内联 + 回指**，避免同一概念碎片化散落在多处。
 
 ## 定义
 
@@ -37,4 +37,4 @@
 ## 与既有机制的关系
 
 - 与必要性质检（[necessity_check.md](necessity_check.md)）互补：必要性质检治「新功能是否重复实现」，本检查治「既有死路径的遗留 bug」。
-- 与 plan §4.5 维度2 的跨模块枚举对齐（v2.4）互补：枚举对齐治「同名数值语义碰撞」，本检查治「未激活路径双侧校验矛盾」。
+- 与 plan §4.5 维度2 的跨模块枚举对齐互补：枚举对齐治「同名数值语义碰撞」，本检查治「未激活路径双侧校验矛盾」。

@@ -235,13 +235,13 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
 > | 跨模块数（`code_files` 顶层目录数） | 1 | 2-3 | ≥4 |
 > | 大改词命中（`keywords` + `00_init.md` 第 3 节） | 0 | 1-2 | ≥3 |
 > - **每轮重评**：步骤 0 多轮对话期间每轮重评，**仅刷 `workload_estimate`+`workload_reason`，不刷 `requirement_points` 等检索字段**（防索引膨胀）
-> **`task_timeout_seconds` 字段**（spawn 等待超时阈值，v2.4 新增，可选，默认 `120`）：
+> **`task_timeout_seconds` 字段**（spawn 等待超时阈值，可选，默认 `120`）：
 >
 > - 数值类型，整数秒，作用于步骤 2.5.5 / 步骤 log 阶段3 / 步骤 5 Free A6 三处 spawn 3 质疑者子代理（详见 [adversarial.md](adversarial.md)「显式等待 + 超时机制」段）
 > - 默认值：缺失视为 `120`（120 秒）；`0` 或负数视为非法 → 静默回落 `120`（防误配 0 导致瞬时超时误降级）
 > - 写入约定：可在入口/步骤1 metadata 更新时按工程场景配置（如重型分析工单可调至 180-300；轻量可缩至 60）；建议最小不低于 30s（过短会过早触发重试链路）
 > - 字段缺失兼容：旧 metadata 无 `task_timeout_seconds` 视为 `120`，不阻塞后续步骤
-> **`no_spawn_env` flag 字段**（环境结构性无 spawn 工具标记，v2.4 新增，可选，默认 `false`）：
+> **`no_spawn_env` flag 字段**（环境结构性无 spawn 工具标记，可选，默认 `false`）：
 >
 > - 布尔类型，标记当前 icode 环境是否**结构性**不支持 Agent 工具 spawn（区别于 transient 失败/超时/截断）
 > - 默认值：缺失视为 `false`（环境有 spawn 工具但本轮未成功——属 transient 失败，走超时/重试链路）
@@ -515,7 +515,7 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
    ├─ 先精确 ls `~/.claude/icode_data/project_docs/<关联 project_id>/<branch_safe>/00_overview.md`
    ├─ 精确不存在且标识疑似工程名/代号 -> 遍历 `project_docs/*/<branch_safe>/00_overview.md` 元信息块的「工程名」「产品线/型号」字段模糊匹配关联标识，命中取其路径
    └─ 命中路径 -> 读前 50 行 -> KEYS 匹配 + 简要说明语义打分 -> 关联工程候选集（**只取 00_overview，不读其他章节**，控 token 且防跨工程失真）；**强制 stale 校验**（分支 + 祖先双校验，同步骤 5 project 章节）+ ⚠️ 跨工程警告「关联工程 `<id>` 文档为快照，代码可能已分叉，下游须 Read 实证」；来源标签「来源：project:关联 `<id>`」；无任何命中 -> ℹ️ 提示「关联工程 `<标识>` 未生成知识库或分支 `<branch>` 不匹配，可提示用户 `/icode doc`」，跳过
-   - **3.6 源码路径定位**（v2.3 新增，为下游 Read 实证关联工程源码提供线索；仅给工程根路径不注正文 file:line，防跨工程失真）：对每个命中的关联工程，读其 00_overview 元信息块的 `project_path` + `Git 地址`，三级定位本机源码根：
+   - **3.6 源码路径定位**（为下游 Read 实证关联工程源码提供线索；仅给工程根路径不注正文 file:line，防跨工程失真）：对每个命中的关联工程，读其 00_overview 元信息块的 `project_path` + `Git 地址`，三级定位本机源码根：
      (a) **project_path 校验**：`project_path` 缺失/空（旧 v1 章节无此字段）则跳过本项进 (b)；`test -d <关联 project_path>` 有效 -> 取为源码线索（同机有效；绝对路径可能因换机器/换 clone 位置失效，故必校验）
      (b) **manifest 匹配**（当前工程 repo-root 模式 + `.repo/manifest.xml` 存在时）：按关联工程 `Git 地址` 精确匹配 manifest `<project name="<git 地址>" path="<本地路径>" />`，命中取 `path`（相对 .repo 根，拼绝对路径）-- 同 repo 关联工程最可靠定位（manifest 是本机源码权威映射）
      (c) **兜底**：(a)(b) 都失败 -> 标「源码不在本机/路径失效」，仅保留简要说明作方向参考，附提示「关联工程 `<id>` 源码未在本机定位到，如需 Read 实证请用户提供路径」

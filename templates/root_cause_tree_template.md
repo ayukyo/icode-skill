@@ -1,4 +1,4 @@
-# 根因树模板（v2.6 强制，防"停在症状层"）
+# 根因树模板（防"停在症状层"）
 
 > **用途**：`/icode log` 阶段3 对抗根因分析时，分析师提假设**必须填本模板**，确保根因追问到触发层而非停在症状层。3 层都 confirmed 才算真 confirmed。引用 [steps/log.md](../steps/log.md)「根因树 3 层假设链」+ [references/adversarial.md](../references/adversarial.md) 对抗裁决。
 
@@ -13,7 +13,7 @@
 - 假设 H1：<填底层触发事件，如"某 SDK/模块同步 I/O 阻塞跨线程锁">
 - 证据指针 E1：<日志行 节点+时间+原文 / 代码行 file:line / 辅助文件 时间戳+数据>
 - 置信度：<高/中/低>
-- 验证方法：<serena find_symbol 定位 / Read 实读 / 辅助文件 Read 实证>
+- 验证方法：<grep 定位符号 / Read 实读 / 辅助文件 Read 实证>
 
 ### 2. 机制层（中间传导链）
 
@@ -72,6 +72,6 @@
 
 - [ ] 3 层假设链都填了（非空）
 - [ ] 每层有证据指针（日志行/代码行/辅助文件）
-- [ ] 触发层经 serena find_symbol/find_referencing_symbols 验证（有可索引源码时）
+- [ ] 触发层经 grep 定位符号 + Read 实读验证（有可索引源码时）
 - [ ] 上游假说已扫（TB 评论 + 历史工单），继承/否决有留痕
 - [ ] 裁决标准已对照（3 层 confirmed 或诚实降级）

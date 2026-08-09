@@ -1,4 +1,4 @@
-# 决策锚点机制（v2.8，步骤间思考传递）
+# 决策锚点机制（步骤间思考传递）
 
 > 本文件是 icode 决策锚点机制的共享规则。解决"步骤间只传产物文件，AI 思考推理不传"的痛点--下游步骤读锚点获取上游关键决策摘要，**不用重读 00_init/01_plan 全文**。锚点不是产物备份，是"思考推理的精炼传递"。
 
@@ -40,7 +40,7 @@ icode 步骤间靠产物文件（00_init.md / 01_plan.md 等）传递信息，�
 | code（步骤4）| 追加 `deviations`（同步 `code_deviations`）+ 刷新 `open_risks` | metadata + `04_code_review_fix.md` |
 | deepcheck（步骤5）| 刷新 `open_risks`（deepcheck 残留风险）| `05_deepcheck.md` |
 | audit（步骤6）| 最终刷新 `deviations` + `open_risks` | `06_audit.md` |
-| patch（v2.13 新增）| 追加 `patch_summary`（本次补丁一句话摘要）+ 刷新 `open_risks`（补丁残留风险）；**追问刷新**（同一 Patch N 内追问导致结论变化时，覆盖刷新 `patch_summary` 为最新摘要）| `08_patch.md` Patch N 段「验证/收尾」 |
+| patch| 追加 `patch_summary`（本次补丁一句话摘要）+ 刷新 `open_risks`（补丁残留风险）；**追问刷新**（同一 Patch N 内追问导致结论变化时，覆盖刷新 `patch_summary` 为最新摘要）| `08_patch.md` Patch N 段「验证/收尾」 |
 
 **写规则**：增量刷新（保留上游写的字段，只刷新本步骤负责的字段）；`updated_at`/`updated_by` 每次写时更新。
 
@@ -53,7 +53,7 @@ icode 步骤间靠产物文件（00_init.md / 01_plan.md 等）传递信息，�
 | code（步骤4）| plan 写的锚点 | 编码对照设计决策 + 4 维度设计态 |
 | deepcheck（步骤5）| plan/code 锚点 | 复检对照设计 + 已知偏离（`deviations`）|
 | audit（步骤6）| 全链路锚点（最后一次 updated_by）| 终审看决策演进 + 偏离汇总 + 残留风险 |
-| patch（v2.13 新增）| 全链路锚点（最后一次 updated_by）| 重审现状时获取既有决策摘要，不用重读产物全文（与 [08_patch.md](../steps/08_patch.md)「上下文控制铁律」配套）|
+| patch| 全链路锚点（最后一次 updated_by）| 重审现状时获取既有决策摘要，不用重读产物全文（与 [08_patch.md](../steps/08_patch.md)「上下文控制铁律」配套）|
 
 **读规则**：启动时 Read `.decision_anchors.json`（存在则读，不存在跳过走原流程）；读到的摘要进思考块作上下文，**不替代产物**（如需细节仍 Read 产物对应章节）。
 

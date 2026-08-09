@@ -244,12 +244,12 @@ eval("2147483648") rc=3 (expect 3 OVERFLOW)
 
 用户可多次 `/icode readme` 覆盖更新（每次重新提取最新产物内容）。
 
-**patch 联动（v2.13）**：工单经过 `/icode patch` 追加修改后，若功能/修复范围有变化，提示用户"补丁后建议重新 `/icode readme` 刷新交付报告"（不自动执行，用户决定）。重新生成时须把 `08_patch.md` 的补丁演进（最新 Patch N）纳入「代码变更 / 验证方法」章节。
-## MCP 推荐（v2.2 强证据二元化）
+**patch 联动**：工单经过 `/icode patch` 追加修改后，若功能/修复范围有变化，提示用户"补丁后建议重新 `/icode readme` 刷新交付报告"（不自动执行，用户决定）。重新生成时须把 `08_patch.md` 的补丁演进（最新 Patch N）纳入「代码变更 / 验证方法」章节。
+## MCP 推荐（强证据二元化）
 | MCP | 推荐级别 | 用途 |
 |-----|----------|------|
 | vision-bridge | 🟢* | 附加 UI 截图--用户给图时 |
 | **cheap-research** | 🟢* | **降本**：generate_filename（文件名）+ select_template（功能/查BUG模板选择）+ fill_template（7 段落填充）+ retrieve_similar（已知限制检索防重复）。不接管决策：风险章节提炼走主会话 |
-| 其他 4 个 | ⚪ | 本步骤不推荐 |
+| 其他 3 个 | ⚪ | 本步骤不推荐 |
 
-**强制约束（v2.2）**：🟢/🟢*/⚪ 语义 + 双保险机制（执行步骤内嵌 + thinking_core gate）详见 [SKILL.md「MCP 调用覆盖强制化」](../SKILL.md) + [references/mcp_per_step.md「双保险机制」](../references/mcp_per_step.md)；本步骤表内的 🟢/🟢* 标注按上方真源判定。
+**强制约束**：🟢/🟢*/⚪ 语义 + 双保险机制（执行步骤内嵌 + thinking_core gate）详见 [SKILL.md「MCP 调用覆盖强制化」](../SKILL.md) + [references/mcp_per_step.md「双保险机制」](../references/mcp_per_step.md)；本步骤表内的 🟢/🟢* 标注按上方真源判定。

@@ -22,7 +22,7 @@
 /tools/__pycache__/
 
 # --- 3. MCP 子工程：Python 字节码 / 环境 / 缓存 / venv ---
-# 覆盖原 7 个 mcp/*/.gitignore 的全部规则（_lib/, context7/, serena/,
+# 覆盖原 6 个 mcp/*/.gitignore 的全部规则（_lib/, context7/,
 # playwright/, sequential-thinking/, memory/, vision-bridge/）
 # 注意: ** 跨目录匹配, 覆盖 mcp/X/__pycache__/ 和 mcp/X/Y/__pycache__/
 /mcp/**/__pycache__/

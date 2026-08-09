@@ -201,7 +201,7 @@ find "${GIT_ROOT}" -maxdepth 3 -name "<module_name>" -type d
 
 **去重**：详见 dir_and_metadata.md 同段「去重」两步（先按归一化绝对路径合并 + 再按 `key = <url_basename_sanitized>_<sha256(url+":"+branch)[:12]>` 去重，key 格式含模块名前缀便于人眼辨认，见 [dir_and_metadata.md](../references/dir_and_metadata.md)「module_docs key 计算」）。输出 modules 列表（每个含 url+branch+key+commit+path+type），写进工程 _meta.json 的 `module_deps` 字段。
 
-**代码特征扫描**：**serena 优先**（v2.2 执行步骤内嵌）：若工程有可索引源码且 serena 可用，ToolSearch 取 `mcp__serena__find_symbol` schema -> `find_symbol` 识别 entry 函数/导出 API/关键数据结构（比 grep 精准 10 倍，按符号语义非文本匹配），结果作为 00_overview.md「核心模块清单」+「全栈图」输入；目标代码在子仓库/嵌套 git 仓库时（`git -C <dir> rev-parse --show-toplevel` ≠ 当前激活项目根），先 `serena-doctor init/fix` 子仓库根 + `activate_project(<子仓库根>)` 激活目标仓库再查（v2.12，详见 anti_laziness 第 21 条 v2.12 段）；激活失败才降级。serena 不可用/无 LSP -> 降级 Grep 扫描，降级说明只进思考块，不写入产物文件。**未经实际调用 serena 就标降级 = 反偷懒第 21 条违规**。用 Grep 扫描工程代码特征，按本表「动态章节」段（doc_template.md「五」）决定追加哪些章节（AI 根据工程实际技术栈选 grep 模式，**不硬编码框架名**）。汇总「章节规划清单」：固定（00/10/90/99）+ 命中的动态章节。
+**代码特征扫描**（grep 优先）：用 Grep 扫描工程代码特征识别 entry 函数/导出 API/关键数据结构，结果作为 00_overview.md「核心模块清单」+「全栈图」输入，按本表「动态章节」段（doc_template.md「五」）决定追加哪些章节（AI 根据工程实际技术栈选 grep 模式，**不硬编码框架名**）。汇总「章节规划清单」：固定（00/10/90/99）+ 命中的动态章节。
 
 ### 3. 增量判定（非全量时）
 
@@ -422,14 +422,13 @@ find "${GIT_ROOT}" -maxdepth 3 -name "<module_name>" -type d
 
 - **段零消费**：`/icode init`/`log`/`plan`/`start`/`fast` 启动时段零自动检索（见 [dir_and_metadata.md](../references/dir_and_metadata.md)「段零·工程文档检索」段）；**doc 自身不写 `_inject_cache.json`**（工单目录缓存，doc 不创建工单）
 - **可重复**：多次 `/icode doc` 覆盖更新，手动编辑受确认门保护
-## MCP 推荐（v2.2 强证据二元化）
+## MCP 推荐（强证据二元化）
 | MCP | 推荐级别 | 用途 |
 |-----|----------|------|
-| serena | 🟢* | 理解代码结构（比 Read 精准 10 倍）--有可索引源码时（执行步骤内嵌） |
 | vision-bridge | 🟢* | 截图分析--用户给图时 |
 | **cheap-research** | 🟢* | **降本甜点**：audit_facts（代码事实审计）+ fill_template（章节+进度模板）+ scan_modules（6 级模块识别）+ scan_patterns/diff_summary（增量判定）+ parse_project_id + fetch_remote（拉远程依赖 README 作模块文档输入）。不接管决策：意图识别走主会话 |
 | context7 | ⚪ | 本步骤不推荐 |
 | memory | ⚪ | 本步骤不推荐 |
 | playwright | ⚪ | 本步骤不推荐 |
 
-**强制约束（v2.2）**：🟢/🟢*/⚪ 语义 + 双保险机制（执行步骤内嵌 + thinking_core gate）详见 [SKILL.md「MCP 调用覆盖强制化」](../SKILL.md) + [references/mcp_per_step.md「双保险机制」](../references/mcp_per_step.md)；本步骤表内的 🟢/🟢* 标注按上方真源判定。
+**强制约束**：🟢/🟢*/⚪ 语义 + 双保险机制（执行步骤内嵌 + thinking_core gate）详见 [SKILL.md「MCP 调用覆盖强制化」](../SKILL.md) + [references/mcp_per_step.md「双保险机制」](../references/mcp_per_step.md)；本步骤表内的 🟢/🟢* 标注按上方真源判定。

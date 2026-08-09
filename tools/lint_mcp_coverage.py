@@ -34,7 +34,7 @@ from typing import Dict, List, Tuple, Optional
 
 
 # 矩阵映射（v2.2 二元化：只静态强制无条件 🟢 的 sequential-thinking）
-# 其他 MCP（serena/context7/vision-bridge/playwright/memory）的 🟢* 取决于强证据场景，
+# 其他 MCP（context7/vision-bridge/playwright/memory/cheap-research）的 🟢* 取决于强证据场景，
 # lint 无法静态判定 -> 强制由 A 层（执行步骤内嵌）+ B 层（thinking_core gate）承载。
 # lint 只保证「段存在 + sequential-thinking 出现」，真实调用覆盖由 A+B 层 + audit 终审保障。
 MATRIX = {

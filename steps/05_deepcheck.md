@@ -24,11 +24,11 @@
 
 ## 前置校验
 
-> **读决策锚点**（v2.8，启动时）：若 `metadata.anchors_enabled != false`，Read `{ICODE_OUT_DIR}/.decision_anchors.json`（不存在则跳过），获取上游关键决策摘要（requirement_digest/key_decisions/design_4dims/deviations/open_risks）作本步骤上下文，不替代产物。详见 [references/decision_anchors.md](../references/decision_anchors.md)。
+> **读决策锚点**（启动时）：若 `metadata.anchors_enabled != false`，Read `{ICODE_OUT_DIR}/.decision_anchors.json`（不存在则跳过），获取上游关键决策摘要（requirement_digest/key_decisions/design_4dims/deviations/open_risks）作本步骤上下文，不替代产物。详见 [references/decision_anchors.md](../references/decision_anchors.md)。
 
 检查 `{ICODE_OUT_DIR}/03_plan_final.md` 和步骤4创建的代码文件是否存在，缺失则报错并提示先执行 `/icode code`。
 
-## 前置：patch 配合（v2.13）
+## 前置：patch 配合
 
 > 工单可能已走过 `/icode patch` 追加修改（`{ICODE_OUT_DIR}/08_patch.md` 存在且有 Patch 段，或 `metadata.patch_count > 0`）。本步骤启动时 **Read `08_patch.md`**（不存在则跳过本段，走原流程），按以下规则配合：
 
@@ -117,8 +117,8 @@ Free 阶段一次性完整覆盖全部 15 个角度。
 
 **Free 阶段 A6 深检/争议验证——必须独立 spawn 3 质疑者子代理**：若 Free 阶段发现任何深检 issue 或需争议性验证的点，**必须按 [references/adversarial.md](../references/adversarial.md) 模式独立 spawn 3 个质疑者子代理**（证据质疑者/替代解释者/充分性质疑者各一，不得合并 spawn，少任一视为不合规——见反偷懒第14条；**spawn 规格**：`subagent_type: "general-purpose"` + schema 强制结构化，**禁用 Explore** 防只调研不裁决被截断）。产物（`05_deepcheck.md` 的「对抗验证」段）必须记录每个质疑者的 **独立 spawn Agent ID** 作为调用证据。
 
-> **spawn 等待规格**（**v2.4 增补**，引用 [references/adversarial.md](../references/adversarial.md)「显式等待 + 超时机制」段）：spawn 3 质疑者必须**显式等 verdict**——同步 `Agent` spawn（`run_in_background: false`）或异步 + `TaskOutput` 等结果，**禁止 spawn 后不等待直接进入下一步**；超时 `TIMEOUT_SECONDS = 120`（可由 metadata.task_timeout_seconds 覆盖），超时触发重试 1 次（换措辞 + 可换 subagent_type 兜底），二次仍超时走 `[未验证-子代理对抗失败]`。**禁止**未等待就标 `[未验证-子代理对抗失败]`——该标签留给「确认失败」的子代理，不得给「仍在跑/返回晚」的子代理（2026-07-29 实测踩坑）。判定状态四态枚举（`sync_ok` / `timeout_retry_used` / `still_failed_after_retry` / `env_no_spawn`）必须写入 `adversarial_verification` 字段便于审计。
-> **主代理代行硬禁止**（**v2.4 实战补强**）：`no_spawn_env = false` 时**禁止**主代理代行三视角判断！即使部分子代理未回结果（如 1/3 返回 verdict、2/3 超时），其余未回子代理必须按「子代理失败处理」失败链路降级（标 `[未验证-子代理对抗失败]`），不得"补齐"为代理代行。主代理代行**仅在** `no_spawn_env = true`（结构性无 spawn 工具）时允许——环境启动检测 `Agent` 工具不可用时置 true。
+> **spawn 等待规格**（引用 [references/adversarial.md](../references/adversarial.md)「显式等待 + 超时机制」段）：spawn 3 质疑者必须**显式等 verdict**——同步 `Agent` spawn（`run_in_background: false`）或异步 + `TaskOutput` 等结果，**禁止 spawn 后不等待直接进入下一步**；超时 `TIMEOUT_SECONDS = 120`（可由 metadata.task_timeout_seconds 覆盖），超时触发重试 1 次（换措辞 + 可换 subagent_type 兜底），二次仍超时走 `[未验证-子代理对抗失败]`。**禁止**未等待就标 `[未验证-子代理对抗失败]`——该标签留给「确认失败」的子代理，不得给「仍在跑/返回晚」的子代理（2026-07-29 实测踩坑）。判定状态四态枚举（`sync_ok` / `timeout_retry_used` / `still_failed_after_retry` / `env_no_spawn`）必须写入 `adversarial_verification` 字段便于审计。
+> **主代理代行硬禁止**：`no_spawn_env = false` 时**禁止**主代理代行三视角判断！即使部分子代理未回结果（如 1/3 返回 verdict、2/3 超时），其余未回子代理必须按「子代理失败处理」失败链路降级（标 `[未验证-子代理对抗失败]`），不得"补齐"为代理代行。主代理代行**仅在** `no_spawn_env = true`（结构性无 spawn 工具）时允许——环境启动检测 `Agent` 工具不可用时置 true。
 
 子代理失败时按 adversarial.md「子代理失败处理」重试 2 次（含 1 次换 subagent_type）→仍失败诚实降级为 `[未验证-子代理对抗失败]`，**绝不改由主代理自演裁决**。
 
@@ -132,7 +132,7 @@ Free 阶段一次性完整覆盖全部 15 个角度。
 5. 否则初始化 `deepcheck_clean_rounds = 0`, `deepcheck_total_rounds = 1`, `deepcheck_phase = "reverse"`, `status = deepcheck_in_progress`
 6. 输出：`▶ 步骤5 复检开始`
 
-### 前置强制执行门（v2.11 新增·防"只写结论不执行"）
+### 前置强制执行门（防"只写结论不执行"）
 
 > **续跑跳过**：若步骤 2 读取的 `.ico_metadata.json` 中 `status` 已是 `"deepcheck_in_progress"`（说明是步骤 4 分步续跑恢复），跳过本门，直接进入恢复的 `deepcheck_phase` 对应阶段。
 
@@ -145,7 +145,7 @@ Free 阶段一次性完整覆盖全部 15 个角度。
 
 **只有以上 4 步全部完成，才能进入「阶段 1 — Reverse」**。思考前置证据（sequential-thinking 或文字块）不可替代上述 Read 确认行——思考是思考，读代码是读代码，缺一不可。
 
-### 阶段间强制校验门（v2.11 新增·防"阶段偷工"）
+### 阶段间强制校验门（防"阶段偷工"）
 
 **每个阶段开始前，必须完成以下检查才能进入下一个阶段**：
 
@@ -156,7 +156,7 @@ Free 阶段一次性完整覆盖全部 15 个角度。
 | 上阶段 has_issues 已处理（修复/分流） | N/A | ✅ Reverse issue 已分流 | ✅ Fixed issue 已分流 |
 | 思考块列出本阶段检查策略 | ✅ ≥3 方向 | ✅ 7 维度覆盖策略 | ✅ 15 角度全覆盖策略 |
 
-**任一检查项不满足 → 不切换阶段**，必须回补。禁止"先切阶段再补"（切了就不会补了——v2.10 实测踩坑模式）。
+**任一检查项不满足 → 不切换阶段**，必须回补。禁止"先切阶段再补"（切了就不会补了——实测踩坑模式）。
 
 ### 阶段 1 — Reverse（逆推）
 
@@ -178,10 +178,10 @@ Free 阶段一次性完整覆盖全部 15 个角度。
 - **欠实现**：计划有，逆推没有
 - **偏离/冗余**：逆推有，计划没提
 - **调用模式与工程不一致**（新增维度，独立于上面两类代码-计划 diff）：对代码中每个"跨模块/跨端点/跨层"调用，grep 同文件/同模块既有同类调用的写法，核对新增调用是否对齐工程主导模式。**这层对比专门抓"计划自己写错调用模式、代码按计划实现了、代码-计划 diff 无偏离但模式本身错了"的情况**——计划-代码 diff 发现不了，必须对照工程既有模式才能发现。若新增调用与工程主导模式不符（如工程统一走路由、同函数既有同类调用走路由，新增却直调）→ 标 issue，**计入 has_issues**（即使代码与计划一致，计划本身可能错）
-- **现有同类实现对比**（v2.11 新增，防重复实现，独立于上面三类代码-计划 diff）：对逆推出的每个**新增功能/新增接口**，按 [references/necessity_check.md](../references/necessity_check.md) 全工程检索等价实现（`rg -in '<需求关键词>'` + Read 命中处行为链）。发现等价实现 → 标 issue，**计入 has_issues**——**这层对比专门抓"代码与计划一致、但计划本身是重复实现（已有模块已覆盖该功能）"的情况**，diff 三要素全部发现不了；判定要点：新功能"写出来也不会执行到（被已有入口/拦截先返回挡掉）" = 重复，比"功能近似"更确凿
-- **首次激活路径双侧校验一致性检查**（v2.14 新增，独立于上面代码-计划 diff）：当 Reverse 逆推出的功能涉及**跨层接口 / IPC** 时，核对**跨层接口双侧校验一致性**。定义与完整核对清单见 [references/first_activation_path.md](../references/first_activation_path.md)。对每个接口 action：grep 历史日志确认是否有**成功调用记录**；若无（首次激活路径）→ Read 请求方入参校验 + Read 接收方校验逻辑，逐字段对比两侧对同一字段的接受值要求是否一致 → 不一致标 issue，**计入 has_issues**。**软信号**：历史日志可能不全，命中只触发核对，不阻断。**与代码-计划 diff 的区别**：上面 diff 抓"代码 vs 计划"偏离，本检查抓"**代码与计划一致、但两者都基于有 bug 的首次激活路径**"——计划本身是错的，diff 发现不了
+- **现有同类实现对比**（防重复实现，独立于上面三类代码-计划 diff）：对逆推出的每个**新增功能/新增接口**，按 [references/necessity_check.md](../references/necessity_check.md) 全工程检索等价实现（`rg -in '<需求关键词>'` + Read 命中处行为链）。发现等价实现 → 标 issue，**计入 has_issues**——**这层对比专门抓"代码与计划一致、但计划本身是重复实现（已有模块已覆盖该功能）"的情况**，diff 三要素全部发现不了；判定要点：新功能"写出来也不会执行到（被已有入口/拦截先返回挡掉）" = 重复，比"功能近似"更确凿
+- **首次激活路径双侧校验一致性检查**（独立于上面代码-计划 diff）：当 Reverse 逆推出的功能涉及**跨层接口 / IPC** 时，核对**跨层接口双侧校验一致性**。定义与完整核对清单见 [references/first_activation_path.md](../references/first_activation_path.md)。对每个接口 action：grep 历史日志确认是否有**成功调用记录**；若无（首次激活路径）→ Read 请求方入参校验 + Read 接收方校验逻辑，逐字段对比两侧对同一字段的接受值要求是否一致 → 不一致标 issue，**计入 has_issues**。**软信号**：历史日志可能不全，命中只触发核对，不阻断。**与代码-计划 diff 的区别**：上面 diff 抓"代码 vs 计划"偏离，本检查抓"**代码与计划一致、但两者都基于有 bug 的首次激活路径**"——计划本身是错的，diff 发现不了
 
-- **blast-radius 三链自检（新增）**：对 `code_files` 每个文件，**serena 优先**（v2.2 执行步骤内嵌）：若 serena 可用，ToolSearch 取 `mcp__serena__find_referencing_symbols` schema -> 对每个改动符号调用找所有引用点（语义精准 vs grep 文本匹配）；目标代码在子仓库/嵌套 git 仓库时（`git -C <dir> rev-parse --show-toplevel` ≠ 当前激活项目根），先 `serena-doctor init/fix` 子仓库根 + `activate_project(<子仓库根>)` 激活目标仓库再查（v2.12，详见 anti_laziness 第 21 条 v2.12 段）；激活失败才降级。serena 不可用/无 LSP -> 降级下方三条 grep，降级说明只进思考块，不写入产物文件。**未经实际调用 serena 就标降级 = 反偷懒第 21 条违规。**步骤末尾按反偷懒第 21 条 v2.6 自检门输出 `serena 调用: <工具 x N>` 或 `serena 降级: <原因>`，无记录 = 违规****。grep 结果作为"修改影响面证据"，与 Reverse 逆推的"跨文件调用关系"段互相印证。任一链 0 命中即不合规（未扫 = 自欺）。
+- **blast-radius 三链自检（新增）**：对 `code_files` 每个文件，用 `grep -rn '<符号>('` 对每个改动符号找所有引用点（跨仓库/子仓库见 anti_laziness 第 21 条「跨仓库/子仓库检索」段）。grep 结果作为"修改影响面证据"，与 Reverse 逆推的"跨文件调用关系"段互相印证。任一链 0 命中即不合规（未扫 = 自欺）。
   1. **caller 链**：`grep -rn '<改动的 func/类/全局符号>(' <project>` —— 列出所有 caller（含行号）
   2. **import 链**：`grep -rn '<改动的 header>' <project>` 或等价的 `import/from` 检索 —— 列出所有依赖入口
   3. **test 链**：`grep -rln '<符号\|<路径>' <test 目录>` —— 列出覆盖测试；无测试时显式标 `[无测试覆盖-符号 X]`，**不静默跳过**（让 has_issues 路径可触发）
@@ -221,9 +221,8 @@ Free 阶段一次性完整覆盖全部 15 个角度。
 
 ### 阶段 4 — Dedup（语义重复函数检测完整版）
 
-> **强证据场景判定**（v2.2 二元化，详见 [references/mcp_per_step.md §5 deepcheck](../references/mcp_per_step.md)）：
+> **强证据场景判定**（详见 [references/mcp_per_step.md §5 deepcheck](../references/mcp_per_step.md)）：
 >
-> - serena 🟢（`mcp__serena__find_symbol` 可用；目标代码在子仓库时先按 v2.12 激活子仓库）
 > - cheap-research 🟢（`mcp__cheap-research__extract` 可用）
 > - **函数数 ≥ 50**
 >
@@ -237,7 +236,7 @@ Free 阶段一次性完整覆盖全部 15 个角度。
    - `catalog.json` 存在 → 跳过第 2 步
    - `categorized.json` 存在 → 跳过第 3 步
    - 否则按需重跑
-2. **抽取阶段**（如 catalog.json 不存在，ripgrep 优先 + serena 降级）：
+2. **抽取阶段**（如 catalog.json 不存在，ripgrep 优先）：
 
    **优先用 ripgrep**（同 §2.5.7 第 1 步命令）：
 
@@ -256,7 +255,7 @@ Free 阶段一次性完整覆盖全部 15 个角度。
      "$PROJECT_ROOT" | head -2000
    ```
 
-   **ripgrep 降级**：调 `mcp__serena__get_symbols_overview` + N 次 `mcp__serena__find_symbol(name, include_body=true)`。**双降级**：ripgrep + serena 都不可用 → 整个 §9.4 跳过
+   **ripgrep 不可用**（未装）：整个 §9.4 跳过
 3. **分类阶段**（如 categorized.json 不存在）：调 `mcp__cheap-research__extract`（haiku）**双层分类**（parent + sub）→ `dedup/categorized.json`。**双层 schema** + **后处理映射（只映射 parent_category）** 同 §2.5.7 第 3 步。
 4. **拆分阶段**：Claude 直接做——**按 sub_category 拆分** `categorized.json`（不按 parent_category——避免跨家族合并），**仅保留 3+ 函数的 sub_category**（< 3 不值得分析），输出 → `dedup/duplicates/<sub_category>.json`
 5. **找重复阶段（高质量模型逐类）**：同 §2.5.7 第 5 步——**简化 schema** + **主代理 try 两种解析格式**（A: JSON 数组字符串; B: 分隔符纯文本）+ **用 categorized.json 回填 file/line**
@@ -290,18 +289,17 @@ Free 阶段一次性完整覆盖全部 15 个角度。
 
 **降级路径**：
 
-- serena 不可用 → 整个 §9.4 跳过，记 `[降级-serena 不可用]`
 - cheap-research 不可用 → 整个 §9.4 跳过，记 `[降级-cheap-research 不可用]`
 - 函数数 < 50 → 输出 `▶ §9.4 跳过：函数数 {N} < 50，工程规模太小无需 dedup`，整个 §9.4 结束
 - 函数数 > 500 → 分批（每批 100），合并结果
 - extract 返回 `schema_validation_failed` → 重试 1 次（自动改 instruction 加"严格按 schema 输出"），仍失败标"分类降级-单类跳过"
 - 高质量模型某类返回空数组 → 该类跳过（无重复），不报错
 
-**反偷懒第 21 条合规**（v2.6 自检门）：步骤末尾在思考块输出 `serena 调用: find_symbol x 1` + `cheap-research 调用: extract x {1+1+K}` 或对应降级声明，**无记录 = 违规**。
+**反偷懒第 21 条合规**：步骤末尾在思考块输出 `cheap-research 调用: extract x {1+1+K}` 或对应降级声明，**无记录 = 违规**。
 
 **与 §5 A6 独立 3 质疑者 spawn 规则的衔接**：dedup 的 issue **不进入** Free 阶段 A6 的 3 质疑者独立 spawn 流程。理由：dedup 用高质量模型单次推理 + cheap-research schema 强约束 + 22 类预定义约束 = 等效"强约束推理"，质量足够；重复 3 次 spawn 成本翻 3 倍但收益边际递减。这是 §9.4 阶段的**显式例外**——A6 规则继续约束 Free 阶段深检 issue。
 
-**与循环控制段的关系**：dedup 是独立扫描，不参与 Reverse/Fixed/Free 的整体循环。dedup 内部修复循环（has_issues=true 时）：修复**重复函数本身**（合并为 survivor，删除其他实现）→ 重新调 serena `find_symbol` 抽新 catalog → 重新调高质量模型找剩余重复。修完 → 写 `dedup_report.md` + 追加 05_deepcheck.md 摘要 → 进入原「循环控制」段继续 Reverse/Fixed/Free 的整体判定。**绝不可让 dedup 的 issue 触发 Reverse/Fixed/Free 重跑**——重复函数修复与计划/代码逆推无关。
+**与循环控制段的关系**：dedup 是独立扫描，不参与 Reverse/Fixed/Free 的整体循环。dedup 内部修复循环（has_issues=true 时）：修复**重复函数本身**（合并为 survivor，删除其他实现）→ 重新调 ripgrep 抽新 catalog → 重新调高质量模型找剩余重复。修完 → 写 `dedup_report.md` + 追加 05_deepcheck.md 摘要 → 进入原「循环控制」段继续 Reverse/Fixed/Free 的整体判定。**绝不可让 dedup 的 issue 触发 Reverse/Fixed/Free 重跑**——重复函数修复与计划/代码逆推无关。
 
 ### 循环控制
 
@@ -318,7 +316,7 @@ Free 阶段一次性完整覆盖全部 15 个角度。
 - 全流程模式：**立即继续执行步骤6**
 
 
-**over-design 复检（v2.7，反偷懒第 26 条）**：Reverse/Fixed/Free 阶段均核对 plan 修复方案分档 + 实施范围。检查点：①plan 修复方案分 A/B/C 三档？②实施范围 = A 档 + 确认的 B 档（B 需 `confirmed_B_fixes`）？③B/C 混入 A 主方案或超范围实施 = issue。与步骤2 over-design 检查对齐。
+**over-design 复检（反偷懒第 26 条）**：Reverse/Fixed/Free 阶段均核对 plan 修复方案分档 + 实施范围。检查点：①plan 修复方案分 A/B/C 三档？②实施范围 = A 档 + 确认的 B 档（B 需 `confirmed_B_fixes`）？③B/C 混入 A 主方案或超范围实施 = issue。与步骤2 over-design 检查对齐。
 
 
 ## 完成前自检（必须填，未填项标 ❌=不合规）
@@ -327,18 +325,17 @@ Free 阶段一次性完整覆盖全部 15 个角度。
 - □ Free 每个角度 ≥3 检查点（file:line），表格填满
 - □ Fixed 每维度有 file:line 证据 + 评分理由 ≥2 句实质
 - □ 无"整体通过""无问题"等空泛结论（每条结论有具体证据）
-## 决策锚点（步骤5 完成后写，v2.8）
+## 决策锚点（步骤5 完成后写）
 
 步骤5 复检完成后，若 `metadata.anchors_enabled != false`，刷新 `.decision_anchors.json`：刷新 `open_risks`（deepcheck 残留风险）。详见 [references/decision_anchors.md](../references/decision_anchors.md)。
 
-## MCP 推荐（v2.2 强证据二元化）
+## MCP 推荐（强证据二元化）
 | MCP | 推荐级别 | 用途 |
 |-----|----------|------|
-| serena | 🟢* | 找所有调用点评估 blast-radius--有可索引源码时（Reverse 阶段内嵌） |
 | playwright | 🟢* | 跑 E2E--前端工程时 |
 | vision-bridge | 🟢* | UI 截图复检--用户给图时 |
 | **cheap-research** | 🟢* | **降本**：Reverse 阶段 diff_summary（计划vs代码差异）+ summarize（长审查输出压缩）。不接管决策：Fixed/Free 阶段/3 质疑者对抗走主会话 |
 | context7 | ⚪ | 本步骤不推荐 |
 | memory | ⚪ | 本步骤不推荐 |
 
-**强制约束（v2.2）**：🟢/🟢*/⚪ 语义 + 双保险机制（执行步骤内嵌 + thinking_core gate）详见 [SKILL.md「MCP 调用覆盖强制化」](../SKILL.md) + [references/mcp_per_step.md「双保险机制」](../references/mcp_per_step.md)；本步骤表内的 🟢/🟢* 标注按上方真源判定。
+**强制约束**：🟢/🟢*/⚪ 语义 + 双保险机制（执行步骤内嵌 + thinking_core gate）详见 [SKILL.md「MCP 调用覆盖强制化」](../SKILL.md) + [references/mcp_per_step.md「双保险机制」](../references/mcp_per_step.md)；本步骤表内的 🟢/🟢* 标注按上方真源判定。

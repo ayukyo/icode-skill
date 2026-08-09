@@ -250,11 +250,10 @@ LOCAL_FILE="$LOCAL_DIR/$PROJECT_ID.md"
 - **可重复**：多次 `/icode limit <...>` 持续追加，编号自动递增
 - **手动编辑**：用户可直接编辑 main/local 文件（约定文件，非 AI 独占），AI 追加时按编号续接
 
-## MCP 推荐（v2.2 强证据二元化）
+## MCP 推荐（强证据二元化）
 
 | MCP | 推荐级别 | 用途 |
 |-----|----------|------|
-| serena | ⚪ | 本步骤不推荐（limit 不读源码） |
 | context7 | ⚪ | 本步骤不推荐 |
 | vision-bridge | ⚪ | 本步骤不推荐 |
 | memory | ⚪ | 本步骤不推荐 |
