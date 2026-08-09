@@ -309,7 +309,7 @@ ICODE_OUT_DIR=".icode_output/.icode_output_${LAST}"
 - `indexed`：是否已写入全局索引（防重复写入）
 - `ticket_id`：本工单在全局索引中的唯一键（`{工程名}-{N}`，冲突时带 hash 后缀）。步骤0写索引时持久化到 metadata；**跳过步骤0直接 `/icode plan`/`/icode start` 的常规新建目录情况**，在步骤1首次写索引时生成并回填 metadata。供后续步骤检索时排除当前工单
 - `code_deviations`：步骤4 编码时主动偏离定稿计划的记录数组（每条含 `plan_said`/`actual_done`/`reason`），供步骤6 终审汇总回写到 `03_plan_final.md` 的「实现偏差备忘」段；无偏离写空数组 `[]`
-- `limit_refs`（本次新增，可选，默认 `[]`）：plan 步骤引用的 limit 红线编号数组，每条 `{redline_no: int, source: "main"|"local", title: str}`，`source` 区分主存全局约定 vs 单 checkout 覆盖。plan §3 架构设计 / §4 ADR / §6 异常处理引用 limit 条目时记录。**字段缺失视为 `[]`（向后兼容旧 metadata）**。详见 [steps/limit.md](steps/limit.md)
+- `limit_refs`（默认 `[]`，**计划文本引用 limit 时须填写**）：plan 步骤引用的 limit 红线编号数组，每条 `{redline_no: int, source: "main"|"local", title: str, applied_in: [...]}`，`source` 区分主存全局约定 vs 单 checkout 覆盖，`applied_in` 为引用章节。plan §3 架构设计 / §4 ADR / §6 异常处理**引用 limit 条目（计划文本出现「红线 N」/「红 N」）时必须记录**，完全未引用才可留空；audit 视角 B 以**先检测计划是否实际引用**再判定跳过/回补（见 [steps/06_audit.md](steps/06_audit.md) §6.7）。**字段缺失视为 `[]`（向后兼容旧 metadata）**。详见 [steps/limit.md](steps/limit.md)
 - `code_review_fix_with_issues`（新增，可选，默认 `false`）：步骤4末尾 1.5「Code Review Fix」4 维度复检未通过标记（同事提示词 4 维度闭环在 04_code 末尾的工程化复检）。`true` 时步骤5/6 入口输出警告，audit 终审会看到此标记——**不阻断流程**，仅作可见性提示，让后续 reviewer/历史检索知道本工单 4 维度复检未通过。**字段缺失视为 `false`（向后兼容旧 metadata）**
 - `test_cmd`/`test_outcome`/`test_failures`/`test_timeout`（测试集成字段）：`test_cmd`=探测/配置的测试命令字符串（null=无测试套件，步骤4 自动探测 Makefile/package.json/pytest.ini/go.mod/CMakeLists.txt/Cargo.toml/pom.xml）；`test_outcome`=枚举 `pass`/`fail`/`skipped`（默认 `skipped`）；`test_failures`=bool（步骤4 测试 3 次重试仍失败置 true，L3 警告不阻断，与 `code_compile_failed` 同级）；`test_timeout`=int 秒（默认 120）。借鉴 aider `auto_test` 机制（一手验证 Aider-AI/aider base_coder.py:1616），icode 增加自动探测。详见 [steps/04_code.md](steps/04_code.md)「编译验证 + 测试验证」段。**字段缺失视为 null/skipped/false/120（向后兼容旧 metadata）**
 - `mode`（新增，可选，默认 `"full"`）：工单模式。`"full"` = `/icode start` 全流程（步骤2 默认 3 轮 + 对抗，步骤5 三阶段循环）；`"fast"` = `/icode fast` 精简全流程（步骤2 固定 1 轮无对抗，步骤5 只跑 Reverse）。**字段缺失视为 `"full"`（向后兼容旧 metadata）**。详见 [steps/fast.md](steps/fast.md)
@@ -372,7 +372,7 @@ python3 -c "import json,sys; d=json.load(open('{ICODE_OUT_DIR}/.ico_metadata.jso
 | 主题 | 真源 | 核心要点 |
 |------|------|---------|
 | 强制思考前置 | [references/thinking_core.md](references/thinking_core.md)（每步必读）+ [references/thinking_detail.md](references/thinking_detail.md)（按需读） | 每步开始前先 `ultrathink`，首选 `sequential-thinking` MCP 至少 3 步；MCP 不可用降级 `### 结构化思考` 文字块；思考子项见各 step 文件 |
-| 反偷懒约束 | [references/anti_laziness.md](references/anti_laziness.md) | 28 条典型偷懒行为 + 正面合规要求；引用 references 必须每步重新 Read 输出 `📖 已 Read` 确认行；思考块每子项 ≥2 句实质内容 |
+| 反偷懒约束 | [references/anti_laziness.md](references/anti_laziness.md) | 29 条典型偷懒行为 + 正面合规要求；引用 references 必须每步重新 Read 输出 `📖 已 Read` 确认行；思考块每子项 ≥2 句实质内容 |
 
 ### 全流程串联规则
 
@@ -722,7 +722,7 @@ icode 工作流可调用 6 个 MCP（`/icode install` 一键安装）。**双保
 |---------|------|--------|
 | [references/thinking_core.md](references/thinking_core.md) | 强制思考前置核心（每步必读：MCP+降级文字块/结构化思考/Read references） | 所有 step |
 | [references/thinking_detail.md](references/thinking_detail.md) | 强制思考前置细节（按需读：各步骤子项速查/历史参考小节） | 所有 step |
-| [references/anti_laziness.md](references/anti_laziness.md) | 反偷懒约束（28条偷懒行为+合规要求+references必读+确认行） | 所有 step |
+| [references/anti_laziness.md](references/anti_laziness.md) | 反偷懒约束（29条偷懒行为+合规要求+references必读+确认行） | 所有 step |
 | [references/adversarial.md](references/adversarial.md) | 对抗分析模式（3质疑者/裁决优先级/诚实降级/证据回指） | 02_review / log |
 | [references/dir_and_metadata.md](references/dir_and_metadata.md) | 目录管理 + ticket_id 生成 + 全局索引写入（含LRU淘汰） + metadata 模板 + **注入缓存机制（防重复注入，两源共用）** + **project_docs 工程文档库 + 段零检索** | init / log / plan / start / fast / doc |
 | [references/doc_template.md](references/doc_template.md) | icode doc 章节模板：前 50 行四块结构（项目元信息/KEYS/简要说明/目录）+ 十位桶编号 + 自适应 grep 关键词表 + 99 章审计策略 + **v2.0.0 双视角必含元素清单（14 项）+ 业务流独立成章 + 英文首次中文备注 + 链路中文说明 + 质量审视检查清单 + 模板版本自举迁移** | doc |
