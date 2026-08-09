@@ -4,6 +4,14 @@
 **产出**: `{ICODE_OUT_DIR}/03_plan_final.md`
 **会话**: 主会话
 
+## 本步骤 L1/L2 检查项声明
+
+按 SKILL.md「强制阻断边界矩阵」定义，本步骤触发的检查项：
+
+| 级别 | 检查项 | 触发后行为 |
+|---|---|---|
+| **L1·致命** | 「定稿机器硬校验」不通过（`03_plan_final.md` 非完整计划副本：编号正文章节 <9 或缺「实现偏差备忘」段） | 报错退出，禁止进入步骤4，回到「写入定稿」把 `01_plan.md` 全文复制后再叠加标记 |
+
 ## 前置校验
 
 检查 `{ICODE_OUT_DIR}/01_plan.md` 和 `{ICODE_OUT_DIR}/02_review.md` 是否存在，缺失则报错并提示先执行对应步骤。
@@ -52,10 +60,29 @@
 - 任何缺失、断裂、矛盾处必须修复后再继续
 - **无需添加新功能或重构，仅修复格式和结构问题**
 
+### 定稿机器硬校验（L1，不通过不得进入步骤4）
+
+**目的**（本轮实测教训）：定稿若写成"方案摘要"而非完整计划副本，步骤 5 逆推对比 / 步骤 6 追溯矩阵以它为计划侧输入会断裂，功能点无法回指代码位置。故在步骤4 之前做**机器校验**——不满足 = L1，报错阻止进入步骤4：
+
+```bash
+python3 -c "
+import re,sys
+t=open('{ICODE_OUT_DIR}/03_plan_final.md').read()
+n=len(re.findall(r'^## \d+(\.\d+)?\. ', t, re.M))          # 编号正文章节（## 1. ~ ## 10.）
+has_memo='实现偏差备忘' in t                                      # 末尾预留空段
+print(f'编号正文章节: {n}（规格 10 节，判据 ≥9 兼容历史 9 节工单）; 含实现偏差备忘: {has_memo}')
+sys.exit(0 if (n>=9 and has_memo) else 1)
+"
+```
+
+- 退出码 0 → 通过，可进入步骤4；非 0 → **停止，报 L1**："`03_plan_final.md` 不是完整计划副本（正文章节数不足或缺「实现偏差备忘」段），禁止进入步骤4，请按上方「写入定稿」把 `01_plan.md` 全文复制为 `03_plan_final.md` 再叠加标记"
+- 全流程模式下同样执行本门禁，通过后才推进步骤4
+
 ### 强制操作
 
-- **更新 `.ico_metadata.json`**：`status = plan_finalized`，`completed_steps` 追加 `"3"`
-- 全流程模式：**立即继续执行步骤4**
+- **更新 `.ico_metadata.json`**：`status = plan_finalized`，`completed_steps` 追加 `"3"`（写回前按 SKILL.md「status 写回校验」对照词表）
+- 全流程模式：**通过「定稿机器硬校验」后立即继续执行步骤4**
+
 ## MCP 推荐
 
 本步骤仅用 sequential-thinking 强制思考（见 [references/mcp_per_step.md](../references/mcp_per_step.md)「通用前置」段）。其他 5 个 MCP 本步骤不推荐。

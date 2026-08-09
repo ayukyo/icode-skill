@@ -4,8 +4,9 @@
 - `/icode status`：只读查当前工单状态
 - `/icode status --verdict <ticket_id> <verified|disproved|superseded> "<reason>" [--correct "<正确方向>"] [--source <machine_test|review|user|auto_signal>] [--superseded-by <ticket_id>] [--premise-dep <module>:<commit>[:<path>]]...`：手动标注工单方向结论（双写 metadata + 全局索引）
 - `/icode status --scan-verdict`：批量扫描 unknown 完成态工单的证伪信号，提示标注
+- `/icode status --validate [N]`：机器校验工单产物集完整性（产物缺件 / status 词表外 / code_files 空），只读 + 输出问题清单
 
-**产出**: 默认无（只读）；`--verdict` 写 `{ICODE_OUT_DIR}/.ico_metadata.json` + `~/.claude/icode_data/index.json`（不写工程内源码文件）；`--scan-verdict` 只读 + 输出标注建议
+**产出**: 默认无（只读）；`--verdict` 写 `{ICODE_OUT_DIR}/.ico_metadata.json` + `~/.claude/icode_data/index.json`（不写工程内源码文件）；`--scan-verdict` / `--validate` 只读 + 输出提示/问题清单
 **会话**: 主会话
 
 ## 定位
@@ -128,9 +129,49 @@ schema: {template_version 字段读取方式：直接读 metadata.template_versi
 - **禁止跳过 06_audit.md**：有些证伪写在终审结论而非 00_init 末轮，两处都要扫
 - **禁止只扫当前工程**：`--scan-verdict` 扫全局索引所有 unknown 完成态工单（跨工程批量治理）
 
+## 模式四：产物集完整性校验（`/icode status --validate [N]`）
+
+**用途**：机器校验工单产物的"机制合规"（防"内容正确、机制不合规"——产物缺件 / 文件名自造 / `status` 词表外 / metadata 关键字段缺失）。`--validate` 默认校验最新工单，可选参数 `N` 指定 `.icode_output_N`。产出：只读 + 问题清单，不自动改文件。
+
+**执行流程**：
+
+1. 确定工单目录：`--validate` → 用「检测最新目录」逻辑；`--validate N` → 指定 `.icode_output/.icode_output_N`
+2. 运行机器校验（Bash 一行命令，输出逐项结果，任何一项不通过记入问题清单）：
+
+```bash
+python3 -c "
+import json,sys,os,glob
+d='.icode_output/.icode_output_'+('N' if len(sys.argv)<2 else sys.argv[1])
+req=['00_init.md','01_plan.md','02_review.md','03_plan_final.md','04_code_review_fix.md','05_deepcheck.md','06_audit.md']
+p=[f for f in req if os.path.exists(os.path.join(d,f))]
+missing=[f for f in ['01_plan.md','02_review.md','03_plan_final.md','04_code_review_fix.md','05_deepcheck.md','06_audit.md'] if not os.path.exists(os.path.join(d,f))]
+json_cnt=len(glob.glob(os.path.join(d,'review_round_*.json')))
+m=json.load(open(os.path.join(d,'.ico_metadata.json')))
+valid={'init_in_progress','plan_done','review_in_progress','review_done','plan_finalized','code_in_progress','code_done','deepcheck_in_progress','deepcheck_done','completed','log_in_progress','log_done'}
+st=m.get('status'); bad=st not in valid
+cf=m.get('code_files'); empty_cf=not cf
+miss_txt='无' if not missing else ','.join(missing)
+status_txt='词表内' if not bad else '词表外(禁止自定义,见 SKILL.md status 枚举)'
+cf_txt=('空/缺失(步骤4 后必须记录)' if empty_cf else str(len(cf))+' 个')
+print(f'工单 {d}')
+print(f'  产物: 存在 {len(p)}/7 主流程; 缺失 {miss_txt}; review_round_*.json {json_cnt} 个')
+print(f'  status: {st} {status_txt}')
+print(f'  code_files: {cf_txt}')
+sys.exit(1 if (missing or bad or empty_cf) else 0)
+"
+```
+
+**结果汇总**：全部通过 → `✅ 工单 {N} 产物集完整性通过`；有缺项 → 列出问题清单，按级别提示（产物缺失 / status 词表外 = L1~L2，先回对应步骤补齐；`code_files` 空 = L2）。**只读提示，不自动改**——修复动作仍由对应步骤执行
+
+**与步骤6 终检的关系**：步骤6 完成前自检也内置同一判据（见 [06_audit.md](06_audit.md)「产物集完整性终检」）；`--validate` 是独立任意时刻可跑的校验器（含已 `completed` 的历史工单回查），判据一致不另立第二套。
+
+**反偷懒**：
+- **禁止改动文件**：`--validate` 纯只读，发现问题提示走对应步骤修复，不在此模式内 Write/Edit
+- **禁止用"内容好"豁免缺件**：产物缺失就是不合规，即使会话里讨论过，磁盘上缺 = 下游步骤/回读断链
+
 ## 不需要强制思考前置
 
-默认只读模式与 `--scan-verdict`（只读+提示）不产出代码/计划/审查文件，**不需要强制思考前置**，不需要 Read references。`--verdict` 标注模式是结构化字段写入（非思考/审查/编码），同样不需要强制思考前置，但须遵守本文件「反偷懒」约束。
+默认只读模式与 `--scan-verdict`（只读+提示）与 `--validate`（只读+提示）不产出代码/计划/审查文件，**不需要强制思考前置**，不需要 Read references。`--verdict` 标注模式是结构化字段写入（非思考/审查/编码），同样不需要强制思考前置，但须遵守本文件「反偷懒」约束。
 ## MCP 推荐
 
 默认只读模式仅用 sequential-thinking；`--scan-verdict` 批量扫描时用 cheap-research `extract`（结构化提取证伪信号，🟢*）；其余 4 个 MCP 不推荐。

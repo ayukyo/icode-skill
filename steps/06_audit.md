@@ -225,11 +225,36 @@
 ## 完成前自检（必须填，未填项标 ❌=不合规）
 
 - □ 输出了 `📖 已 Read` 确认行（列出实际 Read 的代码文件）
+- □ **产物集完整性机器终检通过**（防"过程文档缺件但 audit 照常放行"）：写 `06_audit.md` 结论前运行下方「产物集完整性终检」命令，任何产物缺失 / `status` 词表外 / `code_files` 为空均标 **L2 记入问题清单**（缺失产物 = 上游步骤漏产出，按 6.2 强制修复流程补齐，**不得以"内容已讨论过"豁免文件缺失**）
 - □ 未复用步骤5结论，独立列了"步骤5未覆盖/更深层角度"并逐个查
 - □ 7 维度每维度有 file:line 证据 + 评分理由 ≥2 句实质（含 §6.7 原始需求收敛）
 - □ 测试结果已核对（§6.1 测试核对：`test_outcome` 值 + 失败项是否记入问题清单）
 - □ 无"无新问题""整体通过"等空泛结论（每条结论有具体证据）
 - □ 终审时确认了 verdict（默认 `unknown` 不阻塞流程；标注 `verified`/`disproved`/`superseded` 时回填 `verdict_reason`/`correct_direction`/`verdict_source`/`verdict_at`，双写 metadata + index 同步）
+
+### 产物集完整性终检（完成前自检的机器命令）
+
+```bash
+python3 -c "
+import json,sys,os
+d=os.path.join('{ICODE_OUT_DIR}')
+req=['01_plan.md','02_review.md','03_plan_final.md','04_code_review_fix.md','05_deepcheck.md','06_audit.md']
+missing=[f for f in req if not os.path.exists(os.path.join(d,f))]
+import glob
+json_cnt=len(glob.glob(os.path.join(d,'review_round_*.json')))
+m=json.load(open(os.path.join(d,'.ico_metadata.json')))
+valid={'init_in_progress','plan_done','review_in_progress','review_done','plan_finalized','code_in_progress','code_done','deepcheck_in_progress','deepcheck_done','completed','log_in_progress','log_done'}
+st=m.get('status')
+miss_txt='无' if not missing else ','.join(missing)
+status_txt='OK' if st in valid else '词表外:'+str(st)
+cf_ok='True' if (m.get('code_files') or []) else 'False'
+print(f'缺失产物: {miss_txt}; review_round JSON: {json_cnt}; status: {st} {status_txt}; code_files 非空: {cf_ok}')
+sys.exit(1 if (missing or (st not in valid) or not (m.get('code_files') or [])) else 0)
+"
+```
+
+- **缺失产物 / `status` 词表外 / `code_files` 为空 → 退出码非 0**：逐项按 L2 记入 `06_audit.md` 问题清单，走 6.2 强制修复流程补齐后再出结论（`04_code_review_fix.md` 缺失 = 步骤4 未产出 1.5 复检，须回补；`review_round_*.json` 全缺 = 步骤2 审查无结构化记录，须回查）。**不得以"这些内容我在会话里讨论过"豁免文件缺失**——产物集是下游步骤与回读的唯一磁盘依据
+- `code_files` 为空（S8）：即使代码已写，也标 L2，回步骤4 补记 `code_files`（相对项目根路径数组），否则步骤5/6 的前置校验无代码证据对象
 
 ## 6.5 schema 状态汇总（自动写入，可缺省）
 
