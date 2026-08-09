@@ -76,7 +76,7 @@ N. **强制思考前置**（不可跳过，缺证据视为不合规；按 [refer
 > **解析失败组**（必须同时满足）：
 > 1. 已实际 ToolSearch 取 schema（精确 + 模糊各至少 1 次）-> 均无命中
 > 2. 已实际 Read `~/.claude.json` 的 `mcpServers` **与** 项目根 `.mcp.json`（若有）-> 至少**一处**有 `sequential-thinking` server
-> 3. 降级声明**必须注明**"ToolSearch 解析失败，配置有 server"（区别于配置缺失组）
+> 3. 降级声明**必须注明**"ToolSearch 解析失败，配置有 server"（区别于配置缺失组），并**提示用户运行 `/mcp` 检查 sequential-thinking 连接状态**（配置存在 ≠ 本会话已连接——MCP 连接是会话级快照，server 未连接时 ToolSearch 恒空，需重连或重开会话恢复；思考质量不受降级影响，按文字块照常完成）
 >
 > **两组均不满足即不可走降级**，必须坚持首选路径。
 >
