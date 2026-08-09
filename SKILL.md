@@ -372,7 +372,7 @@ python3 -c "import json,sys; d=json.load(open('{ICODE_OUT_DIR}/.ico_metadata.jso
 | 主题 | 真源 | 核心要点 |
 |------|------|---------|
 | 强制思考前置 | [references/thinking_core.md](references/thinking_core.md)（每步必读）+ [references/thinking_detail.md](references/thinking_detail.md)（按需读） | 每步开始前先 `ultrathink`，首选 `sequential-thinking` MCP 至少 3 步；MCP 不可用降级 `### 结构化思考` 文字块；思考子项见各 step 文件 |
-| 反偷懒约束 | [references/anti_laziness.md](references/anti_laziness.md) | 29 条典型偷懒行为 + 正面合规要求；引用 references 必须每步重新 Read 输出 `📖 已 Read` 确认行；思考块每子项 ≥2 句实质内容 |
+| 反偷懒约束 | [references/anti_laziness.md](references/anti_laziness.md) | 30 条典型偷懒行为 + 正面合规要求；引用 references 必须每步重新 Read 输出 `📖 已 Read` 确认行；思考块每子项 ≥2 句实质内容 |
 
 ### 全流程串联规则
 
@@ -722,7 +722,7 @@ icode 工作流可调用 6 个 MCP（`/icode install` 一键安装）。**双保
 |---------|------|--------|
 | [references/thinking_core.md](references/thinking_core.md) | 强制思考前置核心（每步必读：MCP+降级文字块/结构化思考/Read references） | 所有 step |
 | [references/thinking_detail.md](references/thinking_detail.md) | 强制思考前置细节（按需读：各步骤子项速查/历史参考小节） | 所有 step |
-| [references/anti_laziness.md](references/anti_laziness.md) | 反偷懒约束（29条偷懒行为+合规要求+references必读+确认行） | 所有 step |
+| [references/anti_laziness.md](references/anti_laziness.md) | 反偷懒约束（30条偷懒行为+合规要求+references必读+确认行） | 所有 step |
 | [references/adversarial.md](references/adversarial.md) | 对抗分析模式（3质疑者/裁决优先级/诚实降级/证据回指） | 02_review / log |
 | [references/dir_and_metadata.md](references/dir_and_metadata.md) | 目录管理 + ticket_id 生成 + 全局索引写入（含LRU淘汰） + metadata 模板 + **注入缓存机制（防重复注入，两源共用）** + **project_docs 工程文档库 + 段零检索** | init / log / plan / start / fast / doc |
 | [references/doc_template.md](references/doc_template.md) | icode doc 章节模板：前 50 行四块结构（项目元信息/KEYS/简要说明/目录）+ 十位桶编号 + 自适应 grep 关键词表 + 99 章审计策略 + **v2.0.0 双视角必含元素清单（14 项）+ 业务流独立成章 + 英文首次中文备注 + 链路中文说明 + 质量审视检查清单 + 模板版本自举迁移** | doc |
