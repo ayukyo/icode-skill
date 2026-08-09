@@ -1,6 +1,6 @@
 ---
 name: icode
-description: 端到端编码工作流（步骤 0~6，含可选需求初稿步骤与日志根因分析入口），支持分步手动调用：/icode help (帮助), /icode install (MCP 环境检查+一键安装), /icode init [<粗略需求>] (需求初稿), /icode log [零散信息...] (日志根因分析→转修复需求), /icode start <需求> (全流程), /icode fast <需求> (精简全流程), /icode plan <需求> (计划), /icode review [N] (审查), /icode merge (定稿), /icode code (编码), /icode deepcheck (复检), /icode audit (终审), /icode patch [问题或新需求] (追加修改：主流程后/中途继续改), /icode doc [自然语言] (工程级知识库生成), /icode limit [自然语言] (项目约束红线), /icode readme (交付报告), /icode status (工单状态), /icode list [关键词] (跨工程工单查找)
+description: 端到端编码工作流（步骤 0~6，含可选需求初稿步骤与日志根因分析入口），支持分步手动调用：/icode help (帮助), /icode install (MCP 环境检查+一键安装), /icode init [<粗略需求>] (需求初稿), /icode log [零散信息...] (日志根因分析→转修复需求), /icode start <需求> (全流程), /icode fast <需求> (精简全流程), /icode plan <需求> (计划), /icode review [N] (审查), /icode merge (定稿), /icode code (编码), /icode deepcheck (复检), /icode audit (终审), /icode patch [问题或新需求] (追加修改：主流程后/中途继续改), /icode doc [自然语言] (工程级知识库生成), /icode limit [自然语言] (项目约束红线), /icode readme (交付报告+跨领域简报), /icode status (工单状态), /icode list [关键词] (跨工程工单查找)
 ---
 
 **版本**: v2.17.0
@@ -52,7 +52,7 @@ description: 端到端编码工作流（步骤 0~6，含可选需求初稿步骤
 | `[流程]` `/icode code` | **仅步骤4**：落地编码实施（含**末尾 1.5 子段"Code Review Fix" 4 维度复检**——核对实施是否与计划设计的 4 维度一致。复检失败轻/重度分流回代码修复或重设计，不强制阻断；详见 [steps/04_code.md](steps/04_code.md)） | 用最新目录 |
 | `[流程]` `/icode deepcheck` | **仅步骤5**：三阶段递进复检（Reverse → Fixed → Free）。`mode=="fast"` 时只跑 Reverse 阶段 | 用最新目录 |
 | `[流程]` `/icode audit` | **仅步骤6**：终极终审 + 统一修复（产出 `{ICODE_OUT_DIR}/06_audit.md`） | 用最新目录 |
-| `[流程]` `/icode readme` | **可选步骤7**：生成交付报告（面向人的自包含总结，动态文件名，智能识别功能/查BUG模板）。步骤6完成后手动触发 | 用最新目录 |
+| `[流程]` `/icode readme` | **可选步骤7**：一次性生成两份——**交付报告**（**给自己看**：完整技术档案，自包含，智能识别功能/查BUG模板）+ **跨领域简报**（`_brief.md`，**给其它模块研发/测试/产品看**：含必要改动/修复代码，主要问题/需求/时间点/链路/修复，较简略）。步骤6完成后手动触发 | 用最新目录 |
 | `[独立]` `/icode patch [问题或新需求...]` | **追加修改（独立步骤）**：主流程完成后（`completed`）或中途（步骤1~5任一状态）继续修改既有工单——测试发现问题 / 后续新需求，在既有工单上打补丁。**轻量四段式**（重审现状 → 增量计划 → 最小实施 → 反向复检，含**分析验证型分支**：纯分析无代码修改时豁免实施/编译、改「结论验证」，但**端到端代码追溯/证据方法可靠性/链路完整性结论验证不豁免），**不靠会话记忆靠磁盘产物重载上下文**（治"越问上下文越爆炸"）。产物 `08_patch.md` 追加式（每次**显式调用**追加 Patch N 段；**会话内追问/补充归入当前 Patch N，不新增段**）。**不改变 status/completed_steps**（completed 保持 completed），靠 `patch_count`/`patch_history` 记录；可选 `--listen`（自动监听）/ `--test`（显式触发验证）→ 阶段 4「1.5 实机部署验证」（连设备部署 + 持续轮询 + 实时链路分析；`--listen` 告知触发即监听、用户随时操作被捕获，`--test` 空转停下确认用户已操作再继续）；无 flag 跳过实机验证（详见 [steps/08_patch.md](steps/08_patch.md)） | 用最新目录 |
 | `[工程]` `/icode doc [自然语言]` | **工程级知识库生成（独立步骤）**：扫描工程代码特征，生成/维护 `~/.claude/icode_data/project_docs/<project_id>/<branch>/` 下的工程知识库章节（架构/IPC/术语表/代码事实审计，**按分支分目录**，切分支跑 doc 不互相覆盖），**同时检测工程依赖的独立模块**（git submodule / `repo` 管理 / CMake FetchContent / monorepo / vendor / 用户配置，6 级优先级）并生成 `~/.claude/icode_data/module_docs/{key}/` 模块共享文档（**按仓库+分支 key 跨工程共享**，同一上游仓库同分支只一份），供 init/log/plan/start/fast 段零自动跨仓库检索注入。**去参数化**——目标工程与动作（全量/增量/新增）由自然语言识别。**v1 单级布局自动迁移**：检测到旧 `<project_id>/` 平铺布局时自动迁移到 `<project_id>/<branch>/`（保留所有字段 + 备份 `_meta.json.v1_migrated_from`，详见 doc.md 步骤 5）。**不创建工单目录、不写工单 metadata、不参与步骤1~6推进**（详见 [steps/doc.md](steps/doc.md)） | 否（写全局 `project_docs/` 和 `module_docs/`） |
 | `[配置]` `/icode limit [自然语言]` | **项目约束红线（独立步骤）**：定义和维护本工程的红线/约束/禁区。**主存**：`~/.claude/icode_data/limits/<project_id>.md`（全局，跨 checkout 共享，团队私有不上传）；**覆盖**：`<project_root>/.icode_output/limit.local/<project_id>.md`（单 checkout，自动 gitignore）。**local 完全覆盖 main**。**追加式演进**——每次调用增量追加新红线条目（编号自增），不覆盖、不 diff。对齐 `/icode doc` 模式：无描述→全局扫描显示当前约束（合并视图）；有描述→针对操作生成/追加新条目。**plan 步骤硬基线**——plan §3/§4/§6 引用 limit 条目作为设计依据（柔性提示：plan 入口检测不到 limit 建议生成但不阻断）。**log 步骤对照清单**——log 步骤4 limit 红线检查点读取，逐条对照根因假设是否违反约定红线（柔性提示：log 入口检测不到 limit 不阻断）。**不创建工单目录、不写工单 metadata、不参与步骤1~6推进**（详见 [steps/limit.md](steps/limit.md)） | 否（写全局 `limits/` + 工程根 `.icode_output/limit.local/`，自动 gitignore） |
@@ -101,7 +101,7 @@ description: 端到端编码工作流（步骤 0~6，含可选需求初稿步骤
 /icode start                             # 无参→检测到 log_done 入口态，会询问"复用/新建"，选复用则把 00_init.md（修复需求）作输入，进入步骤1→6
 # 或：
 /icode plan                            # 无参→同上询问，选复用则仅执行步骤1
-/icode readme                          # 可选：步骤6完成后手动触发，生成交付报告（面向人的自包含总结）
+/icode readme                          # 可选：步骤6完成后手动触发，生成交付报告 + 跨领域简报（两份）
 /icode status                          # 可选：随时查当前工单状态（只读，不创建目录）
 /icode list                             # 跨工程查找：列全索引所有工单
 /icode list mcu                         # 关键词搜索（ticket_id/summary/keywords）

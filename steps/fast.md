@@ -133,7 +133,7 @@ fi
 
 - `/icode help`：输出时包含 fast 命令说明
 - `/icode status`：识别 `mode` 字段，输出「工单模式：fast/full」
-- `/icode readme`：步骤7 不区分模式，统一生成交付报告
+- `/icode readme`：步骤7 不区分模式，统一生成交付报告 + 跨领域简报（两份）
 
 ## 反偷懒约束
 

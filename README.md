@@ -153,7 +153,7 @@ Offloads 23 low-risk sub-tasks (long-context compression / history retrieval / t
 | `/icode code` | Step 4 only: implement code |
 | `/icode deepcheck` | Step 5 only: three-phase progressive check (Reverse → Fixed → Free) |
 | `/icode audit` | Step 6 only: final audit + fix (produces `06_audit.md`) |
-| `/icode readme` | Optional Step 7: generate delivery report |
+| `/icode readme` | Optional Step 7: one call, two docs — full report (for yourself) + `_brief.md` (concise, for other modules' dev/test/PM, key changed code included) |
 | `/icode patch [issue or new need]` | Follow-up modification (standalone step): keep modifying an existing ticket after/between main steps — test findings / new needs. Lightweight 4-phase (re-survey → incremental plan → minimal change → reverse re-check), context reloaded from disk artifacts (continuable across sessions), appended to `08_patch.md`; optional `--listen` (auto-monitor) / `--test` (explicit trigger verify) → on-device deploy verify (deploy + poll LOG + incremental analyze); configure `~/.claude/icode_data/device_config/<project_id>.json` (template `templates/device_config.json.template`, single-file multi-conn adb/ssh/serial) |
 | `/icode doc [natural language]` | Project-level knowledge base (standalone step), auto-injected at phase zero |
 | `/icode limit [natural language]` | Project constraint red lines (standalone step); hard baseline for the plan step |
