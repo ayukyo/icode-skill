@@ -326,7 +326,7 @@
     - `has_00_init` = true（log 已产出 `00_init.md`），`has_plan` = false，`status` = `log_done`，`created_at` = 当前时间，`last_used_at` = 当前时间（首次写入=created_at），`hit_count` = 0，`stale` = false，`stale_reason` = null，`stale_checked_commit` = null，`created_commit` = `git rev-parse HEAD`（只读，非 git 仓库为 null），`created_branch` = `git rev-parse --abbrev-ref HEAD`
     - `tb_source` = 步骤9 metadata 的 `tb_source`（无 TB 源时 null）
     - 写回 index.json，置 metadata `indexed = true`、`ticket_id`；**写后执行唯一性验证**（见 [references/dir_and_metadata.md](../references/dir_and_metadata.md)「全局索引写入·写后唯一性验证」）
-11. 提示用户：根因已定，可敲 `/icode plan` 或 `/icode start`（无参）复用本目录的 `00_init.md` 进入修复流程；若对根因有异议，继续对话即可重跑对抗分析
+11. 提示用户：根因已定，可敲 `/icode plan` / `/icode start` / `/icode fast`（均无参）复用本目录的 `00_init.md` 进入修复流程；其中 fast 适合小改动（单文件/少量文件、边界清晰、无架构变更）；若对根因有异议，继续对话即可重跑对抗分析
 
 ## TB 缺陷源拉取（可选前置，仅当零散输入含 TB 引用）
 
