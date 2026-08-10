@@ -380,6 +380,10 @@ python3 -c "import json,sys; d=json.load(open('{ICODE_OUT_DIR}/.ico_metadata.jso
 | 强制思考前置 | [references/thinking_core.md](references/thinking_core.md)（每步必读）+ [references/thinking_detail.md](references/thinking_detail.md)（按需读） | 每步开始前先 `ultrathink`，首选 `sequential-thinking` MCP 至少 3 步；MCP 不可用降级 `### 结构化思考` 文字块；思考子项见各 step 文件 |
 | 反偷懒约束 | [references/anti_laziness.md](references/anti_laziness.md) | 31 条典型偷懒行为 + 正面合规要求；引用 references 必须每步重新 Read 输出 `📖 已 Read` 确认行；思考块每子项 ≥2 句实质内容 |
 
+### 根因优先决策准则（修复缺陷逻辑本身，优先于规避/绕过/补丁/开关）
+
+> 多方案并存时，**第一优先 = 修正缺陷逻辑本身（root cause）**；规避 / 重试 / 打补丁 / 加配置开关 = 降级选项，仅在根因不可行（须给出**可验证**的不可行论证）时选用。「保持安全门控」与「修正错误逻辑」**不是互斥**——根因方案在红线内部保持安全属性，而非因红线直接排除根因选项。细则落点：[steps/01_plan.md](steps/01_plan.md) §4 ADR（选型排序 + 强制判定问题）、[steps/log.md](steps/log.md)（根因多候选 → 诊断先行）、[steps/08_patch.md](steps/08_patch.md)（旁路修复后强制回主验收闭环）。
+
 ### 全流程串联规则
 
 `/icode start` 执行步骤1后，如果会话断开，恢复时必须读取 `.ico_metadata.json` 的 `completed_steps`，从最后一个完成步骤的下一步继续。不可跳过未完成的步骤。
