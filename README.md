@@ -112,6 +112,10 @@ Then run the MCP environment check + one-click install (scans `mcp/*/install.sh`
 
 New clone / new machine / CI bootstrap → run once. The workflow degrades gracefully if optional MCPs aren't installed (declared downgrade paths, never blocks).
 
+## Optional Data Source: Pull from DingTalk Docs
+
+When an entry command (`/icode init` / `log` / `plan` / `start`) receives a DingTalk share link (`alidocs.dingtalk.com` / `/i/nodes/{token}`), it can auto-pull the doc/drive files into `dingtalk_source/` as requirement/reference input. Pull-only, never writes back to DingTalk; native-format docs (`.axls`/`.doci`) require the user to export first in the DingTalk UI. Prerequisites: logged into DingTalk docs in Chrome + `pip install browser_cookie3`. See [SKILL.md「方式 H」](SKILL.md) and `~/.claude/skills/icode/tools/dingtalk/README.md`.
+
 ## Optional Enhancements
 
 Both are platform-agnostic: point them at any OpenAI Chat Completions-compatible endpoint (OpenAI / Claude / Gemini / Chinese vendors / self-hosted / OpenRouter / local Ollama). Not installing either doesn't affect the main workflow.

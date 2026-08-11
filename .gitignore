@@ -20,6 +20,9 @@
 /tools/tb/scripts/.tb_cookie
 /tools/tb/config.json
 /tools/tb/scripts/__pycache__/
+
+# --- 2b. tools/dingtalk：cookie 落在 ~/.cache（600 权限），仅忽略字节码 ---
+/tools/dingtalk/scripts/__pycache__/
 /tools/__pycache__/
 
 # --- 3. MCP 子工程：Python 字节码 / 环境 / 缓存 / venv ---
