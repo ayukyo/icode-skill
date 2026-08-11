@@ -1,0 +1,15 @@
+# tools/ppt 模板非商业授权声明
+
+`tools/ppt/templates/` 下的 PowerPoint **模板**（`template.pptx` / `preview.png`）来自第三方设计师作品
+（原项目 [lmori1301/Agent-PPTSkill](https://github.com/lmori1301/Agent-PPTSkill)，设计署名「稻壳儿原创设计师」，仅存在于形状内部 name 元数据，渲染不可见）。
+
+**这些模板仅供个人学习与研究，严禁任何商业用途**，包括但不限于：
+- 商业演示、销售、培训分发、客户提案
+- 企业内部以营利为目的的使用
+- 再分发 / 并入付费 SaaS / 插件 / 商业模板库
+
+二次商用需获取原作者授权。
+
+`tools/ppt/scripts/`（生成脚本）与 `steps/ppt.md` 为本仓库 MIT 授权，不受上述限制。
+
+> 若需商用模板，请使用**用户自备的 `.pptx` 模板**（模式B：把自有模板交给 AI 自动建模），或 `/icode ppt` 的原创简洁版式路径。
