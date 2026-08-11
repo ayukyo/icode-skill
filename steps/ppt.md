@@ -31,11 +31,11 @@
 
 **场景判定失败或歧义**（如同时命中多类）→ 问用户选一类，不擅自假设。
 
-## 2. 模板选择
+## 2. 模板选择（给 2-3 个候选，让用户挑）
 
-1. 读 [tools/ppt/templates/INDEX.md](../tools/ppt/templates/INDEX.md)（21 套模板的风格/主色/适用场景/页数）。
-2. 按「场景 + 风格」匹配：研发类场景默认推荐 `minimal-business-summary`（深蓝简约商务，工作汇报/项目/模块/复盘首选）；数据密集选 `data-viz-deck`；架构讲解选 `architecture-deck`；复盘/竞聘选 `competition-speech`。
-3. **选定后一句话告诉用户选了哪套、为什么**，给用户否决机会（用户指定模板 → 直接用）。
+1. 读 [tools/ppt/templates/INDEX.md](../tools/ppt/templates/INDEX.md)（21 套模板的风格/主色/适用场景/页数，每套配 `preview.png`）。
+2. 按「场景 + 风格」从 21 套里筛 **2-3 个候选**：候选必须与本次场景匹配，且彼此风格/主色互不相同（避免同风同款）。参考：汇报/复盘类 `minimal-business-summary`、`report-massive-models`、`competition-speech`；数据密集 `data-viz-deck`、`report-massive-charts`；架构讲解 `architecture-deck`、`mckinsey-style`、`premium-corp`；学术 `thesis-*`。把每套的一句话特点 + 推荐理由一并列出。
+3. **让用户在候选中挑一套**（用户直接指定模板名 → 跳过候选、直接用）。选定后才进入 §3；不要把选择结果锁死在某一套上。
 
 ## 3. 生成工作流
 

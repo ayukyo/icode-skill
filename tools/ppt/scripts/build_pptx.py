@@ -42,6 +42,7 @@ import argparse
 import copy
 import json
 import math
+import re
 import sys
 from pathlib import Path
 
@@ -196,6 +197,65 @@ def prune_slides(prs, selected_1indexed: list[int]) -> None:
         sldIdLst.append(sld)
 
 
+def drop_orphan_slide_parts(path: Path) -> int:
+    """Rezip ``path`` dropping slide parts no longer referenced by sldIdLst.
+
+    prune_slides() only removes entries from the slide list; the unselected slide
+    parts stay in the package as orphans. Orphans still carry template placeholder
+    text (Question N / Vivamus / 项目名称), so they must be stripped from the
+    file or the成品 fails the "无占位残留" check even though nothing renders.
+    Returns the number of orphan parts removed.
+    """
+    import zipfile
+    from xml.etree import ElementTree
+
+    prs_rels_ns = "{http://schemas.openxmlformats.org/package/2006/relationships}"
+    prs_ns = "{http://schemas.openxmlformats.org/presentationml/2006/main}"
+    r_ns = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"
+
+    def to_full(target: str) -> str | None:
+        """Normalize a rels Target into a package path (or None if not a slide)."""
+        if target.startswith("/"):
+            target = target.lstrip("/")
+        elif not target.startswith("ppt/"):
+            target = "ppt/" + target
+        return target if re.match(r"ppt/slides/slide\d+\.xml$", target) else None
+
+    with zipfile.ZipFile(path, "r") as z:
+        rels = ElementTree.fromstring(z.read("ppt/_rels/presentation.xml.rels"))
+        target_by_rid = {
+            el.get("Id"): el.get("Target")
+            for el in rels.findall(prs_rels_ns + "Relationship")
+        }
+        sld_refs = {
+            el.get(r_ns + "id")
+            for el in ElementTree.fromstring(
+                z.read("ppt/presentation.xml")).iter(prs_ns + "sldId")
+        }
+        referenced = {
+            p for rid in sld_refs
+            if (p := to_full(target_by_rid[rid])) is not None
+        }
+        drop = {
+            n for n in z.namelist()
+            if re.match(r"ppt/slides/slide\d+\.xml$", n) and n not in referenced
+        } | {
+            n for n in z.namelist()
+            if re.match(r"ppt/slides/_rels/slide\d+\.xml\.rels$", n)
+               and n.replace("_rels/", "").replace(".rels", "") not in referenced
+        }
+        if not drop:
+            return 0
+        kept = [n for n in z.namelist() if n not in drop]
+
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as z:
+        for n in kept:
+            z.writestr(n, zipfile.ZipFile(path, "r").read(n))
+    tmp.replace(path)
+    return len(drop)
+
+
 # ------------------------------------------------------------------
 # Main driver
 # ------------------------------------------------------------------
@@ -306,7 +366,10 @@ def run(args) -> int:
 
     prune_slides(prs, selected)
     prs.save(args.output)
+    orphaned = drop_orphan_slide_parts(args.output)
     note = f"\nSaved {args.output} with {len(selected)} slides and {len(planned)} edits"
+    if orphaned:
+        note += f" (清理 {orphaned} 个未引用孤儿 slide 部件)"
     print(note)
     return 0
 
