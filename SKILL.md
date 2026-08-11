@@ -121,7 +121,8 @@ description: 端到端编码工作流（步骤 0~6，含可选需求初稿步骤
 ```bash
 # 方式H：从钉钉文档/钉盘拉资料（需求文档/参考资料在钉钉分享链接时，拉取替代手动导出）
 /icode init 用户给了钉钉文档分享链接作为需求来源
-# 入口：自动 auth→resolve→ls→download 拉取到 .icode_output/.icode_output_N/dingtalk_source/，作为需求/参考资料输入
+/icode patch 用户测试时给了钉钉链接作为补充资料
+# 入口：init|log|plan|start（阶段0 输入收敛）与 patch（阶段0，随时插入）——自动 auth→resolve→ls→download 拉取到 .icode_output/.icode_output_N/dingtalk_source/，作为需求/参考资料输入
 # 前置：Chrome 已登录 alidocs.dingtalk.com + pip install browser_cookie3 + 桌面会话(keyring 解锁)；缺一按 tools/dingtalk/README.md 提示补
 # 工具：~/.claude/skills/icode/tools/dingtalk/scripts/dingtalk.py（四命令 auth/resolve/ls/download，详见 tools/dingtalk/README.md）
 # 仅拉取，不回写钉钉；原生格式(.axls/.doci)需用户在钉钉 UI 导出为 pdf/xlsx 后，再拉导出后的真实文件

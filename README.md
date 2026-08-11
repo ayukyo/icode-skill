@@ -114,7 +114,7 @@ New clone / new machine / CI bootstrap → run once. The workflow degrades grace
 
 ## Optional Data Source: Pull from DingTalk Docs
 
-When an entry command (`/icode init` / `log` / `plan` / `start`) receives a DingTalk share link (`alidocs.dingtalk.com` / `/i/nodes/{token}`), it can auto-pull the doc/drive files into `dingtalk_source/` as requirement/reference input. Pull-only, never writes back to DingTalk; native-format docs (`.axls`/`.doci`) require the user to export first in the DingTalk UI. Prerequisites: logged into DingTalk docs in Chrome + `pip install browser_cookie3`. See [SKILL.md「方式 H」](SKILL.md) and `~/.claude/skills/icode/tools/dingtalk/README.md`.
+When an entry command (`/icode init` / `log` / `plan` / `start`) or the `patch` step (phase 0, insertable anytime) receives a DingTalk share link (`alidocs.dingtalk.com` / `/i/nodes/{token}`), it can auto-pull the doc/drive files into `dingtalk_source/` as requirement/reference input. Pull-only, never writes back to DingTalk; native-format docs (`.axls`/`.doci`) require the user to export first in the DingTalk UI. Prerequisites: logged into DingTalk docs in Chrome + `pip install browser_cookie3`. See [SKILL.md「方式 H」](SKILL.md) and `~/.claude/skills/icode/tools/dingtalk/README.md`.
 
 ## Optional Enhancements
 

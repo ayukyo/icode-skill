@@ -1,6 +1,6 @@
 # tools/dingtalk - 钉钉文档/钉盘拉取（icode 入口的可选外部资料源）
 
-通用、参数化的钉钉文档拉取层，供 icode 入口步骤（`/icode init` / `log` / `plan` / `start`）在**零散输入含钉钉分享链接（alidocs.dingtalk.com / `/i/nodes/{token}`）时**可选调用，
+通用、参数化的钉钉文档拉取层，供 icode 入口步骤（`/icode init` / `log` / `plan` / `start`）与 **patch 步骤**（阶段0，随时插入）在**零散输入含钉钉分享链接（alidocs.dingtalk.com / `/i/nodes/{token}`）时**可选调用，
 把文档/钉盘里的需求文档、参考资料、规范文件拉到本地，作为流程输入。
 
 > 本目录只做「拉取」，**不做回写**：不向钉钉发任何 POST、不上传、不评论。拉取的资料落到
@@ -60,9 +60,9 @@ python3 $SCRIPT download {文件dentryUuid} -o 保存路径.xlsx --space-id {spa
 - **原生格式 `.axls`/`.doci`/`.sheet` 等下载不下来**（download 接口只给真实上传的文件返回签名 OSS URL）。已验证两条导出路都不通：① 单文档导出在 weboffice 编辑器后端（非门户 API，无法稳定复用）；② 批量打包 `/box/api/v2/dentry/download/snapshot` 被企业管理员策略禁用。**处理：让用户在钉钉 UI 里对该文档「导出为 pdf/xlsx」，再用本工具拉导出后的真实文件。**
 - **cookie 是个人鉴权凭证**：jar 权限 600，不写入工单产物、不进日志文本、不回显。
 
-## 被 icode 入口步骤调用时
+## 被 icode 步骤调用时
 
-入口（init/log/plan/start）阶段0 输入收敛时，若零散输入含 alidocs.dingtalk.com 链接（含 `/i/nodes/` 路径），会自动：
+入口（init/log/plan/start）与 patch 的**阶段0 输入收敛**时，若零散输入含 alidocs.dingtalk.com 链接（含 `/i/nodes/` 路径），会自动：
 
 ```
 python3 tools/dingtalk/scripts/dingtalk.py auth

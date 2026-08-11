@@ -80,6 +80,17 @@ LAST=$(ls -d .icode_output/.icode_output_* 2>/dev/null | grep -oP '(?<=\.icode_o
 
 ## 执行流程（轻量四段式）
 
+### 阶段 0 — 输入收敛（可选外部资料）
+
+> 与入口方式H 同机制（见 [SKILL.md「方式H」](../SKILL.md)）：`/icode patch [问题描述或新需求]` 输入含**钉钉分享链接**（`alidocs.dingtalk.com` / `/i/nodes/{token}`）时，先拉取再进阶段1，保证 patch 随时可插入外部资料分析。
+
+1. **识别**：本次 patch 输入（问题描述/新需求）含钉钉分享链接
+2. **拉取**：调 `tools/dingtalk/scripts/dingtalk.py`（`auth` 已有 jar 则跳过 → `resolve` → `ls` → `download`），落到 `{ICODE_OUT_DIR}/dingtalk_source/`
+   - 原生格式（.axls/.doci）→ 让用户在钉钉 UI 导出 pdf/xlsx 后拉导出文件
+   - 无钉钉引用 → 整段跳过，各阶段行为不变
+3. **溯源**：`.ico_metadata.json` 追加 `dingtalk_source` 字段（links/files），与 `patch_phase` 共存
+4. **融合**：拉取资料作为阶段 1「现状重审」与阶段 2「增量计划」的补充输入
+
 **强制思考前置**（不可跳过，按 [references/thinking_core.md](../references/thinking_core.md)「强制思考前置·统一契约」段执行）：本步骤子项（至少 4 步）= 现状重审要点 → 修改点清单 → 影响面预判 → 复检策略
 
 **思考产出进 `08_patch.md` 对应段，不写工程产物**。

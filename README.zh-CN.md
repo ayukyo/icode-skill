@@ -20,7 +20,7 @@ ICode 是一个 Claude Code 技能（Skill），将需求到交付拆解为严�
 - **两个可选入口**：`/icode log` 日志根因分析（先基线检查再对抗分析，领域无关）→ 转修复需求；`/icode init` 多轮需求初稿对话 → `00_init.md`
 - **产物与状态管理**：统一收纳在 `.icode_output/.icode_output_N/`，`.ico_metadata.json` 记录状态/代码文件，支持跨会话恢复与断点续跑
 - **可选 TB 缺陷源**：`/icode log` 零散输入含 Teambition 项目 URL 或 `<LIB>-<NUM>` 时，可选拉取缺陷单的标题/描述/评论/日志附件作为分析输入（多项目文本配置，仅拉取分析、不回写 TB；无 TB 引用时走纯本地日志路径，行为不变）
-- **可选钉钉文档源**：入口（`/icode init` / `log` / `plan` / `start`）零散输入含钉钉分享链接（alidocs.dingtalk.com）时，可选拉取文档/钉盘文件作为需求与参考资料输入（仅拉取、不回写钉钉；原生格式需用户在钉钉 UI 导出；无钉钉引用时行为不变）
+- **可选钉钉文档源**：入口（`/icode init` / `log` / `plan` / `start`）与 patch 阶段0 零散输入含钉钉分享链接（alidocs.dingtalk.com）时，可选拉取文档/钉盘文件作为需求与参考资料输入（仅拉取、不回写钉钉；原生格式需用户在钉钉 UI 导出；无钉钉引用时行为不变）
 - **可选视觉理解**（`mcp/vision-bridge`）：可装可不装的图片/视频理解 MCP——**不绑任何平台**，只要你的 provider 提供 OpenAI Chat Completions 兼容接口就能用（OpenAI / Claude / Gemini / 国内厂商 / 自建 / OpenRouter 全部支持）。装好后 SKILL 工作流统一走 `mcp__vision-bridge__analyze_media` 工具；未装时 session 模型按原生能力处理，由用户自负其责。详见 [mcp/vision-bridge/README.md](mcp/vision-bridge/README.md) 与 [SKILL.md](SKILL.md) 的「可选增强」段
 
 ## 安装
@@ -128,7 +128,7 @@ cd ~/.claude/skills/icode/mcp/cheap-research
 
 ## 可选：从钉钉文档/钉盘拉资料
 
-入口（`/icode init` / `log` / `plan` / `start`）零散输入含钉钉分享链接（`alidocs.dingtalk.com` / `/i/nodes/{token}`）时，可选自动拉取文档/钉盘文件到 `dingtalk_source/` 作为需求与参考资料输入；详见 [SKILL.md「使用流程示例」段（方式 H）](SKILL.md)。前置：Chrome 已登录钉钉文档 + `pip install browser_cookie3`；详见 `~/.claude/skills/icode/tools/dingtalk/README.md`。
+入口（`/icode init` / `log` / `plan` / `start`）与 patch 阶段0 零散输入含钉钉分享链接（`alidocs.dingtalk.com` / `/i/nodes/{token}`）时，可选自动拉取文档/钉盘文件到 `dingtalk_source/` 作为需求与参考资料输入；详见 [SKILL.md「使用流程示例」段（方式 H）](SKILL.md)。前置：Chrome 已登录钉钉文档 + `pip install browser_cookie3`；详见 `~/.claude/skills/icode/tools/dingtalk/README.md`。
 
 ## 命令一览
 
