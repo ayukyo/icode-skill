@@ -10,7 +10,7 @@
 | `scripts/build_pptx.py` | 按 `edits.json`（选页 + 文字替换）从模板生成 .pptx；带出框检测（默认只提示不阻断，`--strict` 时超框拒绝保存） |
 | `scripts/render_slides.py` | .pptx → PDF → 每页 PNG（LibreOffice + pdftoppm，渲染自检用，可选） |
 | `scripts/compute_capacity.py` | 由 template.pptx 计算每个 slot 容量字段（数据准备/自建模用） |
-| `templates/INDEX.md` | 21 套内置模板索引（风格/主色/场景/页数） |
+| `templates/INDEX.md` | 16 套内置模板索引（风格/主色/场景/页数） |
 | `templates/<slug>/` | 每套 4 文件：`template.pptx` / `intro.md` / `detail.json`（槽位寻址+容量+type_scale）/ `preview.png` |
 
 ## 前置

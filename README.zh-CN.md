@@ -157,7 +157,7 @@ cd ~/.claude/skills/icode/mcp/cheap-research
 | `/icode patch [问题或新需求]` | 追加修改（独立步骤）：主流程后/中途继续改——测试发现问题 / 新需求，在既有工单上打补丁。轻量四段式（重审现状→增量计划→最小实施→反向复检），靠磁盘产物重载上下文（换会话可继续），产出 `08_patch.md` 追加式；可选 `--listen`（自动监听）/ `--test`（显式触发验证）→ 实机部署验证（连设备部署 + 轮询监听 LOG + 增量分析；先配 `~/.claude/icode_data/device_config/<project_id>.json`，模板 `templates/device_config.json.template`，单文件多连接 adb/ssh/串口） |
 | `/icode doc [自然语言]` | 工程级知识库生成（独立步骤）：扫描代码特征生成全局知识库章节，供段零自动检索注入 |
 | `/icode limit [自然语言]` | 项目约束红线（独立步骤）：定义和维护本工程的红线/约束/禁区。主存全局 + 单 checkout 覆盖（自动 gitignore），追加式演进。plan 步骤引用作为硬基线 |
-| `/icode ppt [自然语言]` | PPT 生成（独立交付步骤）：自然语言 → 真实 `.pptx`，4 类场景——**项目 / 模块 / 本次功能开发 / 本次BUG修复**；内容源为 icode 产物/知识库（禁止编造），内置 21 套模板（`tools/ppt/templates/`，AI 先筛 2-3 个风格匹配候选、由用户挑选；也可直接点名模板），产出 `<工程根>/.icode_output/ppt/`（不放进工单目录）可回溯；依赖 python-pptx（必需），LibreOffice+poppler 可选（PNG 预览自检）；内置模板非商业授权（见 `tools/ppt/NOTICE`） |
+| `/icode ppt [自然语言]` | PPT 生成（独立交付步骤）：自然语言 → 真实 `.pptx`，4 类场景——**项目 / 模块 / 本次功能开发 / 本次BUG修复**；内容源为 icode 产物/知识库（禁止编造），内置 16 套模板（`tools/ppt/templates/`，AI 先筛 2-3 个风格匹配候选、由用户挑选；也可直接点名模板），产出 `<工程根>/.icode_output/ppt/`（不放进工单目录）可回溯；依赖 python-pptx（必需），LibreOffice+poppler 可选（PNG 预览自检）；内置模板非商业授权（见 `tools/ppt/NOTICE`） |
 | `/icode status` | 只读：查当前工单状态 |
 | `/icode list [关键词]` | 跨工程工单查找（纯只读） |
 

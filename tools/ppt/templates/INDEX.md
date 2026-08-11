@@ -1,6 +1,6 @@
 # 内置 PPT 模板索引
 
-> 21 套内置模板，覆盖中文场景的绝大多数需求。选模板时按"主色 + 风格 + 场景"快速筛选；候选 2-3 个时把对应 `preview.png` 给用户挑。
+> 16 套内置模板，覆盖中文场景的绝大多数需求。选模板时按"主色 + 风格 + 场景"快速筛选；候选 2-3 个时把对应 `preview.png` 给用户挑。
 
 ⚠️ **非商业使用** — 模板仅供个人学习与研究，禁止商业用途。
 
@@ -9,13 +9,8 @@
 | slug | 名称 | 页数 | 主色 | 风格 / 一句话特点 |
 |---|---|---|---|---|
 | `minimal-business-summary` | 简约商务总结汇报 | 16 | 深蓝白 `#485275` | 极简商务，留白多，4 章节，季度/年度汇报首选 |
-| `red-patriot-youth` | 新时代新青年红色教育 | 16 | 党政红 `#A91F1F` + 金 | 庄重党政红 + 飘带/和平鸽/故宫，思政课件 |
-| `cute-orange-class` | 橙色可爱卡通教学 | 17 | 暖橙 `#F5C97E` | 卡通手绘 + 3 只小宠物，幼儿/小学/培训 |
 | `quarterly-illust` | 蓝灰酸性插画季度总结 | 19 | 亮蓝 `#4F4FFF` + 黑白 | Y2K 酸性设计 + 黑白人物插画，互联网风 |
 | `geometric-summary` | 多彩几何工作总结 | 21 | 4 主色（蓝/红/黄/绿） | 几何切片 + One/Two/Three/Four 大字，活力 |
-| `red-patriot-general` | 红色爱国主题教育通用 | 25 | 党政红 `#A8181C` | 金色书法 + 绸缎飘带，党课/主题党日 |
-| `red-teaching-framework` | 高级红色教学实施框架 | 30 | 党政红 `#C00000` + 橙 | 满版红色教学图解，完整教学逻辑链，教学比赛/说课首选 |
-| `red-teaching-models` | 高级红色数智教学图解 | 30 | 党政红 `#C00000` + 紫 | 同系列图型合辑（漏斗/齿轮/鱼骨/放射），数智教学/课改 |
 | `thesis-novice` | 多专业开题方法论库 | 32 | 墨绿 `#4F6E4F` | 32 套填好的研究方法范例，跨 6 大专业 |
 | `premium-corp` | 高级感大厂 PPT 合辑 | 35 | 酱红 `#A52524` + 深蓝灰 | 35 套高级感版式（战略/运营/数据/思维模型） |
 | `architecture-deck` | 领导爱的架构图合辑 | 37 | 深蓝 `#1F3A93` | 大厂真实架构图（项目/AI/物流/供应链） |
@@ -35,10 +30,7 @@
 | 主色 | 候选 slug |
 |---|---|
 | **深蓝 / 商务蓝** | `minimal-business-summary`、`operations-deck`、`report-savior`、`competition-speech`、`report-massive-models`、`report-massive-charts`、`report-massive-reports`、`architecture-deck`、`thesis-formula` |
-| **红色 / 党政** | `red-patriot-youth`、`red-patriot-general` |
-| **红色 / 教学（高密度图解）** | `red-teaching-framework`、`red-teaching-models` |
 | **酱红 / 大厂** | `premium-corp`、`mckinsey-style` |
-| **橙色 / 暖色** | `cute-orange-class` |
 | **多彩** | `geometric-summary` |
 | **Y2K / 黑白蓝** | `quarterly-illust` |
 | **绿色 / 学术** | `thesis-novice` |
@@ -54,8 +46,7 @@
 | 商务提案 / 方案路演 | `minimal-business-summary`、`mckinsey-style`、`premium-corp` |
 | 述职 / 竞聘 / 晋升答辩 | `competition-speech`、`report-savior`、`report-massive-reports` |
 | 开题答辩 / 课题汇报 | `thesis-novice`、`thesis-formula`、`top-thesis` |
-| 教学 / 培训 / 课件 | `cute-orange-class`、`thesis-novice` |
-| 党政 / 党课 / 爱国教育 | `red-patriot-youth`、`red-patriot-general` |
+| 培训 / 课件 | `thesis-novice` |
 | 架构 / 流程 / 系统拓扑 | `architecture-deck`、`mckinsey-style`、`report-massive-models` |
 | 数据可视化重型 | `data-viz-deck`、`report-massive-charts`、`operations-deck`、`mckinsey-style` |
 | 运营 / 互联网产品 | `operations-deck`、`quarterly-illust`、`premium-corp` |
@@ -67,8 +58,8 @@
 
 | 规模 | 候选 slug | 适合 |
 |---|---|---|
-| **小（≤ 20 页）** | `minimal-business-summary`、`red-patriot-youth`、`cute-orange-class`、`quarterly-illust` | 短小汇报、单一主题、5-10 页演示 |
-| **中（21-42 页）** | `geometric-summary`、`red-patriot-general`、`thesis-novice`、`premium-corp`、`architecture-deck`、`mckinsey-style`、`report-massive-models`、`report-massive-charts`、`report-massive-reports`、`thesis-formula`、`top-thesis`、`data-viz-deck` | 完整章节制汇报、10-20 页演示 |
+| **小（≤ 20 页）** | `minimal-business-summary`、`quarterly-illust` | 短小汇报、单一主题、5-10 页演示 |
+| **中（21-42 页）** | `geometric-summary`、`thesis-novice`、`premium-corp`、`architecture-deck`、`mckinsey-style`、`report-massive-models`、`report-massive-charts`、`report-massive-reports`、`thesis-formula`、`top-thesis`、`data-viz-deck` | 完整章节制汇报、10-20 页演示 |
 | **大（43+ 页）** | `report-savior`、`operations-deck`、`competition-speech` | 素材库式按需挑选，10-25 页演示 |
 
 ## 字段说明
