@@ -13,12 +13,14 @@ ICode 是一个 Claude Code 技能（Skill），将需求到交付拆解为严�
 - **闭环交付**：(可选) 需求初稿 → 计划 → 审查 → 定稿 → 编码 → 复检 → 终审，每步可独立调用，主会话执行、不切换模型
 - **双模式**：`/icode start` 全流程（多轮审查 + 对抗验证）/ `/icode fast` 精简（1 轮无对抗，约 65% 耗时），自动串联步骤 1→6
 - **防偷懒质量门**：三阶段复检（Reverse/Fixed/Free）、Plan 断言实证验证、ADR 决策记录、对抗验证（独立质疑者——证据不足不确认、诚实降级不伪造共识）
-- **跨工程历史检索**：init/log/plan/start 启动时自动检索相似历史工单按命令分流注入，只进会话、不污染工程产物
+- **跨工程历史检索**：init/log/plan/start 启动时自动检索相似历史工单按命令分流注入，只进会话、不污染工程产物；**verdict 防误导注入**——已证伪/被取代的工单注入的是"陷阱结论"而非 ADR，防止误导新工作
+- **强制阻断边界矩阵**：检查项按 L1 致命 / L2 关键 / L3 重要 / L4 参考四级定义"是否阻断流程"（L1 报错退出、L2/L3 警告+记 metadata+继续、L4 柔性提示），各步骤头部声明检查项，统一"内容正确 ≠ 机制合规"
 - **工程级知识库**（`/icode doc`）：生成全局工程知识库（跨仓库跨分支共享，模块文档只生成一次复用），供段零自动检索注入，开发时无需手动告知参考文档
 - **防重复注入**：历史检索与工程文档检索共用缓存去重，避免同开发链路重复注入
 - **防偷懒强化**：步骤5/6 强制 Read 确认行 + 证据 file:line + 自检清单，步骤2 对抗强制 Agent ID
 - **两个可选入口**：`/icode log` 日志根因分析（先基线检查再对抗分析，领域无关）→ 转修复需求；`/icode init` 多轮需求初稿对话 → `00_init.md`
 - **产物与状态管理**：统一收纳在 `.icode_output/.icode_output_N/`，`.ico_metadata.json` 记录状态/代码文件，支持跨会话恢复与断点续跑
+- **决策锚点**：步骤间以精简决策摘要（`.decision_anchors.json`）传递上下文——省 token、保持推理连续性
 - **可选 TB 缺陷源**：`/icode log` 零散输入含 Teambition 项目 URL 或 `<LIB>-<NUM>` 时，可选拉取缺陷单的标题/描述/评论/日志附件作为分析输入（多项目文本配置，仅拉取分析、不回写 TB；无 TB 引用时走纯本地日志路径，行为不变）
 - **可选钉钉文档源**：入口（`/icode init` / `log` / `plan` / `start`）与 patch 阶段0 零散输入含钉钉分享链接（alidocs.dingtalk.com）时，可选拉取文档/钉盘文件作为需求与参考资料输入（仅拉取、不回写钉钉；原生格式需用户在钉钉 UI 导出；无钉钉引用时行为不变）
 - **可选视觉理解**（`mcp/vision-bridge`）：可装可不装的图片/视频理解 MCP——**不绑任何平台**，只要你的 provider 提供 OpenAI Chat Completions 兼容接口就能用（OpenAI / Claude / Gemini / 国内厂商 / 自建 / OpenRouter 全部支持）。装好后 SKILL 工作流统一走 `mcp__vision-bridge__analyze_media` 工具；未装时 session 模型按原生能力处理，由用户自负其责。详见 [mcp/vision-bridge/README.md](mcp/vision-bridge/README.md) 与 [SKILL.md](SKILL.md) 的「可选增强」段
@@ -86,6 +88,17 @@ cd ~/.claude/skills/icode/mcp/cheap-research
 如果 cheap-research 装了但 `config.json` 还没填三件套，工具调用会返回 fallback 提示 dict，session 模型按默认会话模型处理——**等同于未装 cheap-research 的行为**。不报错、不阻塞。
 
 详见 [mcp/cheap-research/README.md](mcp/cheap-research/README.md)。
+
+### 其他 4 个 MCP（sequential-thinking / memory / context7 / playwright）
+
+6 个 MCP 里剩下 4 个是工作流工具，`/icode install` 装好后各步骤直接使用，**无需单独配置**：
+
+- **sequential-thinking**——强制思考前置：plan 模式/复杂修改/重构/重设计前先结构化思考（每步先列本步必调 MCP 再实际调用）
+- **memory**——跨工程知识图谱（`mcp__memory__read_graph`），历史检索/段零注入时唤起，跨会话回看过去工单与工程文档
+- **context7**——第三方库文档实时查询，init/plan/code 且需求涉及第三方库时调用
+- **playwright**——浏览器自动化，deepcheck/audit + 前端工程时调用
+
+每个 MCP 都有显式强证据触发条件 + 声明的优雅降级路径（详见 [SKILL.md「MCP 工具集」](SKILL.md)）；缺失任一都不阻断工作流。
 
 ## 快速开始
 

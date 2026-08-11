@@ -19,7 +19,7 @@ ICode is a Claude Code Skill that breaks the journey from requirement to deliver
 |---|---|---|
 | Process discipline | Depends on your prompt | Hard 6-step gates + L1–L4 blocking matrix |
 | Review quality | Single-perspective self-review | Independent skeptic sub-agents with adversarial verification (self-delegation forbidden) |
-| Laziness resistance | None | 27 hard anti-laziness rules + mandatory Read confirmation lines + file:line evidence |
+| Laziness resistance | None | 31 hard anti-laziness rules + mandatory Read confirmation lines + file:line evidence |
 | Reusing past decisions | Every ticket starts cold | Cross-project history retrieval with a global index + **verdict-based anti-misleading injection** (disproved tickets inject the trap, not the ADR) |
 | Project knowledge | None | `/icode doc` generates a global per-project/branch knowledge base, auto-injected at phase zero |
 | Crash recovery | Restart from scratch | `.ico_metadata.json` status + round counters enable resumable runs at any step |
@@ -32,7 +32,7 @@ ICode is a Claude Code Skill that breaks the journey from requirement to deliver
 # 1) Install into your skills directory (needs one-time setup)
 git clone https://github.com/ayukyo/icode-skill ~/.claude/skills/icode
 
-# 2) Install the 7 MCP servers the workflow relies on (self-checking, fills in what's missing)
+# 2) Install the 6 MCP servers the workflow relies on (self-checking, fills in what's missing)
 /icode install
 
 # 3) Run a full flow
@@ -116,6 +116,10 @@ New clone / new machine / CI bootstrap → run once. The workflow degrades grace
 
 When an entry command (`/icode init` / `log` / `plan` / `start`) or the `patch` step (phase 0, insertable anytime) receives a DingTalk share link (`alidocs.dingtalk.com` / `/i/nodes/{token}`), it can auto-pull the doc/drive files into `dingtalk_source/` as requirement/reference input. Pull-only, never writes back to DingTalk; native-format docs (`.axls`/`.doci`) require the user to export first in the DingTalk UI. Prerequisites: logged into DingTalk docs in Chrome + `pip install browser_cookie3`. See [SKILL.md「方式 H」](SKILL.md) and `~/.claude/skills/icode/tools/dingtalk/README.md`.
 
+## Optional Data Source: Pull from Teambition Bug Tickets
+
+When `/icode log` receives a Teambition project URL or a `<LIB>-<NUM>` ticket ref (e.g. `DEMO-26`) in its scattered input, it can optionally pull the ticket's title / description / comments / log attachments into `tb_source/<ID>/` as analysis input — replacing local logs when the ticket carries attachments. Pull-only for analysis, never writes back to Teambition; with no TB reference, `/icode log` falls back to the pure local-log path (behavior unchanged). Config (optional; multi-project shortcuts + cookie) and the cookie helper: see `~/.claude/skills/icode/tools/tb/README.md` and `tools/tb/scripts/tb_cookie.py --domain <domain>`. Re-running the same ticket (new comments/attachments on TB) prompts "reuse old ticket / create new" — reuse re-pulls the latest and re-runs incremental adversarial analysis. See [SKILL.md「方式 D2」](SKILL.md).
+
 ## Optional Enhancements
 
 Both are platform-agnostic: point them at any OpenAI Chat Completions-compatible endpoint (OpenAI / Claude / Gemini / Chinese vendors / self-hosted / OpenRouter / local Ollama). Not installing either doesn't affect the main workflow.
@@ -141,6 +145,17 @@ cd ~/.claude/skills/icode/mcp/cheap-research
 ```
 
 Offloads 23 low-risk sub-tasks (long-context compression / history retrieval / template filling / structured extraction / TB-comment pre-extraction / code-fact audit / pattern scanning / symbol tracing / diff summaries) to a cheap model. It **never takes over decisions** — 3-skeptic adversarial verification, architecture decisions, final audit, and fix proposals stay on the main session (zero gray area).
+
+### The Other 4 MCPs (sequential-thinking / memory / context7 / playwright)
+
+The remaining 4 of the 6 MCPs are workflow utilities, installed by `/icode install` and used by the steps — no per-user config needed:
+
+- **sequential-thinking** — mandatory structured-thinking gate before plan mode / complex / refactor tasks (each step lists its required MCPs first, then calls them)
+- **memory** — cross-project knowledge graph (`mcp__memory__read_graph`), recalled during search/injection so past tickets and project docs resurface across sessions
+- **context7** — live library-doc lookup during init/plan/code when the requirement touches third-party libraries
+- **playwright** — browser automation during deepcheck/audit for front-end projects
+
+Each MCP has an explicit strong-evidence trigger and a declared graceful-downgrade path (see [SKILL.md「MCP 工具集」](SKILL.md)); none blocks the workflow when missing.
 
 ## Commands
 

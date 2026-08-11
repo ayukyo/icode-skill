@@ -174,6 +174,27 @@ description: 端到端编码工作流（步骤 0~6，含可选需求初稿步骤
 # 产出：08_patch.md（追加 Patch N 段）+ 06_audit.md 末尾补丁记录 + metadata.patch_history
 /icode patch 还发现 I2C 复位时序有问题          # 连续多轮补丁：再追加 Patch N+1，不新建工单
 # 特点：靠磁盘产物重载上下文（换会话/换模型可继续），不靠会话记忆，上下文不爆炸
+
+# patch 实机部署验证（可选 flag，配 ~/.claude/icode_data/device_config/<project_id>.json，模板 templates/device_config.json.template，单文件多连接 adb/ssh/串口）
+/icode patch --listen 测试发现超时阈值场景下读数跳变   # 自动监听：告知触发即监听，连设备部署 + 持续轮询 LOG + 实时链路分析，用户随时操作被捕获
+/icode patch --test 测试发现超时阈值场景下读数跳变     # 显式触发验证：空转停下确认用户已操作再继续（防误触发）
+# 无 flag → 跳过实机验证（只走四段式）；--listen/--test 进入阶段4「1.5 实机部署验证」（多设备按硬件唯一标识核指纹，防连错设备误判）
+```
+
+```bash
+# 方式J：MCP 环境检查+一键安装（install 独立步骤，新 clone / 新机器 / CI 初始化时跑一次）
+/icode install                           # 扫描所有 mcp/*/install.sh，每个子工程自检环境（venv/Node/npm）并缺啥补啥、注册到 ~/.claude.json
+/icode install context7                  # 只装指定子工程（如 context7）
+/icode install --no-auto-install         # 跳过自动装依赖（自己装）
+# 可选 MCP 未装时工作流优雅降级（显式声明降级路径，不阻塞）；不创建工单目录、不参与步骤1~6推进
+```
+
+```bash
+# 方式K：项目约束红线（limit 独立步骤，定义本工程的红线/约束/禁区）
+/icode limit                           # 无描述→全局扫描显示当前约束（合并视图：主存+local 覆盖）
+/icode limit 禁止修改 sdk 底层接口签名  # 有描述→针对操作生成/追加新红线条目（编号自增，追加式演进）
+# 主存：~/.claude/icode_data/limits/<project_id>.md（全局跨 checkout 共享）；覆盖：<工程根>/.icode_output/limit.local/<project_id>.md（自动 gitignore，local 完全覆盖 main）
+# 后续 plan §3/§4/§6 引用 limit 条目作设计依据（硬基线）；log 步骤4 对照逐条核验红线；不创建工单目录、不参与步骤1~6推进
 ```
 
 ## 通用规则
