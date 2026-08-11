@@ -65,7 +65,7 @@ python3 tools/ppt/scripts/render_slides.py .icode_output/ppt/{工程简名}_{场
 ## 4. 内容铁律（对齐 icode 反偷懒哲学；违反一条即不合规）
 
 1. **来源真实**——每页内容必须有来源（产物/知识库/git/验证输出），**禁止编造数据、禁止凭印象写数字**；关键数字给来源标注（如 `06_audit.md` 的测试结果、`log_analysis.md` 的根因结论）。
-2. **无占位残留**——成品 .pptx 不得出现任何模板占位词（`Question 1`/`Vivamus`/`项目名称`/`Key Words` 等）。抽检（.pptx 是 zip，对解压内容 grep）：`unzip -p {产出}.pptx "ppt/slides/slide*.xml" \| grep -c "Vivamus\|项目名称\|Key Words"`，命中 >0 → 该页占位未替换，补 edits。
+2. **无占位残留**——成品 .pptx 不得出现任何模板占位词（`Question 1`/`Vivamus`/`项目名称`/`Key Words` 等）。抽检（.pptx 是 zip，对解压内容 grep）：`unzip -p {产出}.pptx "ppt/slides/slide*.xml" \| grep -c "Vivamus\|项目名称\|Key Words"`，命中 >0 → 该页占位未替换，补 edits。**注意：产物 .pptx 内部 slide 部件保留模板原始编号（`selected_slides` 非连续时如 `slide1/2/15/35/36.xml`），不按成品序号重排**；抽检/按页核对必须用 `slide*.xml` 通配或对照渲染预览图（预览图 `slide-N.png` 才按成品顺序），不能按成品序号猜文件名（如猜 `slide3.xml` 会落空）。
 3. **禁止省略号截断**——内容过长用**精炼重写**（真正概括），绝不 `...`/`等等` 硬凑；`max_chars` 是软参考，轻微超出可接受（模板容量已留 20% 余量）。
 4. **不破坏排版**——只改文字，不改形状位置/大小/颜色/字号；**同级标题字号保持一致**，不为塞字单独改小某处字号。
 5. **产物不是代码事实**——引用 `project_docs` 知识库内容前须 Read/Grep 实证，文档是快照可能过时。
