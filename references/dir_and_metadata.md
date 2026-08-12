@@ -258,6 +258,7 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
   "status": "log_done",
   "completed_steps": ["log"],
   "code_files": [],
+  "limit_refs": [],
   "requirement_summary": "{根因一句话摘要，≤100 token}",
   "requirement_points": ["修复要点1", "修复要点2"],
   "keywords": "{≤8个技术关键词}",
@@ -267,6 +268,8 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
   "migration_log": []
 }
 ```
+
+> `limit_refs`：log 报告 `§2.3 limit 红线对照`（必填小节）/ §6 引用的红线编号数组，每条 `{redline_no, source, title, applied_in}`；报告出现「红线 N」即须记录，经 log 步骤 9.5 机器自检校验（§2.3 存在性 + 引用完整性，见 [steps/log.md](../steps/log.md)）。**字段缺失视为 `[]`（向后兼容旧 metadata）**
 
 ### 步骤0 init 首轮
 

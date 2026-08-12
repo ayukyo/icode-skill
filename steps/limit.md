@@ -5,7 +5,7 @@
 - 主存：`~/.claude/icode_data/limits/<project_id>.md`（全局，跨 checkout 共享）
 - 覆盖：`<project_root>/.icode_output/limit.local/<project_id>.md`（单 checkout，自动 gitignore）
 **会话**: 主会话
-**定位**: **项目约束红线生成与维护，独立步骤**。不创建 `.icode_output_N/`、不写 `.ico_metadata.json`、不更新工单 `completed_steps`/`status`。产物供 `/icode plan`/`start`/`fast` 启动时**作为硬基线引用**（plan §3 架构设计/§4 ADR/§6 异常处理须呼应 limit 条目）；**亦供 `/icode log` 根因分析时作为对照清单**（log 步骤4 limit 红线检查点读取，逐条对照根因假设是否违反约定红线）。
+**定位**: **项目约束红线生成与维护，独立步骤**。不创建 `.icode_output_N/`、不写 `.ico_metadata.json`、不更新工单 `completed_steps`/`status`。产物供 `/icode plan`/`start`/`fast` 启动时**作为硬基线引用**（plan §3 架构设计/§4 ADR/§6 异常处理须呼应 limit 条目）；**亦供 `/icode log` 根因分析时作为对照清单**（log 前置 limit 红线检查点读取——在 log 步骤2 历史检索/段零文档注入**之前**，逐条对照根因假设是否违反约定红线，引用红线经 log 步骤 9.5 机器自检留痕）。
 
 > **核心设计哲学**：
 > - **约定 vs 事实分离** —— limit 是"代码应该这样写"的约定（团队私有，不上传），doc 是"代码长这样"的事实快照（独立于仓库全局可索引）。两者职责严格分离。
@@ -141,6 +141,12 @@ LOCAL_FILE="$LOCAL_DIR/$PROJECT_ID.md"
 - plan §4 ADR 必须呼应相关 limit 条目（"本工程 limit 红线 N：X，本方案选择 Y 因为..."）
 - plan §6 异常处理必须呼应 limit 异常处理相关条目
 - plan 步骤 metadata 写入 `limit_refs` 数组（可选，记录本计划引用的红线编号）
+
+### 6. log 步骤引用契约（不直接执行，在 steps/log.md 体现）
+
+- log **前置 limit 红线检查点**（步骤1 末尾，**先于步骤2 历史检索/段零文档注入**）读取 main + local 作根因对照清单——先读红线再注入历史/文档，防"先入为主后才对照"的滞后
+- log 报告 `log_analysis.md §2.3 limit 红线对照` 为**必填小节**：limit 存在时逐条对照根因假设，不存在时标注"本工程无 limit 红线"
+- log 步骤 metadata 写入 `limit_refs` 数组（报告 §2.3/§6 出现「红线 N」即须记录），经 log 步骤 9.5 机器自检校验（§2.3 存在性 + 引用完整性）
 
 **柔性提示**：plan 步骤入口检测 main + local 都不存在 → 输出"💡 本工程尚无 limit 约束（建议运行 `/icode limit <约束描述>` 生成），不阻断流程"。
 
