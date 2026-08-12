@@ -115,7 +115,7 @@ Free 阶段一次性完整覆盖全部 15 个角度。
 
 **必须先建立计划-代码追溯矩阵**（逐条列出计划功能点/接口/约束，标记代码对应位置和完成状态），再逐维度评估。禁止跳过追溯直接给"全部通过"。
 
-**Free 阶段 A6 深检/争议验证——必须独立 spawn 3 质疑者子代理**：若 Free 阶段发现任何深检 issue 或需争议性验证的点，**必须按 [references/adversarial.md](../references/adversarial.md) 模式独立 spawn 3 个质疑者子代理**（证据质疑者/替代解释者/充分性质疑者各一，不得合并 spawn，少任一视为不合规——见反偷懒第14条；**spawn 规格**：`subagent_type: "general-purpose"` + schema 强制结构化，**禁用 Explore** 防只调研不裁决被截断）。产物（`05_deepcheck.md` 的「对抗验证」段）必须记录每个质疑者的 **独立 spawn Agent ID** 作为调用证据。
+**Free 阶段 A6 深检/争议验证——必须独立 spawn 3 质疑者子代理**：若 Free 阶段发现任何深检 issue 或需争议性验证的点，**必须按 [references/adversarial.md](../references/adversarial.md) 模式独立 spawn 3 个质疑者子代理**（证据质疑者/替代解释者/充分性质疑者各一，不得合并 spawn，少任一视为不合规——见反偷懒第14条；**spawn 规格**：`subagent_type: "general-purpose"` + schema 强制结构化，**禁用 Explore** 防只调研不裁决被截断）。产物（`05_deepcheck.md` 的「对抗验证」段）必须记录每个质疑者的 **独立 spawn Agent ID** 作为调用证据。**质疑者 prompt 组装后过 anti-coaching 扫描 + freshness 检查**（见 [references/adversarial.md](../references/adversarial.md)「输入契约」段）。
 
 > **spawn 等待规格**（引用 [references/adversarial.md](../references/adversarial.md)「显式等待 + 超时机制」段）：spawn 3 质疑者必须**显式等 verdict**——同步 `Agent` spawn（`run_in_background: false`）或异步 + `TaskOutput` 等结果，**禁止 spawn 后不等待直接进入下一步**；超时 `TIMEOUT_SECONDS = 120`（可由 metadata.task_timeout_seconds 覆盖），超时触发重试 1 次（换措辞 + 可换 subagent_type 兜底），二次仍超时走 `[未验证-子代理对抗失败]`。**禁止**未等待就标 `[未验证-子代理对抗失败]`——该标签留给「确认失败」的子代理，不得给「仍在跑/返回晚」的子代理（2026-07-29 实测踩坑）。判定状态四态枚举（`sync_ok` / `timeout_retry_used` / `still_failed_after_retry` / `env_no_spawn`）必须写入 `adversarial_verification` 字段便于审计。
 > **主代理代行硬禁止**：`no_spawn_env = false` 时**禁止**主代理代行三视角判断！即使部分子代理未回结果（如 1/3 返回 verdict、2/3 超时），其余未回子代理必须按「子代理失败处理」失败链路降级（标 `[未验证-子代理对抗失败]`），不得"补齐"为代理代行。主代理代行**仅在** `no_spawn_env = true`（结构性无 spawn 工具）时允许——环境启动检测 `Agent` 工具不可用时置 true。
