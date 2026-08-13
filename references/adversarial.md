@@ -33,6 +33,7 @@
    }
    ```
 3. **指令开头强制约束**：「直接输出裁决，读文件范围仅限喂你的路径，不要长篇调研。先给 verdict 再给依据。」
+4. **输出预算硬约束（防 `max_output_tokens` 截断，实测痛点）**：质疑者的输出会被 API `max_output_tokens` 上限**硬截断**，超长即截断、且截断点在 verdict 之前=任务失败（实测：质疑者输出 594KB 撞上限被截断，无 verdict JSON、无完成通知，表现为"一直不返回"）。因此 spawn 指令必须声明：①**verdict 是第一动作**——先调 StructuredOutput 返回 verdict JSON，再（如需）补依据，截断只丢补充、不丢 verdict；②**禁止回显读到的文件内容**——读文件仅作内部判断依据，不得把日志/代码原文转储进输出（594KB 的根因就是回显）；③**输出体积预算（宽松，勿过紧）**——总输出（含调 StructuredOutput 前文本）≤ 约 2000 token，reasoning ≤ 200 字；正常质疑者（reasoning + 替代解释者的 ≥3 竞争假设 + evidence_ref）本就需数百 token，2000 足够且远低于模型 `max_output_tokens`，**绝不为省 token 把预算压到致正常质疑者失败**——防失控真正靠 ①verdict 优先 + ②禁回显，预算只是"防 594KB 类失控"的宽松天花板、不是紧约束；④**自检**——一旦发现自己正输出大段文本/调研过程，立即停止，只调 StructuredOutput 返回 verdict。
 
 ## 输入契约（喂给每个质疑者的内容，三份相同）
 
@@ -97,6 +98,8 @@
 
 **留痕**：`adversarial_verification` 增加 `spawn_mode`（`sync` / `background`）+ `background_watchdog_triggered`（布尔）字段。后台看门狗触发 → 前台重来成功：记 `spawn_mode=background` + `background_watchdog_triggered=true` + 同步四态 `sync_ok`（重来前的后台挂死**不计为失败**）；前台重来也失败：记 `still_failed_after_retry` 走降级。
 
+**与 `max_output_tokens` 截断的衔接**：后台质疑者被输出上限截断有两种表现——①截断后连任务通知都不发（卡在生成中被杀）→ 表现为"10 分钟不返回"，由看门狗接管（停止 → 前台重来）；②截断但有部分返回（无 verdict）→ 走「子代理失败处理」检测失败（`max_output_tokens` 判据 + 定向重试）。看门狗管"不返回"，截断判据管"返回但无 verdict"，两者互补、不互斥。
+
 > **为什么"改前台重来"而非直接降级**：后台断连是**环境瞬态**（agent 实例挂了），不是"对抗没做成"——前台重来换 spawn 模式即可拿到同一质疑者的独立裁决，保住对抗完整性；直接降级 `[未验证-子代理对抗失败]` 会丢掉一条本可验证的结论。前台重来仍失败才轮到诚实降级，主代理始终不得自演。
 
 ## 子代理失败处理（重试→降级，绝不自演）
@@ -105,9 +108,9 @@
 
 **正确失败处理链路**（按顺序）：
 
-1. **检测失败**：子代理返回空 / 无 schema 结构 / 无 verdict 字段 / 只剩开场白无裁决 → 判定本次 spawn 失败
+1. **检测失败**：子代理返回空 / 无 schema 结构 / 无 verdict 字段 / 只剩开场白无裁决 / 输出被 `max_output_tokens` 截断（报 `error: max_output_tokens`、或返回内容异常巨大但无 verdict，见「spawn 规格要求」第 4 条） → 判定本次 spawn 失败
 2. **重试 2 次（治"子代理失败未重试就降级"）**：
-   - **第 1 次重试**：重新 spawn 同一质疑者，**换措辞**（强化"先给 verdict 再给依据、读文件范围仅限喂你的路径、**必须返回 JSON verdict 不得输出长篇调研报告**"），subagent_type 不变（仍 `general-purpose`）
+   - **第 1 次重试**：重新 spawn 同一质疑者，**换措辞**（强化"先给 verdict 再给依据、读文件范围仅限喂你的路径、**必须返回 JSON verdict 不得输出长篇调研报告**"+ **输出预算硬约束见「spawn 规格要求」第 4 条**），subagent_type 不变（仍 `general-purpose`）。**若是 `max_output_tokens` 截断**：除强化输出预算外，还应**缩小该质疑者单次分析对象数**（原清单过大时拆成小批喂），降低单次输出压力
    - **重试前强制**：每次重试前**必须先 Read [anti_laziness.md](anti_laziness.md) 第 8 条**确认对抗独立性（防主代理自演倾向在重试时复活）
    - **第 2 次重试**：第 1 次重试仍失败 -> **强制换 subagent_type**（`general-purpose` -> `claude`），再 spawn 一次，prompt 同样含"必须返回 JSON verdict"约束
 3. **重试 2 次仍失败 -> 诚实降级**：该条结论的对抗验证置为**未完成**，按裁决优先级的"兜底"档处理--降级为 `needs_more_evidence`，标 `[未验证-子代理对抗失败]`，计入 `pending_verification`，**绝不伪造 confirmed**

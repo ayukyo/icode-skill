@@ -313,7 +313,7 @@
         - 有实质反驳 → 修正方案 / 补证据 / 降级标 `[未验证-对抗不通过]`
         - 2 轮后仍有质疑 → 标 `[部分通过]`，剩余质疑点写入「方案对抗验证记录」末尾「残余风险」段
         - 环境无 spawn 工具（`no_spawn_env = true`）→ 主代理代行三视角独立判断，但不得自演一致假共识；产物文件强制明示「主代理代行（环境无 spawn 工具）」
-        - 子代理超时/失败 → 按 [references/adversarial.md](../references/adversarial.md)「子代理失败处理」重试 2 次（含 1 次换 subagent_type） → 仍失败标 `[未验证-子代理对抗失败]`，**禁止主代理补齐为代理代行**；**后台 spawn 10 分钟（`BACKGROUND_WATCHDOG_SECONDS=600`）无返回 → 判疑似断连，改前台重来**（同步 `run_in_background: false` 重 spawn，见 adversarial.md「显式等待 + 超时机制」段看门狗）
+        - 子代理超时/失败 → 按 [references/adversarial.md](../references/adversarial.md)「子代理失败处理」重试 2 次（含 1 次换 subagent_type） → 仍失败标 `[未验证-子代理对抗失败]`，**禁止主代理补齐为代理代行**；**后台 spawn 10 分钟（`BACKGROUND_WATCHDOG_SECONDS=600`）无返回 → 判疑似断连，改前台重来**（同步 `run_in_background: false` 重 spawn，见 adversarial.md「显式等待 + 超时机制」段看门狗）；**质疑者 spawn 须含输出预算硬约束防 `max_output_tokens` 截断**（verdict 第一动作/禁回显/总输出≤2000 token 宽松上限勿压紧，见 adversarial.md「spawn 规格要求」第 4 条）
       - **产物**：将对抗记录追加到 `01_plan.md` 末尾「方案对抗验证记录」章节（与「断言验证记录」并列），每条记录注质疑者 spawn Agent ID 或「主代理代行」标注
       - **与现有「c. 断言验证」的关系**：断言验证是「静态核对」（接口存在吗？模式对吗？），对抗验证是「动态攻击」（方案撑得住第三方攻击吗？）——两者互补，前者治「细节错」，后者治「方向错」，缺一不可
 
