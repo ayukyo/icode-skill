@@ -55,25 +55,31 @@
 
 若分析对象为 0 条需对抗项（全无问题，或全部已实证无需对抗），跳过本步骤，直接置 `adversarial_verification = null`，进入产出写入。不得为空清单 spawn 质疑者浪费资源。
 
-## 显式等待 + 超时机制（防"主代理未等子代理跑降级"）
+## 显式等待 + 超时机制（防"主代理未等子代理跑降级"；统一走 `TaskOutput` 机械阻塞等待）
 
 **触发条件**：spawn 3 质疑者子代理后，**主代理必须等到子代理返回 verdict 才能进入裁决/降级流程**。实测发现"异步 spawn + 主代理未等待直接 mtime 监控"会触发降级路径误用——子代理实际仍在跑，主代理已按"未返回"标 `[未验证-子代理对抗失败]`。该标签应留给「确认失败」的子代理，不得给「还在跑或返回晚」的子代理。
 
 **等待契约**（强制）：
 
-1. **spawn 模式**：用 `Agent` 工具**同步** spawn（`run_in_background: false`）；异步模式必须**显式调 `TaskOutput`** 等结果，**禁止 spawn 后不等待直接进入下一步**
-2. **超时阈值**：默认 `TIMEOUT_SECONDS = 120`（可由 `.ico_metadata.json.task_timeout_seconds` 覆盖）。子代理未在超时内返回 verdict → 视为「超时 → 触发重试 1 次」（不是"子代理失败"，也不是"环境无 spawn 工具"）
-3. **超时触发重试 1 次**：超时主代理按"换措辞 + 可换 subagent_type 兜底（general-purpose → claude）"再 spawn 一次同一质疑者；二次仍超时或仍无 verdict → **进入**「子代理失败处理」失败链路（标 `[未验证-子代理对抗失败]`）
-4. **timeout 与 verdict 截断区分**（**防误用降级**）：
-   - `timeout`：spawn 句柄超时未返回 → 走第 3 步重试 1 次
-   - `verdict 截断`：120s 内返回但 verdict 字段缺失/截断只剩开场白 → 走「子代理失败处理」第 1 步「检测失败」（不计超时）
+1. **spawn 模式**：3 质疑者一律用 `Agent` 工具**后台** spawn（`run_in_background: true`），拿到 task_id（Agent ID/name）；**必须**紧跟 `TaskOutput(task_id, block=true, timeout=...)` **阻塞等 verdict**。**禁止**：
+   - 后台 spawn 后**被动等任务通知**——断连/挂死的 agent **永远不发通知**，主代理回合制空闲时无定时器，任何墙钟阈值都触发不了（实测：挂死 14 分钟无人唤醒、看门狗失守，直到用户发问才醒）
+   - 用 `run_in_background: false` **裸同步 spawn 当唯一等待手段**——`Agent` 工具**无 timeout 参数**，同步 spawn 挂死 = 主代理被整个工具调用卡死、无超时边界，120s 协议同样无法机械执行
+   - spawn 后不等待直接进入下一步
+2. **等待实现**：`TaskOutput(task_id, block=true, timeout=...)` 是**唯一可机械执行的等待/超时载体**——既等结果、超时又把控制权交回主代理（timeout 上限 600000ms）。返回完成态 → 取 verdict；超时返回（仍 running）→ 按第 3 条档位触发 TaskStop + 重试/前台重来
+3. **超时档位（两档，各管各阶段）**：
+   - **首次 spawn**：`timeout = BACKGROUND_WATCHDOG_SECONDS*1000 = 600000`（10 分钟看门狗直接作首次等待；正常质疑者 1-2 分钟内返回 verdict）。超时 → 判「疑似断连/挂死」→ 走下方「后台 spawn 看门狗」前台重来
+   - **前台重来 / 重试**：`timeout = TIMEOUT_SECONDS*1000 = 120000`（120s，原"同步 120s 协议"语义落此档）。超时 → `TaskStop` + 重试 1 次 → 再超时 → `[未验证-子代理对抗失败]`
+4. **超时触发重试 1 次**：**先 `TaskStop` 停掉超时未归的 agent**（防泄漏挂死句柄；停不掉也作废该句柄）→ 按"换措辞 + 可换 subagent_type 兜底（general-purpose → claude）"再 spawn 一次同一质疑者，等待方式同上（后台 spawn + TaskOutput 阻塞）；二次仍超时或仍无 verdict → **进入**「子代理失败处理」失败链路（标 `[未验证-子代理对抗失败]`）
+5. **timeout 与 verdict 截断区分**（**防误用降级**）：
+   - `timeout`：TaskOutput 阻塞超时未返回 → 走第 4 步重试 1 次
+   - `verdict 截断`：超时内返回但 verdict 字段缺失/截断只剩开场白 → 走「子代理失败处理」第 1 步「检测失败」（不计超时）
    - **禁止用 verdict 截断触发"环境无 spawn 工具"路径**——后者只允许在 spawn 调用本身就返回错误（如工具不存在）时使用
-5. **判定状态四态枚举**（写入 `adversarial_verification` 字段，便于审计追溯）：
-   - `sync_ok`：同步等 verdict，120s 内返回
+6. **判定状态四态枚举**（写入 `adversarial_verification` 字段，便于审计追溯）：
+   - `sync_ok`：`TaskOutput` 阻塞等回 verdict（超时内返回）
    - `timeout_retry_used`：触发 1 次重试
    - `still_failed_after_retry`：重试后仍超时/无 verdict
    - `env_no_spawn`：spawn 调用本身不可用（结构性，非 transient）
-6. **TIMEOUT_SECONDS 边界与兜底**：
+7. **TIMEOUT_SECONDS 边界与兜底**：
    - 默认值：`120` 秒，可由 `.ico_metadata.json.task_timeout_seconds` 覆盖（缺失视为 `120`，字段定义见 [dir_and_metadata.md](dir_and_metadata.md)「`task_timeout_seconds` 字段」段）
    - 非法值兜底：`task_timeout_seconds <= 0` 视为非法 → 静默回落 `120`（防误配 0 导致瞬时超时误降级）
    - 下限建议：不低于 `30s`（过短会过早触发重试链路，浪费 spawn 资源）
@@ -82,21 +88,19 @@
 
 **后台 spawn 看门狗（10 分钟无返回 → 改前台重来，防"断连/挂死永久不返回"）**：
 
-**触发场景**：质疑者以**后台**方式 spawn（`run_in_background: true`，即异步 spawn 等 TaskOutput 任务通知）时，后台 agent 断连/挂死后可能**永久不返回**——同步 120s 超时协议覆盖不到后台路径（后台没有"返回值触发超时"，只能靠**墙钟看门狗**兜底）。实测痛点：后台子代理有概率一直不返回，疑似断连。
+**触发场景**：后台 agent 断连/挂死后**永久不返回且不发任务通知**——主代理若被动空转等通知，任何墙钟阈值都触发不了（回合制空闲时无定时器）。实测痛点：后台子代理有概率一直不返回，疑似断连，主代理空等 14 分钟直到用户发问才醒。**根因**："记录 spawn 时刻 → 事后判断 10 分钟"不可机械执行——看门狗必须靠 `TaskOutput(block=true, timeout=...)` **阻塞等待本身**实现（超时即把控制权交回主代理）。
 
 **看门狗阈值**：`BACKGROUND_WATCHDOG_SECONDS = 600`（10 分钟）。正常质疑者 1-2 分钟内出 verdict，10 分钟未回 = 大概率断连/挂死，不再当"还在跑/返回晚"（该容忍只留给 10 分钟内的正常慢返回）。
 
-**机制步骤**（按顺序）：
+**机制 = `TaskOutput` 阻塞等待本身（首次 spawn 即用 10 分钟档）**：
 
-1. 后台 spawn 时记录 spawn 时刻（墙钟起点）
-2. 10 分钟无返回 → 判「疑似断连/挂死」（新判定态，区别于"仍在跑"与"verdict 截断"）
-3. 先停掉挂死后台 agent（`TaskStop`；停不掉也作废该句柄，不再等）
-4. **改前台重来**：同一质疑者角色 + 同一输入契约，用**同步** `run_in_background: false` 重新 spawn（fresh 实例，符合上节「Freshness」跨轮隔离）→ 落回本节同步 120s 协议（超时 → 重试 1 次 → 二次仍超时 → `[未验证-子代理对抗失败]`）
-5. 前台重来**不算自演**——仍是独立 Agent spawn，只是换 spawn 模式，独立性不受影响；前台重来失败按「子代理失败处理」重试 2 次（含 1 次换 subagent_type）→ 诚实降级
+1. **首次 spawn 后立即 `TaskOutput(task_id, block=true, timeout=600000)`**——该调用既等 verdict、超时又把控制权交回主代理，天然就是看门狗：10 分钟内返回 → 正常进入裁决流程；10 分钟超时返回（仍 running）→ 判「疑似断连/挂死」（区别于"仍在跑"与"verdict 截断"）
+2. **改前台重来**：先 `TaskStop` 停掉挂死句柄（停不掉也作废该句柄，不再等）→ 同一质疑者角色 + 同一输入契约重新 spawn（fresh 实例，符合上节「Freshness」跨轮隔离）→ 等待用 `TaskOutput(block=true, timeout=120000)`（落回 120s 档）→ 超时 → 重试 1 次 → 二次仍超时 → `[未验证-子代理对抗失败]`
+3. 前台重来**不算自演**——仍是独立 Agent spawn，只是换 spawn 模式，独立性不受影响；前台重来失败按「子代理失败处理」重试 2 次（含 1 次换 subagent_type）→ 诚实降级
 
-**与同步 120s 超时的边界**：两套阈值并存、各管各路径——同步路径走 120s 超时 → 重试 1 次 → 降级；后台路径走 10 分钟看门狗 → 停止 → 前台重来（重来后落回同步路径）。**10 分钟看门狗只判"后台断连/挂死"，不得挪用于同步路径**。
+**与 120s 超时的边界**：两档阈值并存、各管各阶段——首次 spawn 走 10 分钟看门狗档（后台路径）；前台重来/重试走 120s 档（原"同步 120s 协议"语义）。**10 分钟看门狗只判"后台断连/挂死"，不得挪用于重试档**。
 
-**留痕**：`adversarial_verification` 增加 `spawn_mode`（`sync` / `background`）+ `background_watchdog_triggered`（布尔）字段。后台看门狗触发 → 前台重来成功：记 `spawn_mode=background` + `background_watchdog_triggered=true` + 同步四态 `sync_ok`（重来前的后台挂死**不计为失败**）；前台重来也失败：记 `still_failed_after_retry` 走降级。
+**留痕**：`adversarial_verification` 记录 `spawn_mode`（`sync` / `background`）+ `background_watchdog_triggered`（布尔）字段。看门狗触发 → 前台重来成功：记 `spawn_mode=background` + `background_watchdog_triggered=true` + 四态 `sync_ok`（重来前的后台挂死**不计为失败**）；前台重来也失败：记 `still_failed_after_retry` 走降级。
 
 **与 `max_output_tokens` 截断的衔接**：后台质疑者被输出上限截断有两种表现——①截断后连任务通知都不发（卡在生成中被杀）→ 表现为"10 分钟不返回"，由看门狗接管（停止 → 前台重来）；②截断但有部分返回（无 verdict）→ 走「子代理失败处理」检测失败（`max_output_tokens` 判据 + 定向重试）。看门狗管"不返回"，截断判据管"返回但无 verdict"，两者互补、不互斥。
 
