@@ -11,6 +11,8 @@
 
 ## 前置校验
 
+**落点约束（worktree 工单）**：读 metadata `worktree_path` 非 null → 产物在 worktree 内，须先 `cd {worktree_path}` 再执行本步骤（cwd 契约，同 status --validate / 06_audit 产物终检，见 [references/worktree_isolation.md](../references/worktree_isolation.md) §2）；在主仓跑会找不到产物目录。已在 worktree 内 → 直接执行。
+
 检查 `{ICODE_OUT_DIR}/.ico_metadata.json` 的 `status == "completed"`（步骤6已完成）。若未完成则报错提示先执行步骤6。
 
 **产物时效校验（防 README 基于过时产物）**：读 metadata 的 `created_at`（工单创建时间，近似步骤6 完成的下界）+ `code_files` 列表，用 `find {code_files} -newer {ICODE_OUT_DIR}/.ico_metadata.json` 检测是否有源码文件 mtime 晚于 metadata 创建时间。若有 → 输出警告「⚠️ 检测到步骤6 完成后代码仍有变更（N 个文件 mtime 晚于终审时间），README 的"已知限制/方案"可能基于过时产物，建议重跑步骤5/6 或确认变更不影响交付」；不阻塞生成（README 的"使用说明"段含实时运行输出兜底，面向人可判断）。**该校验同时覆盖跨领域简报**（简报的"核心代码/时间点"同样基于产物，过时产物会传导到两份）。
@@ -199,6 +201,23 @@ eval("2147483648") rc=3 (expect 3 OVERFLOW)
 **不在本次修复范围的相关问题**（必填，避免与 BUG 概述重复）：
 {如"INT_MIN 字面量 `-2147483648` 仍会触发 OVERFLOW（已在解析入口防御，但本 BUG 修复未涉及该路径）"}
 ```
+
+### worktree 状态段（worktree 工单必填）
+
+**触发**：读 metadata `worktree_path`，**非 null**（工单在 worktree 内完成）→ 交付报告 + 跨领域简报**均**追加「worktree 状态」段（位置：交付报告「代码仓库」行之后；简报「背景与主要问题」之前）。`null`（原地工单）→ 不生成本段。
+
+```markdown
+## worktree 状态
+
+**改动位置**：`{worktree_path}`（独立工作目录，分支 `{worktree_branch}`）
+本工单改动在独立工作目录（git worktree）中，主工作区保持干净。后续如需继续开发或收回改动：
+- **回流**（完成后将改动并入主分支），二选一：
+  ① 在独立工作目录内 commit → 主仓 `git merge {worktree_branch}`（或 PR）→ `git worktree remove` → `git branch -d`
+  ② 不 commit：手动带出改动 → `git worktree remove --force`
+- **清理自查**：`git worktree list`（看所有工作目录）+ `du -sh {worktree_path}`（空间占用）
+```
+
+**自包含**：段内不出现 icode 内部文件名/流程术语（用「独立工作目录」「分支」「回流」等通俗表述）；`git worktree` 等命令是用户可执行的真实 Git 命令，非 icode 内部术语，予以保留。让后续会话与不熟工程的读者一眼知道「改动在哪、怎么收、怎么清」。
 
 ### 跨领域说明模板（简报，面向其它模块的研发/测试/产品——**不区分功能/查BUG**，统一用"本次变更"统领）
 

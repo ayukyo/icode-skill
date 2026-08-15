@@ -227,7 +227,7 @@ description: 端到端编码工作流（步骤 0~6，含可选需求初稿步骤
 |---|---|---|---|
 | **L1·致命** | 阻塞流程的前置条件不满足 | **报错退出**，流程不可继续 | cwd 不在 git 仓库 / 强制产物文件缺失 / MCP 完全不可用 |
 | **L2·关键** | 重要约束未满足 | **警告 + 记入 metadata + 流程继续**（不阻塞等用户；用户事后审阅产物/audit 报告时可见，可手动回退）。icode 调性是 AI 自治 + 用户审阅，L2 不强制阻塞（避免 `/icode start` 串联时卡死）；02_review `absolute_cap` 触达同理，不再设例外 | plan §3 架构设计完全缺失 / review 触达 `absolute_cap` 仍有新问题 |
-| **L3·重要** | 重要检查项未通过 | **警告**，记入 metadata，**流程继续**（user 后续可手动回看） | plan §10 checklist ❌ > 3 条 / audit §6.7 视角 A 失败 / 步骤 4 编译失败（带 `code_compile_failed=true`） |
+| **L3·重要** | 重要检查项未通过 | **警告**，记入 metadata，**流程继续**（user 后续可手动回看） | plan §10 checklist ❌ > 3 条 / audit §6.7 视角 A 失败 / 步骤 4 编译失败（带 `code_compile_failed=true`）/ **worktree 创建失败**（降级原地 + metadata 记 `wt_degraded=true`，见「目录管理·worktree 决策与创建」④） |
 | **L4·参考** | 软性建议 | **柔性提示**，不影响流程 | limit 不存在 / cheap-research 未装 / vision-bridge 未装 / init 末轮理解核对清单用户不回复 |
 
 **各步骤声明的 L1/L2 检查项**：详见对应 step 文件头部的「本步骤 L1/L2 检查项声明」段（已声明 7 个：plan / review / merge / code / deepcheck / audit / patch）。
@@ -245,7 +245,26 @@ description: 端到端编码工作流（步骤 0~6，含可选需求初稿步骤
 
 ### 目录管理
 
-**创建新目录**（用于 `init`，以及 `start` / `plan` / `fast` 在不满足复用条件时）：
+**worktree 决策与创建（新建工单入口 · 每工单先问一次）**：
+> **执行顺序**：`start`/`plan`/`fast` 先走下方「复用 / 创建新目录决策」**判定为「新建」后**，再执行本段询问（REUSE=2 复用歧义问「复用/新建」、答「新建」也走本段）；`init`/`log` 直接新建走本段。判定为「复用」→ **跳过本段**原地续跑（worktree 只在新建时建，不重复建）。
+> **真源**：本段执行细节（创建/降级/字段族/回流/护栏全量规则）见 [references/worktree_isolation.md](references/worktree_isolation.md)，执行本段前 Read 之（本段是精简版，冲突以真源为准）。
+```bash
+# ① 入口询问：本工单用 worktree 隔离吗？（独立分支 + 独立目录，并行互不污染）还是就在当前工作区做？
+#    - 答「用」→ ② 创建 worktree；答「不用」→ 原地（走下方「创建新目录」，不记 worktree metadata）
+#    - limit 已写「worktree 默认关闭」→ 跳过询问直接原地（见 [steps/limit.md](steps/limit.md)）
+# ② 创建 worktree（答「用」时；创建前展示将创建的 路径 + 分支名，等用户最终确认；创建是写操作影响 .git）
+git rev-parse --is-inside-work-tree             # 前置：必须在 git 仓库（失败→原地降级）
+git rev-parse --verify HEAD >/dev/null 2>&1     # 前置：仓库必须有提交（无 HEAD 不能建 worktree）
+test -f "$(git rev-parse --show-toplevel)/.git" && { echo "已在 worktree 内→原地"; WT_SKIP=1; }  # 主仓才建
+git worktree list                               # 只读：确认目标路径/分支名未占用
+[ -z "$WT_SKIP" ] && git worktree add -b "icode/<ticket-slug>" "../<repo>-wt-<ticket-slug>"
+# ③ 创建后：cd 进 worktree → 按下方「创建新目录」逻辑在 worktree 内生成 .icode_output/.icode_output_N
+#    （worktree 内无旧产物 → 通常恒为 _1），本工单全部产物在 worktree 内；校验 worktree 内 .icode_output/ 应为空
+#    → 非空 = 该工程 .icode_output 未 gitignore（worktree 带入了主仓旧产物）→ 提示「建议配置 .gitignore 排除 .icode_output/」，L3 不阻断
+# ④ 创建失败（无 HEAD（仓库无提交）/路径冲突/无写权限/FS 不支持/命名冲突修正后仍失败）→ 原地降级 + metadata 记 wt_degraded=true（见「强制阻断边界矩阵」L3）
+```
+
+**创建新目录**（原地路径：答「不用」/ limit 默认关闭 / worktree 创建失败降级时；worktree 场景则在 worktree 内执行）：
 ```bash
 mkdir -p .icode_output   # 统一父目录，所有产物收纳于此
 LAST=$(ls -d .icode_output/.icode_output_* 2>/dev/null | grep -oP '(?<=\.icode_output_)\d+' | sort -n | tail -1)
@@ -337,7 +356,11 @@ ICODE_OUT_DIR=".icode_output/.icode_output_${LAST}"
   "keywords": [],
   "indexed": false,
   "ticket_id": "",
-  "code_deviations": []
+  "code_deviations": [],
+  "worktree_path": null,
+  "worktree_branch": null,
+  "wt_degraded": false,
+  "cross_project_refs": []
 }
 ```
 
@@ -366,6 +389,10 @@ ICODE_OUT_DIR=".icode_output/.icode_output_${LAST}"
 - `test_cmd`/`test_outcome`/`test_failures`/`test_timeout`（测试集成字段）：`test_cmd`=探测/配置的测试命令字符串（null=无测试套件，步骤4 自动探测 Makefile/package.json/pytest.ini/go.mod/CMakeLists.txt/Cargo.toml/pom.xml）；`test_outcome`=枚举 `pass`/`fail`/`skipped`（默认 `skipped`）；`test_failures`=bool（步骤4 测试 3 次重试仍失败置 true，L3 警告不阻断，与 `code_compile_failed` 同级）；`test_timeout`=int 秒（默认 120）。借鉴 aider `auto_test` 机制（一手验证 Aider-AI/aider base_coder.py:1616），icode 增加自动探测。详见 [steps/04_code.md](steps/04_code.md)「编译验证 + 测试验证」段。**字段缺失视为 null/skipped/false/120（向后兼容旧 metadata）**
 - `mode`（新增，可选，默认 `"full"`）：工单模式。`"full"` = `/icode start` 全流程（步骤2 默认 3 轮 + 对抗，步骤5 三阶段循环）；`"fast"` = `/icode fast` 精简全流程（步骤2 固定 1 轮无对抗，步骤5 只跑 Reverse）。**字段缺失视为 `"full"`（向后兼容旧 metadata）**。详见 [steps/fast.md](steps/fast.md)
 - `max_rounds`（新增，可选，默认 3）：步骤2 review 软上限轮数。`mode="full"` 时由 `/icode review N` 参数决定（默认 3）；`mode="fast"` 时**自动串联下强制为 1**，但**单步命令（`/icode review N`）在 fast 工单上调用时 N 优先级最高**——用户用参数 N 显式表达 fast→full 升级意图时，按 N 轮跑（详见 [references/dir_and_metadata.md](references/dir_and_metadata.md)「步骤2/5 读 mode 字段的契约」段）。**字段缺失视为 3**
+- `worktree_path`（worktree 字段族，缺省 `null` = 未进 worktree，向后兼容旧工单）：本工单所在 worktree 绝对路径。**非 null 是「本工单在 worktree 内」的判定依据**——status 显示 worktree 列 / 06_audit §6.4 回流提醒 / 07_readme worktree 状态段均读它。工单回流 `git worktree remove` 后随 worktree 消失（全局索引 `project_path` 由 stale 检测标 `path_gone` 留档，见 [references/dir_and_metadata.md](references/dir_and_metadata.md)「过时校验」）。创建 worktree 时写入，见「目录管理·worktree 决策与创建」
+- `worktree_branch`（worktree 字段族，缺省 `null`）：本工单分支 `icode/<slug>`（worktree 场景下与索引 `created_branch` 一致——**冗余存储**，便于 status 直接读 metadata 显示分支，不强制双写一致性）
+- `wt_degraded`（worktree 字段族，缺省 `false`）：bool，worktree 创建失败降级原地标记（`true` = 未进 worktree 且已降级，见「强制阻断边界矩阵」L3）
+- `cross_project_refs`（worktree 字段族，缺省 `[]`）：数组，跨工程 worktree 引用——本工单转工单到关联工程时追加 `{project_id, ticket_id, worktree_path}` 指向 B 工单及其 worktree；B 工单自身用 `worktree_path` 记录自己的。从 A 工单可完整追溯「本需求涉及的每个工程的 worktree」
 
 - `fix_tiers`（新增，可选，默认 `null`）：修复方案三档分级（反偷懒第 26 条）。`{"A": ["A1..."], "B": ["B1..."], "C": ["C1..."]}` 供 review/code/audit 核对实施范围。**由步骤1 plan §4.5 落盘**（每档 1-2 条一句话摘要），步骤2/4/6 核对实施范围时读取；字段缺失视为 `null`，从 `03_plan_final.md` §4.5 文本读（向后兼容旧 metadata）
 - `confirmed_B_fixes`（新增，可选，默认 `[]`）：步骤4 实施 B 档兜底修复前记录的**用户显式确认清单**（每条含 B 档内容简述）。**字段缺失视为 `[]`（向后兼容旧 metadata）**。仅当用户显式确认后才实施 B 档并记录；未确认的 B 档不实施
@@ -573,7 +600,7 @@ test -f "{ICODE_OUT_DIR}/03_plan_final.md" && python3 -c "import json,sys; d=jso
 
 ### 注意事项
 
-- **Git 安全**：禁止执行任何 Git 危险操作（`git reset --hard`、`git push --force` 等），**也禁止 `git commit` 和 `git push`**
+- **Git 安全**：禁止执行任何 Git 危险操作（`git reset --hard`、`git push --force` 等），**也禁止 `git commit` 和 `git push`**。**`git worktree add` / `git worktree remove` 允许执行**（不在禁止列）：创建/清理须用户确认（写操作影响 `.git`），**永不自动 `--force` remove**（未提交改动时 remove 失败是保护，见「目录管理·worktree 决策与创建」）
 - **`.icode_output/` 父目录及其下的 `.icode_output_N/` 目录无需用户确认**：该目录下创建/写入/修改 `.md`/`.json`/`.log` 文件均为安全操作
 - **工程污染防护**：`.icode_output/` 是 icode 产物目录，建议在工程 `.gitignore` 中加入 `.icode_output/`，避免产物误提交；icode 本身**不自动修改工程的 `.gitignore`**（工程配置由用户掌控）。历史检索的全局索引位于 `~/.claude/icode_data/`，不在任何工程内，无污染风险；`/icode doc` 的工程文档库位于 `~/.claude/icode_data/project_docs/`，同样不在任何工程内、不写工程内任何文件（用户工程内已有 `doc/workflows/` 等历史文档时，忽略不读取不迁移不删除，从零生成到全局）
 
@@ -785,3 +812,4 @@ icode 工作流可调用 6 个 MCP（`/icode install` 一键安装）。**双保
 | [references/doc_template.md](references/doc_template.md) | icode doc 章节模板：前 50 行四块结构（项目元信息/KEYS/简要说明/目录）+ 十位桶编号 + 自适应 grep 关键词表 + 99 章审计策略 + **v2.0.0 双视角必含元素清单（14 项）+ 业务流独立成章 + 英文首次中文备注 + 链路中文说明 + 质量审视检查清单 + 模板版本自举迁移** | doc |
 | [references/necessity_check.md](references/necessity_check.md) | **现有功能覆盖度检查（防重复实现机制）**：触发时机 + 执行命令（全工程检索 + Read 命中处行为链）+ 三类判定（已覆盖/部分/未覆盖）+ 各步骤落点（init §2.X/预筛列、plan 前置/断言/ADR/对抗、review 维度7、deepcheck Reverse 对比、audit 视角 C） | init / plan / review / deepcheck / audit |
 | [references/first_activation_path.md](references/first_activation_path.md) | **首次激活路径一致性检查**：静态分析盲区（"写了从没实机执行过"的死路径既有 bug）+ 触发条件 + 检测法（软信号、不阻断）+ 双侧校验一致性核对清单 + 部署后验证建议下游输出 | plan（断言⑤）/ deepcheck（Reverse）/ audit（部署后建议）/ patch（部署后验证发现） |
+| [references/worktree_isolation.md](references/worktree_isolation.md) | **git worktree 多需求隔离**：worktree 决策与创建（入口询问/预检/用户确认/失败降级）+ cwd 契约 + metadata 字段族 + 回流指引（F2 二选一）+ 防误删护栏 + 空间自查 | 所有新建工单入口（init/log/start/plan/fast）/ 续跑与只读（review/code/deepcheck/audit/patch/status/readme） |

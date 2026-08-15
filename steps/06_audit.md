@@ -24,6 +24,18 @@
 
 检查 `{ICODE_OUT_DIR}/03_plan_final.md` 和步骤4创建的代码文件是否存在，缺失则报错。
 
+### 前置：worktree 验证基线落后检测（worktree 工单）
+
+读取 metadata `worktree_path` 非 null 时：检测本工单分支是否落后主仓（验证基于过时基线）——
+
+```bash
+# 落后检测：结果 > 0 = 落后。⚠️ 勿用 `git merge-base --is-ancestor <worktree_branch> <目标基分支>`
+# —— worktree 分支零提交时（icode 从不 commit 的常态）该命令恒返回「是祖先」= 不落后，检测完全失效漏报
+git rev-list --count <worktree_branch>..<目标基分支>     # 目标基分支 = 回流 §4 的 master/主分支
+```
+
+结果 > 0 → 输出 L3 提示：「验证前建议先 `git merge <目标基分支>` 进 worktree 分支再终审」（不阻断）。目标基分支未知时跳过（提示用户自查）。
+
 ## 前置：patch 配合
 
 > 工单可能已走过 `/icode patch` 追加修改（`{ICODE_OUT_DIR}/08_patch.md` 存在且有 Patch 段，或 `metadata.patch_count > 0`）。本步骤启动时 **Read `08_patch.md`**（不存在则跳过本段，走原流程），按以下规则配合：
@@ -214,6 +226,32 @@
 
 > 交付报告（原 6.4 文档化）已拆为独立步骤7 `/icode readme`，用户按需手动触发。步骤6 不再自动生成报告。详见 [07_readme.md](07_readme.md)。
 
+### 6.4 worktree 回流提醒（worktree 工单完成时）
+
+读取 metadata `worktree_path` 字段：**非 null**（本工单在 worktree 内完成）→ 交付总结后追加以下提醒（未进 worktree 的工单跳过本段）：
+
+```
+▶ worktree 回流提醒：本工单改动仍在 worktree（icode 不 commit），请按二选一方案手动回流——
+  ①（推荐）在 worktree 内审阅改动后自行 commit → 主仓 switch 目标分支 → git merge icode/<ticket-slug>（或 PR）
+           → git worktree remove <worktree路径> → git branch -d icode/<ticket-slug>（先 remove 再删分支！）
+  ②（不提交）手动带出 worktree 内改动 → 确认已保存后 git worktree remove --force <worktree路径>
+  ⚠️ 未回流前勿删 worktree：未提交改动时 git worktree remove 失败是保护（不是故障）。
+  ⚠️ 回流前产物留档：交付报告与全部产物都在 worktree 内，remove 后随之消失，需留档先复制出来。
+  完整指引见 [references/worktree_isolation.md](../references/worktree_isolation.md) §4。
+```
+
+### 6.4 worktree 空间自查（每工单收尾例行提示）
+
+防僵尸 worktree 堆积（每忘清一个 ≈ 一份完整源码 + 独立构建产物，C++ 工程磁盘近似翻 N 倍）。附命令：
+
+```bash
+git worktree list                                          # 看所有 worktree 与分支（首行是主仓自身）
+git worktree list --porcelain | grep -c '^worktree '       # 数量；实际额外 worktree 数 = 计数 − 1（勿把主仓算进去）
+du -sh <各 worktree 路径>                                  # 空间占用
+```
+
+提醒：「做完即 remove，勿堆积僵尸 worktree；`git worktree prune` 对目录仍在的僵尸无效（只清目录已删的残留），真正清理只能 `git worktree remove <path>`」。
+
 ## 补丁记录（/icode patch 追加）
 
 > 本段**不是**步骤6 的正文内容，而是后续 `/icode patch` 调用时**运行时追加**的说明——供回读区分主流程结论与补丁演进：
@@ -235,6 +273,8 @@
 - □ 终审时确认了 verdict（默认 `unknown` 不阻塞流程；标注 `verified`/`disproved`/`superseded` 时回填 `verdict_reason`/`correct_direction`/`verdict_source`/`verdict_at`，双写 metadata + index 同步）
 
 ### 产物集完整性终检（完成前自检的机器命令）
+
+> **落点约束**：终检必须在**本工单所在 checkout 内**执行——`worktree_path` 非 null 时先 `cd` 进对应 worktree 再跑；在主仓跑会找不到 worktree 内产物 → 误报缺失（cwd 契约的机器校验延伸，§9.5-⑤）。
 
 ```bash
 python3 -c "

@@ -28,7 +28,7 @@
 
 **柔性提示**（**不阻断 plan 流程**）：
 
-1. **路径解析**（同 `/icode limit` 步骤）：先解析 `PROJECT_ID` = `basename(git rev-parse --show-toplevel)`
+1. **路径解析**（同 `/icode limit` 步骤）：先解析 `PROJECT_ID`——`basename(git rev-parse --show-toplevel)`，**含 worktree 归一化（F1）**：worktree 内 `git rev-parse --show-toplevel` 返回 worktree 自身根（`.git` 是普通文件 = git worktree 成员），须归一到**主仓根**（`git worktree list --porcelain` 首行 `worktree <path>`），否则 limit 主存读不到（跨 checkout 共享依据）；「当前 checkout 根」保持 worktree 根不动（分支判定/代码实证用，详见 [references/dir_and_metadata.md](../references/dir_and_metadata.md)「project_id 与 branch 语义」）
 2. **主存 + 覆盖检测**：
    - 检查全局主存 `~/.claude/icode_data/limits/<project_id>.md`（如不存在则跳过）
    - 检查覆盖 `<project_root>/.icode_output/limit.local/<project_id>.md`（如不存在则跳过）

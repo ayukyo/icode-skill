@@ -61,7 +61,14 @@ if [ -z "$GIT_ROOT" ]; then
     exit 1
   fi
 fi
-PROJECT_ID=$(basename "$GIT_ROOT")
+# worktree 归一化（F1）：worktree 内 .git 是普通文件（gitdir 指针）= git worktree 成员，
+# project_id 须归一到主仓根（跨 checkout 共享依据，主存跨 worktree 共享）；GIT_ROOT 保持当前 checkout 根不动（limit.local 按 checkout 隔离）
+if [ -f "$GIT_ROOT/.git" ]; then
+  MAIN_ROOT=$(git -C "$GIT_ROOT" worktree list --porcelain | awk '/^worktree /{print substr($0,10); exit}')
+else
+  MAIN_ROOT=""
+fi
+if [ -n "$MAIN_ROOT" ]; then PROJECT_ID=$(basename "$MAIN_ROOT"); else PROJECT_ID=$(basename "$GIT_ROOT"); fi
 
 # 主存路径（全局）
 MAIN_FILE="$HOME/.claude/icode_data/limits/$PROJECT_ID.md"
@@ -127,7 +134,7 @@ LOCAL_FILE="$LOCAL_DIR/$PROJECT_ID.md"
 1. mkdir -p `~/.claude/icode_data/limits/`（首次）
 2. 读 main 文件（如存在）→ 解析最后一条红线编号 N_last
 3. AI 提取新条目（1~N 条），编号从 N_last + 1 开始
-4. 追加到 main 末尾（用 Edit 工具或 Write 完整重写，原子写 `.tmp` + `mv`）
+4. **写前重读合并（并发安全，多 worktree = 多会话并行配套）**：追加前**重新 Read 最新 main**（丢弃第 2 步旧快照——其他会话可能已追加新条目，编号按最新 N_last + 1），在最新内容上追加本会话条目，**原子写 `.tmp` + `mv`**（勿在旧快照上覆盖，防并发丢红线；多会话并行时共享主存须按「读最新 → 合并本会话改动 → 原子写」契约）
 5. 输出"▶ 已追加红线 N：<标题>"+ 完整 limit 内容（合并视图）
 
 **无描述 → 显示**：
@@ -147,6 +154,13 @@ LOCAL_FILE="$LOCAL_DIR/$PROJECT_ID.md"
 - log **前置 limit 红线检查点**（步骤1 末尾，**先于步骤2 历史检索/段零文档注入**）读取 main + local 作根因对照清单——先读红线再注入历史/文档，防"先入为主后才对照"的滞后
 - log 报告 `log_analysis.md §2.3 limit 红线对照` 为**必填小节**：limit 存在时逐条对照根因假设，不存在时标注"本工程无 limit 红线"
 - log 步骤 metadata 写入 `limit_refs` 数组（报告 §2.3/§6 出现「红线 N」即须记录），经 log 步骤 9.5 机器自检校验（§2.3 存在性 + 引用完整性）
+
+### 7. worktree 入口询问契约（worktree 隔离的默认关闭红线）
+
+- **语义**：用户可在 limit 写红线「worktree 默认关闭」→ 本工程**所有新建工单入口跳过 worktree 询问**，直接原地建工单（见 SKILL.md「目录管理·worktree 决策与创建」①，SKILL.md 引用本段）
+- **写法**（`/icode limit worktree 默认关闭` 追加，格式同「条目格式」段）：
+  `红线 N：worktree 默认关闭（新建工单一律原地建、不建 worktree；理由：本工程单需求/快速改为主、不需要并行隔离；适用范围：所有新建工单入口 init/log/start/plan/fast）`
+- **读取**：新建工单入口判定 worktree 时，Read 主存 + local 合并视图，`grep -q "worktree 默认关闭"` 命中 → 跳过询问直接原地；无该红线 → 照常入口询问（L4 柔性，缺省不阻断）
 
 **柔性提示**：plan 步骤入口检测 main + local 都不存在 → 输出"💡 本工程尚无 limit 约束（建议运行 `/icode limit <约束描述>` 生成），不阻断流程"。
 

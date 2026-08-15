@@ -87,6 +87,7 @@ Read `~/.claude/icode_data/index.json`（不存在则创建 `{"version":"1","upd
 - `verdict` = `"unknown"`（**新增**：方向结论，详见 SKILL.md「verdict 字段族」；首次写入固定 `unknown`，由后续标注/终审/批量识别改写）
 - `verdict_reason` / `correct_direction` / `verdict_source` / `verdict_at` / `superseded_by` = `null`（**新增**：verdict 关联字段，标注时按需填）
 - `verdict_premise_deps` = `[]` / `verdict_review_needed` = `false`（**新增**：硬复活字段，默认空/false；`disproved`/`superseded` 标注时按需填 `verdict_premise_deps` 支持依赖变化检测）
+- **写前重读合并（并发安全，多 worktree = 多会话并行配套，防竞态丢条目）**：从首次 Read 到写回之间可能已有其他会话写入（各会话读旧快照 → 后写覆盖先写 → 丢工单条目）。**写回前必须重新 Read 最新 index.json**（丢弃最初快照），把本会话要追加/修改的内容合并进最新 `tickets` 数组，再原子写回——**绝不在旧快照上直接覆盖**。index.json 所有读-改-写统一按此契约：**读最新 → 合并本会话改动 → 原子写**（原子写防写中断损坏，写前重读合并防并发丢失，两者都要）
 - 写回 index.json，置 metadata `indexed = true`、`ticket_id = {生成的 ticket_id}`
 - **写后唯一性验证（强制硬检查，防 AI 偷懒漏检冲突）**：写回后 Python 验证 `tickets` 数组 `ticket_id` 全局唯一：
   - **同 ticket_id 不同 project_path**（工程名冲突未加后缀）-> 自动给**后写入的**（`created_at` 较晚）追加 `project_path` 短 hash 后缀（`sha256(project_path)[:4]`，如 `myproject-14-a3f2`），同步该工单 `metadata.ticket_id` + 重新排序
@@ -96,7 +97,7 @@ Read `~/.claude/icode_data/index.json`（不存在则创建 `{"version":"1","upd
 
 ## 索引条目更新（已有 ticket_id 的情况）
 
-按 metadata 的 `ticket_id` 定位 index.json 中本工单条目，更新对应字段：
+按 metadata 的 `ticket_id` 定位 index.json 中本工单条目，更新对应字段。**写回前必须写前重读合并**（同「全局索引写入」段契约）：重新 Read 最新 index.json → 在最新快照上定位本工单条目更新 → 原子写回，勿在旧快照覆盖（多会话并行时防丢其他工单条目）：
 
 - 步骤0 每轮对话后：刷新 `requirement_summary` / `requirement_points`（从 `00_init.md`「3.新增需求点」自动提炼）
 - 步骤1 写完 `01_plan.md` 后：`requirement_summary`（基于完整计划刷新）、`has_plan` = true、`status` = `plan_done`
@@ -129,10 +130,10 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
 
 索引存的是工单**当时的摘要**，但工程会迭代，老工单的 ADR/需求可能已被后续工单推翻。命中过时工单注入会误导。
 
-> **⚠️ Git 操作安全白名单（强制，违反即不合规）**：本段所有 git 调用必须**只读**，仅允许：`git rev-parse HEAD` / `git rev-parse --abbrev-ref HEAD` / `git rev-parse --git-dir` / `git merge-base --is-ancestor <A> <B>`（仅取退出码 0/1）/ `git status --porcelain` / `git log --oneline -1` / `git cat-file -e <sha>`。**禁止** `checkout`/`switch`/`reset`/`stash`/`clean`/`commit`/`add`/`rm`/`rebase`/`merge`/`cherry-pick`/`push`/`fetch`/`pull`/`branch -D`/`tag -d` 等一切写操作与网络操作。stale 检测**只读工作树现状，绝不改工作树/索引/提交**--"checkout 变化时重评"指检测到**用户外部**改了 HEAD 后只读重评，**绝不由技能主动 checkout**。`-C {project_path}` 前缀用于跨工程工单切换目录执行只读命令，必需且允许；全部本地完成，离线可用。
+> **⚠️ Git 操作安全白名单（强制，违反即不合规）**：本段所有 git 调用必须**只读**，仅允许：`git rev-parse HEAD` / `git rev-parse --abbrev-ref HEAD` / `git rev-parse --git-dir` / `git merge-base --is-ancestor <A> <B>`（仅取退出码 0/1）/ `git status --porcelain` / `git log --oneline -1` / `git cat-file -e <sha>` / `git worktree list --porcelain`（只读；resolve_project_id F1 worktree 归一化用，见「project_id 与 branch 语义」段）。**禁止** `checkout`/`switch`/`reset`/`stash`/`clean`/`commit`/`add`/`rm`/`rebase`/`merge`/`cherry-pick`/`push`/`fetch`/`pull`/`branch -D`/`tag -d` 等一切写操作与网络操作。stale 检测**只读工作树现状，绝不改工作树/索引/提交**--"checkout 变化时重评"指检测到**用户外部**改了 HEAD 后只读重评，**绝不由技能主动 checkout**。`-C {project_path}` 前缀用于跨工程工单切换目录执行只读命令，必需且允许；全部本地完成，离线可用。
 
 **校验方法**（对 top-N 命中工单，注入前逐条；`H = git -C {project_path} rev-parse HEAD`（该工单工程的当前 HEAD，每候选取一次；非 git 仓库/失败→`null` 走纯锚点兜底））：
-1. **项目路径校验**：`test -d {project_path}` 失败→置 `stale=true`+`stale_reason=path_gone`+`stale_checked_commit=H`，**跳过注入**（即使 hit_count 高也不注入），避免对已删除工程的引用注入
+1. **项目路径校验**：`test -d {project_path}` 失败→置 `stale=true`+`stale_reason=path_gone`+`stale_checked_commit=H`，**跳过注入**（即使 hit_count 高也不注入），避免对已删除工程的引用注入。**worktree 场景（预期行为，非故障）**：`project_path` 指向 worktree 路径时，工单回流 `git worktree remove` 后 `test -d` 失败 → `path_gone` 属预期（工单已交付，索引留档即可，别当工程被删排查）；**复活路径** = 重新 `git worktree add` 同分支 → `project_path` 恢复存在 → 自动重入「可复活规则」再走锚点校验
 2. **commit 上下文校验**（`created_commit` 非 null 时；为 null 跳过本步进第3步纯锚点兜底）：
    - `H == created_commit`→工作树恰为工单出生提交，完全匹配，**not stale，高置信注入**（快路径，跳过第3步锚点校验）
    - `git merge-base --is-ancestor {created_commit} {H}`：退出 0→正常前向演进，进第3步；退出 1（H 是 `created_commit` 的祖先/分叉）→置 `stale=true`+`stale_reason=checkout_mismatch`+`stale_checked_commit=H`，**软 stale 跳过注入**（checkout 变化时可复活，见「stale 字段·可复活」）；退出 128（`created_commit` 不可达，如 GC/换库）→视同 `created_commit=null` 进第3步纯锚点兜底
@@ -461,7 +462,7 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
 
 ### project_id 与 branch 语义
 
-- **git-root 模式**（cwd 在 git 仓库内）：`project_id` = `basename($(git rev-parse --show-toplevel))`，不区分子目录
+- **git-root 模式**（cwd 在 git 仓库内）：`project_id` = `basename($(git rev-parse --show-toplevel))`，不区分子目录。**worktree 归一化（F1）**：worktree 内 `git rev-parse --show-toplevel` 返回 **worktree 自身根**（如 `<repo>-wt-<slug>`），直接 basename 会导致 project_id 漂移 → limit 主存 / project_docs / device_config 全部读不到主仓数据。**`.git` 为普通文件（内容以 `gitdir:` 开头）= git worktree 成员**，此时 `project_id` 归一到**主仓根**（`git worktree list --porcelain` 首行 `worktree <path>`），而「当前 checkout 根」（代码实际所在）仍为 worktree 根——两概念分离：**project_id 归主仓（跨 checkout 共享依据），checkout 根留当前（代码实证依据）**
 - **`repo` 根模式**（cwd 不在 git 仓库但有 `.repo/manifest.xml`，如 Google `repo` 管理的多仓库项目）：`project_id` = `basename(从 cwd 向上找第一个含 .repo/ 的目录)`
 - **branch 感知**：DOC_DIR = `~/.claude/icode_data/project_docs/<project_id>/<branch>/`，**按分支分目录存**（key 设计见下文「DOC_DIR 分支隔离」段）
   - 同工程不同分支（如 `myproject/main/` vs `myproject/feature/`）→ 天然隔离互不覆盖
@@ -472,7 +473,7 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
 - **冲突处理**：若 `~/.claude/icode_data/project_docs/<project_id>/<branch>/` 已存在且其 `00_overview.md` 元信息块的 `project_path` 与当前 `git_root` 不同 → 自动追加 hash 后缀 `${PROJECT_ID}__${BRANCH_SAFE}__$(echo $GIT_ROOT|sha256sum|cut -c1-4)`，AI 靠元信息块的 git remote 区分同名工程同名分支
 - **零配置**：不引入任何配置文件，工程名、分支等可配信息全在章节元信息块
 - **`resolve_project_id(cwd)` 算法**：
-  1. `git rev-parse --show-toplevel` 成功 → git-root 模式，返回 `(basename(git_root), "git-root", git_root, abbrev-ref HEAD)`
+  1. `git rev-parse --show-toplevel` 成功 → git-root 模式：**先做 worktree 归一化（F1）**——若 `<git_root>/.git` 是**普通文件**（内容以 `gitdir:` 开头）= git worktree 成员，则 `project_id = basename(主仓根)`（`git worktree list --porcelain` 首行 `worktree <path>`，**勿用 `awk '$1=="worktree"{print $2}'` 形式**：`$2` 在路径含空格时截断，须 `substr($0,10)` 取整行剥前缀）；`git_root` 保持 worktree 根**不动**（分支判定/代码实证用）。返回 `(project_id, "git-root", git_root, abbrev-ref HEAD)`
   2. 否则从 cwd 向上逐级 `test -d $d/.repo`，首个命中 → repo-root 模式，返回 `(basename(repo_root), "repo-root", repo_root, "(no-git)")`
   3. 都失败 → 报错"请在 git 仓库或 repo 管理的项目内运行 /icode doc 或段零检索"
   4. **多分支并存**：同 `project_id` 下可有多个 `<branch>/` 子目录，下游段零检索需枚举所有分支目录 + 按当前 cwd 分支过滤（详见「DOC_DIR 分支隔离」段）

@@ -34,7 +34,7 @@
      - **无匹配 / 无 TB 引用**：走下方「创建新目录」（强制新建），行为与改前 100% 一致
    - **创建新目录**（强制新建，不做其他复用判定）：执行目录管理中的「创建新目录」逻辑，确定 `ICODE_OUT_DIR`
    - **前置：limit 红线检查点（防"忽略项目级约定违反"，必须先于步骤2 历史检索/文档注入执行）**：在进入步骤2 历史检索/段零文档注入**之前**，**必须**盘点本工程的 limit 红线（与 plan 步骤「前置：limit 硬基线」对齐，防"历史根因/文档先入为主后才读到红线"的对照滞后），不得静默跳过：
-     - **路径解析**（同 [steps/limit.md](limit.md) + [01_plan.md](01_plan.md) 前置逻辑）：`PROJECT_ID = basename(git rev-parse --show-toplevel)`；主存 `~/.claude/icode_data/limits/<project_id>.md`，覆盖 `<project_root>/.icode_output/limit.local/<project_id>.md`
+     - **路径解析**（同 [steps/limit.md](limit.md) + [01_plan.md](01_plan.md) 前置逻辑）：`PROJECT_ID = basename(git rev-parse --show-toplevel)`，**含 worktree 归一化（F1）**：worktree 内 `.git` 是普通文件 = git worktree 成员，project_id 须归一到**主仓根**（`git worktree list --porcelain` 首行），否则主存读不到（详见 [references/dir_and_metadata.md](../references/dir_and_metadata.md)「project_id 与 branch 语义」）；主存 `~/.claude/icode_data/limits/<project_id>.md`，覆盖 `<project_root>/.icode_output/limit.local/<project_id>.md`
      - **读取合并**（local 完全覆盖 main，同 limit 步骤合并规则）：main 存在 -> 读其所有条目；local 存在 -> 整文件覆盖 main（local 文件内容直接当作完整 limit 视图）；都不存在 -> 标注"本工程无 limit 红线"（柔性提示，不阻断）
      - **存在时的应用**：把 limit 红线条目作为**根因假设的对照清单**注入上下文--在阶段1 基线检查 §2.1 阶段逐条对照"症状是否违反了某条 limit 红线？"；在阶段3 对抗分析时把 limit 红线清单喂给质疑者（与段零文档清单并列），让质疑者也能检查"根因假设是否与 limit 红线矛盾"；**对照核验引用的红线编号须记录进步骤9 metadata `limit_refs`**（供步骤 9.5 机器自检）
      - **先读后注入（防滞后）**：limit 是项目级**长期稳定**约定，必须先于步骤2 历史检索（跨工单经验）与段零文档（事实快照）注入读取——若红线读取晚于注入，历史根因/文档先入为主后再对照即为"滞后"；历史检索注入决策不受 limit 影响（同 plan），但读取顺序 limit 优先
@@ -78,7 +78,7 @@
        1. **提取独特字符串**：从设备日志里抓取 ≥3 个独特标识符（如 `NodeStartupA` / `sensor_loc` / `SensorDriverB` / `prepare_mode_switch` 等节点名 / 模块名 / 驱动名 / 关键函数名）
        2. **姊妹工程 git grep**：**候选代码库路径来源优先级**--① 阶段0 用户收集的姊妹工程清单（如有） -> ② **用户未给清单时，优先用段零 3.6 命中的关联工程源码路径**（`project_path` / manifest path，见 [references/dir_and_metadata.md](../references/dir_and_metadata.md) 步骤 3.6 源码路径定位；DOC 关联工程字段经 3.6 自动定位，无需用户手动给清单） -> 对每个候选路径逐个 `git grep -rn <独特字符串>`，找出真正代码库
        2.5. **自动发现姐妹工程（步骤② 段零 3.6 无关联工程 且 用户无清单时，**`**P0 不可跳过**`**）**：步骤② 的段零 3.6 返回空（关联工程字段缺失/未配置，静默跳过）且用户未提供姐妹工程清单时，**不得直接退到步骤③"只看当前工程"**。必须先执行以下自动发现（任一步有命中即停止，不必全跑）：
-         - **a. 同级目录扫描**：`ls -d ../*/ 2>/dev/null` 枚举父目录下同级目录，对每个目录 `test -d <d>/.git && echo <d>` 判定是否为 git 仓库，收集候选工程路径列表
+         - **a. 同级目录扫描**：`ls -d ../*/ 2>/dev/null` 枚举父目录下同级目录，对每个目录 `test -d <d>/.git && echo <d>` 判定是否为 git 仓库，收集候选工程路径列表。**worktree 兄弟天然排除（实测 2026-08-15，无需额外过滤）**：git worktree 成员目录的 `.git` 是**普通文件**（gitdir 指针）而非目录，`test -d` 判据对它们返回 false → 不会误收为本工程其他 checkout（独立克隆的 `.git` 是目录，照常收集为姐妹工程候选，两者天然区分）
          - **b. manifest 扫描**（当前工程为 repo-root 模式且有 `.repo/manifest.xml` 时）：`grep '<project' .repo/manifest.xml` 提取其他 `<project>` 的 `path` 属性，拼绝对路径作为候选
          - **c. project_docs 枚举**：`ls ~/.claude/icode_data/project_docs/ 2>/dev/null` 列出所有已知工程（同名不同分支取一个），每个工程根路径从 `00_overview.md` 元信息块 `project_path` 字段取（`test -d` 校验有效才纳入候选）
          - **d. 独特字符串跨目录 git grep**：对 a/b/c 收集的去重候选路径列表，逐个 `git -C <候选路径> grep -rn <步骤① 提取的独特字符串> 2>/dev/null`，命中者纳入候选代码库

@@ -26,6 +26,7 @@
 模式: {mode 字段读取方式：直接读 metadata.mode 字段，缺失或空值视为 "full"（默认）；fast 模式下显示「fast（精简：review 1轮无对抗 + deepcheck 仅 Reverse）」}
 方向结论: {verdict 字段读取方式：直接读 metadata.verdict 字段，缺失视为 "unknown"；显示 verdict + verdict_reason 摘要（若有）}
 schema: {template_version 字段读取方式：直接读 metadata.template_version 字段，缺失视为 "未知"；显示 schema 版本 + migration_log 长度，如 "v1.1 (3 migrations, 最近 2026-07-25 12:34)" 或 "v0（待迁移）" 或 "未知（field 缺失）"}
+worktree: {worktree_path 字段读取方式：直接读 metadata.worktree_path 字段，null 显示「主仓」；非 null 显示路径 + worktree_branch（如 "…/<repo>-wt-<ticket-slug>（分支 icode/<ticket-slug>）"，另注意续跑须 cd 进该 worktree，见 [references/worktree_isolation.md](../references/worktree_isolation.md) §2）；wt_degraded=true 时附注「（降级原地，未用 worktree）」}
 已完成: {completed_steps 链路，如 log -> 1 -> 2 -> 3 -> 4}
 下一步: {根据续跑判定规则推断，如 "/icode deepcheck (步骤5复检)"}
 代码文件: {code_files 列表，无则"未编码"}
@@ -69,7 +70,7 @@ schema: {template_version 字段读取方式：直接读 metadata.template_versi
    - `superseded` 时额外写 `superseded_by`（来自 `--superseded-by` 参数）
    - 若有 `--premise-dep` 参数：写 `verdict_premise_deps`（数组，每条 `{module, commit, path}`）+ 初始化 `verdict_review_needed=false`（首次标注未检测前为 false，后续由 `--scan-verdict` 或检索命中被动检测改写）
    - **幂等覆盖**：已有 verdict 也覆盖（刷新 `verdict_at`），不报错；verdict 变化时记录新 verdict_at
-   - 写回 metadata + index.json（两处同步，不得只写其一）
+   - 写回 metadata + index.json（两处同步，不得只写其一）；**写 index 前必须写前重读合并**（同 [references/dir_and_metadata.md](../references/dir_and_metadata.md)「全局索引写入」段契约：重新 Read 最新 index → 在最新快照上定位本工单条目改 verdict → 原子写回，勿在旧快照覆盖——多会话并行时防丢其他工单条目）
 4. **输出确认**：`✅ 已标注 {ticket_id} verdict={verdict}（source={source}）；后续检索命中将按 verdict 分流注入（disproved 反转避坑 / superseded 注替代指针 / verified 正常借鉴）`
 
 **反偷懒**：
@@ -93,7 +94,7 @@ schema: {template_version 字段读取方式：直接读 metadata.template_versi
 4. **对 B·disproved/superseded 候选（复活检测）**：
    - 读其 `verdict_premise_deps`（空数组跳过--无硬复活能力，靠软复活）
    - 对每个 dep，取当前 commit：`git -C {dep.path} rev-parse HEAD`（只读，stale 白名单内；`dep.path` 目录不存在则记 `path_gone`，视为变化）
-   - 若 `dep.commit != 当前 HEAD`：证伪前提依赖已变化，置 `verdict_review_needed=true` 写回 index.json（客观 commit 比对，**可自动写**，不写 verdict 本身）
+   - 若 `dep.commit != 当前 HEAD`：证伪前提依赖已变化，置 `verdict_review_needed=true` 写回 index.json（客观 commit 比对，**可自动写**，不写 verdict 本身）；**写前重读合并**（同上方 `--verdict` 契约：写回前重新 Read 最新 index → 合并本会话改写 → 原子写回，防并发覆盖其他条目）
    - 若所有 `dep.commit == 当前 HEAD`：`verdict_review_needed=false`（证伪前提依赖未变，保持硬反转+证伪前提断言）
 5. **汇总输出**（按信号/变化命中数排序）：
 
@@ -135,6 +136,7 @@ schema: {template_version 字段读取方式：直接读 metadata.template_versi
 
 **执行流程**：
 
+0. **落点约束（worktree 工单）**：读 metadata `worktree_path`，非 null → 提示「本工单产物在 worktree 内，请先 `cd {worktree_path}` 再运行本校验」并**退出**（在主仓跑会找不到 worktree 内产物 → 误报缺失，cwd 契约的机器校验延伸）；用户已在该 worktree 内 → 正常执行。null（原地工单）→ 直接执行
 1. 确定工单目录：`--validate` → 用「检测最新目录」逻辑；`--validate N` → 指定 `.icode_output/.icode_output_N`
 2. 运行机器校验（Bash 一行命令，输出逐项结果，任何一项不通过记入问题清单）：
 

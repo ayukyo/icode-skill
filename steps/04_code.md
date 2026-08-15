@@ -109,7 +109,7 @@
 ## 强制操作（完成后必须执行）
 
 0. **git 状态快照（进工程后第一步，改动静止基线；O-2）**：改动报告前先建立"改动归属"基线，防止把"改动没被跟踪"误判为"改动丢失"：
-   - 执行 `git -C <project_path> status --short`，并检查 `.git` 是否为 symlink（`ls -ld <project_path>/.git`）——是则标注「**repo 独立仓**」（`.git` 指向 repo 管理目录，父仓 `.gitignore` 忽略子仓，父仓根目录 `git diff` 恒为空）
+   - 执行 `git -C <project_path> status --short`，并检查 `.git` 形态（`ls -ld <project_path>/.git`）做**三形态判别**：**目录**=普通 git 仓库 / **symlink**=repo 独立仓（`.git` 指向 repo 管理目录，父仓 `.gitignore` 忽略子仓，父仓根目录 `git diff` 恒为空）→ 标注「**repo 独立仓**」/ **普通文件**（内容以 `gitdir:` 开头）= **git worktree 成员** → 标注「**git worktree**」（`git status` 正常，勿误判为异常/独立仓损坏；`project_id` 归主仓见 [references/dir_and_metadata.md](../references/dir_and_metadata.md)「project_id 与 branch 语义」F1）
    - 记录三态：**已暂存（staged）**（本对话之前的改动）、**工作区未暂存（unstaged）**（本对话的改动）、**未跟踪（untracked）**；后续改动报告按此三态描述
    - **禁止**在父仓根目录用 `git diff` 判定子仓改动归属（子仓不在父仓工作树内，父仓 diff 为空 ≠ 子仓改动丢失）
    - 改动报告/交付清单写出 `git -C <子仓> status` 的原始视图

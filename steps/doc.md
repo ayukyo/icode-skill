@@ -119,7 +119,14 @@ if [ -z "$GIT_ROOT" ]; then
     exit 1
   fi
 fi
-PROJECT_ID=$(basename "$GIT_ROOT")
+# worktree 归一化（F1）：worktree 内 .git 是普通文件（gitdir 指针）= git worktree 成员，
+# project_id 须归一到主仓根（跨 checkout 共享依据）；GIT_ROOT 保持当前 checkout 根不动（分支判定/代码实证用）
+if [ -f "$GIT_ROOT/.git" ]; then
+  MAIN_ROOT=$(git -C "$GIT_ROOT" worktree list --porcelain | awk '/^worktree /{print substr($0,10); exit}')
+else
+  MAIN_ROOT=""
+fi
+if [ -n "$MAIN_ROOT" ]; then PROJECT_ID=$(basename "$MAIN_ROOT"); else PROJECT_ID=$(basename "$GIT_ROOT"); fi
 # 分支感知：DOC_DIR 按 <project_id>/<branch> 分目录，**切分支跑 doc 不污染其他分支**
 # detached HEAD / 非 git 仓库 → BRANCH="(detached)" 或 BRANCH="(no-git)"
 BRANCH=$(git -C "$GIT_ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null)
