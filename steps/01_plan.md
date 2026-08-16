@@ -26,7 +26,7 @@
 
 **目的**：把 [`/icode limit`](../steps/limit.md) 维护的项目约束红线作为 plan 步骤的硬基线，确保 plan §3 架构设计 / §4 ADR / §6 异常处理与 limit 条目呼应（避免"计划正确但违反工程红线"的返工）。
 
-**柔性提示**（**不阻断 plan 流程**）：
+**柔性提示**（**limit 缺失不阻断/不强制生成**——柔性仅指这一点；**但"一旦读 limit 就须当场留痕"是刚性审计要求**，见下方第 4 项，缺失判不合规）：
 
 1. **路径解析**（同 `/icode limit` 步骤）：先解析 `PROJECT_ID`——`basename(git rev-parse --show-toplevel)`，**含 worktree 归一化（F1）**：worktree 内 `git rev-parse --show-toplevel` 返回 worktree 自身根（`.git` 是普通文件 = git worktree 成员），须归一到**主仓根**（`git worktree list --porcelain` 首行 `worktree <path>`），否则 limit 主存读不到（跨 checkout 共享依据）；「当前 checkout 根」保持 worktree 根不动（分支判定/代码实证用，详见 [references/dir_and_metadata.md](../references/dir_and_metadata.md)「project_id 与 branch 语义」）
 2. **主存 + 覆盖检测**：
@@ -35,7 +35,8 @@
 3. **存在性分支**：
    - **都不存在** → 输出 `💡 本工程尚无 limit 约束（建议运行 /icode limit <约束描述> 生成），不阻断 plan 流程` —— **不报错、不强制**
    - **存在** → Read 主存 + 覆盖（**local 完全覆盖 main**，同 limit 步骤合并逻辑），结果进 plan 步骤的强制思考前置块作硬基线
-4. **应用契约**：plan §3 架构设计 / §4 ADR / §6 异常处理须呼应相关 limit 条目（"本工程 limit 红线 N：X，本方案选择 Y 因为..."）；**计划文本一旦引用 limit 条目（出现「红线 N」/「红 N」）必须写入 metadata `limit_refs` 数组**（每条含 `redline_no` + `source` + `title` + `applied_in` 引用章节）；计划**完全未引用** limit 时才允许留空（见下方「强制操作」的「limit_refs 机器自检」）
+4. **可审计留痕（读证明，统一覆盖 `/icode init`/`start`/`fast` 各入口的 LIMIT 读取）**：本前置硬基线是 **init/start/fast 三条入口读写 LIMIT 的唯一前置点**（`00_init.md` 自身不读写 LIMIT、`fast` 是精简版 01_plan、`start` 是全流程 01_plan，均汇聚到本步骤），因此本留痕即三入口"步骤1 时点合规读过 LIMIT"的可审计证据。**无论 limit 存在与否都必须在进入后续强制思考/设计之前追加阶段块**（limit 不存在也追加——一/二节标注"本工程无 limit 红线"，否则无 limit 工程会因缺 plan 锚点被判维度④不合规）：向 `{ICODE_OUT_DIR}/limit_checkpoint.md` **追加一个「阶段块：plan前置硬基线」**（强制四节，同 log 前置检查点）：一、索引读取留痕（源路径 + 视图来源 `main`/`local`/`无`）；二、索引条目盘点全量（红线 N：标题）；三、精读命中条目（本工单/本需求相关红线 N + 一句相关性理由，无命中则标注）；四、后续对照去向（§3/§4/§6 须呼应 + 引用编号回填 `limit_refs`）。**追加式多阶段共文件**：`limit_checkpoint.md` 是**工单级**"前置 limit 读取留痕"文件，log 前置检查点与 plan 前置硬基线各自在文末**追加**一个阶段块，**锚点即阶段块标题**（`阶段块：plan前置硬基线` / `阶段块：log前置检查点`），**不覆盖旧块**——同一工单 `log → plan` 串联时两者证据并存。**留痕范围边界（三类读取，防误叠块）**：仅**①前置对照读取**（log 前置检查点 / 本前置硬基线）留痕阶段块；**②复核性重读**（§10 #6 limit 一致性、audit §6.7 视角 B）与 **③工具性取值读取**（[04_code.md](04_code.md) / [08_patch.md](08_patch.md) 条件性读「编译命令规范」红线取编译命令值）**均不追加阶段块**——② 是复核既有留痕内容的再对照，③ 是取单条红线命令值（非索引盘点+精读命中的对照性质），追加重四节块只会冗余 bloat。本文件**缺失**（或含本块标题锚点的块缺失）→ 下方「limit_refs 机器自检」L1 维度④判不合规
+5. **应用契约**：plan §3 架构设计 / §4 ADR / §6 异常处理须呼应相关 limit 条目（"本工程 limit 红线 N：X，本方案选择 Y 因为..."）；**计划文本一旦引用 limit 条目（出现「红线 N」/「红 N」）必须写入 metadata `limit_refs` 数组**（每条含 `redline_no` + `source` + `title` + `applied_in` 引用章节）；计划**完全未引用** limit 时才允许留空（见下方「强制操作」的「limit_refs 机器自检」）
 
 **与历史检索复用的关系**：limit 硬基线是**项目级约定**（长期稳定），历史检索是**跨工单经验**（临时参考）——两者**互补不替代**。limit 不存在不影响历史检索的注入决策。
 
@@ -356,21 +357,31 @@
 
 6. **检索留痕**（检索可审计，防"检索成为会话内不可验证行为"）：若全局索引 `~/.claude/icode_data/index.json` 存在，`{ICODE_OUT_DIR}/_inject_cache.json` **必须存在**（即使 `injections` 为空数组，缓存文件也应已创建，见「执行步骤」第 2 步「注入防重复」）或本工单**显式声明** `[检索跳过-原因]`（如"全局索引无候选"）；两者皆无 → 标注检索留痕缺失（重做场景复盘盲区）
 
-7. **limit_refs 机器自检（L1：计划引用 limit 未记录 = 不合规）**：运行下方命令，退出码非 0 则停下补写 `limit_refs` 后重跑：
+7. **limit_refs 机器自检（L1：计划引用 limit 未记录 / 前置读留痕缺失 = 不合规）**：运行下方命令，退出码非 0 则停下补齐后重跑：
 
 ```bash
 python3 -c "
-import json,re,sys
+import json,re,sys,os
+# ① 前置读留痕存在性（L1 维度④）：limit_checkpoint.md 缺失 或 无 plan 阶段块标题锚点 = init/start/fast 汇聚的步骤1 未按'先读索引→精读命中'留痕 = 按未读处理
+cp='{ICODE_OUT_DIR}/limit_checkpoint.md'
+if not os.path.exists(cp):
+    print('❌ limit_checkpoint.md 缺失（前置 limit 硬基线的读留痕，步骤1 进入强制思考/设计之前必须落盘；计划文本/limit_refs 是事后产物不能替代，严格口径按未读）')
+    sys.exit(1)
+if '阶段块：plan前置硬基线' not in open(cp,encoding='utf-8').read():
+    print('❌ limit_checkpoint.md 缺「阶段块：plan前置硬基线」标题（本工单 plan 前置已读 LIMIT 的锚点；仅存在其他阶段块如 log 不算 plan 已读）')
+    sys.exit(1)
 refs={int(r['redline_no']) for r in json.load(open('{ICODE_OUT_DIR}/.ico_metadata.json')).get('limit_refs',[]) if 'redline_no' in r}
 txt=open('{ICODE_OUT_DIR}/01_plan.md').read()
 cited={int(n) for n in re.findall(r'红(?:线)?\s*(\d+)',txt)}
 missing=cited-refs
-print('计划引用红线:',sorted(cited),'| limit_refs 记录:',sorted(refs),'| 缺失:',sorted(missing) if missing else '无')
+print('limit_checkpoint: plan前置块存在 | 计划引用红线:',sorted(cited),'| limit_refs 记录:',sorted(refs),'| 缺失:',sorted(missing) if missing else '无')
 sys.exit(1 if missing else 0)
 "
 ```
 
-- 退出码 0 → 通过（引用已全部记录，或计划完全未引用）；非 0 → 补写 `limit_refs` 再重跑
+- 退出码 0 → 通过（`limit_checkpoint.md` 的 `plan前置硬基线` 阶段块已落盘 + 引用已全部记录，或计划完全未引用）；非 0 → 补 `plan前置硬基线` 阶段块（步骤1 时点漏落的，如实补写并标注"补录"，不得伪装成步骤1 时点已在） / 补写 `limit_refs` 后重跑
+- **补录与既有的边界（严格口径）**：`limit_checkpoint.md` 应在正常流程里于步骤1 时点天然生成；确系漏落、靠自检才补写的，阶段块内标注「补录 @设计完成时点，非步骤1 时点原读」，供审计判断读取时点合规性
+- **覆盖范围**：本维度④随「前置 limit 硬基线」统一覆盖 `/icode init`（随后经 `/icode plan`/`start` 进入）、`/icode start`、`/icode fast` 三入口的 LIMIT 读取留痕（三者均汇聚到 step1 本前置，见上文第 4 项）
 
 8. 如果是 `/icode start`（全流程模式）：
 

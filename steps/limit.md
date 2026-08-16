@@ -5,7 +5,7 @@
 - 主存：`~/.claude/icode_data/limits/<project_id>.md`（全局，跨 checkout 共享）
 - 覆盖：`<project_root>/.icode_output/limit.local/<project_id>.md`（单 checkout，自动 gitignore）
 **会话**: 主会话
-**定位**: **项目约束红线生成与维护，独立步骤**。不创建 `.icode_output_N/`、不写 `.ico_metadata.json`、不更新工单 `completed_steps`/`status`。产物供 `/icode plan`/`start`/`fast` 启动时**作为硬基线引用**（plan §3 架构设计/§4 ADR/§6 异常处理须呼应 limit 条目）；**亦供 `/icode log` 根因分析时作为对照清单**（log 前置 limit 红线检查点读取——在 log 步骤2 历史检索/段零文档注入**之前**，逐条对照根因假设是否违反约定红线，引用红线经 log 步骤 9.5 机器自检留痕）。
+**定位**: **项目约束红线生成与维护，独立步骤**。不创建 `.icode_output_N/`、不写 `.ico_metadata.json`、不更新工单 `completed_steps`/`status`。产物供 `/icode plan`/`start`/`fast` 启动时**作为硬基线引用**（plan 步骤1「前置 limit 硬基线」读取，统一覆盖 init/start/fast 三入口；plan §3 架构设计/§4 ADR/§6 异常处理须呼应 limit 条目，**读留痕落盘 `{ICODE_OUT_DIR}/limit_checkpoint.md`「阶段块：plan前置硬基线」**）；**亦供 `/icode log` 根因分析时作为对照清单**（log 前置 limit 红线检查点读取——在 log 步骤2 历史检索/段零文档注入**之前**，逐条对照根因假设是否违反约定红线，**读留痕落盘 `limit_checkpoint.md`「阶段块：log前置检查点」**，引用红线经 log 步骤 9.5 机器自检留痕）。
 
 > **核心设计哲学**：
 > - **约定 vs 事实分离** —— limit 是"代码应该这样写"的约定（团队私有，不上传），doc 是"代码长这样"的事实快照（独立于仓库全局可索引）。两者职责严格分离。
@@ -148,12 +148,13 @@ LOCAL_FILE="$LOCAL_DIR/$PROJECT_ID.md"
 - plan §4 ADR 必须呼应相关 limit 条目（"本工程 limit 红线 N：X，本方案选择 Y 因为..."）
 - plan §6 异常处理必须呼应 limit 异常处理相关条目
 - plan 步骤 metadata 写入 `limit_refs` 数组（可选，记录本计划引用的红线编号）
+- plan **前置 limit 硬基线读留痕**（统一覆盖 `/icode init`→plan、`start`、`fast` 三入口，三者均汇聚到 plan 步骤1）：在进入强制思考/设计之前，向 `{ICODE_OUT_DIR}/limit_checkpoint.md` **追加「阶段块：plan前置硬基线」**（先读索引→精读命中条目，强制四节同 log）；`limit_checkpoint.md` 为**工单级追加式**留痕文件，log 前置与 plan 前置各自带**阶段块标题锚点**（`阶段块：log前置检查点` / `阶段块：plan前置硬基线`）、互不覆盖；plan 阶段块缺失 → plan 「limit_refs 机器自检」L1 维度④判不合规（按未读）
 
 ### 6. log 步骤引用契约（不直接执行，在 steps/log.md 体现）
 
-- log **前置 limit 红线检查点**（步骤1 末尾，**先于步骤2 历史检索/段零文档注入**）读取 main + local 作根因对照清单——先读红线再注入历史/文档，防"先入为主后才对照"的滞后
+- log **前置 limit 红线检查点**（步骤1 末尾，**先于步骤2 历史检索/段零文档注入**）读取 main + local 作根因对照清单——先读红线再注入历史/文档，防"先入为主后才对照"的滞后；且必须在进入步骤2 之前落盘 `{ICODE_OUT_DIR}/limit_checkpoint.md`（"先读索引→精读命中条目"的直接读留痕；§2.3 / `limit_refs` 是事后产物，不能替代，缺失按未读处理）
 - log 报告 `log_analysis.md §2.3 limit 红线对照` 为**必填小节**：limit 存在时逐条对照根因假设，不存在时标注"本工程无 limit 红线"
-- log 步骤 metadata 写入 `limit_refs` 数组（报告 §2.3/§6 出现「红线 N」即须记录），经 log 步骤 9.5 机器自检校验（§2.3 存在性 + 引用完整性）
+- log 步骤 metadata 写入 `limit_refs` 数组（报告 §2.3/§6 出现「红线 N」即须记录），经 log 步骤 9.5 机器自检校验（**读留痕 `limit_checkpoint.md` 存在性 + §2.3 存在性 + 引用完整性**）
 
 ### 7. worktree 入口询问契约（worktree 隔离的默认关闭红线）
 

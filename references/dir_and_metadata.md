@@ -283,7 +283,7 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
 }
 ```
 
-> `limit_refs`：log 报告 `§2.3 limit 红线对照`（必填小节）/ §6 引用的红线编号数组，每条 `{redline_no, source, title, applied_in}`；报告出现「红线 N」即须记录，经 log 步骤 9.5 机器自检校验（§2.3 存在性 + 引用完整性，见 [steps/log.md](../steps/log.md)）。**字段缺失视为 `[]`（向后兼容旧 metadata）**
+> `limit_refs`：log 报告 `§2.3 limit 红线对照`（必填小节）/ §6、plan §3/§4/§6 引用的红线编号数组，每条 `{redline_no, source, title, applied_in}`；报告出现「红线 N」即须记录，经 log 步骤 9.5 / plan「limit_refs 机器自检」校验（**读留痕 `limit_checkpoint.md` 存在性 + 引用完整性**，见 [steps/log.md](../steps/log.md) 与 [steps/01_plan.md](../steps/01_plan.md)）。⚠️ `limit_refs` 是**事后回补**，只证明"后来引用了哪些红线"；"**先读索引→精读命中**确实读过"的可审计留痕靠 `{ICODE_OUT_DIR}/limit_checkpoint.md` 的**工单级追加式阶段块**（锚点即阶段块标题：log 前置落「阶段块：log前置检查点」/ plan 前置硬基线落「阶段块：plan前置硬基线」，统一覆盖 init/start/fast，缺失按未读处理）。**字段缺失视为 `[]`（向后兼容旧 metadata）**
 
 ### 步骤0 init 首轮
 

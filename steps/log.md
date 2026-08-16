@@ -36,6 +36,13 @@
    - **前置：limit 红线检查点（防"忽略项目级约定违反"，必须先于步骤2 历史检索/文档注入执行）**：在进入步骤2 历史检索/段零文档注入**之前**，**必须**盘点本工程的 limit 红线（与 plan 步骤「前置：limit 硬基线」对齐，防"历史根因/文档先入为主后才读到红线"的对照滞后），不得静默跳过：
      - **路径解析**（同 [steps/limit.md](limit.md) + [01_plan.md](01_plan.md) 前置逻辑）：`PROJECT_ID = basename(git rev-parse --show-toplevel)`，**含 worktree 归一化（F1）**：worktree 内 `.git` 是普通文件 = git worktree 成员，project_id 须归一到**主仓根**（`git worktree list --porcelain` 首行），否则主存读不到（详见 [references/dir_and_metadata.md](../references/dir_and_metadata.md)「project_id 与 branch 语义」）；主存 `~/.claude/icode_data/limits/<project_id>.md`，覆盖 `<project_root>/.icode_output/limit.local/<project_id>.md`
      - **读取合并**（local 完全覆盖 main，同 limit 步骤合并规则）：main 存在 -> 读其所有条目；local 存在 -> 整文件覆盖 main（local 文件内容直接当作完整 limit 视图）；都不存在 -> 标注"本工程无 limit 红线"（柔性提示，不阻断）
+     - **可审计留痕（读证明，防"读了但没当场留痕"）**：前置检查点**必须在进入步骤2 历史检索/段零注入之前**，向 `{ICODE_OUT_DIR}/limit_checkpoint.md` **追加一个「阶段块：log前置检查点」**（**无论 limit 存在与否都追加**，limit 不存在时四节一/二标注"本工程无 limit 红线"，避免无 limit 工程因缺 log 锚点被判维度④不合规），落盘"先读 LIMIT 索引 → 精读命中条目"的**直接记录**。这是"LOG 当时合规读过 LIMIT"**唯一可审计证据**——步骤8 §2.3 的对照结论、步骤9 metadata `limit_refs` 都是**事后产物/回补**，无法倒推证明步骤1 的读取发生过，故**二者不能替代本留痕**（严格口径下后补 `limit_refs` 只证明"后来引用了红线段落"，不证明"当初先读索引再精读命中条目"）。阶段块（强制四节）：
+       - **一、索引读取留痕**：实际读取的源路径（主存 `~/.claude/icode_data/limits/<project_id>.md` / 覆盖 `<root>/.icode_output/limit.local/<project_id>.md`）+ 有效视图来源 `main`/`local`/`无(本工程无 limit 红线)` + 标注"进入步骤2 之前"时点
+       - **二、索引条目盘点（全量）**：逐条列出「红线 N：标题」（证明**索引已读**，而非跳过索引直取结论）；`无` 视图则标"本工程无 limit 红线"
+       - **三、精读命中条目（本工单相关）**：列出判定与本工单相关的红线 N + 一句相关性理由（无命中则标注"本工单无命中 limit 红线条目"）——证明**命中条目已精读**
+       - **四、后续对照去向**：上述命中条目作为根因假设对照清单注入（§2.1 逐条对照 + 阶段3 喂质疑者）；实际引用编号于步骤9 回填 metadata `limit_refs`
+     - **追加式多阶段共文件（防 log→plan 串联覆盖）**：`limit_checkpoint.md` 是**工单级**"前置 limit 读取留痕"文件，log 前置检查点与 plan 步骤1「前置 limit 硬基线」（**[01_plan.md](01_plan.md) 步骤1，统一覆盖 init/start/fast 各入口**）各自在文末**追加**一个阶段块，**锚点即阶段块标题**（`阶段块：log前置检查点` / `阶段块：plan前置硬基线`），**按读取在文末累加、不覆盖旧块**——同一工单 `log → plan` 串联时两者证据并存，互不抹除（append 语义同 [steps/limit.md](limit.md) 自身的"追加式演进"）
+     - 本文件**缺失**（或含本阶段块标题锚点的块缺失）→ 步骤 9.5 机器自检（L1 维度④）判不合规；`limit_checkpoint.md` 的存在是"步骤1 读取已完成"的留痕，与 `_inject_cache.json` 之于历史检索的"强制存在"模式同构
      - **存在时的应用**：把 limit 红线条目作为**根因假设的对照清单**注入上下文--在阶段1 基线检查 §2.1 阶段逐条对照"症状是否违反了某条 limit 红线？"；在阶段3 对抗分析时把 limit 红线清单喂给质疑者（与段零文档清单并列），让质疑者也能检查"根因假设是否与 limit 红线矛盾"；**对照核验引用的红线编号须记录进步骤9 metadata `limit_refs`**（供步骤 9.5 机器自检）
      - **先读后注入（防滞后）**：limit 是项目级**长期稳定**约定，必须先于步骤2 历史检索（跨工单经验）与段零文档（事实快照）注入读取——若红线读取晚于注入，历史根因/文档先入为主后再对照即为"滞后"；历史检索注入决策不受 limit 影响（同 plan），但读取顺序 limit 优先
      - **与段零的差异**：段零读的是 project_docs（事实快照，"代码长什么样"），limit 读的是约束红线（"代码应该怎么写"）--职责严格分离（详见 [steps/limit.md](limit.md)「核心设计哲学」），互补不重复
@@ -222,7 +229,7 @@
      > **`log_analysis.md` 章节必填/可空说明**：
      > - **必填章节**（缺一不可）：0 核心结论、4 决定性证据、5 根因分析、6 对抗分析记录、7 修复设计 + 4 维度验证清单、8 结语（3 行内，一句话根因 + 修复方向）
      > - **可空章节**：1 输入要素（如三要素明显可空）、2 基线检查（如无 git 可空）、3 现场还原（如无时间线数据可空）、9 本单范围外（如无范围外事项可空）
-     > - **§2.3 limit 红线对照必填例外**：§2 整章可空，但 **§2.3 limit 红线对照小节必填**（缺一不可）——limit 存在时逐条对照、limit 不存在时标注"本工程无 limit 红线"（防整节省略，见步骤9.5 机器自检）
+     > - **§2.3 limit 红线对照必填例外**：§2 整章可空，但 **§2.3 limit 红线对照小节必填**（缺一不可）——limit 存在时逐条对照、limit 不存在时标注"本工程无 limit 红线"（防整节省略，见步骤9.5 机器自检）。§2.3 是**对照结论**（事后产物），对照依据的"先读索引→精读命中条目"读取留痕见步骤1 前置检查点落盘的 `{ICODE_OUT_DIR}/limit_checkpoint.md`——二者**不可互相替代**（读取留痕证明"当时读过"、§2.3 证明"如何对照"）
      > - **章节引用强制**：步骤2 复用 log 阶段对抗验证结论时，必须读 6 对抗分析记录章节（不读全文）
 
    - 每条根因结论必须能回指到**具体日志片段**（节点+时间+原文）。做不到回指的结论不写进「核心结论」，只进「待验证假设」
@@ -326,36 +333,45 @@
    ```
 
    > `tb_source`（可选）：从 TB 拉取时填 `{lib,num,pid,label,url,meta_path}`（metadata 完整版，含本地路径），纯本地日志分析时为 `null`。**写入全局索引时只存摘要 `{lib,num,pid,label}`**（供同 TB 单检索复用，不含 url/meta_path）。
-   > `limit_refs`（默认 `[]`，log 版）：本次对照核验引用的 limit 红线编号数组，每条 `{redline_no: int, source: "main"|"local", title: str, applied_in: [...]}`（字段结构同 plan，`applied_in` 为报告引用章节如 `§2.3`/`§6`）。报告 `log_analysis.md §2.3/§6` 出现「红线 N」/「红 N」引用时必须记录，完全未引用才可留空；填写后经步骤 9.5 机器自检校验。**字段缺失视为 `[]`（向后兼容旧 metadata）**。
+   > `limit_refs`（默认 `[]`，log 版）：本次对照核验引用的 limit 红线编号数组，每条 `{redline_no: int, source: "main"|"local", title: str, applied_in: [...]}`（字段结构同 plan，`applied_in` 为报告引用章节如 `§2.3`/`§6`）。报告 `log_analysis.md §2.3/§6` 出现「红线 N」/「红 N」引用时必须记录，完全未引用才可留空；填写后经步骤 9.5 机器自检校验。**字段缺失视为 `[]`（向后兼容旧 metadata）**。⚠️ `limit_refs` 是**事后回补**，只证明"后来引用了哪些红线"，**不证明**步骤1 前置检查点"先读索引→精读命中条目"的读取发生过——读取留痕靠步骤1 落盘的 `{ICODE_OUT_DIR}/limit_checkpoint.md`（步骤 9.5 维度④校验，缺失按未读处理）
 
 ### 9.5 limit_refs 机器自检（L1：log 报告引用 limit 未记录 / §2.3 省略 = 不合规）
 
-**目的**：机器校验 ① 报告 `§2.3 limit 红线对照` 小节存在（必填，防整节省略）；② 报告 §2.3/§6 引用的「红线 N」全部记录进 metadata `limit_refs`（防"对照了却未留痕"，参考 plan 步骤1「limit_refs 机器自检」同款机制）。运行下方命令，退出码非 0 则停下补齐后重跑：
+**目的**：机器校验 ① 前置读留痕 `limit_checkpoint.md` 存在**且含阶段块标题「阶段块：log前置检查点」作为锚点**（**步骤1 时点"先读索引→精读命中条目"的直接证据**，步骤8 §2.3 / 步骤9 `limit_refs` 是事后产物，不能替代；仅存在其他阶段块如 plan 不算 log 已读）；② 报告 `§2.3 limit 红线对照` 小节存在（必填，防整节省略）；③ 报告 §2.3/§6 引用的「红线 N」全部记录进 metadata `limit_refs`（防"对照了却未留痕"，参考 plan 步骤1「limit_refs 机器自检」同款机制）。运行下方命令，退出码非 0 则停下补齐后重跑：
 
 ```bash
 python3 -c "
-import json,re,sys
+import json,re,sys,os
+# ① 前置读留痕存在性（L1 维度④）：limit_checkpoint.md 缺失 或 无 log 阶段块标题锚点 = "步骤1 未按'先读索引→精读命中'留痕" = 按未读处理
+cp='{ICODE_OUT_DIR}/limit_checkpoint.md'
+if not os.path.exists(cp):
+    print('❌ limit_checkpoint.md 缺失（前置 limit 红线检查点的读留痕，步骤1 进入步骤2 之前必须落盘；§2.3/limit_refs 是事后产物不能替代，严格口径按未读）')
+    sys.exit(1)
+if '阶段块：log前置检查点' not in open(cp,encoding='utf-8').read():
+    print('❌ limit_checkpoint.md 缺「阶段块：log前置检查点」标题（本工单 log 前置已读 LIMIT 的锚点；仅存在其他阶段块如 plan 不算 log 已读）')
+    sys.exit(1)
 txt=open('{ICODE_OUT_DIR}/log_analysis.md',encoding='utf-8').read()
 # 章节切片：以「下一个编号标题 或 文末」为边界，不依赖后继章节存在（§3/§7 可空也不误判）
 def sec(n):
     m=re.search(r'(?sm)^#{1,3}\s*'+str(n)+r'\..*?(?=^#{1,3}\s*\d+\.|\Z)',txt)
     return m.group() if m else ''
 s2,s6=sec(2),sec(6)
-# ① §2.3 limit 红线对照小节存在性（必填：limit 存在则对照，不存在则标'本工程无 limit 红线'）
+# ② §2.3 limit 红线对照小节存在性（必填：limit 存在则对照，不存在则标'本工程无 limit 红线'）
 if not ('limit 红线对照' in s2 or '本工程无 limit 红线' in s2):
     print('❌ §2.3 limit 红线对照小节缺失（必填，limit 不存在也须标注\"本工程无 limit 红线\"）')
     sys.exit(1)
-# ② 引用完整性：只扫 §2 + §6（limit 对照唯二落点），避免 §0/§3 里业务'红线 N'（如安全距离）误判
+# ③ 引用完整性：只扫 §2 + §6（limit 对照唯二落点），避免 §0/§3 里业务'红线 N'（如安全距离）误判
 cited={int(n) for n in re.findall(r'红(?:线)?\s*(\d+)',s2+' '+s6)}
 refs={int(r['redline_no']) for r in json.load(open('{ICODE_OUT_DIR}/.ico_metadata.json')).get('limit_refs',[]) if 'redline_no' in r}
 missing=cited-refs
-print('§2.3 存在: 是 | 报告引用红线:',sorted(cited),'| limit_refs 记录:',sorted(refs),'| 缺失:',sorted(missing) if missing else '无')
+print('limit_checkpoint: 存在 | §2.3 存在: 是 | 报告引用红线:',sorted(cited),'| limit_refs 记录:',sorted(refs),'| 缺失:',sorted(missing) if missing else '无')
 sys.exit(1 if missing else 0)
 "
 ```
 
-- 退出码 0 → 通过（§2.3 已写 + 引用已全部记录，或报告完全未引用红线）；非 0 → 补写 §2.3 / 回补 `limit_refs` 后重跑
-- **与 plan 的差异**：plan 扫 `01_plan.md` 全文；log 只扫 §2 + §6 两章节（limit 对照唯二落点），规避 §0 一句话定性 / §3 现场还原里业务语义的"红线 N"（如安全距离红线）误判；§2.3 存在性检查为 log 独有（plan 无此维度）
+- 退出码 0 → 通过（`limit_checkpoint.md` 已落盘 + §2.3 已写 + 引用已全部记录，或报告完全未引用红线）；非 0 → 补 `limit_checkpoint.md`（步骤1 时点漏落的，如实补写并标注"补录"，不得伪装成步骤1 时点已在） / 补写 §2.3 / 回补 `limit_refs` 后重跑
+- **补录与既有的边界（严格口径）**：`limit_checkpoint.md` 在三者中最关键，**应在正常流程里于步骤1 时点天然生成，而非靠 9.5 触发补录**；确系步骤1 漏落、靠自检才补写的，文件头须标注「补录 @分析完成时点，非步骤1 时点原读」，供审计判断读取时点合规性
+- **与 plan 的差异**：plan 扫 `01_plan.md` 全文 + 校验自己的「阶段块：plan前置硬基线」标题锚点；log 只扫 §2 + §6 两章节（limit 对照唯二落点）+ 校验自己的「阶段块：log前置检查点」标题锚点，规避 §0 一句话定性 / §3 现场还原里业务语义的"红线 N"（如安全距离红线）误判。**二者各有维度④读留痕**：log 校验 `阶段块：log前置检查点`（本步骤）、plan 校验 `阶段块：plan前置硬基线`（覆盖 init/start/fast，见 [01_plan.md](01_plan.md) 前置 limit 硬基线 + limit_refs 机器自检）；同一工单 log→plan 串联时两阶段块彼此独立存在、互不干扰。§2.3 存在性（log_analysis.md 报告小节）为 log 独有检查（plan 无此维度，plan 自身不产 §2.3）
 - **章节切片鲁棒性**：切片边界用「下一个编号标题或文末」，§3 现场还原 / §7 等**可空章节被省略时不影响匹配**（若用固定 `## 3.` 作边界，§3 省略会导致 §2 切片失败 → 误报 §2.3 缺失）
 
 10. **写入全局索引**（步骤9之后）：Read `~/.claude/icode_data/index.json`（不存在则创建），追加一条记录：
@@ -497,7 +513,7 @@ sys.exit(1 if missing else 0)
 - **每条根因结论必须能回指日志片段**——做不到回指的只进「待验证假设」
 - **禁止照抄历史工单根因**——历史参考只作启发，当前症状与历史必有差异
 - **禁止漏读/浅读 TB 评论**：TB 缺陷源的 `comments[]` 必须逐条遍历读 `content.comment`（评论文本嵌套在 `content.comment`，非数组直接为字符串），评论里的时间点/日志原文片段必须回捞进现场时间线；附件型评论（`content.comment` 为空但 `content.files[]` 非空）不得跳过；研读完成后立即核对已分析条数 == meta.json `comments[]` 长度，漏条视为不合规
-- **禁止跳过前置 limit 红线检查点 / 禁止 §2.3 省略**——limit 红线必须在步骤2 历史检索/段零文档注入**之前**读取（防"历史根因先入为主后才对照红线"的滞后）；`log_analysis.md §2.3` 是必填小节，limit 存在时逐条对照、不存在时标注"本工程无 limit 红线"，不得整节省略；报告 §2.3/§6 引用的「红线 N」必须记录进 metadata `limit_refs`（步骤 9.5 机器自检校验，退出码非 0 即不合规）
+- **禁止跳过前置 limit 红线检查点 / 禁止 §2.3 省略 / 禁止缺 `limit_checkpoint.md` 读留痕**——limit 红线必须在步骤2 历史检索/段零文档注入**之前**读取（防"历史根因先入为主后才对照红线"的滞后），且本次读取必须在进入步骤2 之前落盘 `{ICODE_OUT_DIR}/limit_checkpoint.md`（先读索引→精读命中条目的直接留痕；**步骤8 §2.3 / 步骤9 `limit_refs` 是事后产物，不能替代该读留痕**）；`log_analysis.md §2.3` 是必填小节，limit 存在时逐条对照、不存在时标注"本工程无 limit 红线"，不得整节省略；报告 §2.3/§6 引用的「红线 N」必须记录进 metadata `limit_refs`（步骤 9.5 机器自检校验，退出码非 0 即不合规）
 - **禁止向 TB 发任何写操作**（TB 缺陷源仅 GET 拉取）——严禁 POST 评论、回写结论、上传附件到 TB；分析结论只落本地 `log_analysis.md` + `00_init.md` 供人工审。`~/.claude/skills/icode/tools/tb/scripts/tb_pull.py` 本身只读无 POST，**AI 也不得自行用 Bash/requests 等任何工具向 TB 发写请求**（GET 拉取除外），违反视为越界操作
 
 ## 与步骤1的衔接
