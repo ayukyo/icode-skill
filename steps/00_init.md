@@ -19,7 +19,7 @@
 
 ### 首次调用（即每次 `/icode init`）
 
-1. **执行目录管理中的「创建新目录」逻辑**（**强制新建，不做任何复用判定**），确定 `ICODE_OUT_DIR`
+1. **执行目录管理中的「创建新目录」逻辑**（**强制新建，不做任何复用判定**；含硬熔断，见真源），确定 `ICODE_OUT_DIR`。**前置：worktree 询问硬检查点**（新建目录前必须执行，未询问即不合规）：先完成 [SKILL.md「目录管理·worktree 决策与创建」](../SKILL.md) 的**每工单一次询问**（AskUserQuestion 问用户"本工单用 worktree 隔离吗"）。**不得用任何自创理由豁免**（是否隔离由用户决定，不由 AI 判断）；唯一合法豁免 = limit 已写「worktree 默认关闭」（见 [steps/limit.md](limit.md)）。worktree 场景下目录建在 worktree 内，原地场景建在当前工作区
 2. **历史检索复用**（强制思考之前，全局索引存在时必须执行，详见 SKILL.md「历史检索复用」段）：
    - Read `~/.claude/icode_data/index.json`（不存在则跳过检索）
    - **两段式检索**：段一从本次粗略需求提炼关键词集，与各 ticket `keywords` 做 Jaccard 粗筛取 ≤10 候选（零 token，可复活预扫后排除剩余 stale）；段二只把候选 `keywords + requirement_points` 喂主代理精读打分选 top-N 命中（N 由梯度决定，明确无关则 0 条）。`/icode init` 每次强制新建目录，本次工单尚未入索引，故无需排除当前 ticket_id

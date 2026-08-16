@@ -8,10 +8,18 @@
 
 ```bash
 mkdir -p .icode_output   # 统一父目录，所有产物收纳于此
+# ⚠️ 目录号必须由下方递增逻辑计算，禁止手写/硬编码 N（如 .icode_output_10）——手写绕过递增 = 拆除"max+1 防误复用"安全网（历史事故：误复用已有工单目录，覆盖其 metadata 与 00_init）
 LAST=$(ls -d .icode_output/.icode_output_* 2>/dev/null | grep -oP '(?<=\.icode_output_)\d+' | sort -n | tail -1)
 NEXT=${LAST:-0}; NEXT=$((NEXT + 1))
 ICODE_OUT_DIR=".icode_output/.icode_output_${NEXT}"
+# ——硬熔断① 建前检查（防误复用，L1 致命，阻塞流程）——
+# 目标目录已存在 = 递增逻辑被绕过 / 目录号手写 / 并发竞态 → 立即中止，禁止覆盖
+test -d "$ICODE_OUT_DIR" && { echo "❌ 误复用风险：目标目录已存在 $ICODE_OUT_DIR（递增逻辑被绕过或目录号手写/硬编码），禁止在此新建工单"; exit 1; }
 mkdir -p "$ICODE_OUT_DIR"
+# ——硬熔断② 建后验证（防误复用，L1 致命，阻塞流程）——
+# 新建目录必须为空；非空 = 误复用（已含旧产物 / 旧工单所有权标志 .ico_metadata.json）→ 立即中止
+[ -z "$(ls -A "$ICODE_OUT_DIR")" ] || { echo "❌ 目录非空=误复用，禁止在此新建工单"; exit 1; }
+# 建后确认只能用磁盘状态（ls -A 为空 / 目录 mtime），禁止用 echo "created" 充当确认（echo 与磁盘状态无关，是伪确认）
 ```
 
 ### 复用 / 创建新目录决策（仅用于 start / plan）
@@ -35,7 +43,10 @@ fi
 if [ "$REUSE" = "0" ]; then
   NEXT=${LAST:-0}; NEXT=$((NEXT + 1))
   ICODE_OUT_DIR=".icode_output/.icode_output_${NEXT}"
+  # 硬熔断（同「创建新目录」段，防误复用）：目标目录已存在 = 递增被绕过 → 中止；mkdir 后必须验证为空
+  test -d "$ICODE_OUT_DIR" && { echo "❌ 误复用风险：目标目录已存在 $ICODE_OUT_DIR（递增逻辑被绕过或目录号手写/硬编码），禁止在此新建工单"; exit 1; }
   mkdir -p "$ICODE_OUT_DIR"
+  [ -z "$(ls -A "$ICODE_OUT_DIR")" ] || { echo "❌ 目录非空=误复用，禁止在此新建工单"; exit 1; }
 fi
 ```
 
@@ -107,7 +118,7 @@ Read `~/.claude/icode_data/index.json`（不存在则创建 `{"version":"1","upd
 
 > **⚠️ index.json 读取方式（防与 DOC 混淆）**：本段 index.json 指**全局工单索引** `~/.claude/icode_data/index.json`，是完整 JSON 文件，必须用 `json.load` **整体解析 `tickets` 数组全量读**，禁止按行截断（如只读前 50 行--12 条工单约占 350 行，前 50 行仅覆盖 2 条，会漏掉其余工单导致检索失真）。「前 50 行」规则**仅适用于** `project_docs/<id>/*.md` 章节（见下文「段零·工程文档检索」段步骤 2），两者不可混用。
 
-检索阶段（init/log/plan/start 启动时扫 index.json）采用**两段式检索**（详见 SKILL.md「检索注入流程」）——段一 keywords Jaccard 粗筛取 ≤10 候选（零 token，复活预扫后排除剩余 stale/当前 ticket_id），段二只把候选 keywords+requirement_points 喂 LLM 精读打分选 top-N 命中（N 由梯度决定）。对 top-N 命中工单，**先做过时校验，再续期**：
+检索阶段（init/log/plan/start 启动时扫 index.json）采用**两段式检索**（详见 SKILL.md「检索注入流程」）——段一 keywords Jaccard 粗筛取 ≤10 候选（零 token，复活预扫后排除剩余 stale/当前 ticket_id；**归档工单天然不受影响**：`archive_path` 非 null 且 `test -d` 有效的归档工单为 **archived 活跃态，非 stale**，不被段一排除，照常进候选走归档读档），段二只把候选 keywords+requirement_points 喂 LLM 精读打分选 top-N 命中（N 由梯度决定）。对 top-N 命中工单，**先做过时校验，再续期**：
 
 ### 项目路径校验（防注入已删除工程）
 
@@ -122,7 +133,7 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
 }
 ```
 
-**设计意图**：工程被删/移动后，老工单的 ADR/需求已无意义，注入会误导。stale=true 后该工单不再被段一粗筛命中（段一前显式排除）、不再被注入、不再续期。
+**设计意图**：工程被删/移动后，老工单的 ADR/需求已无意义，注入会误导。stale=true 后该工单不再被段一粗筛命中（段一前显式排除）、不再被注入、不再续期。**区别（归档工单 = archived 活跃历史工单，不进入 stale 机制）**：worktree 回流已归档（`archive_path` 有效）的工单，`project_path` 失效属预期（工单已交付），ADR/根因已归档可读档复用——该工单**不标 stale**，为 archived 活跃态，段一照常进候选、过时校验走「归档读档」、命中正常续期+按 verdict 分流，**待遇与主仓工单一致**，仅产物来源不同（archive_path vs project_path）。「达到像主仓使用一样」= 检索命中、ADR/根因注入、命中续期、verdict 分流、LRU 保留全部一致。
 
 **与现有 stale 机制的关系**：复用 stale 字段，不引入新状态值；项目路径校验失败的工单走与代码锚点失效相同的 stale 路径。
 
@@ -133,14 +144,14 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
 > **⚠️ Git 操作安全白名单（强制，违反即不合规）**：本段所有 git 调用必须**只读**，仅允许：`git rev-parse HEAD` / `git rev-parse --abbrev-ref HEAD` / `git rev-parse --git-dir` / `git merge-base --is-ancestor <A> <B>`（仅取退出码 0/1）/ `git status --porcelain` / `git log --oneline -1` / `git cat-file -e <sha>` / `git worktree list --porcelain`（只读；resolve_project_id F1 worktree 归一化用，见「project_id 与 branch 语义」段）。**禁止** `checkout`/`switch`/`reset`/`stash`/`clean`/`commit`/`add`/`rm`/`rebase`/`merge`/`cherry-pick`/`push`/`fetch`/`pull`/`branch -D`/`tag -d` 等一切写操作与网络操作。stale 检测**只读工作树现状，绝不改工作树/索引/提交**--"checkout 变化时重评"指检测到**用户外部**改了 HEAD 后只读重评，**绝不由技能主动 checkout**。`-C {project_path}` 前缀用于跨工程工单切换目录执行只读命令，必需且允许；全部本地完成，离线可用。
 
 **校验方法**（对 top-N 命中工单，注入前逐条；`H = git -C {project_path} rev-parse HEAD`（该工单工程的当前 HEAD，每候选取一次；非 git 仓库/失败→`null` 走纯锚点兜底））：
-1. **项目路径校验**：`test -d {project_path}` 失败→置 `stale=true`+`stale_reason=path_gone`+`stale_checked_commit=H`，**跳过注入**（即使 hit_count 高也不注入），避免对已删除工程的引用注入。**worktree 场景（预期行为，非故障）**：`project_path` 指向 worktree 路径时，工单回流 `git worktree remove` 后 `test -d` 失败 → `path_gone` 属预期（工单已交付，索引留档即可，别当工程被删排查）；**复活路径** = 重新 `git worktree add` 同分支 → `project_path` 恢复存在 → 自动重入「可复活规则」再走锚点校验
+1. **项目路径校验**：`test -d {project_path}` 失败→置 `stale=true`+`stale_reason=path_gone`+`stale_checked_commit=H`，**跳过注入**（即使 hit_count 高也不注入），避免对已删除工程的引用注入。**worktree 场景（预期行为，非故障）**：`project_path` 指向 worktree 路径时，工单回流 `git worktree remove` 后 `test -d` 失败 → `path_gone` 属预期（工单已交付，索引留档即可，别当工程被删排查）；**复活路径** = 重新 `git worktree add` 同分支 → `project_path` 恢复存在 → 自动重入「可复活规则」再走锚点校验。**归档工单（archived 活跃态，worktree 工单）**：`archive_path` 非 null 时**跳过本步 project_path 校验**，改查 `test -d {archive_path}`（如 `~/.claude/icode_data/worktree_archive/<project_id>/<ticket_id>/`）——有效→该工单为 archived 活跃历史工单，**不标 stale**，产物源=archive_path（读 `01_plan.md` ADR/风险或 `log_analysis.md` 根因/结论），**跳过第 2/3/4 步**（无代码可校验，注入走历史参考语义——作启发、非当前代码事实，须 Grep/Read 实证，见「不盲信约束」），命中**正常续期 + 按 verdict 分流**（归档工单 `disproved`/`superseded` **降级**：`project_path` 失效无法 Grep/Read 当前代码验证证伪前提、`verdict_review_needed` 主动检测亦不可执行 → 改注 `verdict_reason`+`correct_direction` 作历史避坑提示 + ⚠️ 标注『基于已交付历史代码，未经当前代码实证，须用户判断前提是否仍适用』），待遇与主仓工单一致；archive_path 失效（归档也被删）→ 才置 `stale=true`+`stale_reason=path_gone`+跳过注入（真病态）。归档见 [worktree_isolation.md](worktree_isolation.md)「产物归档」
 2. **commit 上下文校验**（`created_commit` 非 null 时；为 null 跳过本步进第3步纯锚点兜底）：
    - `H == created_commit`→工作树恰为工单出生提交，完全匹配，**not stale，高置信注入**（快路径，跳过第3步锚点校验）
    - `git merge-base --is-ancestor {created_commit} {H}`：退出 0→正常前向演进，进第3步；退出 1（H 是 `created_commit` 的祖先/分叉）→置 `stale=true`+`stale_reason=checkout_mismatch`+`stale_checked_commit=H`，**软 stale 跳过注入**（checkout 变化时可复活，见「stale 字段·可复活」）；退出 128（`created_commit` 不可达，如 GC/换库）→视同 `created_commit=null` 进第3步纯锚点兜底
 3. **代码锚点校验**（廉价，现有）：读该工单 `01_plan.md` 的 ADR 章节提取**代码锚点**（如"calc.c mul_overflows"），Grep 该工单工程（`{project_path}`）确认是否仍存在；不存在（删除/重构/重命名）→置 `stale=true`+`stale_reason=anchor_gone`+`stale_checked_commit=H`，**跳过注入**
 4. **语义偏离校验**（新，贵层，仅对已决定注入的 top-N≤3 条）：Read 该工单工程（`{project_path}`）锚点处当前代码，按 **ADR 偏离 checklist** 判 ADR 前提是否仍成立：①ADR 涉及的函数/类签名是否仍匹配 ②返回值/边界值/错误码是否仍如 ADR 所述 ③ADR 推理依赖的调用关系/数据结构是否仍存在。任一不成立→置 `stale=true`+`stale_reason=semantic_deviation`+`stale_checked_commit=H`，**跳过注入**（专抓"锚点符号在但语义已变"，锚点校验抓不到）
 
-通过全部校验→工单有效，**按 verdict 分流注入**（详见 SKILL.md「历史检索复用·注入分流」段）+ 续期（`stale_checked_commit=H` 在评估时已更新）：
+通过全部校验（归档工单 = 第1步 `archive_path` 有效即通过，跳过 2/3/4 步）→工单有效，**按 verdict 分流注入**（详见 SKILL.md「历史检索复用·注入分流」段）+ 续期（`stale_checked_commit=H` 在评估时已更新）：
 
 - `verdict="verified"`/`"unknown"`（含所有旧工单）：正常注入 ADR+风险章节（现状不变）；**`unknown` 强制走 A 层强化**（扩读 `00_init.md` 末轮对话摘要 + 对抗质疑三问 + ⚠️未验证警告，见 [thinking_core.md](thinking_core.md)「历史参考小节」）--这是旧工单（无 verdict）防误导的主防线，不依赖标注
 - `verdict="disproved"`（`verdict_review_needed=false`）：**反转注入避坑 + 证伪前提断言**--不注 ADR，改注 `verdict_reason`（作可验证断言）+ `correct_direction`，标 ⛔ 避坑；**强制新需求 Grep/Read 验证证伪前提是否仍成立**（如"某接口语义是重置"，须 Read 当前实现确认是否仍重置）：仍成立则确实避坑；已失效则方向或可重新考虑，提示 `/icode status --verdict` 标复活（unknown/verified）；`correct_direction` 缺失时降级注 ADR + ⛔ 警告（提示补标）
@@ -170,6 +181,8 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
 - `verdict_at` = 当前时间（仅 `disproved`/`superseded` 命中时更新，记录提醒次数，不触发续期）
 - 写回 index.json
 - `stale_checked_commit` 在「过时校验」评估阶段已更新为当前 `H`（**与 hit_count 解耦**--续期去重跳过 hit_count +1 时，stale_checked_commit 仍随评估更新，保证可复活判据准确）
+
+> **归档工单正常续期（archived 活跃态）**：`archive_path` 有效（走「归档读档」注入）的工单，命中**正常续期**（`last_used_at`+`hit_count` 原子同步），与主仓工单一致——归档是已完成交付的真实工单，被复用越多越有保留价值，应参与 LRU 正常保留；仅 `verdict` 为 `disproved`/`superseded` 时按 verdict 语义跳过续期（见上）。续期去重缓存照常写记录（防同目录重复注入）
 
 > **原子同步（强制，防数据失真）**：`last_used_at` 与 `hit_count` 必须在**同一次写回**中同步更新，**不得只更新其一**。历史 bug：某次命中只更新了 `last_used_at` 却漏 `hit_count` 自增，导致 `last_used_at` 被刷新但 `hit_count=0`——这条工单在 LRU 排序里因 hit_count 低沉底、却被 last_used_at"续期"误导排序，**直接破坏淘汰准确性**。续期写入时若任一字段更新失败，整次续期回滚不落盘。
 

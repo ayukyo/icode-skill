@@ -9,10 +9,11 @@
 
 只对**新建工单**触发（`/icode init/log/start/plan/fast` 判定为「新建」时）；续跑不触发（见 §2 cwd 契约）。
 
-**① 入口询问（每工单一次）**：问用户「本工单用 worktree 隔离吗？（独立分支 + 独立目录，并行互不污染）还是就在当前工作区做？」
+**① 入口询问（每工单一次，硬门）**：问用户「本工单用 worktree 隔离吗？（独立分支 + 独立目录，并行互不污染）还是就在当前工作区做？」
 - 答「用」→ ② 创建
 - 答「不用」→ 原地（走现有「创建新目录」），**不记** worktree metadata
 - limit 已写「worktree 默认关闭」→ 跳过询问直接原地
+- **硬门（防心智跳过）**：本询问是**强制检查点**，新建工单前必须完成，未询问即不合规。**不得用任何自创理由豁免**（如"只分析不改代码、不需要隔离"——是否隔离由用户决定，不由 AI 判断）；唯一合法豁免 = limit「worktree 默认关闭」。历史事故：AI 用自创理由跳过本询问，并硬编码目录号误复用已有工单目录，覆盖其 metadata 与 00_init（硬熔断见 [dir_and_metadata.md](dir_and_metadata.md)「创建新目录」）
 
 **② 创建（答「用」时）**：创建前展示将创建的 路径 + 分支名，等用户最终确认（创建是写操作影响 `.git`）：
 
@@ -80,10 +81,27 @@ git worktree remove --force ../<repo>-wt-<ticket-slug>   # --force 仅限改动�
 ```
 
 - **顺序陷阱（两重保护）**：`git branch -d` 有两道检查——① 分支仍 checkout 于 worktree 时被拒 → **先 `worktree remove` 再 `branch -d`**；② 分支未完全合并时被拒（`没有完全合并`）→ 方案① merge 后自然满足；只 commit 不 merge（想暂留分支）则 branch -d 被拒是 git 正常保护——保留分支等以后合并，或用户自行 `git branch -D`（icode 不执行 `-D`）
+- **cwd 陷阱（实跑验证）**：`git worktree remove` / `git branch -d` **必须在主工作区执行**——cwd 在 worktree 内时 remove 会报「不是一个工作区」、branch -d 报「分支未发现」，看似失败实为 cwd 误判（`cd <主仓路径>` 后重跑即正常，目录/分支实际都未受影响）；回流命令前先确认 cwd
 - **严禁**未处理改动就 remove（会失败——失败是保护，绝不由 icode 自动 `--force`）
-- **回流前产物留档**：07_readme 交付报告与产物都在 worktree 内，remove 后随之消失（全局索引仅留核心字段）——需留档先复制出 worktree 再 remove
+- **回流前产物留档（自动归档）**：07_readme 交付报告与产物都在 worktree 内，remove 后随之消失——**06_audit 终审已完成自动归档**（见下方「产物归档」），remove 前无需人工复制；若工单未走 06_audit 而直接 remove，需留档仍须人工复制出 worktree 再 remove
 - **改动涉及 submodule**：submodule 内改动需**在 worktree 内 submodule 里单独 commit**（主仓 `git add -A && git commit` 只更新 gitlink，不带 submodule 内部改动）
 - 未完成工单：worktree 保留，`git worktree list` 可随时看到，`cd` 回去续跑
+
+### 产物归档（自动，防 worktree remove 丢档）
+
+**目的**：worktree 工单的 `.icode_output_N/` 全在 worktree 内，`git worktree remove` 后随 worktree 消失（全局索引仅留摘要，完整 ADR/根因/交付报告丢失，复用价值打折）。归档把**核心产物**复制到 remove 不丢的位置，供后续检索复用完整结论。
+
+- **触发时机**：`06_audit` 终审标记 `status=completed` 时，若 `metadata.worktree_path` 非 null → 自动归档（remove 前归档已完成，remove 是用户回流手动步）。原地工单不触发（产物本在主仓，不丢）。
+- **归档目标**：`~/.claude/icode_data/worktree_archive/<project_id>/<ticket_id>/`（与全局索引同层，天然不随 worktree 走；独立目录不污染 project_docs/module_docs；`ticket_id` 唯一防冲突）
+- **归档内容**（核心高价值产物，`cp` 只复制存在的）：`.ico_metadata.json` + `00_init.md` + `01_plan.md` + `03_plan_final.md` + `log_analysis.md`。**不归档**：中间审查 JSON（`review_round_*.json`）、`tb_source/` 等大目录、临时文件。
+- **归档命令**：
+  ```bash
+  ARCHIVE_DIR="$HOME/.claude/icode_data/worktree_archive/<project_id>/<ticket_id>"
+  mkdir -p "$ARCHIVE_DIR"
+  cp "$ICODE_OUT_DIR/.ico_metadata.json" "$ICODE_OUT_DIR/00_init.md" "$ICODE_OUT_DIR/01_plan.md" "$ICODE_OUT_DIR/03_plan_final.md" "$ICODE_OUT_DIR/log_analysis.md" "$ARCHIVE_DIR/" 2>/dev/null
+  ```
+- **索引记录**：归档后写 `metadata.archive_path = "$ARCHIVE_DIR"`，并在刷新全局索引时同步写 index 条目 `archive_path`（metadata + index 同步，不得只写其一）。
+- **检索回退（读档复用，archived 活跃态）**：`archive_path` 非 null 时该工单为 **archived 活跃历史工单**，不标 stale——后续检索命中时 `project_path` 已失效（worktree remove）但 `archive_path` 存在 → 从归档目录读 `01_plan.md`（ADR/风险）或 `log_analysis.md`（根因/结论）注入，走**历史参考**语义（作启发，未经当前代码实证，须 Grep/Read 验证，见 [dir_and_metadata.md](dir_and_metadata.md)「过时校验·归档工单」），命中**正常续期 + 按 verdict 分流**，待遇与主仓工单一致（仅产物来源不同）。
 
 ---
 

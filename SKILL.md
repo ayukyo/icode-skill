@@ -267,10 +267,14 @@ git worktree list                               # 只读：确认目标路径/�
 **创建新目录**（原地路径：答「不用」/ limit 默认关闭 / worktree 创建失败降级时；worktree 场景则在 worktree 内执行）：
 ```bash
 mkdir -p .icode_output   # 统一父目录，所有产物收纳于此
+# ⚠️ 目录号必须由递增逻辑计算，禁止手写/硬编码 N（防误复用旧工单目录，历史事故教训）；真源见 dir_and_metadata「创建新目录」
 LAST=$(ls -d .icode_output/.icode_output_* 2>/dev/null | grep -oP '(?<=\.icode_output_)\d+' | sort -n | tail -1)
 NEXT=${LAST:-0}; NEXT=$((NEXT + 1))
 ICODE_OUT_DIR=".icode_output/.icode_output_${NEXT}"
+# 硬熔断① 建前检查（L1 阻塞）：目标已存在 = 递增被绕过/手写 → 中止；② 建后验证：非空 = 误复用 → 中止（细节见真源）
+test -d "$ICODE_OUT_DIR" && { echo "❌ 误复用风险：目标目录已存在 $ICODE_OUT_DIR（递增被绕过/目录号手写），禁止覆盖"; exit 1; }
 mkdir -p "$ICODE_OUT_DIR"
+[ -z "$(ls -A "$ICODE_OUT_DIR")" ] || { echo "❌ 目录非空=误复用，禁止在此新建工单"; exit 1; }
 ```
 
 **复用 / 创建新目录决策**（用于 `start` / `plan` / `fast`）：
@@ -293,7 +297,10 @@ fi
 if [ "$REUSE" = "0" ]; then
   NEXT=${LAST:-0}; NEXT=$((NEXT + 1))
   ICODE_OUT_DIR=".icode_output/.icode_output_${NEXT}"
+  # 硬熔断（同「创建新目录」段，细节见真源）：目标已存在=递增被绕过→中止；mkdir 后必须验证为空
+  test -d "$ICODE_OUT_DIR" && { echo "❌ 误复用风险：目标目录已存在 $ICODE_OUT_DIR（递增被绕过/目录号手写），禁止覆盖"; exit 1; }
   mkdir -p "$ICODE_OUT_DIR"
+  [ -z "$(ls -A "$ICODE_OUT_DIR")" ] || { echo "❌ 目录非空=误复用，禁止在此新建工单"; exit 1; }
 fi
 ```
 
@@ -360,7 +367,8 @@ ICODE_OUT_DIR=".icode_output/.icode_output_${LAST}"
   "worktree_path": null,
   "worktree_branch": null,
   "wt_degraded": false,
-  "cross_project_refs": []
+  "cross_project_refs": [],
+  "archive_path": null
 }
 ```
 
@@ -393,6 +401,7 @@ ICODE_OUT_DIR=".icode_output/.icode_output_${LAST}"
 - `worktree_branch`（worktree 字段族，缺省 `null`）：本工单分支 `icode/<slug>`（worktree 场景下与索引 `created_branch` 一致——**冗余存储**，便于 status 直接读 metadata 显示分支，不强制双写一致性）
 - `wt_degraded`（worktree 字段族，缺省 `false`）：bool，worktree 创建失败降级原地标记（`true` = 未进 worktree 且已降级，见「强制阻断边界矩阵」L3）
 - `cross_project_refs`（worktree 字段族，缺省 `[]`）：数组，跨工程 worktree 引用——本工单转工单到关联工程时追加 `{project_id, ticket_id, worktree_path}` 指向 B 工单及其 worktree；B 工单自身用 `worktree_path` 记录自己的。从 A 工单可完整追溯「本需求涉及的每个工程的 worktree」
+- `archive_path`（worktree 字段族，缺省 `null`）：本工单核心产物归档目录（`~/.claude/icode_data/worktree_archive/<project_id>/<ticket_id>/`）。**06_audit 终审**标记 `status=completed` 且 `worktree_path` 非 null 时自动归档写入（见 [references/worktree_isolation.md](references/worktree_isolation.md)「产物归档」）；同步写全局索引条目。`archive_path` 非 null 且 `test -d` 有效的工单为 **archived 活跃历史工单（不标 stale）**：检索照常命中，`project_path` 失效（worktree remove）时从归档读 ADR/根因走历史参考，命中正常续期 + 按 verdict 分流，待遇与主仓工单一致（见 [references/dir_and_metadata.md](references/dir_and_metadata.md)「过时校验」归档工单）。缺省 `null` = 原地工单或未归档
 
 - `fix_tiers`（新增，可选，默认 `null`）：修复方案三档分级（反偷懒第 26 条）。`{"A": ["A1..."], "B": ["B1..."], "C": ["C1..."]}` 供 review/code/audit 核对实施范围。**由步骤1 plan §4.5 落盘**（每档 1-2 条一句话摘要），步骤2/4/6 核对实施范围时读取；字段缺失视为 `null`，从 `03_plan_final.md` §4.5 文本读（向后兼容旧 metadata）
 - `confirmed_B_fixes`（新增，可选，默认 `[]`）：步骤4 实施 B 档兜底修复前记录的**用户显式确认清单**（每条含 B 档内容简述）。**字段缺失视为 `[]`（向后兼容旧 metadata）**。仅当用户显式确认后才实施 B 档并记录；未确认的 B 档不实施
@@ -534,7 +543,7 @@ test -f "{ICODE_OUT_DIR}/03_plan_final.md" && python3 -c "import json,sys; d=jso
 
 1. **检索阶段·两段式**（强制思考**之前**；`/icode init`/`/icode log` 在建目录后检索，`/icode plan`/`/icode start` 在目录管理+确定需求来源后检索——确保用完整需求做相关性判断）：
 
-   **段一·粗筛（不进 LLM，纯计算，零 token 消耗）**：从当前需求/症状提炼关键词集 `K_new`，**先过滤**当前 `ticket_id`（不自我参考）+ **可复活预扫**（对每条 stale 工单取 `H = git -C {project_path} rev-parse HEAD`（只读）；`stale=true` 且 `stale_reason != timeout` 且 `stale_checked_commit != H` 的临时置 `stale=false` 重入候选重评，见步骤2「可复活 stale」）后剩余的 `stale=true`--段一粗筛前**显式排除**（而非粗筛后再过滤），降低计算量；再与**全量 `tickets` 数组中**剩余 ticket 的 `keywords` 做集合交集（index.json 是完整 JSON，必须 `json.load` 整体解析全量读，禁止只读前 N 行--「前 50 行」仅适用于 `project_docs/*.md` 章节，见 [dir_and_metadata.md](references/dir_and_metadata.md)「段零·工程文档检索」段），按 **Jaccard 相似度**（`|K_new ∩ K_ticket| / |K_new ∪ K_ticket|`）降序排列。取相似度 > 0 的前 **≤10 条**作为候选集（候选为 0 则直接零命中结束）。**关键词缺失的工单**（`keywords` 为空）在粗筛中无法被命中，故写索引时 `keywords` 不得为空（≤8 个技术词）。
+   **段一·粗筛（不进 LLM，纯计算，零 token 消耗）**：从当前需求/症状提炼关键词集 `K_new`，**先过滤**当前 `ticket_id`（不自我参考）+ **可复活预扫**（对每条 stale 工单取 `H = git -C {project_path} rev-parse HEAD`（只读）；`stale=true` 且 `stale_reason != timeout` 且 `stale_checked_commit != H` 的临时置 `stale=false` 重入候选重评，见步骤2「可复活 stale」）。**归档工单天然不受影响**：`archive_path` 非 null 且 `test -d {archive_path}` 有效的工单为 **archived 活跃态，非 stale**，不被段一排除、照常进候选走归档读档（worktree 回流已归档工单虽 `project_path` 失效，但 ADR/根因已归档可读档复用，见 [dir_and_metadata.md](references/dir_and_metadata.md)「过时校验·归档工单」）——故段一无需对归档工单特判，它与其他活跃工单同等待遇后剩余的 `stale=true`--段一粗筛前**显式排除**而非粗筛后再过滤，降低计算量；再与**全量 `tickets` 数组中**剩余 ticket 的 `keywords` 做集合交集（index.json 是完整 JSON，必须 `json.load` 整体解析全量读，禁止只读前 N 行--「前 50 行」仅适用于 `project_docs/*.md` 章节，见 [dir_and_metadata.md](references/dir_and_metadata.md)「段零·工程文档检索」段），按 **Jaccard 相似度**（`|K_new ∩ K_ticket| / |K_new ∪ K_ticket|`）降序排列。取相似度 > 0 的前 **≤10 条**作为候选集（候选为 0 则直接零命中结束）。**关键词缺失的工单**（`keywords` 为空）在粗筛中无法被命中，故写索引时 `keywords` 不得为空（≤8 个技术词）。
 
    > **为何先粗筛**：index.json 到 200 条上限时全量进上下文 ≈ 3.5 万 token，纯靠 LLM 现场扫全部 summary 会撑爆 context 且判断质量随条数下降。粗筛把 O(全部) 降到 O(候选集)，实测能圈出 ≤10 条强相关候选。
 
@@ -808,8 +817,8 @@ icode 工作流可调用 6 个 MCP（`/icode install` 一键安装）。**双保
 | [references/thinking_detail.md](references/thinking_detail.md) | 强制思考前置细节（按需读：各步骤子项速查/历史参考小节） | 所有 step |
 | [references/anti_laziness.md](references/anti_laziness.md) | 反偷懒约束（31条偷懒行为+合规要求+references必读+确认行） | 所有 step |
 | [references/adversarial.md](references/adversarial.md) | 对抗分析模式（3质疑者/裁决优先级/诚实降级/证据回指） | 02_review / log |
-| [references/dir_and_metadata.md](references/dir_and_metadata.md) | 目录管理 + ticket_id 生成 + 全局索引写入（含LRU淘汰） + metadata 模板 + **注入缓存机制（防重复注入，两源共用）** + **project_docs 工程文档库 + 段零检索** | init / log / plan / start / fast / doc |
+| [references/dir_and_metadata.md](references/dir_and_metadata.md) | 目录管理（创建新目录含**硬熔断**：建前 test -d + 建后 ls -A 验证，禁手写目录号/echo 伪确认）+ ticket_id 生成 + 全局索引写入（含LRU淘汰） + metadata 模板 + **过时校验（含 worktree 归档工单**：archive_path 有效→archived 活跃态读档历史参考，正常续期） + **注入缓存机制（防重复注入，两源共用）** + **project_docs 工程文档库 + 段零检索** | init / log / plan / start / fast / doc |
 | [references/doc_template.md](references/doc_template.md) | icode doc 章节模板：前 50 行四块结构（项目元信息/KEYS/简要说明/目录）+ 十位桶编号 + 自适应 grep 关键词表 + 99 章审计策略 + **v2.0.0 双视角必含元素清单（14 项）+ 业务流独立成章 + 英文首次中文备注 + 链路中文说明 + 质量审视检查清单 + 模板版本自举迁移** | doc |
 | [references/necessity_check.md](references/necessity_check.md) | **现有功能覆盖度检查（防重复实现机制）**：触发时机 + 执行命令（全工程检索 + Read 命中处行为链）+ 三类判定（已覆盖/部分/未覆盖）+ 各步骤落点（init §2.X/预筛列、plan 前置/断言/ADR/对抗、review 维度7、deepcheck Reverse 对比、audit 视角 C） | init / plan / review / deepcheck / audit |
 | [references/first_activation_path.md](references/first_activation_path.md) | **首次激活路径一致性检查**：静态分析盲区（"写了从没实机执行过"的死路径既有 bug）+ 触发条件 + 检测法（软信号、不阻断）+ 双侧校验一致性核对清单 + 部署后验证建议下游输出 | plan（断言⑤）/ deepcheck（Reverse）/ audit（部署后建议）/ patch（部署后验证发现） |
-| [references/worktree_isolation.md](references/worktree_isolation.md) | **git worktree 多需求隔离**：worktree 决策与创建（入口询问/预检/用户确认/失败降级）+ cwd 契约 + metadata 字段族 + 回流指引（F2 二选一）+ 防误删护栏 + 空间自查 | 所有新建工单入口（init/log/start/plan/fast）/ 续跑与只读（review/code/deepcheck/audit/patch/status/readme） |
+| [references/worktree_isolation.md](references/worktree_isolation.md) | **git worktree 多需求隔离**：worktree 决策与创建（入口询问**硬门**/预检/用户确认/失败降级）+ cwd 契约 + metadata 字段族 + 回流指引（F2 二选一）+ **产物归档（自动，防 remove 丢档）** + 防误删护栏 + 空间自查 | 所有新建工单入口（init/log/start/plan/fast）/ 续跑与只读（review/code/deepcheck/audit/patch/status/readme） |
