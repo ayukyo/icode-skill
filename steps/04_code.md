@@ -21,6 +21,20 @@
 
 检查 `{ICODE_OUT_DIR}/03_plan_final.md` 是否存在，不存在则报错并提示先执行 `/icode merge`。
 
+## 前置：worktree 工单业务子仓隔离（repo 多仓库工程）
+
+> 若本工单是 worktree 隔离工单（`metadata.worktree_path` 非 null）且工程为 repo 多仓库（super-repo + 业务子仓，子仓各自独立 git 仓库），**super-repo worktree 不覆盖业务子仓**——子仓有自己的 `.git` 在原工程路径，worktree 内对应相对路径为空。本步骤进入编码前须确定实际修改的业务子仓，并为每个受影响子仓建立隔离 checkout，**禁止直接改原工程路径子仓**（会污染原工程、多需求并行冲突）。规范见 [references/worktree_isolation.md](../references/worktree_isolation.md)「⑤ 业务子仓隔离」。
+
+1. 读 `{ICODE_OUT_DIR}/03_plan_final.md` 的 code_files/§5 符号清单，确定本需求实际修改的业务子仓集（子仓相对 super-repo 路径经 `.repo/manifest.xml` `<project path>` 推导，见 [references/dir_and_metadata.md](../references/dir_and_metadata.md)「repo 嵌套子项目路径推导」）
+2. 不涉及子仓修改（只改 super-repo）→ **跳过本段**，无需隔离
+3. 对每个受影响原子仓，若 `metadata.sub_worktrees` 未含该子仓 → 建子仓隔离 checkout（把 checkout 放进 super-worktree 同名相对路径，保持路径结构与原工程一致）：
+   ```bash
+   git -C "<主仓绝对路径>/<子仓相对路径>" worktree add -b "icode/<slug>-<子仓slug>" "<主仓绝对路径>-wt-<slug>/<子仓相对路径>"
+   ```
+   前置：子仓须有 HEAD（repo 子仓均有）；目标路径须为空（super-worktree 内该相对路径未被写入）
+4. 写 `metadata.sub_worktrees` 追加 `{sub_path, worktree_path, branch}`（见 [references/worktree_isolation.md](../references/worktree_isolation.md)「§3 metadata 字段族」）
+5. **门禁（硬门）**：受影响子仓未全部隔离即改 = 直接改原工程路径，**不合规**——进入下方「执行步骤」编码前必须确认。历史事故：AI 曾靠模型智能自行加门禁提示而非由 icode 规范保证——本段固化为规范，AI 不得自行裁量
+
 ## 前置：patch 配合
 
 > 工单可能已走过 `/icode patch` 追加修改（`{ICODE_OUT_DIR}/08_patch.md` 存在且有 Patch 段，或 `metadata.patch_count > 0`）。本步骤启动时 **Read `08_patch.md`**（不存在则跳过本段，走原流程），按以下规则配合：

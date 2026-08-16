@@ -238,6 +238,8 @@ git rev-list --count <worktree_branch>..<目标基分支>     # 目标基分支 
   ②（不提交）手动带出 worktree 内改动 → 确认已保存后 git worktree remove --force <worktree路径>
   ⚠️ 未回流前勿删 worktree：未提交改动时 git worktree remove 失败是保护（不是故障）。
   ⚠️ 回流前产物留档：交付报告与全部产物都在 worktree 内，remove 后随之消失，需留档先复制出来。
+  ⚠️ 若有业务子仓隔离（metadata.sub_worktrees 非空）：先对每个子仓隔离 checkout commit + merge 回原子仓，
+     再 git -C <原子仓> worktree remove <子仓隔离路径>，最后才 remove super-worktree（见 worktree_isolation「⑤ 业务子仓隔离」）。
   完整指引见 [references/worktree_isolation.md](../references/worktree_isolation.md) §4。
 ```
 

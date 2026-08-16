@@ -262,6 +262,10 @@ git worktree list                               # 只读：确认目标路径/�
 #    （worktree 内无旧产物 → 通常恒为 _1），本工单全部产物在 worktree 内；校验 worktree 内 .icode_output/ 应为空
 #    → 非空 = 该工程 .icode_output 未 gitignore（worktree 带入了主仓旧产物）→ 提示「建议配置 .gitignore 排除 .icode_output/」，L3 不阻断
 # ④ 创建失败（无 HEAD（仓库无提交）/路径冲突/无写权限/FS 不支持/命名冲突修正后仍失败）→ 原地降级 + metadata 记 wt_degraded=true（见「强制阻断边界矩阵」L3）
+# ⑤ 业务子仓隔离（repo 多仓库工程，worktree 工单进入 code 前；真源见 worktree_isolation「⑤ 业务子仓隔离」）：
+#    super-repo worktree 不覆盖业务子仓（子仓有自己的 .git 在原工程路径）——若需求要改业务子仓，
+#    进入 code（步骤4）前必须为每个受影响子仓建隔离 checkout（git -C <原子仓> worktree add -b icode/<slug>-<子仓slug> <super-wt>/<子仓相对路径>，
+#    写 metadata.sub_worktrees），禁止直接改原工程路径子仓；回流时先 commit+merge+remove 子仓再 remove super-worktree
 ```
 
 **创建新目录**（原地路径：答「不用」/ limit 默认关闭 / worktree 创建失败降级时；worktree 场景则在 worktree 内执行）：
@@ -368,6 +372,7 @@ ICODE_OUT_DIR=".icode_output/.icode_output_${LAST}"
   "worktree_branch": null,
   "wt_degraded": false,
   "cross_project_refs": [],
+  "sub_worktrees": [],
   "archive_path": null
 }
 ```
@@ -401,6 +406,7 @@ ICODE_OUT_DIR=".icode_output/.icode_output_${LAST}"
 - `worktree_branch`（worktree 字段族，缺省 `null`）：本工单分支 `icode/<slug>`（worktree 场景下与索引 `created_branch` 一致——**冗余存储**，便于 status 直接读 metadata 显示分支，不强制双写一致性）
 - `wt_degraded`（worktree 字段族，缺省 `false`）：bool，worktree 创建失败降级原地标记（`true` = 未进 worktree 且已降级，见「强制阻断边界矩阵」L3）
 - `cross_project_refs`（worktree 字段族，缺省 `[]`）：数组，跨工程 worktree 引用——本工单转工单到关联工程时追加 `{project_id, ticket_id, worktree_path}` 指向 B 工单及其 worktree；B 工单自身用 `worktree_path` 记录自己的。从 A 工单可完整追溯「本需求涉及的每个工程的 worktree」
+- `sub_worktrees`（worktree 字段族，缺省 `[]`）：业务子仓隔离 checkout 记录（repo 多仓库工程，仅涉及子仓修改的 worktree 工单）：数组元素 `{sub_path, worktree_path, branch}`——`sub_path`=子仓相对 super-repo 路径、`worktree_path`=子仓隔离 checkout 绝对路径（在 super-worktree 内同名相对路径）、`branch`=`icode/<slug>-<子仓slug>`。首次建子仓隔离时追加，回流回收时清。见 [references/worktree_isolation.md](references/worktree_isolation.md)「⑤ 业务子仓隔离」
 - `archive_path`（worktree 字段族，缺省 `null`）：本工单核心产物归档目录（`~/.claude/icode_data/worktree_archive/<project_id>/<ticket_id>/`）。**06_audit 终审**标记 `status=completed` 且 `worktree_path` 非 null 时自动归档写入（见 [references/worktree_isolation.md](references/worktree_isolation.md)「产物归档」）；同步写全局索引条目。`archive_path` 非 null 且 `test -d` 有效的工单为 **archived 活跃历史工单（不标 stale）**：检索照常命中，`project_path` 失效（worktree remove）时从归档读 ADR/根因走历史参考，命中正常续期 + 按 verdict 分流，待遇与主仓工单一致（见 [references/dir_and_metadata.md](references/dir_and_metadata.md)「过时校验」归档工单）。缺省 `null` = 原地工单或未归档
 
 - `fix_tiers`（新增，可选，默认 `null`）：修复方案三档分级（反偷懒第 26 条）。`{"A": ["A1..."], "B": ["B1..."], "C": ["C1..."]}` 供 review/code/audit 核对实施范围。**由步骤1 plan §4.5 落盘**（每档 1-2 条一句话摘要），步骤2/4/6 核对实施范围时读取；字段缺失视为 `null`，从 `03_plan_final.md` §4.5 文本读（向后兼容旧 metadata）
