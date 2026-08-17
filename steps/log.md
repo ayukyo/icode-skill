@@ -410,7 +410,14 @@ sys.exit(1 if missing else 0)
    - **未跳过的后果**：debug 工单被错误索引会污染 `/icode status` 列表 + 历史检索 + 同 TB 单检索复用——debug 工单正是要做"独立孪生对照"，索引会违背设计意图
    - **强证据场景**：`/icode list`、`/icode status` 检索、段零工程文档检索、SWE bot 跨工程查询均依赖 index.json——debug 工单不入索引 = 不进入这些场景（**设计意图如此**）
    - 同 init.md 阶段 8 跳过逻辑完全一致（参考 [references/debug_mode.md](../references/debug_mode.md)）
-11. 提示用户：根因已定，可敲 `/icode plan` / `/icode start` / `/icode fast`（均无参）复用本目录的 `00_init.md` 进入修复流程；其中 fast 适合小改动（单文件/少量文件、边界清晰、无架构变更）；若对根因有异议，继续对话即可重跑对抗分析
+11. 提示用户：**`--debug` 时**（metadata.debug 为 true）**不输出**"进入修复流程"引导（debug 工单 L1 阻断、不进主流程，引导进入是错误指引），改为输出 **debug 对照说明**：
+    ```
+    ## debug 对照说明
+    📌 本工单是 debug 孪生（debug: true），不入索引、不参与主流程，`log_analysis.md` 仅供与正常工单并列对照研读（设计意图，见 references/debug_mode.md）。
+    ⛔ 不进入修复流程：debug 工单不支持 /icode plan / /icode start / /icode fast（L1 阻断）。
+    如需对根因正式修复：请用 /icode init（不带 --debug）或正常 /icode log 新建正常工单走修复流程。
+    ```
+    **非 debug 时**：根因已定，可敲 `/icode plan` / `/icode start` / `/icode fast`（均无参）复用本目录的 `00_init.md` 进入修复流程；其中 fast 适合小改动（单文件/少量文件、边界清晰、无架构变更）；若对根因有异议，继续对话即可重跑对抗分析
 
 ## TB 缺陷源拉取（可选前置，仅当零散输入含 TB 引用）
 

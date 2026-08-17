@@ -90,6 +90,14 @@
    - **强证据场景**：`/icode list`、``/icode status` 检索、段零工程文档检索、SWE bot 跨工程查询均依赖 index.json——debug 工单不入索引 = 不进入这些场景（**这就是设计意图**）
 9. **工作量评估 + 入口建议**（自动给用户判断，省"我也不知道该 start 还是 fast"的纠结）：
 
+   **`--debug` 模式差异**（详 [references/debug_mode.md](../references/debug_mode.md)）：debug 工单**跳过本步骤全部评估逻辑**（`workload_estimate` / `workload_reason` 不写，见步骤7；不索引也无需评估），**不输出**「下一步建议」入口块，改为输出 **debug 对照说明**：
+   ```
+   ## debug 对照说明
+   📌 本工单是 debug 孪生（debug: true），不入索引、不参与主流程，产物仅供与正常工单并列对照研读（设计意图，见 references/debug_mode.md）。
+   ⛔ 不进入修复流程：debug 工单不支持 /icode plan / /icode start / /icode fast（L1 阻断）。
+   如需正式修复：请用 /icode init（不带 --debug）新建正常工单走主流程。
+   ```
+
    - **4 维度信号**：
      1. 需求点数：`requirement_points` 数组长度
      2. 涉及文件数：`code_files` 数组长度
@@ -122,7 +130,7 @@
      - /icode fast：1 轮无对抗 + 单阶段 deepcheck（{适用情况}）—— {当前是否推荐}
      ```
 
-   - **持续更新**：每轮对话结束前重评（需求点/文件数/大改词可能变化），刷新 metadata + 索引（仅刷 `workload_estimate`+`workload_reason`，不刷 `requirement_points` 防索引膨胀）
+   - **持续更新**：每轮对话结束前重评（需求点/文件数/大改词可能变化），刷新 metadata + 索引（仅刷 `workload_estimate`+`workload_reason`，不刷 `requirement_points` 防索引膨胀）。**debug 工单豁免本子段**（debug 不评估工作量、不写索引，见上方 debug 模式差异）
    - **保持向后兼容**：旧 metadata 无 `workload_estimate` 视为 `"medium"`（中性默认），不阻塞后续步骤
 
 ### 后续每轮对话（同一会话内，由 AI 自主识别，无需用户敲命令）

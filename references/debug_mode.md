@@ -43,6 +43,10 @@
 
 `--debug` 与现有 flag（`--listen` / `--test` 仅 patch）**互不冲突**。
 
+**完成提示差异**（debug 入口步骤末尾的强制输出）：
+- debug 模式下 init/log 完成后**不输出**「下一步建议 / 进入修复流程」引导（`/icode plan` / `/icode start` / `/icode fast`——debug 工单 L1 阻断，引导进入修复流程是错误指引）
+- 改为输出 **debug 对照说明**：说明本工单是 debug 孪生（不入索引、不参与主流程、产物仅供与正常工单并列对照研读），并提示"如需正式修复，请用不带 `--debug` 的 `/icode init` / `/icode log` 新建正常工单"（见 [steps/00_init.md](../steps/00_init.md) 步骤9 与 [steps/log.md](../steps/log.md) 步骤11 的 debug 分支）
+
 ---
 
 ## 4. metadata 新增字段
