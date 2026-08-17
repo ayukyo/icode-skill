@@ -79,6 +79,11 @@ Other entry points:
 /icode log --worktree   ~/work/log/service-anomaly "no response"  # Log + isolated branch/dir
 # Without --worktree, tickets are created in-place by default — no prompt.
 # Triggers also accept natural language ("use worktree isolation"), with reverse declarations taking precedence; AI shows a status line on entry. Projects can block via `/icode limit worktree 强制禁止`.
+# New worktrees are created on the current remote-tracking baseline (@{u}) with upstream tracking, so git status/pull/merge stay correct.
+# Worktree lifecycle (after creation):
+/icode worktree --update    # Move the active implementation to a new checkout on the latest remote baseline (tracked upstream)
+/icode worktree --close     # After you committed/pushed/merged: verify online evidence + safe cleanup + record baseline
+/icode worktree --reopen    # Restore a closed ticket's active checkout on the latest baseline (then /icode patch)
 ```
 
 ## The Workflow
@@ -195,6 +200,9 @@ Each MCP has an explicit strong-evidence trigger and a declared graceful-downgra
 | `/icode ppt [natural language]` | PPT generation (standalone deliverable step): natural language → real `.pptx` for **project / module / current feature dev / current bug fix**; content sourced from icode artifacts & knowledge base (no fabrication), 16 built-in templates (`tools/ppt/templates/`, the AI shortlists 2-3 style-matched candidates and the user picks; user may also name a template directly), editable `edits.json` for re-run; outputs to `<project_root>/.icode_output/ppt/` (outside any ticket dir); needs `pip install python-pptx` (LibreOffice+poppler optional for PNG preview). Built-in templates are **non-commercial** (see `tools/ppt/NOTICE`) |
 | `/icode status` | Read-only: query current ticket status (+ `--verdict` annotation) |
 | `/icode list [keywords]` | Cross-project ticket search (pure read-only) |
+| `/icode worktree --update [--to-ref <ref>]` | Worktree lifecycle (standalone): controlled migration of the active implementation checkout to a new one on the latest/specified baseline — 11-phase state machine, failure keeps the old active root, interrupt-recoverable & idempotent. Switching baselines must go through this command (no silent pointer changes); multi-subrepo handled as one transaction |
+| `/icode worktree --close` | Worktree lifecycle (standalone): after you've committed/pushed/merged — verify online evidence → mark submitted → safely clean up checkouts → record `submitted_baseline`. Never commits/pushes for you; never deletes unique uncommitted code or unarchived artifacts; idempotent |
+| `/icode worktree --reopen [--to-ref <ref>]` | Worktree lifecycle (standalone): explicit restore for a closed `completed` ticket — create a new active checkout on the latest online baseline (no new ticket, patch history kept). Closed tickets must reopen before `patch` |
 
 > Full command details (incl. "Creates Dir?" column + reuse rules + `--verdict`/`--scan-verdict` flags): see the [SKILL.md](SKILL.md) `Commands` section.
 

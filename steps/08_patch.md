@@ -11,6 +11,8 @@
 | **L1·致命** | 无最新工单目录（`.icode_output/.icode_output_N/` 不存在或 metadata 缺失） | 报错退出，提示先 `/icode init` / `/icode start` 创建工单 |
 | **L1·致命** | 最新工单处于入口态（`init_in_progress` / `log_done`，无 `01_plan.md`） | 报错退出，提示先 `/icode plan` / `/icode start` 进入主流程（patch 只作用于已有主流程产物的工单） |
 | **L1·致命** | 当前工单是 debug 工单（`metadata.debug == true`） | 报错退出，提示：`/icode patch` 不接受 debug 工单（debug 工单是 1 次研究产物、不支持 patch 续跑；如需修代码，请用 `/icode init` 重建正常工单走主流程；详情见 [references/debug_mode.md](../references/debug_mode.md)） |
+| **L1·致命** | 统一拓扑门禁 verdict=blocked（双活动实现根 / 子仓逃逸 / 未完成迁移 / cwd 不符） | 报错退出，输出冲突路径与各自 dirty/commit 情况，提示先 `/icode worktree --update` 或人工裁决（[references/worktree_isolation.md §3.8](../references/worktree_isolation.md)） |
+| **L1·致命** | 工单已 close（`submitted_baseline` 非 null）但未 reopen | 报错退出，提示先 `/icode worktree --reopen` 在最新在线基线上创建新的活动 checkout，再 patch（禁止在已关闭的旧目录上继续改） |
 | **L2·关键** | 阶段4 复检发现新引入问题且无法当场修复 | 警告 + 记入 metadata（`patch_history` 末条 `status="issues"`）+ 流程继续（user 可再跑 `/icode patch` 处理） |
 
 ## 定位
@@ -26,6 +28,14 @@
 - 全新的、与当前工单无关的需求 → `/icode init` / `/icode start` 新建工单
 
 **对状态机的影响**：patch **不改变** `status` 和 `completed_steps`（completed 保持 completed，中途状态保持原状态）。patch 是横向追加，不是纵向推进——靠 `patch_count` / `patch_history` 字段记录（见「强制操作」段），主流程推进逻辑（以 `completed_steps` 最大编号推进）完全不受影响。
+
+**completed 工单分流（lifecycle）**：`status=completed` 时区分两种情况——
+1. **未 close**（`submitted_baseline` 为 null 或缺失，活动 checkout 未关闭）：patch 可在当前唯一活动根继续（现有行为）
+2. **已 close**（`submitted_baseline` 非 null）：必须先 `/icode worktree --reopen` 在最新在线基线上创建新的活动 checkout（不新建 ticket、不清 patch 历史），再 patch。**禁止偷偷复活旧目录**（见 [steps/reopen.md](reopen.md)）。reopen 是新的一代 checkout，写入 `checkout_history`，本次恢复原因记入工单历史。
+
+**completed 工单分流（lifecycle）**：`status=completed` 时区分两种情况——
+1. **未 close**（`submitted_baseline` 为 null 或缺失，活动 checkout 未关闭）：patch 可在当前唯一活动根继续（现有行为）
+2. **已 close**（`submitted_baseline` 非 null）：必须**先 `/icode worktree --reopen`** 在最新在线基线上创建新的活动 checkout（不新建 ticket、不清 patch 历史），再 patch。**禁止偷偷复活旧目录**（见 [steps/reopen.md](reopen.md)）。reopen 是新的一代 checkout，写入 `checkout_history`，本次恢复原因记入工单历史。
 
 **后续主流程步骤的配合**：patch 之后继续跑步骤 4/5/6 时，各步骤启动会 Read `08_patch.md` 把补丁纳入计划侧基准（code 在 patch 基础上实施 / deepcheck Reverse 不误判偏离 / audit 追溯矩阵纳入补丁）——详见 [SKILL.md「patch 与主流程步骤的配合」](../SKILL.md) + 各步骤文件「前置：patch 配合」段。review/merge 只动计划文档，不需要配合。
 
@@ -67,9 +77,10 @@
    - `init_in_progress` / `log_done`（入口态，无 `01_plan.md`）→ **报错退出**，提示先 `/icode plan` / `/icode start`
    - `review_in_progress` / `deepcheck_in_progress` → **柔性提示**"当前有未完成的主流程步骤（步骤 2/5 中断态），建议先重跑 `/icode review` / `/icode deepcheck` 续跑"，**不阻断**，用户明确要 patch 则继续
    - 其余状态（`plan_done` 及以后 / `completed`）→ 直接进入执行流程
-2.5. **worktree 工单落点约束**：读 `metadata.worktree_path`：
-   - **非 null**（本工单在 worktree 内）→ **必须先 `cd {worktree_path}` 再继续本步骤**（cwd 契约照常，与 status --validate / 06_audit / 07_readme 同，见 [references/worktree_isolation.md §2](../references/worktree_isolation.md)）；在主仓跑会找不到 `.icode_output_N/` 内产物 → 误报缺失
+2.5. **worktree 工单落点约束**：读 `metadata.active_checkout`（缺失则按 [references/worktree_isolation.md §3.7](../references/worktree_isolation.md) 用 `worktree_path` 推导）：
+   - **非 null**（本工单有活动 checkout）→ **必须先 `cd {active_checkout.path}` 再继续本步骤**（cwd 契约照常，与 status --validate / 06_audit / 07_readme 同，见 [references/worktree_isolation.md §2](../references/worktree_isolation.md)）；在主仓跑会找不到 `.icode_output_N/` 内产物 → 误报缺失
    - **null**（原地工单）→ 直接继续
+   - **已 close**（`submitted_baseline` 非 null）→ 见「定位」段分流：必须先 reopen 再 patch（L1 阻断）
 3. 确定本次 `N`（**双源取大，防编号冲突**）：
    - 读 `metadata.patch_count`（缺失视为 0）
    - 读 `08_patch.md` 最大 Patch 段编号（`grep -oP '^## Patch \K\d+' {ICODE_OUT_DIR}/08_patch.md 2>/dev/null | sort -n | tail -1`——**须重定向 stderr**：文件不存在时 grep 会报错，重定向后无输出、`tail` 为空 → 视为 0）

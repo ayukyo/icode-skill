@@ -12,6 +12,7 @@
 |---|---|---|
 | **L1·致命** | 前置产物缺失（`03_plan_final.md` 不存在） | 报错退出，提示先跑 `/icode merge` |
 | **L1·致命** | 当前工单是 debug 工单（`metadata.debug == true`） | 报错退出，提示：`/icode code` 不接受 debug 工单（debug 工单不入索引、不参与主流程，纯作为正常工单的对照；详情见 [references/debug_mode.md](../references/debug_mode.md)） |
+| **L1·致命** | 统一拓扑门禁 verdict=blocked（双活动实现根 / 子仓逃逸 / 未完成迁移 / cwd 不符） | 报错退出，输出冲突路径与各自 dirty/commit 情况，提示先 `/icode worktree --update` 或人工裁决（[references/worktree_isolation.md §3.8](../references/worktree_isolation.md)） |
 | **L2·关键** | Code Review Fix 4 维度复检**全部失败**（4 个维度都标 ❌） | 警告 + 记入 metadata + 流程继续（不阻断；user 可事后回代码修复/重设计） |
 
 **L3·重要**（矩阵段定义）：编译失败（3 次仍失败）→ 设 `code_compile_failed=true`，步骤 5 入口警告，**流程继续**。测试失败（3 次仍失败）→ 设 `test_failures=true`，步骤 5 入口警告，**流程继续**（与编译失败同级 L3）。
@@ -22,15 +23,26 @@
 
 检查 `{ICODE_OUT_DIR}/03_plan_final.md` 是否存在，不存在则报错并提示先执行 `/icode merge`。
 
+## 前置：统一拓扑门禁（共享检查器）
+
+> 进入编码前**必须**调用统一拓扑检查器（[references/worktree_isolation.md §3.8](../references/worktree_isolation.md)），verdict 语义：`pass` 继续 / `repairable` 仅执行无歧义、可逆、幂等的 metadata 修复后继续 / `blocked` **报错退出**。**禁止**绕开本门禁直接在旧 checkout 修改代码——在非活动 checkout 修改 = 证据与实现脱节，编译/测试通过也不构成当前活动实现的通过证据。子仓隔离硬门（下段）是拓扑门禁「⑥ 子仓拓扑」的实施细则，两者都要过。
+
 ## 前置：worktree 工单业务子仓隔离（repo 多仓库工程）
 
-> 若本工单是 worktree 隔离工单（`metadata.worktree_path` 非 null）且工程为 repo 多仓库（super-repo + 业务子仓，子仓各自独立 git 仓库），**super-repo worktree 不覆盖业务子仓**——子仓有自己的 `.git` 在原工程路径，worktree 内对应相对路径为空。本步骤进入编码前须确定实际修改的业务子仓，并为每个受影响子仓建立隔离 checkout，**禁止直接改原工程路径子仓**（会污染原工程、多需求并行冲突）。规范见 [references/worktree_isolation.md](../references/worktree_isolation.md)「⑤ 业务子仓隔离」。
+> 若本工单是 worktree 隔离工单（`metadata.active_checkout` 非 null，缺失按 [references/worktree_isolation.md §3.7](../references/worktree_isolation.md) 用 `worktree_path` 推导）且工程为 repo 多仓库（super-repo + 业务子仓，子仓各自独立 git 仓库），**super-repo worktree 不覆盖业务子仓**——子仓有自己的 `.git` 在原工程路径，worktree 内对应相对路径为空。本步骤进入编码前须确定实际修改的业务子仓，并为每个受影响子仓建立隔离 checkout，**禁止直接改原工程路径子仓**（会污染原工程、多需求并行冲突）。规范见 [references/worktree_isolation.md](../references/worktree_isolation.md)「⑤ 业务子仓隔离」。
 
 1. 读 `{ICODE_OUT_DIR}/03_plan_final.md` 的 code_files/§5 符号清单，确定本需求实际修改的业务子仓集（子仓相对 super-repo 路径经 `.repo/manifest.xml` `<project path>` 推导，见 [references/dir_and_metadata.md](../references/dir_and_metadata.md)「repo 嵌套子项目路径推导」）
 2. 不涉及子仓修改（只改 super-repo）→ **跳过本段**，无需隔离
-3. 对每个受影响原子仓，若 `metadata.sub_worktrees` 未含该子仓 → 建子仓隔离 checkout（把 checkout 放进 super-worktree 同名相对路径，保持路径结构与原工程一致）：
+3. 对每个受影响原子仓，若 `metadata.sub_worktrees` 未含该子仓 → 建子仓隔离 checkout（把 checkout 放进 super-worktree 同名相对路径，保持路径结构与原工程一致；**子仓分支基于子仓当前分支的远程跟踪 `@{u}` 创建 + 自动 upstream**，无 upstream 降级本地 HEAD）：
    ```bash
-   git -C "<主仓绝对路径>/<子仓相对路径>" worktree add -b "icode/<ticket-slug>-<子仓slug>" "<主仓绝对路径>-wt-<ticket-slug>/<子仓相对路径>"
+   SUB_UP=$(git -C "<主仓绝对路径>/<子仓相对路径>" rev-parse --symbolic-full-name @{u} 2>/dev/null)
+   SUB_UP_AVAIL=0
+   [ -n "$SUB_UP" ] && git -C "<主仓绝对路径>/<子仓相对路径>" rev-parse --verify "$SUB_UP" >/dev/null 2>&1 && SUB_UP_AVAIL=1
+   if [ "$SUB_UP_AVAIL" = "1" ]; then
+     git -C "<主仓绝对路径>/<子仓相对路径>" worktree add -b "icode/<ticket-slug>-<子仓slug>" "<主仓绝对路径>-wt-<ticket-slug>/<子仓相对路径>" "$SUB_UP"
+   else
+     git -C "<主仓绝对路径>/<子仓相对路径>" worktree add -b "icode/<ticket-slug>-<子仓slug>" "<主仓绝对路径>-wt-<ticket-slug>/<子仓相对路径>"
+   fi
    ```
    前置：子仓须有 HEAD（repo 子仓均有）；目标路径须为空（super-worktree 内该相对路径未被写入）
 4. 写 `metadata.sub_worktrees` 追加 `{sub_path, worktree_path, branch}`（见 [references/worktree_isolation.md](../references/worktree_isolation.md)「§3 metadata 字段族」）

@@ -168,7 +168,7 @@ LOCAL_FILE="$LOCAL_DIR/$PROJECT_ID.md"
   1. 先**只判 opt-in**（扫描 `--worktree` / 自然语言）
   2. 若 opt-in 未触发 → 默认原地（**不走本红线判定**——用户没要求 worktree，无违规）
   3. 若 opt-in 触发 → **再读 limit**（主存 + local 合并）
-  4. limit 命中「worktree 强制禁止」→ 提示一次 + 回退原地（**不写 `wt_degraded=true`**——因为根本没尝试 git worktree add，无创建失败；与 SKILL.md §1② 「④ 失败降级」不同路径，flag 由 `worktree_path` 仍为 null 间接表达"未进 worktree"）
+  4. limit 命中「worktree 强制禁止」→ 提示一次 + 回退原地（**不写 `wt_degraded=true`**——因为根本没尝试 git worktree add，无创建失败；与 SKILL.md §1② 「④ 失败降级」不同路径，flag 由 `active_checkout` 仍为 null（§3.7 推导）间接表达"未进 worktree"）
   5. limit 未命中 → 按 opt-in 触发 → 走 worktree 创建路径
 
 **柔性提示**：plan 步骤入口检测 main + local 都不存在 → 输出"💡 本工程尚无 limit 约束（建议运行 `/icode limit <约束描述>` 生成），不阻断流程"。

@@ -152,6 +152,11 @@ cd ~/.claude/skills/icode/mcp/cheap-research
 # 反向声明后置优先：「别用 worktree」「不要 worktree 隔离」「普通做就行」可覆盖前置触发
 # AI 入口输出一行状态：「▶ worktree 隔离：即将启用 → ...」/「▶ worktree 隔离：未启用」
 # 工程级反向开关：`/icode limit worktree 强制禁止` 红线命中 → 阻止触发（提示一次后回退原地）
+# 新建 worktree 基于主仓当前分支的远程跟踪（@{u}）创建 + 自动 upstream——git status/pull/merge 方向始终正确
+# worktree 生命周期（创建之后）：
+/icode worktree --update    # 迁移活动实现根到基于最新远程基线的新 checkout（自动跟踪上游）
+/icode worktree --close     # 你已 commit/push/merge 后：核验在线证据 + 安全清理 + 记录基线
+/icode worktree --reopen    # 已 close 工单恢复：在最新基线上重建活动 checkout（之后 /icode patch）
 
 # 从 bug 日志分析切入修复（先查根因，再修复）
 /icode log ~/work/log/服务异常 "启动后无响应"      # 入口：分析日志根因，产出 log_analysis.md + 修复需求 00_init.md
@@ -189,6 +194,9 @@ cd ~/.claude/skills/icode/mcp/cheap-research
 | `/icode ppt [自然语言]` | PPT 生成（独立交付步骤）：自然语言 → 真实 `.pptx`，4 类场景——**项目 / 模块 / 本次功能开发 / 本次BUG修复**；内容源为 icode 产物/知识库（禁止编造），内置 16 套模板（`tools/ppt/templates/`，AI 先筛 2-3 个风格匹配候选、由用户挑选；也可直接点名模板），产出 `<工程根>/.icode_output/ppt/`（不放进工单目录）可回溯；依赖 python-pptx（必需），LibreOffice+poppler 可选（PNG 预览自检）；内置模板非商业授权（见 `tools/ppt/NOTICE`） |
 | `/icode status` | 只读：查当前工单状态 |
 | `/icode list [关键词]` | 跨工程工单查找（纯只读） |
+| `/icode worktree --update [--to-ref <ref>]` | worktree 生命周期（独立步骤）：把活动实现根受控迁移到基于最新/指定基线的新 checkout——11 阶段状态机，失败保留旧活动根，可中断恢复 + 幂等。**换基线必须走本命令**（禁止静默改指针）；多业务子仓按整体事务处理 |
+| `/icode worktree --close` | worktree 生命周期（独立步骤）：你已自行 commit/push/merge 后的本地收敛——核验在线证据 → 置 submitted → 安全清理 checkout → 记录 `submitted_baseline`。不替 commit/push，不删未提交唯一代码/未归档唯一产物，幂等 |
+| `/icode worktree --reopen [--to-ref <ref>]` | worktree 生命周期（独立步骤）：已 close 的 completed 工单显式恢复——在最新在线基线上创建新活动 checkout（不新建 ticket、保留 patch 历史）。**已 close 工单必须先 reopen 再 patch** |
 
 > 完整命令一览（含「创建目录？」列 + 复用规则 + `--verdict`/`--scan-verdict` 等参数详解）见 [SKILL.md「调用命令」段](SKILL.md)。
 

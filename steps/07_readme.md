@@ -11,7 +11,7 @@
 
 ## 前置校验
 
-**落点约束（worktree 工单）**：读 metadata `worktree_path` 非 null → 产物在 worktree 内，须先 `cd {worktree_path}` 再执行本步骤（cwd 契约，同 status --validate / 06_audit 产物终检，见 [references/worktree_isolation.md](../references/worktree_isolation.md) §2）；在主仓跑会找不到产物目录。已在 worktree 内 → 直接执行。
+**落点约束（worktree 工单）**：读 metadata `active_checkout`（缺失按 [references/worktree_isolation.md §3.7](../references/worktree_isolation.md) 用 `worktree_path` 推导）非 null → 产物在 worktree 内，须先 `cd {active_checkout.path}` 再执行本步骤（cwd 契约，同 status --validate / 06_audit 产物终检，见 [references/worktree_isolation.md](../references/worktree_isolation.md) §2）；在主仓跑会找不到产物目录。已在 worktree 内 → 直接执行。
 
 **debug 工单阻断**（详 [references/debug_mode.md](../references/debug_mode.md)）：读 metadata `debug == true` → **报错退出**：debug 工单不入主流程，readme 步骤不为其生成交付报告。如需交付，请用 `/icode readme` 在对应**正常工单**上调用（debug 工单无对应完整主流程产物）。
 
@@ -206,20 +206,22 @@ eval("2147483648") rc=3 (expect 3 OVERFLOW)
 
 ### worktree 状态段（worktree 工单必填）
 
-**触发**：读 metadata `worktree_path`，**非 null**（工单在 worktree 内完成）→ 交付报告 + 跨领域简报**均**追加「worktree 状态」段（位置：交付报告「代码仓库」行之后；简报「背景与主要问题」之前）。`null`（原地工单）→ 不生成本段。
+**触发**：读 metadata `worktree_path` **或** `active_checkout`（按 [references/worktree_isolation.md §3.7](../references/worktree_isolation.md) 推导）**任一非 null**（工单在 worktree 内完成/曾迁移）→ 交付报告 + 跨领域简报**均**追加「worktree 状态」段（位置：交付报告「代码仓库」行之后；简报「背景与主要问题」之前）。两字段均 null（原地工单）→ 不生成本段。
 
 ```markdown
 ## worktree 状态
 
-**改动位置**：`{worktree_path}`（独立工作目录，分支 `{worktree_branch}`）
+**改动位置**：`{active_checkout.path（推导）或 worktree_path}`（独立工作目录，分支 `{active_checkout.branch 或 worktree_branch}`）
 本工单改动在独立工作目录（git worktree）中，主工作区保持干净。后续如需继续开发或收回改动：
 - **回流**（完成后将改动并入主分支），二选一：
-  ① 在独立工作目录内 commit → 主仓 `git merge {worktree_branch}`（或 PR）→ `git worktree remove` → `git branch -d`
+  ① 在独立工作目录内 commit → 主仓 `git merge {分支名}`（或 PR）→ `git worktree remove` → `git branch -d`
   ② 不 commit：手动带出改动 → `git worktree remove --force`
-- **清理自查**：`git worktree list`（看所有工作目录）+ `du -sh {worktree_path}`（空间占用）
+- **已提交后的收敛**：若改动已并入权威分支，可执行 `/icode worktree --close` 走标准关闭（核验在线提交 → 安全清理 → 记录基线）
+- **待清理资源**：{checkout_history 中 state=superseded/abandoned 且 removed_at=null 的路径清单；无则写「无」}
+- **清理自查**：`git worktree list`（看所有工作目录）+ `du -sh {工作目录路径}`（空间占用）
 ```
 
-**自包含**：段内不出现 icode 内部文件名/流程术语（用「独立工作目录」「分支」「回流」等通俗表述）；`git worktree` 等命令是用户可执行的真实 Git 命令，非 icode 内部术语，予以保留。让后续会话与不熟工程的读者一眼知道「改动在哪、怎么收、怎么清」。
+**自包含**：段内不出现 icode 内部文件名/流程术语（用「独立工作目录」「分支」「回流」等通俗表述）；`git worktree` 等命令是用户可执行的真实 Git 命令，非 icode 内部术语，予以保留。让后续会话与不熟工程的读者一眼知道「改动在哪、怎么收、怎么清、有无待清理的旧工作目录」。
 
 ### 跨领域说明模板（简报，面向其它模块的研发/测试/产品——**不区分功能/查BUG**，统一用"本次变更"统领）
 

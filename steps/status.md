@@ -26,7 +26,8 @@
 模式: {mode 字段读取方式：直接读 metadata.mode 字段，缺失或空值视为 "full"（默认）；fast 模式下显示「fast（精简：review 1轮无对抗 + deepcheck 仅 Reverse）」}
 方向结论: {verdict 字段读取方式：直接读 metadata.verdict 字段，缺失视为 "unknown"；显示 verdict + verdict_reason 摘要（若有）}
 schema: {template_version 字段读取方式：直接读 metadata.template_version 字段，缺失视为 "未知"；显示 schema 版本 + migration_log 长度，如 "v1.1 (3 migrations, 最近 2026-07-25 12:34)" 或 "v0（待迁移）" 或 "未知（field 缺失）"}
-worktree: {worktree_path 字段读取方式：直接读 metadata.worktree_path 字段，null 显示「主仓」；非 null 显示路径 + worktree_branch（如 "…/<repo>-wt-<ticket-slug>（分支 icode/<ticket-slug>）"，另注意续跑须 cd 进该 worktree，见 [references/worktree_isolation.md](../references/worktree_isolation.md) §2）；wt_degraded=true 时附注「（降级原地，未用 worktree）」}
+worktree: {worktree_path 字段读取方式：读 metadata.active_checkout（缺失按 [references/worktree_isolation.md](../references/worktree_isolation.md) §3.7 用 worktree_path 内存推导，不写回），null 显示「主仓」；非 null 显示路径 + branch（如 "…/<repo>-wt-<ticket-slug>（分支 icode/<ticket-slug>）"，另注意续跑须 cd 进该 worktree，见 [references/worktree_isolation.md](../references/worktree_isolation.md) §2）；wt_degraded=true 时附注「（降级原地，未用 worktree）」}
+拓扑: {active_checkout 字段读取方式：读 metadata.active_checkout，缺失则按 [references/worktree_isolation.md](../references/worktree_isolation.md) §3.7 用 worktree_path 内存推导（不写回）。null 显示「原地（无活动 checkout）」；已 close（submitted_baseline 非 null）显示「已关闭，基线 {submitted_baseline 前 12 位}」；非 null 显示「{path}（分支 {branch}，{state}）」——state 为 `preparing`（迁移中间态，§3.5）时附注「（迁移中，未获活动权）」；state 为 `submitted`（close 后）时显示「已提交（close），基线 {submitted_baseline 前 12 位}」。迁移状态：migration 非 null 时附注「迁移: {migration.state}」。历史 checkout：{checkout_history 长度（推导时 worktree_path 非 null 计 1）} 个（state 分布：{逐条统计 `superseded`/`submitted`/`removed`/`abandoned` 计数，如 superseded×1、removed×1}，词表见 §3.6）。**双活动根检测**：checkout_history 中 state=active 与 active_checkout 同时存在 → 拓扑判定 BLOCKED，输出各冲突路径 + 各自 dirty/commit 情况，禁止自行选择"较新的那个"（§3.8）}
 已完成: {completed_steps 链路，如 log -> 1 -> 2 -> 3 -> 4}
 下一步: {根据续跑判定规则推断，如 "/icode deepcheck (步骤5复检)"}
 代码文件: {code_files 列表，无则"未编码"}
@@ -137,7 +138,7 @@ worktree: {worktree_path 字段读取方式：直接读 metadata.worktree_path �
 
 **执行流程**：
 
-0. **落点约束（worktree 工单）**：读 metadata `worktree_path`，非 null → 提示「本工单产物在 worktree 内，请先 `cd {worktree_path}` 再运行本校验」并**退出**（在主仓跑会找不到 worktree 内产物 → 误报缺失，cwd 契约的机器校验延伸）；用户已在该 worktree 内 → 正常执行。null（原地工单）→ 直接执行
+0. **落点约束（worktree 工单）**：读 metadata `active_checkout`（缺失按 [references/worktree_isolation.md §3.7](../references/worktree_isolation.md) 用 `worktree_path` 推导），非 null → 提示「本工单产物在 worktree 内，请先 `cd {active_checkout.path}` 再运行本校验」并**退出**（在主仓跑会找不到 worktree 内产物 → 误报缺失，cwd 契约的机器校验延伸）；用户已在该 worktree 内 → 正常执行。null（原地工单）→ 直接执行
 1. 确定工单目录：`--validate` → 用「检测最新目录」逻辑；`--validate N` → 指定 `.icode_output/.icode_output_N`
 2. 运行机器校验（Bash 一行命令，输出逐项结果，任何一项不通过记入问题清单）：
 
@@ -164,7 +165,11 @@ sys.exit(1 if (missing or bad or empty_cf) else 0)
 "
 ```
 
-**结果汇总**：全部通过 → `✅ 工单 {N} 产物集完整性通过`；有缺项 → 列出问题清单，按级别提示（产物缺失 / status 词表外 = L1~L2，先回对应步骤补齐；`code_files` 空 = L2）。**只读提示，不自动改**——修复动作仍由对应步骤执行
+3. **拓扑检查（接入共享检查器）**：按 [references/worktree_isolation.md](../references/worktree_isolation.md) §3.8 执行统一拓扑门禁（只读），输出 verdict：
+   - `pass` → `✅ 拓扑判定：PASS（单活动实现根）`
+   - `repairable` → 列出可逆 metadata 修复项（如 active_checkout 缺字段可由 worktree_path 推导），**只报告不自动改**（`--validate` 只读契约）
+   - `blocked` → `⛔ 拓扑判定：BLOCKED` + 输出冲突路径与各自 dirty/commit 情况（双 active / 迁移中断 / 子仓逃逸 / cwd 不符），提示先 `/icode worktree --update` 或人工裁决
+4. **结果汇总**：全部通过 → `✅ 工单 {N} 产物集完整性通过`；有缺项 → 列出问题清单，按级别提示（产物缺失 / status 词表外 = L1~L2，先回对应步骤补齐；`code_files` 空 = L2）。**只读提示，不自动改**——修复动作仍由对应步骤执行
 
 **与步骤6 终检的关系**：步骤6 完成前自检也内置同一判据（见 [06_audit.md](06_audit.md)「产物集完整性终检」）；`--validate` 是独立任意时刻可跑的校验器（含已 `completed` 的历史工单回查），判据一致不另立第二套。
 

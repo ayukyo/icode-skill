@@ -12,6 +12,7 @@
 |---|---|---|
 | **L1·致命** | 前置产物缺失（`03_plan_final.md` 或步骤 4 代码文件不存在） | 报错退出，提示先跑 `/icode merge` 或 `/icode code` |
 | **L1·致命** | 当前工单是 debug 工单（`metadata.debug == true`） | 报错退出，提示：`/icode deepcheck` 不接受 debug 工单（debug 工单不入索引、不参与主流程，纯作为正常工单的对照；详情见 [references/debug_mode.md](../references/debug_mode.md)） |
+| **L1·致命** | 统一拓扑门禁 verdict=blocked（双活动实现根 / 子仓逃逸 / 未完成迁移 / cwd 不符） | 报错退出，输出冲突路径与各自 dirty/commit 情况，提示先 `/icode worktree --update` 或人工裁决（[references/worktree_isolation.md §3.8](../references/worktree_isolation.md)） |
 
 **L3·重要**（矩阵段定义）：Reverse/Fixed/Free 任一阶段发现 issue → 进修复循环（最多 2 轮，clean 后退出）；阶段间切换不阻断。
 
@@ -28,6 +29,10 @@
 > **读决策锚点**（启动时）：若 `metadata.anchors_enabled != false`，Read `{ICODE_OUT_DIR}/.decision_anchors.json`（不存在则跳过），获取上游关键决策摘要（requirement_digest/key_decisions/design_4dims/deviations/open_risks）作本步骤上下文，不替代产物。详见 [references/decision_anchors.md](../references/decision_anchors.md)。
 
 检查 `{ICODE_OUT_DIR}/03_plan_final.md` 和步骤4创建的代码文件是否存在，缺失则报错并提示先执行 `/icode code`。
+
+## 前置：统一拓扑门禁（共享检查器）
+
+> 进入复检前**必须**调用统一拓扑检查器（[references/worktree_isolation.md §3.8](../references/worktree_isolation.md)）。**来源一致性**：本步骤所有验证（Reverse 逆推 / Fixed 维度 / Free 角度 / 编译 / 测试）的代码 Read 路径、构建目录、二进制证据**必须来自活动 checkout**——若构建命令在 `superseded` 或旧 checkout 执行，即使测试通过，**不能作为当前活动实现的通过证据**（来源约束见 §3.8 第⑨步）。发现验证记录引用 superseded checkout → 按 blocked 处理，要求迁移或重新验证。
 
 ## 前置：patch 配合
 

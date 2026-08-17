@@ -12,6 +12,7 @@
 |---|---|---|
 | **L1·致命** | 前置产物缺失（`03_plan_final.md` 或步骤 4 代码文件不存在） | 报错退出，提示先跑 `/icode merge` 或 `/icode code` |
 | **L1·致命** | 当前工单是 debug 工单（`metadata.debug == true`） | 报错退出，提示：`/icode audit` 不接受 debug 工单（debug 工单不入索引、不参与主流程，纯作为正常工单的对照；详情见 [references/debug_mode.md](../references/debug_mode.md)） |
+| **L1·致命** | 统一拓扑门禁 verdict=blocked（双活动实现根 / 子仓逃逸 / 未完成迁移 / cwd 不符） | 报错退出，输出冲突路径与各自 dirty/commit 情况，提示先 `/icode worktree --update` 或人工裁决（[references/worktree_isolation.md §3.8](../references/worktree_isolation.md)） |
 
 **L3·重要**（矩阵段定义）：
 - §6.7 视角 A（原始需求）失败 → 走 §6.2 强制修复流程（user 决定）
@@ -25,9 +26,13 @@
 
 检查 `{ICODE_OUT_DIR}/03_plan_final.md` 和步骤4创建的代码文件是否存在，缺失则报错。
 
+### 前置：统一拓扑门禁（共享检查器）
+
+> 进入终审前**必须**调用统一拓扑检查器（[references/worktree_isolation.md §3.8](../references/worktree_isolation.md)），verdict=blocked（双活动根 / 子仓逃逸 / 未完成迁移 / cwd 不符）**报错退出**。终审是「终审 + 归档 + 关闭前置条件」——产物归档（本节第 6 步）与 close 前置（[steps/close.md](../steps/close.md)）都以**单活动实现根**为前提；存在双活动根时归档可能只收录了其中一个 checkout 的产物，留下另一个的未归档产物。
+
 ### 前置：worktree 验证基线落后检测（worktree 工单）
 
-读取 metadata `worktree_path` 非 null 时：检测本工单分支是否落后主仓（验证基于过时基线）——
+读取 metadata `active_checkout`（缺失按 [references/worktree_isolation.md §3.7](../references/worktree_isolation.md) 用 `worktree_path` 推导）非 null 时：检测本工单分支是否落后主仓（验证基于过时基线）——
 
 ```bash
 # 落后检测：结果 > 0 = 落后。⚠️ 勿用 `git merge-base --is-ancestor <worktree_branch> <目标基分支>`
@@ -166,7 +171,7 @@ git rev-list --count <worktree_branch>..<目标基分支>     # 目标基分支 
 3. 全部修复后做全局编译验证，最多 3 次
 4. 更新 `.ico_metadata.json`：`status = completed`
 5. **回写实现偏差备忘到 `03_plan_final.md`**（不可跳过，详见下方「实现偏差备忘」规范）
-6. **worktree 工单产物归档（若 `metadata.worktree_path` 非 null）**：把核心产物（`.ico_metadata.json`/`00_init.md`/`01_plan.md`/`03_plan_final.md`/`log_analysis.md`）复制到 `~/.claude/icode_data/worktree_archive/<project_id>/<ticket_id>/`，写 `metadata.archive_path`（详见 [references/worktree_isolation.md](../references/worktree_isolation.md)「产物归档」）——防 worktree remove 后产物丢失、保后续检索可读档复用完整 ADR/根因
+6. **worktree 工单产物归档（若 `metadata.active_checkout` 非 null，缺失按 [references/worktree_isolation.md §3.7](../references/worktree_isolation.md) 用 `worktree_path` 推导）**：把核心产物（`.ico_metadata.json`/`00_init.md`/`01_plan.md`/`03_plan_final.md`/`log_analysis.md`）复制到 `~/.claude/icode_data/worktree_archive/<project_id>/<ticket_id>/`，写 `metadata.archive_path`（详见 [references/worktree_isolation.md](../references/worktree_isolation.md)「产物归档」）——防 worktree remove 后产物丢失、保后续检索可读档复用完整 ADR/根因
 7. **刷新全局索引最终状态**：Read `~/.claude/icode_data/index.json`，**按 metadata 的 `ticket_id` 定位**本工单条目，更新 `status` = `completed`，`requirement_summary` 若与最终交付有显著偏差则基于 `03_plan_final.md`+交付成果刷新一次（确保未来检索命中的摘要准确反映最终成果而非中途状态）；**若该工单当前 `stale=true`，重置 `stale=false`+`stale_reason=null`+`stale_checked_commit=null`**（产物可能经本轮更新，旧 stale 判据失效；下次检索注入前由过时校验按当前 `01_plan` 锚点重评，盲重置安全不致误注入）；若已归档（步骤6），同步写 index 条目 `archive_path`；**确认 verdict（方向结论，v2 新增）**：向用户确认本工单核心方案最终方向结论--默认保持 `unknown` 不阻塞流程；若方案已实机验证有效标 `verified`，若核心方案被证伪/已回退标 `disproved`（填 `verdict_reason`+`correct_direction`；可选 `--premise-dep` 填证伪依赖的外部模块，支持硬复活检测），若被替代方案取代标 `superseded`（填 `superseded_by`）；标注时回填 `verdict`+`verdict_reason`+`correct_direction`+`verdict_source`（`machine_test`/`review`/`user`）+`verdict_at`（运行时取系统时间）；详见 SKILL.md「verdict 字段族」。写回 index.json（metadata + index 同步，不得只写其一）。
 8. 输出交付总结
 
@@ -230,7 +235,7 @@ git rev-list --count <worktree_branch>..<目标基分支>     # 目标基分支 
 
 ### 6.4 worktree 回流提醒（worktree 工单完成时）
 
-读取 metadata `worktree_path` 字段：**非 null**（本工单在 worktree 内完成）→ 交付总结后追加以下提醒（未进 worktree 的工单跳过本段）：
+读取 metadata `active_checkout`（缺失按 [references/worktree_isolation.md §3.7](../references/worktree_isolation.md) 用 `worktree_path` 推导）字段：**非 null**（本工单在 worktree 内完成）→ 交付总结后追加以下提醒（未进 worktree 的工单跳过本段）：
 
 ```
 ▶ worktree 回流提醒：本工单改动仍在 worktree（icode 不 commit），请按二选一方案手动回流——
@@ -241,6 +246,9 @@ git rev-list --count <worktree_branch>..<目标基分支>     # 目标基分支 
   ⚠️ 回流前产物留档：交付报告与全部产物都在 worktree 内，remove 后随之消失，需留档先复制出来。
   ⚠️ 若有业务子仓隔离（metadata.sub_worktrees 非空）：先对每个子仓隔离 checkout commit + merge 回原子仓，
      再 git -C <原子仓> worktree remove <子仓隔离路径>，最后才 remove super-worktree（见 worktree_isolation「⑤ 业务子仓隔离」）。
+  ⚠️ 已提交后的标准收敛：若你已把改动 commit/push/merge 到权威分支，可用 /icode worktree --close 走标准关闭流程
+     （在线证据核验 → 状态置 submitted → 安全清理 checkout → 记录 submitted_baseline，见 steps/close.md）——
+     比手工逐步 remove 更安全：不删未提交唯一代码、不删未归档唯一产物、幂等可重跑。
   完整指引见 [references/worktree_isolation.md](../references/worktree_isolation.md) §4。
 ```
 
@@ -278,7 +286,7 @@ du -sh <各 worktree 路径>                                  # 空间占用
 
 ### 产物集完整性终检（完成前自检的机器命令）
 
-> **落点约束**：终检必须在**本工单所在 checkout 内**执行——`worktree_path` 非 null 时先 `cd` 进对应 worktree 再跑；在主仓跑会找不到 worktree 内产物 → 误报缺失（cwd 契约的机器校验延伸，§9.5-⑤）。
+> **落点约束**：终检必须在**本工单所在 checkout 内**执行——`active_checkout` 非 null（缺失按 [references/worktree_isolation.md §3.7](../references/worktree_isolation.md) 用 `worktree_path` 推导）时先 `cd` 进对应 checkout 再跑；在主仓跑会找不到 worktree 内产物 → 误报缺失（cwd 契约的机器校验延伸，§9.5-⑤）。
 
 ```bash
 python3 -c "
