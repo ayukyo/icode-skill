@@ -16,6 +16,7 @@ ICode 是一个 Claude Code 技能（Skill），将需求到交付拆解为严�
 - **跨工程历史检索**：init/log/plan/start 启动时自动检索相似历史工单按命令分流注入，只进会话、不污染工程产物；**verdict 防误导注入**——已证伪/被取代的工单注入的是"陷阱结论"而非 ADR，防止误导新工作
 - **强制阻断边界矩阵**：检查项按 L1 致命 / L2 关键 / L3 重要 / L4 参考四级定义"是否阻断流程"（L1 报错退出、L2/L3 警告+记 metadata+继续、L4 柔性提示），各步骤头部声明检查项，统一"内容正确 ≠ 机制合规"
 - **工程级知识库**（`/icode doc`）：生成全局工程知识库（跨仓库跨分支共享，模块文档只生成一次复用），供段零自动检索注入，开发时无需手动告知参考文档
+- **工程工单备份**（`/icode bak`）：把工程整个 `.icode_output/`（工单 + `.debug/` 调试孪生 + limit.local + ppt）快照到全局 `~/.claude/icode_data/project_backup/`，可多次备份（rsync 硬链接去重）。**删工程前先跑**——工程被删后，历史检索仍可从备份读完整工单产物（工程优先 → 备份兜底），`/icode list` 显示 `[path_gone→backup]`
 - **防重复注入**：历史检索与工程文档检索共用缓存去重，避免同开发链路重复注入
 - **防偷懒强化**：步骤5/6 强制 Read 确认行 + 证据 file:line + 自检清单，步骤2 对抗强制 Agent ID
 - **两个可选入口**：`/icode log` 日志根因分析（先基线检查再对抗分析，领域无关）→ 转修复需求；`/icode init` 多轮需求初稿对话 → `00_init.md`
@@ -123,6 +124,10 @@ cd ~/.claude/skills/icode/mcp/cheap-research
 /icode doc myproject                    # 检查该工程更新（增量优先：git diff 命中章节才重生成）
 /icode doc 重新生成 myproject           # 全量重生成（触发确认门，保护手动编辑）
 # 生成后，后续 /icode init|log|plan|start|fast 启动时段零自动检索注入相关章节
+
+# 工程工单备份（独立步骤：把工程 .icode_output/ 快照到全局，删工程前安全网，可多次备份）
+/icode bak                              # 备份当前工程全部工单（快照 + 索引写 backup_path）
+/icode bak --project ~/work/myproj      # 备份指定工程（可多次，每次新快照，硬链接去重）
 
 # PPT 生成（独立交付步骤：把 icode 产物/知识库转成 .pptx）
 /icode ppt                                # 默认：最新工单→本次功能开发 PPT（有 log 入口→本次BUG修复）

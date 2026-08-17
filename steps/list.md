@@ -77,9 +77,16 @@
       - `/home/user/very-long-namespace-name/myproject/.icode_output/.icode_output_3` → `~/<truncated header>…myproject/.icode_output_3`（保留尾段）
    4. **绝对优先**：保留的最后一段必须是工单目录名（`.icode_output_N`），让用户能直接 `cd` 进去
 
+   **PROJECT 列显示优先级**（每条先实判路径有效性，`test -d` 为准）：
+   1. `project_path` 有效（工程在）→ 显示 `project_path`（下截断算法）
+   2. `project_path` 失效 且 `backup_path` 有效（backup 活跃态，`/icode bak` 产物）→ 显示 `[path_gone→backup]` + 智能截断的 `backup_path`（内容实际所在处，用户可直接 `cd` 进去读完整产物）
+   3. `project_path` 失效 且 无有效备份（stale path_gone）→ 显示 `[path_gone]`
+
    **stale 工单**（如 `--include-stale` 显式包含）：`STATUS` 列前缀 `[stale] `，`SUMMARY` 后缀 ` [stale_reason: X]`
 
-   **path_gone 工单**（工程已删）：`PROJECT` 列 `[path_gone]`，保留显示便于用户判断
+   **backup 活跃工单**（工程已删但有 `/icode bak` 备份）：`project_path` 失效但 `backup_path` 非空且 `test -d` 有效 → **非 stale**（设计保证，见 [references/dir_and_metadata.md](../references/dir_and_metadata.md)「过时校验·备份工单」），**默认显示、无需 `--include-stale`**——`PROJECT` 列按上方优先级 2 显示 `[path_gone→backup]` + `backup_path`
+
+   **path_gone 工单**（工程已删且无有效备份）：`PROJECT` 列 `[path_gone]`，保留显示便于用户判断（默认被 stale 排除，`--include-stale` 才显示）
 8. **输出统计脚注**（表格下方）：
    ```
    共 N 条（过滤后）/ 全索引 M 条（stale K 条 / disproved L 条 / verified P 条）
@@ -106,7 +113,8 @@
 | 关键词无匹配 | 提示"无匹配工单（索引共 N 条，尝试其他关键词或去掉过滤条件）" |
 | 旧 metadata 无 `workload_estimate` | WORKLOAD 列显示 `-`，不报错（向后兼容） |
 | 旧 metadata 无 `template_version` | SCHEMA 列显示 `-`（与 WORKLOAD 兼容同形态），不报错 |
-| `project_path` 已删（`stale_reason=path_gone`） | PROJECT 列显示 `[path_gone]`，默认排除（除非 `--include-stale`） |
+| `project_path` 已删但 `backup_path` 有效（backup 活跃态） | **非 stale**，默认显示；PROJECT 列 `[path_gone→backup]` + backup_path（实判 `test -d`） |
+| `project_path` 已删且无有效备份（`stale_reason=path_gone`） | PROJECT 列显示 `[path_gone]`，默认排除（除非 `--include-stale`） |
 | 字段格式异常（如 `last_used_at` 缺） | 退化为 `-`，不中断整行渲染 |
 | `--limit` 截断 | 末尾标注 `(还有 N 条未显示...)` |
 | TTY 检测 | `sys.stdout.isatty() == False` 时自动 `--no-color` |
@@ -118,6 +126,7 @@
 - **禁止只列当前工程**：明确跨工程（从全索引读）
 - **禁止硬编码时间**：用 `datetime.now()` 取真实当前时间（`--since` 过滤的基准）
 - **禁止猜测字段值**：缺失字段退化为 `-`，不编造
+- **禁止只看 backup_path 字段不实判**：`backup_path`/`project_path` 有效性一律 `test -d` 实判（字段可能是旧值/已失效），backup 活跃态判定必须磁盘验证
 - **禁止改 user 项目路径**：只读索引，不 `cd` / 不 `open`（"纯查询不跳转"原则）
 
 ## 与 `/icode status` 的协作

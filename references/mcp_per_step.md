@@ -20,7 +20,7 @@
 | **vision-bridge** | 任意步骤 **且** (a) 用户主动提供图片/截图/视频（会话中含媒体附件/路径，直接调） **或** (b) TB 缺陷源拉取的附件含视频/图片（`{ICODE_OUT_DIR}/tb_source/<ID>/` 下，**vision-bridge 可用则主动调**：视频先用 ffmpeg 本地提取关键帧再传图片帧给 vision-bridge 省钱——见 [steps/log.md](../steps/log.md)「附件分析（含本地路径 + TB 源）与 ffmpeg 抽帧」段） **或** (c) `/icode log` 本地日志目录含视频/图片文件（`find <log_dir> -type f \( -name '*.mp4' -o -name '*.mov' -o -name '*.png' -o -name '*.jpg' -o -name '*.jpeg' \)`，**vision-bridge 可用则主动调**，行为同 (b) 的 ffmpeg 抽帧流程） | vision-bridge 未安装 / `~/.claude/skills/icode/mcp/vision-bridge/config.json` 三件套未配齐 → 仅提示不主动调（防纯文字模型报错）；ffmpeg 不可用时降级为直接传视频（需用户确认，可能耗 API 额度） |
 | **playwright** | deepcheck/audit 步骤 **且** 前端工程（含 .html/.jsx/.tsx/.vue 或 package.json 含 react/vue） | CLI/后端/嵌入式工程 |
 | **memory** | init/plan 步骤 **且** 本工程历史工单数 ≥ 1（`~/.claude/icode_data/index.json` 中本 project_path 工单数 ≥ 1） | 新工程首个工单 / demo |
-| **cheap-research** | init/log/doc/plan/review/code/deepcheck/audit/readme/patch 步骤 **且** 走单闸门入选的 23 个子任务（长上下文压缩 / 历史检索 / 模板填充 / 结构化提取 / TB 评论预提取 / 代码事实审计 / 模式扫描 / 符号追溯 / 差异摘要 / 文件名生成 / 模板选择 / schema 迁移 / 模块识别 / project_id 解析 / 远程拉取） | **不接管决策**：3 质疑者对抗 / 架构决策 / 终审裁决 / 修复方案 / 用户对话一律不走；推理敏感度中等的"灰区"也不走（零灰区原则）；merge/install/list 无入选子任务 |
+| **cheap-research** | init/log/doc/plan/review/code/deepcheck/audit/readme/patch 步骤 **且** 走单闸门入选的 23 个子任务（长上下文压缩 / 历史检索 / 模板填充 / 结构化提取 / TB 评论预提取 / 代码事实审计 / 模式扫描 / 符号追溯 / 差异摘要 / 文件名生成 / 模板选择 / schema 迁移 / 模块识别 / project_id 解析 / 远程拉取） | **不接管决策**：3 质疑者对抗 / 架构决策 / 终审裁决 / 修复方案 / 用户对话一律不走；推理敏感度中等的"灰区"也不走（零灰区原则）；merge/install/list/bak 无入选子任务 |
 
 **判定执行**：
 
@@ -66,7 +66,7 @@
 | **6 audit** | ⚪ | 🟢* | 🟢* | ⚪ | 🟢* |
 | **7 readme** | ⚪ | 🟢* | ⚪ | ⚪ | 🟢* |
 | **patch**| 🟢* | 🟢* | 🟢* | 🟢* | 🟢* |
-| **install/list** | ⚪ | ⚪ | ⚪ | ⚪ | ⚪ |
+| **install/list/bak** | ⚪ | ⚪ | ⚪ | ⚪ | ⚪ |
 | **status** | ⚪ | ⚪ | ⚪ | ⚪ | 🟢* |
 
 `🟢*` = 默认 🟢，但实际需满足强证据场景才必调（不满足降为 ⚪，无需声明）。
@@ -143,8 +143,8 @@
 - **memory**：本工程历史工单数 ≥1 且新问题疑与历史工单/既有决策相关时（同 init/plan 规则）
 - **cheap-research**（🟢*）：阶段1 现状摘要（`summarize` 压缩长产物/长日志）。**不接管决策**：增量计划 / 修改决策 / 复检结论走主会话（与 code 同级，推理敏感不走）
 
-### install / list
-- **sequential-thinking**：仅此（install 装依赖；list 纯查询内置 index.json + 过滤 + 表格化，不需 cheap-research）
+### install / list / bak
+- **sequential-thinking**：仅此（install 装依赖；list 纯查询内置 index.json + 过滤 + 表格化；bak 纯文件复制 + 索引 `backup_path` 字段更新，均不需 cheap-research）
 
 ### status
 - **sequential-thinking**：仅此

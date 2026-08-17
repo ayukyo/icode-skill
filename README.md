@@ -65,6 +65,12 @@ Other entry points:
 # Project-level knowledge base (standalone step, runs anytime)
 /icode doc myproject                                 # Generate/update this project's knowledge base chapters
 
+# Backup all work orders before deleting a project (safety net — run BEFORE deleting)
+/icode bak                                           # Snapshot current project's entire .icode_output/ to ~/.claude/icode_data/project_backup/
+/icode bak --project ~/work/myproj                   # Backup a specified project
+# Repeatable: each run creates a new timestamp snapshot (rsync --link-dest hardlink dedup).
+# After the project is deleted, history retrieval still finds full work orders from the backup (project-first, backup fallback).
+
 # Opt-in worktree isolation (any of the entry points above)
 /icode start --worktree Implement MCU rain sensor I2C driver   # Full flow + isolated branch/dir
 /icode fast --worktree  "Add isqrt function to calc.c"         # Fast mode + isolated branch/dir
@@ -99,6 +105,7 @@ Every step produces a real artifact in `.icode_output/.icode_output_N/` (plan �
 - **Anti-laziness quality gates**: triple-phase deepcheck (Reverse/Fixed/Free), plan assertion verification, ADR decision records, adversarial verification (independent skeptics — insufficient evidence is never confirmed, honest downgrade over fake consensus)
 - **Cross-project history retrieval**: init/log/plan/start auto-search similar past tickets and inject by command; references stay in-session, never pollute project artifacts. **Verdict-based injection** prevents disproved/superseded tickets from misleading new work
 - **Project-level knowledge base** (`/icode doc`): global per-project/per-branch knowledge base (module docs generated once and reused across projects), auto-retrieved and injected by phase-zero search
+- **Project work-order backup** (`/icode bak`): snapshot the project's entire `.icode_output/` (tickets + debug twins + limit.local + ppt) to global `~/.claude/icode_data/project_backup/`, repeatable with hardlink dedup. Run it before deleting a project — once deleted, history retrieval still reads full work orders from the backup (project-first, backup fallback), and `/icode list` marks them `[path_gone→backup]`
 - **Anti-duplicate injection**: history retrieval and project-doc retrieval share an injection cache, avoiding repeated injection within one dev chain
 - **Decision anchors**: steps pass concise decision summaries (`.decision_anchors.json`) downstream — saves tokens, keeps reasoning continuity
 - **Resumable runs**: `.ico_metadata.json` status + round counters support crash recovery at steps 2/4/5
