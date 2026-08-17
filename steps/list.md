@@ -10,6 +10,8 @@
 
 解决"工单目录 `icode_output_N` 分散在多工程，找历史工单要打开很多工程一个个点开"的痛点。`/icode status` 模式一只看当前工程最近一个工单，**`/icode list` 是它的跨工程增强版**：从全局索引 `~/.claude/icode_data/index.json` 的 `tickets` 数组全量读取，按需过滤+排序+格式化输出。
 
+> **debug 工单隔离**（详 [references/debug_mode.md](../references/debug_mode.md)）：**`/icode list` 默认不含 debug 工单**——debug 工单由 [`/icode init --debug`](../steps/00_init.md) / [`/icode log --debug`](../steps/log.md) 创建，**永不写入 `index.json`**（见 [init 阶段 8 跳过硬门](../steps/00_init.md) / [log 阶段 10 跳过硬门](../steps/log.md)），因此本命令基于 `index.json` 全量读取**不会列出 debug 工单**。如需查 debug 工单列表，手动 `ls <project_root>/.icode_output/.debug/` 或写脚本扫描本地目录。
+
 **与 `/icode status` 职责分离**：
 - `status`：当前工程最近一个工单的**详细状态**（含 mode/verdict/下一步推断/索引概览）
 - `list`：全索引的**鸟瞰视图**（一行一个工单，便于浏览+筛选）

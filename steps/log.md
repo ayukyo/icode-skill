@@ -1,6 +1,6 @@
 # 步骤 log — 日志根因分析（可选前置入口）
 
-**命令**: `/icode log [零散信息...]`
+**命令**: `/icode log [--debug] [零散信息...]`（`--debug` = 独立孪生不入索引，详见 [references/debug_mode.md](../references/debug_mode.md)）
 **产出**: `{ICODE_OUT_DIR}/log_analysis.md` + `{ICODE_OUT_DIR}/00_init.md`（修复需求初稿，衔接步骤1）
 **会话**: 主会话
 **定位**: **与 init/start/fast/plan 并列的入口命令，非流程步骤编号**。把"一坨设备/服务日志 + 模糊症状"转化为"有证据、经对抗验证、可信"的根因报告，并自动转成修复需求衔接步骤1。**领域无关**——适用于任何能产生日志的系统（机器人/服务端/嵌入式/Web 等均不限）。完成后用户敲 `/icode plan`（仅步骤1）/ `/icode start`（全流程）/ `/icode fast`（精简全流程）（无参）复用同目录进入修复流程，详见 SKILL.md「调用命令」段的目录复用规则说明。
@@ -32,7 +32,19 @@
        - **同工程**（`project_path` == 当前工程）：询问用户"检测到 TB 单 `<ID>` 的旧工单 `.icode_output_M`（上次根因：`<摘要>`），TB 上可能有新评论/附件。① 复用旧目录继续(重拉最新数据+增量对抗) / ② 新建独立分析"；选① -> ICODE_OUT_DIR = 旧目录（`{project_path}/{out_dir}`），走下方「同 TB 单复用流程」；选② -> 强制新建
        - **跨工程副本**（`project_path` != 当前工程）：提示"检测到 TB 单 `<ID>` 的旧工单在**另一工程副本** `{project_path}`（上次根因：`<摘要>`），当前工程是 `{cwd}`，两份源码拷贝后可能已分叉。① 跨工程复用旧目录续旧分析(⚠️风险：源码可能对不上、旧根因可能失效) / ② 当前工程新建独立分析(读旧工单 `log_analysis.md` 根因/证据作参考，须用当前源码验证) / ③ 去 `{project_path}` 目录继续"；选① -> 走「同 TB 单复用流程」(ICODE_OUT_DIR 用旧工程目录，⚠️标注跨工程源码分叉风险)；选② -> 强制新建 + 读旧工单 `log_analysis.md` 根因结论+决定性证据作参考注入会话(标注跨工程、源码可能分叉、须当前源码验证)；选③ -> 提示用户切到 `{project_path}` 再跑 `/icode log`，本次中止
      - **无匹配 / 无 TB 引用**：走下方「创建新目录」（强制新建），行为与改前 100% 一致
-   - **创建新目录**（强制新建，不做其他复用判定；**前置：worktree 询问硬检查点**，新建前必须执行、未询问即不合规）：先完成 [SKILL.md「目录管理·worktree 决策与创建」](../SKILL.md) 的**每工单一次询问**（AskUserQuestion 问用户"本工单用 worktree 隔离吗"）——**不得用任何自创理由豁免**（如"log 只分析不改代码不需要隔离"——是否隔离由用户决定，不由 AI 判断）；唯一合法豁免 = limit 已写「worktree 默认关闭」（见 [steps/limit.md](limit.md)）。worktree 场景下目录建在 worktree 内、原地场景建在当前工作区；随后执行目录管理中的「创建新目录」逻辑（含硬熔断，见真源），确定 `ICODE_OUT_DIR`
+   - **创建新目录**（强制新建，不做其他复用判定；**前置：worktree opt-in 判定**，详 [SKILL.md「目录管理·worktree 决策与创建」](../SKILL.md) + [references/worktree_isolation.md](../references/worktree_isolation.md) §1①）：
+     - **判定两种触发形式之一**：A. flag 形式（消息命令位置的**独立 token** `--worktree`（双短横独立；不接受 `-worktree`/`--worktree=true` 等变体）） / B. 自然语言意图声明（"用 worktree 隔离做" 等显式措辞）；满足其一即触发 worktree 创建路径
+     - **反向声明后置优先**：同一消息后置「别用 worktree」「不要 worktree 隔离」> 前置触发，取**最后一句**为最终意图
+     - **必须做语境识别防误触**：仅正文叙述/反引号/代码块/文档片段中提及 ≠ 触发；模糊时**按未触发处理**（默认原地，靠 L1 触发回显暴露）
+     - **触发回显 L1 强制 · 区分判定与执行态**（占位符 `<ticket-slug>` 动态回填实际值，**勿字面输出尖括号**）：
+       - 判定·触发：`▶ worktree 隔离：即将启用 → 准备创建 ../<repo>-wt-<ticket-slug>/（分支 icode/<ticket-slug>）`
+       - 判定·未触发：`▶ worktree 隔离：未启用（默认，原地建工单）`
+       - 执行·成功：`▶ worktree 隔离：✓ 已创建 ../<repo>-wt-<ticket-slug>/（分支 icode/<ticket-slug>）`
+       - 执行·失败：`▶ worktree 隔离：⚠ 创建失败，降级原地（wt_degraded=true，原因：<错误>）`
+     - 触发 → 走 worktree 创建路径（创建**前**展示路径 + 分支名作为**告知非询问**；用户触发意图即一次性同意）；未触发 → 默认原地（直接建在当前工作区，**不弹问**）
+     - **违规阻止例外**：limit 「worktree 强制禁止」红线命中时（[steps/limit.md](../steps/limit.md) §7），AI 提示一次"本工程 limit 禁止 worktree，本工单回退原地建" + 回退原地（不创建 worktree）
+     - AI **不得自创理由另行弹问** worktree（是否用 worktree = 用户消息意图决定，不由 AI 判断）
+     - 随后执行目录管理中的「创建新目录」逻辑（含硬熔断，见真源），确定 `ICODE_OUT_DIR`
    - **前置：limit 红线检查点（防"忽略项目级约定违反"，必须先于步骤2 历史检索/文档注入执行）**：在进入步骤2 历史检索/段零文档注入**之前**，**必须**盘点本工程的 limit 红线（与 plan 步骤「前置：limit 硬基线」对齐，防"历史根因/文档先入为主后才读到红线"的对照滞后），不得静默跳过：
      - **路径解析**（同 [steps/limit.md](limit.md) + [01_plan.md](01_plan.md) 前置逻辑）：`PROJECT_ID = basename(git rev-parse --show-toplevel)`，**含 worktree 归一化（F1）**：worktree 内 `.git` 是普通文件 = git worktree 成员，project_id 须归一到**主仓根**（`git worktree list --porcelain` 首行），否则主存读不到（详见 [references/dir_and_metadata.md](../references/dir_and_metadata.md)「project_id 与 branch 语义」）；主存 `~/.claude/icode_data/limits/<project_id>.md`，覆盖 `<project_root>/.icode_output/limit.local/<project_id>.md`
      - **读取合并**（local 完全覆盖 main，同 limit 步骤合并规则）：main 存在 -> 读其所有条目；local 存在 -> 整文件覆盖 main（local 文件内容直接当作完整 limit 视图）；都不存在 -> 标注"本工程无 limit 红线"（柔性提示，不阻断）
@@ -333,6 +345,12 @@
    ```
 
    > `tb_source`（可选）：从 TB 拉取时填 `{lib,num,pid,label,url,meta_path}`（metadata 完整版，含本地路径），纯本地日志分析时为 `null`。**写入全局索引时只存摘要 `{lib,num,pid,label}`**（供同 TB 单检索复用，不含 url/meta_path）。
+
+   **`--debug` 模式差异**（详 [references/debug_mode.md](../references/debug_mode.md)）：
+   - `status` 改为 `"debug_done"`（不是 `"log_done"`——下游易识别）
+   - **新增字段** `"debug": true`（metadata 元数据标志，明确标识此工单是 debug 孪生）
+   - `ticket_id` 留空字符串（`""`，debug 工单永不写入 index.json）
+   - `indexed` 永远是 `false`（debug 工单永不索引）
    > `limit_refs`（默认 `[]`，log 版）：本次对照核验引用的 limit 红线编号数组，每条 `{redline_no: int, source: "main"|"local", title: str, applied_in: [...]}`（字段结构同 plan，`applied_in` 为报告引用章节如 `§2.3`/`§6`）。报告 `log_analysis.md §2.3/§6` 出现「红线 N」/「红 N」引用时必须记录，完全未引用才可留空；填写后经步骤 9.5 机器自检校验。**字段缺失视为 `[]`（向后兼容旧 metadata）**。⚠️ `limit_refs` 是**事后回补**，只证明"后来引用了哪些红线"，**不证明**步骤1 前置检查点"先读索引→精读命中条目"的读取发生过——读取留痕靠步骤1 落盘的 `{ICODE_OUT_DIR}/limit_checkpoint.md`（步骤 9.5 维度④校验，缺失按未读处理）
 
 ### 9.5 limit_refs 机器自检（L1：log 报告引用 limit 未记录 / §2.3 省略 = 不合规）
@@ -381,6 +399,17 @@ sys.exit(1 if missing else 0)
     - `has_00_init` = true（log 已产出 `00_init.md`），`has_plan` = false，`status` = `log_done`，`created_at` = 当前时间，`last_used_at` = 当前时间（首次写入=created_at），`hit_count` = 0，`stale` = false，`stale_reason` = null，`stale_checked_commit` = null，`created_commit` = `git rev-parse HEAD`（只读，非 git 仓库为 null），`created_branch` = `git rev-parse --abbrev-ref HEAD`
     - `tb_source` = 步骤9 metadata 的 `tb_source`（无 TB 源时 null）
     - 写回 index.json，置 metadata `indexed = true`、`ticket_id`；**写后执行唯一性验证**（见 [references/dir_and_metadata.md](../references/dir_and_metadata.md)「全局索引写入·写后唯一性验证」）
+
+   **`--debug` 跳过写索引**（**硬门，防误索引**）：
+   - 步骤 9 metadata 已写 `"debug": true` → 步骤 10 入口先**判 metadata.debug**，若是 `true` 则**整段跳过**：
+     ```python
+     if metadata.get("debug") is True:
+         print("▶ debug 模式：跳过 index.json 写入（不入全局索引、不入 LRU）")
+         return
+     ```
+   - **未跳过的后果**：debug 工单被错误索引会污染 `/icode status` 列表 + 历史检索 + 同 TB 单检索复用——debug 工单正是要做"独立孪生对照"，索引会违背设计意图
+   - **强证据场景**：`/icode list`、`/icode status` 检索、段零工程文档检索、SWE bot 跨工程查询均依赖 index.json——debug 工单不入索引 = 不进入这些场景（**设计意图如此**）
+   - 同 init.md 阶段 8 跳过逻辑完全一致（参考 [references/debug_mode.md](../references/debug_mode.md)）
 11. 提示用户：根因已定，可敲 `/icode plan` / `/icode start` / `/icode fast`（均无参）复用本目录的 `00_init.md` 进入修复流程；其中 fast 适合小改动（单文件/少量文件、边界清晰、无架构变更）；若对根因有异议，继续对话即可重跑对抗分析
 
 ## TB 缺陷源拉取（可选前置，仅当零散输入含 TB 引用）

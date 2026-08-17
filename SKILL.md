@@ -1,9 +1,9 @@
 ---
 name: icode
-description: 端到端编码工作流（步骤 0~6，含可选需求初稿步骤与日志根因分析入口），支持分步手动调用：/icode help (帮助), /icode install (MCP 环境检查+一键安装), /icode init [<粗略需求>] (需求初稿), /icode log [零散信息...] (日志根因分析→转修复需求), /icode start <需求> (全流程), /icode fast <需求> (精简全流程), /icode plan <需求> (计划), /icode review [N] (审查), /icode merge (定稿), /icode code (编码), /icode deepcheck (复检), /icode audit (终审), /icode patch [问题或新需求] (追加修改：主流程后/中途继续改), /icode doc [自然语言] (工程级知识库生成), /icode limit [自然语言] (项目约束红线), /icode readme (交付报告+跨领域简报), /icode ppt [自然语言] (PPT生成：项目/模块/本次功能开发/本次BUG修复), /icode status (工单状态), /icode list [关键词] (跨工程工单查找)
+description: 端到端编码工作流（步骤 0~6，含可选需求初稿步骤与日志根因分析入口），支持分步手动调用：/icode help (帮助), /icode install (MCP 环境检查+一键安装), /icode init [<粗略需求>] (需求初稿), /icode log [零散信息...] (日志根因分析→转修复需求), /icode start <需求> (全流程), /icode fast <需求> (精简全流程), /icode plan <需求> (计划), /icode review [N] (审查), /icode merge (定稿), /icode code (编码), /icode deepcheck (复检), /icode audit (终审), /icode patch [问题或新需求] (追加修改：主流程后/中途继续改), /icode doc [自然语言] (工程级知识库生成), /icode limit [自然语言] (项目约束红线), /icode readme (交付报告+跨领域简报), /icode ppt [自然语言] (PPT生成：项目/模块/本次功能开发/本次BUG修复), /icode status (工单状态), /icode list [关键词] (跨工程工单查找)。**新建工单入口支持 `--worktree` opt-in**（init/log/start/plan/fast 加 `--worktree` 即用 git worktree 隔离；默认原地不弹问）
 ---
 
-**版本**: v2.17.0
+**版本**: v2.18.0
 
 # ICode 全流程编码工作流（步骤 0 + 1~6）
 
@@ -31,11 +31,11 @@ description: 端到端编码工作流（步骤 0~6，含可选需求初稿步骤
 |------|------|-----------|
 | `[辅助]` `/icode help` | **帮助**：输出使用流程示例 | 否 |
 | `[辅助]` `/icode install` | **MCP 环境检查+一键安装（独立步骤）**：跑 `mcp/install.sh` 扫描所有 `mcp/*/install.sh`，每个子工程自检环境（venv/Node/npm）并缺啥补啥、注册到 `~/.claude.json`。新 clone 仓库 / 新机器 / CI 初始化时跑一次。**不创建工单目录、不写工单 metadata、不参与 1~6 推进**（详见 [steps/install.md](steps/install.md)） | 否 |
-| `[入口]` `/icode log [零散信息...]` | **可选入口（日志根因分析）**：把"设备/服务日志+模糊症状"转为有对抗验证的根因报告，自动转修复需求 `00_init.md` 衔接步骤1。先基线检查（git diff/链路图）再日志侦察，对抗分析防确认偏误。**领域无关，每次调用都新建目录**（详见 [steps/log.md](steps/log.md)） | ✅ 每次都新建 |
-| `[入口]` `/icode init [<粗略需求>]` | **可选步骤0**：多轮对话产出 `00_init.md`（需求初稿，含链路图：before/after + 改动点，每轮动态更新）。**每次调用都新建目录，不复用、不续聊**（详见 [steps/00_init.md](steps/00_init.md)） | ✅ 每次都新建 |
-| `[流程]` `/icode start <需求>` | **全流程（full 模式）**：创建/复用目录 → 步骤1→6 串联。步骤2 review 默认 3 轮 + 对抗验证，步骤5 deepcheck 三阶段循环（**复用规则见下**） | ✅ 创建新目录 / 复用 |
-| `[流程]` `/icode fast <需求>` | **精简全流程（fast 模式）**：plan → review(1轮无对抗) → merge → code → deepcheck(Reverse 单阶段) → audit。耗时约为全流程 65%，产物结构与 full 对齐（详见 [steps/fast.md](steps/fast.md)）。入口打印警告、用户自负其责 | ✅ 创建新目录 / 复用 |
-| `[流程]` `/icode plan <需求>` | **仅步骤1**：拟定项目计划（**复用规则见下**） | ✅ 创建新目录 / 复用 |
+| `[入口]` `/icode log [零散信息...]` | **可选入口（日志根因分析）**：把"设备/服务日志+模糊症状"转为有对抗验证的根因报告，自动转修复需求 `00_init.md` 衔接步骤1。先基线检查（git diff/链路图）再日志侦察，对抗分析防确认偏误。**领域无关，每次调用都新建目录**（详见 [steps/log.md](steps/log.md)）。**支持 `--worktree`**（opt-in）；**支持 `--debug`**（独立孪生不入索引，详见 [references/debug_mode.md](references/debug_mode.md)） | ✅ 每次都新建 |
+| `[入口]` `/icode init [<粗略需求>]` | **可选步骤0**：多轮对话产出 `00_init.md`（需求初稿，含链路图：before/after + 改动点，每轮动态更新）。**每次调用都新建目录，不复用、不续聊**（详见 [steps/00_init.md](steps/00_init.md)）。**支持 `--worktree`**（opt-in）；**支持 `--debug`**（独立孪生不入索引，详见 [references/debug_mode.md](references/debug_mode.md)） | ✅ 每次都新建 |
+| `[流程]` `/icode start <需求>` | **全流程（full 模式）**：创建/复用目录 → 步骤1→6 串联。步骤2 review 默认 3 轮 + 对抗验证，步骤5 deepcheck 三阶段循环（**复用规则见下**）。**支持 `--worktree`**（opt-in） | ✅ 创建新目录 / 复用 |
+| `[流程]` `/icode fast <需求>` | **精简全流程（fast 模式）**：plan → review(1轮无对抗) → merge → code → deepcheck(Reverse 单阶段) → audit。耗时约为全流程 65%，产物结构与 full 对齐（详见 [steps/fast.md](steps/fast.md)）。入口打印警告、用户自负其责。**支持 `--worktree`**（opt-in） | ✅ 创建新目录 / 复用 |
+| `[流程]` `/icode plan <需求>` | **仅步骤1**：拟定项目计划（**复用规则见下**）。**支持 `--worktree`**（opt-in） | ✅ 创建新目录 / 复用 |
 
 > **步骤0 init 状态转换时机**（避免状态机歧义）：
 > - `init` 调用：建新目录，立即写 `status=init_in_progress` + `completed_steps=["0"]` 落盘
@@ -74,11 +74,22 @@ description: 端到端编码工作流（步骤 0~6，含可选需求初稿步骤
 
 在对话中输出使用流程示例和命令一览（不创建目录和文件）。
 
+> **公共选项**（适用所有 `/icode` 命令）：
+> - **`--worktree`** — 新建工单时用 git worktree 隔离（独立分支 + 独立目录），opt-in 参数触发；不传默认原地建工单，不弹问；工程可写 limit「worktree 强制禁止」红线阻止触发（详见 [SKILL.md「目录管理·worktree 决策与创建」](../SKILL.md)+ [steps/limit.md §7](../steps/limit.md)）。例：`/icode start --worktree <需求>`
+
 ### 使用流程示例
 
 ```bash
 # 方式A：全流程一步到位（自动串联所有步骤）
 /icode start 实现MCU雨量传感器I2C驱动
+
+# 方式A+：opt-in 用 worktree 隔离（与其它参数/flag 共存)
+/icode start --worktree 实现MCU雨量传感器I2C驱动   # 同上，但产物在 ../<repo>-wt-<ticket-slug>/ 内独立分支
+/icode fast --worktree 实现MCU雨量传感器I2C驱动    # fast 模式 + worktree 隔离
+/icode plan --worktree 实现MCU雨量传感器I2C驱动    # 仅步骤1 + worktree 隔离
+/icode init --worktree 录制传感器数据转包            # 步骤0 + worktree 隔离
+/icode log --worktree ~/work/log/服务异常 "启动后无响应"  # log + worktree 隔离
+# 默认不带 --worktree → 直接原地建工单，不弹问
 
 # 方式B：分步执行
 /icode plan 实现MCU雨量传感器I2C驱动   # 步骤1
@@ -245,87 +256,74 @@ description: 端到端编码工作流（步骤 0~6，含可选需求初稿步骤
 
 ### 目录管理
 
-**worktree 决策与创建（新建工单入口 · 每工单先问一次）**：
-> **执行顺序**：`start`/`plan`/`fast` 先走下方「复用 / 创建新目录决策」**判定为「新建」后**，再执行本段询问（REUSE=2 复用歧义问「复用/新建」、答「新建」也走本段）；`init`/`log` 直接新建走本段。判定为「复用」→ **跳过本段**原地续跑（worktree 只在新建时建，不重复建）。
+**worktree 决策与创建（新建工单入口 · opt-in 参数触发）**：
+> **触发规则（opt-in）**：本段由以下两种触发形式之一触发，AI **不主动弹问**——识别到触发意图即执行，未识别则默认原地：
+>   1. **flag 形式**：用户命令中含独立 token `--worktree`（**只接受双短横独立 token 形式**：`--worktree`，**不接受** `-worktree`（单短横）/ `--worktree=true` / `--worktree true` 等变体——避免 AI 自主解析变体导致误触；与其它独立 flag token 共存如 `--listen`）
+>   2. **自然语言意图声明**：用户在消息正文里显式声明意图，常见措辞如「用 worktree 隔离做」「走 worktree」「独立分支做」「在 worktree 里做」
+>   - **不触发（避免误触）**：仅在消息**正文叙述/引用**（反引号包裹、代码块、问题解释、文档片段）中提到 `--worktree` / `worktree` 等字眼 **≠ 触发**——语境属"讨论参数"而非"下达命令"，AI 必须做语境识别
+>   - **反向声明（后置优先）**：若消息中同时出现**正向声明**（如「用 worktree」）与**反向声明**（如「别用 worktree」「不要 worktree 隔离」「普通做就行」），AI 取**后置声明**作为最终意图（最后一句即最终意图）
+>   - **语境识别失败降级**：语境模糊难以判断时**不弹问**，按"未触发"处理（默认原地）+ L1 触发回显暴露给用户即时纠错（用户看到 `▶ worktree 隔离：未启用` 可主动澄清"用 worktree"补触发）
+>   - **不弹问**：识别不触发即默认原地（不主动询问"要不要 worktree？"），符合 opt-in 默认语义；唯一例外 = limit 「worktree 强制禁止」红线命中时（见 [steps/limit.md](limit.md)「§7 worktree 强制禁止红线」）——这是**违规时阻止**，不同于 opt-in 弹问
+>   - **触发回显（强制 L1，区分判定态与执行态）**：AI 必须先在回复顶部输出一行状态——
+>     - **判定态·触发**：先输出 `▶ worktree 隔离：即将启用 → 准备创建 ../<repo>-wt-<ticket-slug>/（分支 icode/<ticket-slug>）`（`<ticket-slug>` 占位符**动态回填**为 AI 提炼的实际 ticket-slug 值，**勿直接输出尖括号字面**；占位符语义与冲突处理见下方 ⚠️ 段）
+>     - **执行态·成功**：创建完成后输出 `▶ worktree 隔离：✓ 已创建 ../<repo>-wt-<ticket-slug>/（分支 icode/<ticket-slug>）`（同 `<ticket-slug>` 占位符回填为实际值）
+>     - **判定态·未触发**：`▶ worktree 隔离：未启用（默认，原地建工单）`
+>     - **执行态·失败**：`▶ worktree 隔离：⚠ 创建失败，降级原地（wt_degraded=true，原因：<错误>）`
+>     - 让用户即时确认自己的意图是否被正确识别（防误触/漏触静默发生；连续两态让"判定→执行"过程透明）
+> 
+> **执行顺序**：`start`/`plan`/`fast` 先走下方「复用 / 创建新目录决策」**判定为「新建」后**，再判定参数（REUSE=2 复用歧义问「复用/新建」、答「新建」也走本段）；`init`/`log` 直接新建走本段判定。判定为「复用」→ **跳过本段**原地续跑（worktree 只在新建时建，不重复建）。
 > **真源**：本段执行细节（创建/降级/字段族/回流/护栏全量规则）见 [references/worktree_isolation.md](references/worktree_isolation.md)，执行本段前 Read 之（本段是精简版，冲突以真源为准）。
 ```bash
-# ① 入口询问：本工单用 worktree 隔离吗？（独立分支 + 独立目录，并行互不污染）还是就在当前工作区做？
-#    - 答「用」→ ② 创建 worktree；答「不用」→ 原地（走下方「创建新目录」，不记 worktree metadata）
-#    - limit 已写「worktree 默认关闭」→ 跳过询问直接原地（见 [steps/limit.md](steps/limit.md)）
-# ② 创建 worktree（答「用」时；创建前展示将创建的 路径 + 分支名，等用户最终确认；创建是写操作影响 .git）
+# ① 参数识别：扫描用户当前消息，匹配以下两种触发形式之一
+#    A. flag 形式：消息命令位置的独立 token `--worktree`（双短横独立 token；不允许变体）
+#    B. 自然语言意图：识别"用 worktree 隔离"/"走 worktree"/"独立分支做" 等显式声明
+#    - 反向声明后置优先：同一消息后置「别用 worktree」> 前置「用 worktree」
+#    - 不触发：仅叙述/引用/反引号示例 ≠ 触发（语境判断，由 AI 判断）；模糊时按未触发处理
+# ② 触发回显（L1 强制，区分判定态与执行态）：
+#    - 判定态·触发（创建前）：echo "▶ worktree 隔离：即将启用 → 准备创建 ../<repo>-wt-<ticket-slug>/（分支 icode/<ticket-slug>）"（动态回填 ticket-slug）
+#    - 判定态·未触发：echo "▶ worktree 隔离：未启用（默认，原地建工单）"
+# ③ 未触发 → 默认原地，直接走下方「创建新目录」，不读 worktree 真源、不创建 worktree、不记 worktree metadata
+# ④ 触发 → 执行创建前**告知**（非再次询问；用户触发意图即一次性同意，写操作前最后公示）：
+#    - path = "../<repo>-wt-<ticket-slug>" / branch = "icode/<ticket-slug>"
+#    - 执行前需 limit 红线检查（违规阻止契约；见 steps/limit.md §7）
+# ⑤ 触发 + limit 命中「worktree 强制禁止」 → 提示一次"本工程 limit 禁止 worktree，本工单回退原地建"+ 走 ③ 默认原地，**不创建 worktree**
 git rev-parse --is-inside-work-tree             # 前置：必须在 git 仓库（失败→原地降级）
 git rev-parse --verify HEAD >/dev/null 2>&1     # 前置：仓库必须有提交（无 HEAD 不能建 worktree）
 test -f "$(git rev-parse --show-toplevel)/.git" && { echo "已在 worktree 内→原地"; WT_SKIP=1; }  # 主仓才建
 git worktree list                               # 只读：确认目标路径/分支名未占用
 [ -z "$WT_SKIP" ] && git worktree add -b "icode/<ticket-slug>" "../<repo>-wt-<ticket-slug>"
-# ③ 创建后：cd 进 worktree → 按下方「创建新目录」逻辑在 worktree 内生成 .icode_output/.icode_output_N
+# ⑥ 执行后回显：成功 → "▶ worktree 隔离：✓ 已创建 ../<repo>-wt-<ticket-slug>/（分支 icode/<ticket-slug>）"
+# ⑦ 创建后：cd 进 worktree → 按下方「创建新目录」逻辑在 worktree 内生成 .icode_output/.icode_output_N
 #    （worktree 内无旧产物 → 通常恒为 _1），本工单全部产物在 worktree 内；校验 worktree 内 .icode_output/ 应为空
 #    → 非空 = 该工程 .icode_output 未 gitignore（worktree 带入了主仓旧产物）→ 提示「建议配置 .gitignore 排除 .icode_output/」，L3 不阻断
-# ④ 创建失败（无 HEAD（仓库无提交）/路径冲突/无写权限/FS 不支持/命名冲突修正后仍失败）→ 原地降级 + metadata 记 wt_degraded=true（见「强制阻断边界矩阵」L3）
-# ⑤ 业务子仓隔离（repo 多仓库工程，worktree 工单进入 code 前；真源见 worktree_isolation「⑤ 业务子仓隔离」）：
+# ⑧ 创建失败（无 HEAD（仓库无提交）/路径冲突/无写权限/FS 不支持/命名冲突修正后仍失败）→ 原地降级 + metadata 记 wt_degraded=true（见「强制阻断边界矩阵」L3）
+# ⑨ 业务子仓隔离（repo 多仓库工程，worktree 工单进入 code 前；真源见 worktree_isolation「⑤ 业务子仓隔离」）：
 #    super-repo worktree 不覆盖业务子仓（子仓有自己的 .git 在原工程路径）——若需求要改业务子仓，
-#    进入 code（步骤4）前必须为每个受影响子仓建隔离 checkout（git -C <原子仓> worktree add -b icode/<slug>-<子仓slug> <super-wt>/<子仓相对路径>，
+#    进入 code（步骤4）前必须为每个受影响子仓建隔离 checkout（git -C <原子仓> worktree add -b icode/<ticket-slug>-<子仓slug> <super-wt>/<子仓相对路径>，
 #    写 metadata.sub_worktrees），禁止直接改原工程路径子仓；回流时先 commit+merge+remove 子仓再 remove super-worktree
+
+# ⚠️ `<ticket-slug>` 占位符语义（回显与创建共用，必须明确）：
+#    - 由 AI 在判定·触发之后、执行·创建之前**自行提炼**（基于当前需求文本，英文短横线、≤30 字符小写；命名规则见 [references/worktree_isolation.md §1「② 创建·命名」](../references/worktree_isolation.md)）
+#    - 与 git worktree 命令 `git worktree add -b "icode/<ticket-slug>" "../<repo>-wt-<ticket-slug>"` 中的 `<ticket-slug>` **同一值**（一处定义两处用）
+#    - **回显中动态回填**：先用 LLM 提炼的 slug 填占位符显示给用户 → 同一值再喂给 git worktree add 执行
+#    - **与 ticket_id 不同**：ticket_id = `{工程名}-{N}`（步骤8 索引写入后回填），`<ticket-slug>` 是早于 ticket_id 的纯提炼 slug（不带工程名前缀、不带目录号 N）
+#    - **冲突处理**：与 `git worktree list` 已存在的路径/分支冲突 → 追加 `-2` / `-3`（详见 worktree_isolation §1「② 创建·命名」）；slug 提炼后立即用 `git worktree list` 检查冲突，命中即重提炼
+#    - ⚠️ LLM 必须自己提炼、勿向用户索取；勿用占位符字符串（如直接输出 `<ticket-slug>` 而未提炼）执行创建
 ```
 
 **创建新目录**（原地路径：答「不用」/ limit 默认关闭 / worktree 创建失败降级时；worktree 场景则在 worktree 内执行）：
-```bash
-mkdir -p .icode_output   # 统一父目录，所有产物收纳于此
-# ⚠️ 目录号必须由递增逻辑计算，禁止手写/硬编码 N（防误复用旧工单目录，历史事故教训）；真源见 dir_and_metadata「创建新目录」
-LAST=$(ls -d .icode_output/.icode_output_* 2>/dev/null | grep -oP '(?<=\.icode_output_)\d+' | sort -n | tail -1)
-NEXT=${LAST:-0}; NEXT=$((NEXT + 1))
-ICODE_OUT_DIR=".icode_output/.icode_output_${NEXT}"
-# 硬熔断① 建前检查（L1 阻塞）：目标已存在 = 递增被绕过/手写 → 中止；② 建后验证：非空 = 误复用 → 中止（细节见真源）
-test -d "$ICODE_OUT_DIR" && { echo "❌ 误复用风险：目标目录已存在 $ICODE_OUT_DIR（递增被绕过/目录号手写），禁止覆盖"; exit 1; }
-mkdir -p "$ICODE_OUT_DIR"
-[ -z "$(ls -A "$ICODE_OUT_DIR")" ] || { echo "❌ 目录非空=误复用，禁止在此新建工单"; exit 1; }
-```
+
+完整脚本（含目录号递增 + 硬熔断①建前检查 + 硬熔断②建后验证）见 [references/dir_and_metadata.md「创建新目录」段](../references/dir_and_metadata.md)（**真源**：所有入口命令与 step 都引用本段，禁止独立定义或微改）。
 
 **复用 / 创建新目录决策**（用于 `start` / `plan` / `fast`）：
-```bash
-mkdir -p .icode_output
-LAST=$(ls -d .icode_output/.icode_output_* 2>/dev/null | grep -oP '(?<=\.icode_output_)\d+' | sort -n | tail -1)
-REUSE=0
-if [ -n "$LAST" ]; then
-  CAND=".icode_output/.icode_output_${LAST}"
-  # 判定最新目录是否为"入口态"：有 .ico_metadata.json + 00_init.md，且无 01_plan.md
-  if [ -f "$CAND/.ico_metadata.json" ] && [ -f "$CAND/00_init.md" ] && [ ! -f "$CAND/01_plan.md" ]; then
-    STATUS=$(grep -oP '"status"\s*:\s*"\K[^"]+' "$CAND/.ico_metadata.json")
-    # 入口态：init_in_progress 或 log_done
-    case "$STATUS" in
-      init_in_progress|log_done) REUSE=2 ;;  # 2 = 有歧义，需问用户
-    esac
-  fi
-fi
-# REUSE=2：有歧义，问用户"复用 / 新建"；REUSE=0：非入口态，带参新建 / 无参报错
-if [ "$REUSE" = "0" ]; then
-  NEXT=${LAST:-0}; NEXT=$((NEXT + 1))
-  ICODE_OUT_DIR=".icode_output/.icode_output_${NEXT}"
-  # 硬熔断（同「创建新目录」段，细节见真源）：目标已存在=递增被绕过→中止；mkdir 后必须验证为空
-  test -d "$ICODE_OUT_DIR" && { echo "❌ 误复用风险：目标目录已存在 $ICODE_OUT_DIR（递增被绕过/目录号手写），禁止覆盖"; exit 1; }
-  mkdir -p "$ICODE_OUT_DIR"
-  [ -z "$(ls -A "$ICODE_OUT_DIR")" ] || { echo "❌ 目录非空=误复用，禁止在此新建工单"; exit 1; }
-fi
-```
+
+完整脚本见 [references/dir_and_metadata.md「复用 / 创建新目录决策」段](../references/dir_and_metadata.md)（**真源**）。决策三档语义：
 
 > **复用决策三档**：`REUSE=2`（入口态有歧义）→ 必须问用户"复用 / 新建"，按答复定；`REUSE=0`（非入口态）→ 带参新建、无参报错。复用时将 `00_init.md` 作为步骤1主要需求输入（命令行参数作补充）。
 
-**检测最新目录**（用于 `review`/`merge`/`code`/`deepcheck`/`audit`/`patch`）：
-```bash
-LAST=$(ls -d .icode_output/.icode_output_* 2>/dev/null | grep -oP '(?<=\.icode_output_)\d+' | sort -n | tail -1)
-if [ -z "$LAST" ]; then
-  echo "❌ 错误：没有找到 .icode_output/.icode_output_N 目录"
-  echo ""
-  echo "💡 解决方案：先运行以下命令之一创建工单："
-  echo "   /icode init <需求>     # 多轮对话产出 00_init.md（可选步骤 0）"
-  echo "   /icode log <零散信息>  # 日志根因分析入口（领域无关）"
-  echo "   /icode start <需求>    # 全流程（创建新目录 + 步骤 1→6 串联）"
-  echo "   /icode plan <需求>     # 仅步骤 1（创建新目录）"
-  echo "   /icode fast <需求>     # 精简全流程（fast 模式）"
-  exit 1
-fi
-ICODE_OUT_DIR=".icode_output/.icode_output_${LAST}"
-```
+**检测最新目录**（用于 `review`/`merge`/`code`/`deepcheck`/`audit`/`patch`/`status`/`readme`）：
+
+完整脚本（含 `LAST` 提取 + 错误提示 + `exit 1` 兜底）见 [references/dir_and_metadata.md「检测最新目录」段](../references/dir_and_metadata.md)（**真源**）。所有 step 文件共享本段，禁止独立微改。
 
 ### 前置文件校验
 
@@ -403,10 +401,10 @@ ICODE_OUT_DIR=".icode_output/.icode_output_${LAST}"
 - `mode`（新增，可选，默认 `"full"`）：工单模式。`"full"` = `/icode start` 全流程（步骤2 默认 3 轮 + 对抗，步骤5 三阶段循环）；`"fast"` = `/icode fast` 精简全流程（步骤2 固定 1 轮无对抗，步骤5 只跑 Reverse）。**字段缺失视为 `"full"`（向后兼容旧 metadata）**。详见 [steps/fast.md](steps/fast.md)
 - `max_rounds`（新增，可选，默认 3）：步骤2 review 软上限轮数。`mode="full"` 时由 `/icode review N` 参数决定（默认 3）；`mode="fast"` 时**自动串联下强制为 1**，但**单步命令（`/icode review N`）在 fast 工单上调用时 N 优先级最高**——用户用参数 N 显式表达 fast→full 升级意图时，按 N 轮跑（详见 [references/dir_and_metadata.md](references/dir_and_metadata.md)「步骤2/5 读 mode 字段的契约」段）。**字段缺失视为 3**
 - `worktree_path`（worktree 字段族，缺省 `null` = 未进 worktree，向后兼容旧工单）：本工单所在 worktree 绝对路径。**非 null 是「本工单在 worktree 内」的判定依据**——status 显示 worktree 列 / 06_audit §6.4 回流提醒 / 07_readme worktree 状态段均读它。工单回流 `git worktree remove` 后随 worktree 消失（全局索引 `project_path` 由 stale 检测标 `path_gone` 留档，见 [references/dir_and_metadata.md](references/dir_and_metadata.md)「过时校验」）。创建 worktree 时写入，见「目录管理·worktree 决策与创建」
-- `worktree_branch`（worktree 字段族，缺省 `null`）：本工单分支 `icode/<slug>`（worktree 场景下与索引 `created_branch` 一致——**冗余存储**，便于 status 直接读 metadata 显示分支，不强制双写一致性）
+- `worktree_branch`（worktree 字段族，缺省 `null`）：本工单分支 `icode/<ticket-slug>`（worktree 场景下与索引 `created_branch` 一致——**冗余存储**，便于 status 直接读 metadata 显示分支，不强制双写一致性）
 - `wt_degraded`（worktree 字段族，缺省 `false`）：bool，worktree 创建失败降级原地标记（`true` = 未进 worktree 且已降级，见「强制阻断边界矩阵」L3）
 - `cross_project_refs`（worktree 字段族，缺省 `[]`）：数组，跨工程 worktree 引用——本工单转工单到关联工程时追加 `{project_id, ticket_id, worktree_path}` 指向 B 工单及其 worktree；B 工单自身用 `worktree_path` 记录自己的。从 A 工单可完整追溯「本需求涉及的每个工程的 worktree」
-- `sub_worktrees`（worktree 字段族，缺省 `[]`）：业务子仓隔离 checkout 记录（repo 多仓库工程，仅涉及子仓修改的 worktree 工单）：数组元素 `{sub_path, worktree_path, branch}`——`sub_path`=子仓相对 super-repo 路径、`worktree_path`=子仓隔离 checkout 绝对路径（在 super-worktree 内同名相对路径）、`branch`=`icode/<slug>-<子仓slug>`。首次建子仓隔离时追加，回流回收时清。见 [references/worktree_isolation.md](references/worktree_isolation.md)「⑤ 业务子仓隔离」
+- `sub_worktrees`（worktree 字段族，缺省 `[]`）：业务子仓隔离 checkout 记录（repo 多仓库工程，仅涉及子仓修改的 worktree 工单）：数组元素 `{sub_path, worktree_path, branch}`——`sub_path`=子仓相对 super-repo 路径、`worktree_path`=子仓隔离 checkout 绝对路径（在 super-worktree 内同名相对路径）、`branch`=`icode/<ticket-slug>-<子仓slug>`。首次建子仓隔离时追加，回流回收时清。见 [references/worktree_isolation.md](references/worktree_isolation.md)「⑤ 业务子仓隔离」
 - `archive_path`（worktree 字段族，缺省 `null`）：本工单核心产物归档目录（`~/.claude/icode_data/worktree_archive/<project_id>/<ticket_id>/`）。**06_audit 终审**标记 `status=completed` 且 `worktree_path` 非 null 时自动归档写入（见 [references/worktree_isolation.md](references/worktree_isolation.md)「产物归档」）；同步写全局索引条目。`archive_path` 非 null 且 `test -d` 有效的工单为 **archived 活跃历史工单（不标 stale）**：检索照常命中，`project_path` 失效（worktree remove）时从归档读 ADR/根因走历史参考，命中正常续期 + 按 verdict 分流，待遇与主仓工单一致（见 [references/dir_and_metadata.md](references/dir_and_metadata.md)「过时校验」归档工单）。缺省 `null` = 原地工单或未归档
 
 - `fix_tiers`（新增，可选，默认 `null`）：修复方案三档分级（反偷懒第 26 条）。`{"A": ["A1..."], "B": ["B1..."], "C": ["C1..."]}` 供 review/code/audit 核对实施范围。**由步骤1 plan §4.5 落盘**（每档 1-2 条一句话摘要），步骤2/4/6 核对实施范围时读取；字段缺失视为 `null`，从 `03_plan_final.md` §4.5 文本读（向后兼容旧 metadata）
@@ -827,4 +825,4 @@ icode 工作流可调用 6 个 MCP（`/icode install` 一键安装）。**双保
 | [references/doc_template.md](references/doc_template.md) | icode doc 章节模板：前 50 行四块结构（项目元信息/KEYS/简要说明/目录）+ 十位桶编号 + 自适应 grep 关键词表 + 99 章审计策略 + **v2.0.0 双视角必含元素清单（14 项）+ 业务流独立成章 + 英文首次中文备注 + 链路中文说明 + 质量审视检查清单 + 模板版本自举迁移** | doc |
 | [references/necessity_check.md](references/necessity_check.md) | **现有功能覆盖度检查（防重复实现机制）**：触发时机 + 执行命令（全工程检索 + Read 命中处行为链）+ 三类判定（已覆盖/部分/未覆盖）+ 各步骤落点（init §2.X/预筛列、plan 前置/断言/ADR/对抗、review 维度7、deepcheck Reverse 对比、audit 视角 C） | init / plan / review / deepcheck / audit |
 | [references/first_activation_path.md](references/first_activation_path.md) | **首次激活路径一致性检查**：静态分析盲区（"写了从没实机执行过"的死路径既有 bug）+ 触发条件 + 检测法（软信号、不阻断）+ 双侧校验一致性核对清单 + 部署后验证建议下游输出 | plan（断言⑤）/ deepcheck（Reverse）/ audit（部署后建议）/ patch（部署后验证发现） |
-| [references/worktree_isolation.md](references/worktree_isolation.md) | **git worktree 多需求隔离**：worktree 决策与创建（入口询问**硬门**/预检/用户确认/失败降级）+ cwd 契约 + metadata 字段族 + 回流指引（F2 二选一）+ **产物归档（自动，防 remove 丢档）** + 防误删护栏 + 空间自查 | 所有新建工单入口（init/log/start/plan/fast）/ 续跑与只读（review/code/deepcheck/audit/patch/status/readme） |
+| [references/worktree_isolation.md](references/worktree_isolation.md) | **git worktree 多需求隔离**：worktree 决策与创建（**opt-in 参数触发**：`--worktree` 才走创建，否则默认原地，不弹问；**预检/公示告知/失败降级**）+ cwd 契约 + metadata 字段族 + 回流指引（F2 二选一）+ **产物归档（自动，防 remove 丢档）** + 防误删护栏 + 空间自查 | 新建工单入口加 `--worktree` 时（init/log/start/plan/fast）/ 续跑与只读（review/code/deepcheck/audit/patch/status/readme） |

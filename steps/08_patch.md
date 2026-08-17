@@ -10,6 +10,7 @@
 |---|---|---|
 | **L1·致命** | 无最新工单目录（`.icode_output/.icode_output_N/` 不存在或 metadata 缺失） | 报错退出，提示先 `/icode init` / `/icode start` 创建工单 |
 | **L1·致命** | 最新工单处于入口态（`init_in_progress` / `log_done`，无 `01_plan.md`） | 报错退出，提示先 `/icode plan` / `/icode start` 进入主流程（patch 只作用于已有主流程产物的工单） |
+| **L1·致命** | 当前工单是 debug 工单（`metadata.debug == true`） | 报错退出，提示：`/icode patch` 不接受 debug 工单（debug 工单是 1 次研究产物、不支持 patch 续跑；如需修代码，请用 `/icode init` 重建正常工单走主流程；详情见 [references/debug_mode.md](../references/debug_mode.md)） |
 | **L2·关键** | 阶段4 复检发现新引入问题且无法当场修复 | 警告 + 记入 metadata（`patch_history` 末条 `status="issues"`）+ 流程继续（user 可再跑 `/icode patch` 处理） |
 
 ## 定位
@@ -57,13 +58,7 @@
 
 > **读决策锚点**（启动时）：若 `metadata.anchors_enabled != false`，Read `{ICODE_OUT_DIR}/.decision_anchors.json`（不存在则跳过），获取既有决策摘要作上下文，不替代产物。详见 [references/decision_anchors.md](../references/decision_anchors.md)。
 
-按 SKILL.md「检测最新目录」逻辑确定 `ICODE_OUT_DIR`（与 review/code/deepcheck/audit 相同）：
-
-```bash
-LAST=$(ls -d .icode_output/.icode_output_* 2>/dev/null | grep -oP '(?<=\.icode_output_)\d+' | sort -n | tail -1)
-# 无 LAST → 报错退出，提示先 /icode init|start 创建工单
-# 有 LAST → ICODE_OUT_DIR=".icode_output/.icode_output_${LAST}"
-```
+按 [references/dir_and_metadata.md「检测最新目录」段](../references/dir_and_metadata.md)（与 review/code/deepcheck/audit/status/readme 共享同一真源）确定 `ICODE_OUT_DIR`。禁止独立定义该 bash 块。
 
 然后校验：
 
@@ -72,6 +67,9 @@ LAST=$(ls -d .icode_output/.icode_output_* 2>/dev/null | grep -oP '(?<=\.icode_o
    - `init_in_progress` / `log_done`（入口态，无 `01_plan.md`）→ **报错退出**，提示先 `/icode plan` / `/icode start`
    - `review_in_progress` / `deepcheck_in_progress` → **柔性提示**"当前有未完成的主流程步骤（步骤 2/5 中断态），建议先重跑 `/icode review` / `/icode deepcheck` 续跑"，**不阻断**，用户明确要 patch 则继续
    - 其余状态（`plan_done` 及以后 / `completed`）→ 直接进入执行流程
+2.5. **worktree 工单落点约束**：读 `metadata.worktree_path`：
+   - **非 null**（本工单在 worktree 内）→ **必须先 `cd {worktree_path}` 再继续本步骤**（cwd 契约照常，与 status --validate / 06_audit / 07_readme 同，见 [references/worktree_isolation.md §2](../references/worktree_isolation.md)）；在主仓跑会找不到 `.icode_output_N/` 内产物 → 误报缺失
+   - **null**（原地工单）→ 直接继续
 3. 确定本次 `N`（**双源取大，防编号冲突**）：
    - 读 `metadata.patch_count`（缺失视为 0）
    - 读 `08_patch.md` 最大 Patch 段编号（`grep -oP '^## Patch \K\d+' {ICODE_OUT_DIR}/08_patch.md 2>/dev/null | sort -n | tail -1`——**须重定向 stderr**：文件不存在时 grep 会报错，重定向后无输出、`tail` 为空 → 视为 0）
@@ -168,6 +166,11 @@ LAST=$(ls -d .icode_output/.icode_output_* 2>/dev/null | grep -oP '(?<=\.icode_o
 （每个待改/新增符号的三链 grep 结果，**含命中行号**——caller 链/import 链/test 链逐条列出；
   任一条 0 命中明确写"0 命中"而非省略）
 
+### 3.2 修复方案对抗结果（阶段 2.5 写入）
+- 通过：`✅ 通过（质疑者 A 根因: confirmed / 质疑者 B 修改方案: confirmed）` + 双方独立 spawn 的 agent ID（回指审计证据）
+- 降级：`⚠️ 降级 [未验证-对抗不通过]（质疑者 X: refuted — <一句理由>）` + 主张由用户决定是否继续
+- 环境无工具：`⚠️ 降级 [未验证-对抗不可用（环境无 spawn 工具）]` + 主代理文字块自演质疑列点
+
 ### 4. 实施
 （阶段3 落地：实际改动 file:line；与计划的偏离）
 
@@ -191,6 +194,41 @@ LAST=$(ls -d .icode_output/.icode_output_* 2>/dev/null | grep -oP '(?<=\.icode_o
 **事务性/非事务性步骤分离（防「保存/提交已成功但用户看到失败」伪失败）**：本次修改涉及**多步骤业务流程**时，审查并区分**事务性步骤**（主流程结果，失败应失败/回滚）与**非事务性/展示增强步骤**（APP/DP 展示数据上报、底图刷新、通知）。主事务已提交后执行的非事务性步骤，其失败**不得推翻/阻断已提交事务**——降级告警保留事务成功，避免「展示失败→误判整体失败→伪失败」。识别信号：该步骤 payload 是「给客户端/用户的展示数据」，而主事务结果已写入权威状态。
 
 **落盘门（硬门，防"先做后写"）**：增量计划段（含决策推理 + 三链预扫结果）写完后，**必须先 Write `08_patch.md` 落盘，才能进入阶段 3 实施**。未落盘即开始改代码 = 不合规（违反本门）——事后补写会失去"计划约束实施"的作用，且事后追述容易不自知地粉饰为一致。
+
+### 阶段 2.5 — 修复方案对抗（轻量，独立质疑者 spawn）
+
+> **目的**：patch 修复场景下，主代理对「根因」与「修改方案」存在**确认偏误**风险（与 plan 阶段同源问题）——自己找的原因容易"看着像对就收"；自己拟的改法容易高估其安全性。**复用 [references/adversarial.md](../references/adversarial.md) 共享对抗模式**（分析师+独立质疑者+诚实降级），但 patch 是轻量流程，**仅派 2 个质疑者**（不像 plan 阶段 c.5 派 3 个）：质疑者 A 看「根因」是否站得住；质疑者 B 看「修改方案」是否最小侵入、是否有副作用。**不阻断流程**——撑不住就**诚实降级**标 `[未验证-对抗不通过]`（与 adversarial.md 「诚实降级」模式一致），主流程继续；用户/后续 patch/audit 可补。
+
+**适用范围**：
+- **代码修改型**分支（阶段 2 判定①）→ **必做**：本节是修代码流程的关键防偏误环节
+- **分析验证型**分支（阶段 2 判定②）→ **跳过**（无修改方案可质疑，"结论验证"已在阶段 4 完成）
+- **部署后验证发现型**分支（阶段 2 判定③）→ **必做**：本分支最易出现"修了症状没修根因"，对抗更关键
+
+**执行步骤**：
+
+1. **输入契约**：质疑者输入 = `08_patch.md` Patch N 段「3. 增量计划」+「3.1 三链预扫结果」全文 + `git diff`（如果有先前修改）
+2. **独立 spawn 2 个质疑者**（强约束，遵循 [references/adversarial.md](../references/adversarial.md) spawn 规格）：
+   - **质疑者 A（根因质疑）**：聚焦"这次 patch 在修的是不是真的根因？"
+     - 攻击点：症状描述与本次修改的因果关系是否充分成立？是否有其它未被识别的原因能产生同一症状？根因归类是否过窄？
+     - 输出 verdict：`confirmed | refuted | needs_more_evidence` + reasoning（≤200 字，含证据回指 file:line/日志行/章节段落）
+   - **质疑者 B（修改方案质疑）**：聚焦"这次 patch 的改法本身是不是合适？"
+     - 攻击点：本次修改的修改范围是否过大（可更小侵入）？是否会引入副作用（破坏既有功能 / 性能 / 时序）？是否漏掉接口/调用方同步？是否需配套测试？边界/异常/降级路径是否覆盖？
+     - 输出 verdict：同上
+   - **spawn 规格**（直接复用 adversarial.md，不重复）：`subagent_type: "general-purpose"`（**禁用 Explore**）+ `schema` 强制 StructuredOutput
+   - **必须独立 spawn**：主代理不得自演；无 agent spawn 证据 = 未对抗 = 不合规
+3. **裁决**（主代理）：
+   - 双方 `confirmed`（或 `needs_more_evidence` 但补证据后转 confirmed）→ 通过，记录「对抗通过」批注到 Patch N 段「3. 增量计划」末尾（步骤 4）
+   - **任一**方 `refuted` → **诚实降级**：标 `[未验证-对抗不通过]` + 同段追加「质疑点 + 待用户确认的方向」（**不阻断主流程，用户可显式覆盖继续，或另开新 patch 调整方案**）
+   - 双方 `needs_more_evidence` → 补证据后重跑 1 轮（**最多重跑 1 轮**；仍 `needs_more_evidence` → 降级同上）
+4. **Patch N 段追加批注**（不论结果）：在「3. 增量计划」末尾加一行 `### 修复方案对抗结果`：
+   - 通过：`✅ 通过（质疑者 A: confirmed / B: confirmed）` + 双方独立 spawn 的 agent ID（回指审计证据）
+   - 降级：`⚠️ 降级 [未验证-对抗不通过]（质疑者 X: refuted — <一句理由>）` + 主张由用户决定是否继续
+5. **环境无 spawn 工具降级**（参考 adversarial.md 同机制）：ToolSearch 取不到 Agent → 标 `[未验证-对抗不可用（环境无 spawn 工具）]`（**与 refuted 区分**：env-only 不算方案有问题，是工具不具备）；主代理在这种降级下需**额外说明**已用文字块自演质疑（列出至少 3 个反向质疑点 + 自答），作为降级二级兜底
+
+**与计划 4 维度验证清单的关系**（防冗余）：
+- 本节专注**本次修复方案本身的可行性 + 根因合理性**（独立 spawn 质疑）
+- 4 维度验证清单（阶段 4 复检）专注**本次修改点落地后是否引入新问题**（破坏面校验）
+- **两节视角不同、不可互相替代**：本节不通过不影响阶段 4 走完（标降级）；阶段 4 不通过也不影响本节已有 verdict（独立证据链）
 
 ### 阶段 3 — 实施（最小修改）
 
@@ -279,7 +317,39 @@ LAST=$(ls -d .icode_output/.icode_output_* 2>/dev/null | grep -oP '(?<=\.icode_o
 | vision-bridge | 🟢* | 用户测试发现的问题带截图/视频证据（如 UI 异常图、设备视频），或 TB 缺陷源附件含媒体时 |
 | playwright | 🟢* | 前端工程且补丁需浏览器行为验证时 |
 | memory | 🟢* | 本工程历史工单数 ≥1 且新问题疑与历史工单/既有决策相关时 |
-| cheap-research | 🟢* | **降本**：长产物压缩 / 现状摘要（阶段1 重审时可选，不接管决策） |
+| cheap-research | 🟢* | **降本 + 机械扫描**：14 个工具，按 patch 阶段按表选用；**不接管决策/对抗/架构**（核心约束） |
+
+**cheap-research patch 阶段工具映射（每个工具加 server.py 真源行号，方便审计）：**
+
+> **分类约定**（参考 [mcp/cheap-research/README.md「14 工具」段](../mcp/cheap-research/README.md)）：标 `[核心]` = LLM 推理工具（用主代理上下文换效率）/ 标 `[增强]` = 纯机械或轻量工具（接近零 LLM 成本）。**同一工具在不同 patch 阶段可重复出现**（例如 `summarize` 既在阶段 1 重审长产物、又在 1.5 监听长 log，**focus 不同则语义不同**——不是表错，是合理的多场景映射）。
+
+| patch 阶段 | 工具 | 类型 | focus / 输入 | 真源 | 价值 |
+|------------|------|------|------------|------|------|
+| **阶段 1 重新审视现状**：重审 `00_init.md` / `01_plan.md` / `03_plan_final.md` 长产物 | `summarize` | [核心] | `focus="改动点/根因"` | [server.py:194](mcp/cheap-research/server.py) | 8K 产物读全文 → 拿结构化摘要，省主代理上下文 80%+ |
+| **阶段 1 重新审视现状**：从 `index.json` 候选中按本工单症状挑相似历史工单 | `retrieve_similar` | [核心] | `query=本工单症状, candidates=[{ticket_id, requirement_summary, keywords, ...}]` | [server.py:252](mcp/cheap-research/server.py) | 50 条索引 → top-k 评分，主代理只看前几个 |
+| **阶段 2 增量计划 三链预扫 caller / import / test** | `trace_refs` | [增强] | `symbol=待改符号, scope_path="."` | [server.py:700](mcp/cheap-research/server.py) | **纯机械、不调 LLM**——替代 3 次手 grep，自动出 caller 链 |
+| **阶段 2/4 长 diff 摘要**（PATCH vs BASE / 模板产物 vs 现状） | `diff_summary` | [核心] | `focus="接口变更/破坏面"` | [server.py:1298](mcp/cheap-research/server.py) | 长 diff 索引化，主代理只看摘要 |
+| **阶段 4 复检**：编译输出 / 编译错误模式扫描 | `scan_patterns` | [增强] | `patterns=[regex,...]` | [server.py:597](mcp/cheap-research/server.py) | **纯 grep，不调 LLM**——零 LLM 成本，机械扫描 |
+| **阶段 4 复检**：仓库关键文件事实审计（README / CLAUDE.md / 入口 / 依赖 / API），验证 patch 未引入外部接口回归 | `audit_facts` | [核心] | `focus="对外 API / 依赖关系", max_files=10` | [server.py:479](mcp/cheap-research/server.py) | LLM 抽取关键事实 → 主代理对照审查，防 patch 改了入口忘改 README |
+| **1.5 部署/监听 LOG**：本轮增量长 log 收口分析 | `summarize` | [核心] | `focus="异常/fatal/失败"` | [server.py:194](mcp/cheap-research/server.py) | 替代主代理读 8K log，节省 read 上下文 |
+
+**patch 阶段 1 重审的 cheap-research 约束（修复场景防降质）**：
+
+> patch 是"修复"场景——**主代理必须 Read 全文**看清根因、4 维度验证清单、决策推理、增量计划上下文，再做修复方案。**禁止用 `summarize` 替代全文 Read**——便宜模型摘要丢 20-40% 关键信息，**会导致修复方向误判**。
+>
+> | 工具 | 在 patch 阶段 1 的合法用法 | 在 patch 阶段 1 的**非法用法** |
+> |------|----------------------|------------------------|
+> | `summarize` | **跨 session 的快速回顾辅佐**（已知全文、跨 session 重启时让 AI 快速回忆上下文） | **替代全文 Read**（首次进入阶段 1 第一次看产物）——降质不可接受 |
+> | `retrieve_similar` | ✅ 直接用（top-5 相似工单足以，本就不需要全文） | — |
+> | `trace_refs` | ✅ 直接用（纯机械，不影响判断） | — |
+> | `audit_facts` | ✅ 阶段 4 用（详见阶段 4 行） | — |
+>
+> **判定时点**：阶段 1 启动时（如 `/icode patch` 命中、当前会话中 metadata 已读），主代理**必须 Read 全文 + grep 历史产物**；**之后**才可（条件性地）用 `summarize` 做回顾辅佐。**首次进入阶段 1 不得绕过全文**。
+
+**降级与边界**：
+- cheap-research **不接管**：①决策（该改哪、改不改） ②对抗（阶段 2.5 修复方案对抗的质疑者必须独立 spawn，与 `references/adversarial.md` 体系并存） ③架构/工程理解判断。主代理仍需在拿到工具产出后做最终判断 / 重读关键部分
+- 未列入主表的 8 个工具（`fill_template` / `extract` / `fetch_remote` / `apply_migration` / `parse_project_id` / `scan_modules` / `generate_filename` / `select_template`）按通用场景使用，无 patch 专属映射；**清点**：14 工具 - 主表已列 6 个不同工具 = 未列 8 个（5 核心剩 fill_template+extract 共 2，9 增强剩 6 个）
+- cheap-research 的 5 核心 + 9 增强 分类与详细接口见 [README.md「5 核心工具」/「9 增强工具」段](../mcp/cheap-research/README.md)
 
 **强制约束**：🟢/🟢*/⚪ 语义 + 双保险机制详见 [SKILL.md「MCP 调用覆盖强制化」](../SKILL.md) + [references/mcp_per_step.md](../references/mcp_per_step.md)。
 

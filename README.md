@@ -64,6 +64,15 @@ Other entry points:
 
 # Project-level knowledge base (standalone step, runs anytime)
 /icode doc myproject                                 # Generate/update this project's knowledge base chapters
+
+# Opt-in worktree isolation (any of the entry points above)
+/icode start --worktree Implement MCU rain sensor I2C driver   # Full flow + isolated branch/dir
+/icode fast --worktree  "Add isqrt function to calc.c"         # Fast mode + isolated branch/dir
+/icode plan --worktree  Implement MCU rain sensor I2C driver    # Step 1 only + isolated branch/dir
+/icode init --worktree  Record sensor data re-bag              # Step 0 + isolated branch/dir
+/icode log --worktree   ~/work/log/service-anomaly "no response"  # Log + isolated branch/dir
+# Without --worktree, tickets are created in-place by default — no prompt.
+# Triggers also accept natural language ("use worktree isolation"), with reverse declarations taking precedence; AI shows a status line on entry. Projects can block via `/icode limit worktree 强制禁止`.
 ```
 
 ## The Workflow

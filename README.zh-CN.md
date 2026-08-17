@@ -137,6 +137,17 @@ cd ~/.claude/skills/icode/mcp/cheap-research
 # ... 多轮对话补充需求，文档 00_init.md 每轮都被增量更新 ...
 /icode start                             # 无参→检测到 init 入口态，询问"复用/新建"，选复用则把 00_init.md 作需求输入，进入步骤1→6
 
+# 任意入口 opt-in 用 worktree 隔离（与其它参数/flag 共存；不传则默认原地，不弹问）
+/icode start --worktree 实现MCU雨量传感器I2C驱动   # 全流程 + worktree 隔离
+/icode fast --worktree 实现MCU雨量传感器I2C驱动    # fast 模式 + worktree 隔离
+/icode plan --worktree 实现MCU雨量传感器I2C驱动    # 仅步骤1 + worktree 隔离
+/icode init --worktree 录制传感器数据转包            # 步骤0 + worktree 隔离
+/icode log --worktree ~/work/log/服务异常 "启动后无响应"  # log + worktree 隔离
+# 触发方式也支持自然语言：「用 worktree 隔离做」「走 worktree」「独立分支做」等
+# 反向声明后置优先：「别用 worktree」「不要 worktree 隔离」「普通做就行」可覆盖前置触发
+# AI 入口输出一行状态：「▶ worktree 隔离：即将启用 → ...」/「▶ worktree 隔离：未启用」
+# 工程级反向开关：`/icode limit worktree 强制禁止` 红线命中 → 阻止触发（提示一次后回退原地）
+
 # 从 bug 日志分析切入修复（先查根因，再修复）
 /icode log ~/work/log/服务异常 "启动后无响应"      # 入口：分析日志根因，产出 log_analysis.md + 修复需求 00_init.md
 # ... 对抗分析收敛后根因确定；若质疑可继续对话重跑被质疑分支 ...

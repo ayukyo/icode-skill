@@ -28,6 +28,23 @@
 - memory 的工单数探测：Read `~/.claude/icode_data/index.json` 按本工程 project_path 计数
 - vision-bridge/playwright 的工程类型/媒体探测：按会话上下文 + 工程文件判定
 
+## 并发禁区（防 AI 在不该并发时强制并发）
+
+> **背景**：Claude Code 引擎对**互相独立的 IO 工具调用**（多 Read / 多 Bash）**自动批处理并行**——文档**无需也不应**写"请并发"（写了反而会误导 AI 在不该并发时触发并发）。以下是 3 类**必须禁止**并发的硬边界：
+
+| # | 禁区 | 反例 | 正确做法 |
+|---|------|------|---------|
+| 1 | **同一产物文件并发写** | 06_audit.md §6.7 三视角（A/B/C）写同一段 → 并发 3 spawn 同时改 §6.7 段内容 | **三 spawn 并发收集 facts**（仅 Read / 检索 / 评估，不写产物）→ **主代理顺序调和落地**（任一 spawn 返回 issue 也走顺序 §6.2 修复流程） |
+| 2 | **数据有依赖的后置调** | `retrieve_similar(query=从 summarize 提炼的症状, candidates=索引)` 依赖 `summarize(产物)` 的输出 → 把两者并发 | **串行**：先等 `summarize` 摘要出来，**再**触发 `retrieve_similar` |
+| 3 | **环境无 spawn 工具 / 无 MCP 工具时** | `ToolSearch(query="select:Agent")` 失败（no_spawn_env=true）时仍试图 spawn 3 质疑者 | **一律走 [references/adversarial.md](../references/adversarial.md)「环境无 spawn 工具」降级路径**：环境无 spawn → 主代理文字块自演 + 标 `[未验证-对抗不可用]`；环境无 MCP → 直接降为 ⚪，不评估 |
+
+**反之允许并发**（**不写文档，引擎自动批处理**）：
+- 阶段内多个**独立 Read 文件**（无依赖关系）——引擎自动并行
+- 阶段内多个**独立 Bash grep/scan/trace**（无依赖、无同文件写入）——引擎自动并行
+- 多个 cheap-research 工具调用（`summarize(A)` + `summarize(B)` 互相独立）——引擎自动并行
+
+**为什么不写"请并发"具体场景**：写"阶段 N 用 X 个并发调用"是过度指令——(1) AI 引擎已自动做，(2) 写法会误导 AI 在不该并发时（如禁区 #1）触发并发，(3) 实际节省在 IO 比例较低的步骤可忽略。
+
 ## 通用前置（所有步骤必用）
 
 > **所有步骤**必用 `sequential-thinking` 🟢（承载「强制思考前置」，**每步至少 3 步 + 每步对应该步骤声明的子项之一**）。详见 [references/thinking_core.md](../references/thinking_core.md)「通用流程」第 4 步。**该行为是默认常量，不在下方矩阵中重复标注**。

@@ -11,6 +11,7 @@
 | 级别 | 检查项 | 触发后行为 |
 |---|---|---|
 | **L1·致命** | 前置产物缺失（复用 init 工单时 `00_init.md` 不存在） | 报错退出，提示先跑 init |
+| **L1·致命** | 当前工单是 debug 工单（`metadata.debug == true`） | 报错退出，提示：`/icode plan` 不接受 debug 工单（debug 工单不入索引、不参与主流程，纯作为正常工单的对照；详情见 [references/debug_mode.md](../references/debug_mode.md)）。如需 plan，请用 `/icode {{init\|plan}}` 重新建正常工单 |
 | **L2·关键** | plan §3 架构设计**完全缺失**（章节空白） | 警告 + 记入 metadata + 流程继续（不阻断；audit 会看到此标记） |
 | **L2·关键** | plan §10 checklist ❌ 项 > 3 条 | metadata 写 `checklist_status="fail"` + 警告 + 流程继续（不阻断；audit 会看到） |
 

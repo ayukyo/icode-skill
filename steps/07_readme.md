@@ -13,6 +13,8 @@
 
 **落点约束（worktree 工单）**：读 metadata `worktree_path` 非 null → 产物在 worktree 内，须先 `cd {worktree_path}` 再执行本步骤（cwd 契约，同 status --validate / 06_audit 产物终检，见 [references/worktree_isolation.md](../references/worktree_isolation.md) §2）；在主仓跑会找不到产物目录。已在 worktree 内 → 直接执行。
 
+**debug 工单阻断**（详 [references/debug_mode.md](../references/debug_mode.md)）：读 metadata `debug == true` → **报错退出**：debug 工单不入主流程，readme 步骤不为其生成交付报告。如需交付，请用 `/icode readme` 在对应**正常工单**上调用（debug 工单无对应完整主流程产物）。
+
 检查 `{ICODE_OUT_DIR}/.ico_metadata.json` 的 `status == "completed"`（步骤6已完成）。若未完成则报错提示先执行步骤6。
 
 **产物时效校验（防 README 基于过时产物）**：读 metadata 的 `created_at`（工单创建时间，近似步骤6 完成的下界）+ `code_files` 列表，用 `find {code_files} -newer {ICODE_OUT_DIR}/.ico_metadata.json` 检测是否有源码文件 mtime 晚于 metadata 创建时间。若有 → 输出警告「⚠️ 检测到步骤6 完成后代码仍有变更（N 个文件 mtime 晚于终审时间），README 的"已知限制/方案"可能基于过时产物，建议重跑步骤5/6 或确认变更不影响交付」；不阻塞生成（README 的"使用说明"段含实时运行输出兜底，面向人可判断）。**该校验同时覆盖跨领域简报**（简报的"核心代码/时间点"同样基于产物，过时产物会传导到两份）。

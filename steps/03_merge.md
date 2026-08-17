@@ -11,6 +11,7 @@
 | 级别 | 检查项 | 触发后行为 |
 |---|---|---|
 | **L1·致命** | 「定稿机器硬校验」不通过（`03_plan_final.md` 非完整计划副本：编号正文章节 <9 或缺「实现偏差备忘」段） | 报错退出，禁止进入步骤4，回到「写入定稿」把 `01_plan.md` 全文复制后再叠加标记 |
+| **L1·致命** | 当前工单是 debug 工单（`metadata.debug == true`） | 报错退出，提示：`/icode merge` 不接受 debug 工单（debug 工单不入索引、不参与主流程，纯作为正常工单的对照；详情见 [references/debug_mode.md](../references/debug_mode.md)） |
 
 ## 前置校验
 

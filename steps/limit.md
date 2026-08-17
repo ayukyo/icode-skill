@@ -156,12 +156,20 @@ LOCAL_FILE="$LOCAL_DIR/$PROJECT_ID.md"
 - log 报告 `log_analysis.md §2.3 limit 红线对照` 为**必填小节**：limit 存在时逐条对照根因假设，不存在时标注"本工程无 limit 红线"
 - log 步骤 metadata 写入 `limit_refs` 数组（报告 §2.3/§6 出现「红线 N」即须记录），经 log 步骤 9.5 机器自检校验（**读留痕 `limit_checkpoint.md` 存在性 + §2.3 存在性 + 引用完整性**）
 
-### 7. worktree 入口询问契约（worktree 隔离的默认关闭红线）
+### 7. worktree 强制禁止红线（反向开关，防工程被滥用 worktree）
 
-- **语义**：用户可在 limit 写红线「worktree 默认关闭」→ 本工程**所有新建工单入口跳过 worktree 询问**，直接原地建工单（见 SKILL.md「目录管理·worktree 决策与创建」①，SKILL.md 引用本段）
-- **写法**（`/icode limit worktree 默认关闭` 追加，格式同「条目格式」段）：
-  `红线 N：worktree 默认关闭（新建工单一律原地建、不建 worktree；理由：本工程单需求/快速改为主、不需要并行隔离；适用范围：所有新建工单入口 init/log/start/plan/fast）`
-- **读取**：新建工单入口判定 worktree 时，Read 主存 + local 合并视图，`grep -q "worktree 默认关闭"` 命中 → 跳过询问直接原地；无该红线 → 照常入口询问（L4 柔性，缺省不阻断）
+- **语义**：与 [SKILL.md「目录管理·worktree 决策与创建」](../SKILL.md) + [references/worktree_isolation.md](../references/worktree_isolation.md) §1 opt-in 默认**反向**：用户可在 limit 写红线「worktree 强制禁止」→ 本工程**所有新建工单入口的 opt-in 触发被阻止**，即使用户传 `--worktree` 或自然语言声明，AI 也必须提示一次并回退原地建工单
+- **与 opt-in 的关系**：opt-in 默认语义是"默认不开 + 用户显式启用 = 同意"；本红线是"工程级强制禁止 user 启用"，两者**不冲突**——默认不开（opt-in）+ 强制禁止（红线）= 两个独立开关，本红线仅在用户**显式启用**时才生效
+- **触发条件**：新建工单入口判定 worktree 时，Read 主存 + local 合并视图，`grep -q "worktree 强制禁止"` 命中 + 用户命令含 `--worktree` 或自然语言声明触发 → **违规时阻止**（AI 必须**一次性提示**用户"本工程 limit 禁止 worktree，本工单回退原地建" + 回退不创建 worktree；与 opt-in 弹问不同——属**工程明确违规的兜底**，非"AI 自作主张"的弹问）
+- **不触发的兜底**：用户未传 `--worktree` 且无自然语言声明 → 默认原地（opt-in 默认行为），**根本不走到本红线判定**（无违规则不阻止）
+- **写法**（`/icode limit worktree 强制禁止` 追加，格式同「条目格式」段）：
+  `红线 N：worktree 强制禁止（本工程所有 /icode {init,log,start,plan,fast} 即使传 --worktree 也禁止建 worktree，必须原地建；理由：本工程严禁 git worktree 操作；适用范围：所有新建工单入口 init/log/start/plan/fast）`
+- **读取**：新建工单入口判定 worktree 时执行顺序：
+  1. 先**只判 opt-in**（扫描 `--worktree` / 自然语言）
+  2. 若 opt-in 未触发 → 默认原地（**不走本红线判定**——用户没要求 worktree，无违规）
+  3. 若 opt-in 触发 → **再读 limit**（主存 + local 合并）
+  4. limit 命中「worktree 强制禁止」→ 提示一次 + 回退原地（**不写 `wt_degraded=true`**——因为根本没尝试 git worktree add，无创建失败；与 SKILL.md §1② 「④ 失败降级」不同路径，flag 由 `worktree_path` 仍为 null 间接表达"未进 worktree"）
+  5. limit 未命中 → 按 opt-in 触发 → 走 worktree 创建路径
 
 **柔性提示**：plan 步骤入口检测 main + local 都不存在 → 输出"💡 本工程尚无 limit 约束（建议运行 `/icode limit <约束描述>` 生成），不阻断流程"。
 

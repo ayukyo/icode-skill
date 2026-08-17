@@ -1,6 +1,6 @@
 # 步骤 0 — 需求初稿对话（可选前置步骤）
 
-**命令**: `/icode init [<粗略需求>]`
+**命令**: `/icode init [--debug] [<粗略需求>]`（`--debug` = 独立孪生不入索引，详见 [references/debug_mode.md](../references/debug_mode.md)）
 **产出**: `{ICODE_OUT_DIR}/00_init.md`
 **会话**: 主会话
 **与后续步骤的关系**: **独立步骤，不自动串联到步骤1**。完成后用户须显式运行 `/icode start`（全流程）/ `/icode fast`（精简全流程）/ `/icode plan`（仅步骤1）才进入步骤1。复用规则详见 SKILL.md「调用命令」段的目录复用规则说明。
@@ -19,7 +19,18 @@
 
 ### 首次调用（即每次 `/icode init`）
 
-1. **执行目录管理中的「创建新目录」逻辑**（**强制新建，不做任何复用判定**；含硬熔断，见真源），确定 `ICODE_OUT_DIR`。**前置：worktree 询问硬检查点**（新建目录前必须执行，未询问即不合规）：先完成 [SKILL.md「目录管理·worktree 决策与创建」](../SKILL.md) 的**每工单一次询问**（AskUserQuestion 问用户"本工单用 worktree 隔离吗"）。**不得用任何自创理由豁免**（是否隔离由用户决定，不由 AI 判断）；唯一合法豁免 = limit 已写「worktree 默认关闭」（见 [steps/limit.md](limit.md)）。worktree 场景下目录建在 worktree 内，原地场景建在当前工作区
+1. **执行目录管理中的「创建新目录」逻辑**（**强制新建，不做任何复用判定**；含硬熔断，见真源），确定 `ICODE_OUT_DIR`。**前置：worktree opt-in 判定**（详见 [SKILL.md「目录管理·worktree 决策与创建」](../SKILL.md) + [references/worktree_isolation.md](../references/worktree_isolation.md) §1①）：
+   - **判定两种触发形式之一**：A. flag 形式（消息命令位置的**独立 token** `--worktree`（双短横独立；不接受 `-worktree`/`--worktree=true` 等变体）） / B. 自然语言意图声明（"用 worktree 隔离做" 等显式措辞）；满足其一即触发 worktree 创建路径
+   - **反向声明后置优先**：同一消息后置「别用 worktree」「不要 worktree 隔离」> 前置触发，取**最后一句**为最终意图
+   - **必须做语境识别防误触**：仅正文叙述/反引号/代码块/文档片段中提及 ≠ 触发；模糊时**按未触发处理**（默认原地，靠 L1 触发回显暴露）
+   - **触发回显 L1 强制 · 区分判定与执行态**（占位符 `<ticket-slug>` 动态回填实际值，**勿字面输出尖括号**）：
+     - 判定·触发：`▶ worktree 隔离：即将启用 → 准备创建 ../<repo>-wt-<ticket-slug>/（分支 icode/<ticket-slug>）`
+     - 判定·未触发：`▶ worktree 隔离：未启用（默认，原地建工单）`
+     - 执行·成功：`▶ worktree 隔离：✓ 已创建 ../<repo>-wt-<ticket-slug>/（分支 icode/<ticket-slug>）`
+     - 执行·失败：`▶ worktree 隔离：⚠ 创建失败，降级原地（wt_degraded=true，原因：<错误>）`
+   - 触发 → 走 worktree 创建路径（创建**前**展示路径 + 分支名作为**告知非询问**；用户触发意图即一次性同意）；未触发 → 直接原地（默认行为，**不弹问**）
+   - **违规阻止例外**：limit 「worktree 强制禁止」红线命中时（[steps/limit.md](../steps/limit.md) §7），AI 提示一次"本工程 limit 禁止 worktree，本工单回退原地建" + 回退原地（不创建 worktree）
+   - AI **不得自创理由另行弹问** worktree（是否用 worktree = 用户消息意图决定，不由 AI 判断）
 2. **历史检索复用**（强制思考之前，全局索引存在时必须执行，详见 SKILL.md「历史检索复用」段）：
    - Read `~/.claude/icode_data/index.json`（不存在则跳过检索）
    - **两段式检索**：段一从本次粗略需求提炼关键词集，与各 ticket `keywords` 做 Jaccard 粗筛取 ≤10 候选（零 token，可复活预扫后排除剩余 stale）；段二只把候选 `keywords + requirement_points` 喂主代理精读打分选 top-N 命中（N 由梯度决定，明确无关则 0 条）。`/icode init` 每次强制新建目录，本次工单尚未入索引，故无需排除当前 ticket_id
@@ -53,6 +64,13 @@
    }
    ```
 
+   **`--debug` 模式差异**（详 [references/debug_mode.md](../references/debug_mode.md)）：
+   - `status` 改为 `"debug_in_progress"`（不是 `"init_in_progress"`——下游易识别）
+   - **新增字段** `"debug": true`（metadata 元数据标志，明确标识此工单是 debug 孪生）
+   - `ticket_id` 留空字符串（`""`，debug 工单永不写入 index.json）
+   - `workload_estimate` / `workload_reason` 可省（debug 工单不需要工作量评估）
+   - `indexed` 永远是 `false`（debug 工单永不索引）
+
 8. **写入全局索引**（步骤7之后立即执行）：Read `~/.claude/icode_data/index.json`（不存在则创建 `{"version":"1","updated_at":"当前时间","tickets":[]}`），追加一条新记录：
    - `ticket_id` = `{工程名}-{N}`（工程名取 `project_path` 的 basename；N 为当前 `.icode_output_N` 的 N）。**工程名冲突处理**：若索引中已存在相同 `{工程名}-{N}` 但 `project_path` 不同的条目，ticket_id 追加 `project_path` 的短 hash 后缀（如 `myproject-1-a3f2`）以保唯一
    - `project_path` = 当前工程根绝对路径
@@ -60,6 +78,16 @@
    - `requirement_summary` / `keywords` / `workload_estimate` / `workload_reason` 取自步骤7 metadata；`requirement_points` 暂为空数组
    - `has_00_init` = true，`has_plan` = false，`status` = `init_in_progress`，`created_at` = 当前时间，`last_used_at` = 当前时间（首次写入=created_at），`hit_count` = 0，`stale` = false，`stale_reason` = null，`stale_checked_commit` = null，`created_commit` = `git rev-parse HEAD`（只读，非 git 仓库为 null），`created_branch` = `git rev-parse --abbrev-ref HEAD`
    - 写回 index.json，同时置 metadata `indexed = true`、`ticket_id = {生成的 ticket_id}`（持久化 ticket_id，供后续步骤检索时排除当前工单，避免反推）；**写后执行唯一性验证**（见 [references/dir_and_metadata.md](../references/dir_and_metadata.md)「全局索引写入·写后唯一性验证」，防工程名冲突未加 hash 后缀）
+
+   **`--debug` 跳过写索引**（**硬门，防误索引**）：
+   - 步骤 7 metadata 已写 `"debug": true` → 步骤 8 入口先**判 metadata.debug**，若是 `true` 则**整段跳过**：
+     ```python
+     if metadata.get("debug") is True:
+         print("▶ debug 模式：跳过 index.json 写入（不入全局索引、不入 LRU）")
+         return
+     ```
+   - **未跳过的后果**：debug 工单被错误索引会污染 `/icode status` 列表 + 历史检索 + 跨工程查询（与设计意图"独立孪生"违背）——属于硬阻断错误
+   - **强证据场景**：`/icode list`、``/icode status` 检索、段零工程文档检索、SWE bot 跨工程查询均依赖 index.json——debug 工单不入索引 = 不进入这些场景（**这就是设计意图**）
 9. **工作量评估 + 入口建议**（自动给用户判断，省"我也不知道该 start 还是 fast"的纠结）：
 
    - **4 维度信号**：

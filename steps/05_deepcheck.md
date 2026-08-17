@@ -11,6 +11,7 @@
 | 级别 | 检查项 | 触发后行为 |
 |---|---|---|
 | **L1·致命** | 前置产物缺失（`03_plan_final.md` 或步骤 4 代码文件不存在） | 报错退出，提示先跑 `/icode merge` 或 `/icode code` |
+| **L1·致命** | 当前工单是 debug 工单（`metadata.debug == true`） | 报错退出，提示：`/icode deepcheck` 不接受 debug 工单（debug 工单不入索引、不参与主流程，纯作为正常工单的对照；详情见 [references/debug_mode.md](../references/debug_mode.md)） |
 
 **L3·重要**（矩阵段定义）：Reverse/Fixed/Free 任一阶段发现 issue → 进修复循环（最多 2 轮，clean 后退出）；阶段间切换不阻断。
 

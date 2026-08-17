@@ -47,6 +47,7 @@ worktree: {worktree_path 字段读取方式：直接读 metadata.worktree_path �
 | `completed` | 步骤6 终审完成（终态） |
 
 4. 若无 `.icode_output_N` 目录，输出提示："未找到工单目录，请先运行 /icode start/init/log"
+5. **debug 工单隔离**（详 [references/debug_mode.md](../references/debug_mode.md)）：本模式默认**只看正常工单**——`ls .icode_output/.icode_output_*` 仅匹配正常目录，天然排除 `.icode_output/.debug/.icode_output_*`。**debug 工单不入本模式的查询范围**。如需查 debug 工单，手动 `ls .icode_output/.debug/` 或直接 `cd .icode_output/.debug/.icode_output_N/` + Read `.ico_metadata.json`
 
 ## 模式二：verdict 手动标注（`/icode status --verdict ...`）
 

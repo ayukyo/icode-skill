@@ -11,6 +11,7 @@
 | 级别 | 检查项 | 触发后行为 |
 |---|---|---|
 | **L1·致命** | 前置产物缺失（`03_plan_final.md` 不存在） | 报错退出，提示先跑 `/icode merge` |
+| **L1·致命** | 当前工单是 debug 工单（`metadata.debug == true`） | 报错退出，提示：`/icode code` 不接受 debug 工单（debug 工单不入索引、不参与主流程，纯作为正常工单的对照；详情见 [references/debug_mode.md](../references/debug_mode.md)） |
 | **L2·关键** | Code Review Fix 4 维度复检**全部失败**（4 个维度都标 ❌） | 警告 + 记入 metadata + 流程继续（不阻断；user 可事后回代码修复/重设计） |
 
 **L3·重要**（矩阵段定义）：编译失败（3 次仍失败）→ 设 `code_compile_failed=true`，步骤 5 入口警告，**流程继续**。测试失败（3 次仍失败）→ 设 `test_failures=true`，步骤 5 入口警告，**流程继续**（与编译失败同级 L3）。
@@ -29,7 +30,7 @@
 2. 不涉及子仓修改（只改 super-repo）→ **跳过本段**，无需隔离
 3. 对每个受影响原子仓，若 `metadata.sub_worktrees` 未含该子仓 → 建子仓隔离 checkout（把 checkout 放进 super-worktree 同名相对路径，保持路径结构与原工程一致）：
    ```bash
-   git -C "<主仓绝对路径>/<子仓相对路径>" worktree add -b "icode/<slug>-<子仓slug>" "<主仓绝对路径>-wt-<slug>/<子仓相对路径>"
+   git -C "<主仓绝对路径>/<子仓相对路径>" worktree add -b "icode/<ticket-slug>-<子仓slug>" "<主仓绝对路径>-wt-<ticket-slug>/<子仓相对路径>"
    ```
    前置：子仓须有 HEAD（repo 子仓均有）；目标路径须为空（super-worktree 内该相对路径未被写入）
 4. 写 `metadata.sub_worktrees` 追加 `{sub_path, worktree_path, branch}`（见 [references/worktree_isolation.md](../references/worktree_isolation.md)「§3 metadata 字段族」）

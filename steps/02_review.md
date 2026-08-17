@@ -11,6 +11,7 @@
 | 级别 | 检查项 | 触发后行为 |
 |---|---|---|
 | **L1·致命** | 前置产物缺失（`01_plan.md` 不存在） | 报错退出，提示先跑 `/icode plan` |
+| **L1·致命** | 当前工单是 debug 工单（`metadata.debug == true`） | 报错退出，提示：`/icode review` 不接受 debug 工单（debug 工单不入索引、不参与主流程，纯作为正常工单的对照；详情见 [references/debug_mode.md](../references/debug_mode.md)） |
 | **L2·关键** | 触达 `absolute_cap = max(10, N×2)` 仍有新问题 | 落盘告警 + 记入 metadata（`unresolved_issues_at_cap=true`）+ 流程继续（不阻断；user 可事后回 plan 修订） |
 
 **L3·重要**（矩阵段定义）：每轮 `clean_rounds` 未达 2 但有 new_issues 进自动延长（流程继续）。
