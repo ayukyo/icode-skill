@@ -35,8 +35,8 @@
 |------|----------|------|
 | **v1 → v2 旧布局迁移** | v1（平铺 `project_docs/<id>/00_overview.md`）**确实会互相覆盖**（v1 无分支隔离）；v2 起天然隔离。**v1 → v2 仅在跑一次 `/icode doc` 时自动触发** | 正文 §5.0.6 / §5.1 |
 | **detached HEAD 工程** | 落到 `(detached)` 子目录单独记录，**不会与任何分支子目录混在一起** | 正文 §「project_id 解析」段 BRANCH 推导 |
-| **同名 fork 不同 URL** | `<url_basename_sanitized>` 相同但 hash(URL+branch)不同 → **不同 key**（自动区分，不要手动合并） | `dir_and_metadata.md:660-667` |
-| **同 url 同 branch 不同 commit** | key 不含 commit；`current_commit` 不一致时 doc 全量重生成覆盖（`dir_and_metadata.md:667`：key 不含 commit；`dir_and_metadata.md:512`：commit 不匹配触发降级注入） | **有意行为**——"同一份代码不同 commit 只保留最新一份 doc"；要看历史 commit 外部 git 查看即可 |
+| **同名 fork 不同 URL** | `<url_basename_sanitized>` 相同但 hash(URL+branch)不同 → **不同 key**（自动区分，不要手动合并） | `dir_and_metadata.md`「module_docs 工程模块库」段 |
+| **同 url 同 branch 不同 commit** | key 不含 commit；`current_commit` 不一致时 doc 全量重生成覆盖（`dir_and_metadata.md`「module_docs key 计算」段：key 不含 commit；`dir_and_metadata.md`「段零·工程文档检索」段：commit 不匹配触发降级注入） | **有意行为**——"同一份代码不同 commit 只保留最新一份 doc"；要看历史 commit 外部 git 查看即可 |
 | **branch 字符串 sanitize 撞名** | branch 名含 sanitize 字符集（9 种字符：反斜杠/斜杠/冒号/星号/问号/双引号/小于号/大于号/竖线）任一字符时会被 sanitize 函数抹平，可能与同 sanitized 后的其他分支撞名（后者写覆盖前者） | 用户创建分支避免用这 9 种字符（git 常用斜杠 `/` 但 icode sanitize 时抹平） |
 
 ### 4. 三大常见误解 × 正确理解（逐条对照，禁止误判）
@@ -51,16 +51,16 @@
 
 1. **执行前必读本段**——执行 doc 任何子步骤（尤其是"全量重生成""主动 stale 扫描""模板迁移""模块全量重生成"）前，**必须先 Read 本段全文**；不读就直接复述"被覆盖了"作为 bug → 反偷懒第 21 条违规
 2. **遇"被覆盖"反馈的处置**——永远先按本段"三大误解 × 正确理解"表 + "五大边界"表逐条排查，给出根因 + 诊断命令（`ls project_docs/<id>/` 看分支子目录布局、`cat project_docs/<id>/<branch>/_meta.json` 看工程元信息、`cat module_docs/<key>/_meta.json` 看模块元信息），**禁止默认就是 bug**
-3. **跨工程/跨模块上下文**——跨工程 doc 借鉴仅看 `00_overview.md`（`dir_and_metadata.md:517`），**不交叉读其他章节**，防止跨工程/跨分支借鉴失真
+3. **跨工程/跨模块上下文**——跨工程 doc 借鉴仅看 `00_overview.md`（`dir_and_metadata.md`「段零·工程文档检索」段），**不交叉读其他章节**，防止跨工程/跨分支借鉴失真
 4. **分支名边界两类单独走**：detached HEAD → `(detached)` 子目录；branch 名含 sanitize 字符（`\ / : * ? " < > |` 9 种）→ 被 `tr '/\\:*?"<>|' '_'` 抹平成同名 key，两个 git 分支合并到同一 BRANCH_SAFE 子目录，**后者写会覆盖前者**。**两种都落到独立子目录名，不会与正常分支子目录混**；用户反馈"看不到分支文档"时，先 `git -C "$GIT_ROOT" rev-parse --abbrev-ref HEAD` 看实际分支名 + 用 §3 表第 5 行的 sanitize 规则重算 BRANCH_SAFE 是否撞了别分支
 5. **commit / 祖先双源硬约束**（两场景语义独立，合并理解）：
 
    - **`/icode doc` 生成时**：
      - **模块层** — `module_docs/<key>/_meta.json.current_commit` 不等于当前模块 commit → 全量重生成覆盖（`doc.md` 步骤 5「模块全量重生成」）
      - **工程层** — `git merge-base --is-ancestor <prev> HEAD` 退出 1（跨分支/分叉/fork）→ 按全量重生成处理（`<prev>` 与 `HEAD` 不在同一祖先链，`git diff` 不可信）
-   - **段零检索时**（`dir_and_metadata.md:534-543`，含 stale 检测 + 分支校验 + 祖先校验）：
+   - **段零检索时**（`dir_and_metadata.md`「段零·工程文档检索」段，含 stale 检测 + 分支校验 + 祖先校验）：
      - **分支不一致** — 整个工程文档 stale，降级注入只注摘要 + 警告，不读章节正文
-     - **commit 不匹配** — 模块层降级注入；工程层走"祖先 + diff"校验，不直接判 stale（`dir_and_metadata.md:512`）
+     - **commit 不匹配** — 模块层降级注入；工程层走"祖先 + diff"校验，不直接判 stale（`dir_and_metadata.md`「段零·工程文档检索」段）
 
 ### 6. 正文索引（各机制在哪一行展开，需要时直接 Read）
 
@@ -70,17 +70,17 @@
 | 冲突检测（同名工程/分支实为不同 git_root） | 正文 §「project_id 解析」末尾 | 追加 hash 后缀，`PROJECT_ID` + `BRANCH_SAFE` + GIT_ROOT sha256 前 4 字符 |
 | v1 → v2 自动迁移 | 正文 §5.0.6、§5.1 | 7 步迁移流程 + `_meta.json.v1_migrated_from` 备份 |
 | 增量判定（跨分支按全量） | 正文 §3「增量判定」中祖先合法性校验 | `git merge-base --is-ancestor` 退出 1 → 按全量处理 |
-| 模块 key 计算 | `dir_and_metadata.md:658` | `key = <url_basename_sanitized> + "_" + sha256(repo_url + ":" + branch)[:12]` |
-| 模块 commit 推进触发覆盖 | `dir_and_metadata.md:667`、正文 §5 模块全量重生成 | key 不含 commit，但 `current_commit` 不一致时按全量重生成覆盖 |
-| 段零 DOC_DIR 分支过滤 | `dir_and_metadata.md:496`「DOC_DIR 分支过滤」段 | "按 `resolve_project_id(cwd)` 算出 `BRANCH_SAFE`，只读 `<DOC_DIR>` 子目录，不交叉读其他分支子目录" |
-| 段零 stale 检测（分支+祖先双校验） | `dir_and_metadata.md:534-543`（stale 检测 + 分支校验 + 祖先校验） | 分支不一致 → 整个工程文档 stale；祖先不合法 → 走"祖先 + diff"校验，不直接判 stale |
-| 跨工程/跨分支上下文借鉴边界 | `dir_and_metadata.md:516-518` | 跨工程借鉴仅看 `00_overview.md`，不读其他章节 |
+| 模块 key 计算 | `dir_and_metadata.md`「module_docs key 计算」段 | `key = <url_basename_sanitized> + "_" + sha256(repo_url + ":" + branch)[:12]` |
+| 模块 commit 推进触发覆盖 | `dir_and_metadata.md`「module_docs key 计算」段、正文 §5 模块全量重生成 | key 不含 commit，但 `current_commit` 不一致时按全量重生成覆盖 |
+| 段零 DOC_DIR 分支过滤 | `dir_and_metadata.md`「段零·工程文档检索」段 | "按 `resolve_project_id(cwd)` 算出 `BRANCH_SAFE`，只读 `<DOC_DIR>` 子目录，不交叉读其他分支子目录" |
+| 段零 stale 检测（分支+祖先双校验） | `dir_and_metadata.md`「段零·工程文档检索」段（stale 检测 + 分支校验 + 祖先校验） | 分支不一致 → 整个工程文档 stale；祖先不合法 → 走"祖先 + diff"校验，不直接判 stale |
+| 跨工程/跨分支上下文借鉴边界 | `dir_and_metadata.md`「段零·工程文档检索」段 | 跨工程借鉴仅看 `00_overview.md`，不读其他章节 |
 
 ### 7. 嵌入式入口（写代码时随时可调用，别忘了）
 
 - **本文档「project_id 解析」段**（行 93-133，下方 `git -C "$GIT_ROOT" rev-parse --abbrev-ref HEAD` 立即拿到当前分支名 + BRANCH_SAFE 推导）
-- **`dir_and_metadata.md` 「project_docs 工程文档库」段（行 434）+ 「module_docs 工程模块库」段（行 624）+ 「段零·工程文档检索」段（行 481）**
-- **`dir_and_metadata.md:496`「DOC_DIR 分支过滤」段**（段零 AI 必读）
+- **`dir_and_metadata.md` 「project_docs 工程文档库」段 + 「module_docs 工程模块库」段 + 「段零·工程文档检索」段**
+- **`dir_and_metadata.md`「段零·工程文档检索」段**（段零 AI 必读）
 
 ## 前置校验
 

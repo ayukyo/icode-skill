@@ -22,7 +22,26 @@ mkdir -p "$ICODE_OUT_DIR"
 # 建后确认只能用磁盘状态（ls -A 为空 / 目录 mtime），禁止用 echo "created" 充当确认（echo 与磁盘状态无关，是伪确认）
 ```
 
-### 复用 / 创建新目录决策（仅用于 start / plan）
+**「创建新目录」debug 变体（`--debug` 模式，init/log 用）**：
+
+`/icode init --debug` / `/icode log --debug` 的工单目录建在 `.icode_output/.debug/` 子目录下，**N 与正常工单互不干扰**（各自从 1 递增）；硬熔断①② 与正常工单完全一致：
+
+```bash
+mkdir -p .icode_output/.debug
+LAST=$(ls -d .icode_output/.debug/.icode_output_* 2>/dev/null | grep -oP '(?<=\.icode_output_)\d+' | sort -n | tail -1)
+NEXT=${LAST:-0}; NEXT=$((NEXT + 1))
+ICODE_OUT_DIR=".icode_output/.debug/.icode_output_${NEXT}"
+# 硬熔断① 建前检查：目标 debug 目录已存在 = 递增被绕过/目录号手写 → 中止
+test -d "$ICODE_OUT_DIR" && { echo "❌ 误复用风险：目标 debug 目录已存在 $ICODE_OUT_DIR（递增逻辑被绕过或目录号手写），禁止在此新建工单"; exit 1; }
+mkdir -p "$ICODE_OUT_DIR"
+# 硬熔断② 建后验证：新建目录必须为空
+[ -z "$(ls -A "$ICODE_OUT_DIR")" ] || { echo "❌ 目录非空=误复用，禁止在此新建 debug 工单"; exit 1; }
+```
+
+- 正常工单的「创建新目录」`ls -d .icode_output/.icode_output_*` 只匹配**顶层**目录，天然排除 `.debug/` 子目录下的 debug 工单（物理隔离，互不污染）
+- debug 工单 metadata 写 `debug: true` + 独立状态名（`debug_in_progress` / `debug_done`），详见 [debug_mode.md](debug_mode.md)
+
+### 复用 / 创建新目录决策（用于 start / plan / fast）
 
 ```bash
 mkdir -p .icode_output

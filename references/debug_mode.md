@@ -10,7 +10,7 @@
 |------|------|
 | **同档案两场景对比**（最常用） | 正常用 `/icode log` 分析一个 bug；**另一个会话**跑 `/icode log --debug` 同一组症状，产出**两份 `log_analysis.md` 并列对比**，手工读两份产物找差异（视角差别、假说强度、证据缺漏） |
 | **同档案三场景对比** | 正常 `/icode init` 初稿后，**同会话**跑 `/icode init --debug` 同样粗略需求，产出两份 `00_init.md` 对比设计 |
-| **跨工程、跨工程交叉分析** | cwd 切到另一个工程，跑 `/icode init --debug` 或 `/icode log --debug`，产物落那个工程的 `.icode_output/.debug/`，作为跨工程参考 |
+| **跨工程交叉分析** | cwd 切到另一个工程，跑 `/icode init --debug` 或 `/icode log --debug`，产物落那个工程的 `.icode_output/.debug/`，作为跨工程参考 |
 
 ---
 
@@ -60,9 +60,8 @@
 ```
 
 **关键决策**：
-- **不使用新 status 名**（`debug_in_progress` / `debug_done` 复用现有状态枚举，避免 metadata 状态机膨胀）
-- **debug 标志用元数据 `debug: true` 字段**（不依赖 status 名判断）——`/icode status` 列表扫描本地目录时，**先用 `debug: true` 区分，再读 status**
-- **`indexed: false` 永远不变**——debug 工单永不索引（防止被 `/icode status` 误列入）
+- **使用独立 status 名**（`debug_in_progress` / `debug_done`，不复用 `init_in_progress` / `log_done`——下游易识别，见 00_init/log 步骤「`--debug` 模式差异」段）；debug 状态名**不进** SKILL.md「status 字段枚举」主流程词表（词表校验只作用于正常工单，debug 目录在 `.icode_output/.debug/` 下天然被「检测最新目录」排除、不入 `--validate` 范围，不产生状态机冲突）
+- **debug 标志用元数据 `debug: true` 字段**（不依赖 status 名判断）——各主流程步骤 L1 检测段、以及手动扫描 `.debug/` 下的 debug 工单时都读它区分
 
 ---
 
@@ -78,7 +77,7 @@ debug 工单 **不参与主流程**——所有主流程步骤（plan/review/mer
 | `/icode start` / `/icode fast` | ❌ L1 阻断 | 同上 |
 | `/icode review` / `/icode merge` / `/icode code` / `/icode deepcheck` / `/icode audit` / `/icode readme` | ❌ L1 阻断 | 同上 |
 | `/icode patch` | ❌ L1 阻断 | debug 工单**不支持** patch 续跑 |
-| `/icode status` | ✅ 可查（仅本地目录扫描 + 标 `[DEBUG]`，不计 LRU） | 状态查询不属主流程 |
+| `/icode status` | ✅ 可用（默认只读模式只看**当前工程最新正常工单**，`ls .icode_output/.icode_output_*` 天然排除 debug；查 debug 工单须手动 `ls .icode_output/.debug/` + Read metadata，见 §7） | 状态查询不属主流程 |
 | `/icode list` | ❌ 不列（debug 工单不入索引） | list 基于 index.json |
 | `/icode doc` / `/icode limit` / `/icode ppt` | ✅ 与工单状态无关 | 这些是独立工具 |
 | `/icode install` / `/icode help` | ✅ | 系统级工具 |
@@ -105,35 +104,17 @@ debug 工单 **不支持** `/icode patch` 续跑——理由：
 - debug 工单的产物是"对照参考"，不是"待修复代码" —— 不需要 patch
 - L1 阻断（见 §5 表）直接报错
 
-如需对 debug 工单发现的问题正式修复，请用 `/icode init --debug` **复现的正常工单**（同一 cwd 不带 `--debug`）走主流程。
+如需对 debug 工单发现的问题正式修复，请用 `/icode init`（**不带 `--debug`**，同一 cwd 复现该需求）新建正常工单走主流程。
 
 ---
 
 ## 7. 与 `/icode status` 列表的关系
 
-`/icode status` 默认通过 `~/.claude/icode_data/index.json` 列工单——debug 工单**不在此列**。
+`/icode status` 模式一（默认只读）只查**当前工程最新正常工单**（[steps/status.md](../steps/status.md)「模式一」）：`ls .icode_output/.icode_output_*` 仅匹配顶层正常目录，天然排除 `.icode_output/.debug/.icode_output_*`——**debug 工单不入本模式查询范围**（无 `[DEBUG]` 前缀显示、不计 LRU）。
 
-**本地目录扫描扩展**（建议在 `steps/status.md` 加 1 段）：
-
-```python
-# /icode status 默认行为：列 index.json 工单
-# 新增副表（可选 `--include-debug` flag）：
-def list_debug_tickets(project_path):
-    debug_root = f"{project_path}/.icode_output/.debug"
-    if not os.path.isdir(debug_root):
-        return []
-    return [
-        {
-            "n": int(m.group(1)),
-            "status": read_status(f"{path}/.ico_metadata.json"),
-            "path": f".debug/.icode_output_{n}/",
-            "input": read_requirement(f"{path}/.ico_metadata.json"),
-        }
-        for n in sorted(ints)
-    ]
-```
-
-debug 工单在列表中显示 `[DEBUG]` 前缀，让用户视觉区分正常 vs debug。
+**查 debug 工单的办法**（status/list 均不提供 debug 列表视图）：
+- 手动 `ls <project_root>/.icode_output/.debug/` 枚举目录
+- 或 `cd <project_root>/.icode_output/.debug/.icode_output_N/` + Read `.ico_metadata.json`（读 `debug: true` + `status` 区分）
 
 ---
 
@@ -156,8 +137,8 @@ cd /path/to/project-B
 
 | 契约 | 是否受影响 | 说明 |
 |------|----------|------|
-| [references/dir_and_metadata.md](dir_and_metadata.md) | 小改 | 「创建新目录」段的 N 递增逻辑**对 `.debug/` 子目录独立执行**（debug 工单 N 与正常工单 N 互不干扰） |
-| [references/worktree_isolation.md](worktree_isolation.md) | 无关 | worktree 与 debug 模式互不重叠 |
+| [references/dir_and_metadata.md](dir_and_metadata.md) | 小改 | 「创建新目录」段含 **debug 变体**：`--debug` 时目录建在 `.icode_output/.debug/` 下，N 递增逻辑**对该子目录独立执行**（debug 工单 N 与正常工单 N 互不干扰） |
+| [references/worktree_isolation.md](worktree_isolation.md) | 无关 | worktree 与 debug 互不重叠：**debug 工单忽略 `--worktree`**——debug 需「同一 cwd 状态」作孪生对照，worktree 会切换 checkout 违背该前提；若同传 `--debug` 与 `--worktree`，worktree opt-in 不生效，debug 仍在原地 `.icode_output/.debug/` 创建 |
 | [references/decision_anchors.md](decision_anchors.md) | 可选 | debug 工单可写 `.decision_anchors.json`（与正常工单相同），跨 session reload 时帮助 |
 | `/icode status` / `[index.json]` | 跳过 | debug 工单永不进入 index.json |
 | `/icode list` | 跳过 | 同上 |

@@ -74,8 +74,9 @@ description: 端到端编码工作流（步骤 0~6，含可选需求初稿步骤
 
 在对话中输出使用流程示例和命令一览（不创建目录和文件）。
 
-> **公共选项**（适用所有 `/icode` 命令）：
+> **公共选项**（适用所有**新建工单入口**命令 `init/log/start/plan/fast`）：
 > - **`--worktree`** — 新建工单时用 git worktree 隔离（独立分支 + 独立目录），opt-in 参数触发；不传默认原地建工单，不弹问；工程可写 limit「worktree 强制禁止」红线阻止触发（详见 [SKILL.md「目录管理·worktree 决策与创建」](../SKILL.md)+ [steps/limit.md §7](../steps/limit.md)）。例：`/icode start --worktree <需求>`
+> - **`--debug`**（仅 `init`/`log`）— 独立孪生工单对照：目录建在 `.icode_output/.debug/`、不入索引、不参与主流程，**忽略 `--worktree`**（详见 [references/debug_mode.md](references/debug_mode.md)）。例：`/icode log --debug <症状>`
 
 ### 使用流程示例
 
@@ -311,7 +312,7 @@ git worktree list                               # 只读：确认目标路径/�
 #    - ⚠️ LLM 必须自己提炼、勿向用户索取；勿用占位符字符串（如直接输出 `<ticket-slug>` 而未提炼）执行创建
 ```
 
-**创建新目录**（原地路径：答「不用」/ limit 默认关闭 / worktree 创建失败降级时；worktree 场景则在 worktree 内执行）：
+**创建新目录**（原地路径：worktree opt-in **未触发**（默认）/ limit「worktree 强制禁止」红线阻止 / worktree 创建失败降级时；worktree 场景则在 worktree 内执行）：
 
 完整脚本（含目录号递增 + 硬熔断①建前检查 + 硬熔断②建后验证）见 [references/dir_and_metadata.md「创建新目录」段](../references/dir_and_metadata.md)（**真源**：所有入口命令与 step 都引用本段，禁止独立定义或微改）。
 
@@ -393,6 +394,7 @@ git worktree list                               # 只读：确认目标路径/�
 - `workload_estimate`（新增，可选，默认 `"medium"`）：工作量评估等级，枚举 `"small"`/`"medium"`/`"large"`（**字段缺失视为 `"medium"` 中性默认**，向后兼容旧 metadata）。由步骤 0 init 收尾时按 4 维度 max 算法（需求点数/涉及文件数/跨模块数/大改词命中）自动评估，写入 metadata 用于入口建议（small→fast，medium/large→start）。详见 [steps/00_init.md](steps/00_init.md)「步骤 9 工作量评估」段
 - `workload_reason`（新增，可选，≤80 token）：工作量评估的简短理由，辅助用户理解"为什么是 large"等判断。**字段缺失视为空字符串**（向后兼容）
 - `indexed`：是否已写入全局索引（防重复写入）
+- `debug`（新增，可选，缺失 = 正常工单）：bool，仅 `/icode init --debug` / `/icode log --debug` 创建的 debug 孪生工单为 `true`。debug 工单**永不写入 index.json**（`indexed` 恒为 `false`、`ticket_id` 为空串）、**不参与主流程**（各主流程步骤 L1 检测段按 `metadata.debug == true` 阻断，见 [references/debug_mode.md](references/debug_mode.md)）
 - `ticket_id`：本工单在全局索引中的唯一键（`{工程名}-{N}`，冲突时带 hash 后缀）。步骤0写索引时持久化到 metadata；**跳过步骤0直接 `/icode plan`/`/icode start` 的常规新建目录情况**，在步骤1首次写索引时生成并回填 metadata。供后续步骤检索时排除当前工单
 - `code_deviations`：步骤4 编码时主动偏离定稿计划的记录数组（每条含 `plan_said`/`actual_done`/`reason`），供步骤6 终审汇总回写到 `03_plan_final.md` 的「实现偏差备忘」段；无偏离写空数组 `[]`
 - `limit_refs`（默认 `[]`，**产物文本引用 limit 时须填写**）：plan / log 步骤引用的 limit 红线编号数组，每条 `{redline_no: int, source: "main"|"local", title: str, applied_in: [...]}`，`source` 区分主存全局约定 vs 单 checkout 覆盖，`applied_in` 为引用章节。**plan**：§3 架构设计 / §4 ADR / §6 异常处理**引用 limit 条目（计划文本出现「红线 N」/「红 N」）时必须记录**，完全未引用才可留空；audit 视角 B 以**先检测计划是否实际引用**再判定跳过/回补（见 [steps/06_audit.md](steps/06_audit.md) §6.7）。**log**：`log_analysis.md §2.3 limit 红线对照`（必填小节）/ §6 对抗分析记录引用红线时必须记录，经 log 步骤 9.5 机器自检校验（**读留痕 `limit_checkpoint.md` 存在性 + §2.3 存在性 + 引用完整性**，见 [steps/log.md](steps/log.md)）。⚠️ `limit_refs` 是**事后回补**，只证明"后来引用了哪些红线"；"**先读索引→精读命中**"确实读过的可审计留痕靠 `{ICODE_OUT_DIR}/limit_checkpoint.md` 的**工单级追加式阶段块**——log 前置检查点落「阶段块：log前置检查点」（log 9.5 维度④校验），plan 前置硬基线落「阶段块：plan前置硬基线」**统一覆盖 init/start/fast 三入口**（plan limit_refs 机器自检 维度④校验），缺失按未读处理。**字段缺失视为 `[]`（向后兼容旧 metadata）**。详见 [steps/limit.md](steps/limit.md)
@@ -437,6 +439,8 @@ git worktree list                               # 只读：确认目标路径/�
 | 4 | `code_in_progress` → `code_done` | 步骤4编码中 → 完成（含末尾 1.5 "Code Review Fix" 4 维度复检；`code_review_fix_with_issues=true` 时审计可见，不阻断流程） |
 | 5 | `deepcheck_in_progress` → `deepcheck_done` | 步骤5复检中 → 完成 |
 | 6 | `completed` | 步骤6终审完成（终态） |
+
+> **debug 工单例外**：`/icode init --debug` / `/icode log --debug` 创建的 debug 孪生工单使用**独立状态名** `debug_in_progress` / `debug_done`（不入上方主流程词表校验范围——debug 目录在 `.icode_output/.debug/` 下，天然被「检测最新目录」排除、不参与 `--validate`，无状态机冲突；见 [references/debug_mode.md](references/debug_mode.md)）
 
 **步骤0说明**：步骤0产出 `00_init.md` 后 status 一直保持 `init_in_progress`，直到 `/icode start`/`/icode plan` 复用该目录进入步骤1时才被切换为 `plan_done`。`completed_steps` 含 `"0"` 表示走过步骤0。
 
@@ -826,3 +830,4 @@ icode 工作流可调用 6 个 MCP（`/icode install` 一键安装）。**双保
 | [references/necessity_check.md](references/necessity_check.md) | **现有功能覆盖度检查（防重复实现机制）**：触发时机 + 执行命令（全工程检索 + Read 命中处行为链）+ 三类判定（已覆盖/部分/未覆盖）+ 各步骤落点（init §2.X/预筛列、plan 前置/断言/ADR/对抗、review 维度7、deepcheck Reverse 对比、audit 视角 C） | init / plan / review / deepcheck / audit |
 | [references/first_activation_path.md](references/first_activation_path.md) | **首次激活路径一致性检查**：静态分析盲区（"写了从没实机执行过"的死路径既有 bug）+ 触发条件 + 检测法（软信号、不阻断）+ 双侧校验一致性核对清单 + 部署后验证建议下游输出 | plan（断言⑤）/ deepcheck（Reverse）/ audit（部署后建议）/ patch（部署后验证发现） |
 | [references/worktree_isolation.md](references/worktree_isolation.md) | **git worktree 多需求隔离**：worktree 决策与创建（**opt-in 参数触发**：`--worktree` 才走创建，否则默认原地，不弹问；**预检/公示告知/失败降级**）+ cwd 契约 + metadata 字段族 + 回流指引（F2 二选一）+ **产物归档（自动，防 remove 丢档）** + 防误删护栏 + 空间自查 | 新建工单入口加 `--worktree` 时（init/log/start/plan/fast）/ 续跑与只读（review/code/deepcheck/audit/patch/status/readme） |
+| [references/debug_mode.md](references/debug_mode.md) | **debug 模式（独立孪生工单）**：`/icode init --debug` / `/icode log --debug` 产出对照工单，不入全局索引、不参与主流程（各主流程步骤 L1 阻断）；目录在 `.icode_output/.debug/` 下、N 独立递增；`debug: true` 元数据标志 + 独立状态名；忽略 `--worktree` | init / log（`--debug` 时） |

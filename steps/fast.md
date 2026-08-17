@@ -30,27 +30,13 @@
 
 ### 1. 目录决策（与 `/icode start` 复用规则一致）
 
-```bash
-mkdir -p .icode_output
-LAST=$(ls -d .icode_output/.icode_output_* 2>/dev/null | grep -oP '(?<=\.icode_output_)\d+' | sort -n | tail -1)
-REUSE=0
-if [ -n "$LAST" ]; then
-  CAND=".icode_output/.icode_output_${LAST}"
-  if [ -f "$CAND/.ico_metadata.json" ] && [ -f "$CAND/00_init.md" ] && [ ! -f "$CAND/01_plan.md" ]; then
-    STATUS=$(grep -oP '"status"\s*:\s*"\K[^"]+' "$CAND/.ico_metadata.json")
-    case "$STATUS" in
-      init_in_progress|log_done) REUSE=2 ;;
-    esac
-  fi
-fi
-# REUSE=2 问用户；REUSE=0 带参新建 / 无参报错
-```
+完整脚本见 [references/dir_and_metadata.md「复用 / 创建新目录决策」段](../references/dir_and_metadata.md)（**真源**，禁止独立定义或微改）：`REUSE=2`（入口态有歧义）→ 问用户"复用 / 新建"，按答复定；`REUSE=0`（非入口态）→ 带参新建、无参报错。
 
 复用语义：复用入口态目录时，命令参数作补充输入，主体需求取自 `00_init.md`。
 
 > **历史检索 + 段零工程文档检索**：委托给串联执行的 [01_plan.md](01_plan.md) 步骤2（plan 步骤2，非 icode 步骤4），fast 不单独检索。原因：slice 与 plan 完全相同（历史 `adr_risks` / 段零 `section:<file>`），`_inject_cache.json` 按 `(source, ref_id, slice)` 去重兜底，fast 单独检索是冗余动作（检索白跑，注入被 plan 截胡），与 fast 省 token 目标矛盾。详见 [SKILL.md](../SKILL.md)「历史检索复用」段。
 
-> **段零只读当前分支子目录是反交叉污染设计，不要误读为"被覆盖"**：详见 [steps/doc.md](doc.md) 顶部「⚠️ 多分支设计·反偷懒强约束」段（`dir_and_metadata.md:496`「DOC_DIR 分支过滤」），跨分支不交叉读是为防止跨分支借鉴失真；用户反馈"看不到其他分支文档"时**默认不是 bug**，应先 `ls project_docs/<id>/` 看是否有多分支子目录再判。
+> **段零只读当前分支子目录是反交叉污染设计，不要误读为"被覆盖"**：详见 [steps/doc.md](doc.md) 顶部「⚠️ 多分支设计·反偷懒强约束」段（`dir_and_metadata.md`「段零·工程文档检索」段），跨分支不交叉读是为防止跨分支借鉴失真；用户反馈"看不到其他分支文档"时**默认不是 bug**，应先 `ls project_docs/<id>/` 看是否有多分支子目录再判。
 ### 2. 创建 metadata
 
 `/icode fast` 新建目录时，`.ico_metadata.json` 写入：

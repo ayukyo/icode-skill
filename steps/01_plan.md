@@ -99,7 +99,7 @@
    - 命中工单的 `01_plan.md` 读不到（工程被删/移动）→ 跳过该条不报错
    - **段零·工程文档检索**（与历史检索并行，候选合并排序；本入口检索时机：目录管理+需求来源确定后）：完整流程以 [references/dir_and_metadata.md](../references/dir_and_metadata.md)「段零·工程文档检索」+「module_docs 工程模块库」段为准（含步骤 1-5 + 3.5 反查父项目 + 3.6 关联工程检索 + 3.6 源码路径定位 [project_path+manifest+兜底]），**执行前必须 Read 该段全文（含顶部「段零步骤速查」导航），不得凭本行摘要执行**；stale 降级 / commit 校验 / 注入防重复等细节同该段
    - **注入防重复**（两源共用 `_inject_cache.json`）：无缓存则创建空 `{"ticket_id":"<本工单>","injections":[]}`；注入前按 `(source, ref_id, slice)` 查缓存去重，已注入的跳过。历史源 slice=`adr_risks`；段零 slice=`section:<file>`。详见 [references/dir_and_metadata.md](../references/dir_and_metadata.md)「注入缓存机制」段
-   - **段零只读当前分支子目录是反交叉污染设计，不要误读为"被覆盖"**：详见 [steps/doc.md](doc.md) 顶部「⚠️ 多分支设计·反偷懒强约束」段（`dir_and_metadata.md:496`「DOC_DIR 分支过滤」），跨分支不交叉读是为防止跨分支借鉴失真；用户反馈"看不到其他分支文档"时**默认不是 bug**，应先 `ls project_docs/<id>/` 看是否有多分支子目录再判
+   - **段零只读当前分支子目录是反交叉污染设计，不要误读为"被覆盖"**：详见 [steps/doc.md](doc.md) 顶部「⚠️ 多分支设计·反偷懒强约束」段（`dir_and_metadata.md`「段零·工程文档检索」段），跨分支不交叉读是为防止跨分支借鉴失真；用户反馈"看不到其他分支文档"时**默认不是 bug**，应先 `ls project_docs/<id>/` 看是否有多分支子目录再判
    - 零命中不注入，不强凑参考
 
 3. **强制思考前置**（不可跳过，缺证据视为不合规；按 [references/thinking_core.md](../references/thinking_core.md)「强制思考前置·统一契约」段执行）：本步骤子项（至少3步）= 需求分解 → 方案分析 → 风险评估。**若步骤2有历史参考，在此处「历史参考」小节记录命中工单 id 与 ADR/风险要点，作为思考输入**
