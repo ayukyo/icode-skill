@@ -162,6 +162,10 @@ git rev-list --count <worktree_branch>..<目标基分支>     # 目标基分支 
 
 必须先建立计划-代码追溯矩阵，再逐维度评分。禁止跳过追溯直接写"全部通过"。
 
+**终审发现新问题的范围升级（scope_escalations，反偷懒第 33 条）**：终审发现**计划之外**的新问题/新架构信号（新增持久化协议、全局门控、生命周期语义、跨职责边界组件、新故障模型），拟纳入实施/修复范围的——**不得静默采纳**（终审采纳 ≠ 实施授权），须按 `scope_escalations` 分类并写 metadata：`A_now` 必须给直接复发证据链（无证据回指默认 `B_confirm` 需用户确认，未获确认前不实施）/ `C_follow_up` 进范围外另记 / `refuted` 丢弃。与 review 2.5.6 / deepcheck over-design 复检对齐，统一走 [SKILL.md「可选字段」段](../SKILL.md) `scope_escalations` 定义。
+
+**范围契约核对（scope_contract，O-4 语义冻结）**：Read `metadata.scope_contract`（缺失视为 null＝未冻结，跳过本核对，向后兼容旧工单）与 `metadata.requirement_deltas`（缺失视为 `[]`）：核对**实际代码/验收边界是否超出冻结契约 + 已分流 delta 的并集**——超出且无对应 delta/escalation 记录 = issue（超范围实施）；存在未分流 delta（`classification` 未定 / `needs_user_confirm` 未确认 / `needs_replan` 未重审）→ 6.2 强制修复前先完成分流。终审结论基于更新后的契约，`scope_contract.summary` 若因 delta 改变 → 同步刷新。
+
 ## 6.2 强制修复
 
 1. 读取 `06_audit.md` 中的问题清单
@@ -172,7 +176,7 @@ git rev-list --count <worktree_branch>..<目标基分支>     # 目标基分支 
 4. 更新 `.ico_metadata.json`：`status = completed`
 5. **回写实现偏差备忘到 `03_plan_final.md`**（不可跳过，详见下方「实现偏差备忘」规范）
 6. **worktree 工单产物归档（若 `metadata.active_checkout` 非 null，缺失按 [references/worktree_isolation.md §3.7](../references/worktree_isolation.md) 用 `worktree_path` 推导）**：把核心产物（`.ico_metadata.json`/`00_init.md`/`01_plan.md`/`03_plan_final.md`/`log_analysis.md`）复制到 `~/.claude/icode_data/worktree_archive/<project_id>/<ticket_id>/`，写 `metadata.archive_path`（详见 [references/worktree_isolation.md](../references/worktree_isolation.md)「产物归档」）——防 worktree remove 后产物丢失、保后续检索可读档复用完整 ADR/根因
-7. **刷新全局索引最终状态**：Read `~/.claude/icode_data/index.json`，**按 metadata 的 `ticket_id` 定位**本工单条目，更新 `status` = `completed`，`requirement_summary` 若与最终交付有显著偏差则基于 `03_plan_final.md`+交付成果刷新一次（确保未来检索命中的摘要准确反映最终成果而非中途状态）；**若该工单当前 `stale=true`，重置 `stale=false`+`stale_reason=null`+`stale_checked_commit=null`**（产物可能经本轮更新，旧 stale 判据失效；下次检索注入前由过时校验按当前 `01_plan` 锚点重评，盲重置安全不致误注入）；若已归档（步骤6），同步写 index 条目 `archive_path`；**确认 verdict（方向结论，v2 新增）**：向用户确认本工单核心方案最终方向结论--默认保持 `unknown` 不阻塞流程；若方案已实机验证有效标 `verified`，若核心方案被证伪/已回退标 `disproved`（填 `verdict_reason`+`correct_direction`；可选 `--premise-dep` 填证伪依赖的外部模块，支持硬复活检测），若被替代方案取代标 `superseded`（填 `superseded_by`）；标注时回填 `verdict`+`verdict_reason`+`correct_direction`+`verdict_source`（`machine_test`/`review`/`user`）+`verdict_at`（运行时取系统时间）；详见 SKILL.md「verdict 字段族」。写回 index.json（metadata + index 同步，不得只写其一）。
+7. **刷新全局索引最终状态**：Read `~/.claude/icode_data/index.json`，**按 metadata 的 `ticket_id` 定位**本工单条目，更新 `status` = `completed`，`requirement_summary` 若与最终交付有显著偏差则基于 `03_plan_final.md`+交付成果刷新一次（确保未来检索命中的摘要准确反映最终成果而非中途状态）；**若该工单当前 `stale=true`，重置 `stale=false`+`stale_reason=null`+`stale_checked_commit=null`**（产物可能经本轮更新，旧 stale 判据失效；下次检索注入前由过时校验按当前 `01_plan` 锚点重评，盲重置安全不致误注入）；若已归档（步骤6），同步写 index 条目 `archive_path`；**确认 verdict（方向结论，v2 新增）**：向用户确认本工单核心方案最终方向结论--默认保持 `unknown` 不阻塞流程；若方案已实机验证有效标 `verified`，若核心方案被证伪/已回退标 `disproved`（填 `verdict_reason`+`correct_direction`；可选 `--premise-dep` 填证伪依赖的外部模块，支持硬复活检测），若被替代方案取代标 `superseded`（填 `superseded_by`）；标注时回填 `verdict`+`verdict_reason`+`correct_direction`+`verdict_source`（`machine_test`/`review`/`user`）+`verdict_at`（运行时取系统时间）；详见 SKILL.md「verdict 字段族」。**回填 `delivery_verdict`（验证完成度，与 verdict 方向结论正交，见 SKILL.md「可选字段」段）**：按本工单实际验证情况回填——目标改动已获得所要求的验证（编译+测试通过且非 O-6 用户自担验证豁免）标 `verified`；O-6 用户自担验证豁免 / 实机验证待办 / `test_outcome=fail` 未修复标 `verification_pending`；验证因外部条件无法继续标 `blocked`；需求明确不需要该类验证标 `not_applicable`。**target 身份判定（O-6/O-7，worktree 工单）**：工单在 worktree 内（`active_checkout` 非 null）时，标 `verified` 前必须核对**验证动作确实消费了 target checkout**——构建/测试/部署记录指向的源树 = `active_checkout.path`（同一目标身份），而非主仓 baseline；若验证基于主仓 baseline（活动 checkout 未参与构建，如 O-6 基线树构建成功但活动 checkout 未参与）→ **不得标 `verified`**，按实标 `verification_pending`（target 验证待完成）并注明"基线通过、target 未验证"；构建/测试/部署均指向同一 target 身份（O-7）才可标 `verified`。**`status=completed` 不自动等价于 `delivery_verdict=verified`**。写回 metadata（**仅写 metadata，不写 index**——delivery_verdict 不参与检索分流，index 条目无此字段）。写回 index.json（metadata + index 同步，不得只写其一）。
 8. 输出交付总结
 
 ### 实现偏差备忘（回溯标注，防回读误解）
@@ -226,6 +230,8 @@ git rev-list --count <worktree_branch>..<目标基分支>     # 目标基分支 
 [✓] 步骤6: 终极终审 — 评分{分数}, {结论}
 产出目录: {ICODE_OUT_DIR}/
 ```
+
+> **交付措辞按 delivery_verdict 与数据处置二选一定（防"completed"被误读为"已验证/已恢复"）**：`status=completed` 只表示流程步骤结束，**不自动等价于已验证**。若 `metadata.delivery_verdict = verification_pending`（如 O-6 用户自担验证豁免 / 实机验证待办 / 测试失败未修复），交付总结必须用"已完成代码修改，待实机验证"，**不得写成"已修复/已验证"**；`blocked` → 标注"验证因 <原因> 未完成"；`not_applicable` → 标注"本需求不要求该类验证"。若 plan §4.5 选"仅防复发"（已受影响数据处置 B 档），交付总结必须用"已阻止复发路径，现有数据修复待 <交接>（触发条件：<...>，部署后验证项：<...>）"，**不得写成"当前功能已恢复"**。
 
 ## 6.4 交付报告提示
 

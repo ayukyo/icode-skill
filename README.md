@@ -19,7 +19,7 @@ ICode is a Claude Code Skill that breaks the journey from requirement to deliver
 |---|---|---|
 | Process discipline | Depends on your prompt | Hard 6-step gates + L1–L4 blocking matrix |
 | Review quality | Single-perspective self-review | Independent skeptic sub-agents with adversarial verification (self-delegation forbidden) |
-| Laziness resistance | None | 31 hard anti-laziness rules + mandatory Read confirmation lines + file:line evidence |
+| Laziness resistance | None | 33 hard anti-laziness rules + mandatory Read confirmation lines + file:line evidence |
 | Reusing past decisions | Every ticket starts cold | Cross-project history retrieval with a global index + **verdict-based anti-misleading injection** (disproved tickets inject the trap, not the ADR) |
 | Project knowledge | None | `/icode doc` generates a global per-project/branch knowledge base, auto-injected at phase zero |
 | Crash recovery | Restart from scratch | `.ico_metadata.json` status + round counters enable resumable runs at any step |

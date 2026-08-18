@@ -19,6 +19,8 @@
 
 **产物时效校验（防 README 基于过时产物）**：读 metadata 的 `created_at`（工单创建时间，近似步骤6 完成的下界）+ `code_files` 列表，用 `find {code_files} -newer {ICODE_OUT_DIR}/.ico_metadata.json` 检测是否有源码文件 mtime 晚于 metadata 创建时间。若有 → 输出警告「⚠️ 检测到步骤6 完成后代码仍有变更（N 个文件 mtime 晚于终审时间），README 的"已知限制/方案"可能基于过时产物，建议重跑步骤5/6 或确认变更不影响交付」；不阻塞生成（README 的"使用说明"段含实时运行输出兜底，面向人可判断）。**该校验同时覆盖跨领域简报**（简报的"核心代码/时间点"同样基于产物，过时产物会传导到两份）。
 
+**验证结论措辞（按 metadata.delivery_verdict 定，防"completed"被读成已验证）**：读 metadata `delivery_verdict`（缺失视为未回填，按既有流程写）。`verified` → 按既有流程正常写"已验证/已修复"；`verification_pending`（O-6 用户自担验证豁免 / 实机验证待办 / 测试失败未修复）→ 两份文档的"验证方法/效果与验证"段必须用"已完成代码修改，待实机验证"，**禁止写"已验证/已修复"**；`blocked` → 标注"验证因 <原因> 未完成"；`not_applicable` → 标注"本需求不要求该类验证"。**交付文案以 delivery_verdict 为准，`status=completed` 不自动等于已验证**（与 06_audit 交付措辞约束一致）。
+
 ## 文件名生成
 
 从 metadata 的 `requirement` 提炼关键词，生成**一对文件名**（两份同步生成）：

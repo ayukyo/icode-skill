@@ -145,6 +145,8 @@
 > 3. **影响评估**：该问题是否影响已有 plan 的**核心方案方向**？是 → 建议 `/icode plan` 重审；否 → 按本 patch 流程增量修复。
 > 4. **产物同步**：patch 修复的代码照常纳入 `code_files`，`06_audit.md` 评分中标注"**部署后 patch 修正**"。
 
+> **范围升级（反偷懒第 33 条，精简模式不豁免授权门禁）**：阶段 1 现状重审 / 阶段 2 增量计划 / 阶段 4 复检中发现**计划之外**的新问题/新架构信号（新增持久化协议、全局门控、生命周期语义、跨职责边界组件、新故障模型），拟纳入本 Patch 实施范围的——**不得静默采纳**（精简模式不能规避授权门禁，与 review/deepcheck/audit 同类信号同规则），须按 `scope_escalations` 分类并写 metadata：标 `A_now` 必须给**直接复发证据链**（回答"不做这一项、完成已有修改后，哪个已记录证据场景会再次产生原故障"），无证据回指**默认 `B_confirm`**（需用户确认，未获确认前不得纳入本 Patch 实施范围）；标 `C_follow_up` 进范围外；`refuted` 丢弃。分类结果**追加**写入 metadata `scope_escalations`（字段缺失视为 `[]`；每条含 `at`/`source_step`/`change_desc`/`classification`/`evidence`/`user_confirm`/`impact`）。与 [02_review.md](02_review.md) 2.5.6 / [05_deepcheck.md](05_deepcheck.md) over-design 复检 / [06_audit.md](06_audit.md) 终审对齐。
+
 在 `{ICODE_OUT_DIR}/08_patch.md` **追加** `## Patch {N}` 段。文件不存在则新建，**头部说明固定如下**（首次创建时写入，之后不再重复）：
 
 ```markdown
@@ -336,13 +338,13 @@
 
 | patch 阶段 | 工具 | 类型 | focus / 输入 | 真源 | 价值 |
 |------------|------|------|------------|------|------|
-| **阶段 1 重新审视现状**：重审 `00_init.md` / `01_plan.md` / `03_plan_final.md` 长产物 | `summarize` | [核心] | `focus="改动点/根因"` | [server.py:194](mcp/cheap-research/server.py) | 8K 产物读全文 → 拿结构化摘要，省主代理上下文 80%+ |
-| **阶段 1 重新审视现状**：从 `index.json` 候选中按本工单症状挑相似历史工单 | `retrieve_similar` | [核心] | `query=本工单症状, candidates=[{ticket_id, requirement_summary, keywords, ...}]` | [server.py:252](mcp/cheap-research/server.py) | 50 条索引 → top-k 评分，主代理只看前几个 |
-| **阶段 2 增量计划 三链预扫 caller / import / test** | `trace_refs` | [增强] | `symbol=待改符号, scope_path="."` | [server.py:700](mcp/cheap-research/server.py) | **纯机械、不调 LLM**——替代 3 次手 grep，自动出 caller 链 |
-| **阶段 2/4 长 diff 摘要**（PATCH vs BASE / 模板产物 vs 现状） | `diff_summary` | [核心] | `focus="接口变更/破坏面"` | [server.py:1298](mcp/cheap-research/server.py) | 长 diff 索引化，主代理只看摘要 |
-| **阶段 4 复检**：编译输出 / 编译错误模式扫描 | `scan_patterns` | [增强] | `patterns=[regex,...]` | [server.py:597](mcp/cheap-research/server.py) | **纯 grep，不调 LLM**——零 LLM 成本，机械扫描 |
-| **阶段 4 复检**：仓库关键文件事实审计（README / CLAUDE.md / 入口 / 依赖 / API），验证 patch 未引入外部接口回归 | `audit_facts` | [核心] | `focus="对外 API / 依赖关系", max_files=10` | [server.py:479](mcp/cheap-research/server.py) | LLM 抽取关键事实 → 主代理对照审查，防 patch 改了入口忘改 README |
-| **1.5 部署/监听 LOG**：本轮增量长 log 收口分析 | `summarize` | [核心] | `focus="异常/fatal/失败"` | [server.py:194](mcp/cheap-research/server.py) | 替代主代理读 8K log，节省 read 上下文 |
+| **阶段 1 重新审视现状**：重审 `00_init.md` / `01_plan.md` / `03_plan_final.md` 长产物 | `summarize` | [核心] | `focus="改动点/根因"` | [server.py:194](../mcp/cheap-research/server.py) | 8K 产物读全文 → 拿结构化摘要，省主代理上下文 80%+ |
+| **阶段 1 重新审视现状**：从 `index.json` 候选中按本工单症状挑相似历史工单 | `retrieve_similar` | [核心] | `query=本工单症状, candidates=[{ticket_id, requirement_summary, keywords, ...}]` | [server.py:252](../mcp/cheap-research/server.py) | 50 条索引 → top-k 评分，主代理只看前几个 |
+| **阶段 2 增量计划 三链预扫 caller / import / test** | `trace_refs` | [增强] | `symbol=待改符号, scope_path="."` | [server.py:700](../mcp/cheap-research/server.py) | **纯机械、不调 LLM**——替代 3 次手 grep，自动出 caller 链 |
+| **阶段 2/4 长 diff 摘要**（PATCH vs BASE / 模板产物 vs 现状） | `diff_summary` | [核心] | `focus="接口变更/破坏面"` | [server.py:1298](../mcp/cheap-research/server.py) | 长 diff 索引化，主代理只看摘要 |
+| **阶段 4 复检**：编译输出 / 编译错误模式扫描 | `scan_patterns` | [增强] | `patterns=[regex,...]` | [server.py:597](../mcp/cheap-research/server.py) | **纯 grep，不调 LLM**——零 LLM 成本，机械扫描 |
+| **阶段 4 复检**：仓库关键文件事实审计（README / CLAUDE.md / 入口 / 依赖 / API），验证 patch 未引入外部接口回归 | `audit_facts` | [核心] | `focus="对外 API / 依赖关系", max_files=10` | [server.py:479](../mcp/cheap-research/server.py) | LLM 抽取关键事实 → 主代理对照审查，防 patch 改了入口忘改 README |
+| **1.5 部署/监听 LOG**：本轮增量长 log 收口分析 | `summarize` | [核心] | `focus="异常/fatal/失败"` | [server.py:194](../mcp/cheap-research/server.py) | 替代主代理读 8K log，节省 read 上下文 |
 
 **patch 阶段 1 重审的 cheap-research 约束（修复场景防降质）**：
 

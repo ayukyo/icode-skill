@@ -23,6 +23,8 @@
 
 检查 `{ICODE_OUT_DIR}/03_plan_final.md` 是否存在，不存在则报错并提示先执行 `/icode merge`。
 
+**用户语义变更检测（O-4，同 [02_review.md](02_review.md) 前置校验）**：读 `metadata.scope_contract`（缺失视为 null＝未冻结，跳过，向后兼容旧工单）；若**用户本次输入**改变冻结契约语义（状态身份或生命周期 / 允许或拒绝条件 / 持久化一致性或回滚承诺 / 验收条件、调用方语义或真实环境验证场景）——先分类写入 `metadata.requirement_deltas`（追加，分类枚举与判定同 02_review 前置），**未分流不得实施对应变更**（`needs_user_confirm` 未确认 / `needs_replan` 未重定稿 → 先回步骤3 分流）。若用户输入仅澄清不改变契约，则无 delta，正常实施。
+
 ## 前置：统一拓扑门禁（共享检查器）
 
 > 进入编码前**必须**调用统一拓扑检查器（[references/worktree_isolation.md §3.8](../references/worktree_isolation.md)），verdict 语义：`pass` 继续 / `repairable` 仅执行无歧义、可逆、幂等的 metadata 修复后继续 / `blocked` **报错退出**。**禁止**绕开本门禁直接在旧 checkout 修改代码——在非活动 checkout 修改 = 证据与实现脱节，编译/测试通过也不构成当前活动实现的通过证据。子仓隔离硬门（下段）是拓扑门禁「⑥ 子仓拓扑」的实施细则，两者都要过。
@@ -131,6 +133,10 @@
 
 
 **修复方案三档实施（反偷懒第 26 条）**：默认只实施 A 档（根因修复）；B 档需 metadata `confirmed_B_fixes: [...]` 记录用户显式确认才实施；C 档不实施（范围外）。A 档跨工程（plan 标注）时本工程无可实施 A 档，不强行造 A 档、不把 B 当 A 实施，只做确认的 B 档 + commit/工单注明"A 档转交 <X>"。Code Review Fix 复检核对：实施范围 = A 档 + 确认的 B 档（**先 Read metadata.fix_tiers 读 plan 分档**，字段缺失则从 `03_plan_final.md` §4.5 文本读），超范围实施 = issue。实施 B 档前必须把用户确认记录写入 `confirmed_B_fixes` 数组。详见 anti_laziness 第 26 条
+
+**范围升级实施核对（scope_escalations，反偷懒第 33 条）**：Read `metadata.scope_escalations`（字段缺失视为 `[]`），只实施 `classification=A_now` 与已确认 `user_confirm` 的 `B_confirm` 条目对应的方案；`C_follow_up`（范围外）与 `refuted`（丢弃）**不得实施**。审查/复检/终审后新增的 escalation 若未经 merge 定稿纳入 `03_plan_final.md`，编码时不得直接实施（须回到步骤3 定稿或取得用户确认并记录）。Code Review Fix 复检核对实施范围时一并核对（超出已确认 escalation 的修改 = issue）。
+
+**用户语义变更实施核对（requirement_deltas，O-4 语义冻结）**：Read `metadata.requirement_deltas`（字段缺失视为 `[]`），存在未分流条目（`classification` 未定 / `needs_user_confirm` 未确认 / `needs_replan` 未重跑 plan）时**不得实施对应变更**——`clarification_only` 不改变实现；`a_now_with_evidence` 仅在 merge 定稿已纳入计划后实施；`needs_user_confirm` 未获 `user_confirm` 不得实施（先回步骤3 确认）；`needs_replan` 未重定稿不得实施（先回 plan）。**实施范围不得超出 scope_contract 冻结边界 + 已分流 delta/已确认 escalation 的并集**（超范围 = issue）。
 
 
 ## 强制操作（完成后必须执行）

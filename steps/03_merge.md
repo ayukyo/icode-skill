@@ -17,6 +17,8 @@
 
 检查 `{ICODE_OUT_DIR}/01_plan.md` 和 `{ICODE_OUT_DIR}/02_review.md` 是否存在，缺失则报错并提示先执行对应步骤。
 
+**用户语义变更检测（O-4，同 [02_review.md](02_review.md) 前置校验）**：读 `metadata.scope_contract`（缺失视为 null＝未冻结，跳过，向后兼容旧工单）；若**用户本次输入**改变冻结契约语义（状态身份或生命周期 / 允许或拒绝条件 / 持久化一致性或回滚承诺 / 验收条件、调用方语义或真实环境验证场景）——先分类写入 `metadata.requirement_deltas`（追加，分类枚举与判定同 02_review 前置：`clarification_only` / `a_now_with_evidence` / `needs_user_confirm` / `needs_replan`），**未分流不得继续本步骤**（`needs_user_confirm` 未确认 / `needs_replan` 未重跑 plan → 停止定稿流程等待处理）。若用户输入仅澄清不改变契约，则无 delta，正常继续。
+
 ## 执行步骤
 
 1. 执行目录管理中的「检测最新目录」逻辑，确定 `ICODE_OUT_DIR`
@@ -44,6 +46,8 @@
 7. 每处修改标注 `[审查采纳 #编号]` 或 `[通读发现]` 或 `[审查否决 #编号: 理由]` 或 `[对抗否决 #编号: 推翻原因]` 或 `[待验证-已证实/证据仍不足]` 标记
 8. 保持整体架构不变
 9. 输出前必须自检：章节完整、编号连续、校验项 checkbox 格式正确
+10. **`scope_escalations` 定稿检查（反偷懒第 33 条）**：Read `metadata.scope_escalations`（字段缺失视为 `[]`），检查 review 阶段（02_review 2.5.6）写入的分类记录——存在 `classification=B_confirm` 且未获用户确认的条目时，**定稿不得直接采纳实施**：向用户确认该条（确认 → 记录 `user_confirm` 后允许纳入定稿；拒绝/暂缓 → 标 `C_follow_up` 进范围外或 `refuted` 丢弃，不入定稿正文）；`A_now` 条目核对计划是否已含对应方案（未含 → 补入 §3 架构设计并在 §4.5 落盘 `fix_tiers`，**纳入后同步刷新 `scope_contract.summary`**——A_now 改变 A/B/C 分档即契约边界变化，与第 11 条 delta 分流刷新一致）；`C_follow_up`/`refuted` 不入定稿实施范围。未确认的 B_confirm 不得出现在 `03_plan_final.md` 实施范围中
+11. **`requirement_deltas` 分流检查（O-4 语义冻结）**：Read `metadata.requirement_deltas`（字段缺失视为 `[]`），存在**未分流**条目（`classification` 未定，或 `needs_user_confirm` 未获 `user_confirm`，或 `needs_replan` 未重跑 plan 更新 `scope_contract`）时，**禁止定稿**——先完成分流：向用户确认 `needs_user_confirm`（确认 → 记录 `user_confirm` 后纳入定稿；拒绝 → 标 `clarification_only` 或排除）；`needs_replan` → 提示用户重跑 `/icode plan` 更新契约后再定稿；`a_now_with_evidence` → 核对计划已含对应方案（未含 → 补入）。已分流条目若改变 A 档/验收边界，同步刷新 `scope_contract.summary`
 
 **写入定稿**：使用 Write 工具写入 `{ICODE_OUT_DIR}/03_plan_final.md`。
 

@@ -33,6 +33,8 @@
 
 检查 `{ICODE_OUT_DIR}/01_plan.md` 和 `{ICODE_OUT_DIR}/.ico_metadata.json` 是否存在，缺失则报错。
 
+**用户语义变更检测（O-4 语义冻结，写 requirement_deltas）**：读 `metadata.scope_contract`（缺失视为 null＝未冻结，跳过本检测，向后兼容旧工单）；若**用户本次输入**改变了冻结契约的语义——状态身份或生命周期、允许/拒绝条件、持久化一致性或回滚承诺、验收条件/调用方语义/真实环境验证场景——不得静默按新语义继续审查，须**先分类写入 metadata `requirement_deltas`**（追加，字段缺失视为 `[]`）：`clarification_only`（仅澄清不改变实现，可继续）/ `a_now_with_evidence`（改变 A 档但已有直接证据，记 impact 后按 A 档处理）/ `needs_user_confirm`（需用户确认，未确认前**停止自动串联**等待确认）/ `needs_replan`（需回到 plan/review 重新定稿，**先停本步骤提示用户重跑 plan**）。**delta 未分流前不得继续扩大代码设计或验收矩阵**（冻结点）。每条含 `{at, user_input_summary, changed_aspect, classification, impact, user_confirm}`，见 [references/dir_and_metadata.md](../references/dir_and_metadata.md)「requirement_deltas 字段族」。
+
 ## 执行流程
 
 1. 执行目录管理中的「检测最新目录」逻辑，确定 `ICODE_OUT_DIR`
@@ -115,6 +117,8 @@
 
 
 **步骤 2.5.6 - over-design 审查（反偷懒第 26 条）**：检查 plan 修复方案是否分 A/B/C 三档呈现。检查点：①分档？②A 档真根因（非兜底）？③B 档标注"A 修复后触发概率"？④机制层修复是否被误归 B 档（应按"不改会复现吗"判定）？⑤A 档标"跨工程"是否有证据（非借跨工程逃避实施）？判定：B/C 混入 A 档主方案 = `confirmed` issue（需 plan 修订分档）。**核对 metadata.fix_tiers**：plan 未把分档落盘（字段缺失但 `03_plan_final.md` §4.5 有分档文本）→ 提示 plan 补落盘；落盘分档与文本分档不一致 → `confirmed` issue（需 plan 修订）。对抗质疑者追问补："这个修改点是 A 还是 B？B 在 A 修复后还会触发吗？机制层不改会复现吗？A 档标跨工程有证据吗？"
+
+**审查中发现新问题的范围升级（scope_escalations，反偷懒第 33 条）**：审查过程发现**计划之外**的新问题/新架构信号（新增持久化协议、全局门控、生命周期语义、跨职责边界组件、新故障模型），拟建议纳入实施范围的——**不得静默采纳**（审查采纳 ≠ 实施授权），须按 `scope_escalations` 分类并写 metadata：标 `A_now` 必须给出**直接复发证据链**（回答"不做这一项、完成已有 A 项后，哪个已记录证据场景会再次产生原故障"），无证据回指**默认 `B_confirm`**（需用户确认，未获确认前不得进入编码，与 `confirmed_B_fixes` 机制一致）；标 `C_follow_up` 进范围外；`refuted` 丢弃。分类结果追加写入 metadata `scope_escalations`（字段缺失视为 `[]`；每条含 `at`/`source_step`/`change_desc`/`classification`/`evidence`/`user_confirm`/`impact`）。
 
 **步骤 2.5.7 — 语义重复函数检测（轻量 top 5）**：
 

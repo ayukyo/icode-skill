@@ -253,6 +253,14 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
 
 > **verdict 字段族**（方向结论，可选，详见 SKILL.md「verdict 字段族」）：所有入口模板均可选；**创建时可不写**（缺失视为 `"unknown"`，向后兼容旧 metadata）；需标注时回填 `verdict`+`verdict_reason`+`correct_direction`+`verdict_source`+`verdict_at`（`superseded` 额外填 `superseded_by`；`disproved`/`superseded` 可选填 `verdict_premise_deps` 支持硬复活），途径见 `/icode status --verdict`（[steps/status.md](../steps/status.md)）/ 步骤6 终审（[steps/06_audit.md](../steps/06_audit.md)）/ 批量识别扫描。**索引首次写入时 verdict 固定 `"unknown"`、关联字段 null、premise_deps `[]`/review_needed `false`**（见「全局索引写入」段）
 
+> **`scope_escalations` 字段族**（范围升级记录，可选，默认 `[]`，详见 SKILL.md「可选字段」段）：review/deepcheck/audit 阶段发现**计划之外**的新问题/新架构信号（新增持久化协议、全局门控、生命周期语义、跨职责边界组件、新故障模型）拟纳入实施范围时的分类记录。**审查采纳 ≠ 实施授权**：`A_now` 须直接复发证据链（无证据回指默认 `B_confirm` 需用户确认）/ `B_confirm` 未获确认不得进入编码 / `C_follow_up` 进范围外 / `refuted` 丢弃。所有入口模板可选；创建时不写（缺失视为 `[]`，向后兼容）。写入点：review 2.5.6 over-design 审查 / deepcheck over-design 复检 / audit 终审；细则见 anti_laziness 第 33 条
+>
+> **`delivery_verdict` 字段族**（验证完成度，可选，默认 `null`，详见 SKILL.md「可选字段」段）：与 `verdict` 方向结论**正交**——`verdict` 答"方案方向对不对"（verified/disproved/superseded/unknown），`delivery_verdict` 答"验证动作完成没"（verified/verification_pending/blocked/not_applicable）。由步骤6 终审按 `test_outcome` / 实机验证 / O-6 用户自担验证豁免情况回填；**`status=completed` 不自动等价于 `delivery_verdict=verified`**。字段缺失视为 `null`（向后兼容，读作"未回填"）。展示：status 模式一「验证结论」行 + readme 交付措辞
+>
+> **`scope_contract` 字段族**（范围契约，可选，默认 `null`，详见 SKILL.md「可选字段」段）：plan 完成时冻结的语义基线（`{summary, at, source_step}`，summary 为"根因方向 + A/B/C 分档 + 验收边界"的一句话指纹）。供 review/merge/code/deepcheck/audit 核对用户输入或审查是否改变既有契约。字段缺失视为 `null`（向后兼容，读作"未冻结"）。写入点：plan §4.5 落盘 fix_tiers 处一并写。消费点：review 前置校验 / merge 定稿检查 / code 实施核对 / deepcheck 范围核对 / audit 终审范围核对
+>
+> **`requirement_deltas` 字段族**（用户语义变更记录，可选，默认 `[]`，详见 SKILL.md「可选字段」段）：自动流程期间用户输入改变计划语义（状态身份/生命周期、允许/拒绝条件、持久化一致性或回滚承诺、验收条件/调用方语义/真实环境验证场景）时的分类记录数组（每条 `{at, user_input_summary, changed_aspect, classification, impact, user_confirm}`）。`classification` 枚举：`clarification_only`（仅澄清不改变实现）/ `a_now_with_evidence`（改变 A 档但已有直接证据）/ `needs_user_confirm`（需用户确认）/ `needs_replan`（需回到 plan/review 重新定稿）。**delta 未分流前不得继续扩大代码设计或验收矩阵**（冻结点）。字段缺失视为 `[]`（向后兼容）。写入点：review 前置校验 / merge / code 前置检测用户输入；消费点：merge 定稿检查（未分流禁止定稿）+ code 实施核对
+>
 > **`workload_estimate` 字段族**（工作量评估，v2 新增）：由步骤 0 init 收尾时自动评估，辅助用户决定走 `/icode start` 还是 `/icode fast`。详见 SKILL.md「workload_estimate 字段族」与 [steps/00_init.md](../steps/00_init.md)「步骤 9 工作量评估」段：
 > - `workload_estimate`（可选，枚举，默认 `"medium"`）：工作量等级。`"small"` 建议 `/icode fast`，`"medium"` 建议 `/icode start`，`"large"` **必须** `/icode start`
 > - `workload_reason`（可选，≤80 token）：评估理由

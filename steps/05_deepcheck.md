@@ -324,6 +324,8 @@ Free 阶段一次性完整覆盖全部 15 个角度。
 
 **over-design 复检（反偷懒第 26 条）**：Reverse/Fixed/Free 阶段均核对 plan 修复方案分档 + 实施范围。检查点：①plan 修复方案分 A/B/C 三档？②实施范围 = A 档 + 确认的 B 档（B 需 `confirmed_B_fixes`）？③B/C 混入 A 主方案或超范围实施 = issue。与步骤2 over-design 检查对齐。
 
+**复检发现新问题的范围升级（scope_escalations，反偷懒第 33 条）**：Reverse/Fixed/Free 阶段发现**计划之外**的新问题拟纳入实施范围时，同样按 `scope_escalations` 分类并写 metadata——`A_now` 须给直接复发证据链（无证据回指默认 `B_confirm` 需用户确认，未获确认不得实施）/ `C_follow_up` 范围外 / `refuted` 丢弃。**不得因"复检发现"直接采纳实施**（与步骤2 over-design 审查对齐）。
+
 
 ## 完成前自检（必须填，未填项标 ❌=不合规）
 

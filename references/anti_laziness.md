@@ -81,6 +81,8 @@
 
 32. **worktree 生命周期绕过（单活动实现根不变量）**：违反 [references/worktree_isolation.md](worktree_isolation.md) §3.5~3.9 生命周期规则。**偷工表现**：①靠临时字段或人工记忆改指针换实施位置，不走 `/icode worktree --update`；②迁移失败后把两个 checkout 都当活动根用（双 active）；③在已 superseded/旧 checkout 继续修改、编译、部署并把结果当当前活动实现通过证据；④completed **已 close** 工单不 `/icode worktree --reopen` 直接复活旧目录 patch；⑤多子仓只迁移一部分当整体完成（混合基线）；⑥close 时未核验在线证据就清理——用户说"已提交"≠跳过 git 证据校验；⑦跳过共享拓扑门禁（§3.8）在非活动根编码。**必须**：①换基线走标准迁移状态机（失败保留旧活动根，禁止双 active，禁止默认 `git worktree remove --force`/`branch -D`/`reset --hard` 掩盖未完成迁移）；②所有步骤执行前过统一拓扑门禁（verdict=blocked 属 L1 阻断，不得只记 L3 后继续）；③验证来源必须来自 `active_checkout`，旧 checkout 的编译/测试不作为活动实现通过证据；④close/reopen 走标准命令，清理动作须用户授权；⑤迁移/close/reopen 均支持重复执行且不产生额外 checkout（幂等）。
 
+33. **审查/复检发现未分级直接采纳实施（治"质量审查变无上限设计扩张"）**：review/deepcheck/audit 阶段发现**计划之外**的新问题/新架构信号（新增持久化协议、全局门控、生命周期语义、跨职责边界组件、新故障模型），未按 `scope_escalations` 分类就静默纳入实施范围。**偷工表现**：①审查/复检发现新问题直接写进实施任务，不标 A_now/B_confirm/C_follow_up/refuted；②标 A_now 却无**直接复发证据链**（回答不了"不做这一项、完成已有 A 项后，哪个已记录证据场景会再次产生原故障"）；③标 B_confirm 未获用户确认就进入编码（以"审查采纳"为理由实施）；④把 C_follow_up 当 A 档实施。**必须**：①新发现问题拟纳入实施范围时先分类并写 metadata `scope_escalations`（字段缺失视为 `[]`；每条含 at/source_step/change_desc/classification/evidence/user_confirm/impact）；②A_now 必须给直接复发证据链，无证据回指**默认 B_confirm**；③B_confirm 未获用户确认前不得实施（与 `confirmed_B_fixes` 机制一致）；④C_follow_up 进范围外另记。**与第 26 条边界**：第 26 条治"plan 修复方案平铺不分档（宁多勿少）"，本条治"审查/编码/复检阶段新发现问题未分类直接采纳（质量审查变设计扩张）"——前者约束 plan 产出的分档，后者约束流程中段新问题的升级决策。
+
 ## 为什么强制
 
 本工作流的价值在于"完整闭环 + 多轮审查 + 充分思考"，任何偷懒都会破坏闭环、放过隐藏缺陷、最终把质量负担转嫁给后续维护。**省下的 token 远小于因质量下降而需返工的代价**。
