@@ -7,11 +7,20 @@
 ### 创建新目录（用于 init / log，以及 start / plan 在不满足复用条件时）
 
 ```bash
-mkdir -p .icode_output   # 统一父目录，所有产物收纳于此
+# ——工作区根锚定（建前必做，L1 致命，阻塞流程）——
+# 输出目录必须落在「当前会话工作区根」内：先解析工作区根（git 仓库 = git rev-parse --show-toplevel；非 git 仓库 = pwd 兜底），
+# 之后所有路径一律基于该绝对根。禁止凭历史路径假设/硬编码另一副本绝对路径写产物
+# （历史事故：工单被写入另一仓库副本、用户按报告路径找不到；.icode_output 被 gitignore 时 git status 也不提示）。
+# ⚠️ 概念区分（勿混）：WORKSPACE_ROOT = 「当前 checkout 根」，即产物物理落点——worktree 内就是 worktree 根，**不做 F1 归一**；
+#   而 project_id 的 F1 归一（worktree 归主仓根，见「project_id 与 branch 语义」）只用于索引/limit/doc 键，**不用于产物落点**。
+#   原地（非 worktree）时两概念同根；worktree 时产物必须落在 worktree 内（隔离 checkout），否则破坏 worktree 隔离（工单产物进错仓库）。
+#   归档/备份不在此步：归档（worktree 回流后 archive_path）与备份（/icode bak）作用于已入索引的工单，debug 工单不入索引、无归档/备份流程。
+WORKSPACE_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
+mkdir -p "$WORKSPACE_ROOT/.icode_output"   # 统一父目录，所有产物收纳于此（基于工作区根绝对路径）
 # ⚠️ 目录号必须由下方递增逻辑计算，禁止手写/硬编码 N（如 .icode_output_10）——手写绕过递增 = 拆除"max+1 防误复用"安全网（历史事故：误复用已有工单目录，覆盖其 metadata 与 00_init）
-LAST=$(ls -d .icode_output/.icode_output_* 2>/dev/null | grep -oP '(?<=\.icode_output_)\d+' | sort -n | tail -1)
+LAST=$(ls -d "$WORKSPACE_ROOT"/.icode_output/.icode_output_* 2>/dev/null | grep -oP '(?<=\.icode_output_)\d+' | sort -n | tail -1)
 NEXT=${LAST:-0}; NEXT=$((NEXT + 1))
-ICODE_OUT_DIR=".icode_output/.icode_output_${NEXT}"
+ICODE_OUT_DIR="$WORKSPACE_ROOT/.icode_output/.icode_output_${NEXT}"
 # ——硬熔断① 建前检查（防误复用，L1 致命，阻塞流程）——
 # 目标目录已存在 = 递增逻辑被绕过 / 目录号手写 / 并发竞态 → 立即中止，禁止覆盖
 test -d "$ICODE_OUT_DIR" && { echo "❌ 误复用风险：目标目录已存在 $ICODE_OUT_DIR（递增逻辑被绕过或目录号手写/硬编码），禁止在此新建工单"; exit 1; }
@@ -19,36 +28,60 @@ mkdir -p "$ICODE_OUT_DIR"
 # ——硬熔断② 建后验证（防误复用，L1 致命，阻塞流程）——
 # 新建目录必须为空；非空 = 误复用（已含旧产物 / 旧工单所有权标志 .ico_metadata.json）→ 立即中止
 [ -z "$(ls -A "$ICODE_OUT_DIR")" ] || { echo "❌ 目录非空=误复用，禁止在此新建工单"; exit 1; }
+# ——硬熔断③ 建后校验（工作区根锚定，L1 致命，阻塞流程）——
+# 产物目录真实路径必须位于工作区根内；不在 = cwd 漂移 / 路径假设错误（凭历史路径写到了别的仓库副本）→ 立即中止，不静默写入
+case "$(realpath "$ICODE_OUT_DIR")" in
+  "$WORKSPACE_ROOT"/*) : ;;
+  *) echo "❌ 输出目录 $(realpath "$ICODE_OUT_DIR") 不在当前工作区根 $WORKSPACE_ROOT 内（cwd 漂移或路径假设错误），禁止在此新建工单"; exit 1 ;;
+esac
 # 建后确认只能用磁盘状态（ls -A 为空 / 目录 mtime），禁止用 echo "created" 充当确认（echo 与磁盘状态无关，是伪确认）
+# ——创建完成提示（强制输出）——
+echo "📁 ICODE_OUT_DIR = $(realpath "$ICODE_OUT_DIR")"   # 绝对路径，供用户一眼核对是否落在当前工作区
+grep -qE '^[^#]*\.icode_output' "$WORKSPACE_ROOT/.gitignore" 2>/dev/null && echo "⚠️ 产物目录被 gitignore，git status 不会提示写入位置，请以上方 📁 绝对路径为准（L3 提示，非阻断）"
 ```
 
 **「创建新目录」debug 变体（`--debug` 模式，init/log 用）**：
 
-`/icode init --debug` / `/icode log --debug` 的工单目录建在 `.icode_output/.debug/` 子目录下，**N 与正常工单互不干扰**（各自从 1 递增）；硬熔断①② 与正常工单完全一致：
+`/icode init --debug` / `/icode log --debug` 的工单目录建在 `.icode_output/.debug/` 子目录下，**N 与正常工单互不干扰**（各自从 1 递增）；工作区根锚定 + 硬熔断①②③ 与正常工单完全一致：
 
 ```bash
-mkdir -p .icode_output/.debug
-LAST=$(ls -d .icode_output/.debug/.icode_output_* 2>/dev/null | grep -oP '(?<=\.icode_output_)\d+' | sort -n | tail -1)
+# 工作区根锚定（建前必做，同「创建新目录」段，L1 致命）：debug 产物必须落在当前工作区根内，
+# 禁止凭历史路径假设/硬编码另一副本绝对路径写产物（历史事故：debug 工单被写入另一仓库副本，用户按路径找不到）。
+# debug 忽略 --worktree 原地创建：cwd 在 worktree 内时 WORKSPACE_ROOT = worktree 根，产物落该 checkout 的 .icode_output/.debug/
+WORKSPACE_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
+mkdir -p "$WORKSPACE_ROOT/.icode_output/.debug"
+LAST=$(ls -d "$WORKSPACE_ROOT"/.icode_output/.debug/.icode_output_* 2>/dev/null | grep -oP '(?<=\.icode_output_)\d+' | sort -n | tail -1)
 NEXT=${LAST:-0}; NEXT=$((NEXT + 1))
-ICODE_OUT_DIR=".icode_output/.debug/.icode_output_${NEXT}"
+ICODE_OUT_DIR="$WORKSPACE_ROOT/.icode_output/.debug/.icode_output_${NEXT}"
 # 硬熔断① 建前检查：目标 debug 目录已存在 = 递增被绕过/目录号手写 → 中止
 test -d "$ICODE_OUT_DIR" && { echo "❌ 误复用风险：目标 debug 目录已存在 $ICODE_OUT_DIR（递增逻辑被绕过或目录号手写），禁止在此新建工单"; exit 1; }
 mkdir -p "$ICODE_OUT_DIR"
 # 硬熔断② 建后验证：新建目录必须为空
 [ -z "$(ls -A "$ICODE_OUT_DIR")" ] || { echo "❌ 目录非空=误复用，禁止在此新建 debug 工单"; exit 1; }
+# 硬熔断③ 建后校验（工作区根锚定，L1 致命）：真实路径必须位于工作区根内，不在 = cwd 漂移/路径假设错误 → 中止
+case "$(realpath "$ICODE_OUT_DIR")" in
+  "$WORKSPACE_ROOT"/*) : ;;
+  *) echo "❌ 输出目录 $(realpath "$ICODE_OUT_DIR") 不在当前工作区根 $WORKSPACE_ROOT 内（cwd 漂移或路径假设错误），禁止在此新建 debug 工单"; exit 1 ;;
+esac
+# 创建完成提示（强制输出）：绝对路径供核对
+echo "📁 ICODE_OUT_DIR = $(realpath "$ICODE_OUT_DIR")"
+grep -qE '^[^#]*\.icode_output' "$WORKSPACE_ROOT/.gitignore" 2>/dev/null && echo "⚠️ 产物目录被 gitignore，git status 不会提示写入位置，请以上方 📁 绝对路径为准（L3 提示，非阻断）"
 ```
 
-- 正常工单的「创建新目录」`ls -d .icode_output/.icode_output_*` 只匹配**顶层**目录，天然排除 `.debug/` 子目录下的 debug 工单（物理隔离，互不污染）
+- 正常工单的「创建新目录」`ls -d "$WORKSPACE_ROOT"/.icode_output/.icode_output_*` 只匹配**顶层**目录，天然排除 `.debug/` 子目录下的 debug 工单（物理隔离，互不污染）
 - debug 工单 metadata 写 `debug: true` + 独立状态名（`debug_in_progress` / `debug_done`），详见 [debug_mode.md](debug_mode.md)
 
 ### 复用 / 创建新目录决策（用于 start / plan / fast）
 
 ```bash
-mkdir -p .icode_output
-LAST=$(ls -d .icode_output/.icode_output_* 2>/dev/null | grep -oP '(?<=\.icode_output_)\d+' | sort -n | tail -1)
+# 工作区根锚定（建前必做，同「创建新目录」段，L1 致命）：一切路径基于当前工作区根绝对路径，
+# 禁止凭历史路径假设/硬编码另一副本绝对路径写产物（历史事故：工单被写入另一仓库副本，用户按路径找不到）
+WORKSPACE_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
+mkdir -p "$WORKSPACE_ROOT/.icode_output"
+LAST=$(ls -d "$WORKSPACE_ROOT"/.icode_output/.icode_output_* 2>/dev/null | grep -oP '(?<=\.icode_output_)\d+' | sort -n | tail -1)
 REUSE=0
 if [ -n "$LAST" ]; then
-  CAND=".icode_output/.icode_output_${LAST}"
+  CAND="$WORKSPACE_ROOT/.icode_output/.icode_output_${LAST}"
   # 判定最新目录是否为"入口态"：有 .ico_metadata.json + 00_init.md，且无 01_plan.md
   if [ -f "$CAND/.ico_metadata.json" ] && [ -f "$CAND/00_init.md" ] && [ ! -f "$CAND/01_plan.md" ]; then
     STATUS=$(grep -oP '"status"\s*:\s*"\K[^"]+' "$CAND/.ico_metadata.json")
@@ -61,11 +94,20 @@ fi
 # REUSE=2：有歧义，问用户"复用 / 新建"；REUSE=0：非入口态，带参新建 / 无参报错
 if [ "$REUSE" = "0" ]; then
   NEXT=${LAST:-0}; NEXT=$((NEXT + 1))
-  ICODE_OUT_DIR=".icode_output/.icode_output_${NEXT}"
-  # 硬熔断（同「创建新目录」段，防误复用）：目标目录已存在 = 递增被绕过 → 中止；mkdir 后必须验证为空
+  ICODE_OUT_DIR="$WORKSPACE_ROOT/.icode_output/.icode_output_${NEXT}"
+  # 硬熔断① 建前检查（同「创建新目录」段，防误复用）：目标目录已存在 = 递增被绕过 → 中止
   test -d "$ICODE_OUT_DIR" && { echo "❌ 误复用风险：目标目录已存在 $ICODE_OUT_DIR（递增逻辑被绕过或目录号手写/硬编码），禁止在此新建工单"; exit 1; }
   mkdir -p "$ICODE_OUT_DIR"
+  # 硬熔断② 建后验证：新建目录必须为空
   [ -z "$(ls -A "$ICODE_OUT_DIR")" ] || { echo "❌ 目录非空=误复用，禁止在此新建工单"; exit 1; }
+  # 硬熔断③ 建后校验（工作区根锚定，L1 致命）：真实路径必须位于工作区根内，不在 = cwd 漂移/路径假设错误 → 中止
+  case "$(realpath "$ICODE_OUT_DIR")" in
+    "$WORKSPACE_ROOT"/*) : ;;
+    *) echo "❌ 输出目录 $(realpath "$ICODE_OUT_DIR") 不在当前工作区根 $WORKSPACE_ROOT 内（cwd 漂移或路径假设错误），禁止在此新建工单"; exit 1 ;;
+  esac
+  # 创建完成提示（强制输出）：绝对路径供核对
+  echo "📁 ICODE_OUT_DIR = $(realpath "$ICODE_OUT_DIR")"
+  grep -qE '^[^#]*\.icode_output' "$WORKSPACE_ROOT/.gitignore" 2>/dev/null && echo "⚠️ 产物目录被 gitignore，git status 不会提示写入位置，请以上方 📁 绝对路径为准（L3 提示，非阻断）"
 fi
 ```
 
@@ -78,12 +120,14 @@ fi
 ### 检测最新目录（用于 review / merge / code / deepcheck / audit）
 
 ```bash
-LAST=$(ls -d .icode_output/.icode_output_* 2>/dev/null | grep -oP '(?<=\.icode_output_)\d+' | sort -n | tail -1)
+# 工作区根锚定（同「创建新目录」段）：ICODE_OUT_DIR 一律基于当前工作区根绝对路径，防 cwd 漂移误定位
+WORKSPACE_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
+LAST=$(ls -d "$WORKSPACE_ROOT"/.icode_output/.icode_output_* 2>/dev/null | grep -oP '(?<=\.icode_output_)\d+' | sort -n | tail -1)
 if [ -z "$LAST" ]; then
   echo "错误：没有找到 .icode_output/.icode_output_N 目录，请先运行 /icode start <需求> 或 /icode init"
   exit 1
 fi
-ICODE_OUT_DIR=".icode_output/.icode_output_${LAST}"
+ICODE_OUT_DIR="$WORKSPACE_ROOT/.icode_output/.icode_output_${LAST}"
 ```
 
 ## ticket_id 生成规则

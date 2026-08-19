@@ -57,6 +57,7 @@
   "indexed": false,               // 永远 false（debug 工单永不写入 index.json）
   "status": "debug_in_progress",  // init 的调试态 / 或 "debug_done"（log 调试终态）
   "ticket_id": "",                // debug 工单无 ticket_id（不参与索引）
+  "project_path": "<当前工程根绝对路径>",   // 当前工程根绝对路径（git rev-parse --show-toplevel；非 git 仓库 = pwd）。正常工单的 project_path 在索引条目里，debug 不入索引 → 只能写进 metadata 作产物唯一回追锚点（写错副本时能凭它识别真实位置）
   "requirement": "...",           // 调试用输入（与正常工单相同字段）
   "requirement_summary": "...",   // 调试用摘要（正常字段也填，便于跨工单 Read 时快速理解）
   ...                              // 其它 metadata 字段同正常工单
@@ -93,7 +94,9 @@ debug 工单 **不参与主流程**——所有主流程步骤（plan/review/mer
 metadata = read_metadata()
 if metadata.get("debug") is True:
     error_exit(
-        f"当前工单 .icode_output/{out_dir}/.ico_metadata.json 的 debug=true，"
+        # 路径直接用已解析的 ICODE_OUT_DIR（debug 工单 = .icode_output/.debug/.icode_output_N）；
+        # 勿用 metadata 的 out_dir 字段（= .icode_output/.icode_output_{N}）再拼 ".icode_output/" 前缀 → 双写前缀成错误路径
+        f"当前工单 {ICODE_OUT_DIR}/.ico_metadata.json 的 debug=true，"
         f"{step_name} 是主流程步骤，不允许作用于 debug 工单。"
         f"debug 工单仅用作对照，不能继续 {step_name}。\n"
         f"如需 {step_name}，请用 `/icode {{init|plan|start}}` 重新建正常工单。"

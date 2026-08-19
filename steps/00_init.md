@@ -68,6 +68,7 @@
    - `status` 改为 `"debug_in_progress"`（不是 `"init_in_progress"`——下游易识别）
    - **新增字段** `"debug": true`（metadata 元数据标志，明确标识此工单是 debug 孪生）
    - `ticket_id` 留空字符串（`""`，debug 工单永不写入 index.json）
+   - `project_path` = 当前工程根绝对路径（`git rev-parse --show-toplevel`；非 git 仓库 = pwd）。正常工单的 `project_path` 在索引条目里，debug 不入索引 → 只能写进 metadata 作产物唯一回追锚点（写错副本时能凭 metadata 识别真实位置）
    - `workload_estimate` / `workload_reason` 可省（debug 工单不需要工作量评估）
    - `indexed` 永远是 `false`（debug 工单永不索引）
 
@@ -94,6 +95,7 @@
    ```
    ## debug 对照说明
    📌 本工单是 debug 孪生（debug: true），不入索引、不参与主流程，产物仅供与正常工单并列对照研读（设计意图，见 references/debug_mode.md）。
+   📁 产物目录绝对路径 = `{ICODE_OUT_DIR}`（创建时已打印 📁 行；metadata 同时记录 `project_path` 供回追）。若该目录被 gitignore，git status 不会提示写入位置，以绝对路径为准。
    ⛔ 不进入修复流程：debug 工单不支持 /icode plan / /icode start / /icode fast（L1 阻断）。
    如需正式修复：请用 /icode init（不带 --debug）新建正常工单走主流程。
    ```

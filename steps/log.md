@@ -351,6 +351,7 @@
    - `status` 改为 `"debug_done"`（不是 `"log_done"`——下游易识别）
    - **新增字段** `"debug": true`（metadata 元数据标志，明确标识此工单是 debug 孪生）
    - `ticket_id` 留空字符串（`""`，debug 工单永不写入 index.json）
+   - `project_path` = 当前工程根绝对路径（`git rev-parse --show-toplevel`；非 git 仓库 = pwd）。正常工单的 `project_path` 在索引条目里，debug 不入索引 → 只能写进 metadata 作产物唯一回追锚点（写错副本时能凭 metadata 识别真实位置）
    - `indexed` 永远是 `false`（debug 工单永不索引）
    > `limit_refs`（默认 `[]`，log 版）：本次对照核验引用的 limit 红线编号数组，每条 `{redline_no: int, source: "main"|"local", title: str, applied_in: [...]}`（字段结构同 plan，`applied_in` 为报告引用章节如 `§2.3`/`§6`）。报告 `log_analysis.md §2.3/§6` 出现「红线 N」/「红 N」引用时必须记录，完全未引用才可留空；填写后经步骤 9.5 机器自检校验。**字段缺失视为 `[]`（向后兼容旧 metadata）**。⚠️ `limit_refs` 是**事后回补**，只证明"后来引用了哪些红线"，**不证明**步骤1 前置检查点"先读索引→精读命中条目"的读取发生过——读取留痕靠步骤1 落盘的 `{ICODE_OUT_DIR}/limit_checkpoint.md`（步骤 9.5 维度④校验，缺失按未读处理）
 
@@ -415,6 +416,7 @@ sys.exit(1 if missing else 0)
     ```
     ## debug 对照说明
     📌 本工单是 debug 孪生（debug: true），不入索引、不参与主流程，`log_analysis.md` 仅供与正常工单并列对照研读（设计意图，见 references/debug_mode.md）。
+    📁 产物目录绝对路径 = `{ICODE_OUT_DIR}`（创建时已打印 📁 行；metadata 同时记录 `project_path` 供回追）。若该目录被 gitignore，git status 不会提示写入位置，以绝对路径为准。
     ⛔ 不进入修复流程：debug 工单不支持 /icode plan / /icode start / /icode fast（L1 阻断）。
     如需对根因正式修复：请用 /icode init（不带 --debug）或正常 /icode log 新建正常工单走修复流程。
     ```

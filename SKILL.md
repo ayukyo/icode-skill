@@ -337,7 +337,7 @@ fi
 
 **创建新目录**（原地路径：worktree opt-in **未触发**（默认）/ limit「worktree 强制禁止」红线阻止 / worktree 创建失败降级时；worktree 场景则在 worktree 内执行）：
 
-完整脚本（含目录号递增 + 硬熔断①建前检查 + 硬熔断②建后验证）见 [references/dir_and_metadata.md「创建新目录」段](references/dir_and_metadata.md)（**真源**：所有入口命令与 step 都引用本段，禁止独立定义或微改）。
+完整脚本（含目录号递增 + 工作区根锚定 + 硬熔断①建前检查 + 硬熔断②建后验证 + 硬熔断③工作区根校验 + 创建完成绝对路径打印）见 [references/dir_and_metadata.md「创建新目录」段](references/dir_and_metadata.md)（**真源**：所有入口命令与 step 都引用本段，禁止独立定义或微改）。
 
 **复用 / 创建新目录决策**（用于 `start` / `plan` / `fast`）：
 
@@ -425,7 +425,7 @@ fi
 - `workload_estimate`（新增，可选，默认 `"medium"`）：工作量评估等级，枚举 `"small"`/`"medium"`/`"large"`（**字段缺失视为 `"medium"` 中性默认**，向后兼容旧 metadata）。由步骤 0 init 收尾时按 4 维度 max 算法（需求点数/涉及文件数/跨模块数/大改词命中）自动评估，写入 metadata 用于入口建议（small→fast，medium/large→start）。详见 [steps/00_init.md](steps/00_init.md)「步骤 9 工作量评估」段
 - `workload_reason`（新增，可选，≤80 token）：工作量评估的简短理由，辅助用户理解"为什么是 large"等判断。**字段缺失视为空字符串**（向后兼容）
 - `indexed`：是否已写入全局索引（防重复写入）
-- `debug`（新增，可选，缺失 = 正常工单）：bool，仅 `/icode init --debug` / `/icode log --debug` 创建的 debug 孪生工单为 `true`。debug 工单**永不写入 index.json**（`indexed` 恒为 `false`、`ticket_id` 为空串）、**不参与主流程**（各主流程步骤 L1 检测段按 `metadata.debug == true` 阻断，见 [references/debug_mode.md](references/debug_mode.md)）
+- `debug`（新增，可选，缺失 = 正常工单）：bool，仅 `/icode init --debug` / `/icode log --debug` 创建的 debug 孪生工单为 `true`。debug 工单**永不写入 index.json**（`indexed` 恒为 `false`、`ticket_id` 为空串）、**不参与主流程**（各主流程步骤 L1 检测段按 `metadata.debug == true` 阻断，见 [references/debug_mode.md](references/debug_mode.md)）。**debug metadata 记录 `project_path`**（当前工程根绝对路径）：正常工单的 `project_path` 在索引条目里，debug 不入索引 → 只能写进 metadata 作产物唯一回追锚点，写错仓库副本时能凭 metadata 识别真实位置
 - `ticket_id`：本工单在全局索引中的唯一键（`{工程名}-{N}`，冲突时带 hash 后缀）。步骤0写索引时持久化到 metadata；**跳过步骤0直接 `/icode plan`/`/icode start` 的常规新建目录情况**，在步骤1首次写索引时生成并回填 metadata。供后续步骤检索时排除当前工单
 - `code_deviations`：步骤4 编码时主动偏离定稿计划的记录数组（每条含 `plan_said`/`actual_done`/`reason`），供步骤6 终审汇总回写到 `03_plan_final.md` 的「实现偏差备忘」段；无偏离写空数组 `[]`
 - `limit_refs`（默认 `[]`，**产物文本引用 limit 时须填写**）：plan / log 步骤引用的 limit 红线编号数组，每条 `{redline_no: int, source: "main"|"local", title: str, applied_in: [...]}`，`source` 区分主存全局约定 vs 单 checkout 覆盖，`applied_in` 为引用章节。**plan**：§3 架构设计 / §4 ADR / §6 异常处理**引用 limit 条目（计划文本出现「红线 N」/「红 N」）时必须记录**，完全未引用才可留空；audit 视角 B 以**先检测计划是否实际引用**再判定跳过/回补（见 [steps/06_audit.md](steps/06_audit.md) §6.7）。**log**：`log_analysis.md §2.3 limit 红线对照`（必填小节）/ §6 对抗分析记录引用红线时必须记录，经 log 步骤 9.5 机器自检校验（**读留痕 `limit_checkpoint.md` 存在性 + §2.3 存在性 + 引用完整性**，见 [steps/log.md](steps/log.md)）。⚠️ `limit_refs` 是**事后回补**，只证明"后来引用了哪些红线"；"**先读索引→精读命中**"确实读过的可审计留痕靠 `{ICODE_OUT_DIR}/limit_checkpoint.md` 的**工单级追加式阶段块**——log 前置检查点落「阶段块：log前置检查点」（log 9.5 维度④校验），plan 前置硬基线落「阶段块：plan前置硬基线」**统一覆盖 init/start/fast 三入口**（plan limit_refs 机器自检 维度④校验），缺失按未读处理。**字段缺失视为 `[]`（向后兼容旧 metadata）**。详见 [steps/limit.md](steps/limit.md)

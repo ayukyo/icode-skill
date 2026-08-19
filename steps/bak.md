@@ -117,7 +117,7 @@ else:
 PY
 ```
 
-> 不匹配索引的目录（debug 孪生 `ticket_id` 为空、无 `.ico_metadata.json`、从未索引）**文件照常备份**，仅不写 `backup_path`。
+> 索引回写只扫快照内顶层 `.icode_output_*/`；`ticket_id` 为空的目录（含 debug 孪生——快照内位于 `.debug/` 子路径、glob 扫不到）及无 `.ico_metadata.json` 的目录**文件照常备份**，仅不写 `backup_path`。
 
 ## 6. 收尾报告
 
@@ -134,7 +134,7 @@ PY
 | 工程已删（`--project` 指向不存在路径） | 报错「工程不存在，bak 是删工程前的安全网，无复制源无法事后补救」 |
 | 非 git 仓库 | 源工程根 = cwd，project_id = cwd basename（对齐 doc/list 降级） |
 | 全局索引不存在 | 备份照做；索引更新跳过并提示 |
-| 工单目录无 `.ico_metadata.json` / `ticket_id` 为空（含 debug 孪生） | 文件照备份；不匹配索引（不写 backup_path） |
+| 工单目录无 `.ico_metadata.json`（垃圾目录）/ `ticket_id` 为空（含 debug 孪生，快照内位于 `.debug/`） | 文件照备份；索引回写只扫快照顶层 `.icode_output_*`，不写 backup_path |
 | rsync 缺失 | 退化 `cp -r` 全量复制（无去重），提示不阻断 |
 | 快照名冲突（时间戳到秒） | 实际不可能；冲突则报错不覆盖（禁删旧快照） |
 
