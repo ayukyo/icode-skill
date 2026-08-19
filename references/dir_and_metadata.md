@@ -163,7 +163,7 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
 
 索引存的是工单**当时的摘要**，但工程会迭代，老工单的 ADR/需求可能已被后续工单推翻。命中过时工单注入会误导。
 
-> **⚠️ Git 操作安全白名单（强制，违反即不合规）**：本段所有 git 调用必须**只读**，仅允许：`git rev-parse HEAD` / `git rev-parse --abbrev-ref HEAD` / `git rev-parse --git-dir` / `git merge-base --is-ancestor <A> <B>`（仅取退出码 0/1）/ `git status --porcelain` / `git log --oneline -1` / `git cat-file -e <sha>` / `git worktree list --porcelain`（只读；resolve_project_id F1 worktree 归一化用，见「project_id 与 branch 语义」段）。**禁止** `checkout`/`switch`/`reset`/`stash`/`clean`/`commit`/`add`/`rm`/`rebase`/`merge`/`cherry-pick`/`push`/`fetch`/`pull`/`branch -D`/`tag -d` 等一切写操作与网络操作。stale 检测**只读工作树现状，绝不改工作树/索引/提交**--"checkout 变化时重评"指检测到**用户外部**改了 HEAD 后只读重评，**绝不由技能主动 checkout**。`-C {project_path}` 前缀用于跨工程工单切换目录执行只读命令，必需且允许；全部本地完成，离线可用。
+> **⚠️ Git 操作安全白名单（强制，违反即不合规）**：本段所有 git 调用必须**只读**，仅允许：`git rev-parse HEAD` / `git rev-parse --abbrev-ref HEAD` / `git rev-parse --git-dir` / `git merge-base --is-ancestor <A> <B>`（仅取退出码 0/1）/ `git status --porcelain` / `git log --oneline -1` / `git log --oneline --since=<N>.days -- <路径>`（只读；重复模式确定性佐证统计模块提交频次用，`--since`+路径过滤限定范围防大仓慢扫；**相对日期须用 `<N>.days` 格式**——`<N>d`/中文单位在此类 git 静默失效为不过滤，禁用；见 [thinking_detail.md](thinking_detail.md)「重复模式检查」段第 3 步） / `git cat-file -e <sha>` / `git worktree list --porcelain`（只读；resolve_project_id F1 worktree 归一化用，见「project_id 与 branch 语义」段）。**禁止** `checkout`/`switch`/`reset`/`stash`/`clean`/`commit`/`add`/`rm`/`rebase`/`merge`/`cherry-pick`/`push`/`fetch`/`pull`/`branch -D`/`tag -d` 等一切写操作与网络操作。stale 检测**只读工作树现状，绝不改工作树/索引/提交**--"checkout 变化时重评"指检测到**用户外部**改了 HEAD 后只读重评，**绝不由技能主动 checkout**。`-C {project_path}` 前缀用于跨工程工单切换目录执行只读命令，必需且允许；全部本地完成，离线可用。
 
 **校验方法**（对 top-N 命中工单，注入前逐条；`H = git -C {project_path} rev-parse HEAD`（该工单工程的当前 HEAD，每候选取一次；非 git 仓库/失败→`null` 走纯锚点兜底））：
 1. **项目路径校验**：`test -d {project_path}` 失败→置 `stale=true`+`stale_reason=path_gone`+`stale_checked_commit=H`，**跳过注入**（即使 hit_count 高也不注入），避免对已删除工程的引用注入。**worktree 场景（预期行为，非故障）**：`project_path` 指向 worktree 路径时，工单回流 `git worktree remove` 后 `test -d` 失败 → `path_gone` 属预期（工单已交付，索引留档即可，别当工程被删排查）；**复活路径** = 重新 `git worktree add` 同分支 → `project_path` 恢复存在 → 自动重入「可复活规则」再走锚点校验。**归档工单（archived 活跃态，worktree 工单）**：`archive_path` 非 null 时**跳过本步 project_path 校验**，改查 `test -d {archive_path}`（如 `~/.claude/icode_data/worktree_archive/<project_id>/<ticket_id>/`）——有效→该工单为 archived 活跃历史工单，**不标 stale**，产物源=archive_path（读 `01_plan.md` ADR/风险或 `log_analysis.md` 根因/结论），**跳过第 2/3/4 步**（无代码可校验，注入走历史参考语义——作启发、非当前代码事实，须 Grep/Read 实证，见「不盲信约束」），命中**正常续期 + 按 verdict 分流**（归档工单 `disproved`/`superseded` **降级**：`project_path` 失效无法 Grep/Read 当前代码验证证伪前提、`verdict_review_needed` 主动检测亦不可执行 → 改注 `verdict_reason`+`correct_direction` 作历史避坑提示 + ⚠️ 标注『基于已交付历史代码，未经当前代码实证，须用户判断前提是否仍适用』），待遇与主仓工单一致；archive_path 失效（归档也被删）→ 才置 `stale=true`+`stale_reason=path_gone`+跳过注入（真病态）。归档见 [worktree_isolation.md](worktree_isolation.md)「产物归档」。**备份工单（backup 活跃态，`/icode bak` 产物）**：`backup_path` 非 null 且 `test -d {backup_path}` 有效（如 `~/.claude/icode_data/project_backup/<project_id>/<快照>/.icode_output_N/`）的工单，`project_path` 失效（工程被删）时**重置 `stale=false`+`stale_reason=null`+`stale_checked_commit=null`**（backup 活跃态——即使此前标过 stale，备份是唯一可读快照，旧判据作废），产物源=backup_path（读完整工单产物：`01_plan.md` ADR/风险、`log_analysis.md` 根因/结论、`06_audit.md` 终审等），**跳过第 2/3/4 步**（历史快照，无当前代码可校验，注入走历史参考语义——作启发、非当前代码事实，须 Grep/Read 实证，见「不盲信约束」），命中**正常续期 + 按 verdict 分流**（`disproved`/`superseded` 降级注避坑提示 + ⚠️『基于备份历史代码，未经当前代码实证，须用户判断前提是否仍适用』），待遇与主仓工单一致；**工程优先**：`test -d {project_path}` 有效（工程恢复/重克隆）永远优先走工程，备份仅兜底。backup_path 失效（备份也被删）→ 才置 `stale=true`+`stale_reason=path_gone`+跳过注入（真病态）。**与归档工单并行**：`archive_path`（worktree 归档）与 `backup_path`（手动备份）任一有效即活跃态，互不排斥。备份命令见 [steps/bak.md](../steps/bak.md)
@@ -401,6 +401,32 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
   - **fast→full 升级**：fast 工单上用户主动跑 `/icode review 5` 想做更深度审查时，**参数 N 覆盖 mode**（意图明确优先于工单模式），按 full 模式跑 N 轮+对抗（**此场景下 fast 的 `param_max_rounds` 忽略被绕开**——用户用参数显式表达升级意图，参数优先级最高）
   - **full→fast 降级**：不允许——单步命令不强制按 fast 模式执行（用户若想走 fast 应改用 `/icode fast` 重启链路，而不是在 full 工单上强制 fast 降级）
   - 单步命令读 mode 字段只用于 **状态显示**（如 `▶ 步骤2 检测到 fast 模式，但 N=5 显式升级，按 5 轮执行`），不强制降级
+
+## 重复模式状态（patterns.json，跨工单聚合）
+
+> 治「命中多相似工单 → 武断判重复重构 + 反复重构循环」：检索命中簇出现重复信号时，记录"疑似重复模式 + 曾重构事实 + 上次实事求是评估结论"。状态是**历史事实参考，非跳过闸门**——每次命中仍按当下代码实证实事求是评估，不因"标记过已重构"机械跳过（消费逻辑见 [thinking_detail.md](thinking_detail.md)「重复模式检查」段）。
+
+### 文件
+
+`~/.claude/icode_data/patterns.json`（不存在则创建 `{"version":"1","updated_at":"当前时间","patterns":[]}`）。**跨工单全局共享**，不随工单目录走。由检索注入消费端（thinking_detail「重复模式检查」段）读写。
+
+### 条目结构（每个 pattern）
+
+| 字段 | 说明 |
+|------|------|
+| `pattern_key` | 唯一键：`{project_id}::{module}::{symptom_cluster}`（`project_id` 取 `resolve_project_id(cwd)`，与工单索引 `project_id` 字段同源；demo 等继承主仓 git 的工程会解析为主仓名，历史工单缺该字段时用 `project_path` basename 兜底；module 取工程/模块名，symptom_cluster 为症状关键词簇） |
+| `ticket_ids` | 纳入该模式的工单 ticket_id 数组（追加式，去重） |
+| `hit_count` | 累计命中次数（命中时 +1） |
+| `refactor_ticket_id` | **曾重构过的工单**（历史事实，缺省 null） |
+| `last_assessment` | 上次实事求是评估：`{at, result, evidence, ref_ticket_id}`；`result` ∈ `resolved`（已解决无复发）/ `recurred`（复发需再重构）/ `new_pattern`（新根因重估） |
+| `workaround` | **上次规避/修复方案**（可选，缺省省略）：**任一三态结论都提炼记录**（保留最近一次）——resolved 记已落地的实现/规避方案（从当前代码提炼）、recurred 记本轮修复方案、new_pattern 记新方案；命中时直接给出，让重复模式从「告警」升级为「可执行知识」 |
+
+### 读写契约（与 index.json 并发安全契约一致）
+
+- **写前重读合并（并发安全）**：从首次 Read 到写回之间可能已有其他会话写入，**写回前必须重新 Read 最新 patterns.json**，把本会话改动合并进最新 `patterns` 数组，再原子写回——绝不在旧快照上直接覆盖
+- 每次评估后更新：`hit_count +1`、`ticket_ids` 追加本工单、`last_assessment` 更新；本次判定需重构且获用户确认后回填 `refactor_ticket_id`；**任一结论都提炼 `workaround` 记入**（覆盖旧值，保留最近一次）——resolved 记已落地解法、recurred 记修复方案、new_pattern 记新方案；无方案可提炼（纯新增、无规避/修复概念）则省略字段，杜绝「resolved 最高频却永远暂无历史方案」的空转
+- 命中时若 `workaround` 存在，提示直接带「上次方案：{workaround}」（从告警升级为可执行知识；旧 pattern 无此字段 → 显示「暂无历史方案」即可，向后兼容）
+- **时间字段用运行时真实系统当前时间**（禁止写死，同「当前时间」取值约定）
 
 ## 注入缓存机制（防重复注入，两源共用）
 
