@@ -353,7 +353,7 @@ git worktree remove --force ../<repo>-wt-<ticket-slug>   # --force 仅限改动�
 ```
 
 - **顺序陷阱（两重保护）**：`git branch -d` 有两道检查——① 分支仍 checkout 于 worktree 时被拒 → **先 `worktree remove` 再 `branch -d`**；② 分支未完全合并时被拒（`没有完全合并`）→ 方案① merge 后自然满足；只 commit 不 merge（想暂留分支）则 branch -d 被拒是 git 正常保护——保留分支等以后合并，或用户自行 `git branch -D`（icode 不执行 `-D`）
-- **cwd 陷阱（实跑验证）**：`git worktree remove` / `git branch -d` **必须在主工作区执行**——cwd 在 worktree 内时 remove 会报「不是一个工作区」、branch -d 报「分支未发现」，看似失败实为 cwd 误判（`cd <主仓路径>` 后重跑即正常，目录/分支实际都未受影响）；回流命令前先确认 cwd
+- **执行位置（git 2.34.1 实测，非"失败未生效"）**：`git worktree remove` **必须在主工作区执行**——在 worktree 内对自身执行 remove 会**成功删除目录**（exit 0、无报错，git 不阻止），删除后当前 shell 目录悬空、后续命令报「不能读取当前工作目录」；**切勿把"删空后报错"误认为"remove 失败、目录未受影响"**（错误认识会误导用户原地重试，实际目录已删）。`git branch -d` 的失败与 cwd **无关**：分支仍被某 worktree 检出于任意位置都报「error: 无法删除检出于 '<worktree>' 的分支」（顺序陷阱①的检出保护），先 remove 再 branch -d 即解。回流命令前先确认在主工作区执行
 - **严禁**未处理改动就 remove（会失败——失败是保护，绝不由 icode 自动 `--force`）
 - **回流前产物留档（自动归档）**：07_readme 交付报告与产物都在 worktree 内，remove 后随之消失——**06_audit 终审已完成自动归档**（见下方「产物归档」），remove 前无需人工复制；若工单未走 06_audit 而直接 remove，需留档仍须人工复制出 worktree 再 remove
 - **改动涉及 submodule**：submodule 内改动需**在 worktree 内 submodule 里单独 commit**（主仓 `git add -A && git commit` 只更新 gitlink，不带 submodule 内部改动）
