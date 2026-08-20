@@ -12,7 +12,7 @@
 
 按 [thinking_core.md](thinking_core.md) 的"强证据"逻辑（**任一即视为"已配置可用"**）：
 
-- **证据 A（强证据）**：`~/.claude.json` 的 `mcpServers.<name>` 段存在
+- **证据 A（强证据）**：MCP 在**当前宿主**注册——Claude Code = `~/.claude.json` 的 `mcpServers.<name>` 段存在；Codex = `codex mcp list` 含 `<name>`。跨宿主双注册已支持（`/icode install --client all`），**宿主不同注册证据互不替代**（当前宿主没注册 = 证据 A 不成立，即使另一宿主已注册）
 - **证据 B（强证据）**：工具可在当前会话**直接调用**——工具列表直接可见（完整 schema，按语义识别：标准 `mcp__<name>__<tool>` 或代理前缀 `__<proxy>_<tool>` 形态）或 ToolSearch 可取 schema（不可见时按 [thinking_core.md](thinking_core.md) 第 0 判据）
 
 **强证据不存在 → 走降级路径**。**本文档路径：可装可降级，不阻塞流程。**

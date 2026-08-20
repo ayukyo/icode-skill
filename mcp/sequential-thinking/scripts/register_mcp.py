@@ -16,7 +16,6 @@
 默认包名: @modelcontextprotocol/server-sequential-thinking
 可通过第三个参数覆盖: <node> <npx> [package_name]
 """
-import json
 import shutil
 import sys
 from pathlib import Path
@@ -29,6 +28,7 @@ _LIB = _HERE.parent.parent / "_lib"
 if str(_LIB) not in sys.path:
     sys.path.insert(0, str(_LIB))
 from platform_entry import build_server_entry  # noqa: E402
+from claude_registry import register as _claude_register  # noqa: E402
 
 CLAUDE_JSON = Path.home() / ".claude.json"
 
@@ -87,14 +87,8 @@ def main():
         print(f"   请确认 npm 已安装(自带 npx)")
         sys.exit(1)
 
-    if CLAUDE_JSON.exists():
-        cfg = json.loads(CLAUDE_JSON.read_text())
-    else:
-        cfg = {}
-    cfg.setdefault("mcpServers", {})
-
-    cfg["mcpServers"][SERVER_NAME] = build_server_entry(node_path, npx_path, package)
-    CLAUDE_JSON.write_text(json.dumps(cfg, ensure_ascii=False, indent=2))
+    # 共享模块: 原子写 + 损坏保护 + 回读校验 + 导出 entry 供 Codex 注册分支读取
+    _claude_register(SERVER_NAME, build_server_entry(node_path, npx_path, package))
 
     print(f"✅ 已注册 {SERVER_NAME} 到 {CLAUDE_JSON}")
     print(f"   node: {node_path}")

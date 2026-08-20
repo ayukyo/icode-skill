@@ -28,15 +28,19 @@ icode 工作流强依赖 MCP（每个 mcp 子工程自带 `install.sh` 提供一
 
 | 命令 | 行为 |
 |---|---|
-| `/icode install` | 默认 = 一键安装所有 6 个 mcp（触发自动安装 uv 等依赖） |
+| `/icode install` | 默认 = 一键安装所有 6 个 mcp（触发自动安装 uv 等依赖），**只注册 Claude Code**（`~/.claude.json`） |
 | `/icode install <name>` | 只装指定 mcp（如 `/icode install filesystem`） |
 | `/icode install --no-auto-install` | 跳过自动装依赖（依赖缺失时直接给手动步骤，不联网下载） |
+| `/icode install --client codex` | 安装 + 额外注册到 **Codex**（`codex mcp add`）；仍默认注册 Claude Code（entry 真源） |
+| `/icode install --client all` | Claude Code + Codex **双注册** |
 
 **对称卸载**（虽然不是 `/icode` 命令，但同样属于本步骤的核心操作）：
 
 ```bash
-./mcp/uninstall.sh              # 一键卸载所有 6 个 mcp
-./mcp/uninstall.sh <name>       # 只卸载指定 mcp
+./mcp/uninstall.sh                     # 一键卸载所有 6 个 mcp（默认只清 Claude Code）
+./mcp/uninstall.sh <name>              # 只卸载指定 mcp
+./mcp/uninstall.sh --client codex      # 卸载 + 同时清 Codex 注册
+./mcp/uninstall.sh --client all        # Claude Code + Codex 双清理
 ```
 
 ## 执行步骤
@@ -45,16 +49,19 @@ icode 工作流强依赖 MCP（每个 mcp 子工程自带 `install.sh` 提供一
    - 本次作用域明确（本步骤直接调用 `mcp/install.sh`，不读写工程文件）
    - 当前 `~/.claude.json` mcpServers 段速读（了解现状，避免重复注册）
    - 执行结果逐项验证（不只看 install.sh 退出码，还要确认每个 mcpServer 已写入）
-2. **运行 `bash <工程根>/mcp/install.sh [<name>] [--no-auto-install]`**（cwd 必须在 icode-skill 工程根；用 `git rev-parse --show-toplevel` 解析工程根，失败则报错"请在 icode-skill 工程根内运行"）
+2. **运行 `bash <工程根>/mcp/install.sh [<name>] [--no-auto-install] [--client claude|codex|all]`**（cwd 必须在 icode-skill 工程根；用 `git rev-parse --show-toplevel` 解析工程根，失败则报错"请在 icode-skill 工程根内运行"）。`--client` 默认 `claude`（不碰 Codex）；仅显式 `codex`/`all` 才触达 Codex
 3. install.sh 顶层脚本会：
    - 扫描 `mcp/*/install.sh`（含 6 个声明的子工程，**新加 mcp 自动被识别**）
    - 逐个 `bash <子工程>/install.sh`，每个子工程 install.sh 自带：
      - 环境探测（Python/Node/npx/uv 等）
      - **缺啥补啥**（如 vision-bridge 建 venv；npm 类懒加载）
-     - 写 `~/.claude.json` 的 `mcpServers.<name>` 段
+     - 写 `~/.claude.json` 的 `mcpServers.<name>` 段（经共享模块 `mcp/_lib/claude_registry.py`：原子写 + 损坏保护 + 回读校验 + 导出 entry 到 `~/.claude/icode_data/mcp_entries/<name>.json`）
    - 失败项不阻塞后续；最终汇总成功/失败计数
-4. **汇总结果**：脚本输出成功/失败清单。失败项可能是依赖缺失/网络失败/平台不支持；按脚本提示处理后重跑
-5. **必读提示**：「重启 Claude Code 后注册生效」——提示用户本步骤结束后主动重启
+   - **`--client codex|all` 时**：每个子工程成功后再 `python3 mcp/_lib/client_registry.py codex-register <name>`（读导出的 entry → `codex mcp add <name> [--env K=V ...] -- <cmd> [args]`，add 后回读 inspect 确认）。Codex 注册失败计入失败清单，不阻塞其他子工程
+4. **汇总结果**：脚本输出成功/失败清单。失败项可能是依赖缺失/网络失败/平台不支持/Codex 同名不一致；按脚本提示处理后重跑
+5. **必读提示**（按客户端区分）：
+   - Claude Code：重启 Claude Code 后注册生效
+   - Codex：新建或重开 Codex 任务后生效（当前任务不会热加载新 MCP）
 
 ## 密钥约束（首要边界）
 
@@ -65,6 +72,7 @@ icode 工作流强依赖 MCP（每个 mcp 子工程自带 `install.sh` 提供一
 ## 异常处理
 
 - **子工程 install.sh 失败**（非零退出）：脚本不中断后续子工程，继续跑后续；最终汇总里显示失败项
+- **Codex 注册失败**（`--client codex|all` 时）：Codex 已有同名且内容不一致（add 未覆盖）→ 提示先 `codex mcp remove <name>` 再重试；entry 未导出 → 提示先跑子工程 install。均计入失败清单，不自动 remove（避免破坏性更新）
 - **环境探测失败**（如 Node.js / uv 未装）：install.sh 会**主动尝试安装**（按平台优先级：brew / curl / winget / powershell），失败再给手动步骤
 - **`mcp/` 下无子工程**：脚本提示"未找到 * /install.sh"，退出 0（非错误）
 - **网络不可达**（如 curl 拉 astral.sh 失败）：提示用户手动装，或传 `--no-auto-install` 跳过自动装
@@ -88,7 +96,8 @@ icode 工作流强依赖 MCP（每个 mcp 子工程自带 `install.sh` 提供一
 
 - ✅ `mcp/install.sh` 退出 0（单个 MCP 失败不阻塞其他）
 - ✅ `~/.claude.json` 的 `mcpServers` 包含所有声明的、依赖满足的 MCP
-- ✅ user 提示已发布「重启 Claude Code 后生效」
+- ✅ `--client codex|all` 时 `codex mcp list` 含对应 MCP（或已提示同名不一致需人工处理）
+- ✅ user 提示已发布「重启 Claude Code 后生效」（Codex 分支另有「新建/重开任务生效」提示）
 - ✅ 工程文件（`mcp/` 源码、`SKILL.md`、`steps/`）未被动过（独立步骤特性）
 - ✅ **未上传任何 KEY**：检查 `git diff` 仅含 markdown/bash/python，未含 api_key/token 字面量
 
@@ -114,7 +123,8 @@ icode 工作流强依赖 MCP（每个 mcp 子工程自带 `install.sh` 提供一
 ## 卸载时机
 
 卸载 6 个 mcp 用 `mcp/uninstall.sh`（顶层脚本）。**注意**：
-- 仅移除 `~/.claude.json` 注册项
+- 移除 `~/.claude.json` 注册项（经共享模块 `claude_registry.unregister`，同时清理 `~/.claude/icode_data/mcp_entries/<name>.json` 导出）
+- `--client codex|all` 时同时 `codex mcp remove <name>`（未注册幂等跳过）
 - vision-bridge 不删 `.venv`（要彻底清用 `--purge`，待 vision-bridge 升级时支持）
 - npm/uv 缓存系统级保留（不删，下次装仍可用）
 ## MCP 推荐

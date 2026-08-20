@@ -30,7 +30,7 @@ description: 端到端编码工作流（步骤 0~6，含可选需求初稿步骤
 | 命令 | 功能 | 创建目录？ |
 |------|------|-----------|
 | `[辅助]` `/icode help` | **帮助**：输出使用流程示例 | 否 |
-| `[辅助]` `/icode install` | **MCP 环境检查+一键安装（独立步骤）**：跑 `mcp/install.sh` 扫描所有 `mcp/*/install.sh`，每个子工程自检环境（venv/Node/npm）并缺啥补啥、注册到 `~/.claude.json`。新 clone 仓库 / 新机器 / CI 初始化时跑一次。**不创建工单目录、不写工单 metadata、不参与 1~6 推进**（详见 [steps/install.md](steps/install.md)） | 否 |
+| `[辅助]` `/icode install` | **MCP 环境检查+一键安装（独立步骤）**：跑 `mcp/install.sh` 扫描所有 `mcp/*/install.sh`，每个子工程自检环境（venv/Node/npm）并缺啥补啥、注册到当前宿主（默认 Claude Code=`~/.claude.json`；`--client codex\|all` 可额外注册 Codex）。新 clone 仓库 / 新机器 / CI 初始化时跑一次。**不创建工单目录、不写工单 metadata、不参与 1~6 推进**（详见 [steps/install.md](steps/install.md)） | 否 |
 | `[入口]` `/icode log [零散信息...]` | **可选入口（日志根因分析）**：把"设备/服务日志+模糊症状"转为有对抗验证的根因报告，自动转修复需求 `00_init.md` 衔接步骤1。先基线检查（git diff/链路图）再日志侦察，对抗分析防确认偏误。**领域无关，每次调用都新建目录**（详见 [steps/log.md](steps/log.md)）。**支持 `--worktree`**（opt-in）；**支持 `--debug`**（独立孪生不入索引，详见 [references/debug_mode.md](references/debug_mode.md)） | ✅ 每次都新建 |
 | `[入口]` `/icode init [<粗略需求>]` | **可选步骤0**：多轮对话产出 `00_init.md`（需求初稿，含链路图：before/after + 改动点，每轮动态更新）。**每次调用都新建目录，不复用、不续聊**（详见 [steps/00_init.md](steps/00_init.md)）。**支持 `--worktree`**（opt-in）；**支持 `--debug`**（独立孪生不入索引，详见 [references/debug_mode.md](references/debug_mode.md)） | ✅ 每次都新建 |
 | `[流程]` `/icode start <需求>` | **全流程（full 模式）**：创建/复用目录 → 步骤1→6 串联。步骤2 review 默认 3 轮 + 对抗验证，步骤5 deepcheck 三阶段循环（**复用规则见下**）。**支持 `--worktree`**（opt-in） | ✅ 创建新目录 / 复用 |
@@ -201,7 +201,8 @@ description: 端到端编码工作流（步骤 0~6，含可选需求初稿步骤
 
 ```bash
 # 方式J：MCP 环境检查+一键安装（install 独立步骤，新 clone / 新机器 / CI 初始化时跑一次）
-/icode install                           # 扫描所有 mcp/*/install.sh，每个子工程自检环境（venv/Node/npm）并缺啥补啥、注册到 ~/.claude.json
+/icode install                           # 扫描所有 mcp/*/install.sh，每个子工程自检环境（venv/Node/npm）并缺啥补啥、注册到 Claude Code（~/.claude.json）
+/icode install --client all              # 注册到 Claude Code + Codex（codex mcp add；默认 --client claude 不碰 Codex）
 /icode install context7                  # 只装指定子工程（如 context7）
 /icode install --no-auto-install         # 跳过自动装依赖（自己装）
 # 可选 MCP 未装时工作流优雅降级（显式声明降级路径，不阻塞）；不创建工单目录、不参与步骤1~6推进
@@ -740,7 +741,7 @@ icode 工作流可调用 6 个 MCP（`/icode install` 一键安装）。**双保
 - 本文件「MCP 调用覆盖强制化」章节：强制规则
 
 **判定逻辑**：AI 在每个步骤开始时，按 [references/mcp_per_step.md](references/mcp_per_step.md)「强证据场景判定」判定每个 MCP 是否 🟢：
-- 证据 A：`Read ~/.claude.json` 的 `mcpServers.<name>` 段存在
+- 证据 A：MCP 在**当前宿主**注册——Claude Code = `Read ~/.claude.json` 的 `mcpServers.<name>` 段；Codex = `codex mcp list` 含 `<name>`
 - 证据 B：工具可在当前会话直接调用（工具列表直接可见——按语义识别，标准 `mcp__<name>__<tool>` 或代理前缀 `__<proxy>_<tool>` 形态——或 ToolSearch 可取 schema）
 - **强证据场景满足**（如 context7 在 plan 步骤 + 需求涉及第三方库）+ 证据 A/B 任一 -> 🟢 必须调
 - 强证据场景不满足 -> ⚪ 无需评估

@@ -125,10 +125,11 @@ Clone this repository into your Claude Code skills directory:
 git clone https://github.com/ayukyo/icode-skill ~/.claude/skills/icode
 ```
 
-Then run the MCP environment check + one-click install (scans `mcp/*/install.sh`, self-checks venv/Node/npm per sub-project, fills in what's missing, registers to `~/.claude.json`):
+Then run the MCP environment check + one-click install (scans `mcp/*/install.sh`, self-checks venv/Node/npm per sub-project, fills in what's missing, registers to Claude Code (`~/.claude.json`; add `--client all` to also register to Codex via `codex mcp add`, default `--client claude` never touches Codex):
 
 ```bash
 /icode install
+/icode install --client all   # also register to Codex (default: claude only)
 ```
 
 New clone / new machine / CI bootstrap → run once. The workflow degrades gracefully if optional MCPs aren't installed (declared downgrade paths, never blocks).

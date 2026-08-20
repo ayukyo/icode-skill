@@ -34,10 +34,11 @@ ICode 是一个 Claude Code 技能（Skill），将需求到交付拆解为严�
 git clone <repo-url> ~/.claude/skills/icode
 ```
 
-然后跑 MCP 环境检查 + 一键安装（扫描 `mcp/*/install.sh`，每个子工程自检环境（venv/Node/npm）并缺啥补啥、注册到 `~/.claude.json`）：
+然后跑 MCP 环境检查 + 一键安装（扫描 `mcp/*/install.sh`，每个子工程自检环境（venv/Node/npm）并缺啥补啥、注册到 Claude Code（`~/.claude.json`；加 `--client all` 可同时注册到 Codex（`codex mcp add`），默认 `--client claude` 不碰 Codex）：
 
 ```bash
 /icode install
+/icode install --client all   # 同时注册到 Codex（默认只注册 Claude Code）
 ```
 
 新 clone 仓库 / 新机器 / CI 初始化时跑一次。可选 MCP 未装时工作流优雅降级（显式声明降级路径，不阻塞）。

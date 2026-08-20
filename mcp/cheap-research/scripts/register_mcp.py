@@ -11,9 +11,17 @@
         <your_install_path>/server.py \\
         <your_install_path>
 """
-import json
 import sys
 from pathlib import Path
+
+# 注入跨工程共享的 _lib 路径 (mcp/_lib/)。无论 register_mcp.py 从哪个
+# 脚本目录被调用,都能找到 claude_registry.py。scripts/ 的父目录 = 子工程根,
+# 父目录的父目录 = mcp/。
+_HERE = Path(__file__).resolve().parent
+_LIB = _HERE.parent.parent / "_lib"
+if str(_LIB) not in sys.path:
+    sys.path.insert(0, str(_LIB))
+from claude_registry import register as _claude_register  # noqa: E402
 
 CLAUDE_JSON = Path.home() / ".claude.json"
 
@@ -39,13 +47,8 @@ def main():
 
     python_path, server_py, cr_dir = sys.argv[1], sys.argv[2], sys.argv[3]
 
-    if CLAUDE_JSON.exists():
-        cfg = json.loads(CLAUDE_JSON.read_text())
-    else:
-        cfg = {}
-    cfg.setdefault("mcpServers", {})
-
-    cfg["mcpServers"]["cheap-research"] = {
+    # 共享模块: 原子写 + 损坏保护 + 回读校验 + 导出 entry 供 Codex 注册分支读取
+    _claude_register("cheap-research", {
         "command": python_path,
         "args": [server_py],
         "cwd": cr_dir,
@@ -53,8 +56,7 @@ def main():
             # 注意:这里只放 config.json 路径, 不放任何 KEY
             "CHEAP_RESEARCH_CONFIG": f"{cr_dir}/config.json",
         },
-    }
-    CLAUDE_JSON.write_text(json.dumps(cfg, ensure_ascii=False, indent=2))
+    })
 
     _configure_utf8_stdout()
     print(f"✅ 已注册 cheap-research 到 {CLAUDE_JSON}")

@@ -23,33 +23,9 @@ if [ -z "$PYTHON_BIN" ]; then
 fi
 
 echo "🧹 卸载 playwright"
-# 让 Python 自己解析 ~/.claude.json(避免 bash 传 MSYS 路径给 Python 引发 FileNotFoundError)
-"$PYTHON_BIN" - <<PYEOF
-import json
-import sys
-from pathlib import Path
-
-# 强制 UTF-8 stdout,兼容 Windows 默认 GBK 控制台(emoji 报错)
-for _stream in (sys.stdout, sys.stderr):
-    _reconfigure = getattr(_stream, "reconfigure", None)
-    if _reconfigure is not None:
-        try:
-            _reconfigure(encoding="utf-8", errors="replace")
-        except Exception:
-            pass
-
-cfg_path = Path.home() / ".claude.json"
-if not cfg_path.exists():
-    print("ℹ️ ~/.claude.json 不存在, 跳过")
-else:
-    cfg = json.loads(cfg_path.read_text())
-    removed = cfg.get("mcpServers", {}).pop("$SERVER_NAME", None)
-    if removed:
-        cfg_path.write_text(json.dumps(cfg, ensure_ascii=False, indent=2))
-        print(f"✅ 已从 ~/.claude.json 移除 $SERVER_NAME")
-    else:
-        print(f"ℹ️ ~/.claude.json 未注册 $SERVER_NAME, 跳过")
-PYEOF
+# 共享模块: 原子写 + 损坏保护 + 清理导出 entry(与注册侧对称)
+HERE="$(cd "$(dirname "$0")" && pwd)"
+"$PYTHON_BIN" "$HERE/../_lib/claude_registry.py" unregister "$SERVER_NAME"
 
 echo ""
 echo "👉 重启 Claude Code 生效"
