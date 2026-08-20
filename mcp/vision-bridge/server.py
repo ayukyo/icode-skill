@@ -118,5 +118,53 @@ async def analyze_media(
     return await provider.analyze(media_path, prompt, media_type, max_tokens)
 
 
+def _run_cli_analyze(argv: list[str]) -> int:
+    """本地 CLI 调用通道: 等价于 analyze_media 工具但走进程内调用。
+
+    用途: 客户端(如 codex 用第三方模型)MCP 工具未注入、但能执行本地命令时,
+    AI 可用 `python server.py --analyze-media <path> [--prompt ...]` 分析图片/视频,
+    结果纯文本输出到 stdout, 由会话模型读取 —— 避免把原图/原视频塞给 session 模型。
+
+    MCP 路径(mcp.run)行为完全不变; 本入口仅增加一个非 MCP 的文本返回通道。
+    """
+    import argparse
+    import asyncio
+
+    ap = argparse.ArgumentParser(
+        prog="vision-bridge-cli",
+        description="vision-bridge 本地 CLI 调用通道(等价 analyze_media 工具)",
+    )
+    ap.add_argument("--analyze-media", required=True, metavar="PATH", help="本地文件路径或 http(s) URL")
+    ap.add_argument("--prompt", default="", help="可选附加指令")
+    ap.add_argument("--media-type", default="auto", choices=["auto", "image", "video"])
+    ap.add_argument("--max-tokens", type=int, default=1024)
+    args = ap.parse_args(argv)
+
+    async def _run() -> str:
+        provider = get_provider()
+        mt = args.media_type
+        if mt == "auto":
+            mt = detect_media_type(args.analyze_media)
+        if mt == "video" and not provider.supports_video:
+            return (
+                f"[错误] 当前 provider '{provider.name}' 不支持视频。"
+                f"请切到 openai_compat (需装 ffmpeg) 或改传图片。"
+            )
+        return await provider.analyze(args.analyze_media, args.prompt, mt, args.max_tokens)
+
+    try:
+        result = asyncio.run(_run())
+    except FileNotFoundError as e:
+        print(str(e), file=sys.stderr)
+        return 2
+    except Exception as e:  # provider 内部错误(ffmpeg 缺失/API 错误等)也要可见
+        print(f"[错误] {type(e).__name__}: {e}", file=sys.stderr)
+        return 1
+    print(result)
+    return 0
+
+
 if __name__ == "__main__":
+    if len(sys.argv) > 1 and sys.argv[1] in ("--analyze-media", "-h", "--help"):
+        sys.exit(_run_cli_analyze(sys.argv[1:]))
     mcp.run()

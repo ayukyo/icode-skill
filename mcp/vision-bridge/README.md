@@ -107,7 +107,27 @@ session 模型只看到这个工具的文本返回，**永远不接触原图/原
 
 ---
 
+## 本地 CLI 通道（MCP 工具不可用时兜底）
+
+codex 等客户端**不注入 MCP tools**（只暴露 `list_mcp_resources` 等资源类工具，见 openai/codex issue #30922）时，`analyze_media` 工具对会话模型不可见。此时可用**本地 CLI 通道**等价调用（结果同样纯文本输出，不接触原图）：
+
+```bash
+# 需要 VISION_BRIDGE_CONFIG 指向已填三件套的 config.json
+VISION_BRIDGE_CONFIG=~/.claude/skills/icode/mcp/vision-bridge/config.json \
+  ~/.claude/skills/icode/mcp/vision-bridge/.venv/bin/python \
+  ~/.claude/skills/icode/mcp/vision-bridge/server.py \
+  --analyze-media /path/to/frame.jpg \
+  --prompt "提取时间点/界面显示/操作序列/错误提示" \
+  --max-tokens 1024
+# stdout 为文本描述; 退出码 0 成功, 非 0 看 stderr
+```
+
+参数与 `analyze_media` 一一对应：`--analyze-media <path>`、`--prompt`、`--media-type (auto|image|video)`、`--max-tokens`。不传 `--analyze-media` 时仍走 MCP server（`mcp.run()`），行为完全不变。
+
+---
+
 ## SKILL 端约定（写在主 SKILL.md）
 
-- **vision-bridge 装好后**：禁止把图片作为附件直接传给 session 模型，必须走 `analyze_media`
+- **vision-bridge 装好后**：禁止把图片作为附件直接传给 session 模型，必须走 `analyze_media`（MCP 工具）或本地 CLI 通道
+- **codex 等 MCP 工具未注入的环境**：AI 用本地 CLI 通道分析，**禁止**把图片/base64 注入会话模型消息（第三方纯文本模型注入即报 "Model only support text input"）
 - **未装 vision-bridge**：不做约定，session 模型按其原生多模态能力处理，由用户自负其责
