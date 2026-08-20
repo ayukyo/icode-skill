@@ -431,7 +431,7 @@ sys.exit(1 if missing else 0)
 执行（在阶段0 内，目录已建之后、强制思考之前）：
 
 1. **解析三要素**：从零散输入抽 `<LIB>-<NUM>`（缺陷编号）、URL 里的 `pid`（项目 id）、项目名/label。项目解析优先级 `URL pid > config label 匹配 > config lib 前缀`
-2. **调 tb_pull**：`python3 ~/.claude/skills/icode/tools/tb/scripts/tb_pull.py --domain <域名> --pid <pid> defect <LIB>-<NUM> --out {ICODE_OUT_DIR}/tb_source`。**domain+pid 从 URL 抽**（pid 取 /project/<pid>/ 那段；支持不配 config；`--pid` 权威，支持未在 config 登记的项目）
+2. **调 tb_pull**：`python3 ~/.claude/skills/icode/tools/tb/scripts/tb_pull.py --domain <域名> --pid <pid> defect <LIB>-<NUM> --out {ICODE_OUT_DIR}/tb_source`。**domain+pid 从 URL 抽**（pid 取 /project/<pid>/ 那段；支持不配 config；`--pid` 权威，支持未在 config 登记的项目）。**domain 抽纯域名（剥掉 https:// 和路径）**；即便误传带 scheme 的 URL，tb_pull 也会自动剥掉并打 [warn]，拉取失败时会给出 DNS/连接/超时的可读原因
 3. **落盘与三要素绑定**：附件 + `<ID>_meta.json` 落到 `{ICODE_OUT_DIR}/tb_source/<ID>/`；置 日志目录=`{ICODE_OUT_DIR}/tb_source/<ID>/`、问题描述=缺陷 title+note、时间点=从拉取日志内容推断
 4. **鉴权失败（401）**：提示用户跑 `python3 ~/.claude/skills/icode/tools/tb/scripts/tb_cookie.py`（或手动把浏览器 cookie 粘进 `~/.claude/skills/icode/tools/tb/scripts/.tb_cookie`），**不阻塞**--若用户只想本地分析可放弃 TB 源、退回纯本地日志路径继续
 5. **溯源**：把 TB 源信息（`lib`/`num`/`pid`/`label`/`url`/`meta_path`）记入步骤9 metadata 的 `tb_source` 字段；在 `keywords` 里带上缺陷编号（如 `DEMO-26`），便于后续历史检索按缺陷号命中相似工单

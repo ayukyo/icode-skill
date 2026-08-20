@@ -17,11 +17,29 @@ Chrome 149 / cookie DB v24 方案（已验证稳定）：
 也可不依赖 Chrome 解密：手动把浏览器里 tb.example.com 的 Cookie 头（形如
 `name=value; name=value; ...`）粘贴到脚本同目录的 .tb_cookie 文件即可，tb_pull.py 只读该文件。
 """
-import argparse, json, os, sys, sqlite3, hashlib, shutil, tempfile
+import argparse, json, os, re, sys, sqlite3, hashlib, shutil, tempfile
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.backends import default_backend
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+def normalize_domain(domain):
+    """清洗 --domain / config.domain：去空白、剥 scheme(https:// http://)、去路径与尾部斜杠。
+
+    防止误传 'https://tb.example.com' 导致 host 匹配不到 cookie。幂等：纯域名原样返回。
+    """
+    if not domain:
+        return domain
+    d = str(domain).strip()
+    had_scheme = bool(re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*://", d))
+    if had_scheme:
+        d = re.sub(r"^[a-zA-Z][a-zA-Z0-9+.-]*://", "", d)
+    d = d.split("/", 1)[0].rstrip("/")
+    if had_scheme:
+        print(f"[warn] domain 误带 scheme，已自动剥掉：'{domain}' -> '{d}'（--domain 应传纯域名，不带 https://）",
+              file=sys.stderr)
+    return d
 
 
 def load_config():
@@ -69,11 +87,12 @@ def main():
     cfg = load_config()
     ap = argparse.ArgumentParser(description="解密 Chrome cookie -> .tb_cookie（供 tb_pull.py 用）")
     ap.add_argument("--profile", default=cfg.get("chrome_profile", "Profile 1"), help="Chrome profile 名（默认 %(default)s）")
-    ap.add_argument("--domain", default=cfg.get("domain", "tb.example.com"))
+    ap.add_argument("--domain", default=normalize_domain(cfg.get("domain", "tb.example.com")))
     ap.add_argument("--base", default=os.path.expanduser(cfg.get("chrome_base", "~/.config/google-chrome")),
                     help="Chrome 用户数据根目录")
     ap.add_argument("--out", default=None, help="输出文件（默认脚本同目录 .tb_cookie）")
     args = ap.parse_args()
+    args.domain = normalize_domain(args.domain)   # 统一清洗，host 匹配用纯域名
 
     src = os.path.join(args.base, args.profile, "Cookies")
     if not os.path.exists(src):

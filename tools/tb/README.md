@@ -28,7 +28,7 @@ pip install requests cryptography secretstorage
 
 1. **建 config（可选）**：`cp config.example.json config.json`，填 `domain` 和 `projects`（见下）。不建也行，用 `--domain` 传域名。
 2. **取 cookie**：在 Chrome 登录 `https://<你的TB域名>/` 后，二选一：
-   - 自动：`python3 scripts/tb_cookie.py --domain <你的TB域名>`
+   - 自动：`python3 scripts/tb_cookie.py --domain <你的TB域名>`（纯域名，不带 `https://` 和路径）
    - 手动：从浏览器 DevTools 复制 `<你的TB域名>` 的 Cookie 请求头，粘进 `scripts/.tb_cookie`（单行 `name=value; name=value; ...`）
 
 ## 多项目配置（文本配，加项目不改代码）
@@ -70,6 +70,7 @@ python3 scripts/tb_pull.py defect DEMO-26
 
 # 拉一个 URL 带来、未在 config 登记的项目（--pid 权威）
 python3 scripts/tb_pull.py --domain <你的TB域名> --pid <项目ID> defect DEMO-26 --out ~/work/log
+# --domain 传纯域名（不带 https:// 和路径）；即使误带，脚本也会自动剥掉并警告
 ```
 
 `defect` 产物：`{out_root}/<ID>/` 下是日志附件 + `<ID>_meta.json`（title/note/真实评论原文/附件清单/下载清单）。

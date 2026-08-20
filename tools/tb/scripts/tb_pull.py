@@ -21,10 +21,28 @@
   python3 tb_pull.py defect DEMO-26
   python3 tb_pull.py --pid <项目ID> defect DEMO-26 --out ~/work/log
 """
-import argparse, json, os, re, shutil, sys
+import argparse, json, os, re, shutil, socket, sys
 import requests
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+def normalize_domain(domain):
+    """清洗 --domain / config.domain：去空白、剥 scheme(https:// http://)、去路径与尾部斜杠。
+
+    防止误传 'https://tb.example.com' 导致 host 拼接错误。幂等：纯域名（含端口）原样返回。
+    """
+    if not domain:
+        return domain
+    d = str(domain).strip()
+    had_scheme = bool(re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*://", d))
+    if had_scheme:
+        d = re.sub(r"^[a-zA-Z][a-zA-Z0-9+.-]*://", "", d)
+    d = d.split("/", 1)[0].rstrip("/")
+    if had_scheme:
+        print(f"[warn] domain 误带 scheme，已自动剥掉：'{domain}' -> '{d}'（--domain 应传纯域名，不带 https://）",
+              file=sys.stderr)
+    return d
 
 
 def load_config():
@@ -61,11 +79,39 @@ def resolve_pid(cfg, lib, pid):
 
 
 def base_url(cfg):
-    return "https://" + cfg.get("domain", "tb.example.com")
+    domain = normalize_domain(cfg.get("domain", "tb.example.com"))
+    if not domain:
+        print("[error] domain 为空或无效，请用 --domain 指定纯域名（如 tb.example.com）", file=sys.stderr)
+        sys.exit(1)
+    return "https://" + domain
+
+
+def _is_dns_error(e):
+    """沿异常链查是否有 socket.gaierror（DNS 解析失败）。"""
+    cause = e
+    while cause is not None:
+        if isinstance(cause, socket.gaierror):
+            return True
+        cause = getattr(cause, "__cause__", None)
+    return False
 
 
 def api_get(s, cfg, path, **params):
-    r = s.get(base_url(cfg) + path, params=params, timeout=30)
+    url = base_url(cfg) + path
+    try:
+        r = s.get(url, params=params, timeout=30)
+    except requests.exceptions.ConnectionError as e:
+        if _is_dns_error(e):
+            print(f"[error] DNS 解析失败：{url}\n"
+                  f"        检查网络，或 --domain 是否写错（如误带 https://、多了 / 或路径、域名拼错）", file=sys.stderr)
+        else:
+            print(f"[error] 连接失败：{url}（{type(e).__name__}）\n"
+                  f"        检查网络/域名/端口，或稍后重试", file=sys.stderr)
+        sys.exit(1)
+    except requests.exceptions.Timeout:
+        print(f"[error] 请求超时：{url}\n"
+              f"        检查网络，或稍后重试", file=sys.stderr)
+        sys.exit(1)
     if r.status_code == 401:
         print("[error] 401 鉴权失败--cookie 过期，请重跑 tb_cookie.py", file=sys.stderr)
         sys.exit(1)
@@ -93,7 +139,7 @@ def fetch_activities(s, cfg, tid, count=100):
 
 def cmd_list(args):
     cfg = load_config()
-    if args.domain: cfg["domain"] = args.domain
+    if args.domain is not None: cfg["domain"] = args.domain
     s = session(cfg)
     pid = resolve_pid(cfg, args.lib, args.pid)
     if args.status == "all":
@@ -190,7 +236,7 @@ def collect_files(activities):
 
 def cmd_defect(args):
     cfg = load_config()
-    if args.domain: cfg["domain"] = args.domain
+    if args.domain is not None: cfg["domain"] = args.domain
     s = session(cfg)
     task, lib = find_task(s, cfg, args.id, args.lib, args.pid)
     tid = task["_id"]
@@ -290,6 +336,8 @@ def main():
     pd.set_defaults(func=cmd_defect)
 
     args = ap.parse_args()
+    if args.domain:
+        args.domain = normalize_domain(args.domain)   # 统一清洗，两个子命令拿到纯域名
     args.func(args)
 
 
