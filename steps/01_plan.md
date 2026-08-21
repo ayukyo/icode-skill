@@ -92,6 +92,7 @@
    - **两段式检索**：段一从本次需求提炼关键词集，与各 ticket `keywords` 做 Jaccard 粗筛取 ≤10 候选（零 token，可复活预扫后排除剩余 stale/当前 `ticket_id`）；段二只把候选 `keywords + requirement_points` 喂主代理精读打分选 top-N 命中（N 由梯度决定，明确无关则 0 条）。**排除当前 `ticket_id`**，不自我参考——当前 ticket_id 读「最新 `.icode_output_N` 目录的 `.ico_metadata.json`」的 `ticket_id` 字段；**常规新建目录首跑时目录刚创建、尚未入索引，无需排除**；复用步骤0目录时 metadata 已有 ticket_id，按值排除
    - **`/icode plan`/`/icode start` 注入分支**：命中工单经段二精读+过时校验后，**按 `verdict` 分流注入**（字段缺失视为 `unknown`，详见 SKILL.md「注入形式·按 verdict 分流」）：
      - `verified`/`unknown`（含旧工单）：定点读其 `01_plan.md` 的 ADR 章节 + 风险评估章节（**不读全文**，≤1K token/条）；**`unknown` 额外扩读 `00_init.md` 末轮对话摘要**（≤0.3K，捞最终结论/证伪信号）+ 思考块「历史参考」走对抗质疑三问 + ⚠️未验证警告（[../references/thinking_detail.md](../references/thinking_detail.md)「历史参考小节」）--旧工单防误导主防线，不依赖标注
+     - **结论级时效校验（ADR 决策前必查，防"锚点在但 ADR 已被后续 commit 有意推翻"）**：注入前若发现"当前代码行为与某条历史工单 ADR 结论冲突"，对该工单执行 [references/dir_and_metadata.md](../references/dir_and_metadata.md)「过时校验」第 5 步（git 演进史判定缺陷回归 vs 有意设计演进）；判定"有意设计演进"→ 该 ADR 降级为"历史快照"，注入附 ⚠️ 警告「该 ADR 决策依据已被 commit `<hash>` 演进，当前行为以最新代码为准」，**不作可复用决策基准**（可复用决策须以当前 HEAD 代码 + 演进史为据重新论证）。与"证据权威优先级"硬规则（ADR 决策处）联动
      - `disproved`（`verdict_review_needed=false`）：**不读 ADR**（避免错误方向被借鉴），改读 `verdict_reason`（作可验证断言）+ `correct_direction` 作避坑参考（≤0.7K/条）；**强制 Grep/Read 验证证伪前提是否仍成立**（详见 [../references/thinking_detail.md](../references/thinking_detail.md)「历史参考小节」）；`correct_direction` 缺失则降级读 ADR + ⛔ 警告，提示用户 `/icode status --verdict` 补标
      - `disproved`/`superseded`（`verdict_review_needed=true`，证伪前提依赖已变化）：**降级对抗质疑**--不硬反转，走 unknown A 层（扩读末轮+三问）+ 证伪前提+依赖变化提示（详见 SKILL.md「注入形式·按 verdict 分流」），让新需求重新评估前提是否仍成立
      - `superseded`：读 `superseded_by` 指针 + `correct_direction` + 替代工单 ADR 摘要（≤0.8K/条）
@@ -163,6 +164,7 @@
    > **与 `00_init.md` 第5节待决策项的关系**：若 `00_init.md` 第5节列了某待决策项的初步倾向（步骤0「待决策倾向自审」产出），步骤1 ADR **必须独立评估**该决策，不得直接照搬 init 倾向作为 ADR 决策；若 ADR 决策与 init 倾向一致，「理由」字段须附独立 Read/Grep 调研证据（呼应上方「工程既有模式调研」），不得仅引用"init 已倾向 X"作为 ADR 理由。（注：init 第5节标"无代码证据-留步骤1 ADR"的纯设计/产品偏好项除外，其 ADR 理由记设计依据即可，不要求 grep 证据）
 
    > **历史溯源（可选）**：若本 ADR 的决策实质借鉴了历史检索命中的相似工单，在「理由」末尾追加一句 `(参考相似工单 {ticket_id} 的同类决策)`。这是决策溯源而非工程污染，仅限实质借鉴时使用，不得堆砌。
+   > **证据权威优先级（硬规则，ADR 决策前必查）**：当"当前代码行为 / 历史工单 ADR / 段零文档快照 / 用户需求描述"冲突时，按 **当前 HEAD 代码 + git 提交演进史（commit message / 回归日志 / 测试注释） > 历史工单 ADR > 段零工程文档快照 > 用户需求描述** 裁定；以最高权威为准，低级权威只作参考；**决策依据冲突必须在 ADR「理由」中显式标注**（格式："历史工单 `<id>` ADR 已被 commit `<hash>` 演进，本 ADR 以 `<hash>` 为准"）。历史工单 ADR 是**某个时间点的快照**、代码是**持续演进的事实**——禁止照搬旧 ADR 决策而不核对当前代码演进史（会产出回归既有修复的方案）
 5. **模块详细设计** — 每个模块的职责、关键函数、数据结构，引用现有接口命名风格。**代码示例使用伪代码+关键行号引用**，禁止粘贴完整函数实现（完整实现留给步骤4编码阶段）。格式：`参考 src/foo.cpp:42-68 的 HandleXxx 模式`。**必须说明新增代码如何融入既有链路习惯**（命名模式/错误处理模式/调用链模式/日志模式），不得写出"功能对但风格突兀"的设计
 
 ### 端到端路径推演表（plan 阶段反推核心机制，治「链路完整性漏洞」盲区）
