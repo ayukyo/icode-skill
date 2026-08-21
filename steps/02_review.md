@@ -65,7 +65,7 @@
 **步骤 2.3 — 逐文件通读（必须先执行）**：
 从步骤1计划中识别所有涉及的文件（新建文件、修改文件、依赖文件），逐一通读。
 
-**依赖关系审查（grep 优先）**：对计划涉及的每个待改符号，`grep -rn '<symbol>('` 找所有调用方（"这个函数被哪些地方调用？"），结果作为维度6"现有实现对照"的依赖关系证据；跨仓库/子仓库检索见 anti_laziness 第 21 条「跨仓库/子仓库检索」段。检索结果只进思考块，不写入产物文件。
+**依赖关系审查（grep 优先）**：对计划涉及的每个待改符号，`grep -rn '<symbol>('` 找所有调用方（"这个函数被哪些地方调用？"），结果作为维度6"现有实现对照"的依赖关系证据；跨仓库/子仓库检索见 反偷懒第 21 条「跨仓库/子仓库检索」段。检索结果只进思考块，不写入产物文件。
 - 对每个现有源文件，从头到尾阅读：函数/结构体/宏定义签名、调用关系、命名风格、错误处理模式
 - 对每个计划新建文件，列出其对外的接口承诺
 
@@ -157,7 +157,7 @@
 2. **函数数判定**（阈值与分批）：
    - 函数数 < 50 → 输出 `▶ §2.5.7 跳过：函数数 {N} < 50，工程规模太小无需 dedup`，整个 §2.5.7 结束
    - 函数数 > 500 → 分批（每批 100）。**理由**：high质量模型(用户配置)单次处理 5-10 函数合理，10000 函数全跑高质量模型不可能；500 函数通常分 ~30-50 sub_category，每个 5-15 函数，高质量模型 50 次 ≈ $0.04 cost。
-3. **分类阶段（haiku 降本）——双层分类**：调 `mcp__cheap-research__extract` 输入 = catalog.json 文本 + **双层分类 schema**（实测单层分类后处理映射会跨家族合并——例如把"JSON解析"/"字典合并"/"列表过滤"全部归到 `data-transform`，高质量模型找重复时跨家族做无意义比较）。**必须用 `parent_category`（25 类标准化）+ `sub_category`（LLM 自由细粒度）双层**，高质量模型按 `sub_category` 分组工作，输出 → `{ICODE_OUT_DIR}/<ticket>/dedup/categorized.json`：
+3. **分类阶段（haiku 降本）——双层分类**：调 `mcp__cheap-research__extract` 输入 = catalog.json 文本 + **双层分类 schema**（实测单层分类后处理映射会跨家族合并——例如把"JSON解析"/"字典合并"/"列表过滤"全部归到 `data-transform`，高质量模型找重复时跨家族做无意义比较）。**必须用 `parent_category`（23 类标准化）+ `sub_category`（LLM 自由细粒度）双层**，高质量模型按 `sub_category` 分组工作，输出 → `{ICODE_OUT_DIR}/<ticket>/dedup/categorized.json`：
 
    ```json
    {
@@ -169,7 +169,7 @@
            "type": "object",
            "properties": {
              "name": {"type": "string"},
-             "parent_category": {"type": "string", "description": "父类,严格从 25 类清单选一(file-ops/string-utils/validation/error-handling/http-api/date-time/data-transform/database/logging/config/async-utils/testing/ui-helpers/crypto/provider-impl/tool-impl/event-handling/session-management/compaction/other/hardware-abstraction/protocol-impl/build-system)"},
+             "parent_category": {"type": "string", "description": "父类,严格从 23 类清单选一(file-ops/string-utils/validation/error-handling/http-api/date-time/data-transform/database/logging/config/async-utils/testing/ui-helpers/crypto/provider-impl/tool-impl/event-handling/session-management/compaction/other/hardware-abstraction/protocol-impl/build-system)"},
              "sub_category": {"type": "string", "description": "子类,LLM 自由(双语标签:英文例 GPIO/UART/JSON解析,中文例 字符串长度/列表过滤),保持细粒度区分同父类下的不同家族"}
            }
          }
@@ -183,9 +183,9 @@
    - **sub_category 标签**：允许**英文 + 中文混合**。高质量模型找重复按 sub_category 字符串精确匹配，不影响。
    - **每个函数独立类别**：prompt 明确说"每个函数分配到合适类别"，避免 LLM 自由聚类（实测：模糊 prompt → 10/11 归 data-transform；明确 prompt → 25/25 严格归类）。
 
-   **后处理映射**（必做，LLM 不严格遵守 25 类清单——实测会返回"Number Parsing"/"Math"/"String Manipulation"等自由类别）。**只映射 `parent_category` 字段**，`sub_category` 保持原样：
+   **后处理映射**（必做，LLM 不严格遵守 23 类清单——实测会返回"Number Parsing"/"Math"/"String Manipulation"等自由类别）。**只映射 `parent_category` 字段**，`sub_category` 保持原样：
 
-   | LLM 自由类别（parent_category）| 映射到 25 类 |
+   | LLM 自由类别（parent_category）| 映射到 23 类 |
    | --- | --- |
    | Number Parsing / Math / Calculation / parsing / formatting | data-transform |
    | String Manipulation / 字符串操作 | string-utils |
@@ -200,7 +200,7 @@
    | UI / DOM / Render | ui-helpers |
    | Crypto / Hash / Encrypt / 哈希 | crypto |
    | File / IO / Path | file-ops |
-   | JSON解析 / 字典合并 / 列表过滤 (高级抽象) | data-transform (必须归此类,因 25 类无更细粒度) |
+   | JSON解析 / 字典合并 / 列表过滤 (高级抽象) | data-transform (必须归此类,因 23 类无更细粒度) |
    | 其他无法映射 | other |
 
    写入 categorized.json 前用此表做 `parent_category` 字段归一化。`sub_category` 字段保持 LLM 自由输出（用于第 4 步拆分 + 第 5 步高质量模型按子家族分组）。
@@ -208,11 +208,12 @@
 5. **找重复（高质量模型逐类）**：对每个 top 5 **sub_category**，调 `mcp__cheap-research__extract` 输入 = 子家族函数列表 + **简化 schema（嵌套字段用 string，规避 array-of-array schema validation failed）**。
 
    **⚠️ 高质量模型输出格式已知风险**：高质量模型输出**始终自适应**，主代理必须 try 链式解析：
-   - **functions 字段 4 种格式**：
+   - **functions 字段 5 种格式**：
      - 格式 A：JSON 字符串数组 `[{file, name, line, notes}, ...]`（多函数 + 复杂时）
      - 格式 B：`|` 分隔符纯文本 `"name1: desc1 | name2: desc2"`（少函数 + 有差异描述）
      - 格式 C：`,` 分隔符纯文本 `"name1, name2, name3"`（少函数 + 简单列表，实测默认格式）
      - 格式 D：单个纯字符串（极端情况）
+     - 格式 E：`;` 分隔多组纯文本（组内 `,` 分隔）`"name1, name2; name3"`（多组场景；**必须先检查 `;`**——`split(',')` 优先会破坏 `;` 分组，见下方代码骨架）
    - **recommendation 字段 3 种格式**：
      - 格式 A：完整 JSON `{"action": "CONSOLIDATE", "survivor": "fn", "reason": "..."}`
      - 格式 B：Python dict 风格 `{action: 'INVESTIGATE', survivor: null, reason: '...'}`（实测频繁出现，单引号 + 无引号 key）
@@ -319,7 +320,7 @@
    | cmake       | 2      | 子家族<3 不进高质量模型,扫描跳过 |
 
    **中间产物**：`{ICODE_OUT_DIR}/<ticket>/dedup/{catalog,categorized,duplicates/*.json}`
-   **复用**：本步骤生成的 `dedup_categorized.json` 可被 §5 05_deepcheck §9.4 复用（避免重跑分类）
+   **复用**：本步骤生成的 `categorized.json` 可被 §5 05_deepcheck §9.4 复用（避免重跑分类）
    ```
 
    **⚠️ "已扫描但无重复"段必填**：高质量模型某 sub_category 返回 `duplicates: []` 时，**不省略该子家族**——必须显式列在"已扫描但无重复"段，让用户知道"该家族已扫描、确认无重复"，避免用户怀疑"是不是没跑"。
@@ -334,7 +335,7 @@
 
 **反偷懒第 21 条合规**：步骤末尾在思考块输出 `cheap-research 调用: extract x {1+5}` 或对应降级声明，**无记录 = 违规**。
 
-**与 §2.5.5 对抗验证的衔接**：dedup 的 issue **不进入** §2.5.5 对抗验证流程（§2.5.5 的覆盖范围是"§2.5 维度审查 + §2.4 实证"两类 issue）。理由：dedup 用高质量模型单次推理 + cheap-research schema 强约束 + 22 类预定义约束 = 等效"强约束推理"，质量足够；重复 3 次 spawn 成本翻 3 倍但收益边际递减。
+**与 §2.5.5 对抗验证的衔接**：dedup 的 issue **不进入** §2.5.5 对抗验证流程（§2.5.5 的覆盖范围是"§2.5 维度审查 + §2.4 实证"两类 issue）。理由：dedup 用高质量模型单次推理 + cheap-research schema 强约束 + 23 类预定义约束 = 等效"强约束推理"，质量足够；重复 3 次 spawn 成本翻 3 倍但收益边际递减。
 
 
 **步骤 2.6 — 写入结果**：

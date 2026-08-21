@@ -96,7 +96,7 @@
 
 严格按定稿计划实施编码。
 
-**符号定位（grep 优先）**：编码前对计划 §5 声明的待改符号，用 `grep -rn '<符号>'` 定位待改符号定义、`grep -rn '<符号>('` 找所有调用点（跨仓库/子仓库见 anti_laziness 第 21 条「跨仓库/子仓库检索」段），结果作为下方「准入三链预扫」的增强输入。检索结果只进思考块，不写入产物文件。
+**符号定位（grep 优先）**：编码前对计划 §5 声明的待改符号，用 `grep -rn '<符号>'` 定位待改符号定义、`grep -rn '<符号>('` 找所有调用点（跨仓库/子仓库见 反偷懒第 21 条「跨仓库/子仓库检索」段），结果作为下方「准入三链预扫」的增强输入。检索结果只进思考块，不写入产物文件。
 
 **准入（强制三链预扫，每条按 `文件:行号` 给出至少 1 条命中否则禁止 Edit）**：
 
@@ -132,7 +132,7 @@
 用 Write 工具创建/修改每个代码文件。
 
 
-**修复方案三档实施（反偷懒第 26 条）**：默认只实施 A 档（根因修复）；B 档需 metadata `confirmed_B_fixes: [...]` 记录用户显式确认才实施；C 档不实施（范围外）。A 档跨工程（plan 标注）时本工程无可实施 A 档，不强行造 A 档、不把 B 当 A 实施，只做确认的 B 档 + commit/工单注明"A 档转交 <X>"。Code Review Fix 复检核对：实施范围 = A 档 + 确认的 B 档（**先 Read metadata.fix_tiers 读 plan 分档**，字段缺失则从 `03_plan_final.md` §4.5 文本读），超范围实施 = issue。实施 B 档前必须把用户确认记录写入 `confirmed_B_fixes` 数组。详见 anti_laziness 第 26 条
+**修复方案三档实施（反偷懒第 26 条）**：默认只实施 A 档（根因修复）；B 档需 metadata `confirmed_B_fixes: [...]` 记录用户显式确认才实施；C 档不实施（范围外）。A 档跨工程（plan 标注）时本工程无可实施 A 档，不强行造 A 档、不把 B 当 A 实施，只做确认的 B 档 + commit/工单注明"A 档转交 <X>"。Code Review Fix 复检核对：实施范围 = A 档 + 确认的 B 档（**先 Read metadata.fix_tiers 读 plan 分档**，字段缺失则从 `03_plan_final.md` §4.5 文本读），超范围实施 = issue。实施 B 档前必须把用户确认记录写入 `confirmed_B_fixes` 数组。详见 反偷懒第 26 条
 
 **范围升级实施核对（scope_escalations，反偷懒第 33 条）**：Read `metadata.scope_escalations`（字段缺失视为 `[]`），只实施 `classification=A_now` 与已确认 `user_confirm` 的 `B_confirm` 条目对应的方案；`C_follow_up`（范围外）与 `refuted`（丢弃）**不得实施**。审查/复检/终审后新增的 escalation 若未经 merge 定稿纳入 `03_plan_final.md`，编码时不得直接实施（须回到步骤3 定稿或取得用户确认并记录）。Code Review Fix 复检核对实施范围时一并核对（超出已确认 escalation 的修改 = issue）。
 

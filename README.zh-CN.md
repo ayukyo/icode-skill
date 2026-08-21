@@ -24,7 +24,7 @@ ICode 是一个 Claude Code 技能（Skill），将需求到交付拆解为严�
 - **决策锚点**：步骤间以精简决策摘要（`.decision_anchors.json`）传递上下文——省 token、保持推理连续性
 - **可选 TB 缺陷源**：`/icode log` 零散输入含 Teambition 项目 URL 或 `<LIB>-<NUM>` 时，可选拉取缺陷单的标题/描述/评论/日志附件作为分析输入（多项目文本配置，仅拉取分析、不回写 TB；无 TB 引用时走纯本地日志路径，行为不变）
 - **可选钉钉文档源**：入口（`/icode init` / `log` / `plan` / `start`）与 patch 阶段0 零散输入含钉钉分享链接（alidocs.dingtalk.com）时，可选拉取文档/钉盘文件作为需求与参考资料输入（仅拉取、不回写钉钉；原生格式需用户在钉钉 UI 导出；无钉钉引用时行为不变）
-- **可选视觉理解**（`mcp/vision-bridge`）：可装可不装的图片/视频理解 MCP——**不绑任何平台**，只要你的 provider 提供 OpenAI Chat Completions 兼容接口就能用（OpenAI / Claude / Gemini / 国内厂商 / 自建 / OpenRouter 全部支持）。装好后 SKILL 工作流统一走 `mcp__vision-bridge__analyze_media` 工具；未装时 session 模型按原生能力处理，由用户自负其责。详见 [mcp/vision-bridge/README.md](mcp/vision-bridge/README.md) 与 [SKILL.md](SKILL.md) 的「可选增强」段
+- **可选视觉理解**（`mcp/vision-bridge`）：可装可不装的图片/视频理解 MCP——**不绑任何平台**，只要你的 provider 提供 OpenAI Chat Completions 兼容接口就能用（OpenAI / Claude / Gemini / 国内厂商 / 自建 / OpenRouter 全部支持）。装好后 SKILL 工作流走**双通道**：MCP 工具 `mcp__vision-bridge__analyze_media` 或本地 CLI（`<server.py 目录>/.venv/bin/python <server.py> --analyze-media <path>`，供 codex 等 MCP 工具未注入环境兜底），`config.json` 三件套配齐即可用；两通道均不可用时 session 模型按原生能力处理，由用户自负其责。**图片/视频绝不注入会话模型消息**。详见 [mcp/vision-bridge/README.md](mcp/vision-bridge/README.md) 与 [SKILL.md](SKILL.md) 的「可选增强」段
 
 ## 安装
 
@@ -45,7 +45,7 @@ git clone <repo-url> ~/.claude/skills/icode
 
 ## 可选增强：图片/视频理解
 
-视觉理解是可选增强，**未装不影响主工作流**。装了后所有图片/视频处理统一通过 `mcp__vision-bridge__analyze_media` 工具，不污染 session 模型。
+视觉理解是可选增强，**未装不影响主工作流**。装了后所有图片/视频处理通过**双通道**（MCP 工具 `mcp__vision-bridge__analyze_media` 或本地 CLI，codex 等 MCP 工具未注入环境走 CLI 兜底）完成，**图片/视频绝不注入会话模型消息**，不污染 session 模型。
 
 ### 安装 vision-bridge
 

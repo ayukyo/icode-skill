@@ -10,7 +10,7 @@
 
 ## 判定 MCP 是否可用
 
-按 [thinking_core.md](thinking_core.md) 的"强证据"逻辑（**任一即视为"已配置可用"**）：
+按 [thinking_core.md](thinking_core.md) 的"强证据"逻辑（**注册 且 可调用 双条件同时满足才视为可用**；证据 A=注册为必要条件，证据 B=可调用为充分条件——B 成立必然 A 成立，但仅 A 成立（已注册未连接/未暴露）不算可用）：
 
 - **证据 A（强证据）**：MCP 在**当前宿主**注册——Claude Code = `~/.claude.json` 的 `mcpServers.<name>` 段存在；Codex = `codex mcp list` 含 `<name>`。跨宿主双注册已支持（`/icode install --client all`），**宿主不同注册证据互不替代**（当前宿主没注册 = 证据 A 不成立，即使另一宿主已注册）
 - **证据 B（强证据）**：工具可在当前会话**直接调用**——工具列表直接可见（完整 schema，按语义识别：标准 `mcp__<name>__<tool>` 或代理前缀 `__<proxy>_<tool>` 形态）或 ToolSearch 可取 schema（不可见时按 [thinking_core.md](thinking_core.md) 第 0 判据）
@@ -76,7 +76,7 @@
 - **复用 MCP**：⑥ cheap-research（`extract` 用 haiku 分类 + 高质量模型找重复）；函数抽取用 ripgrep（catalog.json）
 - **强证据**：02_review/05_deepcheck 步骤中 + cheap-research 🟢 + **函数数 ≥ 50**
 - **触发场景**：
-  - **02_review §2.5.7（轻量 top 5）**：ripgrep 抽所有函数 → `mcp__cheap-research__extract`(haiku) 分类（wrapper object schema）→ 后处理映射到 25 类 → 取 top 5 类别逐类调高质量模型找重复
+  - **02_review §2.5.7（轻量 top 5）**：ripgrep 抽所有函数 → `mcp__cheap-research__extract`(haiku) 分类（wrapper object schema）→ 后处理映射到 23 类 → 取 top 5 类别逐类调高质量模型找重复
   - **05_deepcheck §9.4（完整全量）**：完整 5 阶段（抽取→分类→拆分→高质量模型逐类找重复→报告）。分别检测 catalog.json/categorized.json 是否已由 §2 生成 → 复用避免重跑
 - **中间产物路径**：`{ICODE_OUT_DIR}/<ticket>/dedup/{catalog,categorized,duplicates/*.json}`
 - **最终报告**：进 step 产物 .md（02_review.md §2.5.7 / 05_deepcheck.md §9.4）的 `## 语义重复检测报告` 段（HIGH/MEDIUM/LOW 三段 + top 5 重复函数对）
@@ -90,10 +90,10 @@
 - **已知限制**：
   - **cheap-research schema 不支持 `enum` 类型**——`{"enum": [...]}` 报 `'enum' is not valid under any of the given schemas`。改用 `string` + prompt 强约束
   - **cheap-research LLM 把 array-of-objects 退化为 single object**——多次确认，schema `{"type": "array", "items": {...}}` 时 LLM 仍返回单个 object。**必须用 wrapper object 模式** `{"results": [...]}` 规避
-  - **cheap-research LLM 不严格遵守 25 类清单**——即使 prompt 强约束，LLM 仍返回"Number Parsing"/"Math"/"String Manipulation"等自由类别。**必须主代理在写入 categorized.json 前做后处理映射**（见 §2.5.7/§9.4 第 3 步映射表）
+  - **cheap-research LLM 不严格遵守 23 类清单**——即使 prompt 强约束，LLM 仍返回"Number Parsing"/"Math"/"String Manipulation"等自由类别。**必须主代理在写入 categorized.json 前做后处理映射**（见 §2.5.7/§9.4 第 3 步映射表）
   - extract 返回 schema_validation_failed → 重试 1 次（自动改 instruction），仍失败标"分类降级"
-- **类别清单（共 25 类）**：
-  - 通用类 22：file-ops / string-utils / validation / error-handling / http-api / date-time / data-transform / database / logging / config / async-utils / testing / ui-helpers / crypto / provider-impl / tool-impl / event-handling / session-management / compaction / other（19）+ file-ops/string-utils 子类补 3 = 22
+- **类别清单（共 23 类）**：
+  - 通用类 20：file-ops / string-utils / validation / error-handling / http-api / date-time / data-transform / database / logging / config / async-utils / testing / ui-helpers / crypto / provider-impl / tool-impl / event-handling / session-management / compaction / other
   - iCode 扩展 3 类（嵌入式场景）：**hardware-abstraction**（硬件抽象：传感器/GPIO/中断）/ **protocol-impl**（通信协议：MQTT/Modbus/CAN/串口）/ **build-system**（构建脚本：CMake/Make/Bazel）
 
 ---

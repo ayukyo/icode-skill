@@ -31,10 +31,6 @@
 
 **completed 工单分流（lifecycle）**：`status=completed` 时区分两种情况——
 1. **未 close**（`submitted_baseline` 为 null 或缺失，活动 checkout 未关闭）：patch 可在当前唯一活动根继续（现有行为）
-2. **已 close**（`submitted_baseline` 非 null）：必须先 `/icode worktree --reopen` 在最新在线基线上创建新的活动 checkout（不新建 ticket、不清 patch 历史），再 patch。**禁止偷偷复活旧目录**（见 [steps/reopen.md](reopen.md)）。reopen 是新的一代 checkout，写入 `checkout_history`，本次恢复原因记入工单历史。
-
-**completed 工单分流（lifecycle）**：`status=completed` 时区分两种情况——
-1. **未 close**（`submitted_baseline` 为 null 或缺失，活动 checkout 未关闭）：patch 可在当前唯一活动根继续（现有行为）
 2. **已 close**（`submitted_baseline` 非 null）：必须**先 `/icode worktree --reopen`** 在最新在线基线上创建新的活动 checkout（不新建 ticket、不清 patch 历史），再 patch。**禁止偷偷复活旧目录**（见 [steps/reopen.md](reopen.md)）。reopen 是新的一代 checkout，写入 `checkout_history`，本次恢复原因记入工单历史。
 
 **后续主流程步骤的配合**：patch 之后继续跑步骤 4/5/6 时，各步骤启动会 Read `08_patch.md` 把补丁纳入计划侧基准（code 在 patch 基础上实施 / deepcheck Reverse 不误判偏离 / audit 追溯矩阵纳入补丁）——详见 [SKILL.md「patch 与主流程步骤的配合」](../SKILL.md) + 各步骤文件「前置：patch 配合」段。review/merge 只动计划文档，不需要配合。
@@ -200,7 +196,7 @@
 2. **import 链**：`grep -rn '<header\|from <module>\|import <pkg>'`（改签名/语义会被牵连，列出命中文件:行号）
 3. **test 链**：`grep -rln '<symbol\|<module>.*test'`（受影响的测试文件；无测试显式写"0 命中/无测试覆盖"）
 
-**符号定位（grep 优先）**：用 `grep -rn '<符号>'` 定位待改符号与调用点（跨仓库/子仓库见 anti_laziness 第 21 条「跨仓库/子仓库检索」段），再补三链 grep。检索结果只进思考块，不写入产物文件。
+**符号定位（grep 优先）**：用 `grep -rn '<符号>'` 定位待改符号与调用点（跨仓库/子仓库见 反偷懒第 21 条「跨仓库/子仓库检索」段），再补三链 grep。检索结果只进思考块，不写入产物文件。
 
 **降级/告警/分支逻辑测试覆盖**：本次修改含「降级、告警化（失败→LOG_WARN）、新增分支/早退路径」时：① 能加单测必须加（如重试次数变更须同步对应断言计数）；② 不能加（纯日志/纯展示无测试挂点）必须在增量计划**显式记录「未配套测试 + 原因」**；③ 修改既有测试契约须同步更新断言，禁止测试与实现脱节（复用 04_code `test_cmd`/`test_outcome` 字段）。
 

@@ -155,7 +155,7 @@ cd ~/.claude/skills/icode/mcp/vision-bridge
 # restart Claude Code to take effect
 ```
 
-All image/video handling flows through `mcp__vision-bridge__analyze_media`. Videos are pre-sampled locally with ffmpeg to save API quota. When unconfigured, it returns a fallback hint and session models fall back to native capability — no error, no blocking.
+All image/video handling flows through either the `mcp__vision-bridge__analyze_media` MCP tool or the local CLI channel (`<server.py 目录>/.venv/bin/python <server.py> --analyze-media <path>`) for clients that don't inject MCP tools (e.g. codex). Videos are pre-sampled locally with ffmpeg to save API quota. When both channels are unavailable, session models fall back to native capability — no error, no blocking. Image/video is never injected into session model messages.
 
 ### Cheap LLM Inference (cheap-research)
 

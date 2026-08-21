@@ -27,7 +27,7 @@
 ## 执行步骤
 
 1. **确定 ICODE_OUT_DIR**（同 TB 单优先复用，否则强制新建）：
-   - **同 TB 单复用检测（仅当零散输入含 TB 引用时）**：解析 `lib+num+pid+domain`（domain 取 https://<域名>/，pid 取 /project/<pid>/ 那段；供 tb_pull --domain --pid）-> Read `~/.claude/icode_data/index.json`，扫各 ticket 的 `tb_source` 字段，匹配同 `lib+num+pid` 的旧工单
+   - **同 TB 单复用检测（仅当零散输入含 TB 引用时）**：解析 `lib+num+pid+domain`（domain 抽纯域名——剥掉 https:// 和路径，如 `https://tb.example.com/project/<pid>` 取 `tb.example.com`；pid 取 /project/<pid>/ 那段；供 tb_pull --domain --pid）-> Read `~/.claude/icode_data/index.json`，扫各 ticket 的 `tb_source` 字段，匹配同 `lib+num+pid` 的旧工单
      - **匹配到旧工单**：比对旧工单的 `project_path` 与当前工程根（cwd）
        - **同工程**（`project_path` == 当前工程）：询问用户"检测到 TB 单 `<ID>` 的旧工单 `.icode_output_M`（上次根因：`<摘要>`），TB 上可能有新评论/附件。① 复用旧目录继续(重拉最新数据+增量对抗) / ② 新建独立分析"；选① -> ICODE_OUT_DIR = 旧目录（`{project_path}/{out_dir}`），走下方「同 TB 单复用流程」；选② -> 强制新建
        - **跨工程副本**（`project_path` != 当前工程）：提示"检测到 TB 单 `<ID>` 的旧工单在**另一工程副本** `{project_path}`（上次根因：`<摘要>`），当前工程是 `{cwd}`，两份源码拷贝后可能已分叉。① 跨工程复用旧目录续旧分析(⚠️风险：源码可能对不上、旧根因可能失效) / ② 当前工程新建独立分析(读旧工单 `log_analysis.md` 根因/证据作参考，须用当前源码验证) / ③ 去 `{project_path}` 目录继续"；选① -> 走「同 TB 单复用流程」(ICODE_OUT_DIR 用旧工程目录，⚠️标注跨工程源码分叉风险)；选② -> 强制新建 + 读旧工单 `log_analysis.md` 根因结论+决定性证据作参考注入会话(标注跨工程、源码可能分叉、须当前源码验证)；选③ -> 提示用户切到 `{project_path}` 再跑 `/icode log`，本次中止
@@ -64,12 +64,12 @@
    - **两段式检索**：段一从本次症状/关键词提炼关键词集，与各 ticket `keywords` 做 Jaccard 粗筛取 ≤10 候选（零 token，可复活预扫后排除剩余 stale）；段二只把候选 `keywords + requirement_points` 喂主代理精读打分选 top-N 命中（N 由梯度决定，明确无关则 0 条）。`/icode log` 每次强制新建目录，本次工单尚未入索引，故无需排除当前 ticket_id
    - **`/icode log` 注入分支**：命中工单经段二精读+过时校验后，**按 `verdict` 分流注入**（字段缺失视为 `unknown`，详见 SKILL.md「注入形式·按 verdict 分流」）：
      - `verified`/`unknown`（含旧工单）：定点读其 `log_analysis.md` 的「根因结论 + 决定性证据」章节（**不读全文**，≤800 token/条）；**`unknown` 额外扩读 `00_init.md` 末轮对话摘要**（≤0.3K）+ 思考块「历史参考」走对抗质疑三问 + ⚠️未验证警告（[../references/thinking_detail.md](../references/thinking_detail.md)「历史参考小节」）——旧工单防误导主防线
-     - **结论级时效校验（防"锚点在但结论已被后续 commit 有意推翻"）**：注入前若发现"当前代码行为与某条历史工单结论冲突"，对该工单执行 [references/dir_and_metadata.md](../references/dir_and_metadata.md)「过时校验」第 5 步（git 演进史判定缺陷回归 vs 有意设计演进）；判定"有意设计演进"→ 该条结论降级为"历史快照"，注入附 ⚠️ 警告「该结论已被 `<commit>` 有意演进，当前行为以最新代码为准」，**不作根因判定基准**。与"证据权威优先级"硬规则（阶段1 基线检查顶部）联动
+     - **结论级时效校验（防"锚点在但结论已被后续 commit 有意推翻"）**：注入前若发现"当前代码行为与某条历史工单结论冲突"，对该工单执行 [references/dir_and_metadata.md](../references/dir_and_metadata.md)「过时校验」第 5 步（git 演进史判定缺陷回归 vs 有意设计演进）；判定"有意设计演进"→ 该条结论降级为"历史快照"，注入附 ⚠️ 警告「该结论已被 `<hash>` 有意演进，当前行为以最新代码为准」，**不作根因判定基准**。与"证据权威优先级"硬规则（阶段1 基线检查顶部）联动
      - `disproved`（`verdict_review_needed=false`）：**不读根因结论**（避免错误根因方向被借鉴），改读 `verdict_reason`（作可验证断言）+ `correct_direction` 作避坑参考（≤0.7K/条）；**强制 Grep/Read 验证证伪前提是否仍成立**（详见 [../references/thinking_detail.md](../references/thinking_detail.md)「历史参考小节」）；`correct_direction` 缺失则降级读根因 + ⛔ 警告，提示 `/icode status --verdict` 补标
-     - `disproved`/`superseded`（`verdict_review_needed=true`，证伪前提依赖已变化）：**降级对抗质疑**--不硬反转，走 unknown A 层（扩读末轮+三问）+ 证伪前提+依赖变化提示（详见 SKILL.md「注入形式·按 verdict 分流」），让新需求重新评估前提是否仍成立
+     - `disproved`/`superseded`（`verdict_review_needed=true`，证伪前提依赖已变化）：**降级对抗质疑**--不硬反转，走 unknown 强化层（扩读末轮+三问）+ 证伪前提+依赖变化提示（详见 SKILL.md「注入形式·按 verdict 分流」），让新需求重新评估前提是否仍成立
      - `superseded`：读 `superseded_by` 指针 + `correct_direction` + 替代工单根因摘要（≤0.8K/条）
      - 作为本次分析的启发——参考其根因方向与踩坑。**只进会话上下文，绝不写进 `log_analysis.md`**（唯一例外：实质借鉴可在该根因条目末尾加一句 `(参考相似工单 {ticket_id} 的同类根因)`）
-   - **重复模式检查**（命中簇重复信号时，段二命中分流后执行）：段二命中簇 ≥2 或任一条 `hit_count ≥ 3` → 思考块「历史参考」加一行轻提示「⚠️ 该模块/症状已出现 N 次，疑似重复模式」（软信号，不判结论、不自动重构）；命中簇 ≥2 时按 [references/thinking_detail.md](../references/thinking_detail.md)「重复模式检查」段执行实事求是评估（查 `~/.claude/icode_data/patterns.json` 状态 → Read/Grep 核对当前代码 → 三态结论：已解决不重构 / 复发建议再重构（附粗略影响面）/ 新根因重估 → 回写 patterns.json；三态结论均提炼 `workaround` 上次方案、命中带出，`project_path` 为 git 仓库时加 git 修复频次确定性佐证）。**全程软提示不打断分析**（与既有 L2 警告分级一致，非硬门禁，不阻塞流程推进）
+   - **重复模式检测**（命中簇重复信号时，段二命中分流后执行）：段二命中簇 ≥2 或任一条 `hit_count ≥ 3` → 思考块「历史参考」加一行轻提示「⚠️ 该模块/症状已出现 N 次，疑似重复模式」（软信号，不判结论、不自动重构）；命中簇 ≥2 时按 [references/thinking_detail.md](../references/thinking_detail.md)「重复模式检测」段执行实事求是评估（查 `~/.claude/icode_data/patterns.json` 状态 → Read/Grep 核对当前代码 → 三态结论：已解决不重构 / 复发建议再重构（附粗略影响面）/ 新根因重估 → 回写 patterns.json；三态结论均提炼 `workaround` 上次方案、命中带出，`project_path` 为 git 仓库时加 git 修复频次确定性佐证）。**全程软提示不打断分析**（与既有 L2 警告分级一致，非硬门禁，不阻塞流程推进）
    - **段零·工程文档检索**（与历史检索并行，候选合并排序；本入口检索时机：建目录后）：完整流程以 [references/dir_and_metadata.md](../references/dir_and_metadata.md)「段零·工程文档检索」+「module_docs 工程模块库」段为准（含步骤 1-5 + 3.5 反查父项目 + 3.6 关联工程检索 + 3.6 源码路径定位 [project_path+manifest+兜底]），**执行前必须 Read 该段全文（含顶部「段零步骤速查」导航），不得凭本行摘要执行**；stale 降级 / commit 校验 / 注入防重复等细节同该段
    - **注入防重复**（两源共用 `_inject_cache.json`）：无缓存则创建空 `{"ticket_id":"<本工单>","injections":[]}`；注入前按 `(source, ref_id, slice)` 查缓存去重，已注入的跳过。历史源 slice=`root_cause_evidence`；段零 slice=`section:<file>`。详见 [references/dir_and_metadata.md](../references/dir_and_metadata.md)「注入缓存机制」段
    - **段零只读当前分支子目录是反交叉污染设计，不要误读为"被覆盖"**：详见 [steps/doc.md](doc.md) 顶部「⚠️ 多分支设计·反偷懒强约束」段（`dir_and_metadata.md`「段零·工程文档检索」段），跨分支不交叉读是为防止跨分支借鉴失真；用户反馈"看不到其他分支文档"时**默认不是 bug**，应先 `ls project_docs/<id>/` 看是否有多分支子目录再判
@@ -179,7 +179,7 @@
      - **完整性自检不变**（防委托后漏条）：预提取后仍核对「已分析评论条数 == meta.json `comments[]` 长度」——extract 结果缺失的 `index` 对应评论必须主会话 Read 原文补齐（补读算已分析）
      - **高价值评论强制回读原文**：含复现步骤/日志原文片段/关键时间点的评论，主会话必须 Read 原文确认后再回捞进「现场时间线」（预提取只作草稿，回捞以原文为准）
      - **降级**：cheap-research 不可用 / extract 失败 → 主会话逐条读（现有路径，行为 100% 一致）
-   - **TB 视频/图片附件研读（vision-bridge 任一通道可用则主动调,与 TB 评论研读并列）**：若 TB 缺陷源附件含视频(`*.mp4`/`*.mov`/`*.avi` 等)/图片(`*.png`/`*.jpg`/`*.jpeg` 等),**vision-bridge 可用时主动逐个调**(MCP 工具 `mcp__vision-bridge__analyze_media`,或 codex 等 MCP 工具未注入环境下用本地 CLI `<server.py>/.venv/bin/python <server.py> --analyze-media <path>`——视频先用 ffmpeg 本地提取关键帧省钱,见「附件分析（含本地路径 + TB 源）与 ffmpeg 抽帧」段);或复用 §1 已落盘的附件分析结果但须独立回捞证据点。**视频/图片里提取的时间点(界面时钟)+ 现象描述 + 用户操作 + APP 状态必须回捞进「现场时间线」表**并标注来源「TB附件:<文件名> <时间点>」,与 TB 评论来源并列、交叉验证。**完整性自检**(vision-bridge 任一通道可用时适用):「已分析附件数 == meta.json `files[]` 中视频/图片附件数」(漏个视为不合规,反偷懒第 23 条);复用场景下对比 `*_meta.prev.json` 识别新增附件;两通道均不可用时仅记录附件清单+关键帧落盘不适用本自检。**⚠️ 图片/视频绝不注入会话模型消息**(防错硬约束,见附件分析段)
+   - **TB 视频/图片附件研读（vision-bridge 任一通道可用则主动调,与 TB 评论研读并列）**：若 TB 缺陷源附件含视频(`*.mp4`/`*.mov`/`*.avi` 等)/图片(`*.png`/`*.jpg`/`*.jpeg` 等),**vision-bridge 可用时主动逐个调**(MCP 工具 `mcp__vision-bridge__analyze_media`,或 codex 等 MCP 工具未注入环境下用本地 CLI `<server.py 目录>/.venv/bin/python <server.py> --analyze-media <path>`——视频先用 ffmpeg 本地提取关键帧省钱,见「附件分析（含本地路径 + TB 源）与 ffmpeg 抽帧」段);或复用 §1 已落盘的附件分析结果但须独立回捞证据点。**视频/图片里提取的时间点(界面时钟)+ 现象描述 + 用户操作 + APP 状态必须回捞进「现场时间线」表**并标注来源「TB附件:<文件名> <时间点>」,与 TB 评论来源并列、交叉验证。**完整性自检**(vision-bridge 任一通道可用时适用):「已分析附件数 == meta.json `files[]` 中视频/图片附件数」(漏个视为不合规,反偷懒第 23 条);复用场景下对比 `*_meta.prev.json` 识别新增附件;两通道均不可用时仅记录附件清单+关键帧落盘不适用本自检。**⚠️ 图片/视频绝不注入会话模型消息**(防错硬约束,见附件分析段)
    - 产出「前序场景状态链 + 现场时间线」双表，写入 `log_analysis.md §3.1/§3.2`
 7. **阶段3 对抗根因分析**（复用 icode 步骤2 对抗模式：分析师+3质疑者+裁决优先级+诚实降级）：
    - **分析师提假设**：基于现场时间线+证据，提根因假设 H + 证据指针 E（具体日志行：节点+时间+原文）+ 置信度
@@ -194,7 +194,7 @@
      2. **否决/部分否决的依据**（实证，不得悄悄忽略）
      3. **在此基础上补了什么**（新证据或新假设）
      - 即使上游假说未中，也须显式记录"已评估但否决，依据 X"--诱导方向的假说不得被悄悄丢弃
-   - **代码事实验证门（必须先于对抗）**：根因假设 H 涉及的代码行/函数，**必须先用 Read 工具实读实际代码验证**（`grep -rn '<符号>'` 定位函数定义 / 找谁调用，再 Read 实读逐行核对；跨仓库/子仓库见 anti_laziness 第 21 条「跨仓库/子仓库检索」段）（如假设"mul_overflows 在1073741824*2边界失效"，则必须 Read calc.c 的 mul_overflows 函数实际实现，逐行核对分支逻辑）。**不得仅凭日志推断代码行为**——日志显示的是现象，代码才是事实。验证通过后才进入对抗分析
+   - **代码事实验证门（必须先于对抗）**：根因假设 H 涉及的代码行/函数，**必须先用 Read 工具实读实际代码验证**（`grep -rn '<符号>'` 定位函数定义 / 找谁调用，再 Read 实读逐行核对；跨仓库/子仓库见 反偷懒第 21 条「跨仓库/子仓库检索」段）（如假设"mul_overflows 在1073741824*2边界失效"，则必须 Read calc.c 的 mul_overflows 函数实际实现，逐行核对分支逻辑）。**不得仅凭日志推断代码行为**——日志显示的是现象，代码才是事实。验证通过后才进入对抗分析
    - **对抗分析**：完整对抗模式（3质疑者/subagent_type=general-purpose+schema 强制结构化/裁决优先级/诚实降级/证据回指/子代理失败处理）——**必须先 Read [references/adversarial.md](../references/adversarial.md) 完整内容**（不得凭概述/记忆执行）。**必须独立 spawn 3 个质疑者子代理**（证据质疑者/替代解释者/充分性质疑者各一，不得合并 spawn，少任一视为不合规；**禁用 Explore**，用 general-purpose + schema 强制结构化输出防截断）。本步骤分析对象 = 根因假设 H（已通过代码事实验证），证据指针指向日志行（节点+时间+原文）和代码行（file:line），输入契约喂质疑者「日志目录路径 + 现场时间线 + 假设 H + 证据指针 E + 代码路径 + **段零文档清单（步骤 4「段零文档与姐妹工程检查点」盘点结果）+ 姊妹工程搜索结果（§2.0 候选代码库路径列表）+ §2.2 跨模块枚举对照表（如已生成）+ limit 红线清单（前置 limit 红线检查点盘点结果，如存在）+ §2.1 演进证据块（设计意图证据采集产出）+ 结论级时效校验结果（步骤2 历史注入产出，如触发）**」，让质疑者也能检查"根因假设是否漏了关联工程的代码路径 / 是否与文档描述的设计意图矛盾 / 上游传来的状态值是否被本模块按错的语义解读（与 §2.2 对照表交叉核验）/ 根因假设是否与 limit 红线矛盾（违反约定红线本身即为高置信根因线索）"。**上游语义追问**：证据质疑者必须独立追问「上游 X 模块传过来的状态值 N，在 X 原生语义下到底是『终局态』还是『过渡态』？本模块消费者有没有按错的语义解读？」——若未追问即使其他维度齐全亦视为对抗不完整（漏掉最常见的「语义碰撞」型根因）。**设计意图对抗（防"把有意设计误判为缺陷"，替代解释者强制维度）**：替代解释者必须对主根因假设涉及的每一处代码行追问「当前行为是否是一个 commit 的**有意设计**（git blame + commit message + 关联文档回归日志 + 测试注释佐证）？若是有意设计，则'缺陷'定性不成立，真实缺陷应在**设计意图之外**（设计张力/边界/时序）寻找」——尤其当 §2.1 演进证据块标注"有意设计"或"待对抗确认"时，替代解释者必须用 git 演进证据证伪或佐证"缺陷"定性。**质疑者 prompt 组装后过 anti-coaching 扫描 + freshness 检查**（见 [references/adversarial.md](../references/adversarial.md)「输入契约」段）。
 
 > **spawn 等待规格**（引用 [references/adversarial.md](../references/adversarial.md)「显式等待 + 超时机制」段）：spawn 3 质疑者必须**显式等 verdict**——统一走 `Agent` **后台 spawn（`run_in_background: true`）拿 task_id + `TaskOutput(task_id, block=true, timeout=...)` 阻塞等**（唯一可机械执行超时的等待方式，超时把控制权交回主代理）。**禁止**：后台 spawn 后被动等任务通知（挂死/断连永无通知，看门狗失守）/ `run_in_background: false` 裸同步 spawn 当唯一等待手段（`Agent` 工具无 timeout 参数，挂死卡死主代理）/ spawn 后不等待直接进下一步。**超时档位**：首次 spawn 走 10 分钟档（`TaskOutput(block=true, timeout=600000)`，`BACKGROUND_WATCHDOG_SECONDS=600`，超时判疑似断连 → `TaskStop` → 前台重来）；前台重来/重试走 `TIMEOUT_SECONDS = 120` 档（可由 metadata.task_timeout_seconds 覆盖，超时先 `TaskStop` 停句柄再重试 1 次，换措辞 + 可换 subagent_type 兜底），二次仍超时走 `[未验证-子代理对抗失败]`。**禁止**未等待就标 `[未验证-子代理对抗失败]`——该标签留给「确认失败」的子代理，不得给「仍在跑/返回晚」的子代理（2026-07-29 实测踩坑）。判定状态四态枚举（`sync_ok` / `timeout_retry_used` / `still_failed_after_retry` / `env_no_spawn`）必须写入 `adversarial_verification` 字段便于审计（详见 [references/adversarial.md](../references/adversarial.md)「显式等待 + 超时机制」段）。**防 `max_output_tokens` 截断**：质疑者 spawn 须含输出预算硬约束（verdict 第一动作/禁回显/总输出≤2000 token 宽松上限勿压紧，见 adversarial.md「spawn 规格要求」第 4 条）。
@@ -268,7 +268,7 @@
    >   - **维度 4 日志反映设计**：根因-日志-修复对齐点（V 可观测性）+ 日志级别/风格
    > - **不是实施，只设计**：§7 是设计态证据，不写代码；步骤1 plan 读入并固化到 `03_plan_final.md` 的「修复方案设计」段，由 04_code 末尾 "Code Review Fix" 复检核对实施是否与设计一致
 
-> - **修复方案三档分级（反偷懒第 26 条）**：§7 修复设计 + `00_init.md` §3 新增需求点 + §0 一句话定性都按 A/B/C 三档呈现：A 档（根因修复，H/P/V 链，必做）/ B 档（兜底防御，每条标注"A 修复后是否触发"，可选增强）/ C 档（后续工单，进 §9 范围外）。§0 修复方向只写 A 档最小修复。A 档跨工程标注"跨工程：属 <X>，本工程不改，已转工单"。最小修复=只做 A 档（范围最小，A 管必改不管改多少）。详见 anti_laziness 第 26 条
+> - **修复方案三档分级（反偷懒第 26 条）**：§7 修复设计 + `00_init.md` §3 新增需求点 + §0 一句话定性都按 A/B/C 三档呈现：A 档（根因修复，H/P/V 链，必做）/ B 档（兜底防御，每条标注"A 修复后是否触发"，可选增强）/ C 档（后续工单，进 §9 范围外）。§0 修复方向只写 A 档最小修复。A 档跨工程标注"跨工程：属 <X>，本工程不改，已转工单"。最小修复=只做 A 档（范围最小，A 管必改不管改多少）。详见 反偷懒第 26 条
    - **转修复需求**：把根因 + 建议修复方向提炼成 `00_init.md`（**log 修复需求版**，结构 = 症状/根因/新增需求点/链路图，详见下方「`00_init.md` 结构」；需求=修复该根因），其中**第 4 节链路图：before = 阶段 1 状态链路图所示的「带 bug 当前链路」（标注故障点 file:line）、after = 修复后链路（在修复点标 `[+]`/`[~]`/`[-]`）、改动点清单对齐第 3 节新增需求点**，供 `/icode plan` / `/icode start` / `/icode fast`（均无参）复用进入步骤1
    - **根因多候选未实机区分 → 诊断先行（P0）**：若根因存在多个候选且**无日志铁证**区分（同一现象可由候选 A 或候选 B 触发），**不得**直接按主候选转需求定修法——把「加诊断日志以区分候选」作为 `00_init.md` 的**显式 P0 待办**（列入 §3 新增需求点 A 档首条），并在 §2 根因假设标注「候选未区分：A / B / …」，供 plan 阶段先证明是哪个候选再定修法（配合 [01_plan.md](01_plan.md)「根因候选区分前置」）。诊断日志应指向**能一票区分候选的观测点**（各候选在哪个日志/哪个分支产生不同行为），不得加"两边都打"的无区分日志。
 
@@ -277,7 +277,7 @@
 > - **log 阶段产出**：`00_init.md` = **修复需求**（"症状描述 + 根因假设 + 新增需求点 + 链路图 + **4 维度验证清单**"）
 >   - 1. 症状描述（"实际 X，预期 Y"）
 >   - 2. 根因假设（指向 log_analysis.md 的「5. 根因分析」）
->   - 3. 新增需求点（A/B/C 三档分列：A 根因修复/B 兜底可选/C 范围外，详见 anti_laziness 第 26 条）
+>   - 3. 新增需求点（A/B/C 三档分列：A 根因修复/B 兜底可选/C 范围外，详见 反偷懒第 26 条）
 >   - 4. 链路图（before = 带 bug 当前链路标故障点 file:line / after = 修复后链路标 `[+]`/`[~]`/`[-]` / 改动点清单对齐第 3 节）--before 取自阶段 1 状态链路图，一图流说明"修哪、怎么修"
 >   - **5. 4 维度验证清单**（**log 工单必填**，init 工单无此项）——把 `log_analysis.md` §7 的设计前置清单提炼进 `00_init.md`：
 >     - 维度 1：H（根因 file:line）→ P（计划修复点 file:line 占位）→ V（验证路径）三件套

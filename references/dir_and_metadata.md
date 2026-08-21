@@ -111,7 +111,7 @@ if [ "$REUSE" = "0" ]; then
 fi
 ```
 
-### 复用决策三档
+### 复用决策两档（仅 REUSE=2 / REUSE=0，无 REUSE=1）
 
 - `REUSE=2`（入口态有歧义）→ **必须问用户"复用 / 新建"**（无论命令是否带参——带参可能是补充旧需求也可能是新需求，区分不了，故一律问），按答复定；复用时将 `00_init.md` 作为步骤1主要需求输入（命令行参数作补充）
 - `REUSE=0`（非入口态）→ 带参新建、无参报错
@@ -207,7 +207,7 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
 
 索引存的是工单**当时的摘要**，但工程会迭代，老工单的 ADR/需求可能已被后续工单推翻。命中过时工单注入会误导。
 
-> **⚠️ Git 操作安全白名单（强制，违反即不合规）**：本段所有 git 调用必须**只读**，仅允许：`git rev-parse HEAD` / `git rev-parse --abbrev-ref HEAD` / `git rev-parse --git-dir` / `git merge-base --is-ancestor <A> <B>`（仅取退出码 0/1）/ `git status --porcelain` / `git log --oneline -1` / `git log --oneline --since=<N>.days -- <路径>`（只读；重复模式确定性佐证统计模块提交频次用，`--since`+路径过滤限定范围防大仓慢扫；**相对日期须用 `<N>.days` 格式**——`<N>d`/中文单位在此类 git 静默失效为不过滤，禁用；见 [thinking_detail.md](thinking_detail.md)「重复模式检查」段第 3 步） / `git log --oneline <commit>..HEAD -- <file>`（只读；结论级时效校验第 5 项列出某文件在 `created_commit` 之后的演进 commit，见「过时校验」段第 5 步；`<commit>..HEAD` 限定范围防大仓慢扫） / `git log -S <string> -- <file>`（只读；pickaxe 值演进追踪——按"某行关键值/哨兵值被增删"定位演进 commit，结论级时效校验第 5 步用） / `git cat-file -e <sha>` / `git worktree list --porcelain`（只读；resolve_project_id F1 worktree 归一化用，见「project_id 与 branch 语义」段）。**禁止** `checkout`/`switch`/`reset`/`stash`/`clean`/`commit`/`add`/`rm`/`rebase`/`merge`/`cherry-pick`/`push`/`fetch`/`pull`/`branch -D`/`tag -d` 等一切写操作与网络操作。stale 检测**只读工作树现状，绝不改工作树/索引/提交**--"checkout 变化时重评"指检测到**用户外部**改了 HEAD 后只读重评，**绝不由技能主动 checkout**。`-C {project_path}` 前缀用于跨工程工单切换目录执行只读命令，必需且允许；全部本地完成，离线可用。
+> **⚠️ Git 操作安全白名单（强制，违反即不合规）**：本段所有 git 调用必须**只读**，仅允许：`git rev-parse HEAD` / `git rev-parse --abbrev-ref HEAD` / `git rev-parse --git-dir` / `git merge-base --is-ancestor <A> <B>`（仅取退出码 0/1）/ `git status --porcelain` / `git log --oneline -1` / `git log --oneline --since=<N>.days -- <路径>`（只读；重复模式确定性佐证统计模块提交频次用，`--since`+路径过滤限定范围防大仓慢扫；**相对日期须用 `<N>.days` 格式**——`<N>d`/中文单位在此类 git 静默失效为不过滤，禁用；见 [thinking_detail.md](thinking_detail.md)「重复模式检测」段第 3 步） / `git log --oneline <commit>..HEAD -- <file>`（只读；结论级时效校验第 5 项列出某文件在 `created_commit` 之后的演进 commit，见「过时校验」段第 5 步；`<commit>..HEAD` 限定范围防大仓慢扫） / `git log -S <string> -- <file>`（只读；pickaxe 值演进追踪——按"某行关键值/哨兵值被增删"定位演进 commit，结论级时效校验第 5 步用） / `git cat-file -e <sha>` / `git worktree list --porcelain`（只读；resolve_project_id F1 worktree 归一化用，见「project_id 与 branch 语义」段）。**禁止** `checkout`/`switch`/`reset`/`stash`/`clean`/`commit`/`add`/`rm`/`rebase`/`merge`/`cherry-pick`/`push`/`fetch`/`pull`/`branch -D`/`tag -d` 等一切写操作与网络操作。stale 检测**只读工作树现状，绝不改工作树/索引/提交**--"checkout 变化时重评"指检测到**用户外部**改了 HEAD 后只读重评，**绝不由技能主动 checkout**。`-C {project_path}` 前缀用于跨工程工单切换目录执行只读命令，必需且允许；全部本地完成，离线可用。
 
 **校验方法**（对 top-N 命中工单，注入前逐条；`H = git -C {project_path} rev-parse HEAD`（该工单工程的当前 HEAD，每候选取一次；非 git 仓库/失败→`null` 走纯锚点兜底））：
 1. **项目路径校验**：`test -d {project_path}` 失败→置 `stale=true`+`stale_reason=path_gone`+`stale_checked_commit=H`，**跳过注入**（即使 hit_count 高也不注入），避免对已删除工程的引用注入。**worktree 场景（预期行为，非故障）**：`project_path` 指向 worktree 路径时，工单回流 `git worktree remove` 后 `test -d` 失败 → `path_gone` 属预期（工单已交付，索引留档即可，别当工程被删排查）；**复活路径** = 重新 `git worktree add` 同分支 → `project_path` 恢复存在 → 自动重入「可复活规则」再走锚点校验。**归档工单（archived 活跃态，worktree 工单）**：`archive_path` 非 null 时**跳过本步 project_path 校验**，改查 `test -d {archive_path}`（如 `~/.claude/icode_data/worktree_archive/<project_id>/<ticket_id>/`）——有效→该工单为 archived 活跃历史工单，**不标 stale**，产物源=archive_path（读 `01_plan.md` ADR/风险或 `log_analysis.md` 根因/结论），**跳过第 2/3/4/5 步**（无代码可校验，注入走历史参考语义——作启发、非当前代码事实，须 Grep/Read 实证，见「不盲信约束」），命中**正常续期 + 按 verdict 分流**（归档工单 `disproved`/`superseded` **降级**：`project_path` 失效无法 Grep/Read 当前代码验证证伪前提、`verdict_review_needed` 主动检测亦不可执行 → 改注 `verdict_reason`+`correct_direction` 作历史避坑提示 + ⚠️ 标注『基于已交付历史代码，未经当前代码实证，须用户判断前提是否仍适用』），待遇与主仓工单一致；archive_path 失效（归档也被删）→ 才置 `stale=true`+`stale_reason=path_gone`+跳过注入（真病态）。归档见 [worktree_isolation.md](worktree_isolation.md)「产物归档」。**备份工单（backup 活跃态，`/icode bak` 产物）**：`backup_path` 非 null 且 `test -d {backup_path}` 有效（如 `~/.claude/icode_data/project_backup/<project_id>/<快照>/.icode_output_N/`）的工单，`project_path` 失效（工程被删）时**重置 `stale=false`+`stale_reason=null`+`stale_checked_commit=null`**（backup 活跃态——即使此前标过 stale，备份是唯一可读快照，旧判据作废），产物源=backup_path（读完整工单产物：`01_plan.md` ADR/风险、`log_analysis.md` 根因/结论、`06_audit.md` 终审等），**跳过第 2/3/4/5 步**（历史快照，无当前代码可校验，注入走历史参考语义——作启发、非当前代码事实，须 Grep/Read 实证，见「不盲信约束」），命中**正常续期 + 按 verdict 分流**（`disproved`/`superseded` 降级注避坑提示 + ⚠️『基于备份历史代码，未经当前代码实证，须用户判断前提是否仍适用』），待遇与主仓工单一致；**工程优先**：`test -d {project_path}` 有效（工程恢复/重克隆）永远优先走工程，备份仅兜底。backup_path 失效（备份也被删）→ 才置 `stale=true`+`stale_reason=path_gone`+跳过注入（真病态）。**与归档工单并行**：`archive_path`（worktree 归档）与 `backup_path`（手动备份）任一有效即活跃态，互不排斥。备份命令见 [steps/bak.md](../steps/bak.md)
@@ -220,15 +220,15 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
    - ① 从该工单产物（`log_analysis.md` 根因/证据 或 `01_plan.md` ADR）抽取其"核心结论涉及的代码行"（根因/证据里的 file:line）；
    - ② 对该行执行 `git -C {project_path} log --oneline <created_commit>..HEAD -- <file>` 或 `git -C {project_path} log -S <哨兵/关键值> -- <file>`（只读，白名单内），列出该工单 `created_commit` 之后的所有演进 commit；
    - ③ 逐条 Read commit message，判"缺陷回归"（fix/bugfix/regression/回退）还是"有意设计演进"（feat/preserve/sentinel/compat/兼容/哨兵/防…误判/避免…）；
-   - ④ 判定为"有意设计演进" → 该工单该条结论**降级为"历史快照"**，注入时附 ⚠️ 警告「该结论已被 `<commit>` 有意演进，当前行为以最新代码为准」，**不再作为根因判定/ADR 决策基准**；判定为"缺陷回归"或"无关演进" → 结论仍有效，正常注入。
+   - ④ 判定为"有意设计演进" → 该工单该条结论**降级为"历史快照"**，注入时附 ⚠️ 警告「该结论已被 `<hash>` 有意演进，当前行为以最新代码为准」，**不再作为根因判定/ADR 决策基准**；判定为"缺陷回归"或"无关演进" → 结论仍有效，正常注入。
    - **归档/备份工单豁免**：第 1 步 `archive_path`/`backup_path` 有效走读档的工单（`project_path` 失效，无当前代码可查演进史）跳过本步，注入按原有历史参考语义（作启发 + ⚠️ 标注"基于历史代码，未经当前代码实证"，见第 1 步归档/备份分支）。
    - **与第 4 项分工**：第 4 项管"当前代码现状是否符合结论描述"（抓"锚点在但语义已变"→ 置 stale 跳过）；本项管"演进史是否有意推翻结论"（抓"锚点在且语义看似在、但结论已被 commit 有意演进"→ **不置 stale**，降级为历史快照 + 警告继续注入，因代码本身没过时、结论仍可作历史参考）。两者互补，覆盖"过时"的两个维度。
 
-通过全部校验（归档工单 = 第1步 `archive_path` 有效即通过，跳过 2/3/4/5 步）→工单有效，**按 verdict 分流注入**（详见 SKILL.md「历史检索复用·注入分流」段）+ 续期（`stale_checked_commit=H` 在评估时已更新）。**第 5 步结论级时效校验命中"有意设计演进"的工单**：不置 stale、正常续期，但注入时附 ⚠️ 警告「该结论已被 `<commit>` 有意演进，当前行为以最新代码为准」（见上第 5 步④）：
+通过全部校验（归档工单 = 第1步 `archive_path` 有效即通过，跳过 2/3/4/5 步）→工单有效，**按 verdict 分流注入**（详见 SKILL.md「历史检索复用·注入分流」段）+ 续期（`stale_checked_commit=H` 在评估时已更新）。**第 5 步结论级时效校验命中"有意设计演进"的工单**：不置 stale、正常续期，但注入时附 ⚠️ 警告「该结论已被 `<hash>` 有意演进，当前行为以最新代码为准」（见上第 5 步④）：
 
-- `verdict="verified"`/`"unknown"`（含所有旧工单）：正常注入 ADR+风险章节（现状不变）；**`unknown` 强制走 A 层强化**（扩读 `00_init.md` 末轮对话摘要 + 对抗质疑三问 + ⚠️未验证警告，见 [thinking_core.md](thinking_core.md)「历史参考小节」）--这是旧工单（无 verdict）防误导的主防线，不依赖标注
+- `verdict="verified"`/`"unknown"`（含所有旧工单）：正常注入 ADR+风险章节（现状不变）；**`unknown` 强制走 unknown 强化层**（扩读 `00_init.md` 末轮对话摘要 + 对抗质疑三问 + ⚠️未验证警告，见 [thinking_detail.md](thinking_detail.md)「历史参考小节」）--这是旧工单（无 verdict）防误导的主防线，不依赖标注
 - `verdict="disproved"`（`verdict_review_needed=false`）：**反转注入避坑 + 证伪前提断言**--不注 ADR，改注 `verdict_reason`（作可验证断言）+ `correct_direction`，标 ⛔ 避坑；**强制新需求 Grep/Read 验证证伪前提是否仍成立**（如"某接口语义是重置"，须 Read 当前实现确认是否仍重置）：仍成立则确实避坑；已失效则方向或可重新考虑，提示 `/icode status --verdict` 标复活（unknown/verified）；`correct_direction` 缺失时降级注 ADR + ⛔ 警告（提示补标）
-- `verdict="disproved"`/`"superseded"`（`verdict_review_needed=true`，证伪前提依赖已变化）：**降级对抗质疑**--不硬反转，走 unknown A 层（扩读末轮+对抗质疑三问）+ 注"曾证伪 + 证伪前提 + 依赖从旧 commit 到新 commit 已变化"提示，让新需求重新评估证伪前提是否仍成立；前提失效则该方向或可重新考虑，提示标复活。**防漏过后来又可行的方向**
+- `verdict="disproved"`/`"superseded"`（`verdict_review_needed=true`，证伪前提依赖已变化）：**降级对抗质疑**--不硬反转，走 unknown 强化层（扩读末轮+对抗质疑三问）+ 注"曾证伪 + 证伪前提 + 依赖从旧 commit 到新 commit 已变化"提示，让新需求重新评估证伪前提是否仍成立；前提失效则该方向或可重新考虑，提示标复活。**防漏过后来又可行的方向**
 - `verdict="superseded"`：注替代指针 `superseded_by` + `correct_direction` + 替代工单摘要，标 🔁 已替代
 
 > **stale 与 verdict 正交**：`stale=true` 优先跳过注入（技术过时，锚点都没了，连避坑都不用）；`stale=false` 才按 verdict 分流。verdict 抓"方向证伪"（锚点在但方向错），stale 抓"技术过时"（锚点没了），互补不重叠。
@@ -241,7 +241,7 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
 - `stale=true` 的工单：**不再注入**（检索时跳过），但仍保留在索引（不删，留追溯）
 - stale 工单默认**不被段一粗筛命中**（关键词交集前即排除）、不参与 hit_count 续期（不再被命中）--但有**可复活例外**（见下）
 - stale 由五种途径触发，每种填对应 `stale_reason`：①检索命中注入前被动校验失败（`path_gone`/`checkout_mismatch`/`anchor_gone`/`semantic_deviation`）；②每次写索引后主动扫描最旧 K 条锚点失效（`anchor_gone`）；③僵尸未完成态超时降级（`timeout`，见「索引淘汰规则」规则 5）
-- **软 stale vs 硬 stale**：`checkout_mismatch`/`anchor_gone`/`path_gone`/`semantic_deviation` 为**软 stale**（依赖当前 checkout，可复活）；`timeout` 为**硬 stale**（活动维度，checkout 变化不复活，下次写索引刷新活动时自然解除）
+- **软 stale vs 硬 stale**：`checkout_mismatch`/`anchor_gone`/`path_gone`/`semantic_deviation` 为**软 stale**（依赖当前 checkout，可复活）；`timeout` 为**硬 stale**（活动维度，checkout 变化不复活，下次写索引刷新活动时自然解除；**注意此处"硬"方向与 verdict 的"硬复活"相反**——"硬 stale"的"硬"=timeout 强制不可复活，"硬复活"的"硬"=确定性可复活，见 verdict_premise_deps 字段）
 - **可复活规则**（解决 checkout 假阳性，核心）：检索段一前对每条 stale 工单取 `H = git -C {project_path} rev-parse HEAD`（该工单工程当前 HEAD）；对每条 `stale=true` 且 `stale_reason != timeout` 且 `stale_checked_commit != H` 的工单，**临时置 `stale=false`** 让其重入段一候选集，按「过时校验」重评。重评仍失败→`stale=true` 且更新 `stale_checked_commit=H`（同 HEAD 下次不再重评，省算）；用户 checkout 回正常→`stale_checked_commit != H` 成立→自动复活重评。**临时 checkout 旧提交误判的 stale，回正常 HEAD 后自动复活，不再永久粘住**（每条 stale 工单一次 `git -C` 调用 <10ms，stale 通常少数；git 调用只读，见「过时校验·Git 操作安全白名单」）
 - 若该工单产物被刷新（如重跑步骤6终审）：**步骤6 终审刷新索引时已自动重置** `stale=false`+`stale_reason=null`+`stale_checked_commit=null`（旧 stale 判据失效，下次检索按当前 `01_plan` 锚点重评）；其他产物刷新场景可手动重置
 
@@ -304,7 +304,7 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
 
 > **verdict 字段族**（方向结论，可选，详见 SKILL.md「verdict 字段族」）：所有入口模板均可选；**创建时可不写**（缺失视为 `"unknown"`，向后兼容旧 metadata）；需标注时回填 `verdict`+`verdict_reason`+`correct_direction`+`verdict_source`+`verdict_at`（`superseded` 额外填 `superseded_by`；`disproved`/`superseded` 可选填 `verdict_premise_deps` 支持硬复活），途径见 `/icode status --verdict`（[steps/status.md](../steps/status.md)）/ 步骤6 终审（[steps/06_audit.md](../steps/06_audit.md)）/ 批量识别扫描。**索引首次写入时 verdict 固定 `"unknown"`、关联字段 null、premise_deps `[]`/review_needed `false`**（见「全局索引写入」段）
 
-> **`scope_escalations` 字段族**（范围升级记录，可选，默认 `[]`，详见 SKILL.md「可选字段」段）：review/deepcheck/audit 阶段发现**计划之外**的新问题/新架构信号（新增持久化协议、全局门控、生命周期语义、跨职责边界组件、新故障模型）拟纳入实施范围时的分类记录。**审查采纳 ≠ 实施授权**：`A_now` 须直接复发证据链（无证据回指默认 `B_confirm` 需用户确认）/ `B_confirm` 未获确认不得进入编码 / `C_follow_up` 进范围外 / `refuted` 丢弃。所有入口模板可选；创建时不写（缺失视为 `[]`，向后兼容）。写入点：review 2.5.6 over-design 审查 / deepcheck over-design 复检 / audit 终审；细则见 anti_laziness 第 33 条
+> **`scope_escalations` 字段族**（范围升级记录，可选，默认 `[]`，详见 SKILL.md「可选字段」段）：review/deepcheck/audit 阶段发现**计划之外**的新问题/新架构信号（新增持久化协议、全局门控、生命周期语义、跨职责边界组件、新故障模型）拟纳入实施范围时的分类记录。**审查采纳 ≠ 实施授权**：`A_now` 须直接复发证据链（无证据回指默认 `B_confirm` 需用户确认）/ `B_confirm` 未获确认不得进入编码 / `C_follow_up` 进范围外 / `refuted` 丢弃。所有入口模板可选；创建时不写（缺失视为 `[]`，向后兼容）。写入点：review 2.5.6 over-design 审查 / deepcheck over-design 复检 / audit 终审；细则见 反偷懒第 33 条
 >
 > **`delivery_verdict` 字段族**（验证完成度，可选，默认 `null`，详见 SKILL.md「可选字段」段）：与 `verdict` 方向结论**正交**——`verdict` 答"方案方向对不对"（verified/disproved/superseded/unknown），`delivery_verdict` 答"验证动作完成没"（verified/verification_pending/blocked/not_applicable）。由步骤6 终审按 `test_outcome` / 实机验证 / O-6 用户自担验证豁免情况回填；**`status=completed` 不自动等价于 `delivery_verdict=verified`**。字段缺失视为 `null`（向后兼容，读作"未回填"）。展示：status 模式一「验证结论」行 + readme 交付措辞
 >
@@ -455,11 +455,11 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
 
 ## 重复模式状态（patterns.json，跨工单聚合）
 
-> 治「命中多相似工单 → 武断判重复重构 + 反复重构循环」：检索命中簇出现重复信号时，记录"疑似重复模式 + 曾重构事实 + 上次实事求是评估结论"。状态是**历史事实参考，非跳过闸门**——每次命中仍按当下代码实证实事求是评估，不因"标记过已重构"机械跳过（消费逻辑见 [thinking_detail.md](thinking_detail.md)「重复模式检查」段）。
+> 治「命中多相似工单 → 武断判重复重构 + 反复重构循环」：检索命中簇出现重复信号时，记录"疑似重复模式 + 曾重构事实 + 上次实事求是评估结论"。状态是**历史事实参考，非跳过闸门**——每次命中仍按当下代码实证实事求是评估，不因"标记过已重构"机械跳过（消费逻辑见 [thinking_detail.md](thinking_detail.md)「重复模式检测」段）。
 
 ### 文件
 
-`~/.claude/icode_data/patterns.json`（不存在则创建 `{"version":"1","updated_at":"当前时间","patterns":[]}`）。**跨工单全局共享**，不随工单目录走。由检索注入消费端（thinking_detail「重复模式检查」段）读写。
+`~/.claude/icode_data/patterns.json`（不存在则创建 `{"version":"1","updated_at":"当前时间","patterns":[]}`）。**跨工单全局共享**，不随工单目录走。由检索注入消费端（thinking_detail「重复模式检测」段）读写。
 
 ### 条目结构（每个 pattern）
 

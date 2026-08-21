@@ -187,7 +187,7 @@ Free 阶段一次性完整覆盖全部 15 个角度。
 - **现有同类实现对比**（防重复实现，独立于上面三类代码-计划 diff）：对逆推出的每个**新增功能/新增接口**，按 [references/necessity_check.md](../references/necessity_check.md) 全工程检索等价实现（`rg -in '<需求关键词>'` + Read 命中处行为链）。发现等价实现 → 标 issue，**计入 has_issues**——**这层对比专门抓"代码与计划一致、但计划本身是重复实现（已有模块已覆盖该功能）"的情况**，diff 三要素全部发现不了；判定要点：新功能"写出来也不会执行到（被已有入口/拦截先返回挡掉）" = 重复，比"功能近似"更确凿
 - **首次激活路径双侧校验一致性检查**（独立于上面代码-计划 diff）：当 Reverse 逆推出的功能涉及**跨层接口 / IPC** 时，核对**跨层接口双侧校验一致性**。定义与完整核对清单见 [references/first_activation_path.md](../references/first_activation_path.md)。对每个接口 action：grep 历史日志确认是否有**成功调用记录**；若无（首次激活路径）→ Read 请求方入参校验 + Read 接收方校验逻辑，逐字段对比两侧对同一字段的接受值要求是否一致 → 不一致标 issue，**计入 has_issues**。**软信号**：历史日志可能不全，命中只触发核对，不阻断。**与代码-计划 diff 的区别**：上面 diff 抓"代码 vs 计划"偏离，本检查抓"**代码与计划一致、但两者都基于有 bug 的首次激活路径**"——计划本身是错的，diff 发现不了
 
-- **blast-radius 三链自检（新增）**：对 `code_files` 每个文件，用 `grep -rn '<符号>('` 对每个改动符号找所有引用点（跨仓库/子仓库见 anti_laziness 第 21 条「跨仓库/子仓库检索」段）。grep 结果作为"修改影响面证据"，与 Reverse 逆推的"跨文件调用关系"段互相印证。任一链 0 命中即不合规（未扫 = 自欺）。
+- **blast-radius 三链自检（新增）**：对 `code_files` 每个文件，用 `grep -rn '<符号>('` 对每个改动符号找所有引用点（跨仓库/子仓库见 反偷懒第 21 条「跨仓库/子仓库检索」段）。grep 结果作为"修改影响面证据"，与 Reverse 逆推的"跨文件调用关系"段互相印证。任一链 0 命中即不合规（未扫 = 自欺）。
   1. **caller 链**：`grep -rn '<改动的 func/类/全局符号>(' <project>` —— 列出所有 caller（含行号）
   2. **import 链**：`grep -rn '<改动的 header>' <project>` 或等价的 `import/from` 检索 —— 列出所有依赖入口
   3. **test 链**：`grep -rln '<符号\|<路径>' <test 目录>` —— 列出覆盖测试；无测试时显式标 `[无测试覆盖-符号 X]`，**不静默跳过**（让 has_issues 路径可触发）
@@ -264,14 +264,14 @@ Free 阶段一次性完整覆盖全部 15 个角度。
    **ripgrep 不可用**（未装）：整个 §9.4 跳过
 3. **分类阶段**（如 categorized.json 不存在）：调 `mcp__cheap-research__extract`（haiku）**双层分类**（parent + sub）→ `dedup/categorized.json`。**双层 schema** + **后处理映射（只映射 parent_category）** 同 §2.5.7 第 3 步。
 4. **拆分阶段**：Claude 直接做——**按 sub_category 拆分** `categorized.json`（不按 parent_category——避免跨家族合并），**仅保留 3+ 函数的 sub_category**（< 3 不值得分析），输出 → `dedup/duplicates/<sub_category>.json`
-5. **找重复阶段（高质量模型逐类）**：同 §2.5.7 第 5 步——**简化 schema** + **主代理 try 两种解析格式**（A: JSON 数组字符串; B: 分隔符纯文本）+ **用 categorized.json 回填 file/line**
+5. **找重复阶段（高质量模型逐类）**：同 §2.5.7 第 5 步——**简化 schema** + **主代理 try 链式解析**（同 §2.5.7 第 5 步的 5 种格式 A/B/C/D/E）+ **用 categorized.json 回填 file/line**
 6. **报告生成**：在 05_deepcheck.md 末尾追加 `## 语义重复检测报告（§9.4 完整全量）` 段，按 HIGH/MEDIUM/LOW 三段展示：
 
    ```markdown
    ## 语义重复检测报告（§9.4 完整全量）
 
-   **函数总数**：{N} | **扫描类别数**：{K}/25 | **生成时间**：{ISO timestamp}
-   **复用**：dedup_categorized.json {复用/重跑}
+   **函数总数**：{N} | **扫描类别数**：{K}/23 | **生成时间**：{ISO timestamp}
+   **复用**：categorized.json {复用/重跑}
 
    ### HIGH 置信度重复（建议立即合并）
    | Intent | Category | 推荐保留 | 应删除函数 |
@@ -303,7 +303,7 @@ Free 阶段一次性完整覆盖全部 15 个角度。
 
 **反偷懒第 21 条合规**：步骤末尾在思考块输出 `cheap-research 调用: extract x {1+1+K}` 或对应降级声明，**无记录 = 违规**。
 
-**与 §5 A6 独立 3 质疑者 spawn 规则的衔接**：dedup 的 issue **不进入** Free 阶段 A6 的 3 质疑者独立 spawn 流程。理由：dedup 用高质量模型单次推理 + cheap-research schema 强约束 + 22 类预定义约束 = 等效"强约束推理"，质量足够；重复 3 次 spawn 成本翻 3 倍但收益边际递减。这是 §9.4 阶段的**显式例外**——A6 规则继续约束 Free 阶段深检 issue。
+**与 §5 A6 独立 3 质疑者 spawn 规则的衔接**：dedup 的 issue **不进入** Free 阶段 A6 的 3 质疑者独立 spawn 流程。理由：dedup 用高质量模型单次推理 + cheap-research schema 强约束 + 23 类预定义约束 = 等效"强约束推理"，质量足够；重复 3 次 spawn 成本翻 3 倍但收益边际递减。这是 §9.4 阶段的**显式例外**——A6 规则继续约束 Free 阶段深检 issue。
 
 **与循环控制段的关系**：dedup 是独立扫描，不参与 Reverse/Fixed/Free 的整体循环。dedup 内部修复循环（has_issues=true 时）：修复**重复函数本身**（合并为 survivor，删除其他实现）→ 重新调 ripgrep 抽新 catalog → 重新调高质量模型找剩余重复。修完 → 写 `dedup_report.md` + 追加 05_deepcheck.md 摘要 → 进入原「循环控制」段继续 Reverse/Fixed/Free 的整体判定。**绝不可让 dedup 的 issue 触发 Reverse/Fixed/Free 重跑**——重复函数修复与计划/代码逆推无关。
 

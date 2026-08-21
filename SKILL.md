@@ -1,6 +1,6 @@
 ---
 name: icode
-description: 端到端编码工作流（步骤 0~6，含可选需求初稿步骤与日志根因分析入口），支持分步手动调用：/icode help (帮助), /icode install (MCP 环境检查+一键安装), /icode init [<粗略需求>] (需求初稿), /icode log [零散信息...] (日志根因分析→转修复需求), /icode start <需求> (全流程), /icode fast <需求> (精简全流程), /icode plan <需求> (计划), /icode review [N] (审查), /icode merge (定稿), /icode code (编码), /icode deepcheck (复检), /icode audit (终审), /icode patch [问题或新需求] (追加修改：主流程后/中途继续改), /icode doc [自然语言] (工程级知识库生成), /icode limit [自然语言] (项目约束红线), /icode readme (交付报告+跨领域简报), /icode ppt [自然语言] (PPT生成：项目/模块/本次功能开发/本次BUG修复), /icode status (工单状态), /icode list [关键词] (跨工程工单查找), /icode bak [--project <path>] (工程工单手动备份到全局，删工程前安全网)。**新建工单入口支持 `--worktree` opt-in**（init/log/start/plan/fast 加 `--worktree` 即用 git worktree 隔离；默认原地不弹问）
+description: 端到端编码工作流（步骤 0~6，含可选需求初稿步骤与日志根因分析入口），支持分步手动调用：/icode help (帮助), /icode install (MCP 环境检查+一键安装), /icode init [<粗略需求>] (需求初稿), /icode log [零散信息...] (日志根因分析→转修复需求), /icode start <需求> (全流程), /icode fast <需求> (精简全流程), /icode plan <需求> (计划), /icode review [N] (审查), /icode merge (定稿), /icode code (编码), /icode deepcheck (复检), /icode audit (终审), /icode patch [问题或新需求] (追加修改：主流程后/中途继续改), /icode doc [自然语言] (工程级知识库生成), /icode limit [自然语言] (项目约束红线), /icode readme (交付报告+跨领域简报), /icode ppt [自然语言] (PPT生成：项目/模块/本次功能开发/本次BUG修复), /icode status (工单状态), /icode list [关键词] (跨工程工单查找), /icode bak [--project <path>] (工程工单手动备份到全局，删工程前安全网), /icode worktree --update/--close/--reopen (git worktree 受控迁移/提交后收敛/显式恢复)。**新建工单入口支持 `--worktree` opt-in**（init/log/start/plan/fast 加 `--worktree` 即用 git worktree 隔离；默认原地不弹问）
 ---
 
 **版本**: v2.18.0
@@ -12,9 +12,9 @@ description: 端到端编码工作流（步骤 0~6，含可选需求初稿步骤
 - **步骤 0（可选）**：需求初稿对话，多轮迭代后落档为 `00_init.md`（含链路图：修改前/后链路 + 改动点，每轮动态更新），独立步骤、不自动串联到步骤1
 - **步骤 1~6**：拟定计划 → 审查 → 定稿 → 编码 → 复检 → 终审
 
-> **主流程步骤真源（防误用，唯一真源 = `steps/` 目录，启动强制 Read）**：步骤编号 / 产物文件名 / `completed_steps` 合法值**一律以 `steps/` 目录实时清单为准**（`ls steps/*.md` 完整列出，含主流程与辅助入口 log / doc / fast / limit / status / install / list / bak）——**本块仅示意，steps/ 演进后以目录为准，勿依赖写死**。`/icode start` / `/icode fast` / `/icode plan` 进入第一步**先 `ls steps/*.md`** 核对，不按"编码→测试→部署"直觉推断
+> **主流程步骤真源（防误用，唯一真源 = `steps/` 目录，启动强制 Read）**：步骤编号 / 产物文件名 / `completed_steps` 合法值**一律以 `steps/` 目录实时清单为准**（`ls steps/*.md` 完整列出，含主流程与辅助入口 log / doc / limit / status / install / list / bak，及精简全流程入口 fast）——**本块仅示意，steps/ 演进后以目录为准，勿依赖写死**。`/icode start` / `/icode fast` / `/icode plan` 进入第一步**先 `ls steps/*.md`** 核对，不按"编码→测试→部署"直觉推断
 > - 当前主流程示意（以 `ls steps/*.md` 为准）：`00_init → 01_plan → 02_review → 03_merge → 04_code → 05_deepcheck → 06_audit → 07_readme → 08_patch`；**不存在 `03_code` / `04_test` / `05_deploy`**（测试验证在 04_code 子段，部署/回归归 07_readme / 08_patch）
-> - 辅助独立步骤（doc / log / fast / limit / status / install / list / bak）不参与 1~6 推进
+> - 辅助独立步骤（doc / log / limit / status / install / list / bak）不参与 1~6 推进；**fast 为精简全流程（非辅助独立步骤）**——参与 1~6 但各步缩略（见命令表 fast 行）
 > - **强制**：产物命名 + `completed_steps` 写号**对照 `ls steps/*.md` 实时结果**（如入口含 `log` → 可写 `"log"`），不在清单 → 停下核对，禁止自造产物占位；steps/ 目录与本文档不一致时**以 steps/ 目录为准**
 
 ## 通用约定（对话语言）
@@ -31,7 +31,7 @@ description: 端到端编码工作流（步骤 0~6，含可选需求初稿步骤
 |------|------|-----------|
 | `[辅助]` `/icode help` | **帮助**：输出使用流程示例 | 否 |
 | `[辅助]` `/icode install` | **MCP 环境检查+一键安装（独立步骤）**：跑 `mcp/install.sh` 扫描所有 `mcp/*/install.sh`，每个子工程自检环境（venv/Node/npm）并缺啥补啥、注册到当前宿主（默认 Claude Code=`~/.claude.json`；`--client codex\|all` 可额外注册 Codex）。新 clone 仓库 / 新机器 / CI 初始化时跑一次。**不创建工单目录、不写工单 metadata、不参与 1~6 推进**（详见 [steps/install.md](steps/install.md)） | 否 |
-| `[入口]` `/icode log [零散信息...]` | **可选入口（日志根因分析）**：把"设备/服务日志+模糊症状"转为有对抗验证的根因报告，自动转修复需求 `00_init.md` 衔接步骤1。先基线检查（git diff/链路图）再日志侦察，对抗分析防确认偏误。**领域无关，每次调用都新建目录**（详见 [steps/log.md](steps/log.md)）。**支持 `--worktree`**（opt-in）；**支持 `--debug`**（独立孪生不入索引，详见 [references/debug_mode.md](references/debug_mode.md)） | ✅ 每次都新建 |
+| `[入口]` `/icode log [零散信息...]` | **可选入口（日志根因分析）**：把"设备/服务日志+模糊症状"转为有对抗验证的根因报告，自动转修复需求 `00_init.md` 衔接步骤1。先基线检查（git diff/链路图）再日志侦察，对抗分析防确认偏误。**领域无关，本地日志每次调用都新建目录**；**同 TB 单再次分析（TB 上有新评论/附件）除外**——提示"复用旧工单/新建"，复用则重拉最新+增量对抗（见方式D2）。（详见 [steps/log.md](steps/log.md)）。**支持 `--worktree`**（opt-in）；**支持 `--debug`**（独立孪生不入索引，详见 [references/debug_mode.md](references/debug_mode.md)） | ✅ 每次都新建（同 TB 单复用除外） |
 | `[入口]` `/icode init [<粗略需求>]` | **可选步骤0**：多轮对话产出 `00_init.md`（需求初稿，含链路图：before/after + 改动点，每轮动态更新）。**每次调用都新建目录，不复用、不续聊**（详见 [steps/00_init.md](steps/00_init.md)）。**支持 `--worktree`**（opt-in）；**支持 `--debug`**（独立孪生不入索引，详见 [references/debug_mode.md](references/debug_mode.md)） | ✅ 每次都新建 |
 | `[流程]` `/icode start <需求>` | **全流程（full 模式）**：创建/复用目录 → 步骤1→6 串联。步骤2 review 默认 3 轮 + 对抗验证，步骤5 deepcheck 三阶段循环（**复用规则见下**）。**支持 `--worktree`**（opt-in） | ✅ 创建新目录 / 复用 |
 | `[流程]` `/icode fast <需求>` | **精简全流程（fast 模式）**：plan → review(1轮无对抗) → merge → code → deepcheck(Reverse 单阶段) → audit。耗时约为全流程 65%，产物结构与 full 对齐（详见 [steps/fast.md](steps/fast.md)）。入口打印警告、用户自负其责。**支持 `--worktree`**（opt-in） | ✅ 创建新目录 / 复用 |
@@ -47,7 +47,7 @@ description: 端到端编码工作流（步骤 0~6，含可选需求初稿步骤
 > - `log` 调用：建新目录，写 `status=log_done` + `completed_steps=["log"]` 落盘
 > - 用户决定进入步骤1（调 `start`/`plan`）：**start/plan 调用时立即**把 status 从 `log_done` 切换为 `plan_done`，`completed_steps` 追加 `"1"`（与 init→start 复用规则一致）
 > - **不得在 log 阶段把 status 切换为 plan_done**——只有 start/plan 显式复用时才切换
-| `[流程]` `/icode review [N]` | **仅步骤2**：多轮循环审查 + 独立质疑者对抗验证（N=软上限轮数，默认3；如最后一轮仍有新问题自动延长 +2 轮，最多扩展至 `max(10, N×2)`）。`mode=="fast"` 时强制 1 轮无对抗 | 用最新目录 |
+| `[流程]` `/icode review [N]` | **仅步骤2**：多轮循环审查 + 独立质疑者对抗验证（N=软上限轮数，默认3；如最后一轮仍有新问题自动延长 +2 轮，最多扩展至 `max(10, N×2)`）。`mode=="fast"` 时**自动串联下**强制 1 轮无对抗；**fast 工单上显式 `/icode review N` 时按 N 轮跑**（N 优先级最高，用户显式 fast→full 升级意图，见字段 `max_rounds`） | 用最新目录 |
 | `[流程]` `/icode merge` | **仅步骤3**：合并审查意见定稿 | 用最新目录 |
 | `[流程]` `/icode code` | **仅步骤4**：落地编码实施（含**末尾 1.5 子段"Code Review Fix" 4 维度复检**——核对实施是否与计划设计的 4 维度一致。复检失败轻/重度分流回代码修复或重设计，不强制阻断；详见 [steps/04_code.md](steps/04_code.md)）**支持用户自担验证豁免（O-6）**：需求/对话出现"我自己编译 / 不要 commit / 我自己验证 / 不宣称已修复"等表达时——编译/测试验证降为可选（产物标注"编译由用户执行"）、禁止 `git commit/push`（收尾只出改动清单）、结论用词降级为"已完成代码修改，待实机验证"（不宣称"已修复"）；与 `/icode limit` 项目约束职责分离（用户工作模式偏好走行为分支，不入 limit） | 用最新目录 |
 | `[流程]` `/icode deepcheck` | **仅步骤5**：三阶段递进复检（Reverse → Fixed → Free）。`mode=="fast"` 时只跑 Reverse 阶段 | 用最新目录 |
@@ -57,8 +57,8 @@ description: 端到端编码工作流（步骤 0~6，含可选需求初稿步骤
 | `[工程]` `/icode doc [自然语言]` | **工程级知识库生成（独立步骤）**：扫描工程代码特征，生成/维护 `~/.claude/icode_data/project_docs/<project_id>/<branch>/` 下的工程知识库章节（架构/IPC/术语表/代码事实审计，**按分支分目录**，切分支跑 doc 不互相覆盖），**同时检测工程依赖的独立模块**（git submodule / `repo` 管理 / CMake FetchContent / monorepo / vendor / 用户配置，6 级优先级）并生成 `~/.claude/icode_data/module_docs/{key}/` 模块共享文档（**按仓库+分支 key 跨工程共享**，同一上游仓库同分支只一份），供 init/log/plan/start/fast 段零自动跨仓库检索注入。**去参数化**——目标工程与动作（全量/增量/新增）由自然语言识别。**v1 单级布局自动迁移**：检测到旧 `<project_id>/` 平铺布局时自动迁移到 `<project_id>/<branch>/`（保留所有字段 + 备份 `_meta.json.v1_migrated_from`，详见 doc.md 步骤 5）。**不创建工单目录、不写工单 metadata、不参与步骤1~6推进**（详见 [steps/doc.md](steps/doc.md)） | 否（写全局 `project_docs/` 和 `module_docs/`） |
 | `[配置]` `/icode limit [自然语言]` | **项目约束红线（独立步骤）**：定义和维护本工程的红线/约束/禁区。**主存**：`~/.claude/icode_data/limits/<project_id>.md`（全局，跨 checkout 共享，团队私有不上传）；**覆盖**：`<project_root>/.icode_output/limit.local/<project_id>.md`（单 checkout，自动 gitignore）。**local 完全覆盖 main**。**追加式演进**——每次调用增量追加新红线条目（编号自增），不覆盖、不 diff。对齐 `/icode doc` 模式：无描述→全局扫描显示当前约束（合并视图）；有描述→针对操作生成/追加新条目。**plan 步骤硬基线**——plan §3/§4/§6 引用 limit 条目作为设计依据（柔性提示：plan 入口检测不到 limit 建议生成但不阻断）；plan 步骤1「前置 limit 硬基线」为 init/start/fast 三入口读 LIMIT 的唯一汇聚点，读留痕落盘 `{ICODE_OUT_DIR}/limit_checkpoint.md`「阶段块：plan前置硬基线」（进入强制思考/设计前，先读索引→精读命中，缺失按未读）。**log 步骤对照清单**——log 前置 limit 红线检查点读取（**步骤1 末尾，先于步骤2 历史检索/段零文档注入**，防对照滞后），**先读索引→精读命中条目**的直接记录在进入步骤2 前向 `limit_checkpoint.md` **追加**「阶段块：log前置检查点」（步骤8 §2.3 / 步骤9 `limit_refs` 是事后产物，不能替代该读留痕），逐条对照根因假设是否违反约定红线，报告 §2.3 必填 + 引用红线经步骤 9.5 机器自检留痕（柔性提示：log 入口检测不到 limit 不阻断）。`limit_checkpoint.md` 为**工单级追加式**留痕文件，log 前置与 plan 前置各自带**阶段块标题锚点**（`阶段块：log前置检查点` / `阶段块：plan前置硬基线`）、互不覆盖。**不创建工单目录、不写工单 metadata、不参与步骤1~6推进**（详见 [steps/limit.md](steps/limit.md)） | 否（写全局 `limits/` + 工程根 `.icode_output/limit.local/`，自动 gitignore） |
 | `[交付]` `/icode ppt [自然语言]` | **PPT 生成（独立交付步骤）**：自然语言 → 真实 `.pptx`。**4 类场景**：**项目**（工程知识库/仓库结构）、**模块**（模块 doc 章节）、**本次功能开发**（最新工单产物：00_init/01_plan/03_final/04_code/06_audit）、**本次BUG修复**（log 根因 + 08_patch + 验证）。**内置 16 套模板**（`tools/ppt/templates/`，索引 INDEX.md，AI 先筛 2-3 个风格匹配候选、由用户挑选；也可直接点名模板），只替换文字不破坏排版，产出 `<project_root>/.icode_output/ppt/{工程简名}_{场景关键词}.pptx` + `edits.json` 可回溯（**不放进工单目录 `.icode_output_N/`**）。依赖 python-pptx（必需）；LibreOffice+poppler 仅渲染自检可选。**内容必须有来源（产物/知识库/git），禁止编造；无占位残留、禁止省略号截断**。内置模板**非商业授权**（仅供学习研究，见 tools/ppt/NOTICE）。**不创建工单目录、不写工单 metadata、不参与步骤1~6推进**（详见 [steps/ppt.md](steps/ppt.md)） | 否（写 `<工程根>/.icode_output/ppt/`，非工单产物） |
-| `[查询]` `/icode status` | **状态查询/verdict 标注/产物集校验**：默认只读查当前工单状态（含 `mode`/`verdict` 字段 + 全局索引工单数）；`--verdict <ticket_id> <verified\|disproved\|superseded> "<reason>" [--correct "<正确方向>"] [--source <machine_test\|review\|user\|auto_signal>]` 手动标注工单方向结论（双写 metadata+index，幂等覆盖刷新 `verdict_at`）；`--scan-verdict` 批量扫描 unknown 完成态工单的 00_init 末轮/06_audit 证伪信号并提示标注；`--validate [N]` 机器校验工单产物集完整性（6 主流程产物 + review_round_*.json 存在 + status 词表内 + code_files 非空，只读提示不自动改）（详见 [steps/status.md](steps/status.md)） | 否（默认只读；`--verdict`/`--scan-verdict` 写 metadata+全局索引，不写工程内源码文件） |
-| `[查询]` `/icode list [关键词]` | **跨工程工单查找**：从全局索引 `~/.claude/icode_data/index.json` 全量读取，表格化展示所有工单（ticker-id/project/status/workload/last-used/verdict/summary），支持 `--project <path>` / `--status <status>` / `--since <duration>` / `--limit N` / `--no-color` / `--include-stale` 过滤。**归档活跃工单**（`project_path` 失效但 `archive_path` 有效）PROJECT 列显示 `[path_gone→archive]`（归档+备份均有效时 `[path_gone→archive+backup]`；展示规则唯一真源 = [steps/list.md](steps/list.md)，本处不重述）。**纯查询不跳转**——不创建目录、不写 metadata、不改任何文件（详见 [steps/list.md](steps/list.md)） | 否（纯只读，跨工程） |
+| `[查询]` `/icode status` | **状态查询/verdict 标注/产物集校验**：默认只读查当前工单状态（含 `mode`/`verdict` 字段 + 全局索引工单数）；`--verdict <ticket_id> <verified\|disproved\|superseded> "<reason>" [--correct "<正确方向>"] [--source <machine_test\|review\|user\|auto_signal>] [--superseded-by <ticket_id>] [--premise-dep <module>:<commit>[:<path>]]...` 手动标注工单方向结论（双写 metadata+index，幂等覆盖刷新 `verdict_at`；`--superseded-by` 标替代工单、`--premise-dep` 标证伪前提依赖模块供复活判定，详见 [steps/status.md](steps/status.md)）；`--scan-verdict` 批量扫描 unknown 完成态工单的 00_init 末轮/06_audit 证伪信号并提示标注；`--validate [N]` 机器校验工单产物集完整性（6 主流程产物 + review_round_*.json 存在 + status 词表内 + code_files 非空，只读提示不自动改）（详见 [steps/status.md](steps/status.md)） | 否（默认只读；`--verdict`/`--scan-verdict` 写 metadata+全局索引，不写工程内源码文件） |
+| `[查询]` `/icode list [关键词]` | **跨工程工单查找**：从全局索引 `~/.claude/icode_data/index.json` 全量读取，表格化展示所有工单（ticket-id/project/status/workload/last-used/verdict/summary），支持 `--project <path>` / `--status <status>` / `--since <duration>` / `--limit N` / `--no-color` / `--include-stale` 过滤。**归档活跃工单**（`project_path` 失效但 `archive_path` 有效）PROJECT 列显示 `[path_gone→archive]`（归档+备份均有效时 `[path_gone→archive+backup]`；展示规则唯一真源 = [steps/list.md](steps/list.md)，本处不重述）。**纯查询不跳转**——不创建目录、不写 metadata、不改任何文件（详见 [steps/list.md](steps/list.md)） | 否（纯只读，跨工程） |
 | `[备份]` `/icode bak [--project <path>]` | **工程工单手动备份（独立步骤，删工程前安全网）**：把工程整个 `.icode_output/`（工单 `.icode_output_N/` + `.debug/` 调试孪生 + limit.local + ppt）快照到 `~/.claude/icode_data/project_backup/<project_id>/bak_<时间戳>/`，**可多次执行**（每次新快照，`rsync --link-dest` 硬链接去重未变文件），快照内写 `MANIFEST.json` + `<project_id>/latest` 符号链接指向最新。备份后更新全局索引 `backup_path` 字段——**工程被删后检索仍可从备份读完整工单产物（工程优先 → 备份兜底 → stale）**，`/icode list` 对 backup 活跃工单显示 `[path_gone→backup]`。**⚠️ 工程已删后无复制源、无法事后补救，必须先备份后删除**。不创建工单目录、不写工单 metadata、不参与步骤1~6推进（详见 [steps/bak.md](steps/bak.md)） | 否（写全局 `project_backup/` + 索引 `backup_path`） |
 | `[生命周期]` `/icode worktree --update [--to-ref <ref>]` | **受控迁移（独立步骤）**：把活动实现根从旧 checkout 迁移到基于最新/指定基线的**新** checkout。11 阶段状态机（inspect → prepare_super → prepare_subrepos → transfer_changes → verify_content → verify_build_source → verify_artifacts → switch → mark_old → cleanup → finalize），失败保留旧活动根、支持中断恢复与幂等重跑。**换基线必须走本命令**，禁止靠临时字段或人工约定静默改指针；含业务子仓时按整体事务处理（详见 [steps/worktree.md](steps/worktree.md)） | 否（改工单 metadata + 建新 checkout） |
 | `[生命周期]` `/icode worktree --close` | **提交后收敛（独立步骤）**：用户已自行 commit/push/merge 后的本地关闭——核验在线证据 → 活动 checkout 置 `submitted` → 安全清理 checkout → 记录 `submitted_baseline`。**不替用户 commit/push**，不删未提交唯一代码 / 未归档唯一产物，幂等可重跑（详见 [steps/close.md](steps/close.md)） | 否（改工单 metadata + 清理 checkout） |
@@ -227,7 +227,7 @@ description: 端到端编码工作流（步骤 0~6，含可选需求初稿步骤
 | 步骤 | 产物文件名 | 备注 |
 |------|-----------|------|
 | 1 | `01_plan.md` | 计划全文 |
-| 2 | `02_review.md` + `review_round_{N}.json` | 多轮审查；每轮有 new_issues / pending_verification / refuted_issues 任一非空才写 JSON |
+| 2 | `02_review.md` + `review_round_{N}.json` + `_review_summary.md` | 多轮审查；每轮有 new_issues / pending_verification / refuted_issues 任一非空才写 JSON；`_review_summary.md` 为步骤2 末尾压缩摘要（供 merge 消费，cheap-research 不可用时跳过，详见 [steps/02_review.md](steps/02_review.md) 步骤6） |
 | 3 | `03_plan_final.md` | **完整计划副本**（复制 `01_plan.md` 全文 + 审查采纳标记 + 末尾「实现偏差备忘」空段），不是元数据摘要 |
 | 4 | `04_code_review_fix.md` | 步骤4 末尾 1.5「Code Review Fix」复检产物（所有工单都触发，不论入口） |
 | 5 | `05_deepcheck.md` | 三阶段复检 |
@@ -330,7 +330,7 @@ fi
 #    - ⚠️ LLM 必须自己提炼、勿向用户索取；勿用占位符字符串（如直接输出 `<ticket-slug>` 而未提炼）执行创建
 ```
 
-**worktree 生命周期（迁移 / 关闭 / 重开）**：
+**worktree 生命周期（迁移 / 关闭 / 重开）**（**术语约定**：`checkout` = `worktree` 的实例 / 隔离实现根，二者同义互指——`worktree` 指机制/命令名，`checkout` 指其产出的实现根实例，下文按语境混用不再重复定义）：
 > **入口**：换基线走 `/icode worktree --update`；用户完成提交后收敛走 `/icode worktree --close`；completed 已 close 工单补充修改先 `/icode worktree --reopen` 再 patch（**禁止偷偷复活旧目录**）。三个命令均为独立步骤，见 [references/worktree_isolation.md](references/worktree_isolation.md) §3.9。
 > **不变量 I-1（单活动实现根）**：任意稳定时刻一个工单的活动 checkout 数 == 1 或 0（0 仅限原地/已 close）。两个 `state=active` = L1 阻断，禁止自动选择"较新的那个"。
 > **共享拓扑门禁**：code/patch/deepcheck/audit/readme/status --validate/带实机验证的 patch 分支，进入实际工作前必须调用统一检查器（[references/worktree_isolation.md](references/worktree_isolation.md) §3.8），禁止各自微改或绕过；拓扑冲突不得只记 L3 后继续编码。
@@ -342,9 +342,9 @@ fi
 
 **复用 / 创建新目录决策**（用于 `start` / `plan` / `fast`）：
 
-完整脚本见 [references/dir_and_metadata.md「复用 / 创建新目录决策」段](references/dir_and_metadata.md)（**真源**）。决策三档语义：
+完整脚本见 [references/dir_and_metadata.md「复用 / 创建新目录决策」段](references/dir_and_metadata.md)（**真源**）。决策两档语义（**仅 REUSE=2 / REUSE=0 两档，无 REUSE=1**）：
 
-> **复用决策三档**：`REUSE=2`（入口态有歧义）→ 必须问用户"复用 / 新建"，按答复定；`REUSE=0`（非入口态）→ 带参新建、无参报错。复用时将 `00_init.md` 作为步骤1主要需求输入（命令行参数作补充）。
+> **复用决策两档**：`REUSE=2`（入口态有歧义）→ 必须问用户"复用 / 新建"，按答复定；`REUSE=0`（非入口态）→ 带参新建、无参报错。复用时将 `00_init.md` 作为步骤1主要需求输入（命令行参数作补充）。
 
 **检测最新目录**（用于 `review`/`merge`/`code`/`deepcheck`/`audit`/`patch`/`status`/`readme`）：
 
@@ -442,14 +442,14 @@ fi
 - `archive_path`（worktree 字段族，缺省 `null`）：本工单核心产物归档目录（`~/.claude/icode_data/worktree_archive/<project_id>/<ticket_id>/`）。**06_audit 终审**标记 `status=completed` 且 `active_checkout` 非 null（缺失按 [references/worktree_isolation.md](references/worktree_isolation.md) §3.7 用 `worktree_path` 推导）时自动归档写入（见 [references/worktree_isolation.md](references/worktree_isolation.md)「产物归档」）；同步写全局索引条目。`archive_path` 非 null 且 `test -d` 有效的工单为 **archived 活跃历史工单（不标 stale）**：检索照常命中，`project_path` 失效（worktree remove）时从归档读 ADR/根因走历史参考，命中正常续期 + 按 verdict 分流，待遇与主仓工单一致（见 [references/dir_and_metadata.md](references/dir_and_metadata.md)「过时校验」归档工单）。缺省 `null` = 原地工单或未归档
 - `artifact_root`（生命周期字段族，缺省 `null`，见 [references/worktree_isolation.md](references/worktree_isolation.md) §3.5）：产物权威根（绝对路径）。默认推导 = `.ico_metadata.json` 所在工单目录；显式迁移产物时才写。**读写 ICode 产物一律走它**
 - `active_checkout`（生命周期字段族，缺省 `null`，§3.5）：活动实现根对象 `{path, branch, base_ref, base_commit, activated_at, state}`——当前允许修改、编译、测试和提交代码的**唯一** checkout。worktree 工单创建时构造（`base_ref`/`base_commit` = 创建基线，见「目录管理·worktree 决策与创建」）；迁移/close/reopen 时更新。原地工单保持 `null`
-- `checkout_history`（生命周期字段族，缺省 `[]`，§3.5）：checkout 历史数组 `{path, branch, base_commit, state, superseded_at, removed_at}`，`state` ∈ 词表（`superseded`/`submitted`/`removed`/`abandoned`，见 §3.6）。迁移/close/reopen 时追加
+- `checkout_history`（生命周期字段族，缺省 `[]`，§3.5）：checkout 历史数组 `{path, branch, base_commit, state, superseded_at, removed_at}`，`state` ∈ 词表（**已完成态子集 4 词**：`superseded`/`submitted`/`removed`/`abandoned`；完整 6 词词表含 `preparing`/`active`，见 §3.6）。迁移/close/reopen 时追加
 - `migration`（生命周期字段族，缺省 `null`，§3.5）：迁移事务对象 `{id, state, from_checkout, to_checkout, target_ref, started_at, last_completed_phase, subrepo_results, error}`。`/icode worktree --update` 写入，支持中断恢复与幂等（见 [steps/worktree.md](steps/worktree.md)）
 - `submitted_baseline`（生命周期字段族，缺省 `null`）：close 后用户提交到达的在线目标 commit（`/icode worktree --close` 写入，用 commit 不用分支名，见 [steps/close.md](steps/close.md)）。非 null = 本工单已 close（patch 前须 reopen）
 - `backup_path`（备份字段族，缺省 `null`）：本工单完整产物备份目录（`~/.claude/icode_data/project_backup/<project_id>/<快照>/.icode_output_N/`，整个工单目录原样复制）。**`/icode bak` 手动备份时写入**（按快照内 `.ico_metadata.json` 的 `ticket_id` 匹配），可多次备份并指向最新快照；同步写全局索引条目。`backup_path` 非 null 且 `test -d` 有效且 `project_path` 失效（工程被删）的工单为 **backup 活跃历史工单（不标 stale）**：检索命中时从备份读完整产物走历史参考，命中正常续期 + 按 verdict 分流，待遇与主仓工单一致（见 [references/dir_and_metadata.md](references/dir_and_metadata.md)「过时校验」备份工单）。**工程优先**：`project_path` 有效永远先读工程，备份仅兜底。缺省 `null` = 未备份。详见 [steps/bak.md](steps/bak.md)
 
 - `fix_tiers`（新增，可选，默认 `null`）：修复方案三档分级（反偷懒第 26 条）。`{"A": ["A1..."], "B": ["B1..."], "C": ["C1..."]}` 供 review/code/audit 核对实施范围。**由步骤1 plan §4.5 落盘**（每档 1-2 条一句话摘要），步骤2/4/6 核对实施范围时读取；字段缺失视为 `null`，从 `03_plan_final.md` §4.5 文本读（向后兼容旧 metadata）
 - `confirmed_B_fixes`（新增，可选，默认 `[]`）：步骤4 实施 B 档兜底修复前记录的**用户显式确认清单**（每条含 B 档内容简述）。**字段缺失视为 `[]`（向后兼容旧 metadata）**。仅当用户显式确认后才实施 B 档并记录；未确认的 B 档不实施
-- `scope_escalations`（新增，可选，默认 `[]`）：**范围升级记录**——review/deepcheck/audit 阶段发现**计划之外**的新问题/新架构信号（新增持久化协议、全局门控、生命周期语义、跨职责边界组件、新故障模型）拟纳入实施范围时的分类记录数组（每条 `{at, source_step, change_desc, classification, evidence, user_confirm, impact}`）。**审查采纳 ≠ 实施授权**：标 `A_now` 必须给**直接复发证据链**（回答"不做这一项、完成已有 A 项后，哪个已记录证据场景会再次产生原故障"），无证据回指**默认 `B_confirm`**（需用户确认，未获确认前不得进入编码，与 `confirmed_B_fixes` 机制一致）；`C_follow_up` 进范围外；`refuted` 丢弃。**字段缺失视为 `[]`（向后兼容旧 metadata）**。写入点见 [steps/02_review.md](steps/02_review.md) 2.5.6 / [steps/05_deepcheck.md](steps/05_deepcheck.md) over-design 复检 / [steps/06_audit.md](steps/06_audit.md) 终审；细则见 anti_laziness 第 33 条
+- `scope_escalations`（新增，可选，默认 `[]`）：**范围升级记录**——review/deepcheck/audit 阶段发现**计划之外**的新问题/新架构信号（新增持久化协议、全局门控、生命周期语义、跨职责边界组件、新故障模型）拟纳入实施范围时的分类记录数组（每条 `{at, source_step, change_desc, classification, evidence, user_confirm, impact}`）。**审查采纳 ≠ 实施授权**：标 `A_now` 必须给**直接复发证据链**（回答"不做这一项、完成已有 A 项后，哪个已记录证据场景会再次产生原故障"），无证据回指**默认 `B_confirm`**（需用户确认，未获确认前不得进入编码，与 `confirmed_B_fixes` 机制一致）；`C_follow_up` 进范围外；`refuted` 丢弃。**字段缺失视为 `[]`（向后兼容旧 metadata）**。写入点见 [steps/02_review.md](steps/02_review.md) 2.5.6 / [steps/05_deepcheck.md](steps/05_deepcheck.md) over-design 复检 / [steps/06_audit.md](steps/06_audit.md) 终审；细则见 反偷懒第 33 条
 - `delivery_verdict`（新增，可选，默认 `null`）：**验证完成度**（与 `verdict` 方向结论**正交**——`verdict` 答"方案方向对不对"，`delivery_verdict` 答"验证动作完成没"）。枚举：`verified`（目标改动已获得所要求的验证）/ `verification_pending`（流程文档已完成但目标验证未完成，如 O-6 用户自担验证豁免 / 实机验证待办 / 测试失败未通过）/ `blocked`（验证因外部条件无法继续）/ `not_applicable`（需求明确不需要该类验证）。由步骤6 终审回填（[steps/06_audit.md](steps/06_audit.md)），status 展示 + readme 交付措辞读取。**`status=completed` 不自动等价于 `delivery_verdict=verified`**——交付文案以 delivery_verdict 为准。**字段缺失视为 `null`（向后兼容旧 metadata，读作"未回填"）**
 - `scope_contract`（新增，可选，默认 `null`）：**范围契约**——plan 完成时冻结的语义基线（`{summary, at, source_step}`，summary 为"根因方向 + A/B/C 分档 + 验收边界"的一句话指纹）。供 review/merge/code/deepcheck/audit 核对用户输入或审查是否改变既有契约（O-4 语义冻结，见 [steps/02_review.md](steps/02_review.md) 前置校验）。**字段缺失视为 `null`（向后兼容旧 metadata，读作"未冻结"）**
 - `requirement_deltas`（新增，可选，默认 `[]`）：**用户语义变更记录**——自动流程期间用户输入改变计划语义（状态身份/生命周期、允许/拒绝条件、持久化一致性或回滚承诺、验收条件/调用方语义/真实环境验证场景）时的分类记录数组（每条 `{at, user_input_summary, changed_aspect, classification, impact, user_confirm}`）。`classification` 枚举：`clarification_only`（仅澄清，不改变实现）/ `a_now_with_evidence`（改变 A 档但已有直接证据）/ `needs_user_confirm`（需用户确认）/ `needs_replan`（需回到 plan/review 重新定稿）。**delta 未分流前不得继续扩大代码设计或验收矩阵**（冻结点）。**字段缺失视为 `[]`（向后兼容旧 metadata）**
@@ -565,7 +565,7 @@ test -f "{ICODE_OUT_DIR}/03_plan_final.md" && python3 -c "import json,sys; d=jso
 
 **痛点**：每次 `/icode` 都是冷启动，过往相似需求的计划/决策/踩坑无法被新需求复用。本机制在不破坏工程隔离、不撑爆上下文的前提下，让新需求能主动检索历史相似工单并定点注入参考。
 
-> **verdict 防误导（v2 新增）**：历史工单的核心方案可能已被实机证伪/取代，直接注入其 ADR 会把新需求带向错误方向。本机制给每个工单标 `verdict`（方向结论，与 `status` 流程态正交），注入按 verdict 分流：`disproved` **反转注入避坑**（不注 ADR，注证伪原因+正确方向）、`superseded` 注替代指针、`unknown`（含所有旧工单，**不依赖标注**）走 A 层强制强化（扩读 `00_init.md` 末轮+对抗质疑+⚠️警告）兜底。录入：`/icode status --verdict` 手动标 / 步骤6 终审回填 / `/icode status --scan-verdict` 批量识别提示。详见「注入形式·按 verdict 分流」+ [references/dir_and_metadata.md](references/dir_and_metadata.md)「过时校验·verdict 分流注入」+「续期·verdict 分流」段
+> **verdict 防误导（v2 新增）**：历史工单的核心方案可能已被实机证伪/取代，直接注入其 ADR 会把新需求带向错误方向。本机制给每个工单标 `verdict`（方向结论，与 `status` 流程态正交），注入按 verdict 分流：`disproved` **反转注入避坑**（不注 ADR，注证伪原因+正确方向）、`superseded` 注替代指针、`unknown`（含所有旧工单，**不依赖标注**）走 unknown 强化层（扩读 `00_init.md` 末轮+对抗质疑+⚠️警告）兜底。录入：`/icode status --verdict` 手动标 / 步骤6 终审回填 / `/icode status --scan-verdict` 批量识别提示。详见「注入形式·按 verdict 分流」+ [references/dir_and_metadata.md](references/dir_and_metadata.md)「过时校验·verdict 分流注入」+「续期·verdict 分流」段
 
 > **证据权威优先级（与"找文档参考但不盲信"并列的硬规则，防"以旧结论证伪最新代码"方向颠倒）**：所有注入入口（init/log/plan/start/fast）在**使用**历史工单结论 / 段零工程文档时，若与当前代码行为冲突，按如下权威顺序裁定——
 > **当前 HEAD 代码 + git 提交演进史（commit message / 回归日志 / 测试注释） > 历史工单结论 > 段零工程文档快照 > 用户症状描述**。
@@ -578,7 +578,7 @@ test -f "{ICODE_OUT_DIR}/03_plan_final.md" && python3 -c "import json,sys; d=jso
 - **只存指针和摘要，不存产物正文**。产物仍在各工程 `.icode_output/`，工程隔离不破坏。
 - **LRU 淘汰**（防 index.json 无限膨胀）：索引是检索缓存非档案。容量上限 200 条；`hit_count >= 20` 且 `verdict != "disproved"` 永久保留（被复用≥20 次的高价值工单；`disproved` 不永久保留，详见「索引淘汰规则」）；未完成态（init/log/review/deepcheck/code in_progress）默认不淘汰，但**超时降级**（`last_used_at` 超 30 天无更新->置 `stale=true`+`stale_reason=timeout` 解除保护、纳入可淘汰，不新增 status 值；timeout 为硬 stale 不复活）；超上限时在**可淘汰集**淘汰 `last_used_at` 最老的：① `hit_count < 20` 且 `stale=false` 完成态，或 ② `stale=true` 且 `stale_reason=timeout` 的超时降级僵尸（status 仍 in_progress）；**软 stale（非 timeout）保留不淘汰待复活**。另**主动 stale 扫描**：每次写索引顺带校验最旧 K 条锚点，失效置 `stale=true`。检索命中**原子同步**更新 `last_used_at`+`hit_count` 续期。淘汰只删索引条目，产物保留各工程。**排序**：tickets 数组按复合键 `(verdict_priority, hit_count)` 降序、同值按 `last_used_at` 降序（`verdict_priority`: verified>unknown>superseded>disproved，详见「索引淘汰规则」）（高价值近期项在前，段一粗筛扫 keywords 快+淘汰从末尾）。详见 [references/dir_and_metadata.md](references/dir_and_metadata.md)「索引淘汰规则」
 - **过时校验**（防注入过时信息）：索引存的是工单当时的摘要，工程迭代后老工单 ADR/需求可能已过时。**两处触发**：①检索命中准备注入前（被动）；②每次写索引触发淘汰后，主动 Grep 校验最旧 K 条代码锚点（主动）。锚点失效→置 `stale=true` 跳过注入（即使 hit_count 高也不注入）。stale 工单保留索引留追溯，不再续期，不再被段一粗筛命中。**project_docs 工程文档同样有过时校验**：段零注入前被动 stale 检测（命中 KEYS 文件位置或正文目录前缀即标 stale，降级注入不注正文）+ `/icode doc` 末尾主动 stale 扫描（全库锚点校验写 `_meta.json.stale_files`，见 [steps/doc.md](steps/doc.md) 步骤8）+ module_docs commit 一致性校验（同分支不同 commit 降级注入+警告）。**历史工单 stale 校验**：commit 上下文比对（`created_commit` vs 当前 HEAD：同提交高置信注入/后代跑锚点/祖先分叉软stale）+ top-N 注入前语义偏离 checklist（抓"锚点在但语义变"）+ **结论级时效校验**（当"当前代码行为与某条历史工单结论冲突"时，查该结论涉及的代码行在 `created_commit` 之后是否被 commit 有意推翻/演进——被有意演进则结论降级为"历史快照"+⚠️ 警告注入，不作根因/ADR 基准，详见 [references/dir_and_metadata.md](references/dir_and_metadata.md)「过时校验」第 5 步）+ stale 可复活（checkout 变化重评，解决临时旧提交误判）+ **Git 操作只读白名单**（禁 checkout/reset/commit 等写操作与网络操作，详见「过时校验·Git 操作安全白名单」）。详见 [references/dir_and_metadata.md](references/dir_and_metadata.md)「检索命中续期 + 过时校验」「索引淘汰规则·主动 stale 扫描」「project_docs 主动 stale 扫描」「段零·工程文档检索·步骤 3 commit 一致性校验」
-- **重复模式检测（跨工单聚合，治反复踩坑）**：段二命中簇 ≥2 或任一条 `hit_count ≥ 3` → 「历史参考」加轻提示「⚠️ 该模块/症状已出现 N 次，疑似重复模式」（软信号，不判结论、不自动重构）；命中簇 ≥2 时查 `~/.claude/icode_data/patterns.json` 模式状态（曾重构事实是参考非闸门）→ **Read/Grep 核对当前代码**（`project_path` 为 git 仓库时加 git 修复频次确定性佐证）→ 三态结论（已解决不重构 / 复发建议再重构并附粗略影响面 / 新根因重估）→ 回写状态（三态结论均提炼 `workaround` 上次方案，命中带出）。**提示敏感、重构收敛**：每次命中都轻提示，但重构决策每次实事求是评估（大多结论是已解决），不因命中多武断重构、也不因标记过机械跳过。详见 [references/thinking_detail.md](references/thinking_detail.md)「重复模式检查」段 + [references/dir_and_metadata.md](references/dir_and_metadata.md)「重复模式状态」段
+- **重复模式检测（跨工单聚合，治反复踩坑）**：段二命中簇 ≥2 或任一条 `hit_count ≥ 3` → 「历史参考」加轻提示「⚠️ 该模块/症状已出现 N 次，疑似重复模式」（软信号，不判结论、不自动重构）；命中簇 ≥2 时查 `~/.claude/icode_data/patterns.json` 模式状态（曾重构事实是参考非闸门）→ **Read/Grep 核对当前代码**（`project_path` 为 git 仓库时加 git 修复频次确定性佐证）→ 三态结论（已解决不重构 / 复发建议再重构并附粗略影响面 / 新根因重估）→ 回写状态（三态结论均提炼 `workaround` 上次方案，命中带出）。**提示敏感、重构收敛**：每次命中都轻提示，但重构决策每次实事求是评估（大多结论是已解决），不因命中多武断重构、也不因标记过机械跳过。详见 [references/thinking_detail.md](references/thinking_detail.md)「重复模式检测」段 + [references/dir_and_metadata.md](references/dir_and_metadata.md)「重复模式状态」段
 
 **写索引时机**（**`keywords` 是段一粗筛的检索索引，所有入口首次写索引时必须填 ≤8 个技术关键词、不得为空**——空 keywords 的工单无法被粗筛命中，等于检索盲区）：
 - `/icode log` 产出 `log_analysis.md` + `00_init.md` 后：**首次生成 `ticket_id`**（`{工程名}-{N}`，冲突加 hash 后缀）并回填 metadata，写入 `requirement_summary`（根因摘要）+`requirement_points`（修复要点）+`keywords`（≤8个，从根因/症状提炼）+`has_00_init=true`+`status=log_done`+`last_used_at=当前`+`hit_count=0`+`stale=false`+`stale_reason=null`+`stale_checked_commit=null`+`created_commit`（`git rev-parse HEAD` 只读，非git仓库为null）+`created_branch`+`tb_source`（{lib,num,pid,label}，从 metadata 读，无 TB 源时 null），**写后执行LRU淘汰 + 主动 stale 扫描**
@@ -605,10 +605,11 @@ test -f "{ICODE_OUT_DIR}/03_plan_final.md" && python3 -c "import json,sys; d=jso
    **段二·精读（调 `mcp__cheap-research__retrieve_similar`）**：只把候选集的 `keywords + requirement_points`（约 50-100 token/条，10 条 ≤1K token）喂给 cheap-research 的 `retrieve_similar` 工具，传入 `query`=当前需求/症状、`candidates`=候选集（每项含 `id`/`summary`/`keywords`/`status`）、`k`=候选集总数（确保所有候选都被评分，不截断）。返回带 `score` 的排序结果。按分数选 top-N 命中（N 由梯度规则定，见下）。**降级**（cheap-research 不可用）：退回主代理手动打分（`Agent(model="haiku")` 兜底，见 [references/mcp_integration.md](references/mcp_integration.md) ⑦ 段），不阻塞流程。
 
 2. **过时校验 + 命中续期**（对 top-N 命中工单，注入前逐条；`H = git -C {project_path} rev-parse HEAD`（每候选一次）；详见 [references/dir_and_metadata.md](references/dir_and_metadata.md)「过时校验」）：
-   - **项目路径校验**：`test -d {project_path}` 失败->先查备份回退：`backup_path` 非 null 且 `test -d {backup_path}` 有效（`/icode bak` 产物）->该工单为 **backup 活跃态（重置 `stale=false`+`stale_reason=null`+`stale_checked_commit=null`）**，产物源=backup_path（读完整产物：`01_plan.md` ADR/风险、`log_analysis.md` 根因/结论等），跳过 commit/锚点/语义校验（历史快照走历史参考语义，须 Grep/Read 实证），命中正常续期 + 按 verdict 分流；`backup_path` 也失效->`stale=true`+`stale_reason=path_gone`，跳过注入（与 `archive_path` **并行判定**，任一有效即活跃态；**工程优先**：`project_path` 有效永远先走工程）
+   - **项目路径校验**：`test -d {project_path}` 失败->先查备份回退：`backup_path` 非 null 且 `test -d {backup_path}` 有效（`/icode bak` 产物）->该工单为 **backup 活跃态（重置 `stale=false`+`stale_reason=null`+`stale_checked_commit=null`）**，产物源=backup_path（读完整产物：`01_plan.md` ADR/风险、`log_analysis.md` 根因/结论等），跳过 commit/锚点/语义/结论级时效校验（历史快照走历史参考语义，须 Grep/Read 实证），命中正常续期 + 按 verdict 分流；`backup_path` 也失效->`stale=true`+`stale_reason=path_gone`，跳过注入（与 `archive_path` **并行判定**，任一有效即活跃态；**工程优先**：`project_path` 有效永远先走工程）
    - **commit 上下文校验**（`created_commit` 非 null）：`H==created_commit`->高置信注入快路径；`git merge-base --is-ancestor {created_commit} {H}`：退出0->正常演进进锚点校验；退出1->`stale=true`+`stale_reason=checkout_mismatch`（软stale，checkout变化可复活）；退出128（commit不可达）->视同null进锚点校验
    - **代码锚点校验**：Grep 该工单工程 `{project_path}` 的 ADR 锚点是否仍存在；失效->`stale=true`+`stale_reason=anchor_gone`，跳过注入
    - **语义偏离校验**（仅对已决定注入的 top-N≤3 条）：Read 该工单工程 `{project_path}` 的锚点代码按偏离 checklist 判 ADR 前提（签名/返回值边界/调用关系）是否仍成立；偏离->`stale=true`+`stale_reason=semantic_deviation`，跳过注入（抓"锚点在但语义变"）
+   - **结论级时效校验**（当"当前代码行为与某条历史工单结论冲突"时）：查该结论涉及的代码行在 `created_commit` 之后是否被 commit **有意**推翻/演进（`git log -S <锚点> {created_commit}..HEAD` 等只读命令）——被有意演进则结论降级为"历史快照"+⚠️ 警告注入，不作根因/ADR 基准；无演进证据（缺陷回归）则维持注入。判据：**HEAD 代码 + git 演进历史 > 历史结论 > 文档快照 > 用户症状**（详见 [references/dir_and_metadata.md](references/dir_and_metadata.md)「过时校验」第 5 步 + 证据权威优先级）
 
    **命中续期**：全部校验通过的工单，**按 verdict 分流续期**——`verified`/`unknown`（含旧工单）原子同步更新 `last_used_at`=当前时间、`hit_count`+=1 写回（两字段同一次写回，不得只更其一--详见 [references/dir_and_metadata.md](references/dir_and_metadata.md)「续期（校验通过才续期）·原子同步」）；`stale_checked_commit=H` 在评估时已更新（与 hit_count 解耦，续期去重不阻断）。`stale=true` 的工单不注入不续期（软stale可复活见下）。
 
@@ -636,13 +637,13 @@ test -f "{ICODE_OUT_DIR}/03_plan_final.md" && python3 -c "import json,sys; d=jso
    |---------|---------|------|---------|-----------|
    | `verified` / `unknown`（含旧工单） | 上表对应命令的注入内容（ADR+风险/根因/要点） + **`unknown` 额外扩读 `00_init.md` 末轮对话摘要** | 上表来源 + `00_init.md` 末轮 | 上表上限 + ≤0.3K（末轮） | ✅借鉴 / `unknown` 时 ⚠️「结论未经验证标注，须甄别是否被后续实机推翻」 |
    | `disproved`（`verdict_review_needed=false`） | **不注 ADR**，注 `verdict_reason`（作可验证断言）+ `correct_direction` | metadata/index verdict 字段 | ≤0.7K/条 | ⛔「避坑+证伪前提断言：须 Grep/Read 验证前提是否仍成立，失效则提示 `--verdict` 标复活」 |
-   | `disproved`/`superseded`（`verdict_review_needed=true`） | **降级对抗质疑**：不硬反转，走 unknown A 层（扩读末轮+三问）+ 证伪前提+依赖变化提示 | metadata verdict + 末轮 | ≤1.1K/条 | ⚠️「曾证伪但依赖已变化，原证伪可能失效，重新评估是否还成立」 |
+   | `disproved`/`superseded`（`verdict_review_needed=true`） | **降级对抗质疑**：不硬反转，走 unknown 强化层（扩读末轮+三问）+ 证伪前提+依赖变化提示 | metadata verdict + 末轮 | ≤1.1K/条 | ⚠️「曾证伪但依赖已变化，原证伪可能失效，重新评估是否还成立」 |
    | `superseded` | 替代指针 `superseded_by` + `correct_direction` + 替代工单摘要 | metadata + 替代工单 | ≤0.8K/条 | 🔁「已被替代，参考新方案 {superseded_by}」 |
 
    - 历史参考作为主代理的**思考输入**，在强制思考文字块里加一节「历史参考」，按上表 verdict 标注 + 注入内容，影响后续产出质量
-   - **`unknown` 强制 A 层强化**（旧工单防误导主防线，不依赖标注）：扩读末轮 + 对抗质疑三问（详见 [references/thinking_detail.md](references/thinking_detail.md)「历史参考小节」）
+   - **`unknown`（含所有旧工单，不依赖标注）强制走 unknown 强化层**（防误导主防线）：扩读末轮 + 对抗质疑三问（详见 [references/thinking_detail.md](references/thinking_detail.md)「历史参考小节」）
    - `disproved` 的 `correct_direction` 缺失时：降级注 ADR + ⛔ 警告（ADR 仅作避坑对照），提示用户用 `/icode status --verdict` 补标 `correct_direction`
-   - **verdict_review_needed 复活降级**（防漏过后来又可行的方向）：`disproved`/`superseded` 工单若 `verdict_premise_deps` 非空且任一依赖 commit 已变化，则 `verdict_review_needed=true`，**不硬反转**，降级走 unknown A 层对抗质疑 + 证伪前提+依赖变化提示，让新需求重新评估证伪前提是否仍成立；前提失效则该方向或可重新考虑，提示 `/icode status --verdict` 标复活（unknown/verified）。检测：`--scan-verdict` 主动扫 + 检索命中被动检测（详见 [references/dir_and_metadata.md](references/dir_and_metadata.md)「过时校验·verdict 分流注入」+ [steps/status.md](steps/status.md)）
+   - **verdict_review_needed 复活降级**（防漏过后来又可行的方向）：`disproved`/`superseded` 工单若 `verdict_premise_deps` 非空且任一依赖 commit 已变化，则 `verdict_review_needed=true`，**不硬反转**，降级走 unknown 强化层对抗质疑 + 证伪前提+依赖变化提示，让新需求重新评估证伪前提是否仍成立；前提失效则该方向或可重新考虑，提示 `/icode status --verdict` 标复活（unknown/verified）。检测：`--scan-verdict` 主动扫 + 检索命中被动检测（详见 [references/dir_and_metadata.md](references/dir_and_metadata.md)「过时校验·verdict 分流注入」+ [steps/status.md](steps/status.md)）
    - **零命中不注入，不强凑参考**
 
 **防撑爆四道闸门**：
@@ -800,15 +801,16 @@ icode 工作流可调用 6 个 MCP（`/icode install` 一键安装）。**双保
 
 ### vision-bridge（图片/视频理解）
 
-视觉理解是可选增强，**统一走 `mcp__vision-bridge__analyze_media` 工具**。
+视觉理解是可选增强，**双通道任一可用即可用**：MCP 工具 `mcp__vision-bridge__analyze_media` **或** 本地 CLI（`<server.py 目录>/.venv/bin/python <server.py> --analyze-media <path> --prompt "<提取时间点/界面显示/操作序列/错误提示>"`，纯文本 stdout）。**codex 等 MCP 工具未注入环境**（只暴露 `list_mcp_resources` 等资源类工具，见 openai/codex issue #30922）下走本地 CLI 通道等价调用。
 
-- **TB 缺陷源附件视频/图片**：log 步骤拉取 TB 缺陷源后,`tb_source/<ID>/` 下若含视频(`*.mp4`/`*.mov`/`*.avi` 等)/图片(`*.png`/`*.jpg`/`*.jpeg` 等),**vision-bridge 可用则主动调**——视频先用 ffmpeg 本地提取关键帧(免费),再传图片帧给 vision-bridge 分析(省 API 额度)。vision-bridge 不可用时仅提示附件清单不主动调(防纯文字模型报错)。详见 [steps/log.md](steps/log.md)「附件分析（含本地路径 + TB 源）与 ffmpeg 抽帧」与「TB 视频/图片附件研读」(反偷懒第 23 条含 vision-bridge 不可用豁免条款)
+- **可用性判定（先判定再决定是否主动调）**：`config.json` 三件套（base_url/api_key/model）配齐 且（当前工具列表直接可见 `mcp__vision-bridge__analyze_media` **或** 能执行本地命令且找到 `mcp/vision-bridge/server.py`）→ 可用
+- **TB 缺陷源附件视频/图片**：log 步骤拉取 TB 缺陷源后,`tb_source/<ID>/` 下若含视频(`*.mp4`/`*.mov`/`*.avi` 等)/图片(`*.png`/`*.jpg`/`*.jpeg` 等),**vision-bridge 可用则主动调**——视频先用 ffmpeg 本地提取关键帧(免费),再传图片帧给 vision-bridge 分析(省 API 额度)。**两通道均不可用时仅提示附件清单+关键帧落盘待人工**(防纯文字模型报错)。详见 [steps/log.md](steps/log.md)「附件分析（含本地路径 + TB 源）与 ffmpeg 抽帧」与「TB 视频/图片附件研读」(反偷懒第 23 条含 vision-bridge 不可用豁免条款)
 - **本地日志目录视频/图片**：`/icode log` 分析本地日志时,日志目录下若含视频/图片文件,vision-bridge 可用则主动调（扫目录枚举,视频同走 ffmpeg 抽帧,行为同 TB 源模式）。详见 [steps/log.md](steps/log.md)「附件分析（含本地路径 + TB 源）与 ffmpeg 抽帧」段
-- **装好 vision-bridge 且 `config.json` 配好三件套（base_url/api_key/model）**：`mcp__vision-bridge__analyze_media` 可用，**优先用 MCP 工具**走统一接口
-- **没装 vision-bridge，或装了但 `config.json` 三件套没填**：`analyze_media` 工具返回 fallback 提示字符串，**降级**——AI 不替用户判断原生能力
+- **优先走 MCP 工具**（统一接口），MCP 不可用但 CLI 可用时走本地 CLI；**两通道均不可用时降级**——AI 不替用户判断原生能力
   - 原生支不支持图片/视频 **视具体 session 模型而定**（Opus/Sonnet 一般支持，Haiku 可能部分支持）
   - **用户自己把握**原生能力是否够用；AI 不假装"可以原生处理"
   - 不报错、不阻塞
+- **⚠️ 图片/视频绝不注入会话模型消息**（防错硬约束）：禁止把图片/base64 作为附件传给 session 模型——codex 等第三方纯文本模型注入即报 "Model only support text input"，必须走 MCP 工具或本地 CLI 通道（结果纯文本 stdout）
 - **vision-bridge 不绑任何平台**：任何 OpenAI Chat Completions 兼容端点都能用，**不推荐任何 provider 或模型名**——用户自己填 `base_url` / `api_key` / `model`
 - 安装：`cd ~/.claude/skills/icode/mcp/vision-bridge && ./install.sh`，三件套在生成的 `config.json` 里配（不入 `~/.claude.json`，不污染环境）
 - 详见 [mcp/vision-bridge/README.md](mcp/vision-bridge/README.md)
@@ -873,7 +875,7 @@ icode 工作流可调用 6 个 MCP（`/icode install` 一键安装）。**双保
 | [references/thinking_detail.md](references/thinking_detail.md) | 强制思考前置细节（按需读：各步骤子项速查/历史参考小节） | 所有 step |
 | [references/anti_laziness.md](references/anti_laziness.md) | 反偷懒约束（33条偷懒行为+合规要求+references必读+确认行） | 所有 step |
 | [references/adversarial.md](references/adversarial.md) | 对抗分析模式（3质疑者/裁决优先级/诚实降级/证据回指） | 02_review / log |
-| [references/dir_and_metadata.md](references/dir_and_metadata.md) | 目录管理（创建新目录含**硬熔断**：建前 test -d + 建后 ls -A 验证，禁手写目录号/echo 伪确认）+ ticket_id 生成 + 全局索引写入（含LRU淘汰） + metadata 模板 + **过时校验（含 worktree 归档工单**：archive_path 有效→archived 活跃态读档历史参考，正常续期；**含 `/icode bak` 备份工单**：backup_path 有效→backup 活跃态读档历史参考，工程优先→备份兜底） + **注入缓存机制（防重复注入，两源共用）** + **project_docs 工程文档库 + 段零检索** | init / log / plan / start / fast / doc / bak |
+| [references/dir_and_metadata.md](references/dir_and_metadata.md) | 目录管理（创建新目录含**硬熔断①②**：建前 test -d + 建后 ls -A 验证 + **硬熔断③工作区根校验**，禁手写目录号/echo 伪确认）+ ticket_id 生成 + 全局索引写入（含LRU淘汰） + metadata 模板 + **过时校验（含 worktree 归档工单**：archive_path 有效→archived 活跃态读档历史参考，正常续期；**含 `/icode bak` 备份工单**：backup_path 有效→backup 活跃态读档历史参考，工程优先→备份兜底） + **注入缓存机制（防重复注入，两源共用）** + **project_docs 工程文档库 + 段零检索** | init / log / plan / start / fast / doc / bak |
 | [references/doc_template.md](references/doc_template.md) | icode doc 章节模板：前 50 行四块结构（项目元信息/KEYS/简要说明/目录）+ 十位桶编号 + 自适应 grep 关键词表 + 99 章审计策略 + **v2.0.0 双视角必含元素清单（14 项）+ 业务流独立成章 + 英文首次中文备注 + 链路中文说明 + 质量审视检查清单 + 模板版本自举迁移** | doc |
 | [references/necessity_check.md](references/necessity_check.md) | **现有功能覆盖度检查（防重复实现机制）**：触发时机 + 执行命令（全工程检索 + Read 命中处行为链）+ 三类判定（已覆盖/部分/未覆盖）+ 各步骤落点（init §2.X/预筛列、plan 前置/断言/ADR/对抗、review 维度7、deepcheck Reverse 对比、audit 视角 C） | init / plan / review / deepcheck / audit |
 | [references/first_activation_path.md](references/first_activation_path.md) | **首次激活路径一致性检查**：静态分析盲区（"写了从没实机执行过"的死路径既有 bug）+ 触发条件 + 检测法（软信号、不阻断）+ 双侧校验一致性核对清单 + 部署后验证建议下游输出 | plan（断言⑤）/ deepcheck（Reverse）/ audit（部署后建议）/ patch（部署后验证发现） |
