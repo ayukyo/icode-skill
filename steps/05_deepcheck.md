@@ -30,6 +30,8 @@
 
 检查 `{ICODE_OUT_DIR}/03_plan_final.md` 和步骤4创建的代码文件是否存在，缺失则报错并提示先执行 `/icode code`。
 
+> **模块文档检索（新增）**：在强制思考前置之前，Read `~/.claude/icode_data/project_docs/<project_id>/<branch_safe>/_meta.json` 取 `module_deps` 列表，对每个 dep 检 `~/.claude/icode_data/module_docs/<key>/_meta.json` 的 `current_commit` 是否与 `_meta.json.module_deps[].commit` 一致（不一致标 `⚠️ commit 漂移`，仍读但附警告）。命中模块的章节作为上下文**只进思考块，不写入产物文件**（deepcheck 是消费方，模块文档已在 plan 阶段固化）。**降级**：路径不存在或 Read 失败 → 静默跳过本段，主流程继续。**复用缓存**：本 ticket 内已通过 01_plan / 02_review 段零检索注入过的模块文档不重复 Read（`_inject_cache.json` 按 `(source, ref_id, slice)` 去重，slice=`section:<file>`，路径 `{ICODE_OUT_DIR}/_inject_cache.json`，与上游步骤共用同一缓存文件——参见 [references/dir_and_metadata.md](../references/dir_and_metadata.md)「注入缓存机制」段）。**前提契约**：同 02_review.md「模块文档检索」段——依赖上游段零检索已执行；`_inject_cache.json` 不存在时退化为全量 Read + 写 `▶ 步骤 5 模块文档检索退化：无 _inject_cache.json 可复用`。
+
 ## 前置：统一拓扑门禁（共享检查器）
 
 > 进入复检前**必须**调用统一拓扑检查器（[references/worktree_isolation.md §3.8](../references/worktree_isolation.md)）。**来源一致性**：本步骤所有验证（Reverse 逆推 / Fixed 维度 / Free 角度 / 编译 / 测试）的代码 Read 路径、构建目录、二进制证据**必须来自活动 checkout**——若构建命令在 `superseded` 或旧 checkout 执行，即使测试通过，**不能作为当前活动实现的通过证据**（来源约束见 §3.8 第⑨步）。发现验证记录引用 superseded checkout → 按 blocked 处理，要求迁移或重新验证。
@@ -203,6 +205,16 @@ Free 阶段一次性完整覆盖全部 15 个角度。
 
 **重新读取所有代码文件**（含 Reverse 修复后的最新版）+ 输出 `📖 已 Read` 确认行。
 
+> **步骤 5 Fixed scan_patterns 预扫（新增，Fixed 前机械预扫）**：调 `mcp__cheap-research__scan_patterns` 对 `code_files` 做"功能点 × 代码位置"机械扫描——
+> - patterns = 从 `03_plan_final.md` §2 功能需求抽取的功能点关键词（每条对应一个正则，覆盖函数/接口/关键字）
+> - scope_path = `<project_root>`（AI 用 `git rev-parse --show-toplevel` 或 `pwd` 解析）
+> - exclude_dirs = `["node_modules", ".git", "build", ".icode_output"]`
+> - max_files = 50（**经验值**：工程 > 100 文件时降低单步 token；用户在 metadata 可调高/低）, max_matches = 100（**经验值**：单 pattern 最多 100 命中防 context 爆炸）
+> - 输出 = `{pattern: [{file, line, snippet}], ...}`，主代理只看命中 + 上下文，**不替代 7 维度判定**
+> - **前提契约（§2 空降级）**：`03_plan_final.md` §2 功能需求为空或不存在 → `patterns=[]` → scan_patterns 退化为无操作（不报错）；写 `▶ scan_patterns 跳过：03_plan_final.md §2 无功能需求`
+> - **fast 模式行为**：`metadata.mode == "fast"` 时**不跑 Fixed 阶段**（[steps/05_deepcheck.md](05_deepcheck.md) §「fast 模式降级」段）→ scan_patterns 预扫不触发，无需处理（fast 模式下预扫节省的 token 同样不产生）
+> - **降级**：cheap-research 不可用 → 跳过预扫，走原流程（主代理自扫）；写 `[降级-scan_patterns 不可用]`
+
 7 维度逐项检查（**每维度必须列 file:line 证据 + 评分理由 ≥2 句实质，不得只概括**）：
 1. 计划实施一致性 — 逐条对照每个功能点/接口/约束
 2. 逻辑闭环 — 数据流、控制流、跨文件调用链
@@ -265,13 +277,21 @@ Free 阶段一次性完整覆盖全部 15 个角度。
 3. **分类阶段**（如 categorized.json 不存在）：调 `mcp__cheap-research__extract`（haiku）**双层分类**（parent + sub）→ `dedup/categorized.json`。**双层 schema** + **后处理映射（只映射 parent_category）** 同 §2.5.7 第 3 步。
 4. **拆分阶段**：Claude 直接做——**按 sub_category 拆分** `categorized.json`（不按 parent_category——避免跨家族合并），**仅保留 3+ 函数的 sub_category**（< 3 不值得分析），输出 → `dedup/duplicates/<sub_category>.json`
 5. **找重复阶段（高质量模型逐类）**：同 §2.5.7 第 5 步——**简化 schema** + **主代理 try 链式解析**（同 §2.5.7 第 5 步的 5 种格式 A/B/C/D/E）+ **用 categorized.json 回填 file/line**
+
+   > **复用 §2.5.7 产物（新增）**：在跑高质量模型前，**`ls {ICODE_OUT_DIR}/<ticket>/dedup/duplicates/`** 拿已有的 sub_category 文件清单（文件名 = `<sub_category>.json`）。**已有 sub_category 文件直接复用其 `duplicates[]` 内容**（其 `duplicates[]` 已含 HIGH/MEDIUM/LOW 完整判定 + file:line 回填——这些由 §2.5.7 第 5 步保证，**不再二次跑高质量模型**），本阶段报告直接合并。仅对**未生成 sub_category 文件的**调用 `mcp__cheap-research__extract`——**用 §2.5.7 第 5 步完全相同的简化 schema（嵌套字段用 string 规避 array-of-array）+ 5 种格式 A/B/C/D/E 链式解析 + categorized.json 回填 file:line**（避免重新设计 schema 引入不一致）。**复用清单 + 新生清单**写到 `{ICODE_OUT_DIR}/<ticket>/dedup/dedup_reuse_log.json`（每条含 `{sub_category, source: "reuse"|"new", high_count, med_count, low_count, at}`，用于审计 + 节省日志）。
+   >
+   > **阈值统一（新增）**：与 §2.5.7 第 4 步对齐——**只对 ≥3 函数的 sub_category 跑高质量模型**，< 3 直接跳过。**本阶段高质量模型调用范围** = §9.4 拆分阶段输出的**全部 ≥3 sub_category**减去 §2.5.7 已生成对应 `.json` 文件的 sub_category（即 §2.5.7 已跑过的 top 5 sub_category 不再跑，仅跑剩余的 ≥3 sub_category）。
+   >
+   > **降级**（独立判断，与 `_review_summary.md` 无关）：`dedup/duplicates/` 目录**不存在**（§2.5.7 未跑）或**目录存在但无任何 `<子_category>.json` 文件**（§2.5.7 跑过但函数数 < 3 全跳过）→ 全部 ≥3 sub_category 重跑，写 `[降级-dedup-reuse §2.5.7 产物缺失]`（与 SKILL.md 降级标签规范一致）
+   >
+   > **JSON 损坏处理**：Read `duplicates/<sub_category>.json` 失败（parse 错）→ 视为"未生成"，该 sub_category 重跑；写 `▶ dedup-reuse 降级：{sub_category}.json 损坏，按未生成处理`
 6. **报告生成**：在 05_deepcheck.md 末尾追加 `## 语义重复检测报告（§9.4 完整全量）` 段，按 HIGH/MEDIUM/LOW 三段展示：
 
    ```markdown
    ## 语义重复检测报告（§9.4 完整全量）
 
    **函数总数**：{N} | **扫描类别数**：{K}/23 | **生成时间**：{ISO timestamp}
-   **复用**：categorized.json {复用/重跑}
+   **复用**：categorized.json {复用/重跑} | **高质量模型复用（§2.5.7）**：{复用 X/Y 个 sub_category，新增 Z 个} | 见 `{ICODE_OUT_DIR}/<ticket>/dedup/dedup_reuse_log.json`
 
    ### HIGH 置信度重复（建议立即合并）
    | Intent | Category | 推荐保留 | 应删除函数 |

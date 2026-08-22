@@ -26,6 +26,8 @@
 
 检查 `{ICODE_OUT_DIR}/03_plan_final.md` 和步骤4创建的代码文件是否存在，缺失则报错。
 
+> **模块文档检索（新增）**：在强制思考前置之前，Read `~/.claude/icode_data/project_docs/<project_id>/<branch_safe>/_meta.json` 取 `module_deps` 列表，对每个 dep 检 `~/.claude/icode_data/module_docs/<key>/_meta.json` 的 `current_commit` 是否与 `_meta.json.module_deps[].commit` 一致（不一致标 `⚠️ commit 漂移`，仍读但附警告）。命中模块的章节作为上下文**只进思考块，不写入产物文件**（audit 是消费方，模块文档已在 plan 阶段固化）。**降级**：路径不存在或 Read 失败 → 静默跳过本段，主流程继续。**复用缓存**：本 ticket 内已通过 01_plan / 02_review / 05_deepcheck 段零检索注入过的模块文档不重复 Read（`_inject_cache.json` 按 `(source, ref_id, slice)` 去重，slice=`section:<file>`，路径 `{ICODE_OUT_DIR}/_inject_cache.json`，与上游步骤共用同一缓存文件——参见 [references/dir_and_metadata.md](../references/dir_and_metadata.md)「注入缓存机制」段）。**前提契约**：同 02_review.md「模块文档检索」段——依赖上游段零检索已执行；`_inject_cache.json` 不存在时退化为全量 Read + 写 `▶ 步骤 6 模块文档检索退化：无 _inject_cache.json 可复用`。
+
 ### 前置：统一拓扑门禁（共享检查器）
 
 > 进入终审前**必须**调用统一拓扑检查器（[references/worktree_isolation.md §3.8](../references/worktree_isolation.md)），verdict=blocked（双活动根 / 子仓逃逸 / 未完成迁移 / cwd 不符）**报错退出**。终审是「终审 + 归档 + 关闭前置条件」——产物归档（本节第 6 步）与 close 前置（[steps/close.md](../steps/close.md)）都以**单活动实现根**为前提；存在双活动根时归档可能只收录了其中一个 checkout 的产物，留下另一个的未归档产物。
@@ -61,6 +63,16 @@ git rev-list --count <worktree_branch>..<目标基分支>     # 目标基分支 
 1. 检测最新目录，确定 `ICODE_OUT_DIR`
 2. 读取 `03_plan_final.md` 和 `.ico_metadata.json` 的 `code_files` 列表 + `code_deviations`（步骤4主动偏离记录，供6.2偏差备忘汇总）
 3. 额外读取 `05_deepcheck.md`（若存在）
+
+> **步骤 6 audit_facts 代码事实预审（新增，强制思考前置前）**：调 `mcp__cheap-research__audit_facts` 做工程代码事实审计——
+> - repo_path = `<project_root>`
+> - focus = "对外 API / 依赖关系 / README 声明 vs 代码事实"
+> - max_files = 10（README / CLAUDE.md / 入口 / 依赖清单 / 公共 API 头文件）
+> - 输出 = `[{"claim": "README 声明 X", "fact": "代码实际 Y", "match": true/false, "evidence": "file:line"}]` 列表
+> - 主代理看 `match=false` 项，作为终审重点复核（防止 patch / 实施改了入口忘改 README、声明与代码漂移）
+> - **前提契约（关键文件全缺降级）**：README / CLAUDE.md / 入口文件**全部不存在** → audit_facts 无对象可审 → 跳过本段；写 `▶ audit_facts 跳过：工程无 README/CLAUDE.md/入口文件可审计`
+> - **降级**：cheap-research 不可用 → 跳过预审，走原流程（主代理自审）；写 `[降级-audit_facts 不可用]`
+
 4. **强制思考前置**（不可跳过，缺证据视为不合规；按 [references/thinking_core.md](../references/thinking_core.md)「强制思考前置·统一契约」段执行）：本步骤子项（至少3步）= 构建追溯矩阵（计划功能点→代码位置）→ 汇步骤历史 → 规划 6 维度审计策略
 5. 输出：`▶ 步骤6 终审开始`
 6. **重新读取所有代码文件**

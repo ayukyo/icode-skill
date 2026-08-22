@@ -33,6 +33,8 @@
 
 检查 `{ICODE_OUT_DIR}/01_plan.md` 和 `{ICODE_OUT_DIR}/.ico_metadata.json` 是否存在，缺失则报错。
 
+> **模块文档检索（新增）**：在强制思考前置之前，Read `~/.claude/icode_data/project_docs/<project_id>/<branch_safe>/_meta.json` 取 `module_deps` 列表，对每个 dep 检 `~/.claude/icode_data/module_docs/<key>/_meta.json` 的 `current_commit` 是否与 `_meta.json.module_deps[].commit` 一致（不一致标 `⚠️ commit 漂移`，仍读但附警告）。命中模块的章节（如 `01_overview.md` / `02_api.md`）作为上下文**只进思考块，不写入产物文件**——本步骤（review）是消费方，模块文档已在 01_plan 阶段由段零检索固化到 `01_plan.md` §1.5 工程结构快照（如果当时命中），本步骤无须再写入产物（避免重复污染 + 与"消费方不二次写入"契约一致）。**降级**：路径不存在或 Read 失败 → 静默跳过本段，主流程继续（与 01_plan 段零检索降级策略一致）。**复用缓存**：本 ticket 内已通过 01_plan 段零检索注入过的模块文档不重复 Read（`_inject_cache.json` 按 `(source, ref_id, slice)` 去重，slice=`section:<file>`，与 01_plan 共用同一缓存文件，路径 `{ICODE_OUT_DIR}/_inject_cache.json`——参见 [references/dir_and_metadata.md](../references/dir_and_metadata.md)「注入缓存机制」段）。**前提契约**：本段依赖 01_plan 阶段已执行过段零检索（**正常 `/icode start` 全流程自动满足**）；若用户先跑 `/icode review` 再补跑 `/icode plan`（异常场景），`_inject_cache.json` 不存在 → 退化为"全量 Read 模块文档"（不报错，行为降级），写 `▶ 步骤 2 模块文档检索退化：无 _inject_cache.json 可复用，全量 Read`。
+
 **用户语义变更检测（O-4 语义冻结，写 requirement_deltas）**：读 `metadata.scope_contract`（缺失视为 null＝未冻结，跳过本检测，向后兼容旧工单）；若**用户本次输入**改变了冻结契约的语义——状态身份或生命周期、允许/拒绝条件、持久化一致性或回滚承诺、验收条件/调用方语义/真实环境验证场景——不得静默按新语义继续审查，须**先分类写入 metadata `requirement_deltas`**（追加，字段缺失视为 `[]`）：`clarification_only`（仅澄清不改变实现，可继续）/ `a_now_with_evidence`（改变 A 档但已有直接证据，记 impact 后按 A 档处理）/ `needs_user_confirm`（需用户确认，未确认前**停止自动串联**等待确认）/ `needs_replan`（需回到 plan/review 重新定稿，**先停本步骤提示用户重跑 plan**）。**delta 未分流前不得继续扩大代码设计或验收矩阵**（冻结点）。每条含 `{at, user_input_summary, changed_aspect, classification, impact, user_confirm}`，见 [references/dir_and_metadata.md](../references/dir_and_metadata.md)「requirement_deltas 字段族」。
 
 ## 执行流程
@@ -97,6 +99,15 @@
 > **产出要求**：本步骤产出的每条 issue **必须当场填写 `evidence_pointer`**（计划章节号/行号 + 代码路径:行号），作为步骤 2.5.5 对抗验证的输入底座。2.5 阶段无法提供证据回指的"问题直觉"不得作为 issue 提出——先回到 2.3/2.4 用 Read/Grep 实证定位，再提 issue。
 
 **步骤 2.5.5 — 对抗验证（独立质疑者子代理，不可跳过）**：
+
+> **[已废弃段·issue 分组 summarize 设计]（自当前版本起不再生效，仅作变更追溯）**：曾设计在 spawn 3 质疑者子代理之前调 cheap-research `summarize` 给主代理做"issue 分组概览"，自检发现以下问题已废弃——
+> ①summarize 是 LLM 推理（非廉价机械），调用成本与"主代理手工分组"相比无优势
+> ②主代理从 issue 列表本身（id/affected_sections/suggestion/rejection_risk/evidence_pointer）就能直接做"维度分配"，无需额外压缩
+> ③相关审计字段与 adversarial_verification 既有 schema 兼容成本 > 收益
+> ④summarize 输出是自然语言，主代理从自然语言抽"分组"是又一次 LLM 推理，与直接看结构化 issue 列表等价
+> **结论**：价值低、复杂度高、风险中，**移除**。主代理在 spawn 3 质疑者时直接按 `affected_sections` 字段做维度分配（既有行为）。
+>
+> ⚠️ **本段不生效**——主代理看到此段时**跳过**，继续走下方 "fast 场景一跳过对抗" 段。AI 不应复活此段逻辑。
 
 > **fast 场景一跳过对抗**（`FAST_LOCKED == true`，即 `/icode fast` 自动串联、未带参 N）：不 spawn 任何质疑者子代理，直接把步骤 2.5 产出 issue 标 `verification_status=confirmed` 计入 `new_issues`。`adversarial_verification` 字段写 `null` 并标注「fast 场景一：无对抗」。**这是设计上的单视角审查，由用户自负其责**——fast 入口警告已明示。
 >

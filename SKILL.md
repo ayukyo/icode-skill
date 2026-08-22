@@ -680,6 +680,103 @@ test -f "{ICODE_OUT_DIR}/03_plan_final.md" && python3 -c "import json,sys; d=jso
 
 ### MCP 调用覆盖强制化（强证据二元化）
 
+### cheap-research 14 工具会话内缓存
+
+> **目的**：本工单（一个 `.icode_output_N/` 目录）内多次调 cheap-research 同一工具（同样输入）= 浪费 token + 浪费时间。**本约定让 AI 在调 cheap-research 前**先查会话内缓存**，命中则复用结果。
+>
+> **缓存文件命名约定**（与现有工单目录文件对齐）：
+> - 文件路径：`{ICODE_OUT_DIR}/.cheap_research_cache.json`（点开头 + `_cheap_research_cache` 命名，**与工单内 `.ico_metadata.json` / `.decision_anchors.json` 同前缀风格**——"工单目录内的辅助数据文件"统一用点开头）
+> - **不同于** `_inject_cache.json`（下划线开头，因其跨多步骤强共享 + 早期实现约定）——但同属"工单目录内缓存"语义，不冲突
+> - **不是产物文件**：缓存文件 ≠ 01_plan.md / 02_review.md 等主产物（与 SKILL.md 第 1 条"MCP 调用结果只进思考块不写产物"一致——缓存是**工具调用的临时数据**，不是产物；归档时随工单一并备份，**但 `.tmp` 中间文件不归档**——见 [steps/bak.md](steps/bak.md) `rsync --exclude='*.tmp'` 约定）
+>
+> **硬约束**（区别于其他 cheap-research 工具调用的"软降级"约定——本缓存约定是**强制**）：
+> 1. **调 cheap-research 前，主代理必须 Read `{ICODE_OUT_DIR}/.cheap_research_cache.json`**——不读 = 违反本约定（按 thinking_core.md 通用流程第 3 步 gate 在思考块记录 `[违反-cheap-research 缓存未查]`）
+> 2. **思考块强制记录**「cheap-research 缓存状态」段：`{tool} 命中={true/false}, key={args_hash}, mtime_ok={true/false}`——**未记录 = 违反本约定**
+> 3. **首次写入 ticket 时**：缓存文件不存在 → 主代理**正常调工具** + **写回缓存**（初始化条目）
+>
+> **缓存键设计**：
+> - 工具名（14 工具之一）+ 主要入参 hash（`sha256(tool + canonical_json(args))[:16]`）
+> - `canonical_json(args)` 实现约定：`json.dumps(args, sort_keys=True, ensure_ascii=False, default=str)`——`default=str` 处理 datetime/Path 等不可序列化类型（视为字符串）
+> - 例：`summarize(text="03_plan_final.md", max_tokens=1000)` → 键 = `summarize:abc123def4567890`
+> - **不可序列化 fallback**：若 `canonical_json` 抛错（极少见，default=str 已覆盖大部分场景）→ 改用 `sha256(tool + repr(args))[:16]`，标记 `key_method=repr_fallback=true`（主代理审慎复用）
+>
+> **缓存内容 schema**（统一规范）：
+> ```json
+> {
+>   "version": "1",
+>   "ticket_id": "<本工单>",
+>   "entries": [
+>     {
+>       "tool": "summarize",
+>       "args_hash": "abc123def4567890",
+>       "key_method": "canonical" | "repr_fallback",
+>       "result": "<result_json_string>",  // 统一存 JSON 字符串（dict/list 由 json.dumps 序列化）
+>       "args_summary": "max_tokens=800 focus='...'",  // 便于人审计
+>       "created_at": "2026-08-22T01:23:45",  // ISO 8601 严格格式
+>       "source_files": ["03_plan_final.md"]  // 仅当 args 含文件路径（scan_patterns/trace_refs/audit_facts 等）
+>     }
+>   ]
+> }
+> ```
+> **result 字段约定**：统一存为 JSON 字符串——工具返回 dict/list 时 `json.dumps(..., ensure_ascii=False)` 序列化；返回字符串时直接存；**禁止**存二进制或非 JSON 可序列化对象
+>
+> **使用规则**：
+> 1. 调 cheap-research 前，主代理**先 Read** `.cheap_research_cache.json` 查 `tool + args_hash` 是否命中
+> 2. **命中**：直接复用 `result` 字段（JSON 字符串需 json.loads 反序列化），**不再调工具**（降本）；**校验**：
+>    - `source_files` 为空 → 只校验 24 小时超时
+>    - `source_files` 非空 → 校验每个文件的 mtime ≤ `created_at`（防文件被修改后还返回旧结果）
+> 3. **未命中 / 失效**：调工具，**写回缓存**（追加一条，**atomic 写**——先写 `.cheap_research_cache.json.tmp` 再 `mv`，防中途崩溃损坏缓存；`.tmp` 文件**不归档**，见 bak.md `--exclude='*.tmp'`）
+> 4. **失效条件**（满足任一即缓存无效，重新调）：
+>    - 缓存条目超过 24 小时（`now - created_at > 86400s`）
+>    - 上游产物变更（`source_files` 列出的任一文件 mtime 晚于 `created_at`）
+>    - 缓存文件本身损坏（parse 失败 → 静默重建，**先 mv 损坏文件到 `.cheap_research_cache.json.broken.<at>`** 留痕，at 用 ISO 8601）
+>    - `key_method=repr_fallback` 且 args 内容肉眼可见不同（如 Path 对象在不同 cwd 下指向不同文件）→ 主代理手动判定
+>
+> **哪些工具值得缓存**（高频调用场景）：
+> - `summarize` / `diff_summary` —— 内容压缩类，**强烈建议缓存**
+> - `extract` —— 结构化提取，每次 schema 略有差异，**适度缓存**
+> - `audit_facts` / `scan_patterns` / `trace_refs` —— 工程事实类，工程不变则结果不变，**强烈建议缓存**
+> - `fill_template` / `select_template` / `generate_filename` —— 模板类，**适度缓存**
+> - `retrieve_similar` / `apply_migration` / `parse_project_id` / `scan_modules` / `fetch_remote` —— 一次性结果，缓存收益小，**可选**
+>
+> **降级**：缓存文件不存在/损坏 → 跳过缓存检查，直接调工具；不影响主流程。
+>
+> **cheap-research 整体不可用时**：缓存机制整体失效（缓存检查通过后调工具仍失败）——按 SKILL.md 降级标签规范统一写 `[降级-cheap-research 缓存 不可用]`（cheap-research 整体 MCP 不可用时），主流程走原 Agent(model="haiku") 兜底（与 install.md「未装 cheap-research → Agent(model="haiku") 兜底」一致）
+>
+> **并发约束**（不依赖文件锁，依赖 icode 状态机本身）：
+> - **单 ticket 不应跨 session 并发跑**——icode 状态机 `status: in_progress` 语义保证同一 ticket 只有一个 active session；用户开两个窗口同时跑同一 ticket 会触发状态机竞态，**这是 icode 主流程的禁忌**，本缓存约定不独立加文件锁
+> - **真要并发**（极少见）：主代理应当用 `flock` 工具包裹 cache 文件读写——但**不推荐**，单 ticket 串行是 icode 基础约束
+>
+> **审计**：缓存文件随工单归档（`/icode bak` 会包含 `.cheap_research_cache.json` 但**不包含** `.tmp`/`.broken.*`），便于事后追溯哪些结果被复用。
+>
+> **不接管决策约束仍生效**——缓存的是工具输出，不改变 cheap-research 不接决策的红线。
+>
+> **与 `_inject_cache.json` 的关系**：两者并存、不互替——
+
+### 降级标签格式规范（与现有工程惯例统一）
+
+> **目的**：icode 工程内"降级"场景多（cheap-research 工具不可用 / 复用对象缺失 / fast 模式跳过 / 缓存退化等），需要**统一标签格式**便于事后检索和审计。
+>
+> **四类降级 + 标签格式**（各步骤已遵守）：
+> 1. **工具级降级**（单个 cheap-research 工具不可用）：`[降级-{工具名} 不可用]`
+>    - 例：`[降级-scan_patterns 不可用]`、`[降级-audit_facts 不可用]`、`[降级-merge 跨轮 summarize 不可用]`、`[降级-PPT 预压缩 summarize 不可用]`
+> 2. **复用对象缺失**（上游产物不存在或损坏）：`[降级-{对象} 缺失|损坏]`
+>    - 例：`[降级-dedup-reuse §2.5.7 产物缺失]`、`[降级-cheap-research 缓存 .cheap_research_cache.json 损坏]`
+> 3. **模式跳过**（fast / N=1 等条件性跳过）：`▶ {功能名} 跳过：{原因}`
+>    - 例：`▶ merge 跨轮汇总跳过：仅 1 轮 review，合并无意义`、`▶ 步骤 N 模块文档检索退化：无 _inject_cache.json 可复用`
+> 4. **通用降级**（cheap-research 整体 MCP 不可用，整段跳过）：`[降级-cheap-research 不可用]`
+>    - 例：02_review.md §2.5.7 第 343 行 + 05_deepcheck.md §9.4 第 316 行
+>
+> **强制约束**：
+> - 任何 cheap-research 调用场景（新增或既有）的降级标签**必须**遵循上述四类之一
+> - 标签**写入思考块「MCP 调用」段**（与 SKILL.md 第 1 条"产物不记录 MCP 调用"一致）+ **可选**写产物文件降级日志
+> - **禁止**自创降级标签（如 `[降级-工具坏了]` `[Error]` `[SKIP]`）——违反本规范
+>
+> **审计**：所有降级标签在 ticket 归档（`/icode bak`）时可全量检索，便于统计"哪些工具/哪些场景降级频率高"——为后续优化提供数据
+> - `_inject_cache.json` 管"注入章节去重"（防同章节重复灌进 plan/review 思考上下文）
+> - `.cheap_research_cache.json` 管"工具调用结果去重"（防同输入重复调 API）
+> - **典型场景**：01_plan 段零检索已 Read module_docs 章节 + 写进 `_inject_cache.json`；05_deepcheck 又调 `audit_facts(repo_path, focus)`——两者**完全独立的缓存机制**，不冲突
+
 > **核心问题**：AI 默认只调 sequential-thinking（必用项），其他 MCP 全部跳过--根因是"形式强制"（产物必含记录段）而非"执行强制"（流程必走调用）。**治本**：消除 🟡"应该调"模糊地带，二元化（🟢 必须调 / ⚪ 不必调），并用**双保险**把 🟢 MCP 写进执行流：
 
 **强制规则**：

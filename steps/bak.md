@@ -33,9 +33,9 @@ mkdir -p "$SNAP_DIR"
 # rsync --link-dest 硬链接去重：未变文件指向上一快照，不占新空间；禁止 --delete（备份绝不删旧文件）
 PREV="$(readlink -f "$BAK_ROOT/latest" 2>/dev/null || true)"
 if [ -n "$PREV" ] && [ -d "$PREV" ]; then
-  rsync -a --link-dest="$PREV" "<src_root>/.icode_output/" "$SNAP_DIR/"
+  rsync -a --link-dest="$PREV" --exclude='*.tmp' --exclude='*.broken.*' "<src_root>/.icode_output/" "$SNAP_DIR/"
 else
-  rsync -a "<src_root>/.icode_output/" "$SNAP_DIR/"
+  rsync -a --exclude='*.tmp' --exclude='*.broken.*' "<src_root>/.icode_output/" "$SNAP_DIR/"
 fi
 # rsync 缺失时退化（全量复制，无去重）：
 # cp -r "<src_root>/.icode_output/" "$SNAP_DIR/"
