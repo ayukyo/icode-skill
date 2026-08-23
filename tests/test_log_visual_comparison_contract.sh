@@ -4,7 +4,7 @@
 # 用法：bash tests/test_log_visual_comparison_contract.sh
 # 退出码：0 = 全部通过；非 0 = 失败（带详细输出）
 #
-# 覆盖三阶段（对齐 references/log-repair-visual-comparison-spec.md 的 RED→GREEN→REFACTOR）：
+# 覆盖三阶段（对齐 steps/log.md「修复前后对照契约」的 RED→GREEN→REFACTOR）：
 #   RED      静态契约锚点：steps/log.md / steps/00_init.md / references/anti_laziness.md
 #            必须已含 §7.5 修复前后对照契约（实施前这些锚点不存在 → 测试失败 = RED 基线固化）
 #   GREEN    语义 fixture：复杂场景（同一张 Mermaid 图含两个 subgraph + 图例 + 新旧关键点表
