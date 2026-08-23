@@ -10,7 +10,7 @@
 
 | 文件 | 职责 |
 |------|------|
-| `scripts/tb_pull.py` | `list` 列缺陷；`defect <LIB-NUM>` 拉详情+真实评论+下载日志附件，写 `<ID>_meta.json` |
+| `scripts/tb_pull.py` | `list` 列缺陷；`defect <LIB-NUM>` 拉详情+真实评论+下载日志附件，写 `<ID>_meta.json`；`probe` 批量探测（list 全量+每单状态名/评论/附件元数据，不下载附件，按状态名过滤写 probe.json） |
 | `scripts/tb_cookie.py` | 解密 Chrome cookie -> `scripts/.tb_cookie`（也可手动粘贴 cookie） |
 | `config.example.json` | 配置模板（占位）。复制为 `config.json` 后填真实项目 |
 
@@ -64,16 +64,29 @@ pip install requests cryptography secretstorage
 # 列缺陷
 python3 scripts/tb_pull.py --lib DEMO list
 python3 scripts/tb_pull.py --lib DEMO list --status all --json
+python3 scripts/tb_pull.py --lib DEMO list --with-status   # 状态列显示真实任务流状态名（逐单拉详情，较慢）
 
 # 拉单个缺陷（下到 config.log_root/<ID>/）
 python3 scripts/tb_pull.py defect DEMO-26
+python3 scripts/tb_pull.py defect DEMO-26 --meta-only      # 只写 meta.json 不下载附件（批量探测/复用预筛用）
+
+# 批量探测：枚举全量 + 每单状态名/评论/附件元数据（不下载附件），按状态名过滤写 probe.json
+python3 scripts/tb_pull.py --lib DEMO probe --status-names 打开,未完成
 
 # 拉一个 URL 带来、未在 config 登记的项目（--pid 权威）
 python3 scripts/tb_pull.py --domain <你的TB域名> --pid <项目ID> defect DEMO-26 --out ~/work/log
 # --domain 传纯域名（不带 https:// 和路径）；即使误带，脚本也会自动剥掉并警告
 ```
 
-`defect` 产物：`{out_root}/<ID>/` 下是日志附件 + `<ID>_meta.json`（title/note/真实评论原文/附件清单/下载清单）。
+`defect` 产物：`{out_root}/<ID>/` 下是日志附件 + `<ID>_meta.json`（title/note/真实评论原文/附件清单/下载清单/`status` 任务流状态名）。
+
+## ⚠️ 状态过滤必须按任务流状态名，不能用 isDone
+
+`list`/`defect`/`probe` 的 task 对象里 `isDone` **与任务流状态不同步**：实测存在 `isDone=True`（`accomplished` 有值）但任务流状态仍是「未完成」的单（如 `DEMO-47`），按 `isDone` 过滤会把这类"未完成"单误判为完成漏掉。
+
+- 真实状态名 = 任务详情内嵌的 `taskflowstatus.name`（list 接口不含，须 `--with-status`/`defect`/`probe` 逐单拉详情）
+- "打开" 与 "未完成" 是**不同任务流**里的状态名（缺陷流程的状态叫"打开"，任务流程的状态叫"未完成"），按需用 `--status-names` 指定集合
+- `list --status open/done` 仍是 isDone 布尔过滤（仅通用枚举用），**状态过滤请用 `probe --status-names`**
 
 ## 被 icode log 步骤调用时
 

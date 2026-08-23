@@ -10,15 +10,19 @@
 即使该项目未在 config 登记也能拉取。
 
 子命令：
-  list    列缺陷（uniqueId / 标题 / 附件数 / 状态 / 更新时间）
-  defect  拉指定缺陷：拉 activities 拿真实评论 + 附件，下载附件（日志）到 {out}/{ID}/，写 {ID}_meta.json
+  list    列缺陷（uniqueId / 标题 / 附件数 / 状态 / 更新时间；--with-status 拉详情显示真实任务流状态名）
+  defect  拉指定缺陷：拉 activities 拿真实评论 + 附件，下载附件（日志）到 {out}/{ID}/，写 {ID}_meta.json（--meta-only 不下载附件）
+  probe   批量探测：list 全量 + 每单拉状态名/评论/附件元数据（不下载附件），按状态名过滤写 probe.json
 
 依赖：requests。cookie 由 tb_cookie.py 生成（或手动粘贴到脚本同目录 .tb_cookie）。
 
 用法示例：
   python3 tb_pull.py --lib DEMO list
   python3 tb_pull.py list --lib DEMO --json
+  python3 tb_pull.py --lib DEMO list --with-status
   python3 tb_pull.py defect DEMO-26
+  python3 tb_pull.py defect DEMO-26 --meta-only
+  python3 tb_pull.py --lib DEMO probe --status-names 打开,未完成
   python3 tb_pull.py --pid <项目ID> defect DEMO-26 --out ~/work/log
 """
 import argparse, json, os, re, shutil, socket, sys
@@ -135,6 +139,20 @@ def fetch_activities(s, cfg, tid, count=100):
     return data.get("result", data) if isinstance(data, dict) else data
 
 
+def fetch_task_detail(s, cfg, tid):
+    """拉单个任务详情。list 接口的 task 对象不含任务流状态名，须用详情内嵌的 taskflowstatus.name（如"打开/未完成"）。"""
+    return api_get(s, cfg, f"/api/v2/tasks/{tid}")
+
+
+def status_name(task_detail):
+    """从任务详情提取任务流状态名（taskflowstatus.name），无则空串。
+
+    isDone 与任务流状态不同步（实测 isDone=True 但状态可为"未完成"），
+    按状态过滤必须用状态名、不能用 isDone。"""
+    ts = (task_detail or {}).get("taskflowstatus") or {}
+    return ts.get("name") or ""
+
+
 # ---------- list ----------
 
 def cmd_list(args):
@@ -148,6 +166,11 @@ def cmd_list(args):
         tasks = fetch_tasks(s, cfg, pid, args.status)
     tasks.sort(key=lambda t: (t.get("uniqueId") or 0))
 
+    # --with-status：list 接口不含任务流状态名，逐单拉详情补真实状态名（如"打开/未完成"，不能用 isDone 推断）
+    if args.with_status:
+        for t in tasks:
+            t["status_name"] = status_name(fetch_task_detail(s, cfg, t.get("_id")))
+
     if args.json:
         json.dump(tasks, sys.stdout, ensure_ascii=False, indent=2)
         print()
@@ -155,13 +178,13 @@ def cmd_list(args):
 
     lib = args.lib or pid
     print(f"=== {lib} 缺陷（{len(tasks)} 条，status={args.status}）===")
-    print(f"{'ID':10} {'附件':>4} {'状态':4} {'更新':12} 标题")
+    print(f"{'ID':10} {'附件':>4} {'状态':<6} {'更新':12} 标题")
     for t in tasks:
         uid = t.get("uniqueId", "")
         label = f"{args.lib}-{uid}" if args.lib and uid else str(uid)
-        done = "完成" if t.get("isDone") else "进行"
+        done = t.get("status_name") or ("完成" if t.get("isDone") else "进行")
         upd = (t.get("updated") or "")[:10] or "-"
-        print(f"{label:10} {str(t.get('attachmentsCount', 0)):>4} {done:4} {upd:12} {(t.get('content') or '')[:50]}")
+        print(f"{label:10} {str(t.get('attachmentsCount', 0)):>4} {done:<6} {upd:12} {(t.get('content') or '')[:50]}")
 
 
 # ---------- defect ----------
@@ -244,6 +267,8 @@ def cmd_defect(args):
     label = f"{lib}-{uid}" if (lib and uid) else (args.id if not uid else str(uid))
     print(f"=== {label}：{task.get('content', '')} ===")
 
+    detail = fetch_task_detail(s, cfg, tid)
+    st = status_name(detail)
     activities = fetch_activities(s, cfg, tid)
     comments = [a for a in activities if (a.get("action") or "").startswith("activity.comment")]
     files = collect_files(activities)
@@ -253,30 +278,36 @@ def cmd_defect(args):
     os.makedirs(dest_dir, exist_ok=True)
 
     downloaded = []
-    for f in files:
-        fname = safe_filename(f.get("name") or f.get("fileName"), f.get("ext") or f.get("fileType"))
-        dest = unique_path(os.path.join(dest_dir, fname))
-        url = f.get("url") or f.get("downloadUrl") or ""
-        try:
-            sz = download(s, url, dest)
-        except Exception as e:
-            # token 可能过期 -> 刷新 activities 重取同 (name,ext) 的 url
-            print(f"  [retry] {fname} 下载失败（{type(e).__name__}），刷新 token 重试...")
-            url = _refresh_url(s, cfg, tid, f.get("name") or f.get("fileName"), f.get("ext") or f.get("fileType"))
-            if not url:
-                print(f"  [fail] {fname}：刷新后仍无可用 url")
-                continue
+    if args.meta_only:
+        print(f"  [meta-only] 不下载附件（{len(files)} 个附件仅记录清单），批量探测/复用预筛用")
+    else:
+        for f in files:
+            fname = safe_filename(f.get("name") or f.get("fileName"), f.get("ext") or f.get("fileType"))
+            dest = unique_path(os.path.join(dest_dir, fname))
+            url = f.get("url") or f.get("downloadUrl") or ""
             try:
                 sz = download(s, url, dest)
-            except Exception as e2:
-                print(f"  [fail] {fname}：{e2}")
-                continue
-        downloaded.append({"name": fname, "path": os.path.relpath(dest, dest_dir), "size": sz})
-        print(f"  [ok] {fname}（{sz:,} bytes）")
+            except Exception as e:
+                # token 可能过期 -> 刷新 activities 重取同 (name,ext) 的 url
+                print(f"  [retry] {fname} 下载失败（{type(e).__name__}），刷新 token 重试...")
+                url = _refresh_url(s, cfg, tid, f.get("name") or f.get("fileName"), f.get("ext") or f.get("fileType"))
+                if not url:
+                    print(f"  [fail] {fname}：刷新后仍无可用 url")
+                    continue
+                try:
+                    sz = download(s, url, dest)
+                except Exception as e2:
+                    print(f"  [fail] {fname}：{e2}")
+                    continue
+            downloaded.append({"name": fname, "path": os.path.relpath(dest, dest_dir), "size": sz})
+            print(f"  [ok] {fname}（{sz:,} bytes）")
 
     meta = {
         "id": label, "title": task.get("content"), "note": task.get("note"),
         "uniqueId": uid, "_id": tid,
+        # 真实任务流状态名（list 接口不含；isDone 与状态名不同步——实测 isDone=True 但状态可为"未完成"）
+        "status": st, "_taskflowstatusId": detail.get("_taskflowstatusId"),
+        "isDone": detail.get("isDone"), "updated": detail.get("updated"),
         "attachmentsCount_cache": task.get("attachmentsCount"),
         "comments": [{"action": a.get("action"), "created": a.get("created"),
                       "content": a.get("content")} for a in comments],
@@ -298,7 +329,66 @@ def cmd_defect(args):
 
     print(f"\n[ok] 日志目录：{dest_dir}")
     print(f"[ok] 元信息：{meta_path}")
-    print(f"[ok] 评论 {len(comments)} 条 / 附件 {len(files)} 个 / 下载 {len(downloaded)} 个")
+    print(f"[ok] 状态：{st} / 评论 {len(comments)} 条 / 附件 {len(files)} 个 / 下载 {len(downloaded)} 个")
+
+
+# ---------- probe ----------
+
+def cmd_probe(args):
+    """批量探测：list 全量 + 每单拉状态名/评论/附件元数据（不下载附件），按任务流状态名过滤，写 probe.json。
+
+    用途：/icode log 批量 TB 分析（分析所有"打开/未完成"单）的枚举+探测阶段，零附件下载；
+    每单 items[] 含 status/comments/files/updated，供与 index.json 旧工单 meta 对比分流。"""
+    cfg = load_config()
+    if args.domain is not None: cfg["domain"] = args.domain
+    s = session(cfg)
+    pid = resolve_pid(cfg, args.lib, args.pid)
+    status_names = [x.strip() for x in (args.status_names or "打开,未完成").split(",") if x.strip()]
+    # 必须 open+done 两批枚举（fetch_tasks("all") 是不带 isDone 过滤的单次调用，会漏 isDone=True 但状态"未完成"的单）
+    tasks = fetch_tasks(s, cfg, pid, "open") + fetch_tasks(s, cfg, pid, "done")
+    result = []
+    for t in tasks:
+        tid = t.get("_id")
+        detail = fetch_task_detail(s, cfg, tid)
+        st = status_name(detail)
+        if status_names and st not in status_names:
+            continue
+        activities = fetch_activities(s, cfg, tid)
+        comments = [a for a in activities if (a.get("action") or "").startswith("activity.comment")]
+        files = collect_files(activities)
+        result.append({
+            "uniqueId": t.get("uniqueId"),
+            "lib": args.lib,
+            "_id": tid,
+            "status": st,
+            "_taskflowstatusId": detail.get("_taskflowstatusId"),
+            "isDone": detail.get("isDone"),
+            "updated": detail.get("updated") or t.get("updated"),
+            "title": t.get("content"),
+            "comments_count": len(comments),
+            "comments": [{"created": c.get("created"),
+                          "comment": (c.get("content") or {}).get("comment"),
+                          "files": [(f.get("name") or f.get("fileName"))
+                                    for f in ((c.get("content") or {}).get("files") or [])]}
+                         for c in comments],
+            "files": [{"name": f.get("name") or f.get("fileName"),
+                       "ext": f.get("ext") or f.get("fileType"),
+                       "size": f.get("size") if f.get("size") is not None else f.get("fileSize"),
+                       "mimeType": f.get("mimeType") or f.get("contentType")} for f in files],
+        })
+    out_dir = os.path.expanduser(args.out or "~/.claude/icode_data/tb_probe")
+    os.makedirs(out_dir, exist_ok=True)
+    probe_path = os.path.join(out_dir, f"{pid}.json")
+    with open(probe_path, "w") as f:
+        json.dump(result, f, ensure_ascii=False, indent=2)
+
+    lib = args.lib or pid
+    print(f"=== {lib} 探测（状态名 ∈ {status_names}，{len(result)}/{len(tasks)} 条）===")
+    for it in result:
+        label = f"{args.lib}-{it['uniqueId']}" if args.lib and it.get("uniqueId") else str(it.get("uniqueId"))
+        print(f"{label:10} [{it['status']}] 评论{it['comments_count']} 附件{len(it['files'])} "
+              f"{str(it['updated'] or '')[:10]} {(it['title'] or '')[:40]}")
+    print(f"[ok] probe.json -> {probe_path}（{len(result)} 条，未下载任何附件）")
 
 
 def _refresh_url(s, cfg, tid, name, ext):
@@ -328,12 +418,21 @@ def main():
     pl = sub.add_parser("list", help="列缺陷")
     pl.add_argument("--status", choices=["open", "done", "all"], default="open")
     pl.add_argument("--json", action="store_true", help="输出原始 JSON")
+    pl.add_argument("--with-status", action="store_true",
+                    help="逐单拉详情补真实任务流状态名（list 接口不含；isDone 与状态名不同步，过滤须用它）")
     pl.set_defaults(func=cmd_list)
 
     pd = sub.add_parser("defect", help="拉单个缺陷：详情 + 真实评论 + 下载日志")
     pd.add_argument("id", help="缺陷标识，如 DEMO-26（或纯数字配 --lib/--pid，或 task _id）")
     pd.add_argument("--out", help="下载根目录（默认 config.log_root）")
+    pd.add_argument("--meta-only", action="store_true",
+                    help="只拉详情+评论写 meta.json，不下载附件（批量探测/复用预筛用）")
     pd.set_defaults(func=cmd_defect)
+
+    pp = sub.add_parser("probe", help="批量探测：list 全量 + 每单状态名/评论/附件元数据（不下载附件），按状态名过滤写 probe.json")
+    pp.add_argument("--status-names", help="过滤的状态名集合，逗号分隔（默认：打开,未完成）")
+    pp.add_argument("--out", help="probe.json 输出目录（默认 ~/.claude/icode_data/tb_probe，文件名 <pid>.json）")
+    pp.set_defaults(func=cmd_probe)
 
     args = ap.parse_args()
     if args.domain:

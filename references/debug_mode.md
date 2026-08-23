@@ -58,6 +58,7 @@
   "status": "debug_in_progress",  // init 的调试态 / 或 "debug_done"（log 调试终态）
   "ticket_id": "",                // debug 工单无 ticket_id（不参与索引）
   "project_path": "<当前工程根绝对路径>",   // 当前工程根绝对路径（git rev-parse --show-toplevel；非 git 仓库 = pwd）。正常工单的 project_path 在索引条目里，debug 不入索引 → 只能写进 metadata 作产物唯一回追锚点（写错副本时能凭它识别真实位置）
+  "tb_source": {...},             // TB 缺陷单溯源（从 TB 拉取时填完整版 {lib,num,pid,label,url,meta_path}，无 TB 源时 null）。正常工单的 tb_source 摘要存索引条目、debug 不入索引 → 只能写进 metadata 作 debug 域内"按 lib+num+pid 复用匹配"的唯一依据（批量 TB + --debug 复用判定扫它，见 steps/log.md「批量 TB 分析」段步骤3 debug 变体）
   "requirement": "...",           // 调试用输入（与正常工单相同字段）
   "requirement_summary": "...",   // 调试用摘要（正常字段也填，便于跨工单 Read 时快速理解）
   ...                              // 其它 metadata 字段同正常工单

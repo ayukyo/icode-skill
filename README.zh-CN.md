@@ -167,7 +167,7 @@ cd ~/.claude/skills/icode/mcp/cheap-research
 
 ## 可选：从 Teambition 拉缺陷单日志分析
 
-`/icode log` 的零散输入含 Teambition 项目 URL 或 `<LIB>-<NUM>`（如 `DEMO-26`）时，可选自动拉取缺陷单的标题/描述/评论/日志附件作为分析输入；详见 [SKILL.md「使用流程示例」段（方式 D2）](SKILL.md)。配置（多项目 + cookie）详见 `~/.claude/skills/icode/tools/tb/README.md`。
+`/icode log` 的零散输入含 Teambition 项目 URL 或 `<LIB>-<NUM>`（如 `DEMO-26`）时，可选自动拉取缺陷单的标题/描述/评论/日志附件作为分析输入；详见 [SKILL.md「使用流程示例」段（方式 D2）](SKILL.md)。配置（多项目 + cookie）详见 `~/.claude/skills/icode/tools/tb/README.md`。另支持**批量分析所有"打开/未完成"缺陷单**（零散输入含"分析所有TB"类意图时触发，按真实任务流状态名过滤、不能用 isDone），详见 [SKILL.md「方式 D3」](SKILL.md)。
 
 ## 可选：从钉钉文档/钉盘拉资料
 
