@@ -34,9 +34,9 @@
 
 | # | 禁区 | 反例 | 正确做法 |
 |---|------|------|---------|
-| 1 | **同一产物文件并发写** | 06_audit.md §6.7 三视角（A/B/C）写同一段 → 并发 3 spawn 同时改 §6.7 段内容 | **三 spawn 并发收集 facts**（仅 Read / 检索 / 评估，不写产物）→ **主代理顺序调和落地**（任一 spawn 返回 issue 也走顺序 §6.2 修复流程） |
+| 1 | **同一产物文件并发写** | 06_audit.md §6.7 三视角（A/B/C）写同一段 → 并发 3 spawn 同时改 §6.7 段内容 | **三 spawn 并发收集 facts**（仅 Read / 检索 / 评估，不写产物）→ **主代理顺序调和落地**（任一 spawn 返回 issue 也走顺序 §6.2 修复流程）；**等待按 [subagent_spawn_wait.md](subagent_spawn_wait.md) 通用契约**（后台 spawn + `TaskOutput` 阻塞等 + `INTEGRATION_WALL_CLOCK_DEADLINE_SECONDS=1200` 墙钟硬截止，禁止裸同步 spawn / 被动等通知 / 无限等待） |
 | 2 | **数据有依赖的后置调** | `retrieve_similar(query=从 summarize 提炼的症状, candidates=索引)` 依赖 `summarize(产物)` 的输出 → 把两者并发 | **串行**：先等 `summarize` 摘要出来，**再**触发 `retrieve_similar` |
-| 3 | **环境无 spawn 工具 / 无 MCP 工具时** | `ToolSearch(query="select:Agent")` 失败（no_spawn_env=true）时仍试图 spawn 3 质疑者 | **一律走 [references/adversarial.md](../references/adversarial.md)「环境无 spawn 工具」降级路径**：环境无 spawn → 主代理文字块自演 + 标 `[未验证-对抗不可用]`；环境无 MCP → 直接降为 ⚪，不评估 |
+| 3 | **环境无 spawn 工具 / 无 MCP 工具时** | `ToolSearch(query="select:Agent")` 失败（no_spawn_env=true）时仍试图 spawn 3 质疑者 | **一律走 [references/adversarial.md](../references/adversarial.md)「环境无 spawn 工具」降级路径**：环境无 spawn → 主代理文字块自演 + 标 `[未验证-环境无spawn工具]`；环境无 MCP → 直接降为 ⚪，不评估 |
 
 **反之允许并发**（**不写文档，引擎自动批处理**）：
 - 阶段内多个**独立 Read 文件**（无依赖关系）——引擎自动并行
@@ -175,6 +175,6 @@
 - **vision-bridge 不可用**：用户自负原生多模态能力，标降级
 - **playwright 不可用**：Bash + curl 兜底（无 JS 渲染），标降级
 - **memory 不可用**：本对话手动笔记兜底，标降级
-- **cheap-research 不可用**：主会话 / 子代理走 `Agent(model="haiku")` 兜底（Claude 家族最便宜模型）。整体 token 节省幅度下降，但工作流不阻塞
+- **cheap-research 不可用**：主会话 / 子代理走 `Agent(model="haiku")` 兜底（Claude 家族最便宜模型）。整体 token 节省幅度下降，但工作流不阻塞。**子代理兜底时按 [subagent_spawn_wait.md](subagent_spawn_wait.md) 通用契约等待**（后台 spawn + `TaskOutput` 阻塞等 + 20 分钟墙钟硬截止，禁止裸同步 spawn / 被动等通知 / 无限等待）
 
 **降级不是错误，但必须显式声明**（先实际调用一次，失败/空才能标降级）。

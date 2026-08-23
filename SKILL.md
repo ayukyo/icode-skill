@@ -650,7 +650,7 @@ test -f "{ICODE_OUT_DIR}/03_plan_final.md" && python3 -c "import json,sys; d=jso
 - **索引体积**：全局索引单条只存摘要+要点+关键词，整体 <2K token
 - **粗筛控量**：两段式检索只把 ≤10 条候选集 keywords+requirement_points 喂 LLM（非全量），控 token
 - **注入数**：top-N 动态梯度，强相关≤2 + 弱相关≤1，全相关时上限 3 条（与段零工程文档候选合并后总量≤3 条一致，见 [dir_and_metadata.md](references/dir_and_metadata.md)「段零·工程文档检索」段步骤 4）
-- **注入体积**：init 注入要点 ≤500 token/条；plan 注入 ADR+风险 ≤1K token/条；log 注入根因+证据 ≤800 token/条；超大工单需深读时派子代理消化成摘要返回（隔离上下文）
+- **注入体积**：init 注入要点 ≤500 token/条；plan 注入 ADR+风险 ≤1K token/条；log 注入根因+证据 ≤800 token/条；超大工单需深读时派子代理消化成摘要返回（隔离上下文，**等待按 [subagent_spawn_wait.md](references/subagent_spawn_wait.md) 通用契约**：后台 spawn + `TaskOutput` 阻塞等 + 20 分钟墙钟硬截止，禁止裸同步 spawn / 被动等通知 / 无限等待）
 
 **工程污染防护**（重要）：
 - 历史参考**只进会话上下文，不写进产物文件**（`00_init.md` 完全不写历史引用；`01_plan.md` 不堆砌历史引用）
@@ -806,7 +806,7 @@ test -f "{ICODE_OUT_DIR}/03_plan_final.md" && python3 -c "import json,sys; d=jso
    - 多个互不依赖的 Bash 命令
    - 多个独立子任务用 Agent 工具并行启动
 
-   **判定**：A 的结果影响 B 的执行 → 串行；A 和 B 互不依赖 → 必须并行一个回复发出。
+   **判定**：A 的结果影响 B 的执行 → 串行；A 和 B 互不依赖 → 必须并行一个回复发出。**并行子代理等待按 [subagent_spawn_wait.md](references/subagent_spawn_wait.md) 通用契约**（后台 spawn + `TaskOutput` 阻塞等 + `INTEGRATION_WALL_CLOCK_DEADLINE_SECONDS=1200` 墙钟硬截止，禁止裸同步 spawn / 被动等通知 / 无限等待）。
 
 2. **连续执行不等待**：拿到工具结果后，在同一回复中立即继续后续步骤/决策，不等用户主动推进（不论用户说什么）。仅以下情况可以停下来问用户：
    - 需要用户做二元决策（如"复用/新建目录"）

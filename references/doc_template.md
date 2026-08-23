@@ -211,6 +211,7 @@
 **永远生成**（不因工程大跳过），增量+并行控成本：
 
 - **首次**：并行子代理（general-purpose，禁用 Explore），每个验证一批 file:line 引用。从全库正文提取引用（grep `\w+\.\w+:\d+`），子代理实读返回 `{ref, exists, matches, issue}`，汇总失效项 + 修正建议
+- **等待契约**：并行子代理等待按 [subagent_spawn_wait.md](subagent_spawn_wait.md)「子代理 spawn 等待通用契约」执行——后台 spawn + `TaskOutput` 阻塞等 + `INTEGRATION_WALL_CLOCK_DEADLINE_SECONDS=1200` 墙钟硬截止，超时按已返回批整合、未返回批标 `[未验证-子代理失败]`（**禁止裸同步 spawn / 被动等通知 / 无限等待**）
 - **增量**：读 `00_overview.md` 的 generation_commit，`git diff <commit>..HEAD --name-only` 拿变更文件，只重验引用了变更文件的 file:line
   - **语义联动盲区（已知局限）**：增量只重验"引用了变更文件"的 file:line；未变更文件因他处变更而语义变化时不被重验（如 a.c 没变但 b.c 改了导致 a.c 中函数 A 的行为变，a.c:100 相关引用不重验 → 章节描述可能已过时但 99 章不发现）
   - **一跳联动缓解**：为缩小盲区，对变更文件直接调用/引用的未变更文件也纳入重验范围--grep 变更文件调用的函数符号 / 引用的类型，把被引用的未变更文件加入重验集（仅扩一跳，控 token）；仍无法覆盖"间接语义联动"（二跳及以上），残余过时由段零 stale 检测 + 不盲信约束兜底（见 [dir_and_metadata.md](dir_and_metadata.md)「stale 检测」「不盲信约束」）

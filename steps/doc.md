@@ -338,7 +338,7 @@ find "${GIT_ROOT}" -maxdepth 3 -name "<module_name>" -type d
 
 ### 6. 代码事实审计（`99_code_facts_audit.md`，永远生成）
 
-增量+并行（见 [doc_template.md](../references/doc_template.md)「六」）：首次并行子代理验证全库 file:line；增量只重验变更文件相关引用（**含一跳联动**：grep 变更文件调用的符号，把被引用的未变更文件也纳入重验，缩小语义联动盲区）。**已知盲区**：未变更文件因他处变更而语义变化时（二跳及以上联动）增量审计不重验，残余过时由段零 stale 检测 + 不盲信约束兜底（见 [dir_and_metadata.md](../references/dir_and_metadata.md)）。子代理失败→该批标 `[未验证-子代理失败]`。
+增量+并行（见 [doc_template.md](../references/doc_template.md)「六」）：首次并行子代理验证全库 file:line；增量只重验变更文件相关引用（**含一跳联动**：grep 变更文件调用的符号，把被引用的未变更文件也纳入重验，缩小语义联动盲区）。**已知盲区**：未变更文件因他处变更而语义变化时（二跳及以上联动）增量审计不重验，残余过时由段零 stale 检测 + 不盲信约束兜底（见 [dir_and_metadata.md](../references/dir_and_metadata.md)）。子代理失败→该批标 `[未验证-子代理失败]`。**并行子代理等待按 [subagent_spawn_wait.md](../references/subagent_spawn_wait.md) 通用契约**（后台 spawn + `TaskOutput` 阻塞等 + `INTEGRATION_WALL_CLOCK_DEADLINE_SECONDS=1200` 墙钟硬截止，禁止裸同步 spawn / 被动等通知 / 无限等待）。
 
 ### 7. 进度输出（阶段级 + 末尾汇总）
 
