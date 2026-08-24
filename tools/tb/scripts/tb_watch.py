@@ -404,7 +404,7 @@ PROMPT_TMPL = """你是 icode log 定时增量监控触发的分析会话，执�
 
 **必须执行完整 `/icode log --debug {label}` 深度分析（与人工单独 `/icode log` 同等完整，禁止因无人值守/无头环境而精简流程）**：
 - **下载并解压 TB 日志附件**做日志实证根因分析（**不用 --meta-only**，日志是根因分析的核心输入）；
-- 走完整 log 流程：limit 前置红线检查点（读留痕 limit_checkpoint.md）→ 历史工单检索 → 工程知识库/cheap-research 检索 → 需求初稿（00_init.md）→ 完整对抗根因分析（log_analysis.md）；
+- 走完整 log 流程（debug 语义）：limit 前置红线检查点（读留痕 limit_checkpoint.md）→ **跳过历史工单检索（debug 独立孪生对照，不参考历史正式工单，见 references/debug_mode.md §14）** → 工程知识库/cheap-research 检索 → 需求初稿（00_init.md）→ 完整对抗根因分析（log_analysis.md）；
 - debug 语义：产物在 {project_dir}/.icode_output/.debug/，不写全局 index.json，自动判定复用该单旧 debug 孪生、不询问。
 
 若 `/icode` 命令在当前无头环境不可用，则按 icode debug 语义**手动**执行同等完整分析：

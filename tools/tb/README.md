@@ -108,7 +108,7 @@ python3 tools/tb/scripts/tb_pull.py --pid <URL里的pid> defect <LIB>-<NUM> --ou
 
 **用途**：定时监控一个或多个 TB 项目（"打开/未完成"单），周期检测各单是否有新增内容（评论/附件/状态变化），
 有则自动拉起 claude 无头会话做 **完整 `/icode log --debug` 深度分析**（**下载并解压 TB 日志附件**做日志实证根因分析，
-完整 log 流程：limit 红线检查点 → 历史工单检索 → 工程知识库/cheap-research 检索 → 00_init 需求初稿 → 对抗根因分析；
+完整 log 流程（debug 语义）：limit 红线检查点 → **跳过历史工单检索（debug 独立孪生对照，不参考历史正式工单，见 [references/debug_mode.md](../../references/debug_mode.md) §14）** → 工程知识库/cheap-research 检索 → 00_init 需求初稿 → 对抗根因分析；
 产物落 `{工程}/.icode_output/.debug/`，**不写全局 index.json，不污染正式索引**）。适合"缺陷单持续有更新、想自动跟进分析"的长期监控场景。
 
 **debug 语义（核心）**：监控触发的分析一律走 icode debug 变体——每单独立 debug 工单在
