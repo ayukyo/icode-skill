@@ -198,6 +198,52 @@ def scan_debug_worktickets(project_dir):
     return found
 
 
+def scan_debug_halfdone(project_dir):
+    """扫 .debug 域下"中断半成品"debug 工单：目录存在、有 tb_source 附件、但无 .ico_metadata.json。
+
+    半成品没有 metadata，scan_debug_worktickets 收集不到，检测会误判"无基线"、
+    每轮重复触发同一单重建 → 死循环（实测 root cause：某单分析被超时杀在写 metadata 前）。
+    识别归属单：优先读 *_meta.json 的 uniqueId，兜底从 tb_source/<LIB>-<NUM>/ 目录名解析。
+    返回 [(工单目录名, meta_path, lib, num_str)]；meta_path 可为 None（无 meta.json 的半成品）。
+    """
+    dbg_root = os.path.join(project_dir, ".icode_output", ".debug")
+    if not os.path.isdir(dbg_root):
+        return []
+    found = []
+    for name in sorted(os.listdir(dbg_root)):
+        d = os.path.join(dbg_root, name)
+        if not os.path.isdir(d) or os.path.exists(os.path.join(d, ".ico_metadata.json")):
+            continue  # 正常 debug 工单走 scan_debug_worktickets
+        num, lib, mp = None, None, None
+        # 1) tb_source/<LIB>-<NUM>/ 目录名解析（提供 lib + 兜底 num）
+        ts_root = os.path.join(d, "tb_source")
+        if os.path.isdir(ts_root):
+            for sub in sorted(os.listdir(ts_root)):
+                m = re.match(r"^([A-Za-z0-9]+)-(\d+)$", sub)   # <LIB>-<NUM>
+                if m:
+                    lib, num = m.group(1), m.group(2)
+                    break
+        # 2) *_meta.json 的 uniqueId 作为 num 权威（若存在，覆盖目录名解析）
+        for dirpath, _dirs, files in os.walk(d):
+            for fn in files:
+                if fn.endswith("_meta.json") and not fn.endswith(".prev.json"):
+                    mp = os.path.join(dirpath, fn)
+                    break
+            if mp:
+                break
+        if mp:
+            try:
+                with open(mp) as f:
+                    uid = json.load(f).get("uniqueId", "")
+                if uid:
+                    num = str(uid)
+            except (json.JSONDecodeError, OSError):
+                pass
+        if num:
+            found.append((name, mp, lib, num))
+    return found
+
+
 def locate_debug_meta(project_dir, workticket_dir, ts):
     """定位 debug 工单里该单的 <ID>_meta.json。
 
@@ -275,6 +321,7 @@ def detect_project(project_dir, proj, watch_dir):
     items = run_probe(proj, watch_dir)
     items.sort(key=_num_of, reverse=True)          # 倒序：新单（号大）优先
     dbg_tickets = scan_debug_worktickets(project_dir)
+    halfdone = scan_debug_halfdone(project_dir)
 
     need_inc, no_upd, pend_new = [], [], []
     for it in items:
@@ -286,7 +333,15 @@ def detect_project(project_dir, proj, watch_dir):
             with open(mp) as f:
                 old_meta = json.load(f)
         if wdir is None or old_meta is None:
-            pend_new.append((num, label, it, None, "无 debug 基线(自动建基线)", None))
+            # 无 metadata 但可能有"超时中断的半成品"（附件已下载）→ 按该单续跑而非新建，防死循环
+            hd = [h for h in halfdone
+                  if h[3] == str(num) and (not proj.get("lib") or not h[2] or h[2] == proj["lib"])]
+            if hd:
+                hname, hmp, _hlib, _hnum = hd[0]
+                hwdir = os.path.join(project_dir, ".icode_output", ".debug", hname)
+                need_inc.append((num, label, it, hwdir, "中断续跑(半成品复用,附件已下载)", hmp))
+            else:
+                pend_new.append((num, label, it, None, "无 debug 基线(自动建基线)", None))
             continue
         updated, reason = has_update(it, old_meta)
         if updated:
@@ -306,7 +361,7 @@ def write_report(cfg, results):
              "",
              f"- 生成时间：{stamp} | 轮询间隔：{cfg['interval']}s",
              f"- 工程根：{cfg['project_dir']} | 项目数：{len(cfg['projects'])}",
-             "- 分析状态：**需增量**=有新增内容待 claude debug 增量分析；**无更新**=debug 孪生比对一致；**待新建**=尚无 debug 孪生（自动触发 debug 分析建基线，每轮一条）",
+             "- 分析状态：**需增量**=有新增内容待 claude debug 增量分析；**无更新**=debug 孪生比对一致；**待新建**=尚无 debug 孪生（自动触发 debug 分析建基线，每轮一条）；**中断续跑**=该单有上次超时遗留的半成品 debug 工单（附件已下载），复用续跑完成基线",
              ""]
     for proj, res in zip(cfg["projects"], results):
         lines.append(f"## {proj['url'] or proj['domain'] + '/project/' + proj['pid']}")
@@ -349,13 +404,16 @@ PROMPT_TMPL = """你是 icode log 定时增量监控触发的分析会话，执�
 
 若 `/icode` 命令在当前无头环境不可用，则按 icode debug 语义**手动**执行同等完整分析：
 1. 在 {project_dir}/.icode_output/.debug/ 下定位该单旧 debug 孪生（metadata 的 tb_source 匹配 lib={lib} num={num} pid={pid}）；
-   无则新建 debug 工单，metadata 写 debug=true / indexed=false / status=debug_done /
-   project_path={project_dir} / tb_source 完整 {{lib,num,pid,label,url,meta_path}}
-2. 用 tb_pull.py --domain {domain} --pid {pid} defect {num} **下载全部 TB 附件**（日志 tgz 解压到
-   tb_source/<label>/extracted/）并重拉该单最新评论
+   **若定位到的是"中断半成品"**（目录存在、tb_source/ 附件已下载、但**无 .ico_metadata.json**——上次分析超时中断的残留）：
+   **复用该目录，不要新建第二个工单**；无任何旧目录才新建 debug 工单，metadata 写 debug=true / indexed=false /
+   status=debug_done / project_path={project_dir} / tb_source 完整 {{lib,num,pid,label,url,meta_path}}
+2. 用 tb_pull.py --domain {domain} --pid {pid} defect {num} **重拉该单最新评论**；**附件复用优化**：半成品已下载的
+   附件（tb_source/<label>/ 下的 tgz/mp4/已抽帧，日志已解压到 extracted/）**直接复用、跳过重复下载**，仅补拉缺失附件
 3. 对比 debug 工单旧 meta 识别新增评论/附件/状态变化；基于**日志实证**做增量对抗分析（确认/补充/推翻旧根因），
    更新该 debug 工单的 log_analysis.md；补 limit_checkpoint.md 读留痕
-4. 更新该 debug 工单的 meta（并入新数据）与 metadata（续期），**绝不写全局 index.json**
+4. 更新该 debug 工单的 meta（并入新数据）与 metadata（续期），**绝不写全局 index.json**；
+   **中断半成品收尾**：若该目录原本无 .ico_metadata.json，本步补写为正式基线（debug=true / indexed=false /
+   status=debug_done / project_path={project_dir} / tb_source 完整 {{lib,num,pid,label,url,meta_path}}）
 
 硬约束：只处理这一个 TB 单、不混单、绝不回写 TB、自动判定复用 debug 孪生不新建不询问、
 所有产物只落 {project_dir}/.icode_output/.debug/ 域。
@@ -363,16 +421,19 @@ PROMPT_TMPL = """你是 icode log 定时增量监控触发的分析会话，执�
 
 
 def _low_priority_preexec():
-    """子进程降级：nice 10 + ionice idle。监控分析不抢占交互资源（失败静默，无副作用）。
+    """子进程温和降级：nice 5 + ionice best-effort 最低档（-c 2 -n 7）。监控分析不抢占交互资源（失败静默，无副作用）。
 
     仅在 low_priority=true 时挂到 claude 子进程；nice/ionice 优先级被子进程继承。
+    温和档选型：不用激进 idle（-c 3）——idle 类 IO 只在系统无其它 IO 时才执行，
+    会饿死 SMB 下载/解压/抽帧（实测百 MB 级日志包下载+解压被拖到超时）；best-effort -n 7 仍低于
+    其它普通 IO，但不会被完全饿死。nice 5 比 nice 10 权重约翻倍，仍低于默认(0)。
     """
     try:
-        os.nice(10)
+        os.nice(5)
     except OSError:
         pass
     try:
-        subprocess.run(["ionice", "-c", "3", "-p", str(os.getpid())],
+        subprocess.run(["ionice", "-c", "2", "-n", "7", "-p", str(os.getpid())],
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except Exception:
         pass
@@ -479,6 +540,9 @@ def main_loop(cfg, once=False):
     os.makedirs(watch_dir, exist_ok=True)
     log_file = os.path.join(watch_dir, "watch.log")
     round_no = 0
+    # 连续"快速失败"计数（<600s 的触发失败 = 疑似连接/环境故障，如 API Connection refused）。
+    # >=3 时退避：跳过触发 claude（检测/报告照常），直到某单触发成功才清零——防网关故障期每轮空转启动 claude。
+    _trigger_fail_streak = 0
     while True:
         # 顶部统一检查退出标志：检测失败分支的 continue / sleep 被信号中断后
         # 都会回到这里，确保 SIGTERM(优雅 stop) 在任何路径下都能让守护退出
@@ -517,9 +581,21 @@ def main_loop(cfg, once=False):
         candidates.sort(key=lambda x: x[1][0], reverse=True)
         try:
             if candidates and not cfg.get("detect_only"):
-                proj, (num, label, _it, _wdir, reason, _mp) = candidates[0]
-                rc, cost = trigger_claude(cfg, proj, num, label, reason)
-                _append_log(log_file, f"[{stamp}] round#{round_no} 触发 {label}（{reason}）：{'成功' if rc == 0 else '失败/超时'}，耗时{cost}s")
+                if _trigger_fail_streak >= 3:
+                    # 退避：连续快速失败（疑似网关/环境故障），本轮跳过触发；检测/报告照常，成功一次即清零
+                    print(f"[{stamp}] round#{round_no} 触发连续快速失败 {_trigger_fail_streak} 次，本轮跳过触发（退避，疑似网关/环境故障），候选 {candidates[0][1][1]}")
+                    _append_log(log_file, f"[{stamp}] round#{round_no} 触发连续快速失败 {_trigger_fail_streak} 次，跳过触发（退避），候选 {candidates[0][1][1]}")
+                else:
+                    proj, (num, label, _it, _wdir, reason, _mp) = candidates[0]
+                    rc, cost = trigger_claude(cfg, proj, num, label, reason)
+                    if rc == 0:
+                        _trigger_fail_streak = 0
+                    elif cost < 600:
+                        # 快速失败（<10 分钟）= 疑似连接/环境故障（如 API Connection refused），计入退避
+                        _trigger_fail_streak += 1
+                    # >=600s 的失败（任务太重超时等）不计入退避——由"中断半成品续跑"兜底，不误伤
+                    detail = f"，快速失败连续{_trigger_fail_streak}次" if (rc != 0 and cost < 600) else ""
+                    _append_log(log_file, f"[{stamp}] round#{round_no} 触发 {label}（{reason}）：{'成功' if rc == 0 else '失败/超时'}，耗时{cost}s{detail}")
             elif candidates:
                 print(f"[{stamp}] round#{round_no} (detect-only) 候选 {candidates[0][1][1]}，未触发 claude")
             else:

@@ -171,3 +171,22 @@ cd /path/to/project-B
 - **debug 工单的产物不可被 audit 6.7 视角 A 引用**：audit 视角 A 检查 `metadata.requirement` vs 实际产物，但**当前迭代的"实际产物"是另一张正常工单，不是 debug 工单**——debug 工单的产物是**独立对照**
 - **debug 工单的产物不可被 patch 续跑**：见 §6
 - **debug 工单不支持跨工程的 `cross_project_refs`**：入索引的工单才有该字段，debug 工单不入索引 → 不参与跨工程流转
+
+---
+
+## 12. 中断半成品识别与续跑（防超时死循环）
+
+**背景**：tb_watch 定时增量监控触发的 claude 分析可能**超时被杀**（单次 `claude_timeout` 到点 / 会话中断），留下**中断半成品 debug 工单**：目录 + 已下载 TB 附件齐全，但**未写完 `.ico_metadata.json`**（metadata 是流程末步才写）。若不识别，下次分析会把它当"无 debug 孪生"→ 新建第二个 debug 工单 → 重复下载附件 → 同一批单无限重建（实测死循环：同一批单反复重建、重复下载附件）。
+
+**识别标准（中断半成品）**：`.icode_output/.debug/` 下的目录，**同时满足**：
+- **无 `.ico_metadata.json`**（与正式 debug 孪生区分——正式孪生必有 metadata）
+- **有已下载的 TB 附件**：`tb_source/<LIB>-<NUM>/` 子目录存在，或其内 `*_meta.json`（排除 `.prev.json`）带 `uniqueId` 字段
+
+**归属单识别**：优先读 `tb_source/<LIB>-<NUM>/<LIB>-<NUM>_meta.json`（附件下载产物的 meta）的 `uniqueId` 为权威单号；目录名 `<LIB>-<NUM>` 提供 lib+num（两者存在且一致时以 uniqueId 为准）。真实半成品的 meta.json 就在 `tb_source/<LIB>-<NUM>/` 子目录（附件下载产物），**非工单顶层**——扫描必须递归。
+
+**复用续跑（命中半成品时，不新建第二个 debug 工单）**：
+1. `ICODE_OUT_DIR` = 半成品目录（如 `.icode_output/.debug/.icode_output_2`），**不新建**
+2. **附件复用**：半成品已下载附件（`tb_source/` 下 tgz/mp4/已抽帧、日志已解压到 `extracted/`）**直接复用、跳过重复下载**，仅补拉缺失附件
+3. 完成分析后**收尾补写 `.ico_metadata.json`**：`debug: true` / `indexed: false` / `status: debug_done` / `project_path` / `tb_source` 完整 `{lib,num,pid,label,url,meta_path}`——补写后该目录即正式 debug 孪生，后续走正常 debug 复用匹配（§4）
+
+**与正常 debug 复用匹配的关系**（统一判定顺序）：① 正常复用匹配（扫 metadata 的 `tb_source`，见 [steps/log.md](../steps/log.md) 步骤1 debug 变体 / 批量步骤3 debug 变体）优先 → ② 匹配不到再扫**中断半成品**（本 §）→ ③ 两者皆无才「创建新目录」debug 变体新建。命中①或②均**自动判定复用、不询问**（debug 无人值守场景如 tb_watch 不能弹问），与批量 debug 的"自动判定、不逐单弹问"一致。

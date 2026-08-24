@@ -113,7 +113,8 @@ python3 tools/tb/scripts/tb_pull.py --pid <URL里的pid> defect <LIB>-<NUM> --ou
 
 **debug 语义（核心）**：监控触发的分析一律走 icode debug 变体——每单独立 debug 工单在
 `{工程}/.icode_output/.debug/.icode_output_N/`，metadata 写 `debug=true`/`indexed=false`/`tb_source` 完整版，
-**绝不写全局 index.json**；检测"有更新"的比对对象 = debug 域里该单的旧 debug 孪生（按 `tb_source` 的 lib+num+pid 匹配），
+**绝不写全局 index.json**；检测"有更新"的比对对象 = debug 域里该单的旧 debug 孪生（按 `tb_source` 的 lib+num+pid 匹配）；
+**超时中断残留的"半成品"**（目录 + 附件已下载但无 `.ico_metadata.json`，分析超时被杀）**识别复用续跑而非重复新建**（防死循环，见 [references/debug_mode.md](../../references/debug_mode.md) §12）。
 与正式工单/正式索引完全脱钩。想要正式修复分析请用不带 `--debug` 的 `/icode log`。
 
 **配置化·多项目**：JSON 配置文件列出多个项目，每轮遍历全部项目。**最小配置只需给 URL**（自动解析 domain+pid）：
@@ -135,8 +136,9 @@ python3 tools/tb/scripts/tb_pull.py --pid <URL里的pid> defect <LIB>-<NUM> --ou
 - `project_dir`：工程根（可选，报告与 debug 工单落点 `{工程}/.icode_output/`；默认 = 启动时 cwd）。
   配了之后 `tb_watch_ctl.sh start/stop/status` 免传 `--project-dir`
 - `claude_skip_permissions`：true 时给 claude 加 `--dangerously-skip-permissions`（无人值守所需，见风险）
-- `low_priority`：true（默认）时 claude 分析进程**降级**（nice 10 + ionice idle，子进程继承），
-  监控分析只在系统空闲时占用资源、不抢交互操作；false 关闭。配合"每轮只跑 1 个、串行、分析完才下一轮"，
+- `low_priority`：true（默认）时 claude 分析进程**温和降级**（nice 5 + ionice best-effort 最低档 -c 2 -n 7，子进程继承）——
+  比默认优先级低、不抢交互操作，但不会被完全饿死（不用激进 idle：idle 类 IO 只在系统无其它 IO 时才执行，
+  实测会饿死 SMB 下载/解压/抽帧拖到超时）；false 完全关闭降级。配合"每轮只跑 1 个、串行、分析完才下一轮"，
   **同一时刻最多 1 个 claude 分析进程，不会并发堆叠**
 - 每项目：`url`（必填，自动解析 domain+pid）、`lib`（可选，缺陷库前缀，用于 debug 孪生匹配）、
   `status_names`（可选，默认 `打开,未完成`）
@@ -176,11 +178,13 @@ tools/tb/scripts/tb_watch_ctl.sh stop --force
 
 **自动建基线**：首次监控时 debug 域无基线，单全部为"待新建"——watch 自动逐轮触发 claude 对该单做
 debug 全量分析**建基线**（每轮一条，按单号倒序），全部建完后转入纯增量监控（仅对"有更新"的单做增量）。
+**超时中断残留的半成品不会反复被当"待新建"重建**——识别为"中断续跑"复用续跑（见 debug 语义段）。
 多项目时跨项目合并按单号倒序处理。
 
 **每轮动作**：
 1. 每个项目 `tb_pull.py probe --status-names 打开,未完成` 拉线上最新（零附件下载）
-2. 扫 `{工程}/.icode_output/.debug/` 下 debug 工单 metadata 的 `tb_source`，按 lib+num+pid 定位每单旧 debug 孪生
+2. 扫 `{工程}/.icode_output/.debug/` 下 debug 工单 metadata 的 `tb_source`，按 lib+num+pid 定位每单旧 debug 孪生；
+   匹配不到再扫**中断半成品**（无 `.ico_metadata.json` 但有 `tb_source/<LIB>-<NUM>/` 附件，见 [references/debug_mode.md](../../references/debug_mode.md) §12）→ 命中判"中断续跑"复用续跑（附件复用、收尾补写 metadata）
 3. 按单号倒序逐单机械"有更新判定"（比对口径对齐 log.md「批量 TB 分析」步骤3：评论 `(created, 评论文本)` 键差集、
    附件 `(name, ext)` 键差集、状态仅当旧 meta 含 `status` 字段才比）
 4. 取单号最大的需增量/待新建单 -> 拉起 `claude -p` 触发 debug 分析（优先 `/icode log --debug <单>`，
