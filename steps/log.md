@@ -1,7 +1,7 @@
 # 步骤 log — 日志根因分析（可选前置入口）
 
 **命令**: `/icode log [--debug] [零散信息...]`（`--debug` = 独立孪生不入索引，详见 [references/debug_mode.md](../references/debug_mode.md)）
-**产出**: `{ICODE_OUT_DIR}/log_analysis.md` + `{ICODE_OUT_DIR}/00_init.md`（修复需求初稿，衔接步骤1）
+**产出**: `{ICODE_OUT_DIR}/log_analysis.md` + `{ICODE_OUT_DIR}/00_init.md`（修复需求初稿，衔接步骤1） + `{ICODE_OUT_DIR}/log_problem_brief.md`（**对外简报**，跨领域交付，报告完成时自动生成；**TB 分析时为 `{ICODE_OUT_DIR}/<单号>_log_problem_brief.md`**，如 `DEMO-26_log_problem_brief.md`，命名见下方「对外简报」段）
 **会话**: 主会话
 **定位**: **与 init/start/fast/plan 并列的入口命令，非流程步骤编号**。把"一坨设备/服务日志 + 模糊症状"转化为"有证据、经对抗验证、可信"的根因报告，并自动转成修复需求衔接步骤1。**领域无关**——适用于任何能产生日志的系统（机器人/服务端/嵌入式/Web 等均不限）。完成后用户敲 `/icode plan`（仅步骤1）/ `/icode start`（全流程）/ `/icode fast`（精简全流程）（无参）复用同目录进入修复流程，详见 SKILL.md「调用命令」段的目录复用规则说明。
 
@@ -433,7 +433,7 @@ sys.exit(1 if missing else 0)
    - **未跳过的后果**：debug 工单被错误索引会污染 `/icode status` 列表 + 历史检索 + 同 TB 单检索复用——debug 工单正是要做"独立孪生对照"，索引会违背设计意图
    - **强证据场景**：`/icode list`、`/icode status` 检索、段零工程文档检索、SWE bot 跨工程查询均依赖 index.json——debug 工单不入索引 = 不进入这些场景（**设计意图如此**）
    - 同 init.md 阶段 8 跳过逻辑完全一致（参考 [references/debug_mode.md](../references/debug_mode.md)）
-11. 提示用户（**最终答复必含**，报告完成时）：①一句话根因结论及置信度；②"修复前 → 修复后" 3 个关键变化；③`log_analysis.md §7.5` 链接（§7.5 触发时）；④明确"目标链路为设计建议，**尚未部署**"（除非本轮已有实机验证证据）。**`--debug` 时**（metadata.debug 为 true）**不输出**"进入修复流程"引导（debug 工单 L1 阻断、不进主流程，引导进入是错误指引），改为输出 **debug 对照说明**：
+11. **生成对外简报 + 提示用户**（报告完成时）：先自动生成对外简报（本地日志为 `{ICODE_OUT_DIR}/log_problem_brief.md`、**TB 分析为 `{ICODE_OUT_DIR}/<单号>_log_problem_brief.md`** 如 `DEMO-26_log_problem_brief.md`，命名见下方「对外简报」段；面向产品/测试/其它模块研发，剔除分析流程内部术语；本地日志与 TB/debug 分析均生成，debug 简报落 debug 工单目录）。再提示用户（**最终答复必含**）：①一句话根因结论及置信度；②"修复前 → 修复后" 3 个关键变化；③`log_analysis.md §7.5` 链接（§7.5 触发时）；④明确"目标链路为设计建议，**尚未部署**"（除非本轮已有实机验证证据）。**`--debug` 时**（metadata.debug 为 true）**不输出**"进入修复流程"引导（debug 工单 L1 阻断、不进主流程，引导进入是错误指引），改为输出 **debug 对照说明**：
     ```
     ## debug 对照说明
     📌 本工单是 debug 孪生（debug: true），不入索引、不参与主流程，`log_analysis.md` 仅供与正常工单并列对照研读（设计意图，见 references/debug_mode.md）。
@@ -442,6 +442,30 @@ sys.exit(1 if missing else 0)
     如需对根因正式修复：请用 /icode init（不带 --debug）或正常 /icode log 新建正常工单走修复流程。
     ```
     **非 debug 时**：根因已定，可敲 `/icode plan` / `/icode start` / `/icode fast`（均无参）复用本目录的 `00_init.md` 进入修复流程；其中 fast 适合小改动（单文件/少量文件、边界清晰、无架构变更）；若对根因有异议，继续对话即可重跑对抗分析
+
+## 对外简报（log_problem_brief.md / TB 分析为 <单号>_log_problem_brief.md，报告完成时自动生成）
+
+**定位**：`log_analysis.md` + `00_init.md` 面向研发自己看 + 流程 AI 续跑（含分析流程内部术语）；本简报是**面向不同领域读者**（产品 / 测试 / 其它模块研发 / 相关方）的**跨领域交付版**——**剔除 icode 分析流程术语**，保留根因与证据的技术实质，供非 icode 读者直接读懂"什么问题 / 为什么 / 怎么修 / 影响什么 / 怎么验证"。
+
+**产物**（**动态命名**，随分析源不同）：
+- **本地日志分析**：`{ICODE_OUT_DIR}/log_problem_brief.md`——`log`=分析对象日志、`problem`=内容问题、`brief`=对外体裁
+- **TB 分析**（含 debug）：`{ICODE_OUT_DIR}/<单号>_log_problem_brief.md`——单号取自 `tb_source` 的 `<LIB>-<NUM>`（如 `DEMO-26_log_problem_brief.md`），一眼看出是哪个 TB 单的问题，主体仍是 `log_problem_brief`
+- 两者均与 `log_analysis.md` **同目录并列**、成对存放便于查找。**本地日志分析与 TB（debug）分析均自动生成**；debug 工单简报落 debug 工单目录，与 `log_analysis.md` 并列供对照交付。
+
+**结构**（从 `log_analysis.md`（必要时 `00_init.md`）提炼，自然章节、**不得复制全文**）：
+1. **一句话结论**（症状 + 根因 + 置信度）
+2. **问题现象**（业务语言描述症状/触发条件/影响）
+3. **根因分析**（根因结论 + 关键证据：日志实证引时间点/日志行、代码实证带 file:line；**未证实的因果必须标注"待验证"，不得升格为事实**）
+4. **影响范围**（涉及模块/文件/功能/用户场景/风险）
+5. **建议修复方案**（A 档必做 / B 档兜底 / C 档后续，保留技术实质）
+6. **验证方式**（复现场景/观测点/测试口径）
+7. **遗留问题 / 待确认**（候选未区分、待实机验证等，诚实标注）
+8. **修复前后对照**（§7.5 触发时必含：修复前链路 → 修复后目标链路（**未部署**）+ 新旧关键点，从 `log_analysis.md §7.5` 压缩而来，节点边界/未定因果/改动点不得矛盾）
+
+**术语剔除清单**（对外简报**禁止**出现 icode 分析流程内部术语，用领域通用表达替代或省略）：
+`limit_checkpoint`/limit 红线 →（需要时）"项目约定约束"；段零/姐妹工程/关联工程/cheap-research → "相关工程/工程文档/历史记录"；对抗分析/质疑者/adversarial/spawn → 需要时"多视角验证"；`00_init`/4 维度验证清单 → "修复需求/验证清单"；`metadata`/debug 语义/`indexed`/`tb_source`/`anti_laziness`/反偷懒/`§编号` 引用 → **一律不提**（改写为自然章节）。
+
+**硬约束**：简报不是 `log_analysis.md` 的摘要重排，须**用领域通用语言重写**；证据（日志时间点/代码 file:line）必须保留、让测试与其它模块研发可复核；未证实的因果与待办必须如实标注，不得因"对外好看"而省略或升格。**文件名只到"问题/单号"粒度**——本地简报名 `log_problem_brief.md` 不表达具体问题、TB 简报名只带单号不带症状，故简报**标题（或首行）必须点明具体问题**（症状 + TB 单号如 `DEMO-26`，单号从 tb_source/工单目录名取），不得用"问题简报"这类泛标题。
 
 ## TB 缺陷源拉取（可选前置，仅当零散输入含 TB 引用）
 
@@ -561,7 +585,7 @@ sys.exit(1 if missing else 0)
 **⚠️ 状态语义（关键，决定枚举方式）**：TB 任务流状态名与 `isDone` **不同步**——实测存在 `isDone=True`（`accomplished` 有值）但任务流状态为「未完成」的单（如 `DEMO-47`），按 `isDone` 过滤会漏掉这类未完成单；且"打开"与"未完成"是**不同任务流**里的状态名（缺陷流程="打开"、任务流程="未完成"）。故**批量枚举必须用 `tb_pull.py probe --status-names`（按真实任务流状态名过滤），不能用 `list --status open`（isDone 布尔）**；默认状态名集合 `打开,未完成`（**即"分析所有TB单"默认只分析这两态，其它状态不纳入——除非用户显式指定扩展**），可按项目差异覆盖。
 
 **执行模型（每单独立工单，绝不混单——先读这里再执行）**：
-- **每个目标 TB 单 = 一个独立工单**（非 debug）：独立 `ICODE_OUT_DIR`（无旧工单 -> 按「创建新目录」新建，`.icode_output_N` 编号正常自增；有旧工单 -> 按「同 TB 单复用流程」复用旧目录），独立 `log_analysis.md`/`00_init.md`、独立 `tb_source/<ID>/` 附件、独立 metadata 与 index 条目（`ticket_id` + `tb_source`），各自可独立 `/icode plan`/`start` 续修，**单与单之间互不共享产物目录**（debug 变体见下一条）
+- **每个目标 TB 单 = 一个独立工单**（非 debug）：独立 `ICODE_OUT_DIR`（无旧工单 -> 按「创建新目录」新建，`.icode_output_N` 编号正常自增；有旧工单 -> 按「同 TB 单复用流程」复用旧目录），独立 `log_analysis.md`/`00_init.md`/`<单号>_log_problem_brief.md`（批量每单都是 TB 单，简报按「对外简报」段动态命名、报告完成自动生成）、独立 `tb_source/<ID>/` 附件、独立 metadata 与 index 条目（`ticket_id` + `tb_source`），各自可独立 `/icode plan`/`start` 续修，**单与单之间互不共享产物目录**（debug 变体见下一条）
 - **`--debug` 批量变体（所有 TB 单都在 DEBUG 目录，可确保）**：`/icode log --debug 分析所有打开/未完成的TB单 ...` 时，整批每单的独立工单都建在 `.icode_output/.debug/.icode_output_N`（N 在 debug 域独立递增，与正常工单互不干扰）、编排目录 `.icode_output/.debug/tb_batch_<pid>/`——**所有分析产物（含汇总报告）全部落在 `.icode_output/.debug/` 域内，绝不进入正常工单域**；每单 metadata `debug: true` + 完整 `tb_source`、**不入 index、L1 阻断主流程、独立状态名 `debug_in_progress`/`debug_done`**、忽略 `--worktree`（debug 语义继承，见 [references/debug_mode.md](../references/debug_mode.md)）；**debug 批量的复用只在 debug 域内匹配旧 debug 孪生，不匹配正常工单**（debug 是独立孪生对照，见步骤3）
 - **批量编排目录 `.icode_output/tb_batch_<pid>/` 不是工单**（`--debug` 变体为 `.icode_output/.debug/tb_batch_<pid>/`）：不占工单编号、不建 metadata、不入 index、不参与"检测最新目录"；只放批量汇总报告 `tb_batch_report.md`，不承载任何单的分析产物
 - **混单后果（禁止）**：把多个 TB 单塞进一个工单会破坏"一工单一根因报告一修复链路"契约——各单根因无法区分、`/icode plan` 串单、index 检索失真、后续无法单独续修
@@ -595,7 +619,7 @@ sys.exit(1 if missing else 0)
 
 **成本控制**：探测阶段零附件下载（probe 只拉元数据）；仅确认要增量/新建的单才 `defect` 下载附件；批量大时按影响度分批、可裁剪。每单的评论研读/附件研读/完整性自检/评论不盲信/增量对抗（确认/补充/推翻）等规则**全部复用单 TB 路径，不另立平行规则**。
 
-> **与单 TB 路径的关系**：批量 = 对每个目标单循环走既有"单 TB 分析 / 同 TB 单复用流程"，仅枚举、分流、汇总三步是新增；**每个 TB 单独立一个工单（独立 ICODE_OUT_DIR + 独立 `log_analysis.md`/`00_init.md` + 独立 index 条目），绝不混入同一工单**——混单会破坏"一工单一根因报告一修复链路"的目录契约、无法区分各单根因、无法各自独立续修（`/icode plan` 串单）；单内 ICODE_OUT_DIR 确定（新建/复用）按**单 TB 路径步骤1「检测旧工单」**与「同 TB 单复用流程」既有逻辑执行（debug 变体按执行模型 debug 语义，不写 index）；批量编排目录只放汇总表，不承载任何单的分析产物。
+> **与单 TB 路径的关系**：批量 = 对每个目标单循环走既有"单 TB 分析 / 同 TB 单复用流程"，仅枚举、分流、汇总三步是新增；**每个 TB 单独立一个工单（独立 ICODE_OUT_DIR + 独立 `log_analysis.md`/`00_init.md`/`<单号>_log_problem_brief.md` + 独立 index 条目），绝不混入同一工单**——混单会破坏"一工单一根因报告一修复链路"的目录契约、无法区分各单根因、无法各自独立续修（`/icode plan` 串单）；单内 ICODE_OUT_DIR 确定（新建/复用）按**单 TB 路径步骤1「检测旧工单」**与「同 TB 单复用流程」既有逻辑执行（debug 变体按执行模型 debug 语义，不写 index）；批量编排目录只放汇总表，不承载任何单的分析产物。
 
 ## 追问机制（与 init 的差异）
 

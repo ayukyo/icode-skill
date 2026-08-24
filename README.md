@@ -114,7 +114,7 @@ Every step produces a real artifact in `.icode_output/.icode_output_N/` (plan �
 - **Anti-duplicate injection**: history retrieval and project-doc retrieval share an injection cache, avoiding repeated injection within one dev chain
 - **Decision anchors**: steps pass concise decision summaries (`.decision_anchors.json`) downstream — saves tokens, keeps reasoning continuity
 - **Resumable runs**: `.ico_metadata.json` status + round counters support crash recovery at steps 2/4/5
-- **Two optional entries**: `/icode log` log root-cause analysis (baseline check first, then adversarial analysis; domain-agnostic) → fix requirement; `/icode init` multi-turn requirement draft → `00_init.md`
+- **Two optional entries**: `/icode log` log root-cause analysis (baseline check first, then adversarial analysis; domain-agnostic) → fix requirement, plus a cross-audience brief at completion — `log_problem_brief.md`, with a `<ticket>` prefix (`DEMO-26_log_problem_brief.md`) when the source is a TB ticket (no icode terminology); `/icode init` multi-turn requirement draft → `00_init.md`
 - **Project constraint red lines** (`/icode limit`): define this project's forbidden zones / constraints; the plan step treats them as a hard baseline (plan → implementation → audit convergence)
 
 ## Installation
@@ -141,6 +141,8 @@ When an entry command (`/icode init` / `log` / `plan` / `start`) or the `patch` 
 ## Optional Data Source: Pull from Teambition Bug Tickets
 
 When `/icode log` receives a Teambition project URL or a `<LIB>-<NUM>` ticket ref (e.g. `DEMO-26`) in its scattered input, it can optionally pull the ticket's title / description / comments / log attachments into `tb_source/<ID>/` as analysis input — replacing local logs when the ticket carries attachments. Pull-only for analysis, never writes back to Teambition; with no TB reference, `/icode log` falls back to the pure local-log path (behavior unchanged). Config (optional; multi-project shortcuts + cookie) and the cookie helper: see `~/.claude/skills/icode/tools/tb/README.md` and `tools/tb/scripts/tb_cookie.py --domain <domain>`. Re-running the same ticket (new comments/attachments on TB) prompts "reuse old ticket / create new" — reuse re-pulls the latest and re-runs incremental adversarial analysis. A batch mode also analyzes every "open / unfinished" ticket in a project (triggered by an "analyze all TB" intent; filtered by the real taskflow status name, not `isDone`) — see [SKILL.md「方式 D2 / D3」](SKILL.md).
+
+**Scheduled incremental monitoring** (`tools/tb/scripts/tb_watch.py`): periodically polls one or more projects' "open / unfinished" tickets (newest ticket number first), and when a ticket gains new comments/attachments/status changes it auto-launches a headless `claude` session for **full `/icode log --debug` deep analysis** (downloads & extracts TB log attachments; artifacts under `{project}/.icode_output/.debug/`, never touching the global index; first-run tickets are auto-baselined one per round). Config is a JSON file listing projects — the minimal entry is just the project URL; every round it writes a searchable "latest analysis status" report to `{project}/.icode_output/tb_watch_report.md`. Config / start / stop / risks: see [tools/tb/README.md](tools/tb/README.md)「定时增量监控」section.
 
 ## Optional Enhancements
 
@@ -184,7 +186,7 @@ Each MCP has an explicit strong-evidence trigger and a declared graceful-downgra
 | Command | Description |
 | --- | --- |
 | `/icode help` | Help: show usage examples |
-| `/icode log [scattered info...]` | Optional entry: log root-cause analysis → fix requirement `00_init.md` (domain-agnostic) |
+| `/icode log [scattered info...]` | Optional entry: log root-cause analysis → fix requirement `00_init.md` (domain-agnostic); auto-generates cross-audience brief at completion (`log_problem_brief.md`, `<ticket>_log_problem_brief.md` for TB sources) |
 | `/icode init [<rough req>]` | Optional Step 0: multi-turn dialogue → `00_init.md` |
 | `/icode start <req>` | Full flow: create/reuse dir → steps 1–6 |
 | `/icode fast <req>` | Trimmed full flow: plan→review(1 round, no adversarial)→merge→code→deepcheck(Reverse only)→audit (~65% cost) |
