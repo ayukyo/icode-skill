@@ -602,10 +602,10 @@ def stop_daemon(cfg):
         pid = int(f.read().strip())
     try:
         os.kill(pid, signal.SIGTERM)
-        print(f"已向 {pid} 发送 SIGTERM（优雅退出：当前轮结束后停）。")
+        print(f"已向 {pid} 发送 SIGTERM（优雅退出：当前轮结束后停；pid 文件由守护进程退出时自动清理）。")
     except ProcessLookupError:
-        print(f"进程 {pid} 不存在（可能已退出），清理 pid 文件。")
-    os.remove(pid_file)
+        print(f"进程 {pid} 不存在（可能已退出），清理残留 pid 文件。")
+        os.remove(pid_file)
     return 0
 
 
