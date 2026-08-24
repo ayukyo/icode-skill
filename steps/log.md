@@ -453,20 +453,26 @@ sys.exit(1 if missing else 0)
 - **TB 分析**（含 debug）：`{ICODE_OUT_DIR}/<单号>_log_problem_brief.md`——单号取自 `tb_source` 的 `<LIB>-<NUM>`（如 `DEMO-26_log_problem_brief.md`），一眼看出是哪个 TB 单的问题，主体仍是 `log_problem_brief`
 - 两者均与 `log_analysis.md` **同目录并列**、成对存放便于查找。**本地日志分析与 TB（debug）分析均自动生成**；debug 工单简报落 debug 工单目录，与 `log_analysis.md` 并列供对照交付。
 
-**结构**（从 `log_analysis.md`（必要时 `00_init.md`）提炼，自然章节、**不得复制全文**）：
-1. **一句话结论**（症状 + 根因 + 置信度）
-2. **问题现象**（业务语言描述症状/触发条件/影响）
-3. **根因分析**（根因结论 + 关键证据：日志实证引时间点/日志行、代码实证带 file:line；**未证实的因果必须标注"待验证"，不得升格为事实**）
-4. **影响范围**（涉及模块/文件/功能/用户场景/风险）
-5. **建议修复方案**（A 档必做 / B 档兜底 / C 档后续，保留技术实质）
-6. **验证方式**（复现场景/观测点/测试口径）
-7. **遗留问题 / 待确认**（候选未区分、待实机验证等，诚实标注）
-8. **修复前后对照**（§7.5 触发时必含：修复前链路 → 修复后目标链路（**未部署**）+ 新旧关键点，从 `log_analysis.md §7.5` 压缩而来，节点边界/未定因果/改动点不得矛盾）
+**表达契约**（对外如何组织与表述，**统一按 [references/external_brief_contract.md](../references/external_brief_contract.md) 执行**——开头「结论与问题定位」卡 / 归因措辞分级 / 四角色拆分 / 「日志/观测说明」条件章节 / 修复三段闭环 / 修复与验证状态显式标注 / 首屏质量门；本段不重复契约正文，只保留 log 特有约束）。
+
+**组织**（**章节组织统一按契约 §7 语义槽位**：`结论与问题定位`（必填四项）/ `日志/观测说明`（条件）/ `故障如何发生` / `关键证据` / `应该怎么修改` / `验证标准` / `尚未确认的事项` / `修复前后对照`（条件）；从 `log_analysis.md`（必要时 `00_init.md`）提炼、**不得复制全文**。**内容要点**（简报必须覆盖，落点如下——不要另起与契约冲突的章节标题）：
+1. **一句话结论**（症状 + 根因 + 置信度 + 状态边界）→ 落「结论与问题定位」
+2. **问题现象**（业务语言描述症状/触发条件/影响）→ 落「结论与问题定位·现象与影响」
+3. **主要定位与角色澄清**（按契约 §2/§3：证据指向的链路 + 证据等级 + 实现主体/运行载体/下游表现/观测载体四角色的必要拆分，**不得从日志落点直接推导责任**）→ 落「结论与问题定位」
+4. **根因分析与证据**（根因结论 + 日志实证引时间点/日志行、代码实证带 file:line；**未证实的因果必须标注"待验证"，不得升格为事实**）→ 因果链落「故障如何发生」，证据落「关键证据」
+5. **影响范围**（涉及模块/文件/功能/用户场景/风险）→ 落「结论与问题定位·现象与影响」
+6. **建议修复方案**（按契约 §6 三段：临时止血/永久修复/验证与可观测性；A 档必做 / B 档兜底 / C 档后续，保留技术实质）→ 落「应该怎么修改」
+7. **验证方式**（复现场景/观测点/测试口径；**分析态默认未部署**——除非输入中已有可核验的部署与回归证据，否则不得写成"已修复/已验证"）→ 落「验证标准」+「尚未确认的事项」
+8. **遗留问题 / 待确认**（候选未区分、待实机验证等，诚实标注）→ 落「尚未确认的事项」
+9. **修复前后对照**（§7.5 触发时必含：修复前链路 → 修复后目标链路（**未部署**）+ 新旧关键点，从 `log_analysis.md §7.5` 压缩而来，节点边界/未定因果/改动点不得矛盾）→ 落「修复前后对照」
+10. **「日志/观测说明」**（契约 §4 条件命中时生成，按"先区分、再因果"：普通文本日志 vs 调试数据录制/trace/dump 拆分，明确哪一部分进入故障链；未命中条件不生成，不机械凑满标题）→ 落「日志/观测说明」
 
 **术语剔除清单**（对外简报**禁止**出现 icode 分析流程内部术语，用领域通用表达替代或省略）：
 `limit_checkpoint`/limit 红线 →（需要时）"项目约定约束"；段零/姐妹工程/关联工程/cheap-research → "相关工程/工程文档/历史记录"；对抗分析/质疑者/adversarial/spawn → 需要时"多视角验证"；`00_init`/4 维度验证清单 → "修复需求/验证清单"；`metadata`/debug 语义/`indexed`/`tb_source`/`anti_laziness`/反偷懒/`§编号` 引用 → **一律不提**（改写为自然章节）。
 
 **硬约束**：简报不是 `log_analysis.md` 的摘要重排，须**用领域通用语言重写**；证据（日志时间点/代码 file:line）必须保留、让测试与其它模块研发可复核；未证实的因果与待办必须如实标注，不得因"对外好看"而省略或升格。**文件名只到"问题/单号"粒度**——本地简报名 `log_problem_brief.md` 不表达具体问题、TB 简报名只带单号不带症状，故简报**标题（或首行）必须点明具体问题**（症状 + TB 单号如 `DEMO-26`，单号从 tb_source/工单目录名取），不得用"问题简报"这类泛标题。
+
+**首屏质量门（生成后单独自检「结论与问题定位」）**：按契约 §8——不依赖后文即可理解现象与影响；不从日志目录直接推导责任；归因措辞不超过证据等级；不把候选提交写成现场已修复；存在宿主/下游误判风险时已在首屏澄清；首屏不堆叠超过 3 个源码符号或文件位置。
 
 ## TB 缺陷源拉取（可选前置，仅当零散输入含 TB 引用）
 
@@ -482,7 +488,16 @@ sys.exit(1 if missing else 0)
 4. **鉴权失败（401）**：提示用户跑 `python3 ~/.claude/skills/icode/tools/tb/scripts/tb_cookie.py`（或手动把浏览器 cookie 粘进 `~/.claude/skills/icode/tools/tb/scripts/.tb_cookie`），**不阻塞**--若用户只想本地分析可放弃 TB 源、退回纯本地日志路径继续
 5. **溯源**：把 TB 源信息（`lib`/`num`/`pid`/`label`/`url`/`meta_path`）记入步骤9 metadata 的 `tb_source` 字段；在 `keywords` 里带上缺陷编号（如 `DEMO-26`），便于后续历史检索按缺陷号命中相似工单
 
-> 拉取产物（`{ICODE_OUT_DIR}/tb_source/<ID>/` 下的日志附件 + `<ID>_meta.json` 里的真实评论/描述）即作为阶段2「日志侦察 + 现场还原」的输入，走既有对抗根因分析流程，与本步骤下游各阶段无缝衔接。`<ID>_meta.json` 的评论文本在 `comments[].content.comment`（**非 `comments[]` 直接为字符串**，每条评论是对象），`note` 为缺陷描述，均可作为症状补充证据（评论里常含复现步骤/现象描述/关键时间点/日志原文片段，须逐条研读不漏、回捞进现场时间线，详见步骤6「TB 评论研读」；**评论里的根因结论/修复手段只作参考启发、不得直接采信为根因事实**，见步骤6「⚠️ 评论不盲信」）。
+> 拉取产物（`{ICODE_OUT_DIR}/tb_source/<ID>/` 下的日志附件 + `<ID>_meta.json` 里的真实评论/描述）即作为阶段2「日志侦察 + 现场还原」的输入，走既有对抗根因分析流程，与本步骤下游各阶段无缝衔接。
+
+**附件本地镜像（防 gvfs SMB 后端 fd 泄漏崩溃，长期方案；TB 源分析适用，纯本地日志路径跳过）**：
+TB 附件已落盘后，若 `{ICODE_OUT_DIR}` 位于**网络挂载（SMB 等）**，将 `tb_source/<ID>/` **整体复制到本地临时镜像**，后续所有"**读附件**"动作一律读本地镜像——避免 claude 分析期对 SMB 单点代理 `gvfsd-smb` 的高频小文件读（其 fd 泄漏累积会耗尽并拖垮整个 gvfs 挂载，实测 gvfsd 主进程 `Too many open files` 崩溃、全部 SMB 挂载端点断开）。
+
+- 定义：`LOCAL_TB_SRC=/tmp/icode_attach_mirror/<project_id>/<outdir basename>/tb_source/<ID>`（`project_id` 见前置逻辑；`<outdir basename>` 取 `{ICODE_OUT_DIR}` 的 basename，如 `.icode_output_7`）
+- 执行：`mkdir -p "$(dirname "$LOCAL_TB_SRC")" && cp -r "{ICODE_OUT_DIR}/tb_source/<ID>" "$(dirname "$LOCAL_TB_SRC")/"`
+  - 复用/续跑场景附件已下载同样复制本地（「同 TB 单复用流程」重拉后同样重建镜像，见该段步骤3）
+- **替换规则**：本段之后凡引用 `{ICODE_OUT_DIR}/tb_source/<ID>/` 的**读取**（Read 日志/评论/附件、解压 tar/grep、ffmpeg/vision-bridge 输入）一律改用 `LOCAL_TB_SRC`；**写产物**（`log_analysis.md`、简报、关键帧、metadata）仍写回 `{ICODE_OUT_DIR}`（低频少量，SMB 压力可忽略）
+- 清理：步骤9 metadata 落盘后 `rm -rf "$(dirname "$LOCAL_TB_SRC")"`（/tmp 重启即失，防残留占盘）`<ID>_meta.json` 的评论文本在 `comments[].content.comment`（**非 `comments[]` 直接为字符串**，每条评论是对象），`note` 为缺陷描述，均可作为症状补充证据（评论里常含复现步骤/现象描述/关键时间点/日志原文片段，须逐条研读不漏、回捞进现场时间线，详见步骤6「TB 评论研读」；**评论里的根因结论/修复手段只作参考启发、不得直接采信为根因事实**，见步骤6「⚠️ 评论不盲信」）。
 
 ## TB 评论等回复机制（防"过早出报告"）
 
@@ -535,14 +550,14 @@ sys.exit(1 if missing else 0)
 
      ```bash
      # 提取场景变化 >10% 的关键帧（典型 1-2 分钟视频产出 3-15 帧）
-     # TB 源：输出到 {ICODE_OUT_DIR}/tb_source/<ID>/frames_<video_basename>_%03d.jpg
+     # TB 源：输出到 {LOCAL_TB_SRC}/frames_<video_basename>_%03d.jpg（避免抽帧写 SMB 拖垮 gvfs）
      # 本地路径：输出到 {ICODE_OUT_DIR}/frames_<video_basename>_%03d.jpg
      ffmpeg -i <video> -vf "select='gt(scene,0.1)',scale=1280:-1" -vsync vfr -q:v 2 -frame_pts 1 \
-       "{ICODE_OUT_DIR}/frames_<video_basename>_%03d.jpg"
+       "<对应输出路径>/frames_<video_basename>_%03d.jpg"
      ```
 
    - **ffmpeg 不可用**：降级为直接传视频给 vision-bridge（需提示用户「ffmpeg 不可用,直接分析视频可能消耗 API 额度」），或仅分析图片附件
-2. **枚举关键帧**：`ls {ICODE_OUT_DIR}/frames_*.jpg` 列出所有关键帧文件（TB 源关键帧在 `{ICODE_OUT_DIR}/tb_source/<ID>/` 子目录下，本地路径关键帧在 `{ICODE_OUT_DIR}/` 根目录下）
+2. **枚举关键帧**：`ls {LOCAL_TB_SRC}/frames_*.jpg`（TB 源）或 `{ICODE_OUT_DIR}/frames_*.jpg`（本地路径）列出所有关键帧文件
 3. **调 vision-bridge 分析图片帧**（视频经 ffmpeg 抽帧后传图片，不传视频——省 API 额度）：
    - **MCP 通道**：工具已在列表直接可见则直接调 `mcp__vision-bridge__analyze_media`，不可见才 ToolSearch 取 schema
    - **CLI 通道**（MCP 不可用但 CLI 可用时）：用 `exec_command` 执行 `<server.py 目录>/.venv/bin/python <server.py> --analyze-media <帧路径> --prompt "<提取时间点/界面显示/操作序列/错误提示>"`，从 stdout 读文本结果
@@ -569,7 +584,7 @@ sys.exit(1 if missing else 0)
 
 1. **复用旧目录**：`ICODE_OUT_DIR` = 旧工单目录（如 `.icode_output/.icode_output_3`），不新建；读其 `.ico_metadata.json` 的 `ticket_id`，**步骤2 历史检索须排除此旧 ticket_id 防自参考**（与新建场景步骤2「本次工单尚未入索引故无需排除」不同）
 2. **切回分析态**：metadata `status` 从 `log_done` 切回 `log_in_progress`；`completed_steps` 仍含 `"log"`
-3. **重拉最新数据**：调 `python3 ~/.claude/skills/icode/tools/tb/scripts/tb_pull.py --domain <域名> --pid <pid> defect <LIB>-<NUM> --out {ICODE_OUT_DIR}/tb_source`。tb_pull 自动把旧 `<ID>_meta.json` 备份为 `<ID>_meta.prev.json`（不丢旧数据），再写最新全量 meta
+3. **重拉最新数据**：调 `python3 ~/.claude/skills/icode/tools/tb/scripts/tb_pull.py --domain <域名> --pid <pid> defect <LIB>-<NUM> --out {ICODE_OUT_DIR}/tb_source`。tb_pull 自动把旧 `<ID>_meta.json` 备份为 `<ID>_meta.prev.json`（不丢旧数据），再写最新全量 meta。**重拉后**若 `{ICODE_OUT_DIR}` 在网络挂载，按「TB 缺陷源拉取」段「附件本地镜像」重建 `LOCAL_TB_SRC`（同样 `cp -r` 整个 `tb_source/<ID>/` 到 `/tmp/icode_attach_mirror/...`，增量分析期间一律读本地镜像）
 4. **识别新增**：读 `<ID>_meta.prev.json`（旧）与 `<ID>_meta.json`（新）对比，按 `created`（评论时间戳）+ `content.comment` 为键找出**新评论**（旧 `comments[]` 没有的，**新评论同样须逐条研读、回捞时间点/日志原文进现场时间线**，不得只看条数增量）；和**新附件**（旧 files 没有的、或同名新拉取的 `_1` 后缀文件）
 5. **增量对抗**：读旧 `log_analysis.md` 的「核心结论 + 对抗分析记录」-> 把新增评论/附件作**新证据** -> 重跑对抗（复用 icode 步骤2 对抗模式）。新证据可能：① 确认旧根因（追加佐证）/ ② 补充旧根因遗漏环节 / ③ **推翻旧根因**（标注「本次增量推翻旧结论」+推翻理由+新结论，旧结论不删但标已推翻）
 6. **追加增量段**：在 `log_analysis.md` 追加「## 增量分析（<日期>，TB 单更新）」段：新增评论/附件清单 + 新对抗结论（确认/补充/推翻）+ 最终根因

@@ -439,6 +439,90 @@ def _low_priority_preexec():
         pass
 
 
+# ---------------------------------------------------------------------------
+# gvfsd-smb fd 兜底（防 SMB 单点代理 fd 累积拖垮整个挂载；长期方案）
+# ---------------------------------------------------------------------------
+# 触发阈值：单进程 fd 占比达此值（与 /proc/sys/fs/file-max 比）即视为危险，先 kill 重建 gvfsd-smb 再触发
+GVD_FD_RATIO = 0.6
+GVD_FD_ABS_MAX = 4096  # 绝对上限兜底（小机器 file-max 也可能很大，比例失真）
+# 危险时连续 N 次检测命中才触发 kill（避免抖动误杀）
+GVD_DANGER_HITS = 2
+
+
+def _check_smb_health():
+    """探测 gvfsd-smb 健康。返回 (ok, detail) — ok=False 表示 SMB 挂载不可用或代理危险。
+
+    探测点：
+    1. 挂载端点：尝试 listdir /run/user/<uid>/gvfs（不依赖具体工程）
+    2. gvfsd-smb fd 占比：所有 gvfsd-smb 进程 fd 总和 vs 系统 fs.file-max
+    """
+    info = {"mount_ok": True, "gvfsd_smb_fd": 0, "file_max": 0, "danger": False, "error": ""}
+    gvfs_root = f"/run/user/{os.getuid()}/gvfs"
+    try:
+        os.listdir(gvfs_root)
+        info["mount_ok"] = True
+    except OSError as e:
+        info["mount_ok"] = False
+        info["danger"] = True
+        info["error"] = f"gvfs 挂载不可用：{e}"
+        return False, info
+
+    try:
+        with open("/proc/sys/fs/file-max") as f:
+            file_max = int(f.read().strip())
+        info["file_max"] = file_max
+    except (OSError, ValueError):
+        file_max = 0
+    total_fd = 0
+    try:
+        out = subprocess.check_output(["pgrep", "-f", "gvfsd-smb"],
+                                       stderr=subprocess.DEVNULL, text=True)
+        for pid_str in out.split():
+            pid = pid_str.strip()
+            if not pid:
+                continue
+            fd_dir = f"/proc/{pid}/fd"
+            try:
+                total_fd += len(os.listdir(fd_dir))
+            except OSError:
+                pass  # 进程已死/无权限
+        info["gvfsd_smb_fd"] = total_fd
+    except (subprocess.CalledProcessError, OSError):
+        pass
+    threshold = min(int(file_max * GVD_FD_RATIO), GVD_FD_ABS_MAX) if file_max else GVD_FD_ABS_MAX
+    if total_fd >= threshold:
+        info["danger"] = True
+    return info["mount_ok"] and not info["danger"], info
+
+
+def _recycle_gvfsd_smb():
+    """危险时 recycle gvfsd-smb：SIGTERM 该进程让 gvfsd-daemon 重启它。失败降级记日志。"""
+    out = subprocess.run(["pgrep", "-f", "gvfsd-smb"], capture_output=True, text=True)
+    killed = []
+    for pid_str in out.stdout.split():
+        pid = pid_str.strip()
+        if not pid:
+            continue
+        try:
+            os.kill(int(pid), signal.SIGTERM)
+            killed.append(pid)
+        except (ProcessLookupError, PermissionError, ValueError):
+            pass
+    if not killed:
+        return False, "无 gvfsd-smb 进程可 recycle"
+    # 等 gvfsd-daemon 重新 fork 替代进程（最多 10s）
+    for _ in range(10):
+        time.sleep(1)
+        try:
+            new = subprocess.check_output(["pgrep", "-f", "gvfsd-smb"],
+                                            stderr=subprocess.DEVNULL, text=True)
+            if set(new.split()) - set(killed):
+                return True, f"recycled ({killed} -> 仍有活跃进程)"
+        except subprocess.CalledProcessError:
+            pass
+    return True, f"recycled {killed}（替代进程未必立即起来）"
+
+
 def trigger_claude(cfg, proj, num, label, reason):
     """拉起 claude -p 无头会话执行该单 debug 增量分析，返回 (rc, 耗时秒)。"""
     prompt = PROMPT_TMPL.format(lib=proj["lib"] or "(未知，按 pid 匹配)", num=num, label=label,
@@ -581,10 +665,25 @@ def main_loop(cfg, once=False):
         candidates.sort(key=lambda x: x[1][0], reverse=True)
         try:
             if candidates and not cfg.get("detect_only"):
+                # SMB 健康兜底：挂载不可用或 gvfsd-smb fd 累积到阈值 → recycle 替代进程
+                smb_ok, smb_info = _check_smb_health()
+                if not smb_ok:
+                    print(f"[{stamp}] round#{round_no} SMB 健康异常：{smb_info}，先 recycle gvfsd-smb")
+                    _append_log(log_file, f"[{stamp}] round#{round_no} SMB 健康异常：{smb_info}，recycle 兜底")
+                    if smb_info.get("mount_ok"):
+                        # 仅 fd 危险（挂载端点还活着），recycle 进程；挂载已断 recycle 无意义
+                        rec_ok, rec_msg = _recycle_gvfsd_smb()
+                        print(f"[{stamp}] round#{round_no} recycle gvfsd-smb：{rec_ok} {rec_msg}")
+                        _append_log(log_file, f"[{stamp}] round#{round_no} recycle gvfsd-smb：{rec_ok} {rec_msg}")
+                    # 无论 recycle 是否成功，本轮不再触发 claude（避免 claude 满血 IO 把脆弱的代理再次拖垮）
                 if _trigger_fail_streak >= 3:
                     # 退避：连续快速失败（疑似网关/环境故障），本轮跳过触发；检测/报告照常，成功一次即清零
                     print(f"[{stamp}] round#{round_no} 触发连续快速失败 {_trigger_fail_streak} 次，本轮跳过触发（退避，疑似网关/环境故障），候选 {candidates[0][1][1]}")
                     _append_log(log_file, f"[{stamp}] round#{round_no} 触发连续快速失败 {_trigger_fail_streak} 次，跳过触发（退避），候选 {candidates[0][1][1]}")
+                elif not smb_ok:
+                    # SMB 异常已记日志（上行），本轮不触发但也不计入退避（环境问题非网关问题）
+                    print(f"[{stamp}] round#{round_no} SMB 健康异常，本轮跳过触发，候选 {candidates[0][1][1]}")
+                    _append_log(log_file, f"[{stamp}] round#{round_no} SMB 健康异常，本轮跳过触发（不计退避），候选 {candidates[0][1][1]}")
                 else:
                     proj, (num, label, _it, _wdir, reason, _mp) = candidates[0]
                     rc, cost = trigger_claude(cfg, proj, num, label, reason)

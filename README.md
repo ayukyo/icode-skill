@@ -186,7 +186,7 @@ Each MCP has an explicit strong-evidence trigger and a declared graceful-downgra
 | Command | Description |
 | --- | --- |
 | `/icode help` | Help: show usage examples |
-| `/icode log [scattered info...]` | Optional entry: log root-cause analysis → fix requirement `00_init.md` (domain-agnostic); auto-generates cross-audience brief at completion (`log_problem_brief.md`, `<ticket>_log_problem_brief.md` for TB sources) |
+| `/icode log [scattered info...]` | Optional entry: log root-cause analysis → fix requirement `00_init.md` (domain-agnostic); auto-generates cross-audience brief at completion (`log_problem_brief.md`, `<ticket>_log_problem_brief.md` for TB sources; external wording follows the shared brief contract — attribution grading, role clarification, explicit fix/verify state) |
 | `/icode init [<rough req>]` | Optional Step 0: multi-turn dialogue → `00_init.md` |
 | `/icode start <req>` | Full flow: create/reuse dir → steps 1–6 |
 | `/icode fast <req>` | Trimmed full flow: plan→review(1 round, no adversarial)→merge→code→deepcheck(Reverse only)→audit (~65% cost) |

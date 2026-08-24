@@ -160,7 +160,7 @@ cd ~/.claude/skills/icode/mcp/cheap-research
 /icode worktree --reopen    # 已 close 工单恢复：在最新基线上重建活动 checkout（之后 /icode patch）
 
 # 从 bug 日志分析切入修复（先查根因，再修复）
-/icode log ~/work/log/服务异常 "启动后无响应"      # 入口：分析日志根因，产出 log_analysis.md + 修复需求 00_init.md + 对外简报 log_problem_brief.md
+/icode log ~/work/log/服务异常 "启动后无响应"      # 入口：分析日志根因，产出 log_analysis.md + 修复需求 00_init.md + 对外简报 log_problem_brief.md（对外表达按统一契约：归因分级/角色澄清/修复状态明确）
 # ... 对抗分析收敛后根因确定；若质疑可继续对话重跑被质疑分支 ...
 /icode start                             # 无参→检测到 log_done 入口态，询问"复用/新建"，选复用则把 00_init.md（修复需求）作输入，进入步骤1→6
 ```
@@ -190,7 +190,7 @@ cd ~/.claude/skills/icode/mcp/cheap-research
 | `/icode code` | 仅步骤 4：落地编码实施 |
 | `/icode deepcheck` | 仅步骤 5：三阶段递进复检（Reverse → Fixed → Free） |
 | `/icode audit` | 仅步骤 6：终极终审 + 统一修复（产出 `06_audit.md`） |
-| `/icode readme` | 可选步骤 7：一次生成两份——交付报告（给自己看，完整档案）+ 跨领域简报（`_brief.md`，给其它模块研发/测试/产品看，含必要代码，较简略） |
+| `/icode readme` | 可选步骤 7：一次生成两份——交付报告（给自己看，完整档案）+ 跨领域简报（`_brief.md`，给其它模块研发/测试/产品看，含必要代码，较简略；对外表达按统一契约） |
 | `/icode patch [问题或新需求]` | 追加修改（独立步骤）：主流程后/中途继续改——测试发现问题 / 新需求，在既有工单上打补丁。轻量四段式（重审现状→增量计划→最小实施→反向复检），靠磁盘产物重载上下文（换会话可继续），产出 `08_patch.md` 追加式；可选 `--listen`（自动监听）/ `--test`（显式触发验证）→ 实机部署验证（连设备部署 + 轮询监听 LOG + 增量分析；先配 `~/.claude/icode_data/device_config/<project_id>.json`，模板 `templates/device_config.json.template`，单文件多连接 adb/ssh/串口） |
 | `/icode doc [自然语言]` | 工程级知识库生成（独立步骤）：扫描代码特征生成全局知识库章节，供段零自动检索注入 |
 | `/icode limit [自然语言]` | 项目约束红线（独立步骤）：定义和维护本工程的红线/约束/禁区。主存全局 + 单 checkout 覆盖（自动 gitignore），追加式演进。plan 步骤引用作为硬基线 |
