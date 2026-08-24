@@ -92,6 +92,32 @@
    - 计划中的伪代码和行号引用需要在此步骤展开为完整实现。读取引用的源文件获取完整上下文
 5. 输出步骤确认：`▶ 步骤4 编码开始`
 
+### TDD 准入门（RED 硬门，行为变更默认 required；测试驱动非实现后验证）
+
+> **目的**：把"测试通过"升级为"测试先证明能抓住问题（RED）、再证明修复有效（GREEN）、再证明未破坏相邻行为（regression）"。**RED 是准入证据，GREEN 不是交付终点**。测试形态不限于单元测试（unit/静态/契约/集成/特征/主机侧协议配置/设备侧行为均可），但"先取得有效失败证据、再改生产代码"不能因"配置修改/改动少/fast/patch"跳过。
+
+**0. 判定 `tdd.mode`**（Read `metadata.tdd`，缺失视为 `not_assessed`）：`required`/`contract`/`characterization` = 需先 RED；`device_split`/`blocked` = 允许在明确边界内继续准备代码但交付验证保持待完成；`exempt` = 纯文档/注释/无生产行为变化（须 Read `metadata.tdd.reason` 确认豁免理由，缺理由视为违规）。**分类缺失（`not_assessed`）且本工单含行为变更 → L2，先回步骤1/3 补测试契约**；不得静默默认 exempt。
+
+**1. RED 阶段（生产代码 Edit 前的硬门；`required`/`contract`/`characterization` 模式 L1 强制）**：
+   1. 记录活动 checkout + 生产文件哈希 + 现有 staged/unstaged/untracked 基线（沿用下方「强制操作·git 状态快照」三态判别）——**不得回滚用户已有修改**；若用户修改已实现目标导致测试通过，报告并重新确认剩余工作
+   2. 只新增/修改测试文件及其最小测试基础设施（**禁止此时 Edit 任何生产文件**）
+   3. 运行计划中的最窄测试命令（`metadata.tdd.red.cmd` 或计划测试契约「测试命令」），捕获退出码与失败摘要
+   4. **分类失败**（写入 `metadata.tdd.red.failure_class`）：
+      - `expected_assertion`（目标断言失败，与计划「RED 预期」一致）→ **有效 RED**，`tdd.status=red_verified`，允许进入生产代码 Edit
+      - `harness_compile_error` / `harness_import_error` / `environment_error` / `timeout` / `flaky` → **不是有效 RED**：修测试基础设施/消除不稳定性后重跑（**不能靠重复运行挑一次失败当 RED**），不得推进 red_verified
+      - `unexpected_failure` → 重新审查测试是否覆盖目标行为
+   5. **测试首次即通过**（退出码 0）→ **停止生产代码修改**，重新做必要性检查：可能是行为已存在，也可能是测试未覆盖目标；不得以"测试通过"作为继续写代码的理由，须回步骤1 复核或补强测试
+   6. **L1 硬阻断**：`required`/`contract`/`characterization` 模式下，未取得有效 RED（`failure_class=expected_assertion` 且 `tdd.status` 未达 `red_verified`）就准备 Edit 生产代码 → **L1 停止实施**，提示"先取得有效 RED（测试先证明能抓住问题）再改生产代码"；修正测试后可继续
+
+**2. GREEN 阶段（只做最小生产修改后）**：
+   1. 严格按计划做最小生产代码修改（不在 GREEN 阶段顺手重构/扩展接口/修改无关测试）
+   2. 重跑**完全相同**的 RED 命令（`metadata.tdd.red.cmd`）
+   3. 退出码 0 → `tdd.status=green_verified`；若必须修改测试才能通过，说明是修正错误期望还是放宽契约——**放宽断言不得被当作生产修复成功**
+
+**3. Regression 阶段（复用现有验证能力）**：GREEN 后继续执行下方「强制操作·编译验证 + 测试验证」——目标测试 + 受影响模块回归 + 工程构建 + Code Review Fix；`test_cmd`/`test_outcome`/`test_failures` 继续作为**最终回归摘要**，不用于覆盖 RED 历史证据（RED/GREEN 证据在 `metadata.tdd.red/green`）。GREEN 后构建/回归失败沿用现有 L3 降级，但 `delivery_verdict` 不得写已验证。
+
+**4. 落盘**：RED/GREEN/regression 证据写入 `metadata.tdd`（结构见 [SKILL.md](../SKILL.md) metadata 段）：`{mode, red: {cmd, exit_code, failure_class, expected, observed_excerpt, at}, green: {cmd, exit_code, at}, regression: {cmd, exit_code, at}, status}`。**O-6 用户自担验证（用户要求不跑测试）**：可完成代码修改，但 `tdd.status=blocked`（或确属豁免时 `exempt`）+ `delivery_verdict=verification_pending`，交付措辞"已完成代码修改，待实机验证/待用户验证"，不得写"已修复并验证"。
+
 ### 编码实施
 
 严格按定稿计划实施编码。

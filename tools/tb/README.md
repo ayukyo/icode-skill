@@ -133,6 +133,11 @@ python3 tools/tb/scripts/tb_pull.py --pid <URL里的pid> defect <LIB>-<NUM> --ou
 - `claude_timeout`：单次 claude 分析超时秒（默认 6000 = 100 分钟）。触发的是**完整深度分析**（下载解压日志附件 +
   limit 红线/历史检索/cheap-research/00_init/对抗分析，单次可达 1 小时+），6000 只是**防挂死兜底上限**，按需调大；
   超时则本轮放弃该单（meta 未变）、下一轮重试，不阻塞守护
+- `claude_context_window`：claude 子进程上下文窗口 token 数（默认 **256000 = 256K**）。通过子进程 env
+  `CLAUDE_CODE_MAX_CONTEXT_TOKENS` 传给 claude——强制 claude 把上下文窗口硬切到该值，避免膨胀到模型声明的 1M
+  上限（**适配 AI 模型兼容性**：深层架构类模型长上下文触发分类器超时是实测根因，256K 是稳定的甜蜜点）。
+  与 `settings.json` 的 `CLAUDE_CODE_AUTO_COMPACT_WINDOW`（自动压缩阈值）**不冲突**——后者管"什么时候开始压缩"，
+  本字段管"上下文窗口硬上限"；二者独立。CPU/GPU 资源紧张时可调更小（如 128000），充足时可保留默认。
 - `project_dir`：工程根（可选，报告与 debug 工单落点 `{工程}/.icode_output/`；默认 = 启动时 cwd）。
   配了之后 `tb_watch_ctl.sh start/stop/status` 免传 `--project-dir`
 - `claude_skip_permissions`：true 时给 claude 加 `--dangerously-skip-permissions`（无人值守所需，见风险）

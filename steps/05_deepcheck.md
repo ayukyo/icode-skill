@@ -45,6 +45,21 @@
 3. **patch 修改照常全维度检查**：patch 引入的代码照常进 Reverse 逆推（行为/边界/错误处理）与 Fixed/Free 全维度（含计划实施一致性、优雅度 6 条、竞态/边界）——补丁记录"已计划"只豁免"计划外修改"误报，**不豁免质量检查**（patch 引入的新问题照常标 issue、进修复循环）
 4. **blast-radius 三链自检范围扩展**：`code_files` + `08_patch.md` 最新 Patch N 段涉及的符号一并纳入三链扫描
 
+## 前置：TDD 证据反向核验（读 `metadata.tdd`，缺失视为 `not_assessed` 不强制）
+
+> **目的**：复核步骤4 的 RED/GREEN 证据真实性——测试驱动的前提是"测试先证明能抓住问题，再证明修复有效"，deepcheck 要确认这两步证据没有被放宽/删除/伪造。
+
+Read `metadata.tdd`（缺失/`not_assessed` → 本段跳过；工单含行为变更且无 tdd 证据时在报告中标注"无 TDD 证据，完整度证据降级——仅最终测试通过无法证明因果"）。`tdd.status` 达 `red_verified`/`green_verified`/`regression_verified` 时逐项核验：
+
+1. **同一命令/同一断言**：`metadata.tdd.red.cmd` 与 `green.cmd` 是否同一目标命令；RED 与 GREEN 是否验证同一行为断言（不是 RED 断言 A、GREEN 断言 B）
+2. **RED 基线未被破坏**：`metadata.tdd.baseline.production_hashes` 与步骤4 入口基线是否一致——RED 时生产文件哈希已变化则 RED 证据失效（说明 RED 不是"修复前"取得的）
+3. **RED 分类合法**：`red.failure_class` 必须是 `expected_assertion`（`harness_compile_error`/`harness_import_error`/`environment_error`/`timeout`/`flaky` 均不算有效 RED）
+4. **GREEN 未放宽**：对比测试文件在 RED vs GREEN 的快照——测试是否在 GREEN 阶段被删除/跳过/放宽断言（放宽断言不得当作生产修复成功）
+5. **"移除修复会失败"的可信度**：临时把修复逻辑拿掉时测试理论上能失败——但**不要为证明这一点破坏或回滚用户工作区**，优先审阅断言与 diff 证据
+6. **覆盖根因路径**：测试覆盖的是否为根因路径（不是只覆盖日志字符串/旁路现象）——对照 `03_plan_final.md` 修复方案设计定位
+
+核验结果写入 `05_deepcheck.md` 报告（TDD 证据核验小节），任一不符标 issue 并进修复循环。
+
 ## 前置：Code Review Fix 复检产物读取（**软依赖，不阻塞**）
 
 **目的**：读取步骤4末尾 1.5 复检产物 `04_code_review_fix.md`（若存在），让 deepcheck 知道哪些 4 维度未通过项需要重点复检。

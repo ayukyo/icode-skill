@@ -56,6 +56,8 @@
 10. **`scope_escalations` 定稿检查（反偷懒第 33 条）**：Read `metadata.scope_escalations`（字段缺失视为 `[]`），检查 review 阶段（02_review 2.5.6）写入的分类记录——存在 `classification=B_confirm` 且未获用户确认的条目时，**定稿不得直接采纳实施**：向用户确认该条（确认 → 记录 `user_confirm` 后允许纳入定稿；拒绝/暂缓 → 标 `C_follow_up` 进范围外或 `refuted` 丢弃，不入定稿正文）；`A_now` 条目核对计划是否已含对应方案（未含 → 补入 §3 架构设计并在 §4.5 落盘 `fix_tiers`，**纳入后同步刷新 `scope_contract.summary`**——A_now 改变 A/B/C 分档即契约边界变化，与第 11 条 delta 分流刷新一致）；`C_follow_up`/`refuted` 不入定稿实施范围。未确认的 B_confirm 不得出现在 `03_plan_final.md` 实施范围中
 11. **`requirement_deltas` 分流检查（O-4 语义冻结）**：Read `metadata.requirement_deltas`（字段缺失视为 `[]`），存在**未分流**条目（`classification` 未定，或 `needs_user_confirm` 未获 `user_confirm`，或 `needs_replan` 未重跑 plan 更新 `scope_contract`）时，**禁止定稿**——先完成分流：向用户确认 `needs_user_confirm`（确认 → 记录 `user_confirm` 后纳入定稿；拒绝 → 标 `clarification_only` 或排除）；`needs_replan` → 提示用户重跑 `/icode plan` 更新契约后再定稿；`a_now_with_evidence` → 核对计划已含对应方案（未含 → 补入）。已分流条目若改变 A 档/验收边界，同步刷新 `scope_contract.summary`
 
+**冻结 TDD 测试契约**（行为变更 A 档，`metadata.tdd` 非 `exempt` 时）：定稿时把计划 §4.5 的 TDD 测试契约与 A 档方案**一起冻结**进 `03_plan_final.md`（目标行为 / 测试命令 / RED 预期 / GREEN 标准 / 回归范围）。review 若修改了目标行为 → **必须同步修改 RED 断言和 GREEN 标准**；**禁止**合并后只更新实现计划、不更新测试契约（测试契约与实现脱节 = 步骤4 无 RED 基线可循，步骤5/6 无法核验因果）。冻结的契约同步写入 `metadata.tdd`（`mode`/`reason`/`test_files`/`red.expected`/`green` 等）。
+
 **写入定稿**：使用 Write 工具写入 `{ICODE_OUT_DIR}/03_plan_final.md`。
 
 > **`03_plan_final.md` 必须是完整计划，不是元数据摘要**：先把 `01_plan.md` 全文**复制**为 `03_plan_final.md` 主体（保留 10 个正文章节（含 §10 需求质量清单），每段不省略），再在其上叠加审查意见采纳标记（如 `[审查采纳 #1]`）与末尾「实现偏差备忘」空段。**不要把"无修改"理解为"不复制"**——只要 01_plan.md 章节没有需要修改的地方，应直接复制全文；只有在采纳了审查意见需要修改时，才改动对应章节。步骤 5 逆推对比、步骤 6 追溯矩阵均以本文件为计划侧输入，仅写元数据会导致功能点无法回指代码位置。

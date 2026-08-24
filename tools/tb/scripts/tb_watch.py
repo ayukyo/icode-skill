@@ -42,8 +42,11 @@ signal.signal(signal.SIGINT, _stop_handler)
 
 PROBE_PY = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tb_pull.py")
 DEFAULT_STATUS_NAMES = "打开,未完成"
+# claude_context_window 默认 256000：适配 AI 模型兼容性——深层架构类模型声明 1M context
+# 但实测长上下文触发分类器超时（与会话无关注册/会话关联成本有关），256K 是稳定的甜蜜点。
+# 子进程通过 env CLAUDE_CODE_MAX_CONTEXT_TOKENS 传给 claude，强制上下文窗口硬切到该值。
 DEFAULTS = {"interval": 900, "claude_timeout": 6000, "claude_skip_permissions": False,
-            "low_priority": True}
+            "low_priority": True, "claude_context_window": 256000}
 # probe 单项目拉取超时兜底（网络卡死/SMB 慢时防止守护每轮永久挂起变假死）
 PROBE_TIMEOUT = 600
 
@@ -85,6 +88,8 @@ def load_config(path, cli_args):
         cfg["claude_timeout"] = cli_args.claude_timeout
     if cli_args.claude_skip_permissions:
         cfg["claude_skip_permissions"] = True
+    if cli_args.claude_context_window is not None:
+        cfg["claude_context_window"] = cli_args.claude_context_window
     if cli_args.project_dir:
         cfg["project_dir"] = cli_args.project_dir
     cfg.setdefault("project_dir", os.getcwd())
@@ -534,10 +539,17 @@ def trigger_claude(cfg, proj, num, label, reason):
     print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] 触发 claude debug 增量分析 {label} ...")
     t0 = time.time()
     preexec = _low_priority_preexec if cfg.get("low_priority", True) else None
+    # env 构造：继承 os.environ + 注入 CLAUDE_CODE_MAX_CONTEXT_TOKENS（强制 claude 把上下文窗口切到目标值）
+    # settings.json 里的 CLAUDE_CODE_AUTO_COMPACT_WINDOW 仍控制自动压缩阈值；本变量是上限，二者不冲突。
+    # 用 .get() 容错：万一用户清掉默认值，env 不传这个键（claude 退回到 settings.json 默认）。
+    ctx_window = cfg.get("claude_context_window")
+    sub_env = os.environ.copy()
+    if ctx_window:
+        sub_env["CLAUDE_CODE_MAX_CONTEXT_TOKENS"] = str(ctx_window)
     try:
         # cwd 强制 = 工程根：claude 的 /icode log --debug 在该目录运行，产物才落 {工程}/.icode_output/.debug/
         proc = subprocess.run(cmd, timeout=cfg["claude_timeout"], capture_output=True, text=True,
-                              cwd=cfg["project_dir"], preexec_fn=preexec)
+                              cwd=cfg["project_dir"], preexec_fn=preexec, env=sub_env)
         rc, timed_out = proc.returncode, False
     except subprocess.TimeoutExpired:
         rc, timed_out = 124, True
@@ -720,6 +732,8 @@ def parse_args(argv=None):
     ap.add_argument("--claude-timeout", type=int, help="覆盖单次 claude 超时秒（默认 6000 = 100 分钟防挂死兜底）")
     ap.add_argument("--claude-skip-permissions", action="store_true",
                     help="给 claude 加 --dangerously-skip-permissions（无头无人值守所需；慎用，见 README 风险）")
+    ap.add_argument("--claude-context-window", type=int,
+                    help="覆盖 claude 子进程上下文窗口 token 数（默认 256000；通过 env CLAUDE_CODE_MAX_CONTEXT_TOKENS 传给 claude）")
     # 单项目快捷（无 --config 时）：--lib/--domain/--pid
     ap.add_argument("--lib", default="", help="缺陷库前缀（可选，仅用于匹配）")
     ap.add_argument("--domain", default="", help="TB 域名（无 --config 时与 --pid 搭配）")

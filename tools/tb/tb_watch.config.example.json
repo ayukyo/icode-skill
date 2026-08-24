@@ -4,6 +4,7 @@
   "claude_timeout": 6000,
   "claude_skip_permissions": true,
   "low_priority": true,
+  "claude_context_window": 256000,
   "project_dir": "/绝对路径/到/工程根",
   "projects": [
     {

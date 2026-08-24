@@ -72,6 +72,7 @@
 ⚠️ /icode fast 模式：
    - 步骤2 review 固定 1 轮无对抗验证
    - 步骤5 deepcheck 只跑 Reverse 阶段（跳过 Fixed/Free）
+   - **不省略步骤4 TDD 准入门 RED→GREEN**（测试驱动门禁与 full 一致，小改动常用快速契约测试）
    - 依赖 plan+1 轮 review+Reverse 单阶段+audit 四道关卡
    - 复杂需求（跨模块/新架构/安全敏感）建议改用 /icode start 全流程
 ```
@@ -85,7 +86,7 @@
 | 1 | 步骤1 plan | `steps/01_plan.md` | `01_plan.md` | → `plan_done` |
 | 2 | 步骤2 review | `steps/02_review.md` | `02_review.md` | → `review_done` |
 | 3 | 步骤3 merge | `steps/03_merge.md` | `03_plan_final.md` | → `plan_finalized` |
-| 4 | 步骤4 code（含末尾 1.5 "Code Review Fix" 4 维度复检） | `steps/04_code.md` | 代码文件 + `04_code_review_fix.md` | → `code_done` |
+| 4 | 步骤4 code（含 **TDD 准入门 RED→GREEN**（见 [steps/04_code.md](04_code.md)「TDD 准入门」——fast **不省略** RED→GREEN 门禁）+ 末尾 1.5 "Code Review Fix" 4 维度复检） | `steps/04_code.md` | 代码文件 + `04_code_review_fix.md` | → `code_done` |
 | 5 | 步骤5 deepcheck | `steps/05_deepcheck.md` | `05_deepcheck.md` | → `deepcheck_done` |
 | 6 | 步骤6 audit | `steps/06_audit.md` | `06_audit.md` | → `completed` |
 

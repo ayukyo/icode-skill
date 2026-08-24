@@ -68,10 +68,13 @@ assert_contains "$CONTRACT" "结论与问题定位" "真源含开头结论卡"
 assert_contains "$CONTRACT" "修复前后对照" "真源含修复前后对照槽位"
 assert_contains "$LOG_DOC" "external_brief_contract.md" "log.md 引用统一真源"
 assert_contains "$README_DOC" "external_brief_contract.md" "07_readme.md 引用统一真源"
-assert_contains "$ANTI_DOC" "35. **对外简报表达偷工" "anti_laziness.md 新增第 35 条"
-assert_contains "$THINKING_DOC" "35 条偷工反例" "thinking_core.md 计数同步为 35"
-assert_contains "$SKILL_DOC" "35 条典型偷懒行为" "SKILL.md 计数同步为 35（表1）"
-assert_contains "$SKILL_DOC" "35条偷懒行为" "SKILL.md 计数同步为 35（表2）"
+# 动态读取 anti_laziness 实际条数，断言计数声明与之一致（避免硬编码，条数演进免改测试）
+ANTI_COUNT=$(grep -oE '^[0-9]+\.' "$ANTI_DOC" | tr -d '.' | sort -n | tail -1)
+BRIEF_NO=$(grep -oE '^[0-9]+\. \*\*对外简报表达偷工' "$ANTI_DOC" | grep -oE '^[0-9]+' | head -1)
+assert_contains "$ANTI_DOC" "${BRIEF_NO}. **对外简报表达偷工" "anti_laziness.md 含对外简报表达偷工条（第 ${BRIEF_NO} 条）"
+assert_contains "$THINKING_DOC" "${ANTI_COUNT} 条偷工反例" "thinking_core.md 计数同步为 ${ANTI_COUNT}"
+assert_contains "$SKILL_DOC" "${ANTI_COUNT} 条典型偷懒行为" "SKILL.md 计数同步为 ${ANTI_COUNT}（表1）"
+assert_contains "$SKILL_DOC" "${ANTI_COUNT}条偷懒行为" "SKILL.md 计数同步为 ${ANTI_COUNT}（表2）"
 
 echo ""
 echo "=== RED：真源真实术语清洗（禁止真实项目内容） ==="
