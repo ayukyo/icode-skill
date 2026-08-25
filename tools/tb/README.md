@@ -187,8 +187,15 @@ tools/tb/scripts/tb_watch_ctl.sh stop
 tools/tb/scripts/tb_watch_ctl.sh stop --force
 ```
 
-`start` 成功后会同时打印网页服务地址（配置 `web` 段，默认 `http://0.0.0.0:8000/`），
+`start` 成功后会同时打印网页服务地址（配置 `web` 段，默认 `0.0.0.0:8000`），
 同事在浏览器直接打开即可查看检索报告与各 debug 分析简报，无需 SMB 账号；`status` 也会显示网页服务运行状态。
+
+**本机 IP 变化（换网/重启路由）怎么办**：
+- 网页服务绑定 `0.0.0.0`，IP 变了服务继续监听新接口，**无需重启守护**；报告内也不写死 IP。
+- `start`/`status` 会优先打印 **mDNS 稳定地址** `http://<主机名>.local:8000/`（本机 avahi 在跑时），
+  IP 怎么变链接都不变，**分享给同事用这个最省心**（仅同一局域网生效，跨网段仍用 IP）。
+- `status` 同时检测本机 IP 快照（`{工程}/.icode_output/tb_watch/last_ips`），变了会提示
+  「⚠ 本机 IP 已变更: 旧 → 新」——旧链接失效时按提示换新地址即可。
 
 **检索报告（分析最新状态）**：每轮覆盖写 `{工程}/.icode_output/tb_watch_report.md`，**且每次触发
 claude 分析完成后立即刷新**（重 probe 重判，该单刚建基线/完成增量后不再标"待新建"）——

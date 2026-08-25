@@ -80,11 +80,16 @@ stop_web() {
   fi
 }
 
-# 网页服务可访问地址：host=0.0.0.0 时枚举本机局域网 IPv4 逐个拼 URL（否则按配置 host）
+# 网页服务可访问地址：host=0.0.0.0 时优先给 mDNS 稳定地址（IP 变化不影响），再枚举本机局域网 IPv4
+# （否则按配置 host）。输出多行：第一行 .local（可用时），其后为当前各网段 IP。
 access_url() {
   local host="$1" port="$2"
   if [ "$host" = "0.0.0.0" ]; then
-    local ips=""
+    local hn ips=""
+    hn=$(hostname 2>/dev/null)
+    if [ -n "$hn" ]; then
+      printf "http://%s.local:%s/  (mDNS 稳定地址, 本机 IP 变化不影响)\n" "$hn" "$port"
+    fi
     ips=$(hostname -I 2>/dev/null | tr ' ' '\n' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | grep -v '^127\.' | tr '\n' ' ')
     [ -z "$ips" ] && ips="<本机IP>"
     for ip in $ips; do printf "http://%s:%s/ " "$ip" "$port"; done
@@ -92,6 +97,28 @@ access_url() {
   else
     echo "http://$host:$port/"
   fi
+}
+
+# IP 变更检测：对比 <proj>/.icode_output/tb_watch/last_ips 快照，本机 IP 变了打印提示并更新快照。
+# 首次（无快照）只建基准不提示；返回 0=无变化/首次，1=已变更。
+ip_change_note() {
+  local proj="$1"
+  local f="$proj/.icode_output/tb_watch/last_ips"
+  local cur old
+  cur=$(hostname -I 2>/dev/null | tr ' ' '\n' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | grep -v '^127\.' | sort | tr '\n' ' ')
+  cur="${cur% }"
+  mkdir -p "$(dirname "$f")" 2>/dev/null
+  if [ -f "$f" ]; then
+    old=$(cat "$f" 2>/dev/null)
+    if [ -n "$old" ] && [ "$old" != "$cur" ]; then
+      echo "[tb_watch] ⚠ 本机 IP 已变更: ${old} → ${cur}"
+      echo "[tb_watch]   网页旧地址已失效，请用上方 mDNS .local 稳定地址或新 IP 重新分享"
+      echo "$cur" > "$f"
+      return 1
+    fi
+  fi
+  echo "$cur" > "$f"
+  return 0
 }
 
 case "$CMD" in
@@ -142,6 +169,7 @@ case "$CMD" in
         sleep 1
         if kill -0 "$WEBPID" 2>/dev/null; then
           echo "[tb_watch] 网页服务已启动 PID=$WEBPID：$(access_url "$WHOST" "$WPORT")  （日志 /tmp/tb_web.log）"
+          ip_change_note "$PROJ"
         else
           echo "[tb_watch] 警告: 网页服务启动失败（端口被占? 看 /tmp/tb_web.log），守护不受影响"
           rm -f "$WEBPIDF"
@@ -195,6 +223,7 @@ case "$CMD" in
       if kill -0 "$WPID" 2>/dev/null; then
         read -r _ WHOST WPORT _ <<< "$(web_info)"
         echo "[tb_watch] 网页服务 运行中 PID=$WPID：$(access_url "$WHOST" "$WPORT")"
+        ip_change_note "$PROJ"
       else
         echo "[tb_watch] 网页服务 pid 存在但进程已死（残留，可 stop 清理）"
       fi
