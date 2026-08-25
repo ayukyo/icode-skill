@@ -139,7 +139,8 @@ python3 tools/tb/scripts/tb_pull.py --pid <URL里的pid> defect <LIB>-<NUM> --ou
   与 `settings.json` 的 `CLAUDE_CODE_AUTO_COMPACT_WINDOW`（自动压缩阈值）**不冲突**——后者管"什么时候开始压缩"，
   本字段管"上下文窗口硬上限"；二者独立。CPU/GPU 资源紧张时可调更小（如 128000），充足时可保留默认。
 - `project_dir`：工程根（可选，报告与 debug 工单落点 `{工程}/.icode_output/`；默认 = 启动时 cwd）。
-  配了之后 `tb_watch_ctl.sh start/stop/status` 免传 `--project-dir`
+  **SMB（`/run/user/<uid>/gvfs/smb-share:`）与本地目录工程均支持**——本地目录自动跳过 SMB 健康检查（gvfsd-smb
+  fd/recycle 只针对 SMB 工程生效）。配了之后 `tb_watch_ctl.sh start/stop/status` 免传 `--project-dir`
 - `claude_skip_permissions`：true 时给 claude 加 `--dangerously-skip-permissions`（无人值守所需，见风险）
 - `low_priority`：true（默认）时 claude 分析进程**温和降级**（nice 5 + ionice best-effort 最低档 -c 2 -n 7，子进程继承）——
   比默认优先级低、不抢交互操作，但不会被完全饿死（不用激进 idle：idle 类 IO 只在系统无其它 IO 时才执行，
@@ -147,6 +148,15 @@ python3 tools/tb/scripts/tb_pull.py --pid <URL里的pid> defect <LIB>-<NUM> --ou
   **同一时刻最多 1 个 claude 分析进程，不会并发堆叠**
 - 每项目：`url`（必填，自动解析 domain+pid）、`lib`（可选，缺陷库前缀，用于 debug 孪生匹配）、
   `status_names`（可选，默认 `打开,未完成`）
+- `web`：**网页只读查看服务**（可选，缺省 = 启用）。`start` 会自动拉起、`stop`/`stop --force` 一并停止，
+  `status` 一并显示。根目录 = `{工程}/.icode_output/`，`.md` 自动渲染成 HTML（`text/html; charset=utf-8`，
+  根治浏览器把 md 当错误编码显示的乱码），其它文件可下载，严格只读（GET/HEAD 之外一律 403）：
+  ```json
+  "web": {"enable": true, "host": "0.0.0.0", "port": 8000}
+  ```
+  - `enable=false` 关闭；`host` 监听地址（`0.0.0.0` = 局域网可见；**无认证**，`.icode_output` 含真实缺陷数据，
+    注意分享范围）；`port` 端口（被占则网页服务起不来，守护不受影响）
+  - 也可单独运行 `python3 tools/tb/scripts/tb_web.py --config watch.json`（`--root`/`--host`/`--port` 覆盖）
 
 **首次使用（新用户）**：仓库已带占位模板 `tools/tb/tb_watch.config.example.json`，
 复制为默认配置位置 `~/.claude/icode_data/tb_watch.json` 后，填两处即可：
@@ -176,6 +186,9 @@ tools/tb/scripts/tb_watch_ctl.sh stop
 # 强制停止（中断正在跑的分析，杀守护+子进程；分析中需立即停时用）
 tools/tb/scripts/tb_watch_ctl.sh stop --force
 ```
+
+`start` 成功后会同时打印网页服务地址（配置 `web` 段，默认 `http://0.0.0.0:8000/`），
+同事在浏览器直接打开即可查看检索报告与各 debug 分析简报，无需 SMB 账号；`status` 也会显示网页服务运行状态。
 
 **检索报告（分析最新状态）**：每轮覆盖写 `{工程}/.icode_output/tb_watch_report.md`，**且每次触发
 claude 分析完成后立即刷新**（重 probe 重判，该单刚建基线/完成增量后不再标"待新建"）——

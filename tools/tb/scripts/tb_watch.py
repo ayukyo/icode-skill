@@ -456,8 +456,12 @@ GVD_FD_ABS_MAX = 4096  # 绝对上限兜底（小机器 file-max 也可能很大
 GVD_DANGER_HITS = 2
 
 
-def _check_smb_health():
+def _check_smb_health(project_dir):
     """探测 gvfsd-smb 健康。返回 (ok, detail) — ok=False 表示 SMB 挂载不可用或代理危险。
+
+    仅对 **SMB(gvfs) 工程**生效：project_dir 落在 /run/user/<uid>/gvfs/smb-share: 下才做检查；
+    本地目录工程直接放行 (True) ——否则本机挂着 SMB 时本地工程会被 gvfs 健康检查误伤
+    （fd 危险时 recycle 掉正在用的 gvfsd-smb），或本机无 SMB 挂载时被"跳过触发"卡死。
 
     探测点：
     1. 挂载端点：尝试 listdir /run/user/<uid>/gvfs（不依赖具体工程）
@@ -465,6 +469,8 @@ def _check_smb_health():
     """
     info = {"mount_ok": True, "gvfsd_smb_fd": 0, "file_max": 0, "danger": False, "error": ""}
     gvfs_root = f"/run/user/{os.getuid()}/gvfs"
+    if f"{gvfs_root}/smb-share:" not in project_dir:
+        return True, info
     try:
         os.listdir(gvfs_root)
         info["mount_ok"] = True
@@ -680,7 +686,7 @@ def main_loop(cfg, once=False):
         try:
             if candidates and not cfg.get("detect_only"):
                 # SMB 健康兜底：挂载不可用或 gvfsd-smb fd 累积到阈值 → recycle 替代进程
-                smb_ok, smb_info = _check_smb_health()
+                smb_ok, smb_info = _check_smb_health(cfg["project_dir"])
                 if not smb_ok:
                     print(f"[{stamp}] round#{round_no} SMB 健康异常：{smb_info}，先 recycle gvfsd-smb")
                     _append_log(log_file, f"[{stamp}] round#{round_no} SMB 健康异常：{smb_info}，recycle 兜底")
