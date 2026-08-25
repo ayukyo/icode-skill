@@ -169,7 +169,7 @@ case "$CMD" in
         sleep 1
         if kill -0 "$WEBPID" 2>/dev/null; then
           echo "[tb_watch] 网页服务已启动 PID=$WEBPID：$(access_url "$WHOST" "$WPORT")  （日志 /tmp/tb_web.log）"
-          ip_change_note "$PROJ"
+          ip_change_note "$PROJ" || true
         else
           echo "[tb_watch] 警告: 网页服务启动失败（端口被占? 看 /tmp/tb_web.log），守护不受影响"
           rm -f "$WEBPIDF"
@@ -223,7 +223,7 @@ case "$CMD" in
       if kill -0 "$WPID" 2>/dev/null; then
         read -r _ WHOST WPORT _ <<< "$(web_info)"
         echo "[tb_watch] 网页服务 运行中 PID=$WPID：$(access_url "$WHOST" "$WPORT")"
-        ip_change_note "$PROJ"
+        ip_change_note "$PROJ" || true
       else
         echo "[tb_watch] 网页服务 pid 存在但进程已死（残留，可 stop 清理）"
       fi
