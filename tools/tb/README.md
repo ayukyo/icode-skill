@@ -177,7 +177,8 @@ tools/tb/scripts/tb_watch_ctl.sh stop
 tools/tb/scripts/tb_watch_ctl.sh stop --force
 ```
 
-**检索报告（分析最新状态）**：每轮覆盖写 `{工程}/.icode_output/tb_watch_report.md`，
+**检索报告（分析最新状态）**：每轮覆盖写 `{工程}/.icode_output/tb_watch_report.md`，**且每次触发
+claude 分析完成后立即刷新**（重 probe 重判，该单刚建基线/完成增量后不再标"待新建"）——
 列出全部"打开/未完成"单（按单号倒序）及每单分析状态（需增量 / 无更新 / 待新建·建基线）、debug 工单位置；
 轮询流水追加在 `{工程}/.icode_output/tb_watch/watch.log`。
 

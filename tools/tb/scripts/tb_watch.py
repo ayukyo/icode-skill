@@ -17,7 +17,8 @@
   按 lib+num+pid 匹配），与正式工单/正式索引完全脱钩。
 
 **报告（检索列表）**：每轮生成"打开/未完成单 + 分析最新状态"报告到
-  {工程}/.icode_output/tb_watch_report.md（工程根默认 = 运行目录 cwd，可用 --project-dir 覆盖）。
+  {工程}/.icode_output/tb_watch_report.md，且**每次触发 claude 分析完成后立即刷新**（重 probe 重判，
+  该单不再"待新建"）；工程根默认 = 运行目录 cwd，可用 --project-dir 覆盖。
 
 **调度语义 = 自循环守护（非 cron）**：每轮 = 检测（全部项目）->（有需增量单则触发 claude 分析、
 等它结束）-> sleep interval。"分析完才计时下一个周期"，分析耗时多长都不撞下一轮；flock 单实例锁 + pid 文件。
@@ -252,18 +253,19 @@ def scan_debug_halfdone(project_dir):
 def locate_debug_meta(project_dir, workticket_dir, ts):
     """定位 debug 工单里该单的 <ID>_meta.json。
 
-    优先级：metadata.tb_source.meta_path（可绝对/相对 project_dir）-> 递归找工单目录下 *_meta.json
+    优先级：metadata.tb_source.meta_path（可绝对/相对 workticket_dir）-> 完整递归找工单目录下 *_meta.json
     （排除 .prev 备份）。定位不到返回 None。
     """
     candidates = []
     mp = ts.get("meta_path")
     if mp:
-        candidates.append(mp if os.path.isabs(mp) else os.path.join(project_dir, mp))
+        # 相对路径以工单目录为基准（claude 落盘 meta_path 时格式不统一：绝对/相对两种写法并存）
+        candidates.append(mp if os.path.isabs(mp) else os.path.join(workticket_dir, mp))
     for dirpath, _dirs, files in os.walk(workticket_dir):
         for fn in files:
             if fn.endswith("_meta.json") and not fn.endswith(".prev.json"):
                 candidates.append(os.path.join(dirpath, fn))
-        break  # 只扫第一层（tb_source/<LABEL>/ 结构）
+        # 完整递归（不 break）：meta 可能在 tb_source/<LABEL>/ 深层，只扫首层会漏
     for c in candidates:
         if c and os.path.exists(c):
             return c
@@ -707,6 +709,19 @@ def main_loop(cfg, once=False):
                     # >=600s 的失败（任务太重超时等）不计入退避——由"中断半成品续跑"兜底，不误伤
                     detail = f"，快速失败连续{_trigger_fail_streak}次" if (rc != 0 and cost < 600) else ""
                     _append_log(log_file, f"[{stamp}] round#{round_no} 触发 {label}（{reason}）：{'成功' if rc == 0 else '失败/超时'}，耗时{cost}s{detail}")
+                    # 触发分析完成后立即刷新检索报告：该单刚建基线/完成增量，report 若仍标"待新建"
+                    # 会误导（须等下一轮才反映）。先等 SMB 缓存刷新（gvfs 对刚写入的 metadata 可能有
+                    # 目录缓存延迟），再重 probe 重判重写；刷新失败不崩守护（下轮自然刷新兜底）。
+                    try:
+                        time.sleep(3)
+                        fresh = [detect_project(cfg["project_dir"], p, watch_dir) for p in cfg["projects"]]
+                        write_report(cfg, fresh)
+                        print(f"[{stamp}] round#{round_no} 分析完成，report 已刷新")
+                        _append_log(log_file, f"[{stamp}] round#{round_no} 分析完成，report 已刷新")
+                    except Exception as e:
+                        # 刷新失败不崩守护（下轮自然刷新兜底），但须留痕 watch.log 便于追溯
+                        print(f"[{stamp}] round#{round_no} 触发后 report 刷新失败：{e}", file=sys.stderr)
+                        _append_log(log_file, f"[{stamp}] round#{round_no} 触发后 report 刷新失败：{e}")
             elif candidates:
                 print(f"[{stamp}] round#{round_no} (detect-only) 候选 {candidates[0][1][1]}，未触发 claude")
             else:

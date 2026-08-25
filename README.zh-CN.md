@@ -169,7 +169,7 @@ cd ~/.claude/skills/icode/mcp/cheap-research
 
 `/icode log` 的零散输入含 Teambition 项目 URL 或 `<LIB>-<NUM>`（如 `DEMO-26`）时，可选自动拉取缺陷单的标题/描述/评论/日志附件作为分析输入；详见 [SKILL.md「使用流程示例」段（方式 D2）](SKILL.md)。配置（多项目 + cookie）详见 `~/.claude/skills/icode/tools/tb/README.md`。另支持**批量分析所有"打开/未完成"缺陷单**（零散输入含"分析所有TB"类意图时触发，按真实任务流状态名过滤、不能用 isDone），详见 [SKILL.md「方式 D3」](SKILL.md)。
 
-另支持**定时增量监控**（`tools/tb/scripts/tb_watch.py`）：周期轮询一个或多个项目的"打开/未完成"单（按单号倒序），检测到某单有新增评论/附件/状态变化时自动拉起 claude 无头会话做**完整 `/icode log --debug` 深度分析**（下载解压日志附件做日志实证根因分析；产物落 `{工程}/.icode_output/.debug/`、不写全局索引；首次出现的单自动建基线，每轮一条）。配置为 JSON 文件、**最小只需填项目 URL**；每轮把"打开/未完成单 + 分析最新状态"检索报告写到 `{工程}/.icode_output/tb_watch_report.md`。配置 / 启动 / 停止 / 风险详见 [tools/tb/README.md](tools/tb/README.md)「定时增量监控」节。
+另支持**定时增量监控**（`tools/tb/scripts/tb_watch.py`）：周期轮询一个或多个项目的"打开/未完成"单（按单号倒序），检测到某单有新增评论/附件/状态变化时自动拉起 claude 无头会话做**完整 `/icode log --debug` 深度分析**（下载解压日志附件做日志实证根因分析；产物落 `{工程}/.icode_output/.debug/`、不写全局索引；首次出现的单自动建基线，每轮一条）。配置为 JSON 文件、**最小只需填项目 URL**；每轮把"打开/未完成单 + 分析最新状态"检索报告写到 `{工程}/.icode_output/tb_watch_report.md`，**且每次触发分析完成后立即刷新**（该单刚建基线/完成增量后不再标"待新建"）。配置 / 启动 / 停止 / 风险详见 [tools/tb/README.md](tools/tb/README.md)「定时增量监控」节。
 
 ## 可选：从钉钉文档/钉盘拉资料
 
