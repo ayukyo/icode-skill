@@ -66,12 +66,18 @@ assert_contains "$CONTRACT" "首屏质量门" "真源含首屏质量门"
 assert_contains "$CONTRACT" "分析态默认未部署" "真源含分析态默认未部署"
 assert_contains "$CONTRACT" "结论与问题定位" "真源含开头结论卡"
 assert_contains "$CONTRACT" "修复前后对照" "真源含修复前后对照槽位"
+assert_contains "$CONTRACT" "原现场时间线" "真源含现场时间线语义槽位"
+assert_contains "$CONTRACT" "问题点—修复点—验证结果映射" "真源含问题—修复—验证映射槽位"
+assert_contains "$CONTRACT" "对外简报完成门" "真源含对外简报完成门"
+assert_contains "$CONTRACT" "机器自检" "真源含完成门机器自检"
 assert_contains "$LOG_DOC" "external_brief_contract.md" "log.md 引用统一真源"
 assert_contains "$README_DOC" "external_brief_contract.md" "07_readme.md 引用统一真源"
 # 动态读取 anti_laziness 实际条数，断言计数声明与之一致（避免硬编码，条数演进免改测试）
 ANTI_COUNT=$(grep -oE '^[0-9]+\.' "$ANTI_DOC" | tr -d '.' | sort -n | tail -1)
 BRIEF_NO=$(grep -oE '^[0-9]+\. \*\*对外简报表达偷工' "$ANTI_DOC" | grep -oE '^[0-9]+' | head -1)
 assert_contains "$ANTI_DOC" "${BRIEF_NO}. **对外简报表达偷工" "anti_laziness.md 含对外简报表达偷工条（第 ${BRIEF_NO} 条）"
+VERSION_NO=$(grep -oE '^[0-9]+\. \*\*日志有版本证据仍直接用当前 HEAD 解释现场' "$ANTI_DOC" | grep -oE '^[0-9]+' | head -1)
+assert_contains "$ANTI_DOC" "${VERSION_NO}. **日志有版本证据仍直接用当前 HEAD 解释现场" "anti_laziness.md 含版本基线条（第 ${VERSION_NO} 条）"
 assert_contains "$THINKING_DOC" "${ANTI_COUNT} 条偷工反例" "thinking_core.md 计数同步为 ${ANTI_COUNT}"
 assert_contains "$SKILL_DOC" "${ANTI_COUNT} 条典型偷懒行为" "SKILL.md 计数同步为 ${ANTI_COUNT}（表1）"
 assert_contains "$SKILL_DOC" "${ANTI_COUNT}条偷懒行为" "SKILL.md 计数同步为 ${ANTI_COUNT}（表2）"

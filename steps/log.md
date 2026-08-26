@@ -108,6 +108,24 @@
          - **自动发现结果处置**：命中 -> 作为候选代码库进入步骤③ 验证；全部空（a/b/c/d 均无命中）-> **显式标注"自动发现未找到姐妹工程"**（写入 `log_analysis.md §2.0`），此为自觉降级、非静默跳过
        3. **步骤②+②.5 均无候选代码库时**：退到当前 cwd 工程 + `git submodule foreach` / `find . -name "*.md" | xargs grep` / 项目 metadata（如 `~/.claude/icode_data/projects.json`）找候选代码库；**此时必须显式标注"未发现姐妹工程/关联工程，仅分析当前工程代码库（路径 Z）"**（写入 `log_analysis.md §2.0`），不得假装查过而实际未查
      - **判定结果填入** §2.0：「设备型号 X → 实际代码库 Y（路径 Z）」，作为 §2.1 表格的前置
+   - **现场运行版本基线门（P0，防"用当前 HEAD 解释现场日志"；grep 日志前必做）**：日志分析前**先确定产生日志时实际运行的代码版本**，不得默认当前 HEAD 就是现场代码——当前 HEAD 的作用是判断"问题现在是否仍存在"，**不是自动替代现场版本**（对应反偷懒第 37 条）。执行 7 步：
+     1. **提取候选版本**（按证据来源优先级）：①同一节点启动日志明确打印的 `git hash`/`commit`/`revision`/`sha`；②日志包中的 `build_info.json`/`version.json`/固件 manifest/OTA 清单/包版本清单；③二进制 `--version` 输出 / ELF note / 构建 ID 与发布清单的确定性映射；④TB 评论或人工描述中的版本信息（须再经日志/包清单验证）；⑤完全无版本证据 → 标 `unknown`，**不得把当前 HEAD 自动填成现场版本**。
+     2. **Hash 识别两条件**：①出现在明确版本语义附近（不能把 operation UUID / 请求 ID / 文件校验和误当 Git Hash）；②能在正确的模块仓库唯一解析为 commit（短 Hash 冲突记歧义，不猜测）。
+     3. **代码库归属**：复用 §2.0 判定结果，将模块绑定到正确仓库（多仓库/子仓/独立业务仓库**按模块分别绑定**，不能只记 super repo HEAD；某节点日志中的 Hash 只能绑定该节点或明确声明的组件）。
+     4. **可解析验证**：`git -C <repo> cat-file -e <hash>^{commit}` 验证本地可解析；**Hash 本地不可达时不自动 fetch**，如实记录 `unresolved` 降级（由用户决定是否补齐仓库对象或发布清单）。
+     5. **记录三基线**：现场 Hash（runtime）/ 当前 HEAD（analysis）/ 二者关系（`same_as_head` / `ancestor_of_head` / `ahead_or_forked` / `unresolved`），写入 metadata 三基线字段（见步骤9）+ `log_analysis.md §2.0.1` 模块版本矩阵。
+     6. **按现场 Hash 读历史代码**：根因假设涉及的代码行/函数，先用 `git -C <repo> show <hash>:<path>` 读取**现场版本源码**逐行核对（只读白名单，见 [references/dir_and_metadata.md](../references/dir_and_metadata.md)「Git 操作安全白名单」；禁止 checkout/switch/reset/stash/clean），并在根因代码事实处**注明"取自现场 Hash X 还是当前 HEAD"**。**核对与演进对照必须按相关函数/代码段定位**（用函数名/`case` 分支等锚点划界），**不得对整文件做字符串级比对**——同一防御性检查字符串可能出现在多处（如多个函数各有同类溢出守卫），整文件 grep 会把"其他函数已有同类检查"误判成"现场已修复"，导致判定矩阵失真。
+     7. **现场→HEAD 演进对照**：`git -C <repo> log --oneline <hash>..HEAD -- <path>` + `git -C <repo> diff <hash>..HEAD -- <path>` 列出相关文件演进，按判定矩阵给结论：
+        | 现场 Hash 代码 | 当前 HEAD 代码 | 结论与后续动作 |
+        |---|---|---|
+        | 存在该缺陷 | 仍存在 | 当前仍需修复，在最新目标分支实施根因修复 |
+        | 存在该缺陷 | 已不存在 | 现场问题可能已被后续提交修复 → 定位修复提交，优先做版本同步/部署与回归，**不重复写修复** |
+        | 不存在该缺陷 | 当前出现 | 后续版本引入回归，**不能用当前回归解释更早现场**，重新寻找现场根因 |
+        | 两边行为相同但日志不符 | 相同 | 代码假设不足 → 检查配置、依赖、dirty 构建、运行时状态或其它模块版本 |
+        | Hash 无法确定或解析 | 未知 | 代码与现场未绑定 → 降低置信度，列出补证方法，不写"现场代码就是当前实现" |
+     **dirty 标记**：Hash 带 `dirty`（`raw_version` 形如 `git=<hash>-dirty`）只能定位基础提交，不能精确复现运行二进制，置信度不得标高，未提交差异列为残余不确定性。
+     **同一日志包多个 Hash**：按重启/升级时间切分运行区间，不能任选一个；闭源 SDK 只有版本号时记录版本号和包校验信息，不伪造 Git Hash。
+     **结果落盘**：`log_analysis.md §2.0.1 现场运行版本基线`（模块版本矩阵 `运行节点 | 实现模块 | 仓库 | 现场 Hash | 当前 HEAD | 关系 | 证据来源` + 演进对照 + 判定结论）；无版本证据时 §2.0.1 标注"现场运行版本未确定（unknown）"，**不得静默跳过**。
    - **git diff/status/log**：看相关代码改过没（含 submodule/subrepo）。若代码已被改过（AI/同事/其他分支 merge），问题可能在改动里
    - **设计意图证据采集（防"把有意设计误判为缺陷"，P0）**：对基线检查中"可疑/反直觉/违反历史工单门禁/默认值魔法值"的代码行，**阶段1 内**（非等到对抗阶段）强制 5 步采集并输出"缺陷 / 有意设计 / 待对抗确认"判定：
      1. `git blame -L <行> <file>` → 定位引入 commit
@@ -135,7 +153,11 @@
 
    - **跨模块枚举值对照表（防"语义碰撞"类根因）**：当数据流跨越 SDK / 其他进程 / 共享库边界时，**必须**在状态链路图后追加「枚举值对照表」——列出每个跨边界状态字段在**两侧模块的枚举定义**，逐值标注「同名数值是否同义」「哪个是过渡态、哪个是终局态」。**触发条件**：症状或根因假设中出现来自外部模块的状态值（如 SDK 返回的状态字段 / IPC 收到的枚举字段 / protobuf enum 字段），即触发本表，**不得跳过**。**判定模板**：外部模块某状态值 N 在其原生语义下是 A 类（终局 / 过渡 / 中间），在本消费模块语义下被解读为 B 类——若 A ≠ B 则记「语义碰撞」嫌疑根因。**实证**：两侧枚举定义用 `grep -rn 'enum class.*Status\|kEnumValueA\|kEnumValueB'` 在两侧代码库各找一次，把两侧定义都贴进对照表（带 file:line，使用通用占位替换具体枚举值名）。**写入位置**：`log_analysis.md §2.2 跨模块枚举对照表`（与 §2.1 状态链路图并列）
    - **找项目文档参考但不盲信**：grep 相关 `docs/`、`*.md`，快速了解设计意图。但**文档可能过时/错误**，看到后必须用 Read/Grep 验证文档描述的代码行为是否属实
-   - **证据权威优先级（硬规则，与"找项目文档参考但不盲信"并列）**：当"当前代码行为 / 历史工单结论 / 段零文档快照 / 用户症状描述"冲突时，按 **当前 HEAD 代码 + git 提交演进史（commit message / 回归日志 / 测试注释） > 历史工单结论 > 段零工程文档快照 > 用户症状描述** 裁定；以最高权威为准，低级权威只作参考；**冲突必须在 §2.1 显式标注**（格式："历史工单 `<id>` 结论已被 commit `<hash>` 演进，本报告以 `<hash>` 为准"）。历史工单结论是**时间点快照**、代码是**持续演进的事实**——禁止以旧结论为基准去"证伪"最新代码（方向颠倒，会产出回归既有修复的错误方案）
+   - **证据权威优先级（硬规则，按问题分类，与"找项目文档参考但不盲信"并列）**：当"现场日志 / 当前代码行为 / 历史工单结论 / 段零文档快照 / 用户症状描述"冲突时，**按问题类型选择权威顺序，不可混成一个 HEAD**：
+     - **解释现场行为**（现场当时为什么这样）：`现场日志原文 + 现场版本源码（现场 Hash 对应源码，见阶段1 版本门） > 同版本测试/发布记录 > TB 评论 > 当前 HEAD 推测 > 历史工单/文档快照`
+     - **判断当前是否仍需修复**（现在还有没有问题）：`当前目标分支源码 + 现场 Hash→当前 HEAD 的提交演进 > 历史工单结论 > 段零工程文档快照 > 用户症状描述`
+     - **判断修复是否已验证**：`验证设备实际部署 Hash + 该 Hash 下的现场结果 > 本地编译结果 > 候选提交说明`
+     以最高权威为准，低级权威只作参考；**冲突必须在 §2.1 显式标注**（格式："历史工单 `<id>` 结论已被 commit `<hash>` 演进，本报告以 `<hash>` 为准"）。历史工单结论是**时间点快照**、代码是**持续演进的事实**——禁止以旧结论为基准去"证伪"最新代码（方向颠倒，会产出回归既有修复的错误方案）；同样，**禁止用当前 HEAD 解释更早现场**（现场行为须以现场版本源码为准，见阶段1「现场运行版本基线门」）
    - **limit 红线对照**：若前置 limit 红线检查点命中（limit 存在），**必须**逐条对照当前根因假设与 limit 红线--"症状/根因是否违反了某条 limit 红线？"。违反 limit 红线本身即为高置信根因线索（约定红线是团队已知的易错点）。**写入 `log_analysis.md §2.3`**（见步骤8 报告骨架；**§2.3 必填**，limit 不存在时此小节标注"本工程无 limit 红线"，不得整节省略）
    - **基线快通道**：若基线检查已直接定位根因（代码改动暴露问题 + 链路图显示清除者缺失），跳过阶段2深挖，直接进阶段3 对抗验证该根因
 6. **阶段2 日志侦察 + 现场还原**：
@@ -224,6 +246,7 @@
      ## 1. 输入要素 —— 五要素（日志目录/问题描述/问题时间点/前序场景状态链/附件清单（含 TB + 本地）与附件分析结果），标注推断来源（附件清单：视频/图片的文件名+大小+类型，**无条件记录**（无视频/图片时该小节不存在）；「附件分析结果」vision-bridge 任一通道可用时由「附件分析（含本地路径 + TB 源）与 ffmpeg 抽帧」段写入,含时间点+现象+关键帧路径；两通道均不可用时仅记"vision-bridge 不可用"降级声明于附件清单小节末尾）
      ## 2. 基线检查
      - §2.0 代码库归属判定（实战补强）—— 设备型号 ≠ 代码库；提取日志独特字符串到姊妹工程 git grep 找出真正代码库
+     - §2.0.1 现场运行版本基线（版本门，P0）—— 模块版本矩阵（运行节点/实现模块/仓库/现场 Hash/当前 HEAD/关系/证据来源）+ Hash 可解析状态 + 现场→当前 HEAD 演进对照 + 判定结论（见阶段1「现场运行版本基线门」；无版本证据时标注"现场运行版本未确定（unknown）"）
      - §2.1 git diff 结论（含**演进证据块**：每个相关 commit 的 4 字段——commit/意图/依据/对结论的影响，见阶段1「设计意图证据采集」）+ 状态链路图 + 文档验证结论 + **证据权威冲突标注**（如"历史工单 <id> 结论已被 commit <hash> 演进，本报告以 <hash> 为准"，见阶段1「证据权威优先级」）
      - §2.2 跨模块枚举对照表（防"语义碰撞"类根因）—— 当数据流跨越 SDK / 其他进程 / 共享库边界时，列出每个跨边界状态字段在两侧的枚举定义并标注「同名数值是否同义 / 过渡态 vs 终局态」；不涉及时该小节可空
      - §2.3 limit 红线对照（**必填小节**，不得整节省略）-- 逐条对照根因假设与 limit 红线（违反约定红线本身即为高置信根因线索）；limit 不存在时标注"本工程无 limit 红线"
@@ -257,6 +280,7 @@
      > **`log_analysis.md` 章节必填/可空说明**：
      > - **必填章节**（缺一不可）：0 核心结论、4 决定性证据、5 根因分析、6 对抗分析记录、7 修复设计 + 4 维度验证清单、8 结语（3 行内，一句话根因 + 修复方向）
      > - **可空章节**：1 输入要素（如三要素明显可空）、2 基线检查（如无 git 可空）、3 现场还原（如无时间线数据可空）、9 本单范围外（如无范围外事项可空）
+     > - **§2.0.1 版本门例外**：§2 整章可空，但**只要开始分析日志，§2.0.1 现场运行版本基线就不得静默省略**——有版本证据时给模块版本矩阵，无版本证据时显式标注"现场运行版本未确定（unknown）"（防"用当前 HEAD 解释现场"；校验见步骤9.6 版本基线完成门）
      > - **§2.3 limit 红线对照必填例外**：§2 整章可空，但 **§2.3 limit 红线对照小节必填**（缺一不可）——limit 存在时逐条对照、limit 不存在时标注"本工程无 limit 红线"（防整节省略，见步骤9.5 机器自检）。§2.3 是**对照结论**（事后产物），对照依据的"先读索引→精读命中条目"读取留痕见步骤1 前置检查点落盘的 `{ICODE_OUT_DIR}/limit_checkpoint.md`——二者**不可互相替代**（读取留痕证明"当时读过"、§2.3 证明"如何对照"）
      > - **§7.5 触发式必填**：命中「修复前后对照契约」触发判定（复杂场景 / 用户主动要求）时 §7.5 必填（同图 + 新旧关键点表 + 图例）；低复杂度修复不强制，用 2–4 行对照表并说明"低复杂度，不画图"
      > - **章节引用强制**：步骤2 复用 log 阶段对抗验证结论时，必须读 6 对抗分析记录章节（不读全文）
@@ -364,11 +388,16 @@
      "keywords": "{≤8个技术关键词}",
      "indexed": false,
      "ticket_id": "{写入索引后回填}",
-     "tb_source": null
+     "tb_source": null,
+     "runtime_code_baselines": [],
+     "analysis_code_baselines": [],
+     "verification_code_baselines": []
    }
    ```
 
    > `tb_source`（可选）：从 TB 拉取时填 `{lib,num,pid,label,url,meta_path}`（metadata 完整版，含本地路径），纯本地日志分析时为 `null`。**写入全局索引时只存摘要 `{lib,num,pid,label}`**（供同 TB 单检索复用，不含 url/meta_path）。
+
+   > **三基线字段（P0，默认 `[]` 向后兼容；字段缺失视为 `[]`）**：现场运行版本基线门（阶段1）与步骤 9.6 版本基线完成门落地用。`runtime_code_baselines` = 现场运行代码版本证据数组，每条 `{module, repo_path, evidence_source, raw_version, commit, dirty, resolved, confidence, relation_to_analysis_head}`（`module` 实现模块名、`repo_path` 归属仓库绝对路径、`evidence_source` 版本证据回指（启动日志/build_info/version.json/manifest/--version/TB 评论）、`raw_version` 原文版本串（含 `dirty` 形如 `git=<hash>-dirty`）、`commit` 解析出的提交 Hash、`dirty` 是否带未提交差异、`resolved` Hash 是否本地可解析、`confidence` ∈ `high`/`medium`/`low`（高/中/低）、`relation_to_analysis_head` ∈ `same_as_head`/`ancestor_of_head`/`ahead_or_forked`/`unresolved`，Hash 不可解析时 `commit=null`+`relation=unresolved`）；`analysis_code_baselines` = 当前分析版本，每条 `{module, repo_path, commit, branch}`（缺省为 `git rev-parse HEAD` 所在仓库）；`verification_code_baselines` = 修复验证版本，每条 `{module, commit, verified_at, scenarios}`。字段定义与只读约束见 [references/dir_and_metadata.md](../references/dir_and_metadata.md)「metadata 三基线字段」。
 
    **`--debug` 模式差异**（详 [references/debug_mode.md](../references/debug_mode.md)）：
    - `status` 改为 `"debug_done"`（不是 `"log_done"`——下游易识别）
@@ -417,6 +446,40 @@ sys.exit(1 if missing else 0)
 - **与 plan 的差异**：plan 扫 `01_plan.md` 全文 + 校验自己的「阶段块：plan前置硬基线」标题锚点；log 只扫 §2 + §6 两章节（limit 对照唯二落点）+ 校验自己的「阶段块：log前置检查点」标题锚点，规避 §0 一句话定性 / §3 现场还原里业务语义的"红线 N"（如安全距离红线）误判。**二者各有维度④读留痕**：log 校验 `阶段块：log前置检查点`（本步骤）、plan 校验 `阶段块：plan前置硬基线`（覆盖 init/start/fast，见 [01_plan.md](01_plan.md) 前置 limit 硬基线 + limit_refs 机器自检）；同一工单 log→plan 串联时两阶段块彼此独立存在、互不干扰。§2.3 存在性（log_analysis.md 报告小节）为 log 独有检查（plan 无此维度，plan 自身不产 §2.3）
 - **章节切片鲁棒性**：切片边界用「下一个编号标题或文末」，§3 现场还原 / §7 等**可空章节被省略时不影响匹配**（若用固定 `## 3.` 作边界，§3 省略会导致 §2 切片失败 → 误报 §2.3 缺失）
 
+### 9.6 版本基线完成门（P0：日志含版本证据却未绑定现场 = 不合规；防"用当前 HEAD 解释现场日志"）
+
+**目的**：机器校验「现场运行版本基线门」（阶段1）真正执行了——**日志/版本文件明明打印了 Git 版本，分析却直接用当前 HEAD 解释现场 = 不合规**（对应反偷懒第 37 条）。运行下方命令，退出码非 0 则停下补齐后重跑：
+
+```bash
+python3 -c "
+import json,re,sys,os
+m=json.load(open('{ICODE_OUT_DIR}/.ico_metadata.json'))
+runs=m.get('runtime_code_baselines',[])
+txt=open('{ICODE_OUT_DIR}/log_analysis.md',encoding='utf-8').read()
+# 限定 §2 章节切片，避免结论/正文其他位置的 'unknown' 字样误触发放行（同 9.5 sec() 切片法）
+def sec(n):
+    mt=re.search(r'(?sm)^#{1,3}\s*'+str(n)+r'\..*?(?=^#{1,3}\s*\d+\.|\Z)',txt)
+    return mt.group() if mt else ''
+s2=sec(2)
+if '现场运行版本' not in s2:
+    print('❌ §2.0.1 现场运行版本基线缺失（版本门未落盘；无版本证据也须写\"现场运行版本未确定\"）'); sys.exit(1)
+if '现场运行版本未确定' in s2:
+    print('✓ 现场运行版本未确定（unknown），已显式降级，允许通过'); sys.exit(0)
+errs=[]
+if not runs: errs.append('runtime_code_baselines 为空（检出版本标识却未记录现场版本）')
+for r in runs:
+    if not r.get('evidence_source'): errs.append('候选无 evidence_source（版本证据不可回指）: '+r.get('module','?'))
+    if r.get('resolved') and not r.get('relation_to_analysis_head'): errs.append('可解析 Hash 未记录与 HEAD 关系: '+r.get('module','?'))
+if errs:
+    print('❌ '+'; '.join(errs)); sys.exit(1)
+print('✓ 版本基线门：现场版本已绑定 + 证据可回指 + 与 HEAD 关系已记录（含 unresolved：候选在案+证据可回指即视为已降级处理）')
+"
+```
+
+- 判定规则：**① 检出版本标识**（启动日志 git hash / build_info.json / version.json / manifest / --version，阶段1 版本门识别）→ 校验 `runtime_code_baselines` 非空 + 每条有 `evidence_source` + **可解析 Hash** 有 `relation_to_analysis_head`；**Hash 不可解析（`resolved=false`/`unresolved`）的候选**只要记录在案 + `evidence_source` 可回指即放行——降级已被如实处理，不要求 relation（与阶段1 步骤4"不可达不 fetch、如实降级"一致）；**② 未检出版本标识** → **§2 章节内**必须含精确降级措辞"现场运行版本未确定"（**不得用裸 `unknown` 替代**——§2.1/§2.0 等小节里业务语义的 unknown 与版本降级无关，裸匹配会把"矩阵已写但 metadata 空"的偷懒场景误放行），**不得静默跳过**（限定 §2 切片 + 精确短语双约束）；**③ 现场与当前行为不同** → §2.0.1 演进对照须给出"已被后续提交修复/后续回归/尚未定位"的明确结论（不能只列 Hash 不给判定）
+- **补录边界**：§2.0.1 / 三基线字段应在**正常流程的阶段1 与步骤9 天然生成**，不是靠 9.6 触发补录；确系漏落、靠自检才补写的，`evidence_source` 须如实标注补证来源，不得伪装成阶段1 时点已采集
+- **只读白名单**：本门只允许 `git cat-file -e` / `git show` / `git log` / `git diff` / `git merge-base` / `git blame` 等只读命令（见 [references/dir_and_metadata.md](../references/dir_and_metadata.md)「Git 操作安全白名单」）；Hash 本地不可达时如实降级 `unresolved`，**禁止 fetch/checkout 改变工作区**
+
 10. **写入全局索引**（步骤9之后）：Read `~/.claude/icode_data/index.json`（不存在则创建），追加一条记录：
     - `ticket_id` = `{工程名}-{N}`（冲突时加 `project_path` 短 hash 后缀，规则同 init）
     - `project_path` = 当前工程根绝对路径；`out_dir` = `.icode_output/.icode_output_{N}`
@@ -454,7 +517,7 @@ sys.exit(1 if missing else 0)
 - **TB 分析**（含 debug）：`{ICODE_OUT_DIR}/<单号>_log_problem_brief.md`——单号取自 `tb_source` 的 `<LIB>-<NUM>`（如 `DEMO-26_log_problem_brief.md`），一眼看出是哪个 TB 单的问题，主体仍是 `log_problem_brief`
 - 两者均与 `log_analysis.md` **同目录并列**、成对存放便于查找。**本地日志分析与 TB（debug）分析均自动生成**；debug 工单简报落 debug 工单目录，与 `log_analysis.md` 并列供对照交付。
 
-**表达契约**（对外如何组织与表述，**统一按 [references/external_brief_contract.md](../references/external_brief_contract.md) 执行**——开头「结论与问题定位」卡 / 归因措辞分级 / 四角色拆分 / 「日志/观测说明」条件章节 / 修复三段闭环 / 修复与验证状态显式标注 / 首屏质量门；本段不重复契约正文，只保留 log 特有约束）。
+**表达契约**（对外如何组织与表述，**统一按 [references/external_brief_contract.md](../references/external_brief_contract.md) 执行**——开头「结论与问题定位」卡 / 归因措辞分级 / 四角色拆分 / 「日志/观测说明」条件章节 / 修复三段闭环 / 修复与验证状态显式标注 / 首屏质量门；**日志源简报还须满足契约 §7.1 必填语义槽位 + §10 对外简报完成门**——原现场时间线（毫秒级）/问题点—修复点—验证结果映射/修复前后链路/验证时间线与版本/版本信息（现场/修复/验证三版本，对应三基线字段 `runtime`/`analysis`/`verification`，分析基线在对外语境表述为"修复所基于版本"，措辞以 [external_brief_contract.md](../references/external_brief_contract.md) §7.1 为准）/统一对外结论口径，见 [07_readme.md](07_readme.md)「TB/日志源简报的强制语义槽位」；本段不重复契约正文，只保留 log 特有约束）。
 
 **组织**（**章节组织统一按契约 §7 语义槽位**：`结论与问题定位`（必填四项）/ `日志/观测说明`（条件）/ `故障如何发生` / `关键证据` / `应该怎么修改` / `验证标准` / `尚未确认的事项` / `修复前后对照`（条件）；从 `log_analysis.md`（必要时 `00_init.md`）提炼、**不得复制全文**。**内容要点**（简报必须覆盖，落点如下——不要另起与契约冲突的章节标题）：
 1. **一句话结论**（症状 + 根因 + 置信度 + 状态边界）→ 落「结论与问题定位」
@@ -662,6 +725,7 @@ TB 附件已落盘后，若 `{ICODE_OUT_DIR}` 位于**网络挂载（SMB 等）*
 - **禁止跳过前置 limit 红线检查点 / 禁止 §2.3 省略 / 禁止缺 `limit_checkpoint.md` 读留痕**——limit 红线必须在步骤2 历史检索/段零文档注入**之前**读取（防"历史根因先入为主后才对照红线"的滞后），且本次读取必须在进入步骤2 之前落盘 `{ICODE_OUT_DIR}/limit_checkpoint.md`（先读索引→精读命中条目的直接留痕；**步骤8 §2.3 / 步骤9 `limit_refs` 是事后产物，不能替代该读留痕**）；`log_analysis.md §2.3` 是必填小节，limit 存在时逐条对照、不存在时标注"本工程无 limit 红线"，不得整节省略；报告 §2.3/§6 引用的「红线 N」必须记录进 metadata `limit_refs`（步骤 9.5 机器自检校验，退出码非 0 即不合规）
 - **禁止向 TB 发任何写操作**（TB 缺陷源仅 GET 拉取）——严禁 POST 评论、回写结论、上传附件到 TB；分析结论只落本地 `log_analysis.md` + `00_init.md` 供人工审。`~/.claude/skills/icode/tools/tb/scripts/tb_pull.py` 本身只读无 POST，**AI 也不得自行用 Bash/requests 等任何工具向 TB 发写请求**（GET 拉取除外），违反视为越界操作
 - **禁止复杂日志修复无「修复前后可读对照」**——命中触发判定须产出 §7.5 同图对照（同图两 subgraph + 新旧关键点表 + 图例 + 未部署声明），低复杂度用 2–4 行对照表、不强制画图（详见 [references/anti_laziness.md](../references/anti_laziness.md) 第 34 条 + 上方「修复前后对照契约」）
+- **禁止日志有版本证据仍直接用当前 HEAD 解释现场**——日志分析前必须执行「现场运行版本基线门」（阶段1）：按优先级提取版本证据 → 绑定现场 Hash → 按现场 Hash 读源码逐行核对根因、与当前 HEAD 演进对照（判定矩阵给结论）→ 落盘 `log_analysis.md §2.0.1` + metadata 三基线字段；无版本证据须显式标注"现场运行版本未确定（unknown）"，不得静默跳过；Hash 本地不可达不 fetch、如实降级 `unresolved`，不得把当前 HEAD 自动填成现场版本（详见 [references/anti_laziness.md](../references/anti_laziness.md) 第 37 条 + 上方「现场运行版本基线门」+ 步骤 9.6 版本基线完成门）
 
 ## 与步骤1的衔接
 

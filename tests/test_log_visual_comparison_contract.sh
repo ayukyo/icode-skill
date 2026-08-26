@@ -62,6 +62,10 @@ assert_contains "$ANTI_DOC" "34. **复杂日志修复未提供可读新旧对照
 echo "▶ 测试脚本自身存在性（REFACTOR 防回归）"
 assert_file "$REPO_ROOT/tests/test_log_visual_comparison_contract.sh" "测试脚本存在"
 
+echo "▶ steps/07_readme.md — 对外简报修复前后链路继承 §7.5（readme 简报契约）"
+assert_contains "$REPO_ROOT/steps/07_readme.md" "继承 log_analysis §7.5" "07_readme.md 简报修复前后链路继承 §7.5"
+assert_contains "$REPO_ROOT/steps/07_readme.md" "低复杂度用 2–4 行对照表并注明" "07_readme.md 简报含低复杂度降级判定"
+
 echo
 echo "================================================"
 echo "阶段 2 (GREEN)：语义 fixture — 复杂场景"
