@@ -42,6 +42,7 @@
 > **PPT 内容预压缩（新增）**：在收集材料（§3 第 1 步）之前，对**本次功能开发/本次BUG修复**两类场景的内容源做 cheap-research `summarize` 预压缩——
 > - 本次功能开发：5 产物 `00_init.md` / `01_plan.md` / `03_plan_final.md` / `04_code_review_fix.md` / `06_audit.md` + `git diff` 累计常达 30K+ token，先对**每个产物单独**调 `mcp__cheap-research__summarize(text=<产物全文>, max_tokens=800, focus="保留结构：需求要点/ADR/修复方案/验证结论/遗留")` 压到 ≤1K，主代理读摘要 + 关键章节定位即可，节省 ~20K token
 > - 本次BUG修复：`log_analysis.md` + `00_init.md`（根因）+ `08_patch.md`（修复）+ 终审 同理对每个产物单独 summarize（focus="保留结构：现象/根因/修复方案/回归验证/遗留"）
+> - **⚠️ 截断硬信号（truncation L1）**：summarize 只消费输入前 8000 字符（`truncate_with_meta`），产物超过 8000 字符时返回 `truncated=true` + `consumed_chars`/`source_digest`/`chunk_count`。**`truncated=true` 时禁止把摘要当完整结果消费**——两种合规处理（选一）：① 分块 map-reduce（按 `chunk_count` 分批 summarize 再合并，保序 + 保留结构锚点）；② 主代理对该产物 Read 原文（跳过预压缩）。**不得静默继续**（否则 PPT 内容基于截断摘要，丢章节）。`truncated=false` 才允许直接读摘要做 PPT 组织
 > - **项目/模块**两类场景：内容源是 project_docs 章节（已是结构化文档，每章前 50 行自带身份证），**不预压缩**（避免结构损失 + 不污染章节布局），主代理按章节直接用
 > - **降级**：cheap-research 不可用 → 跳过预压缩，走原流程（主代理 Read 全文）；写 `[降级-PPT 预压缩 summarize 不可用]`
 > - **缓存复用**：若本 ticket 已通过其他步骤调过相同产物的 summarize（如 02_review.md 第 453 行末尾 `_review_summary.md` 的输入），主代理**优先复用 SKILL.md「cheap-research 14 工具会话内缓存」段的 `.cheap_research_cache.json` 命中条目**，避免重复调 summarize

@@ -184,6 +184,6 @@ sys.exit(1 if (missing or bad or empty_cf) else 0)
 默认只读模式与 `--scan-verdict`（只读+提示）与 `--validate`（只读+提示）不产出代码/计划/审查文件，**不需要强制思考前置**，不需要 Read references。`--verdict` 标注模式是结构化字段写入（非思考/审查/编码），同样不需要强制思考前置，但须遵守本文件「反偷懒」约束。
 ## MCP 推荐
 
-默认只读模式仅用 sequential-thinking；`--scan-verdict` 批量扫描时用 cheap-research `extract`（结构化提取证伪信号，🟢*）；其余 4 个 MCP 不推荐。
+默认只读模式仅用 sequential-thinking；`--scan-verdict` 批量扫描是**零 LLM** 信号词匹配（见上方「模式三」步骤 3，不调 cheap-research `extract`）；`--validate` 纯机器校验；其余 5 个 MCP 不推荐。
 
 **强制约束**：🟢/🟢*/⚪ 语义 + 双保险机制（执行步骤内嵌 + thinking_core gate）详见 [SKILL.md「MCP 调用覆盖强制化」](../SKILL.md) + [references/mcp_per_step.md「双保险机制」](../references/mcp_per_step.md)；本步骤表内的 🟢/🟢* 标注按上方真源判定。

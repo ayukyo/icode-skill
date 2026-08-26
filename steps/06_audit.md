@@ -64,14 +64,14 @@ git rev-list --count <worktree_branch>..<目标基分支>     # 目标基分支 
 2. 读取 `03_plan_final.md` 和 `.ico_metadata.json` 的 `code_files` 列表 + `code_deviations`（步骤4主动偏离记录，供6.2偏差备忘汇总）
 3. 额外读取 `05_deepcheck.md`（若存在）
 
-> **步骤 6 audit_facts 代码事实预审（新增，强制思考前置前）**：调 `mcp__cheap-research__audit_facts` 做工程代码事实审计——
+> **步骤 6 propose_repo_facts 仓库事实候选预审（新增，强制思考前置前）**：调 `mcp__cheap-research__propose_repo_facts` 生成工程仓库事实**候选**——
 > - repo_path = `<project_root>`
 > - focus = "对外 API / 依赖关系 / README 声明 vs 代码事实"
 > - max_files = 10（README / CLAUDE.md / 入口 / 依赖清单 / 公共 API 头文件）
-> - 输出 = `[{"claim": "README 声明 X", "fact": "代码实际 Y", "match": true/false, "evidence": "file:line"}]` 列表
-> - 主代理看 `match=false` 项，作为终审重点复核（防止 patch / 实施改了入口忘改 README、声明与代码漂移）
-> - **前提契约（关键文件全缺降级）**：README / CLAUDE.md / 入口文件**全部不存在** → audit_facts 无对象可审 → 跳过本段；写 `▶ audit_facts 跳过：工程无 README/CLAUDE.md/入口文件可审计`
-> - **降级**：cheap-research 不可用 → 跳过预审，走原流程（主代理自审）；写 `[降级-audit_facts 不可用]`
+> - 输出 = `{"candidate": true, "facts": [...]}` 候选事实列表（**候选不作数**，主代理必须 Read/rg 实证后才可用于终审）
+> - 主代理把候选逐条与代码实证比对，`match=false` 项作为终审重点复核（防止 patch / 实施改了入口忘改 README、声明与代码漂移）
+> - **前提契约（关键文件全缺降级）**：README / CLAUDE.md / 入口文件**全部不存在** → propose_repo_facts 无对象可审 → 跳过本段；写 `▶ propose_repo_facts 跳过：工程无 README/CLAUDE.md/入口文件可审计`
+> - **降级**：cheap-research 不可用 → 跳过预审，走原流程（主代理自审）；写 `[降级-propose_repo_facts 不可用]`
 
 4. **强制思考前置**（不可跳过，缺证据视为不合规；按 [references/thinking_core.md](../references/thinking_core.md)「强制思考前置·统一契约」段执行）：本步骤子项（至少3步）= 构建追溯矩阵（计划功能点→代码位置）→ 汇步骤历史 → 规划 6 维度审计策略
 5. 输出：`▶ 步骤6 终审开始`
@@ -189,7 +189,8 @@ git rev-list --count <worktree_branch>..<目标基分支>     # 目标基分支 
 5. **回写实现偏差备忘到 `03_plan_final.md`**（不可跳过，详见下方「实现偏差备忘」规范）
 6. **worktree 工单产物归档（若 `metadata.active_checkout` 非 null，缺失按 [references/worktree_isolation.md §3.7](../references/worktree_isolation.md) 用 `worktree_path` 推导）**：把核心产物（`.ico_metadata.json`/`00_init.md`/`01_plan.md`/`03_plan_final.md`/`log_analysis.md`）复制到 `~/.claude/icode_data/worktree_archive/<project_id>/<ticket_id>/`，写 `metadata.archive_path`（详见 [references/worktree_isolation.md](../references/worktree_isolation.md)「产物归档」）——防 worktree remove 后产物丢失、保后续检索可读档复用完整 ADR/根因
 7. **刷新全局索引最终状态**：Read `~/.claude/icode_data/index.json`，**按 metadata 的 `ticket_id` 定位**本工单条目，更新 `status` = `completed`，`requirement_summary` 若与最终交付有显著偏差则基于 `03_plan_final.md`+交付成果刷新一次（确保未来检索命中的摘要准确反映最终成果而非中途状态）；**若该工单当前 `stale=true`，重置 `stale=false`+`stale_reason=null`+`stale_checked_commit=null`**（产物可能经本轮更新，旧 stale 判据失效；下次检索注入前由过时校验按当前 `01_plan` 锚点重评，盲重置安全不致误注入）；若已归档（步骤6），同步写 index 条目 `archive_path`；**确认 verdict（方向结论，v2 新增）**：向用户确认本工单核心方案最终方向结论--默认保持 `unknown` 不阻塞流程；若方案已实机验证有效标 `verified`，若核心方案被证伪/已回退标 `disproved`（填 `verdict_reason`+`correct_direction`；可选 `--premise-dep` 填证伪依赖的外部模块，支持硬复活检测），若被替代方案取代标 `superseded`（填 `superseded_by`）；标注时回填 `verdict`+`verdict_reason`+`correct_direction`+`verdict_source`（`machine_test`/`review`/`user`）+`verdict_at`（运行时取系统时间）；详见 SKILL.md「verdict 字段族」。**回填 `delivery_verdict`（验证完成度，与 verdict 方向结论正交，见 SKILL.md「可选字段」段）**：按本工单实际验证情况回填——目标改动已获得所要求的验证（编译+测试通过且非 O-6 用户自担验证豁免）标 `verified`；O-6 用户自担验证豁免 / 实机验证待办 / `test_outcome=fail` 未修复标 `verification_pending`；验证因外部条件无法继续标 `blocked`；需求明确不需要该类验证标 `not_applicable`。**TDD 门槛（无有效 RED 不标 verified，治"仅最终测试通过写已验证"）**：工单含行为变更（`metadata.tdd` 非 `exempt`）但**无有效 RED**（`metadata.tdd` 缺失/`not_assessed`，或 `red.failure_class != expected_assertion`，或 `tdd.status` 未达 `green_verified`）→ **不得标 `verified`**，按实标 `verification_pending`（"仅完成代码修改/最终测试通过，无有效 RED 证据"）；`tdd.status=blocked`（用户要求不跑测试/环境不可用）→ `verification_pending`，交付措辞"已完成代码修改，待实机验证/待用户验证"；`exempt`（纯文档/无生产行为变化，须有 `tdd.reason`）→ `not_applicable`。**target 身份判定（O-6/O-7，worktree 工单）**：工单在 worktree 内（`active_checkout` 非 null）时，标 `verified` 前必须核对**验证动作确实消费了 target checkout**——构建/测试/部署记录指向的源树 = `active_checkout.path`（同一目标身份），而非主仓 baseline；若验证基于主仓 baseline（活动 checkout 未参与构建，如 O-6 基线树构建成功但活动 checkout 未参与）→ **不得标 `verified`**，按实标 `verification_pending`（target 验证待完成）并注明"基线通过、target 未验证"；构建/测试/部署均指向同一 target 身份（O-7）才可标 `verified`。**`status=completed` 不自动等价于 `delivery_verdict=verified`**。写回 metadata（**仅写 metadata，不写 index**——delivery_verdict 不参与检索分流，index 条目无此字段）。写回 index.json（metadata + index 同步，不得只写其一）。
-8. 输出交付总结
+8. **G3 交付前提交契约检查（worktree 工单，`submission_contracts` 非空时）**：运行 [references/worktree_isolation.md §3.10](../references/worktree_isolation.md) G3 逐仓检查（super + 每个契约子仓一视同仁），生成逐仓提交清单（Repo / Branch / Upstream / Remote URL / Target / Ahead/Behind / Dirty / Verdict）附在交付总结前——有变更或含本工单 ticket commit 的仓库显示精确安全 push 命令 `git push <remote_name> HEAD:refs/heads/<target-branch>`；upstream 未经契约验证时不给出普通 `git push`；target 比本地前进 → 提示先 fetch/merge/rebase（由用户决定）；任一仓库 L1 → 总 verdict=blocked（提示先修再交付）。**只读检查，不执行任何 push**；写 `metadata.submission_audit`（G3 结果缓存，判定实时重跑）
+9. 输出交付总结
 
 ### 实现偏差备忘（回溯标注，防回读误解）
 
@@ -260,6 +261,9 @@ git rev-list --count <worktree_branch>..<目标基分支>     # 目标基分支 
   ①（推荐）在 worktree 内审阅改动后自行 commit → 主仓 switch 目标分支 → git merge icode/<ticket-slug>（或 PR）
            → git worktree remove <worktree路径> → git branch -d icode/<ticket-slug>（先 remove 再删分支！）
   ②（不提交）手动带出 worktree 内改动 → 确认已保存后 git worktree remove --force <worktree路径>
+  📋 G3 交付前提交契约检查（本终审步骤8 已运行）：逐仓提交目标与精确 push 命令见终审交付总结中的提交清单——
+     提交目标来自 submission_contracts（super + 子仓一视同仁），unverified/blocked 时不给出普通 git push 指令；
+     需重新查看可运行 /icode worktree --submit-check（只读，绝不 push）。
   ⚠️ 未回流前勿删 worktree：未提交改动时 git worktree remove 失败是保护（不是故障）。
   ⚠️ 回流前产物留档：交付报告与全部产物都在 worktree 内，remove 后随之消失，需留档先复制出来。
   ⚠️ 若有业务子仓隔离（metadata.sub_worktrees 非空）：先对每个子仓隔离 checkout commit + merge 回原子仓，
@@ -375,7 +379,7 @@ sys.exit(1 if (missing or (st not in valid) or not (m.get('code_files') or [])) 
 | MCP | 推荐级别 | 用途 |
 |-----|----------|------|
 | vision-bridge | 🟢* | UI 截图分析--用户给图时 |
-| **cheap-research** | 🟢* | **降本**：diff_summary（计划vs代码差异摘要）+ fill_template（6.4 交付报告提示+偏差备忘）+ summarize（schema 状态汇总）。不接管决策：6.1 终审裁决/6.2 强制修复走主会话 |
+| **cheap-research** | 🟢* | **降本**：propose_repo_facts（仓库事实候选预审，须实证）+ diff_summary（计划vs代码差异摘要）。其余（fill_template 6.4 交付报告提示+偏差备忘 / summarize schema 状态汇总）可作可选增强，非强证据场景不评估。不接管决策：6.1 终审裁决/6.2 强制修复走主会话 |
 | playwright | 🟢* | 真实 UI 验证（截图、交互）--前端工程时 |
 | memory | ⚪ | 本步骤不推荐 |
 | context7 | ⚪ | 本步骤不推荐 |

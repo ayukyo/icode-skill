@@ -23,7 +23,7 @@ ICode is a Claude Code Skill that breaks the journey from requirement to deliver
 | Reusing past decisions | Every ticket starts cold | Cross-project history retrieval with a global index + **verdict-based anti-misleading injection** (disproved tickets inject the trap, not the ADR) |
 | Project knowledge | None | `/icode doc` generates a global per-project/branch knowledge base, auto-injected at phase zero |
 | Crash recovery | Restart from scratch | `.ico_metadata.json` status + round counters enable resumable runs at any step |
-| Cost control | Everything on the main model | `cheap-research` offloads 23 low-risk sub-tasks to cheap models; `/icode fast` ≈ 65% of full-flow cost |
+| Cost control | Everything on the main model | `cheap-research` offloads low-risk candidate/compression/structured-extraction sub-tasks (the ones with real call sites in each step) to cheap models; `/icode fast` ≈ 65% of full-flow cost |
 | Model freedom | Manual | Every step is a separate command, so you can switch models between steps |
 
 ## Quick Start
@@ -36,13 +36,13 @@ git clone https://github.com/ayukyo/icode-skill ~/.claude/skills/icode
 /icode install
 
 # 3) Run a full flow
-/icode start Implement MCU rain sensor I2C driver
+/icode start Implement a feature module
 ```
 
 Or run step by step (switch models between steps anytime):
 
 ```bash
-/icode plan Implement MCU rain sensor I2C driver   # Step 1: Draft plan
+/icode plan Implement a feature module   # Step 1: Draft plan
 /icode review                                       # Step 2: Review plan (soft cap 3 rounds; auto-extends if issues remain)
 /icode merge                                        # Step 3: Merge & finalize
 /icode code                                         # Step 4: Code implementation
@@ -72,9 +72,9 @@ Other entry points:
 # After the project is deleted, history retrieval still finds full work orders from the backup (project-first, backup fallback).
 
 # Opt-in worktree isolation (any of the entry points above)
-/icode start --worktree Implement MCU rain sensor I2C driver   # Full flow + isolated branch/dir
+/icode start --worktree Implement a feature module   # Full flow + isolated branch/dir
 /icode fast --worktree  "Add isqrt function to calc.c"         # Fast mode + isolated branch/dir
-/icode plan --worktree  Implement MCU rain sensor I2C driver    # Step 1 only + isolated branch/dir
+/icode plan --worktree  Implement a feature module    # Step 1 only + isolated branch/dir
 /icode init --worktree  Record sensor data re-bag              # Step 0 + isolated branch/dir
 /icode log --worktree   ~/work/log/service-anomaly "no response"  # Log + isolated branch/dir
 # Without --worktree, tickets are created in-place by default — no prompt.
@@ -84,6 +84,7 @@ Other entry points:
 /icode worktree --update    # Move the active implementation to a new checkout on the latest remote baseline (tracked upstream)
 /icode worktree --close     # After you committed/pushed/merged: verify online evidence + safe cleanup + record baseline
 /icode worktree --reopen    # Restore a closed ticket's active checkout on the latest baseline (then /icode patch)
+/icode worktree --submit-check  # Pre-submit commit-contract check (G3): per-repo target + exact push command, read-only, never pushes
 ```
 
 ## The Workflow
@@ -206,6 +207,7 @@ Each MCP has an explicit strong-evidence trigger and a declared graceful-downgra
 | `/icode worktree --update [--to-ref <ref>]` | Worktree lifecycle (standalone): controlled migration of the active implementation checkout to a new one on the latest/specified baseline — 11-phase state machine, failure keeps the old active root, interrupt-recoverable & idempotent. Switching baselines must go through this command (no silent pointer changes); multi-subrepo handled as one transaction |
 | `/icode worktree --close` | Worktree lifecycle (standalone): after you've committed/pushed/merged — verify online evidence → mark submitted → safely clean up checkouts → record `submitted_baseline`. Never commits/pushes for you; never deletes unique uncommitted code or unarchived artifacts; idempotent |
 | `/icode worktree --reopen [--to-ref <ref>]` | Worktree lifecycle (standalone): explicit restore for a closed `completed` ticket — create a new active checkout on the latest online baseline (no new ticket, patch history kept). Closed tickets must reopen before `patch` |
+| `/icode worktree --submit-check` | Worktree lifecycle (standalone, read-only): pre-submit commit-contract check (G3) — per-repo table of submit target + exact safe push command (`git push <remote> HEAD:refs/heads/<target>`), super repo and subrepos alike; never pushes; any repo L1 → total verdict blocked. See `steps/worktree.md` G3 + `references/worktree_isolation.md` §3.10 |
 
 > Full command details (incl. "Creates Dir?" column + reuse rules + `--verdict`/`--scan-verdict` flags): see the [SKILL.md](SKILL.md) `Commands` section.
 

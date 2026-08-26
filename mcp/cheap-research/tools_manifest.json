@@ -1,0 +1,24 @@
+{
+  "_doc": "cheap-research 14 工具单一真源 manifest。README / 步骤矩阵 / 安装检查共同消费。capability 三分类：local(纯本地确定性) / fetch(网络) / llm(依赖 LLM provider)。",
+  "tools": [
+    {"name": "summarize", "capability": "llm", "deterministic": false, "outbound": true, "network": false, "truncation_limit": 8000, "default_max_tokens": 512, "role": "compression"},
+    {"name": "retrieve_similar", "capability": "llm", "deterministic": false, "outbound": true, "network": false, "truncation_limit": 6000, "default_max_tokens": 8192, "role": "navigation"},
+    {"name": "fill_template", "capability": "llm", "deterministic": false, "outbound": true, "network": false, "truncation_limit": 4000, "default_max_tokens": 8192, "role": "candidate_generation"},
+    {"name": "extract", "capability": "llm", "deterministic": false, "outbound": true, "network": false, "truncation_limit": 8000, "default_max_tokens": 8192, "role": "candidate_generation"},
+    {"name": "propose_repo_facts", "capability": "llm", "deterministic": false, "outbound": true, "network": false, "truncation_limit": 8000, "default_max_tokens": 8192, "role": "candidate_generation"},
+    {"name": "diff_summary", "capability": "llm", "deterministic": false, "outbound": true, "network": false, "truncation_limit": 6000, "default_max_tokens": 1024, "role": "navigation"},
+    {"name": "generate_filename", "capability": "llm", "deterministic": false, "outbound": true, "network": false, "truncation_limit": 2000, "default_max_tokens": 8192, "role": "candidate_generation"},
+    {"name": "select_template", "capability": "llm", "deterministic": false, "outbound": true, "network": false, "truncation_limit": 1500, "default_max_tokens": 8192, "role": "candidate_generation"},
+    {"name": "scan_patterns", "capability": "local", "deterministic": true, "outbound": false, "network": false, "truncation_limit": null, "default_max_tokens": null, "role": "local_search"},
+    {"name": "trace_refs", "capability": "local", "deterministic": true, "outbound": false, "network": false, "truncation_limit": null, "default_max_tokens": null, "role": "local_search"},
+    {"name": "validate_migration_ops", "capability": "local", "deterministic": true, "outbound": false, "network": false, "truncation_limit": null, "default_max_tokens": null, "role": "local_validation"},
+    {"name": "parse_project_id", "capability": "local", "deterministic": true, "outbound": false, "network": false, "truncation_limit": null, "default_max_tokens": null, "role": "local_identity"},
+    {"name": "scan_modules", "capability": "local", "deterministic": true, "outbound": false, "network": false, "truncation_limit": null, "default_max_tokens": null, "role": "local_search"},
+    {"name": "fetch_remote", "capability": "fetch", "deterministic": false, "outbound": false, "network": true, "truncation_limit": null, "default_max_tokens": null, "role": "network_fetch"}
+  ],
+  "capability_gates": {
+    "cheap_research.local_available": "scan_patterns/trace_refs/validate_migration_ops/parse_project_id/scan_modules 不依赖 LLM provider，不因 provider 未配置而整体降级",
+    "cheap_research.fetch_available": "fetch_remote 不需要 LLM provider（需公网可访问）；结果依赖远端、非确定性，不入本地确定性缓存（独立 TTL/ETag 语义），返回标 trust_level=untrusted 防未信任内容被当本地事实",
+    "cheap_research.llm_available": "8 个 LLM 工具必须 provider 可用（注册 + 实际可调用 + 配置有效）"
+  }
+}

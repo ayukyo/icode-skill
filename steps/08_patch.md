@@ -12,7 +12,7 @@
 | **L1·致命** | 最新工单处于入口态（`init_in_progress` / `log_done`，无 `01_plan.md`） | 报错退出，提示先 `/icode plan` / `/icode start` 进入主流程（patch 只作用于已有主流程产物的工单） |
 | **L1·致命** | 当前工单是 debug 工单（`metadata.debug == true`） | 报错退出，提示：`/icode patch` 不接受 debug 工单（debug 工单是 1 次研究产物、不支持 patch 续跑；如需修代码，请用 `/icode init` 重建正常工单走主流程；详情见 [references/debug_mode.md](../references/debug_mode.md)） |
 | **L1·致命** | 统一拓扑门禁 verdict=blocked（双活动实现根 / 子仓逃逸 / 未完成迁移 / cwd 不符） | 报错退出，输出冲突路径与各自 dirty/commit 情况，提示先 `/icode worktree --update` 或人工裁决（[references/worktree_isolation.md §3.8](../references/worktree_isolation.md)） |
-| **L1·致命** | 工单已 close（`submitted_baseline` 非 null）但未 reopen | 报错退出，提示先 `/icode worktree --reopen` 在最新在线基线上创建新的活动 checkout，再 patch（禁止在已关闭的旧目录上继续改） |
+| **L1·致命** | 工单已 close（`submitted_baseline` 非 null 或 `submitted_baselines` 非空）但未 reopen | 报错退出，提示先 `/icode worktree --reopen` 在最新在线基线上创建新的活动 checkout，再 patch（禁止在已关闭的旧目录上继续改） |
 | **L2·关键** | 阶段4 复检发现新引入问题且无法当场修复 | 警告 + 记入 metadata（`patch_history` 末条 `status="issues"`）+ 流程继续（user 可再跑 `/icode patch` 处理） |
 
 ## 定位
@@ -30,8 +30,8 @@
 **对状态机的影响**：patch **不改变** `status` 和 `completed_steps`（completed 保持 completed，中途状态保持原状态）。patch 是横向追加，不是纵向推进——靠 `patch_count` / `patch_history` 字段记录（见「强制操作」段），主流程推进逻辑（以 `completed_steps` 最大编号推进）完全不受影响。
 
 **completed 工单分流（lifecycle）**：`status=completed` 时区分两种情况——
-1. **未 close**（`submitted_baseline` 为 null 或缺失，活动 checkout 未关闭）：patch 可在当前唯一活动根继续（现有行为）
-2. **已 close**（`submitted_baseline` 非 null）：必须**先 `/icode worktree --reopen`** 在最新在线基线上创建新的活动 checkout（不新建 ticket、不清 patch 历史），再 patch。**禁止偷偷复活旧目录**（见 [steps/reopen.md](reopen.md)）。reopen 是新的一代 checkout，写入 `checkout_history`，本次恢复原因记入工单历史。
+1. **未 close**（`submitted_baseline` 为 null 或缺失且 `submitted_baselines` 为空，活动 checkout 未关闭）：patch 可在当前唯一活动根继续（现有行为）
+2. **已 close**（`submitted_baseline` 非 null 或 `submitted_baselines` 非空）：必须**先 `/icode worktree --reopen`** 在最新在线基线上创建新的活动 checkout（不新建 ticket、不清 patch 历史），再 patch。**禁止偷偷复活旧目录**（见 [steps/reopen.md](reopen.md)）。reopen 是新的一代 checkout，写入 `checkout_history`，本次恢复原因记入工单历史。
 
 **后续主流程步骤的配合**：patch 之后继续跑步骤 4/5/6 时，各步骤启动会 Read `08_patch.md` 把补丁纳入计划侧基准（code 在 patch 基础上实施 / deepcheck Reverse 不误判偏离 / audit 追溯矩阵纳入补丁）——详见 [SKILL.md「patch 与主流程步骤的配合」](../SKILL.md) + 各步骤文件「前置：patch 配合」段。review/merge 只动计划文档，不需要配合。
 
@@ -76,7 +76,7 @@
 2.5. **worktree 工单落点约束**：读 `metadata.active_checkout`（缺失则按 [references/worktree_isolation.md §3.7](../references/worktree_isolation.md) 用 `worktree_path` 推导）：
    - **非 null**（本工单有活动 checkout）→ **必须先 `cd {active_checkout.path}` 再继续本步骤**（cwd 契约照常，与 status --validate / 06_audit / 07_readme 同，见 [references/worktree_isolation.md §2](../references/worktree_isolation.md)）；在主仓跑会找不到 `.icode_output_N/` 内产物 → 误报缺失
    - **null**（原地工单）→ 直接继续
-   - **已 close**（`submitted_baseline` 非 null）→ 见「定位」段分流：必须先 reopen 再 patch（L1 阻断）
+   - **已 close**（`submitted_baseline` 非 null 或 `submitted_baselines` 非空）→ 见「定位」段分流：必须先 reopen 再 patch（L1 阻断）
 3. 确定本次 `N`（**双源取大，防编号冲突**）：
    - 读 `metadata.patch_count`（缺失视为 0）
    - 读 `08_patch.md` 最大 Patch 段编号（`grep -oP '^## Patch \K\d+' {ICODE_OUT_DIR}/08_patch.md 2>/dev/null | sort -n | tail -1`——**须重定向 stderr**：文件不存在时 grep 会报错，重定向后无输出、`tail` 为空 → 视为 0）
@@ -346,7 +346,7 @@
 | **阶段 2 增量计划 三链预扫 caller / import / test** | `trace_refs` | [增强] | `symbol=待改符号, scope_path="."` | [server.py:700](../mcp/cheap-research/server.py) | **纯机械、不调 LLM**——替代 3 次手 grep，自动出 caller 链 |
 | **阶段 2/4 长 diff 摘要**（PATCH vs BASE / 模板产物 vs 现状） | `diff_summary` | [核心] | `focus="接口变更/破坏面"` | [server.py:1298](../mcp/cheap-research/server.py) | 长 diff 索引化，主代理只看摘要 |
 | **阶段 4 复检**：编译输出 / 编译错误模式扫描 | `scan_patterns` | [增强] | `patterns=[regex,...]` | [server.py:597](../mcp/cheap-research/server.py) | **纯 grep，不调 LLM**——零 LLM 成本，机械扫描 |
-| **阶段 4 复检**：仓库关键文件事实审计（README / CLAUDE.md / 入口 / 依赖 / API），验证 patch 未引入外部接口回归 | `audit_facts` | [核心] | `focus="对外 API / 依赖关系", max_files=10` | [server.py:479](../mcp/cheap-research/server.py) | LLM 抽取关键事实 → 主代理对照审查，防 patch 改了入口忘改 README |
+| **阶段 4 复检**：仓库关键文件事实候选（README / CLAUDE.md / 入口 / 依赖 / API），验证 patch 未引入外部接口回归 | `propose_repo_facts` | [核心] | `focus="对外 API / 依赖关系", max_files=10` | [server.py:527](../mcp/cheap-research/server.py) | LLM 生成候选事实（`candidate=true`）→ 主代理 Read/rg 实证后对照审查，防 patch 改了入口忘改 README |
 | **1.5 部署/监听 LOG**：本轮增量长 log 收口分析 | `summarize` | [核心] | `focus="异常/fatal/失败"` | [server.py:194](../mcp/cheap-research/server.py) | 替代主代理读 8K log，节省 read 上下文 |
 
 **patch 阶段 1 重审的 cheap-research 约束（修复场景防降质）**：
@@ -358,13 +358,13 @@
 > | `summarize` | **跨 session 的快速回顾辅佐**（已知全文、跨 session 重启时让 AI 快速回忆上下文） | **替代全文 Read**（首次进入阶段 1 第一次看产物）——降质不可接受 |
 > | `retrieve_similar` | ✅ 直接用（top-5 相似工单足以，本就不需要全文） | — |
 > | `trace_refs` | ✅ 直接用（纯机械，不影响判断） | — |
-> | `audit_facts` | ✅ 阶段 4 用（详见阶段 4 行） | — |
+> | `propose_repo_facts` | ✅ 阶段 4 用（详见阶段 4 行，候选须实证） | — |
 >
 > **判定时点**：阶段 1 启动时（如 `/icode patch` 命中、当前会话中 metadata 已读），主代理**必须 Read 全文 + grep 历史产物**；**之后**才可（条件性地）用 `summarize` 做回顾辅佐。**首次进入阶段 1 不得绕过全文**。
 
 **降级与边界**：
 - cheap-research **不接管**：①决策（该改哪、改不改） ②对抗（阶段 2.5 修复方案对抗的质疑者必须独立 spawn，与 `references/adversarial.md` 体系并存） ③架构/工程理解判断。主代理仍需在拿到工具产出后做最终判断 / 重读关键部分
-- 未列入主表的 8 个工具（`fill_template` / `extract` / `fetch_remote` / `apply_migration` / `parse_project_id` / `scan_modules` / `generate_filename` / `select_template`）按通用场景使用，无 patch 专属映射；**清点**：14 工具 - 主表已列 6 个不同工具 = 未列 8 个（5 核心剩 fill_template+extract 共 2，9 增强剩 6 个）
+- 未列入主表的 8 个工具（`fill_template` / `extract` / `fetch_remote` / `validate_migration_ops` / `parse_project_id` / `scan_modules` / `generate_filename` / `select_template`）按通用场景使用，无 patch 专属映射；**清点**：14 工具 - 主表已列 6 个不同工具 = 未列 8 个（5 核心剩 fill_template+extract 共 2，9 增强剩 6 个）
 - cheap-research 的 5 核心 + 9 增强 分类与详细接口见 [README.md「5 核心工具」/「9 增强工具」段](../mcp/cheap-research/README.md)
 
 **强制约束**：🟢/🟢*/⚪ 语义 + 双保险机制详见 [SKILL.md「MCP 调用覆盖强制化」](../SKILL.md) + [references/mcp_per_step.md](../references/mcp_per_step.md)。

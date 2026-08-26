@@ -18,9 +18,9 @@ icode 工作流强依赖 MCP（每个 mcp 子工程自带 `install.sh` 提供一
 | **memory** | npm | 跨工单记忆 | ❌ |
 | **context7** | npm | 库文档实时查询，步骤 0/1/4 | ❌ |
 | **playwright** ⚠️ | npm | 浏览器自动化，步骤 5/6（**仅前端项目**） | ❌ |
-| **cheap-research** | Python venv | 便宜 LLM 推理降本（23 子任务），未装走 Agent(model="haiku") 兜底 | ✅ 推荐装（需 KEY） |
+| **cheap-research** | Python venv | 便宜 LLM 推理降本（各步骤正文执行点的候选/压缩/结构化提取子任务），未装走 Agent(model="haiku") 兜底 | ✅ 推荐装（LLM 类工具需配三件套；本地/网络类工具不依赖） |
 
-> 完整说明见各 `mcp/<name>/README.md`。**vision-bridge 和 cheap-research 是我们自研的、需配 KEY（三件套）才能用**。其余无需 KEY 即可安装。
+> 完整说明见各 `mcp/<name>/README.md`。**vision-bridge 需配 KEY（三件套）才能用**；cheap-research 分三类 capability——`local` 6 个（scan_patterns / trace_refs / validate_migration_ops / parse_project_id / scan_modules）+ `fetch` 1 个（fetch_remote）**不依赖 LLM provider，未配 KEY 也照常可用**，仅 `llm` 8 个（summarize / retrieve_similar / fill_template / extract / propose_repo_facts / diff_summary / generate_filename / select_template）需配三件套。其余无需 KEY 即可安装。
 >
 > **⚠️ playwright 警告**：24 个工具 schema 永久加载到 system prompt，**非前端项目 token 性价比低**。建议：前端项目保留，全部项目通用时不装。
 
@@ -82,10 +82,10 @@ icode 工作流强依赖 MCP（每个 mcp 子工程自带 `install.sh` 提供一
 
 `/icode install` 一键装完后，**部分 MCP 启动行为可能影响首次体验**——提前说明便于排查：
 
-- **cheap-research 装完需 KEY**（必填 KEY 才能用）
-  - **症状**：cheap-research 是便宜 LLM 推理 MCP（承担长上下文压缩/历史检索/模板填充等子任务），**装完首次启动会 fallback 提示"未配置 platform"**
+- **cheap-research LLM 类工具装完需 KEY**（仅 `llm` capability 8 个必填 KEY）
+  - **症状**：cheap-research 的 `llm` 类工具（summarize / extract / propose_repo_facts / diff_summary / fill_template / retrieve_similar / generate_filename / select_template）是便宜 LLM 推理，**未配 provider 时调用会 fallback 提示"未配置 platform"**；`local` 6 个 + `fetch` 1 个**不受影响照常可用**
   - **解决**：编辑 `~/.claude/skills/icode/mcp/cheap-research/config.json` 填三件套（`provider` / `base_url` / `api_key` / `model`），不绑任何平台
-  - **降级**：未装或未配置 → Agent(`model="haiku"`) 兜底（不报错不阻塞）
+  - **降级**：未装或未配置 → 对应子任务 Agent(`model="haiku"`) 兜底（不报错不阻塞）；本地/网络类子任务不受 provider 配置影响
 
 - **vision-bridge 未配置时 fallback 提示**
   - **症状**：vision-bridge 装完没填 config.json 时，工具调用返回 fallback 字符串，AI 不会自动处理图片/视频

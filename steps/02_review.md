@@ -318,12 +318,12 @@
 
    **函数总数**：{N} | **扫描类别数**：5/{K 总 sub_category} | **生成时间**：{ISO timestamp}
 
-   ### HIGH 置信度重复（建议立即合并）
-   | Intent | SubCategory | 推荐保留 | 应删除函数 |
-   |--------|-------------|----------|-----------|
-   | ...    | ...         | ...      | ...       |
+   ### HIGH 疑似重复（高优先级复核；合并/删除前须经 §2.5.5 对抗验证）
+   | Intent | SubCategory | 推荐保留 | 疑似重复函数 | 验证状态 |
+   |--------|-------------|----------|-------------|---------|
+   | ...    | ...         | ...      | ...         | needs_more_evidence/confirmed |
 
-   ### MEDIUM 置信度重复（建议人工审查）
+   ### MEDIUM 疑似重复（建议人工审查）
    | Intent | SubCategory | 推荐保留 | 差异点 |
    |--------|-------------|----------|--------|
    | ...    | ...         | ...      | ...    |
@@ -345,7 +345,10 @@
 
    **⚠️ "已扫描但无重复"段必填**：高质量模型某 sub_category 返回 `duplicates: []` 时，**不省略该子家族**——必须显式列在"已扫描但无重复"段，让用户知道"该家族已扫描、确认无重复"，避免用户怀疑"是不是没跑"。
 
-7. **产物文件附加**：每条 HIGH/MEDIUM 重复函数对同时作为 issue 计入本轮 `new_issues`（用下方「Issue 结构化模板」段），`evidence_pointer` 指向 `dedup/duplicates/<category>.json:<line>`，`suggestion` 写"合并为 `<survivor>` + 删除其他实现"，`verification_status` 直接标 `confirmed`（已用高质量模型推理，**无需再进步骤 2.5.5 对抗验证**——单视角推理质量足够（详细理由同 §2.5.7），且 §2.5.5 的覆盖范围是"步骤 2.5 维度审查 + 步骤 2.4 实证"两类 issue，不含 §2.5.7 dedup）。
+7. **产物文件附加**：每条 HIGH/MEDIUM 重复函数对作为**疑似重复候选**计入本轮 `new_issues`（用下方「Issue 结构化模板」段），`evidence_pointer` 指向 `dedup/duplicates/<category>.json:<line>`，`suggestion` 写"合并为 `<survivor>` + 删除其他实现"。**verification_status 分两类（v1.1 取消 dedup 对抗豁免）**：
+   - **会导致代码删除/合并的候选**（HIGH 且 suggestion 含删除/合并）：默认 `needs_more_evidence`，**必须进入步骤 2.5.5 对抗验证**，对抗通过才标 `confirmed`——删除/合并是破坏性动作，单次 LLM 推理 + schema 强约束不能证明语义判断正确；
+   - **纯重复提示**（不涉及删除，如 MEDIUM/LOW 信息提示）：可标 `confirmed` 作为报告信息，不触发对抗；
+   - **HIGH 语义 = "高优先级复核"，不直接等于 confirmed**。
 
 **降级路径**：
 
@@ -355,7 +358,7 @@
 
 **反偷懒第 21 条合规**：步骤末尾在思考块输出 `cheap-research 调用: extract x {1+5}` 或对应降级声明，**无记录 = 违规**。
 
-**与 §2.5.5 对抗验证的衔接**：dedup 的 issue **不进入** §2.5.5 对抗验证流程（§2.5.5 的覆盖范围是"§2.5 维度审查 + §2.4 实证"两类 issue）。理由：dedup 用高质量模型单次推理 + cheap-research schema 强约束 + 23 类预定义约束 = 等效"强约束推理"，质量足够；重复 3 次 spawn 成本翻 3 倍但收益边际递减。
+**与 §2.5.5 对抗验证的衔接**（v1.1 取消 dedup 豁免）：dedup 只产出**疑似重复候选对**。会导致代码删除/合并的候选**必须进入** §2.5.5 对抗验证流程——删除/合并是破坏性动作，schema 只能约束输出形状、不能证明语义判断正确，单次 LLM 推理 + schema 强约束不足以免除验证；`trace_refs` 结果也只是文本引用候选，不能证明动态调用/反射/链接关系完整。纯重复提示（无删除动作）可保持轻量，不强制对抗。
 
 
 **步骤 2.6 — 写入结果**：
@@ -469,7 +472,7 @@
 | MCP | 推荐级别 | 用途 |
 |-----|----------|------|
 | vision-bridge | 🟢* | 截图分析--用户给图时 |
-| **cheap-research** | 🟢* | **降本**：diff_summary（增量审查）+ summarize（审查输出压缩，供 merge 步骤消费）+ fill_template（维度结果）+ retrieve_similar（历史 issue）+ scan_patterns（grep 扫描）+ trace_refs（引用追溯）。不接管决策：3 质疑者对抗/审查合成走主会话 |
+| **cheap-research** | 🟢* | **降本**：extract（dedup 函数分类 + 找重复，见 §2.5.7）+ summarize（审查输出压缩，供 merge 步骤消费，见步骤 6）。其余（diff_summary 增量审查 / fill_template 维度结果 / retrieve_similar 历史 issue / scan_patterns / trace_refs）可作可选增强，非强证据场景不评估。不接管决策：3 质疑者对抗/审查合成走主会话 |
 | context7 | ⚪ | 本步骤不推荐 |
 | memory | ⚪ | 本步骤不推荐 |
 | playwright | ⚪ | 本步骤不推荐 |

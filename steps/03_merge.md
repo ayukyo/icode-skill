@@ -99,6 +99,9 @@ sys.exit(0 if (n>=9 and has_memo) else 1)
 
 ## MCP 推荐
 
-本步骤仅用 sequential-thinking 强制思考（见 [references/mcp_per_step.md](../references/mcp_per_step.md)「通用前置」段）。其他 5 个 MCP 本步骤不推荐。
+- **sequential-thinking**：强制思考前置（逐条甄别审查意见 → 判断采纳/驳回 → 规划修改策略），见 [references/mcp_per_step.md](../references/mcp_per_step.md)「通用前置」段
+- **cheap-research**（🟢*）：**仅多轮 review（>1 轮）** 时，跨轮 issue 合并汇总调 `mcp__cheap-research__summarize`（见上方「合并定稿」段；N=1 轮跳过，不评估）。其他 5 个 MCP 本步骤不推荐。
+
+**强制约束**：🟢/🟢*/⚪ 语义 + 双保险机制（执行步骤内嵌 + thinking_core gate）详见 [SKILL.md「MCP 调用覆盖强制化」](../SKILL.md) + [references/mcp_per_step.md「双保险机制」](../references/mcp_per_step.md)；本步骤表内的 🟢/🟢* 标注按上方真源判定。
 
 **强制约束**：🟢/🟢*/⚪ 语义 + 双保险机制（执行步骤内嵌 + thinking_core gate）详见 [SKILL.md「MCP 调用覆盖强制化」](../SKILL.md) + [references/mcp_per_step.md「双保险机制」](../references/mcp_per_step.md)；本步骤表内的 🟢/🟢* 标注按上方真源判定。

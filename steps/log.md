@@ -678,7 +678,7 @@ TB 附件已落盘后，若 `{ICODE_OUT_DIR}` 位于**网络挂载（SMB 等）*
 | context7 | 🟢* | 库 API 行为查证--涉及第三方库时 |
 | vision-bridge | 🟢* | 错误截图分析 + 本地日志视频/图片分析--用户给截图或本地日志目录含视频/图片时 |
 | memory | 🟢* | read_graph 查跨工单记忆--本工程有历史工单时 |
-| **cheap-research** | 🟢* | **降本甜点**：summarize（阶段 0/1/2 长上下文压缩：输入采集+基线检查+日志侦察）+ extract（8.6 memory 沉淀 + 阶段2 TB 评论预提取，评论 ≥ 8 条时）+ fetch_remote（TB 缺陷源拉取）+ fill_template（TB 评论回复）。不接管决策：阶段 3 链路图/阶段 4 根因假设/阶段 6+7 对抗/阶段 8 修复建议/追问机制走主会话（高风险） |
+| **cheap-research** | 🟢* | **降本**：extract（阶段 2 TB 评论预提取，评论 ≥ 8 条时，可选加速——见「TB 评论研读」段）。**TB 缺陷源拉取走 tb_pull.py（非 fetch_remote）**。其余（阶段 0/1/2 长上下文压缩 summarize / 8.6 memory 沉淀 / fill_template 评论回复）可作可选增强，非强证据场景不评估。不接管决策：阶段 3 链路图/阶段 4 根因假设/阶段 6+7 对抗/阶段 8 修复建议/追问机制走主会话（高风险） |
 | playwright | ⚪ | 本步骤不推荐 |
 
 **强制约束**：🟢/🟢*/⚪ 语义 + 双保险机制（执行步骤内嵌 + thinking_core gate）详见 [SKILL.md「MCP 调用覆盖强制化」](../SKILL.md) + [references/mcp_per_step.md「双保险机制」](../references/mcp_per_step.md)；本步骤表内的 🟢/🟢* 标注按上方真源判定。

@@ -70,7 +70,7 @@ cd ~/.claude/skills/icode/mcp/vision-bridge
 
 为降低主会话的 token 消耗，cheap-research 把"长上下文压缩 / 历史检索 / 模板填充 / 结构化提取"等子任务**转交便宜模型**（仍走 `mcp__cheap-research__*` 工具）。**不接管决策**：3 质疑者对抗 / 架构决策 / 终审裁决 / 修复方案一律不交给 cheap-research。
 
-**入选条件**（单闸门）：价值 ≥ 3 ★ + 低风险 = 23 个子任务入选（含 TB 评论预提取），覆盖 log / doc / readme / init / plan / review / start / fast 等入口。
+**入选条件**（单闸门）：价值 ≥ 3 ★ + 低风险，且是**各步骤正文有真实调用点**的子任务（TB 评论预提取 / 远程 README 拉取 / dedup 分类找重复 / 审查输出压缩 / 跨轮汇总 / 差异摘要 / 仓库事实候选等，覆盖 log / doc / review / merge / deepcheck / audit / patch 步骤）；init / plan / code / status / readme 无正文执行点（走确定性机制），标 ⚪。完整清单见 [mcp/cheap-research/tools_manifest.json](mcp/cheap-research/tools_manifest.json)。
 
 ### 安装 cheap-research
 
@@ -106,10 +106,10 @@ cd ~/.claude/skills/icode/mcp/cheap-research
 
 ```bash
 # 一步走完全流程
-/icode start 实现MCU雨量传感器I2C驱动
+/icode start 实现一个功能模块
 
 # 或者分步执行
-/icode plan 实现MCU雨量传感器I2C驱动   # 步骤1：拟定计划
+/icode plan 实现一个功能模块   # 步骤1：拟定计划
 /icode review                          # 步骤2：专项审查（软上限3轮，仍有问题时自动延长）
 /icode review 5                        # 步骤2：指定5轮审查
 /icode merge                           # 步骤3：合并定稿
@@ -133,21 +133,21 @@ cd ~/.claude/skills/icode/mcp/cheap-research
 # PPT 生成（独立交付步骤：把 icode 产物/知识库转成 .pptx）
 /icode ppt                                # 默认：最新工单→本次功能开发 PPT（有 log 入口→本次BUG修复）
 /icode ppt 项目                            # 项目全景 PPT（内容源：project_docs 工程知识库 + 仓库结构）
-/icode ppt 模块 传感器                        # 指定模块 PPT（内容源：模块 doc 章节）
+/icode ppt 模块 数据采集                        # 指定模块 PPT（内容源：模块 doc 章节）
 /icode ppt 本次BUG修复                      # log 根因 + 08_patch + 验证→查BUG PPT
 # 前置：pip install python-pptx（必需）；LibreOffice+poppler 可选（渲染 PNG 自检）
 # 产出：<工程根>/.icode_output/ppt/xxx.pptx；内置模板非商业授权（tools/ppt/NOTICE）
 
 # 需求不明确时，先讨论再进入流程
-/icode init 录制传感器数据转包              # 步骤0：起一稿，进入对话
+/icode init 实现数据录制功能              # 步骤0：起一稿，进入对话
 # ... 多轮对话补充需求，文档 00_init.md 每轮都被增量更新 ...
 /icode start                             # 无参→检测到 init 入口态，询问"复用/新建"，选复用则把 00_init.md 作需求输入，进入步骤1→6
 
 # 任意入口 opt-in 用 worktree 隔离（与其它参数/flag 共存；不传则默认原地，不弹问）
-/icode start --worktree 实现MCU雨量传感器I2C驱动   # 全流程 + worktree 隔离
-/icode fast --worktree 实现MCU雨量传感器I2C驱动    # fast 模式 + worktree 隔离
-/icode plan --worktree 实现MCU雨量传感器I2C驱动    # 仅步骤1 + worktree 隔离
-/icode init --worktree 录制传感器数据转包            # 步骤0 + worktree 隔离
+/icode start --worktree 实现一个功能模块   # 全流程 + worktree 隔离
+/icode fast --worktree 实现一个功能模块    # fast 模式 + worktree 隔离
+/icode plan --worktree 实现一个功能模块    # 仅步骤1 + worktree 隔离
+/icode init --worktree 实现数据录制功能            # 步骤0 + worktree 隔离
 /icode log --worktree ~/work/log/服务异常 "启动后无响应"  # log + worktree 隔离
 # 触发方式也支持自然语言：「用 worktree 隔离做」「走 worktree」「独立分支做」等
 # 反向声明后置优先：「别用 worktree」「不要 worktree 隔离」「普通做就行」可覆盖前置触发
@@ -158,6 +158,7 @@ cd ~/.claude/skills/icode/mcp/cheap-research
 /icode worktree --update    # 迁移活动实现根到基于最新远程基线的新 checkout（自动跟踪上游）
 /icode worktree --close     # 你已 commit/push/merge 后：核验在线证据 + 安全清理 + 记录基线
 /icode worktree --reopen    # 已 close 工单恢复：在最新基线上重建活动 checkout（之后 /icode patch）
+/icode worktree --submit-check  # 交付前提交契约检查（G3）：逐仓提交目标 + 精确 push 命令，只读、绝不 push
 
 # 从 bug 日志分析切入修复（先查根因，再修复）
 /icode log ~/work/log/服务异常 "启动后无响应"      # 入口：分析日志根因，产出 log_analysis.md + 修复需求 00_init.md + 对外简报 log_problem_brief.md（对外表达按统一契约：归因分级/角色澄清/修复状态明确）
@@ -200,6 +201,7 @@ cd ~/.claude/skills/icode/mcp/cheap-research
 | `/icode worktree --update [--to-ref <ref>]` | worktree 生命周期（独立步骤）：把活动实现根受控迁移到基于最新/指定基线的新 checkout——11 阶段状态机，失败保留旧活动根，可中断恢复 + 幂等。**换基线必须走本命令**（禁止静默改指针）；多业务子仓按整体事务处理 |
 | `/icode worktree --close` | worktree 生命周期（独立步骤）：你已自行 commit/push/merge 后的本地收敛——核验在线证据 → 置 submitted → 安全清理 checkout → 记录 `submitted_baseline`。不替 commit/push，不删未提交唯一代码/未归档唯一产物，幂等 |
 | `/icode worktree --reopen [--to-ref <ref>]` | worktree 生命周期（独立步骤）：已 close 的 completed 工单显式恢复——在最新在线基线上创建新活动 checkout（不新建 ticket、保留 patch 历史）。**已 close 工单必须先 reopen 再 patch** |
+| `/icode worktree --submit-check` | worktree 生命周期（独立步骤，只读）：交付前提交契约检查（G3）——逐仓表格（super + 子仓一视同仁）列出提交目标与精确安全 push 命令（`git push <remote> HEAD:refs/heads/<target>`），**只读输出、绝不 push**；任一仓库 L1（detached/缺 upstream/drift/remote mismatch/未登记/tracking_verified=false）→ 总 verdict=blocked。见 [steps/worktree.md](steps/worktree.md) G3 段 + [references/worktree_isolation.md](references/worktree_isolation.md) §3.10 |
 
 > 完整命令一览（含「创建目录？」列 + 复用规则 + `--verdict`/`--scan-verdict` 等参数详解）见 [SKILL.md「调用命令」段](SKILL.md)。
 

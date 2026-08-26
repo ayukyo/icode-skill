@@ -25,6 +25,9 @@
 /tools/dingtalk/scripts/__pycache__/
 /tools/__pycache__/
 
+# --- 2c. scripts/：顶层 Python 工具字节码（防 rsync 把 .pyc 带入 installed）---
+/scripts/__pycache__/
+
 # --- 3. MCP 子工程：Python 字节码 / 环境 / 缓存 / venv ---
 # 覆盖原 6 个 mcp/*/.gitignore 的全部规则（_lib/, context7/,
 # playwright/, sequential-thinking/, memory/, vision-bridge/）

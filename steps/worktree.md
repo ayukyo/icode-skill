@@ -1,9 +1,10 @@
 # 步骤：worktree 迁移（/icode worktree --update）
 
-**命令**: `/icode worktree --update [--to-ref <ref>]`
+**命令**: `/icode worktree --update [--to-ref <ref>]` / `/icode worktree --submit-check`
 - 默认（无参）：目标基线 = 当前活动 checkout 所属仓库的远程跟踪最新（`@{u}` 的远程 ref，如 `refs/remotes/origin/master`）
 - `--to-ref <ref>`：目标基线 = 用户显式指定的 ref（本地分支 / 远程分支 / commit）
-**产出**: 工单 metadata 更新（`active_checkout`/`checkout_history`/`migration`/`sub_worktrees`）+ 新建 checkout + 可选清理旧 checkout；不产出新的工单产物文件
+- `--submit-check`：**交付前提交契约检查（G3）**——逐仓枚举提交目标与精确 push 命令，只读输出、不执行任何 push（见下「G3 交付前 submit-check」段）
+**产出**: 工单 metadata 更新（`active_checkout`/`checkout_history`/`migration`/`sub_worktrees`/`submission_contracts`/`submission_audit`）+ 新建 checkout + 可选清理旧 checkout；不产出新的工单产物文件
 **会话**: 主会话
 
 > 迁移是**同一工单**的物理 checkout 变更，不是新建工单。工单身份（`ticket_id`/产物历史/`requirement`/`patch_count`/verdict 字段族/决策锚点）在迁移前后保持不变。
@@ -47,6 +48,7 @@
 7. 目标 ref 是否存在及对应 commit（默认 → 解析远程 ref；`--to-ref` → 解析用户 ref）
 8. 旧 checkout 是否包含未归档的唯一产物
 9. 是否已有未完成迁移事务（`metadata.migration` 非 null 且 state ∉ {done, failed}）
+10. **冻结新目标提交契约（G1 迁移）**：修改型工单（`submission_contracts` 非空）迁移前须先确认新目标可冻结契约——新目标 ref 的 upstream/remote URL/目标 commit 可解析；**detached / 无 upstream / remote URL 不可识别 → L1 阻断**（不静默基于本地 HEAD 迁移），迁移后逐仓重建契约并比对（见「执行流程」阶段 2/3）
 
 **停止条件（命中任一即停止并报告，不猜测处理）**：
 - 无法唯一识别当前活动根（双 active / 无 active）
@@ -65,8 +67,8 @@
 | # | 阶段 | 动作 | 完成标记 |
 |---|---|---|---|
 | 1 | `inspect` | 形成旧拓扑快照（旧 checkout / 子仓 HEAD / dirty / 未推送提交清单）+ 迁移计划（§6 拓扑清单） | last_completed_phase=inspect |
-| 2 | `prepare_super` | 基于目标 ref 创建新 super checkout：`git worktree add -b "icode/<ticket-slug>-<序号>" <新路径> <目标ref>`（自动 tracking），写 `metadata.migration.to_checkout`；新 checkout 状态为 `preparing`（**未获得活动权**） | prepare_super |
-| 3 | `prepare_subrepos` | 为受影响子仓创建对应隔离 checkout（命令同 [references/worktree_isolation.md §1「⑤ 业务子仓隔离」](../references/worktree_isolation.md)，基于子仓远程基线）；每个结果记入 `subrepo_results` | prepare_subrepos |
+| 2 | `prepare_super` | 基于目标 ref 创建新 super checkout：`git worktree add -b "icode/<ticket-slug>-<序号>" <新路径> <目标ref>`（自动 tracking），写 `metadata.migration.to_checkout`；新 checkout 状态为 `preparing`（**未获得活动权**）。**G1 契约重建**：显式 `git -C <新路径> branch --set-upstream-to=<remote>/<目标分支> icode/<ticket-slug>-<序号>` + 逐项比对（HEAD 可解析 / 当前分支 / `@{u}` == 新目标 ref / remote 与主仓一致），更新 `submission_contracts` 中 super 仓库契约项（新 `worktree_branch`/`target_remote_ref`/`target_push_ref`/`target_commit_at_create`/`tracking_verified`） | prepare_super |
+| 3 | `prepare_subrepos` | 为受影响子仓创建对应隔离 checkout（命令同 [references/worktree_isolation.md §1「⑤ 业务子仓隔离」](../references/worktree_isolation.md)，基于子仓远程基线）；每个结果记入 `subrepo_results`。**G1 契约重建**：每个子仓同样显式 set-upstream-to + 比对，更新契约项（迁移不改子仓目标分支时仅重验 `tracking_verified`） | prepare_subrepos |
 | 4 | `transfer_changes` | 按 §4 内容转移策略把旧 checkout 改动转移到新 checkout（明确 commit 移植 / 可审计补丁 / 仅产物则锚定 artifact_root / 两边各有独立改动则停止交用户） | transfer_changes |
 | 5 | `verify_content` | 对比旧、新 checkout 的预期改动集合（`git diff --stat` + 逐文件核对），确认改动已完整转移 | verify_content |
 | 6 | `verify_build_source` | 确认后续编译命令的源码路径全部位于新 checkout（构建目录/二进制路径不引用旧 checkout） | verify_build_source |
@@ -129,11 +131,28 @@ ICode **不默认替用户 commit**。迁移时按以下策略判断：
 | §14.4 旧 checkout 含未提交修改 | 默认保留旧 checkout；报告差异、未跟踪文件和未推送提交；只有用户明确选择移植/保存/丢弃后才继续清理；「在线已有类似文件」不能替代逐项包含性验证 |
 | §14.5 目标在线分支变化 | 关闭或迁移操作开始后目标 ref 又前进时，记录实际解析到的 commit；在提交活动切换前重新解析一次；commit 改变则重新进行必要的冲突和包含性校验；**不得把分支名当成稳定 commit 使用** |
 
+## G3 交付前 submit-check（/icode worktree --submit-check）
+
+交付前（audit 末尾同样嵌入）运行**只读**提交契约检查，输出逐仓表格（真源见 [references/worktree_isolation.md §3.10](../references/worktree_isolation.md)）：
+
+| Repo | Branch | Upstream | Remote URL | Target(remote branch) | Ahead/Behind | Dirty | Verdict |
+|---|---|---|---|---|---|---|---|
+
+规则要点：
+1. **枚举 super repo + 全部 `submission_contracts` 子仓**（不能只枚举 `code_files`——super 文档提交必须进清单）
+2. 有变更或含本工单 ticket commit 的仓库 → 显示精确安全命令 `git push <remote_name> HEAD:refs/heads/<target-branch>`（target 来自契约 `target_push_ref`）
+3. upstream 未经契约验证（`tracking_verified=false` / G2 ⑩ 未过）→ **不给出普通 `git push` 指令**，提示先修复或由用户显式确认目标
+4. target 比本地前进 → 提示先 fetch/merge/rebase，**由用户决定，ICode 不自动改历史**；判定前先 `git fetch <remote> <target-branch>` 取在线状态（防本地 fetch 过时误报，与 G4 规则 1 一致），fetch 失败降级本地 ref 并标注 `(本地缓存)`；存在落后仓库时总 verdict 显示 `behind`（⚠️，rc=0，先 fetch/merge/rebase）
+5. 明确显示 "remote server"（Remote URL）与 "remote branch"（Target）两列，避免「同一服务器 = 同名远端分支」歧义
+6. 任一仓库 L1 → **总 verdict = blocked**，不宣称"可以提交"
+7. ICode 红线不变：只检查与回显指引，**不 commit / 不 push**
+
 ## 反偷懒
 
 - **禁止双活动根**：任何时刻只允许一个 `state=active`；迁移完成前新 checkout 恒为 `preparing`
 - **禁止默认破坏性命令**：不得自动 `git worktree remove --force` / `git branch -D` / `git reset --hard`（I-5 破坏性清理后置）
 - **禁止用临时字段改指针**：不引入 `active_implementation_root`/`latest_worktree`/`current_code_root` 等语义相近字段（I-2 权威字段唯一）
+- **禁止迁移后不重建契约**：新 checkout 的 upstream 必须经 G1 契约重建与逐项比对（`tracking_verified=true`）才能获得活动权，**不得依赖隐式 tracking**（历史事故：ticket 分支无 upstream 被误推同名远端分支）
 - **禁止跳过来源校验**：迁移未完成前不在新 checkout 修改/编译/部署并当活动实现证据
 - **禁止伪造迁移结果**：`last_completed_phase`/`migration.state` 必须如实记录，未执行的阶段不得标记完成
 - **禁止真实项目术语**：本步骤输出、示例、迁移日志一律使用通用占位符（路径/分支/commit 用 `<...>` 或虚构值）

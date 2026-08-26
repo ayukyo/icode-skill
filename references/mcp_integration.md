@@ -64,12 +64,16 @@
 ### ⑥ cheap-research（**可选 · 降本场景**）
 
 - **强证据**：`~/.claude.json` 的 `mcpServers.cheap-research` 段存在 + `config.json` 三件套（base_url/api_key/model）已填
-- **强证据满足**：`mcp__cheap-research__summarize(text)` / `__retrieve_similar(query, candidates)` / `__fill_template(template, data)` / `__extract(text, schema)` / `__audit_facts(repo_path)` 等 14 工具返回结构化 dict，**子代理优先用 MCP 工具**
+- **强证据满足**：`mcp__cheap-research__summarize(text)` / `__retrieve_similar(query, candidates)` / `__fill_template(template, data)` / `__extract(text, schema)` / `__propose_repo_facts(repo_path)` 等 14 工具返回结构化 dict，**子代理优先用 MCP 工具**
+- **⚠️ 分能力闸门（v1.1）**：14 工具分三类 capability，**不能整体按三件套判定**——
+  - `local`（6 个，不依赖 LLM provider）：`scan_patterns` / `trace_refs` / `validate_migration_ops` / `parse_project_id` / `scan_modules`（`fetch_remote` 归 fetch）——**provider 未配置也照常可用**
+  - `llm`（8 个，必须 provider 可用）：`summarize` / `retrieve_similar` / `fill_template` / `extract` / `propose_repo_facts` / `diff_summary` / `generate_filename` / `select_template`
+  - 真源：[mcp/cheap-research/tools_manifest.json](../mcp/cheap-research/tools_manifest.json)
 - **降级**（没装 / 装了没填三件套）：主会话 / 子代理走 `Agent(model="haiku")` 兜底（方案 A），不阻塞主流程。**子代理兜底时按 [subagent_spawn_wait.md](subagent_spawn_wait.md) 通用契约等待**（后台 spawn + `TaskOutput` 阻塞等 + 20 分钟墙钟硬截止，禁止裸同步 spawn / 被动等通知 / 无限等待）
-- **触发场景**：长上下文压缩（log / doc / init / deepcheck / review）、历史工单检索（init / plan / start / fast / log）、模板填充（readme / audit / list）、结构化提取（doc 99_code_facts_audit）、TB 评论预提取（log 阶段2，评论 ≥ 8 条时）、差异摘要（audit 计划vs代码）、远程 README 拉取（doc 模块文档参考输入）—— 23 个入选子任务（单闸门：价值 ≥ 3 ★ + 低风险）
+- **触发场景**：以各步骤**正文执行点**为真源（推荐表仅声明、正文无调用的不算入选）——log 阶段2 TB 评论预提取（`extract`，评论 ≥ 8 条）、doc 远程模块 README 拉取（`fetch_remote`）、review dedup 分类/找重复（`extract`）+ 审查输出压缩（`summarize`）、merge 跨轮 review 汇总（`summarize`，>1 轮）、deepcheck Fixed 预扫（`scan_patterns`）+ dedup（`extract`）、audit 仓库事实候选预审（`propose_repo_facts`）+ 计划vs代码差异摘要（`diff_summary`）、patch 阶段工具映射（见 [steps/08_patch.md](../steps/08_patch.md) 338 行）。**init/plan/code/status/readme 无正文执行点**（历史检索/ADR 检索/现状盘点/文件名/模板选择均走确定性机制 Read/rg/规则，`--scan-verdict` 零 LLM），标 ⚪。完整清单见 [tools_manifest.json](../mcp/cheap-research/tools_manifest.json)
 - **不接管决策**：所有高风险子任务（3 质疑者对抗 / 架构决策 / 终审裁决 / 修复方案 / 用户对话）一律不交给 cheap-research
 - **触发场景详见**：[mcp_per_step.md](mcp_per_step.md) 强证据场景表 + 14 工具入参/出参 schema（见 [mcp/cheap-research/server.py](../mcp/cheap-research/server.py)）
-- **当前状态**：14 工具 + 43 个自检用例全过，dev_repo 完成；**未同步到已安装目录**（等用户指令）
+- **当前状态**：14 工具已在 dev_repo 完成，核心契约测试见 [mcp/cheap-research/tests/](../mcp/cheap-research/tests/)；**未同步到已安装目录**（等用户指令）。此前「43 个自检用例全过」声明已撤销（当时无仓库测试证据，以实际 tests/ 为准）
 
 ### ⑦ cheap-research 单跑：dedup 子阶段
 
@@ -79,7 +83,8 @@
   - **02_review §2.5.7（轻量 top 5）**：ripgrep 抽所有函数 → `mcp__cheap-research__extract`(haiku) 分类（wrapper object schema）→ 后处理映射到 23 类 → 取 top 5 类别逐类调高质量模型找重复
   - **05_deepcheck §9.4（完整全量）**：完整 5 阶段（抽取→分类→拆分→高质量模型逐类找重复→报告）。分别检测 catalog.json/categorized.json 是否已由 §2 生成 → 复用避免重跑
 - **中间产物路径**：`{ICODE_OUT_DIR}/<ticket>/dedup/{catalog,categorized,duplicates/*.json}`
-- **最终报告**：进 step 产物 .md（02_review.md §2.5.7 / 05_deepcheck.md §9.4）的 `## 语义重复检测报告` 段（HIGH/MEDIUM/LOW 三段 + top 5 重复函数对）
+- **最终报告**：进 step 产物 .md（02_review.md §2.5.7 / 05_deepcheck.md §9.4）的 `## 语义重复检测报告` 段（HIGH/MEDIUM/LOW 三段 + top 5 重复函数对）。**HIGH = 高优先级复核，不直接等于 confirmed**
+- **权限边界（v1.1 取消 dedup 对抗豁免）**：dedup 只产出**疑似重复候选对**。会导致代码删除/合并的候选**必须进入 §2.5.5 / §5 A6 对抗验证**，对抗通过才可标 `confirmed`、才可进入合并/删除；纯重复提示（无删除动作）可保持轻量。`trace_refs` 只作文本引用候选，不能证明动态调用/反射/链接关系
 - **降级路径**：
   - 函数数 < 50 → 整个 §2.5.7/§9.4 跳过（避免 LLM 成本浪费）
   - 函数数 > 500 → 分批（每批 100），合并结果
@@ -128,6 +133,6 @@
 | 纯后端项目 | sequential-thinking + vision-bridge + context7 |
 | 前端项目 | 上述 + playwright |
 | 长期项目 | 上述 + memory（跨工单积累） |
-| **降本场景** | 上述 + **cheap-research**（仅 23 个低风险子任务；3 质疑者对抗 / 架构决策 / 终审裁决 / 修复方案一律不走） |
+| **降本场景** | 上述 + **cheap-research**（仅低风险候选/压缩/结构化提取子任务，以各步骤正文执行点为真源；3 质疑者对抗 / 架构决策 / 终审裁决 / 修复方案一律不走） |
 
 完整安装：`/icode install`（一键扫描 `mcp/` 目录里所有 `install.sh`）

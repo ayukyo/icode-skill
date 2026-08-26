@@ -411,7 +411,7 @@
 |-----|----------|------|
 | context7 | 🟢* | 库调研（用 React 19 还是 18？）--需求涉及第三方库时 |
 | vision-bridge | 🟢* | 识别用户给的设计图/截图--用户给图时 |
-| **cheap-research** | 🟢* | **降本**：summarize（现状盘点压缩工程结构长文）+ retrieve_similar（历史工单匹配）。不接管决策：需求点抽取/4 维度验证清单/链路图绘制走主会话 |
+| **cheap-research** | ⚪ | 本步骤正文无调用执行点（现状盘点走主会话 Read/rg；历史工单检索走确定性 Read index.json 源1，见步骤 2）。retrieve_similar/summarize 可作可选增强，非强证据场景不评估。不接管决策：需求点抽取/4 维度验证清单/链路图绘制走主会话 |
 | memory | 🟢* | read_graph 查跨工单偏好--本工程有历史工单时 |
 | playwright | ⚪ | 本步骤不推荐 |
 

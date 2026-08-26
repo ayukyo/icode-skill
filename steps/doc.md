@@ -433,7 +433,7 @@ find "${GIT_ROOT}" -maxdepth 3 -name "<module_name>" -type d
 | MCP | 推荐级别 | 用途 |
 |-----|----------|------|
 | vision-bridge | 🟢* | 截图分析--用户给图时 |
-| **cheap-research** | 🟢* | **降本甜点**：audit_facts（代码事实审计）+ fill_template（章节+进度模板）+ scan_modules（6 级模块识别）+ scan_patterns/diff_summary（增量判定）+ parse_project_id + fetch_remote（拉远程依赖 README 作模块文档输入）。不接管决策：意图识别走主会话 |
+| **cheap-research** | 🟢* | **降本**：fetch_remote（有远程 URL 模块拉取其 README 作模块文档参考输入，见「模块文档」段）。其余（propose_repo_facts / fill_template 章节模板 / scan_modules / scan_patterns / diff_summary / parse_project_id）可作可选增强，非强证据场景不评估。不接管决策：意图识别走主会话 |
 | context7 | ⚪ | 本步骤不推荐 |
 | memory | ⚪ | 本步骤不推荐 |
 | playwright | ⚪ | 本步骤不推荐 |

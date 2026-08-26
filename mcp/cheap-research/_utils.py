@@ -1,8 +1,9 @@
 """cheap-research 工具层统一 utilities。
 
 阶段 1.1 引入：避免 5 工具重复实现错误兜底 / 校验 / 文本截断。
-所有 5 核心工具（summarize / retrieve_similar / fill_template / extract / audit_facts）都基于本文件。
+所有 5 核心工具（summarize / retrieve_similar / fill_template / extract / propose_repo_facts）都基于本文件。
 """
+import hashlib
 import json
 import re
 from pathlib import Path
@@ -90,6 +91,99 @@ def truncate_text(text: str, max_chars: int = 8000) -> str:
     return text[:max_chars] + "\n\n... (truncated)"
 
 
+def _sha256_digest(text: str, length: int = 16) -> str:
+    """原文 sha256 摘要（前 length 位），用于溯源/去重，不暴露原文。"""
+    return hashlib.sha256(text.encode("utf-8", errors="replace")).hexdigest()[:length]
+
+
+def truncate_with_meta(
+    text: str,
+    max_chars: int = 8000,
+    chunk_index: int = 0,
+) -> tuple[str, dict]:
+    """截断文本并返回证据元数据（**截断硬信号**，L1 数据质量）。
+
+    与 `truncate_text` 的区别：额外返回 meta dict，供调用方判断
+    "这次输入是否被静默截断"。工作流只允许两种处理：
+      1. 分块 map-reduce（把原文分块分别调用后合并）；
+      2. 主模型回读原文。
+    禁止把 `truncated=true` 的消费结果当作完整证据。
+
+    meta 字段：
+      - `truncated`: bool          是否发生截断
+      - `source_chars` / `consumed_chars`: 原始 / 实际消费字符数
+      - `source_digest`: 原文 sha256 前 16 位（溯源/去重，不暴露原文）
+      - `chunk_index` / `chunk_count`: 分块位置（单块调用恒 0/1）
+      - `source_range`: 消费的字符区间
+    """
+    source_chars = len(text)
+    truncated = source_chars > max_chars
+    consumed = text[:max_chars]
+    meta = {
+        "truncated": truncated,
+        "source_chars": source_chars,
+        "consumed_chars": len(consumed),
+        "source_digest": _sha256_digest(text),
+        "chunk_index": chunk_index,
+        "chunk_count": 1,
+        "source_range": f"chars:0-{len(consumed) - 1}" if truncated else "chars:all",
+    }
+    if truncated:
+        consumed = consumed + "\n\n... (truncated)"
+    return consumed, meta
+
+
+# ---------------------------------------------------------------------------
+# 数据出境闸门（v1.1）：LLM 类工具外发前的敏感扫描
+# ---------------------------------------------------------------------------
+
+# 占位符形态（示例密钥、文档模板）——命中则不算真实密钥，避免误伤合法输入
+_PLACEHOLDER_RE = re.compile(
+    r"(?i)(xxx|your[_-]?(key|secret|token|password|api[_-]?key|value)|"
+    r"example|placeholder|<[^>\n]+>|\.\.\.|todo)"
+)
+
+# 高危硬模式：命中任一 = 禁止外发（真实密钥 / 私钥 / 证书）
+_HARD_SENSITIVE_PATTERNS = [
+    # 私钥 / 证书块
+    re.compile(r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----"),
+    re.compile(r"-----BEGIN (CERTIFICATE|OPENSSH PRIVATE KEY|RSA PRIVATE KEY|EC PRIVATE KEY)-----"),
+    # AWS 访问密钥（AKIA 开头 16+ 位字母数字）
+    re.compile(r"\bAKIA[0-9A-Z]{16,}\b"),
+    # 键值型密钥/令牌（值 ≥12 位且不含占位符；含常见特殊字符的密码也拦截）
+    re.compile(
+        r"(?i)(api[_-]?key|secret|password|passwd|token|access[_-]?key|"
+        r"auth[_-]?token|private[_-]?key|client[_-]?secret)\s*[=:：]\s*"
+        r"['\"]?([A-Za-z0-9_\-\.\+/@#$%^&*!]{12,})"
+    ),
+]
+
+
+def scan_sensitive(text: str) -> list[str]:
+    """数据出境闸门：扫描文本中的高危敏感内容。
+
+    调用方（LLM 类工具）在把输入发送给外部 provider **之前**必须调用：
+      命中非空 → 阻断本次外发，返回 error 并提示脱敏；
+      空列表  → 允许外发。
+
+    Returns: 命中的模式摘录列表（空 = 安全）。
+    """
+    hits = []
+    for pattern in _HARD_SENSITIVE_PATTERNS:
+        for m in pattern.finditer(text):
+            matched = m.group(0)
+            # 键值型命中的值含占位符（example/your-key/xxx/<...>）→ 判为示例，不拦
+            if "PRIVATE KEY" in pattern.pattern or "AKIA" in pattern.pattern:
+                hits.append(matched[:60])
+                continue
+            if _PLACEHOLDER_RE.search(matched):
+                continue
+            hits.append(matched[:60])
+            if len(hits) >= 5:
+                return hits
+    return hits
+
+
 def json_dumps_safe(obj: Any, max_chars: int = 4000) -> str:
     """JSON 序列化 + 超长截断。用于把 candidates / data 序列化进 LLM prompt。"""
     try:
@@ -100,7 +194,7 @@ def json_dumps_safe(obj: Any, max_chars: int = 4000) -> str:
 
 
 # ---------------------------------------------------------------------------
-# 数据加载（audit_facts / 可选 retrieve_similar 用）
+# 数据加载（propose_repo_facts / 可选 retrieve_similar 用）
 # ---------------------------------------------------------------------------
 
 def load_json_file(path: str | Path) -> dict | list | None:

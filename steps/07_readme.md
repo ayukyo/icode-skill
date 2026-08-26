@@ -317,7 +317,7 @@ eval("2147483648") rc=3 (expect 3 OVERFLOW)
 | MCP | 推荐级别 | 用途 |
 |-----|----------|------|
 | vision-bridge | 🟢* | 附加 UI 截图--用户给图时 |
-| **cheap-research** | 🟢* | **降本**：generate_filename（文件名，含 `_brief` 双名）+ select_template（功能/查BUG模板选择）+ fill_template（交付报告 + 简报段落填充）+ retrieve_similar（已知限制检索防重复）。不接管决策：风险章节提炼走主会话 |
+| **cheap-research** | ⚪ | 本步骤正文无调用执行点（文件名生成与功能/查BUG 模板选择均为确定性规则，见「文件名生成」「智能模板选择」段）。fill_template（段落草稿）/retrieve_similar（已知限制检索防重复）可作可选增强，非强证据场景不评估。不接管决策：风险章节提炼/内容定稿走主会话 |
 | 其他 3 个 | ⚪ | 本步骤不推荐 |
 
 **强制约束**：🟢/🟢*/⚪ 语义 + 双保险机制（执行步骤内嵌 + thinking_core gate）详见 [SKILL.md「MCP 调用覆盖强制化」](../SKILL.md) + [references/mcp_per_step.md「双保险机制」](../references/mcp_per_step.md)；本步骤表内的 🟢/🟢* 标注按上方真源判定。

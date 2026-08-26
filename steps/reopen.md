@@ -3,7 +3,7 @@
 **命令**: `/icode worktree --reopen [--to-ref <ref>]`
 - 默认（无参）：在**最新在线基线**（远程跟踪 `@{u}` 的 ref）上创建新的活动 checkout
 - `--to-ref <ref>`：在用户显式指定的 ref 上创建新的活动 checkout（可选扩展）
-**产出**: 工单 metadata 更新（`active_checkout`/`checkout_history`/`sub_worktrees`/`migration=null`）+ 新建 checkout；不新建 ticket、不清空 patch 历史
+**产出**: 工单 metadata 更新（`active_checkout`/`checkout_history`/`sub_worktrees`/`submission_contracts`/`migration=null`）+ 新建 checkout；不新建 ticket、不清空 patch 历史
 **会话**: 主会话
 
 ## 本步骤 L1/L2 检查项声明
@@ -11,14 +11,14 @@
 | 级别 | 检查项 | 触发后行为 |
 |---|---|---|
 | **L1·致命** | 无最新工单目录（`.ico_output_N/` 不存在或 metadata 缺失） | 报错退出，提示先 `/icode init` / `/icode start` 创建工单 |
-| **L1·致命** | 工单**未 close**（`submitted_baseline` 为 null 或缺失） | 报错退出，提示：未 close 的工单直接 `/icode patch` 在当前活动根继续，或 `/icode worktree --update` 换基线——不需要 reopen |
+| **L1·致命** | 工单**未 close**（`submitted_baseline` 为 null 或缺失且 `submitted_baselines` 为空） | 报错退出，提示：未 close 的工单直接 `/icode patch` 在当前活动根继续，或 `/icode worktree --update` 换基线——不需要 reopen |
 | **L1·致命** | 统一拓扑门禁 verdict=blocked | 报错退出（[references/worktree_isolation.md §3.8](../references/worktree_isolation.md)） |
 | **L1·致命** | 目标基线 ref 不可解析（默认最新基线但远程 ref 缺失 / 本地无该 ref） | 报错退出，提示先 `git fetch` 或改用显式 ref |
 | **L2·关键** | 已存在未 close 的旧活动 checkout（close 后用户又手动复活了目录） | 警告 + 提示先 `/icode worktree --update` 收敛拓扑，不自动覆盖 |
 
 ## 定位
 
-`status=completed` 且**已 close**（`submitted_baseline` 非 null）的工单，后续出现补充修改时，**必须显式 reopen**：在最新在线基线上创建新的活动 checkout。这是 close 后的唯一恢复通道，**禁止偷偷复活旧目录**（在已关闭的 checkout 上继续改 = 基线过时 + 拓扑违规）。
+`status=completed` 且**已 close**（`submitted_baseline` 非 null 或 `submitted_baselines` 非空）的工单，后续出现补充修改时，**必须显式 reopen**：在最新在线基线上创建新的活动 checkout。这是 close 后的唯一恢复通道，**禁止偷偷复活旧目录**（在已关闭的 checkout 上继续改 = 基线过时 + 拓扑违规）。
 
 reopen 与相关命令的边界：
 - **未 close 的 completed 工单**：`patch` 可直接在当前唯一活动根继续（[steps/08_patch.md](08_patch.md)「completed 工单分流」）
@@ -28,14 +28,14 @@ reopen 与相关命令的边界：
 ## 前置校验
 
 1. 按 [references/dir_and_metadata.md「检测最新目录」段](../references/dir_and_metadata.md) 确定 `ICODE_OUT_DIR`
-2. 读 metadata：`status == "completed"` 且 `submitted_baseline` 非 null（已 close），否则按 L1 表报错
+2. 读 metadata：`status == "completed"` 且（`submitted_baseline` 非 null 或 `submitted_baselines` 非空）（已 close），否则按 L1 表报错
 3. 调用统一拓扑门禁（§3.8），verdict=blocked 报错退出
-4. 解析目标基线：默认 → `git rev-parse --symbolic-full-name @{u}` 的远程 ref（本地不可解析则报错）；`--to-ref <ref>`（可选扩展）→ 用户指定 ref
+4. 解析目标基线：默认 → **复用已提交契约**（读 `submission_contracts` 中 super 仓库契约的 `target_remote_ref`，缺失按 [references/worktree_isolation.md](../references/worktree_isolation.md) §3.7 推导）的远程 ref（本地不可解析则报错）——**不用当前环境临时推断目标**；`--to-ref <ref>`（可选扩展）→ 用户指定 ref，且**仅此时更新契约**（默认 reopen 不改变契约目标）
 
 ## 执行流程
 
 1. **解析基线**：目标基线 ref + commit（`git rev-parse <ref>`）；记录实际解析到的 commit（分支名不当作稳定 commit）
-2. **创建新 checkout**：`git worktree add -b "icode/<ticket-slug>-reopen-<N>" <新路径> <基线ref>`（`<N>` 为 reopen 代数序号，如已有 `-reopen-1` 则用 `-reopen-2`；基于远程基线创建自动 tracking，命令见 [references/worktree_isolation.md §1「② 创建」](../references/worktree_isolation.md)）
+2. **创建新 checkout**：`git worktree add -b "icode/<ticket-slug>-reopen-<N>" <新路径> <基线ref>`（`<N>` 为 reopen 代数序号，如已有 `-reopen-1` 则用 `-reopen-2`；基于远程基线创建自动 tracking，命令见 [references/worktree_isolation.md §1「② 创建」](../references/worktree_isolation.md)）。**G1 契约重建**：显式 `git -C <新路径> branch --set-upstream-to=<remote>/<目标分支> icode/<ticket-slug>-reopen-<N>` + 逐项比对（HEAD 可解析 / 当前分支 / `@{u}` == 契约 `target_remote_ref` / remote 与主仓一致），更新 `submission_contracts` 中 super 仓库契约项（新 `worktree_branch`/`target_commit_at_create`/`tracking_verified`；目标分支不变时 `target_remote_ref`/`target_push_ref` 保持不变）
 3. **受影响业务子仓**：若工单涉及业务子仓修改，为受影响子仓创建隔离 checkout（同 §1「⑤ 业务子仓隔离」，基于子仓远程基线），写 `metadata.sub_worktrees`
 4. **校验新 checkout**：`git -C <新路径> rev-parse --verify HEAD` + 分支核对 + 基线 = 解析到的目标 commit
 5. **原子切换**（临时文件写入 → 校验 → 原子替换）：
@@ -55,6 +55,7 @@ reopen 与相关命令的边界：
 - **禁止复活旧目录**：不在已 close 的旧 checkout 上继续 patch
 - **禁止覆盖未确认状态**：close 后旧 checkout 目录若仍存在，reopen 不自动删除（留用户确认）；`checkout_history` 如实记录旧目录存在状态
 - **禁止清空 patch 历史**：reopen 不重置 `patch_count`/`patch_history`（补丁历史是工单身份的一部分，见 I-3）
+- **禁止临时推断契约目标**：默认 reopen 复用已提交契约 `target_remote_ref`（G1 冻结），不得用当前环境临时推断；仅显式 `--to-ref` 才更新契约目标
 - **禁止真实项目术语**：示例/输出用通用占位符
 
 ## MCP 推荐

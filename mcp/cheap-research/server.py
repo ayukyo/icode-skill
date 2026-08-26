@@ -6,19 +6,28 @@ session 模型只通过 mcp 工具调用, 不直连 LLM API。
 启动: python server.py
 
 5 核心工具（LLM 推理）：
-  - summarize        长上下文压缩
-  - retrieve_similar 历史工单相似度匹配
-  - fill_template    模板填充
-  - extract          结构化提取
-  - audit_facts      代码事实审计
+  - summarize            长上下文压缩
+  - retrieve_similar     历史工单相似度匹配
+  - fill_template        模板填充
+  - extract              结构化提取
+  - propose_repo_facts   仓库事实候选（原 audit_facts，只产候选不做裁决）
 
 9 增强工具（含 6 工具型 + 3 LLM 摘要）：
-  - scan_patterns / trace_refs / diff_summary / apply_migration
+  - scan_patterns / trace_refs / diff_summary / validate_migration_ops
   - fetch_remote / generate_filename / select_template
   - parse_project_id / scan_modules
 
+工具分三类 capability（`tools_manifest.json` 为真源）：
+  - local: 纯本地确定性工具（scan_patterns/trace_refs/validate_migration_ops/parse_project_id/scan_modules）
+  - fetch: 网络工具（fetch_remote）
+  - llm:   依赖 LLM provider（summarize/retrieve_similar/fill_template/extract/propose_repo_facts/diff_summary/generate_filename/select_template）
+  本地/网络工具不因 provider 未配置而整体降级；LLM 工具必须 provider 可用。
+
 所有工具严格遵循单闸门: 价值 ≥ 3 ★ + 低风险 = 入选。
 不接管决策: 3 质疑者对抗 / 架构决策 / 终审裁决 / 修复方案一律不走本工具。
+
+数据出境闸门（v1.1）：LLM 类工具外发前必须 scan_sensitive，
+命中高危敏感模式（私钥/证书/AWS 密钥/键值型密钥）→ 阻断并提示脱敏。
 """
 import ipaddress
 import json
@@ -65,12 +74,14 @@ from _utils import (  # noqa: E402
     validate_int_range,
     validate_url,
     truncate_text,
+    truncate_with_meta,
     truncate_candidates,
     json_dumps_safe,
     iter_source_files,
     safe_read_text,
     safe_run_git,
     sanitize_for_llm,
+    scan_sensitive,
     detect_language_from_ext,
     build_symbol_regex,
     DEFAULT_SOURCE_EXTS,
@@ -193,7 +204,7 @@ def get_provider():
 @mcp.tool()
 async def summarize(
     text: str,
-    max_tokens: int = 8192,
+    max_tokens: int = 512,
     focus: str = "",
 ) -> dict:
     """长上下文压缩。
@@ -202,22 +213,30 @@ async def summarize(
     严格不接管决策/对抗/架构: 推理类工作一律不走本工具。
 
     Args:
-        text: 待压缩文本 (支持中英文, 自动截断到 8000 字符)
+        text: 待压缩文本 (支持中英文, 自动截断到 8000 字符; 截断时返回 meta.truncated=true)
         max_tokens: 最大输出 token 数 (默认 512)
         focus: 可选聚焦角度 (如"异常根因" / "改动点" / "风险"), 为空时让 LLM 自己判
 
     Returns:
-        成功: {answer: {summary, key_points}, confidence, model, tokens_used, cost_estimated}
+        成功: {answer: {summary, key_points}, confidence, model, tokens_used, cost_estimated,
+               truncation: {truncated, source_chars, consumed_chars, source_digest, ...}}
         失败: {error: str, model: str}
     """
     # 入参校验
     if err := validate_non_empty_str(text, "text"):
         return make_error_response(err)
 
+    # 数据出境闸门：外发前扫描敏感内容
+    if sensitive := scan_sensitive(text):
+        return make_error_response(
+            f"[数据出境闸门] 输入命中高危敏感模式, 已拒绝外发: {sensitive[:3]}。"
+            f"请先脱敏（排除密钥/令牌/私钥）后重试。"
+        )
+
     provider = get_provider()
 
-    # 文本截断（防 prompt 爆）
-    text_safe = truncate_text(text, max_chars=8000)
+    # 文本截断（防 prompt 爆）+ 截断硬信号
+    text_safe, trunc_meta = truncate_with_meta(text, max_chars=8000)
 
     # 构造 schema 强制结构化输出
     schema = {
@@ -241,11 +260,14 @@ async def summarize(
         f"原文:\n{text_safe}"
     )
 
-    return await provider.invoke(
+    result = await provider.invoke(
         prompt=prompt,
         schema=schema,
         max_tokens=max_tokens,
     )
+    if "error" not in result:
+        result["truncation"] = trunc_meta
+    return result
 
 
 @mcp.tool()
@@ -283,6 +305,13 @@ async def retrieve_similar(
         return make_error_response(err)
     if not isinstance(k, int) or k < 1 or k > 20:
         return make_error_response(f"k 必须是 1~20 的整数, 实际 {k}")
+
+    # 数据出境闸门：外发前扫描 query 与候选
+    if sensitive := scan_sensitive(query + json_dumps_safe(candidates, max_chars=100000)):
+        return make_error_response(
+            f"[数据出境闸门] 输入命中高危敏感模式, 已拒绝外发: {sensitive[:3]}。"
+            f"请先脱敏（排除密钥/令牌/私钥）后重试。"
+        )
 
     provider = get_provider()
 
@@ -345,6 +374,7 @@ async def retrieve_similar(
     if isinstance(items, list):
         items = items[:k]
         result["answer"] = {"items": items, "query": query}
+    result["candidates_truncated"] = was_truncated
 
     return result
 
@@ -374,10 +404,17 @@ async def fill_template(
     if err := validate_dict(data, "data"):
         return make_error_response(err)
 
+    # 数据出境闸门：外发前扫描模板与数据
+    if sensitive := scan_sensitive(template + json.dumps(data, ensure_ascii=False)):
+        return make_error_response(
+            f"[数据出境闸门] 模板/数据命中高危敏感模式, 已拒绝外发: {sensitive[:3]}。"
+            f"请先脱敏（排除密钥/令牌/私钥）后重试。"
+        )
+
     provider = get_provider()
 
-    # 模板截断（防 prompt 爆）
-    template_safe = truncate_text(template, max_chars=4000)
+    # 模板截断（防 prompt 爆）+ 截断硬信号
+    template_safe, trunc_meta = truncate_with_meta(template, max_chars=4000)
     data_str = json_dumps_safe(data, max_chars=2000)
 
     schema = {
@@ -400,11 +437,14 @@ async def fill_template(
         f"data:\n{data_str}"
     )
 
-    return await provider.invoke(
+    result = await provider.invoke(
         prompt=prompt,
         schema=schema,
         max_tokens=8192,
     )
+    if "error" not in result:
+        result["truncation"] = trunc_meta
+    return result
 
 
 @mcp.tool()
@@ -433,9 +473,16 @@ async def extract(
     if err := validate_dict(schema, "schema"):
         return make_error_response(err)
 
+    # 数据出境闸门：外发前扫描敏感内容
+    if sensitive := scan_sensitive(text):
+        return make_error_response(
+            f"[数据出境闸门] 输入命中高危敏感模式, 已拒绝外发: {sensitive[:3]}。"
+            f"请先脱敏（排除密钥/令牌/私钥）后重试。"
+        )
+
     provider = get_provider()
 
-    text_safe = truncate_text(text, max_chars=8000)
+    text_safe, trunc_meta = truncate_with_meta(text, max_chars=8000)
     instruction_part = f"\n附加指令: {instruction}" if instruction else ""
 
     # 复用 openai_compat.py 的 schema 强约束逻辑
@@ -471,22 +518,26 @@ async def extract(
             "fields_count": len(parsed),
             "schema_validated": _HAS_JSONSCHEMA,
         }
+        result["truncation"] = trunc_meta
 
     return result
 
 
 @mcp.tool()
-async def audit_facts(
+async def propose_repo_facts(
     repo_path: str,
     focus: str = "",
     max_files: int = 10,
 ) -> dict:
-    """代码事实审计。
+    """仓库事实候选（不接管裁决）。
 
     扫描 repo_path 下的关键文件 (README / CLAUDE.md / pyproject.toml / package.json / 入口 main.*),
-    让 LLM 总结关键事实 (用途、依赖、入口、关键 API)。
+    让 LLM 生成**候选事实** (用途、依赖、入口、关键 API)。
 
-    严格不接管决策: LLM 只做事实抽取, 不做架构评分或改进建议。
+    权限边界（v1.1 改名自 audit_facts）:
+      - 只读少量文件片段, 无法证明完整调用链/代码行为/测试覆盖/边界条件;
+      - 输出必须标 `candidate=true`, 每条事实不保证准确;
+      - 主模型必须用 Read/rg 实证后才可写入 plan / log_analysis / audit 等正式产物。
 
     Args:
         repo_path: 仓库路径 (本地绝对路径)
@@ -494,7 +545,8 @@ async def audit_facts(
         max_files: 最多扫描文件数 (默认 10, 防超大 repo)
 
     Returns:
-        成功: {answer: {facts: [str], source_files: [str], focus}, confidence, model, tokens_used, cost_estimated}
+        成功: {answer: {candidate, facts: [str], source_files: [str], focus},
+               confidence, model, tokens_used, cost_estimated, truncation}
         失败: {error: str, model: str}
     """
     # 入参校验
@@ -533,16 +585,30 @@ async def audit_facts(
         )
 
     # 读取文件内容（每个文件截断到 1500 字符，v1.0 修复：原 2000 → 1500 防 prompt 爆）
+    # v1.1：逐文件记录截断硬信号，合并后同样记录，返回 truncation 汇总
     file_contents = []
+    file_truncations = []
     for f in source_files:
         try:
             content = Path(f).read_text(encoding="utf-8", errors="replace")
-            file_contents.append(f"=== {f} ===\n{truncate_text(content, max_chars=1500)}")
         except Exception:
             continue
+        content_safe, f_meta = truncate_with_meta(content, max_chars=1500)
+        file_contents.append(f"=== {f} ===\n{content_safe}")
+        file_truncations.append({
+            "file": f,
+            **f_meta,
+        })
 
-    combined = "\n\n".join(file_contents)
-    combined = truncate_text(combined, max_chars=8000)  # v1.0 修复：原 15000 → 8000
+    combined_raw = "\n\n".join(file_contents)
+    # 数据出境闸门：外发前扫描全部已读源码片段
+    if sensitive := scan_sensitive(combined_raw):
+        return make_error_response(
+            f"[数据出境闸门] 仓库内容命中高危敏感模式, 已拒绝外发: {sensitive[:3]}。"
+            f"请先脱敏（排除密钥/令牌/私钥）后重试。"
+        )
+    combined, trunc_meta = truncate_with_meta(combined_raw, max_chars=8000)  # v1.0 修复：原 15000 → 8000
+    trunc_meta["per_file"] = file_truncations
 
     provider = get_provider()
 
@@ -581,10 +647,12 @@ async def audit_facts(
     if "error" in result:
         return result
 
-    # 附加 source_files 到 answer
+    # 附加 source_files / 候选标记 / 截断汇总到 answer
     if isinstance(result.get("answer"), dict):
         result["answer"]["source_files"] = source_files
         result["answer"]["focus"] = focus
+        result["answer"]["candidate"] = True
+        result["truncation"] = trunc_meta
 
     return result
 
@@ -873,6 +941,7 @@ async def fetch_remote(
                     "truncated": truncated_by_size or truncated_by_chars,
                     "truncated_by_size": truncated_by_size,
                     "truncated_by_chars": truncated_by_chars,
+                    "trust_level": "untrusted",
                 },
                 "model": "fetch_remote",
             }
@@ -900,17 +969,20 @@ async def fetch_remote(
 
 
 @mcp.tool()
-async def apply_migration(
+async def validate_migration_ops(
     schema_diff: dict,
     repo_path: str = ".",
 ) -> dict:
-    """Schema 迁移操作生成（不直接执行）。
+    """迁移 ops 校验与规范化（v1.1 改名自 apply_migration）。
 
-    解析 schema_diff, 生成迁移 ops (add/remove/rename/modify)。
+    只校验并规范化**调用者已经给出**的 schema_diff, 转成 pending ops。
+    不发现 schema 差异, 不决定应该迁移什么——「迁移方案决定」是主模型 + 用户权限范畴。
+
     严格不直接改文件: 返 ops 给主会话审核 + 执行, 避免误操作。
+    remove/rename 类 op 仍需主模型和用户权限检查后才能执行。
 
     Args:
-        schema_diff: schema 变更描述, e.g.
+        schema_diff: 调用者给出的 schema 变更描述, e.g.
                      {
                        "add": [{"path": "src/foo.py", "template": "..."}],
                        "remove": [{"path": "src/old.py"}],
@@ -919,7 +991,7 @@ async def apply_migration(
         repo_path: 仓库路径 (默认 ".")
 
     Returns:
-        成功: {answer: {ops: [{type, target, content}], files_affected: [str]}, model: "apply_migration"}
+        成功: {answer: {ops: [{type, target, content}], files_affected: [str]}, model: "validate_migration_ops"}
         失败: {error: str, model: str}
     """
     # 入参校验
@@ -980,9 +1052,9 @@ async def apply_migration(
             "files_affected": sorted(files_affected),
             "op_count": len(ops),
             "repo_path": str(repo),
-            "warning": "ops 已生成, 未执行 —— 主会话需审核后手动执行",
+            "warning": "ops 已校验并规范化, 未执行 —— 主会话需审核后手动执行",
         },
-        "model": "apply_migration",
+        "model": "validate_migration_ops",
     }
 
 
@@ -1299,12 +1371,13 @@ async def diff_summary(
     text_a: str,
     text_b: str,
     focus: str = "",
-    max_tokens: int = 8192,
+    max_tokens: int = 1024,
 ) -> dict:
     """差异摘要。
 
     调 LLM 摘要两段文本的差异, 适合"代码变更/long log diff"场景。
     严格不接管决策: LLM 只做摘要, 不做"该不该改"的判断。
+    只作索引/导航, 不得替代 diff/逐项验收。
 
     Args:
         text_a: 旧文本
@@ -1313,7 +1386,7 @@ async def diff_summary(
         max_tokens: 最大输出 token (默认 1024)
 
     Returns:
-        成功: {answer: {summary, key_changes: [str]}, confidence, model, tokens_used, cost_estimated}
+        成功: {answer: {summary, key_changes: [str]}, confidence, model, tokens_used, cost_estimated, truncation}
         失败: {error: str, model: str}
     """
     # 入参校验
@@ -1322,9 +1395,16 @@ async def diff_summary(
     if err := validate_non_empty_str(text_b, "text_b"):
         return make_error_response(err)
 
-    # 截断保护
-    text_a_safe = truncate_text(text_a, max_chars=6000)
-    text_b_safe = truncate_text(text_b, max_chars=6000)
+    # 数据出境闸门：外发前扫描两侧文本
+    if sensitive := scan_sensitive(text_a + text_b):
+        return make_error_response(
+            f"[数据出境闸门] 输入命中高危敏感模式, 已拒绝外发: {sensitive[:3]}。"
+            f"请先脱敏（排除密钥/令牌/私钥）后重试。"
+        )
+
+    # 截断保护 + 截断硬信号
+    text_a_safe, trunc_a = truncate_with_meta(text_a, max_chars=6000)
+    text_b_safe, trunc_b = truncate_with_meta(text_b, max_chars=6000)
 
     provider = get_provider()
 
@@ -1349,11 +1429,14 @@ async def diff_summary(
         f"新文本 (B):\n{text_b_safe}"
     )
 
-    return await provider.invoke(
+    result = await provider.invoke(
         prompt=prompt,
         schema=schema,
         max_tokens=max_tokens,
     )
+    if "error" not in result:
+        result["truncation"] = {"text_a": trunc_a, "text_b": trunc_b}
+    return result
 
 
 @mcp.tool()
@@ -1382,6 +1465,13 @@ async def generate_filename(
         return make_error_response(err)
     if not context:
         return make_error_response("context 不能为空 dict")
+
+    # 数据出境闸门：外发前扫描 context
+    if sensitive := scan_sensitive(json_dumps_safe(context, max_chars=100000)):
+        return make_error_response(
+            f"[数据出境闸门] context 命中高危敏感模式, 已拒绝外发: {sensitive[:3]}。"
+            f"请先脱敏后重试。"
+        )
 
     provider = get_provider()
 
@@ -1442,6 +1532,13 @@ async def select_template(
     for opt in options:
         if not isinstance(opt, str):
             return make_error_response("options 必须都是字符串")
+
+    # 数据出境闸门：外发前扫描 context
+    if sensitive := scan_sensitive(json_dumps_safe(context, max_chars=100000)):
+        return make_error_response(
+            f"[数据出境闸门] context 命中高危敏感模式, 已拒绝外发: {sensitive[:3]}。"
+            f"请先脱敏后重试。"
+        )
 
     provider = get_provider()
 

@@ -101,22 +101,26 @@ model:    qwen2.5:7b
 - `retrieve_similar(query, candidates, k)` — 历史工单相似度匹配
 - `fill_template(template, data)` — 模板填充
 - `extract(text, schema, instruction)` — 结构化提取
-- `audit_facts(repo_path, focus, max_files)` — 代码事实审计
+- `propose_repo_facts(repo_path, focus, max_files)` — 仓库事实候选（不接管裁决）
 
 **9 增强工具**（含 6 工具型 + 3 LLM 摘要）：
 - `scan_patterns(patterns, scope_path, exclude_dirs, max_files, max_matches)` — 机械模式匹配
 - `trace_refs(symbol, scope_path, max_files, max_refs)` — 符号引用追溯
 - `fetch_remote(url, max_chars)` — HTTP 拉取
-- `apply_migration(schema_diff, repo_path)` — Schema 迁移操作生成
+- `validate_migration_ops(schema_diff, repo_path)` — 迁移 ops 校验与规范化
 - `parse_project_id(repo_path)` — 解析 project_id
 - `scan_modules(repo_path, max_files)` — 6 级模块检测
 - `diff_summary(text_a, text_b, focus, max_tokens)` — 差异摘要
 - `generate_filename(context, prefix, max_tokens)` — 文件名生成
 - `select_template(context, options, max_tokens)` — 模板选择
 
-session 模型只看工具返回结构化 dict，**永远不直接调 LLM API**。
+**分能力闸门（v1.1）**：14 工具分三类 capability（真源 [tools_manifest.json](tools_manifest.json)）——
+`local`（scan_patterns/trace_refs/validate_migration_ops/parse_project_id/scan_modules）、`fetch`（fetch_remote）、
+`llm`（8 个，需 provider 可用）。本地/网络工具**不因 provider 未配置而整体降级**。
 
-> **输入纯净度建议**：14 个工具都依赖 LLM 输出能严格按 schema 输出 JSON。server.py 的 _parse_response 有 4 道容错闸门：剥离 think 标签 → 提取 json 代码块 → brace-matching 提取最外层 {...} → 修复数组元素间缺逗号。**实测在 prompt 里加一句"只输出 JSON，不要前后缀文本"显著降低容错失败率**——容错是 last resort，不是默认行为。
+session 模型只看工具返回的结构化 dict，**不直接调用 cheap-research 配置的 LLM provider**——但 provider 调用确实发生在本 MCP server 进程内（`config.json` 配置的 base_url/api_key/model），数据出境闸门（`scan_sensitive`）与 `truncation`/`source_digest` 元数据即用于审计该外发路径。
+
+> **输入纯净度建议**：`llm` 类工具依赖 LLM 输出能严格按 schema 输出 JSON。server.py 的 _parse_response 有 4 道容错闸门：剥离 think 标签 → 提取 json 代码块 → brace-matching 提取最外层 {...} → 修复数组元素间缺逗号。**实测在 prompt 里加一句"只输出 JSON，不要前后缀文本"显著降低容错失败率**——容错是 last resort，不是默认行为。
 
 
 ---
@@ -127,4 +131,5 @@ session 模型只看工具返回结构化 dict，**永远不直接调 LLM API**�
 - **未装 cheap-research**：走 Agent(model="haiku") 兜底（不阻塞）
 - **不接管决策**：3 质疑者对抗 / 架构决策 / 终审裁决 / 修复方案一律不走本工具
 
-详见 [mcp/cheap-research/server.py](server.py) 与 14 工具自检用例（tests/）。
+详见 [mcp/cheap-research/server.py](server.py)、工具类型真源 [tools_manifest.json](tools_manifest.json)
+与核心契约测试 [tests/](tests/)。

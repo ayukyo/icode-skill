@@ -35,19 +35,21 @@
 
 1. 读 `{ICODE_OUT_DIR}/03_plan_final.md` 的 code_files/§5 符号清单，确定本需求实际修改的业务子仓集（子仓相对 super-repo 路径经 `.repo/manifest.xml` `<project path>` 推导，见 [references/dir_and_metadata.md](../references/dir_and_metadata.md)「repo 嵌套子项目路径推导」）
 2. 不涉及子仓修改（只改 super-repo）→ **跳过本段**，无需隔离
-3. 对每个受影响原子仓，若 `metadata.sub_worktrees` 未含该子仓 → 建子仓隔离 checkout（把 checkout 放进 super-worktree 同名相对路径，保持路径结构与原工程一致；**子仓分支基于子仓当前分支的远程跟踪 `@{u}` 创建 + 自动 upstream**，无 upstream 降级本地 HEAD）：
+3. 对每个受影响原子仓，若 `metadata.sub_worktrees` 未含该子仓 → 建子仓隔离 checkout（把 checkout 放进 super-worktree 同名相对路径，保持路径结构与原工程一致；**子仓分支基于子仓当前分支的远程跟踪 `@{u}` 创建 + 自动 upstream**）：
    ```bash
    SUB_UP=$(git -C "<主仓绝对路径>/<子仓相对路径>" rev-parse --symbolic-full-name @{u} 2>/dev/null)
    SUB_UP_AVAIL=0
    [ -n "$SUB_UP" ] && git -C "<主仓绝对路径>/<子仓相对路径>" rev-parse --verify "$SUB_UP" >/dev/null 2>&1 && SUB_UP_AVAIL=1
-   if [ "$SUB_UP_AVAIL" = "1" ]; then
-     git -C "<主仓绝对路径>/<子仓相对路径>" worktree add -b "icode/<ticket-slug>-<子仓slug>" "<主仓绝对路径>-wt-<ticket-slug>/<子仓相对路径>" "$SUB_UP"
+   # G1 子仓提交契约：修改型工单子仓 detached / 无 upstream → L1 阻断，不静默降级本地 HEAD（见 worktree_isolation §1「⑤」）
+   if [ "$SUB_UP_AVAIL" != "1" ] || [ "$(git -C "<主仓绝对路径>/<子仓相对路径>" rev-parse --abbrev-ref HEAD 2>/dev/null)" = "HEAD" ]; then
+     echo "▶ worktree 隔离：⚠ L1 阻断——子仓 <子仓相对路径> 提交目标不明确（detached / 无远程跟踪 @{u}），请先为子仓 git branch --set-upstream-to=<remote>/<目标分支>"
    else
-     git -C "<主仓绝对路径>/<子仓相对路径>" worktree add -b "icode/<ticket-slug>-<子仓slug>" "<主仓绝对路径>-wt-<ticket-slug>/<子仓相对路径>"
+     git -C "<主仓绝对路径>/<子仓相对路径>" worktree add -b "icode/<ticket-slug>-<子仓slug>" "<主仓绝对路径>-wt-<ticket-slug>/<子仓相对路径>" "$SUB_UP"
+     git -C "<主仓绝对路径>-wt-<ticket-slug>/<子仓相对路径>" branch --set-upstream-to="${SUB_UP#refs/remotes/}" "icode/<ticket-slug>-<子仓slug>"
    fi
    ```
    前置：子仓须有 HEAD（repo 子仓均有）；目标路径须为空（super-worktree 内该相对路径未被写入）
-4. 写 `metadata.sub_worktrees` 追加 `{sub_path, worktree_path, branch}`（见 [references/worktree_isolation.md](../references/worktree_isolation.md)「§3 metadata 字段族」）
+4. 写 `metadata.sub_worktrees` 追加 `{sub_path, worktree_path, branch}`（见 [references/worktree_isolation.md](../references/worktree_isolation.md)「§3 metadata 字段族」）；修改型工单同步往 `submission_contracts` 追加该子仓契约一项（G1 冻结，见 [references/worktree_isolation.md](../references/worktree_isolation.md) §3.5.5）
 5. **门禁（硬门）**：受影响子仓未全部隔离即改 = 直接改原工程路径，**不合规**——进入下方「执行步骤」编码前必须确认。历史事故：AI 曾靠模型智能自行加门禁提示而非由 icode 规范保证——本段固化为规范，AI 不得自行裁量
 
 ## 前置：patch 配合
@@ -233,7 +235,7 @@
 |-----|----------|------|
 | context7 | 🟢* | 实时查库 API（防训练知识过时）--涉及第三方库时 |
 | vision-bridge | 🟢* | 涉及 UI 实现时截图参照--用户给图时 |
-| **cheap-research** | 🟢* | **降本**：apply_migration（schema 迁移 ops 生成不执行，主会话审核后手动执行）。不接管决策：关键设计/编码实施/Code Review Fix 走主会话 |
+| **cheap-research** | ⚪ | 本步骤正文无调用执行点（编码/编译/测试/复检全走主会话 + 文本层）。validate_migration_ops（迁移 ops 路径安全校验与规范化）可作可选增强，非强证据场景不评估。不接管决策：关键设计/编码实施/Code Review Fix 走主会话 |
 | memory | ⚪ | 本步骤不推荐 |
 | playwright | ⚪ | 本步骤不推荐 |
 

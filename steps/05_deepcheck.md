@@ -327,7 +327,10 @@ Free 阶段一次性完整覆盖全部 15 个角度。
    **中间产物**：`{ICODE_OUT_DIR}/<ticket>/dedup/{catalog,categorized,duplicates/*.json}`
    ```
 
-7. **产物文件附加**：每条 HIGH/MEDIUM 重复函数对同时作为 issue 计入**dedup 内部 `has_issues` 计数器**（**不与 Reverse/Fixed/Free 的 `has_issues` 共享**——dedup 是独立扫描，不触发整体循环），`evidence_pointer` 指向 `dedup/duplicates/<category>.json:<line>`，`suggestion` 写"合并为 `<survivor>` + 删除其他实现"，`verification_status` 直接标 `confirmed`（已用高质量模型推理，无需再走 §5 A6 独立 3 质疑者对抗——单视角推理质量足够（详细理由同 §2.5.7））
+7. **产物文件附加**：每条 HIGH/MEDIUM 重复函数对作为**疑似重复候选**计入**dedup 内部 `has_issues` 计数器**（**不与 Reverse/Fixed/Free 的 `has_issues` 共享**——dedup 是独立扫描，不触发整体循环），`evidence_pointer` 指向 `dedup/duplicates/<category>.json:<line>`，`suggestion` 写"合并为 `<survivor>` + 删除其他实现"。**verification_status 分两类（v1.1 取消 dedup 对抗豁免）**：
+   - **会导致代码删除/合并的候选**（HIGH 且 suggestion 含删除/合并）：默认 `needs_more_evidence`，**必须进入 §5 A6 独立 3 质疑者对抗**，对抗通过才标 `confirmed`——删除/合并是破坏性动作，单次 LLM 推理 + schema 强约束不能证明语义判断正确；
+   - **纯重复提示**（不涉及删除，如 MEDIUM/LOW 信息提示）：可标 `confirmed` 作为报告信息，不触发对抗；
+   - **HIGH 语义 = "高优先级复核"，不直接等于 confirmed**。
 
 **降级路径**：
 
@@ -339,9 +342,9 @@ Free 阶段一次性完整覆盖全部 15 个角度。
 
 **反偷懒第 21 条合规**：步骤末尾在思考块输出 `cheap-research 调用: extract x {1+1+K}` 或对应降级声明，**无记录 = 违规**。
 
-**与 §5 A6 独立 3 质疑者 spawn 规则的衔接**：dedup 的 issue **不进入** Free 阶段 A6 的 3 质疑者独立 spawn 流程。理由：dedup 用高质量模型单次推理 + cheap-research schema 强约束 + 23 类预定义约束 = 等效"强约束推理"，质量足够；重复 3 次 spawn 成本翻 3 倍但收益边际递减。这是 §9.4 阶段的**显式例外**——A6 规则继续约束 Free 阶段深检 issue。
+**与 §5 A6 独立 3 质疑者 spawn 规则的衔接**（v1.1 取消 dedup 豁免）：dedup 只产出**疑似重复候选对**。会导致代码删除/合并的候选**必须进入** Free 阶段 A6 的 3 质疑者独立 spawn 流程——删除/合并是破坏性动作，schema 只能约束输出形状、不能证明语义判断正确，单次 LLM 推理 + schema 强约束不足以免除验证；`trace_refs` 结果也只是文本引用候选，不能证明动态调用/反射/链接关系完整。纯重复提示（无删除动作）可保持轻量，不强制对抗。A6 规则继续约束 Free 阶段深检 issue。
 
-**与循环控制段的关系**：dedup 是独立扫描，不参与 Reverse/Fixed/Free 的整体循环。dedup 内部修复循环（has_issues=true 时）：修复**重复函数本身**（合并为 survivor，删除其他实现）→ 重新调 ripgrep 抽新 catalog → 重新调高质量模型找剩余重复。修完 → 写 `dedup_report.md` + 追加 05_deepcheck.md 摘要 → 进入原「循环控制」段继续 Reverse/Fixed/Free 的整体判定。**绝不可让 dedup 的 issue 触发 Reverse/Fixed/Free 重跑**——重复函数修复与计划/代码逆推无关。
+**与循环控制段的关系**：dedup 是独立扫描，不参与 Reverse/Fixed/Free 的整体循环。dedup 内部修复循环（has_issues=true 时）——**修复前置（v1.1 取消豁免）**：任何"合并为 survivor + 删除其他实现"动作前，该候选必须已通过 §5 A6 独立 3 质疑者对抗（`verification_status == confirmed`），并完成影响面检查（该函数全部引用、调用方、测试和可见性，用 `rg`/`git grep` 实证；`trace_refs` 仅文本候选不作数）——**未对抗通过不得删除代码**：修复**重复函数本身**（合并为 survivor，删除其他实现）→ 重新调 ripgrep 抽新 catalog → 重新调高质量模型找剩余重复。修完 → 写 `dedup_report.md` + 追加 05_deepcheck.md 摘要 → 进入原「循环控制」段继续 Reverse/Fixed/Free 的整体判定。**绝不可让 dedup 的 issue 触发 Reverse/Fixed/Free 重跑**——重复函数修复与计划/代码逆推无关。
 
 ### 循环控制
 
@@ -378,7 +381,7 @@ Free 阶段一次性完整覆盖全部 15 个角度。
 |-----|----------|------|
 | playwright | 🟢* | 跑 E2E--前端工程时 |
 | vision-bridge | 🟢* | UI 截图复检--用户给图时 |
-| **cheap-research** | 🟢* | **降本**：Reverse 阶段 diff_summary（计划vs代码差异）+ summarize（长审查输出压缩）。不接管决策：Fixed/Free 阶段/3 质疑者对抗走主会话 |
+| **cheap-research** | 🟢* | **降本**：Fixed 预扫 scan_patterns（功能点×代码位置机械预扫）+ dedup extract（见 §9.4）。其余（Reverse 阶段 diff_summary / summarize 长审查输出压缩）可作可选增强，非强证据场景不评估。不接管决策：Fixed/Free 阶段/3 质疑者对抗走主会话 |
 | context7 | ⚪ | 本步骤不推荐 |
 | memory | ⚪ | 本步骤不推荐 |
 
