@@ -139,12 +139,14 @@ python3 tools/tb/scripts/tb_pull.py --pid <URL里的pid> defect <LIB>-<NUM> --ou
   与 `settings.json` 的 `CLAUDE_CODE_AUTO_COMPACT_WINDOW`（自动压缩阈值）**不冲突**——后者管"什么时候开始压缩"，
   本字段管"上下文窗口硬上限"；二者独立。CPU/GPU 资源紧张时可调更小（如 128000），充足时可保留默认。
 - `project_dir`：工程根（可选，报告与 debug 工单落点 `{工程}/.icode_output/`；默认 = 启动时 cwd）。
-  **SMB（`/run/user/<uid>/gvfs/smb-share:`）与本地目录工程均支持**——本地目录自动跳过 SMB 健康检查（gvfsd-smb
-  fd/recycle 只针对 SMB 工程生效）。配了之后 `tb_watch_ctl.sh start/stop/status` 免传 `--project-dir`
+  **gvfs SMB（`/run/user/<uid>/gvfs/smb-share:`）、sshfs 挂载（如 `~/mnt/<share>`）与本地目录工程均支持**——
+  挂载健康检查按工程路径所在挂载类型（`findmnt -T`）分流：gvfs SMB 检查挂载端点 + gvfsd-smb fd/recycle
+  （防 fd 累积拖垮挂载），sshfs 探测挂载可访问性（断线本轮跳过触发、不计退避），本地目录自动放行。
+  配了之后 `tb_watch_ctl.sh start/stop/status` 免传 `--project-dir`
 - `claude_skip_permissions`：true 时给 claude 加 `--dangerously-skip-permissions`（无人值守所需，见风险）
 - `low_priority`：true（默认）时 claude 分析进程**温和降级**（nice 5 + ionice best-effort 最低档 -c 2 -n 7，子进程继承）——
   比默认优先级低、不抢交互操作，但不会被完全饿死（不用激进 idle：idle 类 IO 只在系统无其它 IO 时才执行，
-  实测会饿死 SMB 下载/解压/抽帧拖到超时）；false 完全关闭降级。配合"每轮只跑 1 个、串行、分析完才下一轮"，
+  实测会饿死远程挂载（SMB/sshfs）下载/解压/抽帧拖到超时）；false 完全关闭降级。配合"每轮只跑 1 个、串行、分析完才下一轮"，
   **同一时刻最多 1 个 claude 分析进程，不会并发堆叠**
 - 每项目：`url`（必填，自动解析 domain+pid）、`lib`（可选，缺陷库前缀，用于 debug 孪生匹配）、
   `status_names`（可选，默认 `打开,未完成`）
@@ -188,7 +190,7 @@ tools/tb/scripts/tb_watch_ctl.sh stop --force
 ```
 
 `start` 成功后会同时打印网页服务地址（配置 `web` 段，默认 `0.0.0.0:8000`），
-同事在浏览器直接打开即可查看检索报告与各 debug 分析简报，无需 SMB 账号；`status` 也会显示网页服务运行状态。
+同事在浏览器直接打开即可查看检索报告与各 debug 分析简报，无需任何 NAS/挂载账号；`status` 也会显示网页服务运行状态。
 
 **本机 IP 变化（换网/重启路由）怎么办**：
 - 网页服务绑定 `0.0.0.0`，IP 变了服务继续监听新接口，**无需重启守护**；报告内也不写死 IP。
@@ -220,11 +222,11 @@ debug 全量分析**建基线**（每轮一条，按单号倒序），全部建�
 失败/超时则 meta 未变 -> 下一轮重试（不阻塞）。
 
 **异常韧性（守护不因外部异常退出）**：
-- 网络异常 / SMB 断开：单轮检测失败 -> 记 `watch.log` -> sleep 后下一轮重试，守护常驻不退出
+- 网络异常 / 挂载断开（SMB/sshfs）：单轮检测失败 -> 记 `watch.log` -> sleep 后下一轮重试，守护常驻不退出
 - probe 卡死：单项目拉取超时兜底 `PROBE_TIMEOUT`（600s），超时转检测失败，不会每轮永久挂起
 - claude 分析报错/超时：按"失败/超时"记录，meta 未变下一轮重试；claude 命令不存在/无法启动也按失败记录，不中断守护
-- 写 `watch.log` / 报告失败（SMB 断开）：仅降级到 stderr 提示，不抛异常
-- 唯一例外：工程目录在**启动时**不可达（如 SMB 未挂载）守护起不来——此时 `ctl start` 的 console.log 可见 traceback，属"没起来"而非"运行中断开"，挂载后重新 start 即可
+- 写 `watch.log` / 报告失败（挂载断开）：仅降级到 stderr 提示，不抛异常
+- 唯一例外：工程目录在**启动时**不可达（如挂载未就绪）守护起不来——此时 `ctl start` 的 console.log 可见 traceback，属"没起来"而非"运行中断开"，挂载就绪后重新 start 即可
 
 **演练 / 人工确认**：`--once --detect-only` 只跑一轮、只检测写报告、不触发 claude。
 
