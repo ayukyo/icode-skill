@@ -1,11 +1,12 @@
 {
-  "_comment": "tb_watch 定时增量监控配置模板。用法：复制为 ~/.claude/icode_data/tb_watch.json（或任意路径，ctl 用 --config 指定），然后填两处即可：① project_dir=工程根（产物落该工程 .icode_output/）；② projects[].url=TB 项目地址（自动解析 domain+pid）。可选 lib（缺陷库前缀，debug 孪生匹配用）。",
+  "_comment": "tb_watch 定时增量监控配置模板。用法：复制为 ~/.claude/icode_data/tb_watch.json（或任意路径，ctl 用 --config 指定），然后填两处即可：① project_dir=工程根（产物落该工程 .icode_output/）；② projects[].url=TB 项目地址（自动解析 domain+pid）。可选 lib（缺陷库前缀，debug 孪生匹配用）。mount_required=true 表示 project_dir 必须在网络挂载上（sshfs/gvfs SMB），start 时强制校验，挂载未恢复会拒绝启动，防止在本地空目录生成假的 .icode_output/。",
   "interval": 900,
   "claude_timeout": 6000,
   "claude_skip_permissions": true,
   "low_priority": true,
   "claude_context_window": 256000,
   "project_dir": "/绝对路径/到/工程根",
+  "mount_required": false,
   "projects": [
     {
       "url": "https://tb.example.com/project/<项目ID>",

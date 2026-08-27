@@ -47,7 +47,11 @@ DEFAULT_STATUS_NAMES = "打开,未完成"
 # 但实测长上下文触发分类器超时（与会话无关注册/会话关联成本有关），256K 是稳定的甜蜜点。
 # 子进程通过 env CLAUDE_CODE_MAX_CONTEXT_TOKENS 传给 claude，强制上下文窗口硬切到该值。
 DEFAULTS = {"interval": 900, "claude_timeout": 6000, "claude_skip_permissions": False,
-            "low_priority": True, "claude_context_window": 256000}
+            "low_priority": True, "claude_context_window": 256000,
+            "mount_required": False}
+# mount_required: True 时 project_dir 必须在网络挂载上（sshfs/gvfs SMB）。
+# 用于 NAS 工程：防止重启后挂载未恢复时，守护把 project_dir 当成普通本地目录，
+# 在本地空目录上生成假的 .icode_output/ 报告与 debug 工单（与 NAS 真实产物对不上）。
 # probe 单项目拉取超时兜底（网络卡死/挂载慢时防止守护每轮永久挂起变假死）
 PROBE_TIMEOUT = 600
 
@@ -466,21 +470,33 @@ def _mount_fstype(path):
         return ""
 
 
-def _check_mount_health(project_dir):
+def _check_mount_health(project_dir, mount_required=False):
     """探测工程路径所在挂载的健康。返回 (ok, detail) — ok=False 表示挂载不可用/危险，本轮不触发。
 
-    按 project_dir 所在挂载类型（findmnt -T）分流，仅对网络挂载生效，本地目录直接放行：
+    按 project_dir 所在挂载类型（findmnt -T）分流：
+    - mount_required=True（配置声明工程路径必须在网络挂载上）：当前不在网络挂载
+      （挂载丢失 → 退化成普通本地目录 / 路径不存在）→ 硬故障 hard=True，调用方应连检测/写报告
+      都跳过——否则会在本地假目录上生成 .icode_output 假数据（与 NAS 真实产物对不上）
     - gvfs SMB（fuse.gvfsd-fuse 且路径含 smb-share:）：挂载端点 + gvfsd-smb fd 占比；
       fd 危险（占比达阈值）→ danger=True，main_loop 会 recycle 替代进程（防 SMB 单点 fd 累积拖垮挂载）
     - sshfs（fuse.sshfs）：挂载可访问性（statvfs）；断线/未挂载 → ok=False（本轮跳过触发，不计退避）
-    - 本地目录 / 其它：直接放行 (True)——避免误伤正在用的挂载，也避免无网络挂载时被"跳过触发"卡死
+    - 本地目录 / 其它（且未要求挂载）：直接放行 (True)——避免误伤正在用的挂载，
+      也避免无网络挂载时被"跳过触发"卡死
     """
-    info = {"fstype": "", "mount_ok": True, "gvfsd_smb_fd": 0, "file_max": 0, "danger": False, "error": ""}
+    info = {"fstype": "", "mount_ok": True, "gvfsd_smb_fd": 0, "file_max": 0,
+            "danger": False, "hard": False, "error": ""}
     gvfs_root = f"/run/user/{os.getuid()}/gvfs"
     fstype = _mount_fstype(project_dir)
     info["fstype"] = fstype
     is_gvfs_smb = f"{gvfs_root}/smb-share:" in project_dir
     is_sshfs = fstype == "fuse.sshfs"
+    if mount_required and not (is_gvfs_smb or is_sshfs):
+        # 配置声明必须网络挂载，但当前路径不在网络挂载上（挂载丢失 → 本地目录 / 路径不存在）
+        info["mount_ok"] = False
+        info["danger"] = True
+        info["hard"] = True
+        info["error"] = f"mount_required=true 但路径不在网络挂载上（fstype={fstype or '无挂载'}）"
+        return False, info
     if not (is_gvfs_smb or is_sshfs):
         return True, info
     if is_sshfs:
@@ -678,6 +694,19 @@ def main_loop(cfg, once=False):
             break
         round_no += 1
         stamp = time.strftime("%Y-%m-%d %H:%M:%S")
+        # mount_required 硬门：配置声明工程路径必须在网络挂载上；若当前挂载缺失
+        # （路径退化成普通本地目录），本轮整体跳过——不检测、不写报告、不触发，
+        # 防止在本地假目录上生成 .icode_output 假数据（与 NAS 真实产物对不上）。
+        # start 时 ctl 已有同款前置检查；此处兜底覆盖"启动后挂载中途丢失/重启后未恢复"场景。
+        if cfg.get("mount_required"):
+            _mok, _minfo = _check_mount_health(cfg["project_dir"], mount_required=True)
+            if not _mok:
+                print(f"[{stamp}] round#{round_no} 挂载未就绪（mount_required）：{_minfo['error']}，本轮跳过（不检测/不写报告/不触发）")
+                _append_log(log_file, f"[{stamp}] round#{round_no} 挂载未就绪（mount_required）：{_minfo['error']}，本轮跳过")
+                if once:
+                    break
+                _interruptible_sleep(cfg["interval"])
+                continue
         print(f"[{stamp}] round#{round_no} 开始检测（{len(cfg['projects'])} 项目）...")
         results = []
         try:
@@ -710,7 +739,7 @@ def main_loop(cfg, once=False):
         try:
             if candidates and not cfg.get("detect_only"):
                 # 挂载健康兜底：按工程路径所在挂载类型（SMB/sshfs）检查，不可用或危险 → 本轮不触发
-                mount_ok, mount_info = _check_mount_health(cfg["project_dir"])
+                mount_ok, mount_info = _check_mount_health(cfg["project_dir"], cfg.get("mount_required", False))
                 if not mount_ok:
                     print(f"[{stamp}] round#{round_no} 挂载健康异常：{mount_info}，本轮不触发")
                     _append_log(log_file, f"[{stamp}] round#{round_no} 挂载健康异常：{mount_info}，本轮不触发")

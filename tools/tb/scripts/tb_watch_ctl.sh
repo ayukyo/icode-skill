@@ -121,6 +121,37 @@ ip_change_note() {
   return 0
 }
 
+# 从配置读 mount_required（True=project_dir 必须在网络挂载上），返回 "true" 或 ""
+mount_required_of() {
+  python3 - "$CFG" <<'PY'
+import json, sys
+try:
+    print("true" if json.load(open(sys.argv[1])).get("mount_required") else "")
+except Exception:
+    print("")
+PY
+}
+
+# 校验工程路径位于网络挂载（sshfs 或 gvfs SMB）。就绪返回 0，否则返回 1 并打印原因。
+# 用于 start 前置检查：mount_required=true 时，若挂载未恢复（路径退化成普通本地目录），
+# 直接拒绝启动——防止守护在本地空目录上生成假的 .icode_output/（与 NAS 真实产物对不上）。
+mount_ready() {
+  local proj="$1" req ft
+  req=$(mount_required_of)
+  [ "$req" = "true" ] || return 0
+  ft=$(findmnt -T "$proj" -o FSTYPE -n 2>/dev/null | head -1)
+  case "$ft" in
+    fuse.sshfs) return 0;;
+    fuse.gvfsd-fuse)
+      case "$proj" in *smb-share:*) return 0;; esac
+      ;;
+  esac
+  echo "[tb_watch] 启动中止：配置 mount_required=true，但工程路径不在网络挂载上（当前 fstype=${ft:-无挂载}）"
+  echo "[tb_watch]   工程路径: $proj"
+  echo "[tb_watch]   请先恢复挂载再 start（例如: sshfs ... 或 systemctl --user start mnt-zilaiye）"
+  return 1
+}
+
 case "$CMD" in
   start)
     if [ ! -f "$CFG" ]; then
@@ -138,6 +169,10 @@ case "$CMD" in
     fi
     # 防多实例（python 层另有 flock 单实例兜底）：在跑则提示退出，残留 pid 自动清理
     if [ -n "${PDIR:-}" ]; then PROJ="$PDIR"; else PROJ="$(project_dir_of)"; fi
+    # 挂载前置检查：mount_required=true 时工程路径必须在网络挂载上，否则拒绝启动（不建假数据）
+    if ! mount_ready "$PROJ"; then
+      exit 1
+    fi
     PIDF="$PROJ/.icode_output/tb_watch/watch.pid"
     if [ -f "$PIDF" ]; then
       DPID=$(cat "$PIDF")
