@@ -142,6 +142,10 @@ python3 tools/tb/scripts/tb_pull.py --pid <URL里的pid> defect <LIB>-<NUM> --ou
   **gvfs SMB（`/run/user/<uid>/gvfs/smb-share:`）、sshfs 挂载（如 `~/mnt/<share>`）与本地目录工程均支持**——
   挂载健康检查按工程路径所在挂载类型（`findmnt -T`）分流：gvfs SMB 检查挂载端点 + gvfsd-smb fd/recycle
   （防 fd 累积拖垮挂载），sshfs 探测挂载可访问性（断线本轮跳过触发、不计退避），本地目录自动放行。
+  **NAS/网络工程建议设 `"mount_required": true`**：强制 project_dir 必须在网络挂载（sshfs/gvfs SMB）上——
+  `ctl start` 启动前检查，挂载未恢复（如重启后挂载未自动拉起、路径退化成普通本地目录）会**拒绝启动**；
+  守护运行中若挂载丢失也每轮跳过（不检测/不写报告/不触发），防止在本地空目录生成假的 `.icode_output/`
+  （与 NAS 真实产物对不上）。纯本地目录工程不设即可（保持自动放行）。
   配了之后 `tb_watch_ctl.sh start/stop/status` 免传 `--project-dir`
 - `claude_skip_permissions`：true 时给 claude 加 `--dangerously-skip-permissions`（无人值守所需，见风险）
 - `low_priority`：true（默认）时 claude 分析进程**温和降级**（nice 5 + ionice best-effort 最低档 -c 2 -n 7，子进程继承）——
@@ -226,7 +230,7 @@ debug 全量分析**建基线**（每轮一条，按单号倒序），全部建�
 - probe 卡死：单项目拉取超时兜底 `PROBE_TIMEOUT`（600s），超时转检测失败，不会每轮永久挂起
 - claude 分析报错/超时：按"失败/超时"记录，meta 未变下一轮重试；claude 命令不存在/无法启动也按失败记录，不中断守护
 - 写 `watch.log` / 报告失败（挂载断开）：仅降级到 stderr 提示，不抛异常
-- 唯一例外：工程目录在**启动时**不可达（如挂载未就绪）守护起不来——此时 `ctl start` 的 console.log 可见 traceback，属"没起来"而非"运行中断开"，挂载就绪后重新 start 即可
+- 唯一例外：工程目录在**启动时**不可达（如挂载未就绪）守护起不来——`mount_required: true` 时 `ctl start` 会**前置拒绝**并打印"挂载未就绪，请先恢复挂载"（退出码 1，不启动守护）；未设 `mount_required` 时属"没起来"而非"运行中断开"（console.log 可见 traceback），挂载就绪后重新 start 即可
 
 **演练 / 人工确认**：`--once --detect-only` 只跑一轮、只检测写报告、不触发 claude。
 

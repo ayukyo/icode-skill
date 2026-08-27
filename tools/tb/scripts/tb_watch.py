@@ -822,6 +822,16 @@ def main():
     if args.stop:
         return stop_daemon(cfg)
 
+    # mount_required 启动硬门：配置声明工程路径必须在网络挂载上；挂载缺失时拒绝启动，
+    # 不写 pid / 不建任何本地目录（防重启后挂载未恢复时在本地空目录生成假的 .icode_output）。
+    # ctl start 已有同款前置检查（mount_ready），此处兜底覆盖直接 python 运行入口。
+    if cfg.get("mount_required"):
+        _mok, _minfo = _check_mount_health(cfg["project_dir"], mount_required=True)
+        if not _mok:
+            print(f"[tb_watch] 挂载未就绪（mount_required）：{_minfo['error']}，拒绝启动（未写任何目录）",
+                  file=sys.stderr)
+            return 1
+
     cfg["detect_only"] = args.detect_only
     if args.detect_only or args.once:
         main_loop(cfg, once=True)
