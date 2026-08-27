@@ -79,7 +79,10 @@ def load_config(path, cli_args):
     """读配置文件并叠加 CLI 覆盖，返回规范化配置 dict。
 
     配置结构：{"interval": 秒, "claude_timeout": 秒, "claude_skip_permissions": bool,
-              "project_dir": 工程根, "projects": [{"url"/"pid"/"domain"/"lib"/"status_names"}...]}
+              "projects": [{"url"/"pid"/"domain"/"lib"/"status_names"/"project_dir"/"mount_required"}...]}
+    规范写法：**每个 project 都写自己的 project_dir**（工程根，产物落该工程 .icode_output/）。
+    顶层 project_dir 为可选（仅作全局运行时锚点/pid 目录，及单工程旧配置兼容缺省）；
+    未给顶层时全局锚点取第一个 project 的 project_dir。
     """
     if path and os.path.exists(path):
         with open(path) as f:
@@ -97,7 +100,6 @@ def load_config(path, cli_args):
         cfg["claude_context_window"] = cli_args.claude_context_window
     if cli_args.project_dir:
         cfg["project_dir"] = cli_args.project_dir
-    cfg.setdefault("project_dir", os.getcwd())
 
     raw_projects = cfg.get("projects")
     if raw_projects:
@@ -110,22 +112,35 @@ def load_config(path, cli_args):
                 "pid": p.get("pid") or url_pid,
                 "lib": p.get("lib", ""),
                 "status_names": p.get("status_names", DEFAULT_STATUS_NAMES),
+                # 多工程支持：每项目带自己的工程根（规范写法，缺省继承顶层 project_dir 作旧兼容）。
+                # 一份配置可列多个工程，一个守护进程每轮遍历全部工程（各自 probe/报告/debug 工单
+                # 落各自工程 .icode_output/，减少守护进程数 = 减性能消耗）。
+                "project_dir": p.get("project_dir") or cfg.get("project_dir"),
+                # mount_required 每项目可覆盖（缺省继承顶层）：该工程路径必须在网络挂载上
+                "mount_required": p.get("mount_required", cfg.get("mount_required", False)),
             }
             if not proj["domain"] or not proj["pid"]:
                 raise ValueError(f"项目配置缺 domain/pid：{p}")
+            if not proj["project_dir"]:
+                raise ValueError(f"项目配置缺 project_dir（应在该项或顶层给工程根）：{p}")
             projects.append(proj)
     elif cli_args.pid:
-        # 单项目快捷（兼容旧用法）：--domain --pid [--lib]
+        # 单项目快捷（兼容旧用法）：--domain --pid [--lib]；工程根 = --project-dir 或 cwd
+        cfg.setdefault("project_dir", os.getcwd())
         projects = [{
             "url": "",
             "domain": cli_args.domain or "",
             "pid": cli_args.pid,
             "lib": cli_args.lib or "",
             "status_names": DEFAULT_STATUS_NAMES,
+            "project_dir": cfg["project_dir"],
+            "mount_required": cfg.get("mount_required", False),
         }]
     else:
         raise ValueError("既无配置 projects 也无 --pid，无法检测（--config 或 --domain+--pid 至少给一个）")
     cfg["projects"] = projects
+    # 全局运行时锚点（pid/lock/watch 目录）：顶层给了用顶层，否则用第一个工程
+    cfg.setdefault("project_dir", projects[0]["project_dir"])
     return cfg
 
 
@@ -366,38 +381,50 @@ def detect_project(project_dir, proj, watch_dir):
 # 报告（检索列表，落工程 .icode_output/）
 # ---------------------------------------------------------------------------
 def write_report(cfg, results):
-    """生成"打开/未完成单 + 分析最新状态"检索报告，覆盖写 {工程}/.icode_output/tb_watch_report.md。"""
+    """按工程根分组生成"打开/未完成单 + 分析最新状态"报告。
+
+    多工程支持：一份配置可列多个工程（每个 project 带自己的 project_dir），
+    每个工程一份报告，覆盖写各自 {工程}/.icode_output/tb_watch_report.md。
+    返回写出的报告路径 list。
+    """
     stamp = time.strftime("%Y-%m-%d %H:%M:%S")
-    lines = [f"# tb_watch 检索报告（打开/未完成单 · 分析最新状态）",
-             "",
-             f"- 生成时间：{stamp} | 轮询间隔：{cfg['interval']}s",
-             f"- 工程根：{cfg['project_dir']} | 项目数：{len(cfg['projects'])}",
-             "- 分析状态：**需增量**=有新增内容待 claude debug 增量分析；**无更新**=debug 孪生比对一致；**待新建**=尚无 debug 孪生（自动触发 debug 分析建基线，每轮一条）；**中断续跑**=该单有上次超时遗留的半成品 debug 工单（附件已下载），复用续跑完成基线",
-             ""]
+    # 按 project_dir 分组：同工程根的多个 TB 项目合并进同一份报告
+    groups = {}
     for proj, res in zip(cfg["projects"], results):
-        lines.append(f"## {proj['url'] or proj['domain'] + '/project/' + proj['pid']}")
-        lines.append(f"- 状态集合：{proj['status_names']} | 枚举 {len(res['probe'])} 单（按单号倒序）")
-        lines.append("")
-        lines.append("| 单号 | 状态 | 标题 | 评论 | 附件 | 分析状态 | debug 工单 |")
-        lines.append("|------|------|------|------|------|----------|-----------|")
-        for num, label, it, wdir, reason, mp in res["need_incremental"]:
-            lines.append(f"| {label} | {it.get('status')} | {str(it.get('title') or '')[:30]} | "
-                         f"{it.get('comments_count') or len(it.get('comments') or [])} | {len(it.get('files') or [])} | "
-                         f"需增量({reason}) | {os.path.basename(wdir)} |")
-        for num, label, it, wdir, reason, mp in res["pending_new"]:
-            lines.append(f"| {label} | {it.get('status')} | {str(it.get('title') or '')[:30]} | "
-                         f"{it.get('comments_count') or len(it.get('comments') or [])} | {len(it.get('files') or [])} | "
-                         f"待新建·建基线 | - |")
-        for num, label, it, wdir, reason, mp in res["no_update"]:
-            lines.append(f"| {label} | {it.get('status')} | {str(it.get('title') or '')[:30]} | "
-                         f"{it.get('comments_count') or len(it.get('comments') or [])} | {len(it.get('files') or [])} | "
-                         f"无更新 | {os.path.basename(wdir)} |")
-        lines.append("")
-    report_path = os.path.join(cfg["project_dir"], ".icode_output", "tb_watch_report.md")
-    os.makedirs(os.path.dirname(report_path), exist_ok=True)
-    with open(report_path, "w") as f:
-        f.write("\n".join(lines))
-    return report_path
+        groups.setdefault(proj["project_dir"], []).append((proj, res))
+    written = []
+    for project_dir, pairs in groups.items():
+        lines = [f"# tb_watch 检索报告（打开/未完成单 · 分析最新状态）",
+                 "",
+                 f"- 生成时间：{stamp} | 轮询间隔：{cfg['interval']}s",
+                 f"- 工程根：{project_dir} | 项目数：{len(pairs)}",
+                 "- 分析状态：**需增量**=有新增内容待 claude debug 增量分析；**无更新**=debug 孪生比对一致；**待新建**=尚无 debug 孪生（自动触发 debug 分析建基线，每轮一条）；**中断续跑**=该单有上次超时遗留的半成品 debug 工单（附件已下载），复用续跑完成基线",
+                 ""]
+        for proj, res in pairs:
+            lines.append(f"## {proj['url'] or proj['domain'] + '/project/' + proj['pid']}")
+            lines.append(f"- 状态集合：{proj['status_names']} | 枚举 {len(res['probe'])} 单（按单号倒序）")
+            lines.append("")
+            lines.append("| 单号 | 状态 | 标题 | 评论 | 附件 | 分析状态 | debug 工单 |")
+            lines.append("|------|------|------|------|------|----------|-----------|")
+            for num, label, it, wdir, reason, mp in res["need_incremental"]:
+                lines.append(f"| {label} | {it.get('status')} | {str(it.get('title') or '')[:30]} | "
+                             f"{it.get('comments_count') or len(it.get('comments') or [])} | {len(it.get('files') or [])} | "
+                             f"需增量({reason}) | {os.path.basename(wdir)} |")
+            for num, label, it, wdir, reason, mp in res["pending_new"]:
+                lines.append(f"| {label} | {it.get('status')} | {str(it.get('title') or '')[:30]} | "
+                             f"{it.get('comments_count') or len(it.get('comments') or [])} | {len(it.get('files') or [])} | "
+                             f"待新建·建基线 | - |")
+            for num, label, it, wdir, reason, mp in res["no_update"]:
+                lines.append(f"| {label} | {it.get('status')} | {str(it.get('title') or '')[:30]} | "
+                             f"{it.get('comments_count') or len(it.get('comments') or [])} | {len(it.get('files') or [])} | "
+                             f"无更新 | {os.path.basename(wdir)} |")
+            lines.append("")
+        report_path = os.path.join(project_dir, ".icode_output", "tb_watch_report.md")
+        os.makedirs(os.path.dirname(report_path), exist_ok=True)
+        with open(report_path, "w") as f:
+            f.write("\n".join(lines))
+        written.append(report_path)
+    return written
 
 
 # ---------------------------------------------------------------------------
@@ -577,10 +604,13 @@ def _recycle_gvfsd_smb():
 
 
 def trigger_claude(cfg, proj, num, label, reason):
-    """拉起 claude -p 无头会话执行该单 debug 增量分析，返回 (rc, 耗时秒)。"""
+    """拉起 claude -p 无头会话执行该单 debug 增量分析，返回 (rc, 耗时秒)。
+
+    cwd/prompt 用该项目的工程根（proj["project_dir"]）：多工程时每个项目产物落各自工程 .icode_output/。
+    """
     prompt = PROMPT_TMPL.format(lib=proj["lib"] or "(未知，按 pid 匹配)", num=num, label=label,
                                 domain=proj["domain"], pid=proj["pid"],
-                                project_dir=cfg["project_dir"], reason=reason)
+                                project_dir=proj["project_dir"], reason=reason)
     cmd = [cfg.get("claude_cmd", "claude"), "-p", prompt]
     if cfg.get("claude_skip_permissions"):
         cmd.append("--dangerously-skip-permissions")
@@ -595,9 +625,9 @@ def trigger_claude(cfg, proj, num, label, reason):
     if ctx_window:
         sub_env["CLAUDE_CODE_MAX_CONTEXT_TOKENS"] = str(ctx_window)
     try:
-        # cwd 强制 = 工程根：claude 的 /icode log --debug 在该目录运行，产物才落 {工程}/.icode_output/.debug/
+        # cwd 强制 = 该项目的工程根：claude 的 /icode log --debug 在该目录运行，产物才落 {工程}/.icode_output/.debug/
         proc = subprocess.run(cmd, timeout=cfg["claude_timeout"], capture_output=True, text=True,
-                              cwd=cfg["project_dir"], preexec_fn=preexec, env=sub_env)
+                              cwd=proj["project_dir"], preexec_fn=preexec, env=sub_env)
         rc, timed_out = proc.returncode, False
     except subprocess.TimeoutExpired:
         rc, timed_out = 124, True
@@ -614,13 +644,17 @@ def trigger_claude(cfg, proj, num, label, reason):
 # ---------------------------------------------------------------------------
 # 主循环 / 启动停止
 # ---------------------------------------------------------------------------
-def watch_dir_of(cfg):
-    """watch 运行目录（日志/pid/probe 中间产物），放工程 .icode_output/tb_watch/ 下。"""
-    return os.path.join(cfg["project_dir"], ".icode_output", "tb_watch")
+def watch_dir_of(project_dir):
+    """watch 运行目录（日志/pid/probe 中间产物），放工程 .icode_output/tb_watch/ 下。
+
+    多工程：每工程各自的 watch 目录（probe 中间产物/watch.log 落各自工程），
+    全局锁/pid 仍用顶层 cfg["project_dir"]（单守护 = 单锁单 pid）。
+    """
+    return os.path.join(project_dir, ".icode_output", "tb_watch")
 
 
 def acquire_lock(cfg):
-    watch_dir = watch_dir_of(cfg)
+    watch_dir = watch_dir_of(cfg["project_dir"])
     os.makedirs(watch_dir, exist_ok=True)
     lock_path = os.path.join(watch_dir, ".watch.lock")
     fh = open(lock_path, "w")
@@ -633,7 +667,7 @@ def acquire_lock(cfg):
 
 
 def write_pid(cfg):
-    watch_dir = watch_dir_of(cfg)
+    watch_dir = watch_dir_of(cfg["project_dir"])
     with open(os.path.join(watch_dir, "watch.pid"), "w") as f:
         f.write(str(os.getpid()))
     print(f"[pid] {os.getpid()} 已写入 {os.path.join(watch_dir, 'watch.pid')}")
@@ -641,7 +675,7 @@ def write_pid(cfg):
 
 def stop_daemon(cfg):
     """--stop：读 pid 文件 SIGTERM 优雅停止常驻 watch。"""
-    watch_dir = watch_dir_of(cfg)
+    watch_dir = watch_dir_of(cfg["project_dir"])
     pid_file = os.path.join(watch_dir, "watch.pid")
     if not os.path.exists(pid_file):
         print(f"无 pid 文件（{pid_file}），没有在跑的 watch。")
@@ -678,15 +712,66 @@ def _interruptible_sleep(seconds):
         remaining -= step
 
 
+def _all_log_files(cfg):
+    """多工程：每工程各自 watch.log；轮级事件写全部工程（每工程日志完整反映自身轮询状态）。"""
+    logs = []
+    for p in cfg["projects"]:
+        lf = os.path.join(watch_dir_of(p["project_dir"]), "watch.log")
+        os.makedirs(os.path.dirname(lf), exist_ok=True)
+        logs.append(lf)
+    return logs
+
+
+def _append_all(log_files, line):
+    """追加一行到全部工程 watch.log；写失败仅降级，不抛异常。"""
+    for lf in log_files:
+        _append_log(lf, line)
+
+
+def _mount_req_dirs(cfg):
+    """需要 mount_required 硬门的工程根集合（去重；每工程 mount_required 独立）。"""
+    return sorted({p["project_dir"] for p in cfg["projects"] if p.get("mount_required")})
+
+
+def pick_candidate(candidates, last_trigger_dir):
+    """工程间公平轮转：从候选里选本轮要触发分析的一条。
+
+    candidates 为 [(proj, item), ...]，item[0] = TB 单号 int。内部先按单号倒序（同工程内
+    新单优先），再优先选"非上次触发工程"里单号最大的候选——两边都有活时严格 A→B→A→B 轮转；
+    仅单工程/另一边本轮无候选时才回退到上次触发工程（仍取该工程单号最大）。
+    返回 (proj, item, 本轮到次选中的工程根 last_trigger_dir)。
+    约定：调用方保证 candidates 非空。
+    """
+    ordered = sorted(candidates, key=lambda x: x[1][0], reverse=True)
+    proj, item = ordered[0]
+    if last_trigger_dir is not None:
+        for p, it in ordered:
+            if p["project_dir"] != last_trigger_dir:
+                proj, item = p, it
+                break
+    return proj, item, proj["project_dir"]
+
+
 def main_loop(cfg, once=False):
-    """自循环守护：每轮遍历全部项目 -> 检测 -> 取全局第一条需增量 -> 触发 claude -> sleep。"""
-    watch_dir = watch_dir_of(cfg)
-    os.makedirs(watch_dir, exist_ok=True)
-    log_file = os.path.join(watch_dir, "watch.log")
+    """自循环守护：每轮遍历全部工程/项目 -> 检测 -> 触发 claude -> sleep。
+
+    多工程：一份配置可列多个工程（每 project 带自己的 project_dir），单守护每轮遍历全部工程，
+    各自 probe/报告/debug 工单落各自工程 .icode_output/——少起守护进程 = 减性能消耗。
+    触发顺序 = **工程间公平轮转**：两个工程都有候选时严格 A→B→A→B 交替（同工程内按单号倒序
+    新单优先）；仅一个工程有候选时集中处理那个工程，不因轮转而空等。
+    """
+    # 全局锁/pid 用顶层工程（单守护单锁单 pid）；每工程 watch.log/probe 落各自工程
+    top_watch_dir = watch_dir_of(cfg["project_dir"])
+    os.makedirs(top_watch_dir, exist_ok=True)
+    log_files = _all_log_files(cfg)
+    project_dirs = sorted({p["project_dir"] for p in cfg["projects"]})
     round_no = 0
     # 连续"快速失败"计数（<600s 的触发失败 = 疑似连接/环境故障，如 API Connection refused）。
     # >=3 时退避：跳过触发 claude（检测/报告照常），直到某单触发成功才清零——防网关故障期每轮空转启动 claude。
     _trigger_fail_streak = 0
+    # 工程间公平轮转游标：上次触发的是哪个工程根（None = 首次，直接取全局单号最大）。
+    # 两个工程都有候选时，下轮优先从"另一个工程"里挑单号最大的，实现 A→B→A→B 严格交替。
+    last_trigger_dir = None
     while True:
         # 顶部统一检查退出标志：检测失败分支的 continue / sleep 被信号中断后
         # 都会回到这里，确保 SIGTERM(优雅 stop) 在任何路径下都能让守护退出
@@ -694,71 +779,79 @@ def main_loop(cfg, once=False):
             break
         round_no += 1
         stamp = time.strftime("%Y-%m-%d %H:%M:%S")
-        # mount_required 硬门：配置声明工程路径必须在网络挂载上；若当前挂载缺失
-        # （路径退化成普通本地目录），本轮整体跳过——不检测、不写报告、不触发，
+        # mount_required 硬门（多工程逐工程独立）：配置声明某工程路径必须在网络挂载上；
+        # 若当前挂载缺失（路径退化成普通本地目录），本轮整体跳过——不检测、不写报告、不触发，
         # 防止在本地假目录上生成 .icode_output 假数据（与 NAS 真实产物对不上）。
         # start 时 ctl 已有同款前置检查；此处兜底覆盖"启动后挂载中途丢失/重启后未恢复"场景。
-        if cfg.get("mount_required"):
-            _mok, _minfo = _check_mount_health(cfg["project_dir"], mount_required=True)
+        mount_bad = []
+        for pd in _mount_req_dirs(cfg):
+            _mok, _minfo = _check_mount_health(pd, mount_required=True)
             if not _mok:
-                print(f"[{stamp}] round#{round_no} 挂载未就绪（mount_required）：{_minfo['error']}，本轮跳过（不检测/不写报告/不触发）")
-                _append_log(log_file, f"[{stamp}] round#{round_no} 挂载未就绪（mount_required）：{_minfo['error']}，本轮跳过")
-                if once:
-                    break
-                _interruptible_sleep(cfg["interval"])
-                continue
-        print(f"[{stamp}] round#{round_no} 开始检测（{len(cfg['projects'])} 项目）...")
+                mount_bad.append(f"{pd}（{_minfo['error']}）")
+        if mount_bad:
+            msg = f"[{stamp}] round#{round_no} 挂载未就绪（mount_required）：{'；'.join(mount_bad)}，本轮跳过（不检测/不写报告/不触发）"
+            print(msg)
+            _append_all(log_files, msg)
+            if once:
+                break
+            _interruptible_sleep(cfg["interval"])
+            continue
+        print(f"[{stamp}] round#{round_no} 开始检测（{len(cfg['projects'])} 项目 / {len(project_dirs)} 工程）...")
         results = []
         try:
             for proj in cfg["projects"]:
-                res = detect_project(cfg["project_dir"], proj, watch_dir)
+                res = detect_project(proj["project_dir"], proj, watch_dir_of(proj["project_dir"]))
                 results.append(res)
         except Exception as e:
             # 网络异常/probe 超时/挂载断开等单轮检测失败：记日志后下一轮重试，绝不杀守护
             print(f"[{stamp}] round#{round_no} 检测失败：{e}", file=sys.stderr)
-            _append_log(log_file, f"[{stamp}] round#{round_no} 检测失败：{e}")
+            _append_all(log_files, f"[{stamp}] round#{round_no} 检测失败：{e}")
             if once:
                 break
             _interruptible_sleep(cfg["interval"])
             continue
 
         try:
-            report_path = write_report(cfg, results)
-            print(f"[{stamp}] round#{round_no} 报告已写：{report_path}")
+            report_paths = write_report(cfg, results)
+            print(f"[{stamp}] round#{round_no} 报告已写：{'、'.join(report_paths)}")
         except Exception as e:
-            # 报告落工程 .icode_output/，挂载断开等写失败不崩守护，仅降级提示
+            # 报告落各工程 .icode_output/，挂载断开等写失败不崩守护，仅降级提示
             print(f"[{stamp}] round#{round_no} 报告写入失败：{e}", file=sys.stderr)
-            _append_log(log_file, f"[{stamp}] round#{round_no} 报告写入失败：{e}")
+            _append_all(log_files, f"[{stamp}] round#{round_no} 报告写入失败：{e}")
 
-        # 候选 = 需增量 + 待新建（待新建自动建 debug 基线），跨项目合并按单号倒序取单号最大的一条
+        # 候选 = 需增量 + 待新建（待新建自动建 debug 基线），跨工程合并
         candidates = []
         for proj, res in zip(cfg["projects"], results):
             for item in res["need_incremental"] + res["pending_new"]:
                 candidates.append((proj, item))
-        candidates.sort(key=lambda x: x[1][0], reverse=True)
         try:
             if candidates and not cfg.get("detect_only"):
-                # 挂载健康兜底：按工程路径所在挂载类型（SMB/sshfs）检查，不可用或危险 → 本轮不触发
-                mount_ok, mount_info = _check_mount_health(cfg["project_dir"], cfg.get("mount_required", False))
+                # 工程间公平轮转：优先选"非上次触发工程"里单号最大的候选，两边都有活时
+                # 严格 A→B→A→B；仅单工程/另一边无候选才回退上次工程（同工程内仍按单号倒序）。
+                proj, chosen, last_trigger_dir = pick_candidate(candidates, last_trigger_dir)
+                num, label, _it, _wdir, reason, _mp = chosen
+                proj_log = os.path.join(watch_dir_of(proj["project_dir"]), "watch.log")
+                print(f"[{stamp}] round#{round_no} 轮转选中 工程={proj['project_dir']} 单号={num} {label}（{reason}）")
+                # 挂载健康兜底：按该候选工程路径所在挂载类型（SMB/sshfs）检查，不可用或危险 → 本轮不触发
+                mount_ok, mount_info = _check_mount_health(proj["project_dir"], proj.get("mount_required", False))
                 if not mount_ok:
                     print(f"[{stamp}] round#{round_no} 挂载健康异常：{mount_info}，本轮不触发")
-                    _append_log(log_file, f"[{stamp}] round#{round_no} 挂载健康异常：{mount_info}，本轮不触发")
+                    _append_log(proj_log, f"[{stamp}] round#{round_no} 挂载健康异常：{mount_info}，本轮不触发")
                     if mount_info.get("mount_ok"):
                         # 仅 fd 危险（gvfs SMB 挂载端点还活着）才 recycle 进程；挂载已断 recycle 无意义
                         rec_ok, rec_msg = _recycle_gvfsd_smb()
                         print(f"[{stamp}] round#{round_no} recycle gvfsd-smb：{rec_ok} {rec_msg}")
-                        _append_log(log_file, f"[{stamp}] round#{round_no} recycle gvfsd-smb：{rec_ok} {rec_msg}")
+                        _append_log(proj_log, f"[{stamp}] round#{round_no} recycle gvfsd-smb：{rec_ok} {rec_msg}")
                     # 无论 recycle 是否成功，本轮不再触发 claude（避免 claude 满血 IO 把脆弱的挂载再次拖垮）
                 if _trigger_fail_streak >= 3:
                     # 退避：连续快速失败（疑似网关/环境故障），本轮跳过触发；检测/报告照常，成功一次即清零
-                    print(f"[{stamp}] round#{round_no} 触发连续快速失败 {_trigger_fail_streak} 次，本轮跳过触发（退避，疑似网关/环境故障），候选 {candidates[0][1][1]}")
-                    _append_log(log_file, f"[{stamp}] round#{round_no} 触发连续快速失败 {_trigger_fail_streak} 次，跳过触发（退避），候选 {candidates[0][1][1]}")
+                    print(f"[{stamp}] round#{round_no} 触发连续快速失败 {_trigger_fail_streak} 次，本轮跳过触发（退避，疑似网关/环境故障），候选 {label}")
+                    _append_log(proj_log, f"[{stamp}] round#{round_no} 触发连续快速失败 {_trigger_fail_streak} 次，跳过触发（退避），候选 {label}")
                 elif not mount_ok:
                     # 挂载异常已记日志（上行），本轮不触发但也不计入退避（环境问题非网关问题）
-                    print(f"[{stamp}] round#{round_no} 挂载健康异常，本轮跳过触发，候选 {candidates[0][1][1]}")
-                    _append_log(log_file, f"[{stamp}] round#{round_no} 挂载健康异常，本轮跳过触发（不计退避），候选 {candidates[0][1][1]}")
+                    print(f"[{stamp}] round#{round_no} 挂载健康异常，本轮跳过触发，候选 {label}")
+                    _append_log(proj_log, f"[{stamp}] round#{round_no} 挂载健康异常，本轮跳过触发（不计退避），候选 {label}")
                 else:
-                    proj, (num, label, _it, _wdir, reason, _mp) = candidates[0]
                     rc, cost = trigger_claude(cfg, proj, num, label, reason)
                     if rc == 0:
                         _trigger_fail_streak = 0
@@ -767,20 +860,20 @@ def main_loop(cfg, once=False):
                         _trigger_fail_streak += 1
                     # >=600s 的失败（任务太重超时等）不计入退避——由"中断半成品续跑"兜底，不误伤
                     detail = f"，快速失败连续{_trigger_fail_streak}次" if (rc != 0 and cost < 600) else ""
-                    _append_log(log_file, f"[{stamp}] round#{round_no} 触发 {label}（{reason}）：{'成功' if rc == 0 else '失败/超时'}，耗时{cost}s{detail}")
+                    _append_log(proj_log, f"[{stamp}] round#{round_no} 触发 {label}（{reason}）：{'成功' if rc == 0 else '失败/超时'}，耗时{cost}s{detail}")
                     # 触发分析完成后立即刷新检索报告：该单刚建基线/完成增量，report 若仍标"待新建"
                     # 会误导（须等下一轮才反映）。先等挂载缓存刷新（网络挂载对刚写入的 metadata
                     # 可能有目录缓存延迟），再重 probe 重判重写；刷新失败不崩守护（下轮自然刷新兜底）。
                     try:
                         time.sleep(3)
-                        fresh = [detect_project(cfg["project_dir"], p, watch_dir) for p in cfg["projects"]]
+                        fresh = [detect_project(p["project_dir"], p, watch_dir_of(p["project_dir"])) for p in cfg["projects"]]
                         write_report(cfg, fresh)
                         print(f"[{stamp}] round#{round_no} 分析完成，report 已刷新")
-                        _append_log(log_file, f"[{stamp}] round#{round_no} 分析完成，report 已刷新")
+                        _append_log(proj_log, f"[{stamp}] round#{round_no} 分析完成，report 已刷新")
                     except Exception as e:
                         # 刷新失败不崩守护（下轮自然刷新兜底），但须留痕 watch.log 便于追溯
                         print(f"[{stamp}] round#{round_no} 触发后 report 刷新失败：{e}", file=sys.stderr)
-                        _append_log(log_file, f"[{stamp}] round#{round_no} 触发后 report 刷新失败：{e}")
+                        _append_log(proj_log, f"[{stamp}] round#{round_no} 触发后 report 刷新失败：{e}")
             elif candidates:
                 print(f"[{stamp}] round#{round_no} (detect-only) 候选 {candidates[0][1][1]}，未触发 claude")
             else:
@@ -788,7 +881,7 @@ def main_loop(cfg, once=False):
         except Exception as e:
             # 触发 claude 意外异常（含写 watch.log 失败）不崩守护，仅降级提示
             print(f"[{stamp}] round#{round_no} 触发/记录失败：{e}", file=sys.stderr)
-            _append_log(log_file, f"[{stamp}] round#{round_no} 触发/记录失败：{e}")
+            _append_all(log_files, f"[{stamp}] round#{round_no} 触发/记录失败：{e}")
 
         if once or _STOP:
             break
@@ -822,15 +915,19 @@ def main():
     if args.stop:
         return stop_daemon(cfg)
 
-    # mount_required 启动硬门：配置声明工程路径必须在网络挂载上；挂载缺失时拒绝启动，
-    # 不写 pid / 不建任何本地目录（防重启后挂载未恢复时在本地空目录生成假的 .icode_output）。
+    # mount_required 启动硬门（多工程逐工程独立）：任一声明必须在网络挂载上的工程
+    # 当前不在网络挂载上（挂载丢失 → 本地目录/路径不存在）→ 拒绝启动（不写 pid / 不建任何
+    # 本地目录，防重启后挂载未恢复时在本地空目录生成假的 .icode_output）。
     # ctl start 已有同款前置检查（mount_ready），此处兜底覆盖直接 python 运行入口。
-    if cfg.get("mount_required"):
-        _mok, _minfo = _check_mount_health(cfg["project_dir"], mount_required=True)
+    bad_dirs = []
+    for pd in _mount_req_dirs(cfg):
+        _mok, _minfo = _check_mount_health(pd, mount_required=True)
         if not _mok:
-            print(f"[tb_watch] 挂载未就绪（mount_required）：{_minfo['error']}，拒绝启动（未写任何目录）",
-                  file=sys.stderr)
-            return 1
+            bad_dirs.append(f"{pd}（{_minfo['error']}）")
+    if bad_dirs:
+        print(f"[tb_watch] 挂载未就绪（mount_required）：{'；'.join(bad_dirs)}，拒绝启动（未写任何目录）",
+              file=sys.stderr)
+        return 1
 
     cfg["detect_only"] = args.detect_only
     if args.detect_only or args.once:
@@ -842,7 +939,7 @@ def main():
             main_loop(cfg)
         finally:
             fcntl.flock(lock, fcntl.LOCK_UN)
-            pid_file = os.path.join(watch_dir_of(cfg), "watch.pid")
+            pid_file = os.path.join(watch_dir_of(cfg["project_dir"]), "watch.pid")
             if os.path.exists(pid_file):
                 os.remove(pid_file)
 

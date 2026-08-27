@@ -14,9 +14,9 @@
 | `scripts/tb_pull.py` | `list` 列缺陷；`defect <LIB-NUM>` 拉详情+真实评论+下载日志附件，写 `<ID>_meta.json`；`probe` 批量探测（list 全量+每单状态名/评论/附件元数据，不下载附件，按状态名过滤写 probe.json） |
 | `scripts/tb_cookie.py` | 解密 Chrome cookie -> `scripts/.tb_cookie`（也可手动粘贴 cookie） |
 | `scripts/tb_watch.py` | 定时增量监控（自循环守护）：周期 probe 打开/未完成单，按单号倒序检查，发现"有更新"的单自动拉起 claude 无头会话做**完整 `/icode log --debug` 深度分析**（详见下方「定时增量监控」节） |
-| `scripts/tb_watch_ctl.sh` | 守护控制脚本：`start` / `stop` / `stop --force` / `status`（工程路径配在配置 `project_dir` 字段） |
+| `scripts/tb_watch_ctl.sh` | 守护控制脚本：`start` / `stop` / `stop --force` / `status`（工程路径配在配置 `projects[].project_dir` 字段，顶层可省） |
 | `config.example.json` | tb_pull 配置模板（占位）。复制为 `config.json` 后填真实项目 |
-| `tb_watch.config.example.json` | **tb_watch 配置模板（占位）**。复制为 `~/.claude/icode_data/tb_watch.json` 后填 `project_dir` + 项目 url |
+| `tb_watch.config.example.json` | **tb_watch 配置模板（占位）**。复制为 `~/.claude/icode_data/tb_watch.json` 后填各 `projects[].project_dir` + 项目 url |
 
 ## 依赖
 
@@ -138,11 +138,12 @@ python3 tools/tb/scripts/tb_pull.py --pid <URL里的pid> defect <LIB>-<NUM> --ou
   上限（**适配 AI 模型兼容性**：深层架构类模型长上下文触发分类器超时是实测根因，256K 是稳定的甜蜜点）。
   与 `settings.json` 的 `CLAUDE_CODE_AUTO_COMPACT_WINDOW`（自动压缩阈值）**不冲突**——后者管"什么时候开始压缩"，
   本字段管"上下文窗口硬上限"；二者独立。CPU/GPU 资源紧张时可调更小（如 128000），充足时可保留默认。
-- `project_dir`：工程根（可选，报告与 debug 工单落点 `{工程}/.icode_output/`；默认 = 启动时 cwd）。
+- `project_dir`：工程根（可选，全局运行时锚点 + 旧配置缺省；**规范写法是不写顶层、每个 project 写自己的
+  `project_dir`**）。报告与 debug 工单落点 = 各工程 `{工程}/.icode_output/`。
   **gvfs SMB（`/run/user/<uid>/gvfs/smb-share:`）、sshfs 挂载（如 `~/mnt/<share>`）与本地目录工程均支持**——
   挂载健康检查按工程路径所在挂载类型（`findmnt -T`）分流：gvfs SMB 检查挂载端点 + gvfsd-smb fd/recycle
   （防 fd 累积拖垮挂载），sshfs 探测挂载可访问性（断线本轮跳过触发、不计退避），本地目录自动放行。
-  **NAS/网络工程建议设 `"mount_required": true`**：强制 project_dir 必须在网络挂载（sshfs/gvfs SMB）上——
+  **NAS/网络工程建议设 `"mount_required": true`**：强制该工程路径必须在网络挂载（sshfs/gvfs SMB）上——
   `ctl start` 启动前检查，挂载未恢复（如重启后挂载未自动拉起、路径退化成普通本地目录）会**拒绝启动**；
   守护运行中若挂载丢失也每轮跳过（不检测/不写报告/不触发），防止在本地空目录生成假的 `.icode_output/`
   （与 NAS 真实产物对不上）。纯本地目录工程不设即可（保持自动放行）。
@@ -152,8 +153,26 @@ python3 tools/tb/scripts/tb_pull.py --pid <URL里的pid> defect <LIB>-<NUM> --ou
   比默认优先级低、不抢交互操作，但不会被完全饿死（不用激进 idle：idle 类 IO 只在系统无其它 IO 时才执行，
   实测会饿死远程挂载（SMB/sshfs）下载/解压/抽帧拖到超时）；false 完全关闭降级。配合"每轮只跑 1 个、串行、分析完才下一轮"，
   **同一时刻最多 1 个 claude 分析进程，不会并发堆叠**
-- 每项目：`url`（必填，自动解析 domain+pid）、`lib`（可选，缺陷库前缀，用于 debug 孪生匹配）、
-  `status_names`（可选，默认 `打开,未完成`）
+- 每项目：`project_dir`（**必填**，该 TB 项目所属工程根，报告/debug 工单落 `{该工程}/.icode_output/`）、
+  `url`（必填，自动解析 domain+pid）、`lib`（可选，缺陷库前缀，用于 debug 孪生匹配）、
+  `status_names`（可选，默认 `打开,未完成`）、`mount_required`（可选，缺省继承顶层）
+- **多工程（一份配置 · 一个守护进程）**：一份配置的 `projects[]` 可列**多个工程**——每个 project 写自己的
+  `project_dir`（可再覆盖 `mount_required`），**一个守护进程每轮遍历全部工程**，各自 probe/watch.log/报告/
+  debug 工单落各自工程 `.icode_output/`（报告按工程分组各写一份），少起守护进程 = 减性能消耗。
+  ```json
+  {
+    "interval": 900,
+    "claude_timeout": 6000,
+    "projects": [
+      {"project_dir": "/绝对路径/工程A", "url": "https://tb.example.com/project/<A的ID>",
+       "lib": "DEMO", "mount_required": true},
+      {"project_dir": "/绝对路径/工程B", "url": "https://tb.example.com/project/<B的ID>"}
+    ],
+    "web": {"enable": true, "host": "0.0.0.0", "port": 8000}
+  }
+  ```
+  顶层 `project_dir`/`mount_required` 可省（给了做全局缺省，旧配置向后兼容）；单工程配置每个 project
+  也要写自己的 `project_dir`。
 - `web`：**网页只读查看服务**（可选，缺省 = 启用）。`start` 会自动拉起、`stop`/`stop --force` 一并停止，
   `status` 一并显示。根目录 = `{工程}/.icode_output/`，`.md` 自动渲染成 HTML（`text/html; charset=utf-8`，
   根治浏览器把 md 当错误编码显示的乱码），其它文件可下载，严格只读（GET/HEAD 之外一律 403）：
@@ -162,6 +181,8 @@ python3 tools/tb/scripts/tb_pull.py --pid <URL里的pid> defect <LIB>-<NUM> --ou
   ```
   - `enable=false` 关闭；`host` 监听地址（`0.0.0.0` = 局域网可见；**无认证**，`.icode_output` 含真实缺陷数据，
     注意分享范围）；`port` 端口（被占则网页服务起不来，守护不受影响）
+  - **多工程时同一网页聚合展示**：首页列出各工程（URL 首段 = 工程目录名，如 `http://host:8000/工程B/`），
+    单工程保持旧行为（`/` 直达）
   - 也可单独运行 `python3 tools/tb/scripts/tb_web.py --config watch.json`（`--root`/`--host`/`--port` 覆盖）
 
 **首次使用（新用户）**：仓库已带占位模板 `tools/tb/tb_watch.config.example.json`，
@@ -169,8 +190,9 @@ python3 tools/tb/scripts/tb_pull.py --pid <URL里的pid> defect <LIB>-<NUM> --ou
 
 ```bash
 cp tools/tb/tb_watch.config.example.json ~/.claude/icode_data/tb_watch.json
-# 然后编辑：① 顶层 "project_dir" 改成监控工程的绝对路径；② "projects[0].url" 改成真实 TB 项目 URL
+# 然后编辑：① "projects[0].project_dir" 改成监控工程的绝对路径；② "projects[0].url" 改成真实 TB 项目 URL
 #（可选）③ "projects[0].lib" 改成缺陷库前缀（如 DEMO）；④ 按需调 interval / claude_timeout
+# 要同时监控多个工程：在 projects[] 加项并给该项填 "project_dir"（各自的工程根），一个守护进程一起轮询
 ```
 
 配置存在与否由 `tb_watch_ctl.sh start` 自动判定：缺配置时给出"复制模板"提示而不是直接失败。
@@ -180,7 +202,7 @@ cp tools/tb/tb_watch.config.example.json ~/.claude/icode_data/tb_watch.json
 优雅 `stop`：**间隔等待可被中断**（可中断 sleep，无分析在跑时 ~5s 内退出）；若正在跑 claude 分析则等它结束（最长 `claude_timeout`）；要立即停用 `stop --force`。
 
 ```bash
-# 启动（工程路径配在配置 JSON 顶层 "project_dir" 字段，产物落该工程 .icode_output/；缺省 = cwd）
+# 启动（工程路径配在配置 JSON 各 "projects[].project_dir" 字段，各产物落各自工程 .icode_output/）
 tools/tb/scripts/tb_watch_ctl.sh start --config watch.json
 
 # 查看状态（运行中/未运行 + 正在分析的子进程）
@@ -193,7 +215,9 @@ tools/tb/scripts/tb_watch_ctl.sh stop
 tools/tb/scripts/tb_watch_ctl.sh stop --force
 ```
 
-**多实例（默认全量 / 指定单个）**：一台机器可同时监控多个工程——每个配置 JSON 一个实例
+**多实例（默认全量 / 指定单个）**：监控多个工程时**首选上一节"多工程（一份配置 · 一个守护进程）"**——
+一份配置列多个工程、一个守护进程轮询全部工程即可，少起进程省性能。
+仅当确有隔离需求（如不同调度节奏/不同 web 端口/不同负责人）才拆多配置多实例——每个配置 JSON 一个实例
 （如 `tb_watch.json`、`tb_watch_mowerware.json`，同一目录，命名以 `tb_watch*.json` 识别，排除 `example`/`.bak`）。
 `start`/`stop`/`status` **默认对全部实例生效**（按名逐个递归调用，任一失败汇总非零退出码）；
 只针对单个实例时用 `--config <文件>`（或环境变量 `TB_WATCH_CONFIG`）指定，此时仅操作该实例：
@@ -226,7 +250,8 @@ claude 分析完成后立即刷新**（重 probe 重判，该单刚建基线/完
 **自动建基线**：首次监控时 debug 域无基线，单全部为"待新建"——watch 自动逐轮触发 claude 对该单做
 debug 全量分析**建基线**（每轮一条，按单号倒序），全部建完后转入纯增量监控（仅对"有更新"的单做增量）。
 **超时中断残留的半成品不会反复被当"待新建"重建**——识别为"中断续跑"复用续跑（见 debug 语义段）。
-多项目时跨项目合并按单号倒序处理。
+多工程时**触发顺序 = 工程间公平轮转**：两个工程都有候选时严格 A→B→A→B 交替（同工程内仍按单号倒序
+新单优先）；仅一个工程有候选时集中处理该工程，不因轮转而空等。
 
 **每轮动作**：
 1. 每个项目 `tb_pull.py probe --status-names 打开,未完成` 拉线上最新（零附件下载）
@@ -234,8 +259,9 @@ debug 全量分析**建基线**（每轮一条，按单号倒序），全部建�
    匹配不到再扫**中断半成品**（无 `.ico_metadata.json` 但有 `tb_source/<LIB>-<NUM>/` 附件，见 [references/debug_mode.md](../../references/debug_mode.md) §12）→ 命中判"中断续跑"复用续跑（附件复用、收尾补写 metadata）
 3. 按单号倒序逐单机械"有更新判定"（比对口径对齐 log.md「批量 TB 分析」步骤3：评论 `(created, 评论文本)` 键差集、
    附件 `(name, ext)` 键差集、状态仅当旧 meta 含 `status` 字段才比）
-4. 取单号最大的需增量/待新建单 -> 拉起 `claude -p` 触发 debug 分析（优先 `/icode log --debug <单>`，
-   不可用则按 debug 语义手动建/复用 debug 工单；每轮一条）
+4. 从所有工程候选里**公平轮转取一条** -> 拉起 `claude -p` 触发 debug 分析（优先 `/icode log --debug <单>`，
+   不可用则按 debug 语义手动建/复用 debug 工单；每轮一条）。轮转规则：优先选"非上次触发工程"里单号
+   最大的候选（两边都有活时严格 A→B→A→B），仅单工程/另一边无候选才回退上次工程（同工程内按单号倒序）
 
 **幂等**：分析成功把新数据并入该 debug 工单 meta -> 下一轮变"无更新"不再重复触发；
 失败/超时则 meta 未变 -> 下一轮重试（不阻塞）。

@@ -85,18 +85,23 @@ def fmt_time(ts):
     return time.strftime("%Y-%m-%d %H:%M", time.localtime(ts))
 
 
-def render_md(path, root):
+def render_md(path, root, key=""):
     """markdown 渲染（tables/fenced_code 扩展支持报告表格与代码块）。"""
     import markdown
     with open(path, encoding="utf-8", errors="replace") as f:
         text = f.read()
     body = markdown.markdown(text, extensions=["tables", "fenced_code"])
     title = next((ln.lstrip("# ").strip() for ln in text.splitlines() if ln.startswith("#")), os.path.basename(path))
-    return page(title, f"<div class='crumb'>{breadcrumb_html(path, root)}</div><article>{body}</article>")
+    return page(title, f"<div class='crumb'>{breadcrumb_html(path, root, key)}</div><article>{body}</article>")
 
 
-def breadcrumb_html(abs_path, root):
-    """生成目录导航（根 / → ... → 当前）。"""
+def _key_prefix(key):
+    """URL 前缀：单根(空键)="" → '/'；多根键 "eng" → '/eng/'。"""
+    return "/" + (key + "/" if key else "")
+
+
+def breadcrumb_html(abs_path, root, key=""):
+    """生成目录导航（根 / → ... → 当前）。多工程时首段 = 工程键。"""
     parts = []
     rel = os.path.relpath(abs_path, root)
     cur = root
@@ -105,9 +110,10 @@ def breadcrumb_html(abs_path, root):
             continue
         cur = os.path.join(cur, seg)
         parts.append((seg, cur))
-    crumb = ['<a href="/">/</a>']
+    base = _key_prefix(key)
+    crumb = [f"<a href='{base}'>{'/' if not key else html.escape(key)}</a>"]
     for name, p in parts:
-        crumb.append(f"<a href='/{urlenc(os.path.relpath(p, root))}'>{html.escape(name)}</a>")
+        crumb.append(f"<a href='{base}{urlenc(os.path.relpath(p, root))}'>{html.escape(name)}</a>")
     return " / ".join(crumb)
 
 
@@ -174,11 +180,34 @@ class Handler(BaseHTTPRequestHandler):
             except Exception:
                 pass
 
+    def _resolve(self, roots, rel):
+        """多根路由：URL 首段 = 工程键（单根时键为空，保持 /xxx 直达旧行为）。
+
+        返回 (key, root_abs, rel)。未知工程键返回 (None, None, None)。
+        单根强制返回空键：即使 load_config 给单工程生成了 basename 键，也不切分 URL、
+        不加 key 前缀，完全保持旧行为（否则列表里的链接会多出 /basename 前缀而 404）。
+        """
+        if len(roots) == 1:
+            return "", roots[0][1], rel
+        seg, _, rest = rel.partition("/")
+        for key, rp in roots:
+            if key == seg:
+                return key, rp, rest
+        return None, None, None
+
     def _handle(self, only_header):
-        root = self.server.root
+        roots = self.server.roots
         raw = urllib.parse.unquote(self.path.split("?", 1)[0])
         # 不能用 posixpath.normpath：以 `.` 开头的目录名（如 .debug）会被当相对路径吃掉
         rel = raw.lstrip("/")
+        if not rel and len(roots) > 1:
+            # 多工程根：首页显示工程列表
+            self._index(roots, only_header)
+            return
+        key, root, rel = self._resolve(roots, rel)
+        if key is None:
+            self._text(404, "未知工程", only_header)
+            return
         full = os.path.realpath(os.path.join(root, rel))
         # gvfsd-smb 负缓存兜底：父目录 ls 可见但 open()/stat() 报不存在（fuse dentry 陈旧）。
         # 用 cd + 重 ls 触发 fetch，避开即时失败。
@@ -189,11 +218,22 @@ class Handler(BaseHTTPRequestHandler):
             self._text(404, "路径越界", only_header)
             return
         if os.path.isdir(full):
-            self._listing(root, full, only_header)
+            self._listing(key, root, full, only_header)
         elif os.path.isfile(full):
-            self._file(full, only_header)
+            self._file(key, root, full, only_header)
         else:
             self._text(404, "文件不存在", only_header)
+
+    def _index(self, roots, only_header):
+        """多工程首页：列出全部工程（key + 目录）。"""
+        rows = []
+        for key, rp in roots:
+            name = key or os.path.basename(rp.rstrip(os.sep)) or "root"
+            rows.append(f"<tr><td>📁 <a href='{_key_prefix(key)}'>{html.escape(name)}</a></td>"
+                        f"<td>{html.escape(rp)}</td></tr>")
+        body = ("<div class='crumb'>工程列表</div>"
+                "<table><tr><th>工程</th><th>目录</th></tr>" + "".join(rows) + "</table>")
+        self._html(200, page("tb_watch 工程列表", body), only_header)
 
     def _text(self, code, msg, only_header):
         self.send_response(code)
@@ -202,7 +242,7 @@ class Handler(BaseHTTPRequestHandler):
         if not only_header:
             self.wfile.write(page("提示", f"<div class='msg'>{html.escape(msg)}</div>").encode("utf-8"))
 
-    def _listing(self, root, full, only_header):
+    def _listing(self, key, root, full, only_header):
         entries = []
         for name in os.listdir(full):
             if name == ".ico_metadata.json":  # 隐藏元数据文件（debug 工单指纹），避免误导用户进入
@@ -219,13 +259,13 @@ class Handler(BaseHTTPRequestHandler):
         for name, is_dir, size, mtime in entries:
             # 用根相对路径（/开头），避免进子页后点 .debug/ 被当相对路径解析
             sub_rel = os.path.relpath(full, root).replace(os.sep, "/")
-            href = "/" + posixpath.join(sub_rel, urlenc(name)) + ("/" if is_dir else "")
+            href = _key_prefix(key) + posixpath.join(sub_rel, urlenc(name)) + ("/" if is_dir else "")
             icon = "📁" if is_dir else ("📄" if name.lower().endswith(".md") else "📎")
             rows.append(f"<tr><td>{icon} <a href='{href}'>{html.escape(name)}</a></td>"
                         f"<td>{'目录' if is_dir else '文件'}</td>"
                         f"<td class='size'>{'—' if is_dir else fmt_size(size)}</td>"
                         f"<td>{fmt_time(mtime)}</td></tr>")
-        body = (f"<div class='crumb'>{breadcrumb_html(full, root)}</div>"
+        body = (f"<div class='crumb'>{breadcrumb_html(full, root, key)}</div>"
                 f"<table><tr><th>名称</th><th>类型</th><th>大小</th><th>修改时间</th></tr>"
                 f"{''.join(rows)}</table>")
         self._html(200, page(os.path.basename(full) or "/", body), only_header)
@@ -239,10 +279,10 @@ class Handler(BaseHTTPRequestHandler):
         if not only_header:
             self.wfile.write(data)
 
-    def _file(self, full, only_header):
+    def _file(self, key, root, full, only_header):
         if full.lower().endswith(".md"):
             # md 渲染成 HTML（charset=utf-8，根治乱码）
-            self._html(200, render_md(full, self.server.root), only_header)
+            self._html(200, render_md(full, root, key), only_header)
             return
         ctype = mimetypes.guess_type(full)[0] or "application/octet-stream"
         try:
@@ -269,19 +309,51 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def load_config(path):
-    """读 tb_watch 配置，返回 (project_dir, web_cfg)。web 段缺省 = 启用 0.0.0.0:8000。"""
+    """读 tb_watch 配置，返回 (roots, web_cfg)。
+
+    多工程支持：收集配置里全部工程根（每个 project 的 project_dir，顶层 project_dir 可省作缺省；去重），
+    每个工程映射一个 web 键（URL 首段），web 段缺省 = 启用 0.0.0.0:8000。
+    roots = [(key, 该工程 .icode_output 绝对路径)]。
+    """
     if not os.path.isfile(path):
         sys.exit(f"[tb_web] 配置不存在: {path}")
     with open(path, encoding="utf-8") as f:
         cfg = json.load(f)
-    project_dir = cfg.get("project_dir") or os.getcwd()
     web = cfg.get("web") or {}
     web_cfg = {
         "enable": bool(web.get("enable", True)),
         "host": web.get("host") or "0.0.0.0",
         "port": int(web.get("port") or 8000),
     }
-    return project_dir, web_cfg
+    # 顶层 project_dir 可省（规范写法：每个 project 自带 project_dir）；缺省才回退 cwd
+    default_pd = cfg.get("project_dir")
+    if not default_pd:
+        for p in cfg.get("projects") or []:
+            if p.get("project_dir"):
+                default_pd = p["project_dir"]
+                break
+    default_pd = default_pd or os.getcwd()
+    dirs = []
+    if cfg.get("projects"):
+        for p in cfg["projects"]:
+            pd = p.get("project_dir") or default_pd
+            if pd not in dirs:
+                dirs.append(pd)
+    else:
+        dirs.append(default_pd)
+    # 键默认 = 工程目录名；同名（不同父目录）时追加序号避免冲突
+    used = {}
+    roots = []
+    for pd in dirs:
+        base = os.path.basename(pd.rstrip(os.sep)) or "root"
+        key = base
+        n = 1
+        while key in used:
+            n += 1
+            key = f"{base}-{n}"
+        used[key] = pd
+        roots.append((key, os.path.realpath(os.path.join(pd, ".icode_output"))))
+    return roots, web_cfg
 
 
 def main():
@@ -294,22 +366,27 @@ def main():
     args = ap.parse_args()
 
     if args.config:
-        project_dir, web_cfg = load_config(args.config)
+        roots, web_cfg = load_config(args.config)
     else:
-        project_dir, web_cfg = os.getcwd(), {"enable": True, "host": "0.0.0.0", "port": 8000}
+        roots, web_cfg = [("", os.path.realpath(os.getcwd()))], {"enable": True, "host": "0.0.0.0", "port": 8000}
     if not web_cfg["enable"]:
         sys.exit("[tb_web] 配置 web.enable=false，退出")
-    root = os.path.realpath(args.root or os.path.join(project_dir, ".icode_output"))
-    if not os.path.isdir(root):
-        sys.exit(f"[tb_web] 根目录不存在: {root}")
+    # --root 覆盖为单根（旧行为）
+    if args.root:
+        roots = [("", os.path.realpath(args.root))]
+    # 只保留真实存在的工程根（挂载未就绪的工程不影响其它工程展示）
+    roots = [(k, rp) for k, rp in roots if os.path.isdir(rp)]
+    if not roots:
+        sys.exit("[tb_web] 无可用根目录（.icode_output 不存在）")
     host = args.host or web_cfg["host"]
     port = args.port or web_cfg["port"]
 
     srv = ThreadingHTTPServer((host, port), Handler)
-    srv.root = root
+    srv.roots = roots
     addrs = "、".join(f"http://{ip}:{port}/" for ip in _local_ips(host))
+    roots_txt = "；".join(f"{k or '/'}->{rp}" for k, rp in roots)
     if not args.quiet:
-        print(f"[tb_web] 只读查看服务已启动：{addrs}  （根: {root}）")
+        print(f"[tb_web] 只读查看服务已启动：{addrs}  （工程根: {roots_txt}）")
     try:
         srv.serve_forever()
     except KeyboardInterrupt:

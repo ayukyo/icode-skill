@@ -7,7 +7,7 @@
 #   tb_watch_ctl.sh stop --force                                      # 强制停止（中断正在跑的分析，杀守护+子进程）
 #   tb_watch_ctl.sh status [--config <path>]                          # 查看运行状态
 #
-# 工程路径：配置文件 JSON 顶层 "project_dir" 字段（或 --project-dir 覆盖）。
+# 工程路径：配置文件各 "projects[].project_dir" 字段（顶层 project_dir 可省作全局缺省；或 --project-dir 覆盖）。
 # 产物落 <project_dir>/.icode_output/（报告 tb_watch_report.md + debug 工单 + tb_watch/ 运行目录）。
 # start 会一并拉起网页只读查看服务 tb_web.py（配置 web 段，缺省启用 0.0.0.0:8000）；
 # stop / stop --force 一并停止；status 一并显示。web.pid 落 <project_dir>/.icode_output/tb_watch/。
@@ -65,13 +65,20 @@ all_instances() {
   return $rc
 }
 
-# 从配置读 project_dir（缺省 = 当前目录）
+# 从配置读 project_dir（全局运行时锚点）：顶层 project_dir 优先，否则第一个 project 的
+# project_dir，否则缺省 = 当前目录。规范写法是每 project 自带 project_dir，顶层可省。
 project_dir_of() {
   python3 - "$CFG" <<'PY'
 import json, sys, os
 try:
     cfg = json.load(open(sys.argv[1]))
-    print(cfg.get("project_dir") or os.getcwd())
+    pd = cfg.get("project_dir")
+    if not pd:
+        for p in cfg.get("projects") or []:
+            if p.get("project_dir"):
+                pd = p["project_dir"]
+                break
+    print(pd or os.getcwd())
 except Exception as e:
     print(os.getcwd(), file=sys.stderr)
     print(os.getcwd())
@@ -88,8 +95,13 @@ try:
     enable = web.get("enable", True)
     host = web.get("host") or "0.0.0.0"
     port = web.get("port") or 8000
-    pdir = cfg.get("project_dir") or os.getcwd()
-    print(f"{enable} {host} {port} {pdir}")
+    pdir = cfg.get("project_dir")
+    if not pdir:
+        for p in cfg.get("projects") or []:
+            if p.get("project_dir"):
+                pdir = p["project_dir"]
+                break
+    print(f"{enable} {host} {port} {pdir or os.getcwd()}")
 except Exception:
     print("True 0.0.0.0 8000 " + os.getcwd())
 PY
@@ -148,35 +160,47 @@ ip_change_note() {
   return 0
 }
 
-# 从配置读 mount_required（True=project_dir 必须在网络挂载上），返回 "true" 或 ""
-mount_required_of() {
+# 输出配置里所有 mount_required=true 的工程根（每 project 带自己的 project_dir + mount_required，
+# 缺省继承顶层；去重，一行一个）。多工程单配置时 start 要对每个需挂载的工程做前置检查。
+mount_required_dirs() {
   python3 - "$CFG" <<'PY'
-import json, sys
+import json, os, sys
 try:
-    print("true" if json.load(open(sys.argv[1])).get("mount_required") else "")
+    cfg = json.load(open(sys.argv[1]))
 except Exception:
-    print("")
+    sys.exit(0)
+default_pd = cfg.get("project_dir")
+default_mr = bool(cfg.get("mount_required"))
+seen = []
+for p in cfg.get("projects") or []:
+    pd = p.get("project_dir") or default_pd or os.getcwd()
+    mr = p.get("mount_required", default_mr)
+    if mr and pd not in seen:
+        seen.append(pd)
+        print(pd)
 PY
 }
 
 # 校验工程路径位于网络挂载（sshfs 或 gvfs SMB）。就绪返回 0，否则返回 1 并打印原因。
-# 用于 start 前置检查：mount_required=true 时，若挂载未恢复（路径退化成普通本地目录），
+# 用于 start 前置检查：任一 mount_required=true 的工程若挂载未恢复（路径退化成普通本地目录），
 # 直接拒绝启动——防止守护在本地空目录上生成假的 .icode_output/（与 NAS 真实产物对不上）。
 mount_ready() {
-  local proj="$1" req ft
-  req=$(mount_required_of)
-  [ "$req" = "true" ] || return 0
-  ft=$(findmnt -T "$proj" -o FSTYPE -n 2>/dev/null | head -1)
-  case "$ft" in
-    fuse.sshfs) return 0;;
-    fuse.gvfsd-fuse)
-      case "$proj" in *smb-share:*) return 0;; esac
-      ;;
-  esac
-  echo "[tb_watch] 启动中止：配置 mount_required=true，但工程路径不在网络挂载上（当前 fstype=${ft:-无挂载}）"
-  echo "[tb_watch]   工程路径: $proj"
-  echo "[tb_watch]   请先恢复挂载再 start（例如: sshfs ... 或 systemctl --user start mnt-zilaiye）"
-  return 1
+  local proj ft rc=0
+  while read -r proj; do
+    [ -n "$proj" ] || continue
+    ft=$(findmnt -T "$proj" -o FSTYPE -n 2>/dev/null | head -1)
+    case "$ft" in
+      fuse.sshfs) continue;;
+      fuse.gvfsd-fuse)
+        case "$proj" in *smb-share:*) continue;; esac
+        ;;
+    esac
+    echo "[tb_watch] 启动中止：mount_required=true 但工程路径不在网络挂载上（当前 fstype=${ft:-无挂载}）"
+    echo "[tb_watch]   工程路径: $proj"
+    echo "[tb_watch]   请先恢复挂载再 start（例如: sshfs ... 或 systemctl --user start mnt-zilaiye）"
+    rc=1
+  done < <(mount_required_dirs)
+  return $rc
 }
 
 case "$CMD" in

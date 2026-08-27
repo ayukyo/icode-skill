@@ -1,20 +1,25 @@
 {
-  "_comment": "tb_watch 定时增量监控配置模板。用法：复制为 ~/.claude/icode_data/tb_watch.json（或任意路径，ctl 用 --config 指定），然后填两处即可：① project_dir=工程根（产物落该工程 .icode_output/）；② projects[].url=TB 项目地址（自动解析 domain+pid）。可选 lib（缺陷库前缀，debug 孪生匹配用）。mount_required=true 表示 project_dir 必须在网络挂载上（sshfs/gvfs SMB），start 时强制校验，挂载未恢复会拒绝启动，防止在本地空目录生成假的 .icode_output/。",
+  "_comment": "tb_watch 定时增量监控配置模板。用法：复制为 ~/.claude/icode_data/tb_watch.json（或任意路径，ctl 用 --config 指定），然后填 projects 即可：每个 project 必须写自己的 project_dir（该工程根，产物/报告/debug 工单落该工程 .icode_output/）+ url（自动解析 domain+pid），可选 lib（缺陷库前缀）。【多工程】一份配置可同时监控多个工程，一个守护进程每轮遍历全部工程，各自报告/debug 工单落各自工程 .icode_output/（少起守护进程 = 减性能消耗）。mount_required=true 表示该工程路径必须在网络挂载上（sshfs/gvfs SMB），start 时强制校验，挂载未恢复会拒绝启动，防止在本地空目录生成假的 .icode_output/。顶层 project_dir/mount_required 为可选：给了做全局缺省（旧配置兼容），不给则以每个 project 自己写的为准。",
   "interval": 900,
   "claude_timeout": 6000,
   "claude_skip_permissions": true,
   "low_priority": true,
   "claude_context_window": 256000,
-  "project_dir": "/绝对路径/到/工程根",
-  "mount_required": false,
   "projects": [
     {
+      "project_dir": "/绝对路径/到/工程根",
       "url": "https://tb.example.com/project/<项目ID>",
       "lib": "DEMO"
+    },
+    {
+      "_comment": "多工程示例：该 TB 项目属于另一个工程目录（各自 .icode_output/），project_dir 必填（可选再覆盖 mount_required）",
+      "project_dir": "/绝对路径/到/另一个工程根",
+      "url": "https://tb.example.com/project/<另一个项目ID>",
+      "mount_required": true
     }
   ],
   "web": {
-    "_comment": "网页只读查看服务（start 自动拉起，stop 一并停）：enable=false 关闭；host 监听地址（0.0.0.0=局域网可见，无认证，注意分享范围）；port 端口",
+    "_comment": "网页只读查看服务（start 自动拉起，stop 一并停）：enable=false 关闭；host 监听地址（0.0.0.0=局域网可见，无认证，注意分享范围）；port 端口。多工程时同一网页首页列出各工程，URL 首段=工程目录名",
     "enable": true,
     "host": "0.0.0.0",
     "port": 8000
