@@ -193,6 +193,21 @@ tools/tb/scripts/tb_watch_ctl.sh stop
 tools/tb/scripts/tb_watch_ctl.sh stop --force
 ```
 
+**多实例（默认全量 / 指定单个）**：一台机器可同时监控多个工程——每个配置 JSON 一个实例
+（如 `tb_watch.json`、`tb_watch_mowerware.json`，同一目录，命名以 `tb_watch*.json` 识别，排除 `example`/`.bak`）。
+`start`/`stop`/`status` **默认对全部实例生效**（按名逐个递归调用，任一失败汇总非零退出码）；
+只针对单个实例时用 `--config <文件>`（或环境变量 `TB_WATCH_CONFIG`）指定，此时仅操作该实例：
+```bash
+# 全量：所有实例（推荐，日常维护用）
+tools/tb/scripts/tb_watch_ctl.sh status
+tools/tb/scripts/tb_watch_ctl.sh stop
+
+# 单个：仅指定实例
+tools/tb/scripts/tb_watch_ctl.sh status --config tb_watch_mowerware.json
+tools/tb/scripts/tb_watch_ctl.sh start --config tb_watch_mowerware.json
+```
+各实例独立 pid 文件、独立网页端口（配置 `web.port`，默认 8000，第二实例建议 8001）。
+
 `start` 成功后会同时打印网页服务地址（配置 `web` 段，默认 `0.0.0.0:8000`），
 同事在浏览器直接打开即可查看检索报告与各 debug 分析简报，无需任何 NAS/挂载账号；`status` 也会显示网页服务运行状态。
 

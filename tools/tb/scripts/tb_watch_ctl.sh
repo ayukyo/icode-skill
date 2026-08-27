@@ -15,10 +15,15 @@ set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PY="$SCRIPT_DIR/tb_watch.py"
+# 多实例语义：默认 = 全量（对配置目录下所有 tb_watch*.json 生效）；--config / TB_WATCH_CONFIG = 单个。
 CFG="${TB_WATCH_CONFIG:-$HOME/.claude/icode_data/tb_watch.json}"
+MULTI=1
+[ -n "${TB_WATCH_CONFIG:-}" ] && MULTI=0
 
 usage() {
   echo "用法: $0 {start|stop|status} [--config <path>] [--project-dir <path>] [--force]"
+  echo "  默认（不带 --config）对所有工程实例生效（配置目录下全部 tb_watch*.json，排除 example/bak）"
+  echo "  --config <path>  只对指定单个实例生效"
   echo "  start            启动常驻守护（产物落配置 project_dir 工程的 .icode_output/）"
   echo "  stop             优雅停止（SIGTERM，当前轮结束后停）"
   echo "  stop --force     强制停止（中断正在跑的分析，杀守护+子进程）"
@@ -31,12 +36,34 @@ shift || true
 FORCE=0
 while [ $# -gt 0 ]; do
   case "$1" in
-    --config) CFG="${2:-}"; shift 2;;
+    --config) CFG="${2:-}"; MULTI=0; shift 2;;
     --project-dir) PDIR="${2:-}"; shift 2;;
     --force) FORCE=1; shift;;
     *) usage;;
   esac
 done
+
+# 枚举本次应操作的配置：MULTI=1 时 = 默认配置同目录下所有 tb_watch*.json（排除 example/备份），
+# MULTI=0 时 = 仅 CFG。全量模式下 --project-dir 无意义（多实例），忽略。
+list_configs() {
+  if [ "$MULTI" = 0 ]; then
+    printf '%s\n' "$CFG"
+  else
+    ls -1 "$(dirname "$CFG")"/tb_watch*.json 2>/dev/null | grep -viE 'example|\.bak'
+  fi
+}
+
+# 全量分支：不带 --config 时对每个实例递归调用本脚本（带 --config 走单实例逻辑），复用成熟实现。
+all_instances() {
+  local extra="" rc=0
+  [ "$FORCE" = 1 ] && extra="$extra --force"
+  [ -n "${PDIR:-}" ] && echo "[tb_watch] 警告: 全量模式下忽略 --project-dir（多实例无法对应单工程）"
+  for cfg in $(list_configs); do
+    echo "---- [$CMD] $cfg ----"
+    "$0" "$CMD" --config "$cfg" $extra || rc=1
+  done
+  return $rc
+}
 
 # 从配置读 project_dir（缺省 = 当前目录）
 project_dir_of() {
@@ -154,6 +181,10 @@ mount_ready() {
 
 case "$CMD" in
   start)
+    if [ "$MULTI" = 1 ]; then
+      all_instances
+      exit $?
+    fi
     if [ ! -f "$CFG" ]; then
       TPL="$SCRIPT_DIR/../tb_watch.config.example.json"
       echo "[tb_watch] 配置不存在: $CFG"
@@ -213,6 +244,10 @@ case "$CMD" in
     fi
     ;;
   stop)
+    if [ "$MULTI" = 1 ]; then
+      all_instances
+      exit $?
+    fi
     if [ "$FORCE" = 1 ]; then
       PROJ="$(project_dir_of)"
       PIDF="$PROJ/.icode_output/tb_watch/watch.pid"
@@ -238,6 +273,10 @@ case "$CMD" in
     fi
     ;;
   status)
+    if [ "$MULTI" = 1 ]; then
+      all_instances
+      exit $?
+    fi
     PROJ="$(project_dir_of)"
     PIDF="$PROJ/.icode_output/tb_watch/watch.pid"
     if [ -f "$PIDF" ]; then
