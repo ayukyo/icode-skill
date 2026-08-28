@@ -711,6 +711,13 @@ test -f "{ICODE_OUT_DIR}/03_plan_final.md" && python3 -c "import json,sys; d=jso
 
 ### MCP 调用覆盖强制化（强证据二元化）
 
+> **cheap-research 执行门机器化**：cheap-research 的强证据执行点不再是纯自然语言提示词，而是——
+> - gate 机器真源：`mcp/cheap-research/gates.json`（11 个 gate + 阈值常量，`long_text_threshold_bytes=8192` / `dedup_min_functions=50` / `tb_comment_extract_min=8` / `merge_min_rounds=2` / `max_input_bytes_per_call=65536`；阈值**只从这里读**）
+> - 运行痕迹：`{ICODE_OUT_DIR}/.mcp_gate_trace.jsonl`（JSON Lines，每 gate 一条最终判定：`gate_id`/`eligible`/`evidence`/`decision`/`attempted`/`result`/`at`）
+> - 运行时校验器：`python3 tools/lint_mcp_coverage.py <out_dir> [--step <step>] [--strict] [--json] [--require-trace]`（退出码 0=通过 / 1=有违规 / 2=参数或目录错误；旧工单无 `mcp_gate_schema_version` 输出 legacy-untracked 兼容警告，`--require-trace`/`--strict` 才阻断）
+>
+> 新工单 metadata 增加 `"mcp_gate_schema_version": 1`；步骤转换前跑校验器，eligible 未履行 gate 不得标流程合规。完整流程见 [references/thinking_core.md](references/thinking_core.md)「cheap-research 执行门（gate）流程」段。**正式产物仍不记录 MCP 调用信息**——trace 是独立辅助点文件（与 `.cheap_research_cache.json` 同级），不写入用户交付正文。
+
 ### cheap-research 14 工具会话内缓存
 
 > **目的**：本工单（一个 `.icode_output_N/` 目录）内多次调 cheap-research 同一工具（同样输入）= 浪费 token + 浪费时间。**本约定让 AI 在调 cheap-research 前**先查会话内缓存**，命中则复用结果。

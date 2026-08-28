@@ -30,10 +30,11 @@
 
 > **步骤 3 merge 跨轮 review 汇总（新增，合并定稿前）**：步骤 2 末尾的 `_review_summary.md` 只是**单轮**压缩（`02_review.md` 第 453 行明确"压缩本轮审查输出"），多轮累积时主代理仍需读 N 个 JSON 文件手工合并。**本段新增跨轮汇总**：
 > - 收集 `review_round_*.json`（按 `total_rounds` 顺序）+ metadata `pending_verification` 字段，做**跨轮 issue 合并**（confirmed 去重 / refuted 去重 / pending 状态继承），按"维度归属 + 严重度"分组
-> - 调 `mcp__cheap-research__summarize(text=<合并后 issue JSON 字符串>, max_tokens=1000, focus="按维度归属 + 严重度分组")` 压到 ≤1K token，写入 `{ICODE_OUT_DIR}/_review_merged_summary.md`（**与单轮 `_review_summary.md` 共存**：单轮摘要作每轮历史快照，merged_summary 作多轮合并视图）
+> - **gate 绑定**：本段 = gate `merge.cross_round_summary`（tool=summarize）。阈值 `merge_min_rounds`（gates.json 常量 =2，即 >1 轮才 eligible）
+> - **多轮（review_rounds ≥ 阈值）**：调 `mcp__cheap-research__summarize(text=<合并后 issue JSON 字符串>, max_tokens=1000, focus="按维度归属 + 严重度分组")` 压到 ≤1K token，写入 `{ICODE_OUT_DIR}/_review_merged_summary.md`（**与单轮 `_review_summary.md` 共存**：单轮摘要作每轮历史快照，merged_summary 作多轮合并视图）→ trace `eligible=true, decision=called/cache_hit/degraded_after_attempt, evidence={review_rounds, threshold}`
 > - 主代理看 merged_summary 决定采纳/驳回/分流，**不替代逐 JSON 细读**（细节仍以 JSON 为准）
-> - **降级**：cheap-research 不可用 → 跳过合并 summarize，主代理直接读各轮 JSON 原文合并；写 `[降级-merge 跨轮 summarize 不可用]`
-> - **N=1 场景**（未触达自动延长）：`_review_summary.md` 已足够，跳过本段；写 `▶ merge 跨轮汇总跳过：仅 1 轮 review，合并无意义`
+> - **降级**：cheap-research 不可用 → 跳过合并 summarize，主代理直接读各轮 JSON 原文合并；写 `[降级-merge 跨轮 summarize 不可用]` + trace `decision=degraded_after_attempt, attempted=true`
+> - **N=1 场景**（未触达自动延长）：`_review_summary.md` 已足够，跳过本段；写 `▶ merge 跨轮汇总跳过：仅 1 轮 review，合并无意义` + trace `merge.cross_round_summary: eligible=false, skipped_not_eligible, evidence={review_rounds:1, threshold:2}`——**必须写 trace**（让"合理没调用"与"漏调"可区分）
 
 解析审查意见——如果 `{ICODE_OUT_DIR}/_review_summary.md` 存在，先读其**审查轮次 + 总问题数 + 关键 HIGH 问题 + 未解决标记**获取概览；再读 `review_round_*.json` 文件（按 `total_rounds` 顺序读取所有轮 JSON；**clean 轮无 JSON 文件**——步骤2 约定无 issue 的轮跳过写文件，遇到缺失的轮号直接跳过）提取结构化审查数据，重点关注：
 - 首轮的 `file_review.key_findings`（通读实际代码发现的问题）

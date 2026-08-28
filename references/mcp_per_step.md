@@ -84,7 +84,7 @@
 - **context7**：库 API 行为查证——仅涉及第三方库行为时
 - **vision-bridge**：TB 附件视频/图片主动分析 + 本地日志视频/图片分析——TB 拉取的附件含视频/图片时 **vision-bridge 可用则主动调**（视频先用 ffmpeg 本地提取关键帧再传图片帧省钱，详见 [steps/log.md](../steps/log.md)「附件分析（含本地路径 + TB 源）与 ffmpeg 抽帧」）；用户主动给截图时直接调；本地日志目录含视频/图片文件时扫目录后主动调。vision-bridge 不可用时仅提示附件清单不主动调（防纯文字模型报错）
 
-- **cheap-research**（🟢*）：**阶段2 TB 评论预提取**（`extract`，评论 ≥ 8 条时批量预提取要点，主会话回读高价值评论原文；详见 [steps/log.md](../steps/log.md)「TB 评论预提取」段）。**TB 缺陷源拉取走 `tb_pull.py`（非 fetch_remote）**；长上下文压缩（阶段 0/1/2）/ 8.6 memory 沉淀无正文执行点，可作可选增强。**不接管决策**：阶段 3 链路图分析 / 阶段 4 根因假设 / 阶段 6+7 对抗分析 / 阶段 8 修复建议 / 追问机制一律不走（高风险子任务）
+- **cheap-research**（🟢*）：**阶段2 TB 评论预提取**（`extract`，评论 ≥ `tb_comment_extract_min`（gates.json 常量）时批量预提取要点，主会话回读高价值评论原文；详见 [steps/log.md](../steps/log.md)「TB 评论预提取」段）。**TB 缺陷源拉取走 `tb_pull.py`（非 fetch_remote）**；长上下文压缩（阶段 0/1/2）/ 8.6 memory 沉淀无正文执行点，可作可选增强。**不接管决策**：阶段 3 链路图分析 / 阶段 4 根因假设 / 阶段 6+7 对抗分析 / 阶段 8 修复建议 / 追问机制一律不走（高风险子任务）
 
 ### doc（工程知识库生成）
 - **vision-bridge**：截图分析——仅用户给图时
@@ -102,7 +102,7 @@
 
 
 - **cheap-research**（🟢*）：dedup 分类/找重复（`extract`，见 §2.5.7）+ 审查输出压缩（`summarize` 压缩审查结果供 merge 消费，见 [steps/02_review.md](../steps/02_review.md) 步骤 6）。其余（`diff_summary` 增量审查 / `fill_template` 维度结果 / `retrieve_similar` 历史 issue / `scan_patterns` / `trace_refs`）可作可选增强，非强证据场景不评估。**不接管决策**：3 质疑者对抗验证 / 审查意见合成走主会话（高风险）
-- **dedup 子阶段**：见 §2.5.7。**强证据** = cheap-research 🟢 + 函数数 ≥ 50 → ripgrep 抽函数（catalog.json）+ `mcp__cheap-research__extract`（haiku 分类 + 高质量模型找 top 5 重复）。**降级**：函数数 < 50 / ripgrep 不可用 / cheap-research 不可用 → 整个 §2.5.7 跳过
+- **dedup 子阶段**：见 §2.5.7。**强证据** = cheap-research 🟢 + 函数数 ≥ `dedup_min_functions`（gates.json 常量）→ ripgrep 抽函数（catalog.json）+ `mcp__cheap-research__extract`（haiku 分类 + 高质量模型找 top 5 重复）。**降级**：函数数 < 阈值 / ripgrep 不可用 / cheap-research 不可用 → 整个 §2.5.7 跳过
 
 ### 3 merge（合并审查意见）
 - **sequential-thinking**：强制思考前置（逐条甄别审查意见 → 判断采纳/驳回 → 规划修改策略）
@@ -120,7 +120,7 @@
 
 
 - **cheap-research**（🟢*）：Fixed 预扫（`scan_patterns` 功能点×代码位置机械预扫，见 [steps/05_deepcheck.md](../steps/05_deepcheck.md) 步骤 5）+ dedup（`extract`，见 §9.4）。`diff_summary`（Reverse 阶段对比）/ `summarize`（阶段摘要压缩）可作可选增强，非强证据场景不评估。**不接管决策**：Fixed/Free 阶段 / 3 质疑者对抗（A6）走主会话（高风险）
-- **dedup 子阶段**：见 §9.4。**强证据** = cheap-research 🟢 + 函数数 ≥ 50 → 全量 dedup（5 阶段：抽取→分类→拆分→高质量模型逐类找重复→报告）。**降级**：函数数 < 50 / ripgrep 不可用 / cheap-research 不可用 → 整个 §9.4 跳过。**复用**：检测 `categorized.json` 是否已由 §2 02_review 生成 → 复用避免重跑分类（中间产物路径 `{ICODE_OUT_DIR}/<ticket>/dedup/{catalog,categorized,duplicates/*.json}`，与 mcp_integration 一致）
+- **dedup 子阶段**：见 §9.4。**强证据** = cheap-research 🟢 + 函数数 ≥ `dedup_min_functions`（gates.json 常量）→ 全量 dedup（5 阶段：抽取→分类→拆分→高质量模型逐类找重复→报告）。**降级**：函数数 < 阈值 / ripgrep 不可用 / cheap-research 不可用 → 整个 §9.4 跳过。**复用**：检测 `categorized.json` 是否已由 §2 02_review 生成 → 复用避免重跑分类（中间产物路径 `{ICODE_OUT_DIR}/<ticket>/dedup/{catalog,categorized,duplicates/*.json}`，与 mcp_integration 一致）
 
 ### 6 audit（终审）
 - **playwright**：真实 UI 验证——仅前端工程时
@@ -158,6 +158,12 @@
 3. **🟢 MCP 未实际调用**（含未先尝试调用就标降级）= 反偷懒第 21 条违规
 4. **⚪ MCP 无需记录**（强证据场景不满足，不评估不声明）
 5. **🟢 MCP 未在思考块留下调用/降级记录** = 反偷懒第 21 条违规（审计 grep 思考块核查）
+
+> **cheap-research 例外（机器化 gate）**：cheap-research 的强证据执行点由**独立运行痕迹**承载，不进正式产物——
+> - gate 真源：`mcp/cheap-research/gates.json`（阈值常量 + 11 个 gate 的 eligibility condition）
+> - 运行痕迹：`{ICODE_OUT_DIR}/.mcp_gate_trace.jsonl`（每 gate 一条最终判定，`decision` 词表 = `called` / `cache_hit` / `skipped_not_eligible` / `skipped_stage_not_reached` / `degraded_after_attempt`）
+> - 校验器：`python3 tools/lint_mcp_coverage.py <out_dir> [--step <step>] [--strict] [--json]`（step 转换前运行；eligible 未履行 gate 不得标流程合规）
+> - 完整流程见 [thinking_core.md](thinking_core.md)「cheap-research 执行门（gate）流程」段
 
 ## 双保险机制
 

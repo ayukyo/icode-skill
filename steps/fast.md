@@ -138,6 +138,6 @@ fast 模式的"精简"不等于"偷懒"：
 | vision-bridge | 🟢* | UI 截图--用户给图时 |
 | memory | 🟢* | read_graph 查跨工单记忆--有历史工单时 |
 | playwright | ⚪ | fast 模式不跑 E2E |
-| **cheap-research** | 🟢* | **降本增强**：review（dedup extract + 审查输出压缩 summarize）+ deepcheck（Fixed 预扫 scan_patterns + dedup extract）+ audit（仓库事实候选 propose_repo_facts + 差异摘要 diff_summary）等**正文有执行点**的子任务；plan/code 无正文执行点（标 ⚪），不做。未装走 Agent(model="haiku") 兜底，不阻塞。**不接管决策**：3 质疑者对抗/架构决策/终审裁决/修复方案一律不走（零灰区原则）。详见 [mcp_per_step.md](../references/mcp_per_step.md) |
+| **cheap-research** | 🟢* | **降本增强**：review（dedup `review.dedup` extract + 审查输出压缩 `review.result_summary` summarize）+ audit（仓库事实候选 `audit.repo_facts` propose_repo_facts + 差异摘要 `audit.plan_diff` diff_summary）等**正文有执行点**的子任务。**fast deepcheck 只跑 Reverse，Fixed/Dedup 阶段不到达**：`deepcheck.fixed_scan` / `deepcheck.dedup` 必须记 `decision=skipped_stage_not_reached, evidence={mode:fast, phase:reverse}`，fast 的 dedup 责任由 review 承担（review gate 不因 fast 豁免）。plan/code 无正文执行点（标 ⚪），不做。未装走 Agent(model="haiku") 兜底，不阻塞。**不接管决策**：3 质疑者对抗/架构决策/终审裁决/修复方案一律不走（零灰区原则）。详见 [mcp_per_step.md](../references/mcp_per_step.md) |
 
 **强制约束**：🟢/🟢*/⚪ 语义 + 双保险机制（执行步骤内嵌 + thinking_core gate）详见 [SKILL.md「MCP 调用覆盖强制化」](../SKILL.md) + [references/mcp_per_step.md「双保险机制」](../references/mcp_per_step.md)；本步骤表内的 🟢/🟢* 标注按上方真源判定。

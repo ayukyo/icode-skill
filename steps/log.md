@@ -175,6 +175,13 @@
      1. 各文件错误级别计数：`grep -c "ERROR\|WARN\|FATAL" <file>` 摸热度
      2. 高频错误模式聚合：`grep -oE "ERROR [A-Z_]+" <file> | sort | uniq -c | sort -rn | head -10` 拿 top 10
      3. 各节点时间范围：head/tail 拿首末时间戳，定位问题时刻在文件中的相对位置
+   - **长日志预摘要（gate `log.long_log_summary`，cheap-research summarize）**：本阶段是本工单最大上下文消费者，大体积日志预摘要为**强证据执行点**（不是可选增强）。流程：
+     1. **确定性预筛构造候选文本**（禁止整包把几十 MB 日志传给 cheap-research）：按用户时间窗、目标 mission/request/session ID、模块名及 `error|fatal|fail|assert|timeout|state` 等关键词抓取命中行与上下文（`grep`/`rg` 带 `-A/-B` 上下文 + `file:line` 回指）
+     2. **去重、按时间排序，保留 `file:line` 回指**
+     3. **计算候选文本字节数**：`candidate_text_bytes = len(candidate_text.encode("utf-8"))`；阈值 `long_text_threshold_bytes`（gates.json 常量 =8192）——判断对象是"准备送进主会话分析的候选文本"，不是压缩包/原始日志目录大小
+     4. **候选文本 < 阈值**：主代理直接读，gate 记 `decision=skipped_not_eligible, eligible=false, evidence={candidate_text_bytes, threshold}`
+     5. **≥ 阈值**：按每块最多 `max_input_bytes_per_call`（gates.json 常量 =65536）调 `mcp__cheap-research__summarize`；多块输出只做时间线/异常/身份/状态变化候选汇总，focus 固定为 `提取时间线、错误/失败、请求身份、状态变化、缺失响应和 file:line 回指；只做候选导航，不裁决根因` → trace `eligible=true, decision=called/cache_hit/degraded_after_attempt`
+     6. **主代理必须回读所有用于最终结论的原始行及上下文**——预摘要不得替代版本基线、状态链、决定性证据和三质疑者对抗
    - **时间窗口切片**：围绕问题时间点前后各 5-10 分钟，`sed -n '/<t1>/,/<t2>/p' <file>` 切出小范围关键段（避免读 20MB 原文）
    - **§3.1 前序场景状态链（**`**P0**`**）**——问题时刻往前 30-60 分钟的状态/任务/模式切换表，**通用抽象**：
      - **目标**：补全"问题时刻之前发生了什么"，避免用户被迫 5+ 轮追问 mission/状态/模式切换
@@ -195,7 +202,7 @@
    - **成败差分（R4，同条件先成功后失败的强化对照组）**：症状为"同一操作先成功后失败"时，必须对两次的请求-响应**逐字段** diff，定位首次出现差异的字段并给出两侧取值；不得只写"第二次失败"而不给首次差异字段
    - **零号病人**：找首次异常出现的时刻，以及它之前的先兆
    - **TB 评论研读（若有 TB 源，强制逐条不漏）**：若步骤1 拉取了 TB 缺陷源，Read `{ICODE_OUT_DIR}/tb_source/<ID>/<ID>_meta.json`，**逐条遍历 `comments[]` 数组**（不得只读前几条、不得跳过），每条取 `content.comment`（评论正文）、`content.creator`（评论人）、`created`（评论时间）三字段；`title`/`note` 为缺陷描述。**评论常含复现步骤/现象描述/排查记录/关键时间点/日志原文片段**（评论里可能直接贴了形如 `[节点] [级别] [文件:行] 原文` 的日志行加发生时刻），这些时间点与日志原文**必须回捞进本阶段「现场时间线」表**并标注来源「TB评论：评论人 时间」，作为症状补充证据纳入现场还原与对抗分析。**附件型评论**（`action=activity.comment.attachments`，`content.comment` 为空但 `content.files[]` 非空）不得当无评论跳过，须识别附件名（如「根因分析报告.md」）并提示已落盘可 Read。复用场景下对比 `*_meta.prev.json` 识别新增评论。**完整性自检**：研读完成后立即核对「已分析评论条数 == meta.json `comments[]` 长度」（写报告前再兜底一次），漏条视为不合规。**⚠️ 评论不盲信（只作参考启发，须实证）**：评论是别人的观点/排查记录，可能错误、过时或带方向性诱导（含附件「根因分析报告.md」等修复手段/根因分析文档）——**不得直接采信为根因事实**；评论给出的根因结论、修复手段、时间点一律**先当未证实假说**，须经日志原文实证 + 代码事实验证门核对后才可纳入根因结论（与「找项目文档参考但不盲信」「历史根因只作启发」同原则）
-   - **TB 评论预提取（可选加速，cheap-research extract）**：评论数 ≥ 8 条（`comments[]` 长度）**且** cheap-research 可用（MCP 已装 + `config.json` 三件套已配）时，先调 `mcp__cheap-research__extract` 批量预提取评论要点，主会话再基于预提取结果回读高价值评论原文——省逐条通读 token，**不降低证据完整性**（完整性自检 + 高价值回读双保留，不违反反偷懒第 23 条）：
+   - **TB 评论预提取（gate `log.comments_extract`，cheap-research extract）**：评论数 ≥ `tb_comment_extract_min`（gates.json 常量 =8，`comments[]` 长度）**且** cheap-research 可用（MCP 已装 + `config.json` 三件套已配）时，先调 `mcp__cheap-research__extract` 批量预提取评论要点，主会话再基于预提取结果回读高价值评论原文——省逐条通读 token，**不降低证据完整性**（完整性自检 + 高价值回读双保留，不违反反偷懒第 23 条）。**gate trace**：评论数 ≥ 阈值 → `log.comments_extract: eligible=true` 必须 called/cache_hit/degraded_after_attempt；评论数 < 阈值 → `eligible=false, skipped_not_eligible, evidence={tb_comments_count, threshold}`（**合法 skip 也要写 trace**，让"合理没调用"与"漏调"可区分）：
      - **分批**：评论数组序列化文本按 **8000 字符**分批（extract 的 `text` 参数自动截断到 8000 字符，超长必须分批，每批调一次），`index` 字段贯穿原始 `comments[]` 下标
      - **schema**（wrapper object 模式，防 array-of-objects 退化，已实测验证）：`{"type":"object","properties":{"results":{"type":"array","items":{"type":"object","properties":{"index":{"type":"integer"},"creator":{"type":"string"},"created":{"type":"string"},"key_points":{"type":"array","items":{"type":"string"}},"log_snippets":{"type":"array","items":{"type":"string"}},"evidence_timepoints":{"type":"array","items":{"type":"string"}}},"required":["index","creator","key_points"]}}},"required":["results"]}`
      - **instruction 必含**："每条评论提取 index / creator / created / key_points(核心要点数组，含复现步骤/怀疑方向/补充信息，每条 ≤30 字) / log_snippets(评论中引用的日志原文片段，逐字保留) / evidence_timepoints(关键时间点)；不要漏任何一条评论"
@@ -396,6 +403,10 @@
    ```
 
    > `tb_source`（可选）：从 TB 拉取时填 `{lib,num,pid,label,url,meta_path}`（metadata 完整版，含本地路径），纯本地日志分析时为 `null`。**写入全局索引时只存摘要 `{lib,num,pid,label}`**（供同 TB 单检索复用，不含 url/meta_path）。
+
+   > **新建 metadata 增加 `"mcp_gate_schema_version": 1`**（见 [references/thinking_core.md](../references/thinking_core.md)「cheap-research 执行门（gate）流程」段）。
+   > **log 完成前 gate 校验**：置 `log_done` 前运行
+   > `python3 tools/lint_mcp_coverage.py {ICODE_OUT_DIR} --step log --strict`——`log.comments_extract` / `log.long_log_summary` 必须各有最终 trace 行（评论/候选日志未达阈值时记 `skipped_not_eligible`），eligible 未履行不得标流程合规。
 
    > **三基线字段（P0，默认 `[]` 向后兼容；字段缺失视为 `[]`）**：现场运行版本基线门（阶段1）与步骤 9.6 版本基线完成门落地用。`runtime_code_baselines` = 现场运行代码版本证据数组，每条 `{module, repo_path, evidence_source, raw_version, commit, dirty, resolved, confidence, relation_to_analysis_head}`（`module` 实现模块名、`repo_path` 归属仓库绝对路径、`evidence_source` 版本证据回指（启动日志/build_info/version.json/manifest/--version/TB 评论）、`raw_version` 原文版本串（含 `dirty` 形如 `git=<hash>-dirty`）、`commit` 解析出的提交 Hash、`dirty` 是否带未提交差异、`resolved` Hash 是否本地可解析、`confidence` ∈ `high`/`medium`/`low`（高/中/低）、`relation_to_analysis_head` ∈ `same_as_head`/`ancestor_of_head`/`ahead_or_forked`/`unresolved`，Hash 不可解析时 `commit=null`+`relation=unresolved`）；`analysis_code_baselines` = 当前分析版本，每条 `{module, repo_path, commit, branch}`（缺省为 `git rev-parse HEAD` 所在仓库）；`verification_code_baselines` = 修复验证版本，每条 `{module, commit, verified_at, scenarios}`。字段定义与只读约束见 [references/dir_and_metadata.md](../references/dir_and_metadata.md)「metadata 三基线字段」。
 
@@ -742,7 +753,7 @@ TB 附件已落盘后，若 `{ICODE_OUT_DIR}` 位于**网络挂载（SMB 等）*
 | context7 | 🟢* | 库 API 行为查证--涉及第三方库时 |
 | vision-bridge | 🟢* | 错误截图分析 + 本地日志视频/图片分析--用户给截图或本地日志目录含视频/图片时 |
 | memory | 🟢* | read_graph 查跨工单记忆--本工程有历史工单时 |
-| **cheap-research** | 🟢* | **降本**：extract（阶段 2 TB 评论预提取，评论 ≥ 8 条时，可选加速——见「TB 评论研读」段）。**TB 缺陷源拉取走 tb_pull.py（非 fetch_remote）**。其余（阶段 0/1/2 长上下文压缩 summarize / 8.6 memory 沉淀 / fill_template 评论回复）可作可选增强，非强证据场景不评估。不接管决策：阶段 3 链路图/阶段 4 根因假设/阶段 6+7 对抗/阶段 8 修复建议/追问机制走主会话（高风险） |
+| **cheap-research** | 🟢* | **降本**：extract（gate `log.comments_extract`，阶段 2 TB 评论预提取，评论 ≥ `tb_comment_extract_min` 时）+ summarize（gate `log.long_log_summary`，长日志预摘要，候选文本 ≥ `long_text_threshold_bytes` 时——见「预聚合」段）。**TB 缺陷源拉取走 tb_pull.py（非 fetch_remote）**。其余（8.6 memory 沉淀 / fill_template 评论回复）可作可选增强，非强证据场景不评估。不接管决策：阶段 3 链路图/阶段 4 根因假设/阶段 6+7 对抗/阶段 8 修复建议/追问机制走主会话（高风险） |
 | playwright | ⚪ | 本步骤不推荐 |
 
 **强制约束**：🟢/🟢*/⚪ 语义 + 双保险机制（执行步骤内嵌 + thinking_core gate）详见 [SKILL.md「MCP 调用覆盖强制化」](../SKILL.md) + [references/mcp_per_step.md「双保险机制」](../references/mcp_per_step.md)；本步骤表内的 🟢/🟢* 标注按上方真源判定。

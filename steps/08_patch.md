@@ -341,13 +341,20 @@
 
 | patch 阶段 | 工具 | 类型 | focus / 输入 | 真源 | 价值 |
 |------------|------|------|------------|------|------|
-| **阶段 1 重新审视现状**：重审 `00_init.md` / `01_plan.md` / `03_plan_final.md` 长产物 | `summarize` | [核心] | `focus="改动点/根因"` | [server.py:194](../mcp/cheap-research/server.py) | 8K 产物读全文 → 拿结构化摘要，省主代理上下文 80%+ |
+| **阶段 1 重新审视现状**：重审 `00_init.md` / `01_plan.md` / `03_plan_final.md` 长产物（**仅跨 session 快速回顾**，gate `patch.context_summary`） | `summarize` | [核心] | `focus="改动点/根因"` | [server.py:194](../mcp/cheap-research/server.py) | 跨 session 恢复时快速回顾；**首次进入必须 Read 全文，不得用 summarize 替代**（见下方阶段 1 约束） |
 | **阶段 1 重新审视现状**：从 `index.json` 候选中按本工单症状挑相似历史工单 | `retrieve_similar` | [核心] | `query=本工单症状, candidates=[{ticket_id, requirement_summary, keywords, ...}]` | [server.py:252](../mcp/cheap-research/server.py) | 50 条索引 → top-k 评分，主代理只看前几个 |
 | **阶段 2 增量计划 三链预扫 caller / import / test** | `trace_refs` | [增强] | `symbol=待改符号, scope_path="."` | [server.py:700](../mcp/cheap-research/server.py) | **纯机械、不调 LLM**——替代 3 次手 grep，自动出 caller 链 |
 | **阶段 2/4 长 diff 摘要**（PATCH vs BASE / 模板产物 vs 现状） | `diff_summary` | [核心] | `focus="接口变更/破坏面"` | [server.py:1298](../mcp/cheap-research/server.py) | 长 diff 索引化，主代理只看摘要 |
 | **阶段 4 复检**：编译输出 / 编译错误模式扫描 | `scan_patterns` | [增强] | `patterns=[regex,...]` | [server.py:597](../mcp/cheap-research/server.py) | **纯 grep，不调 LLM**——零 LLM 成本，机械扫描 |
 | **阶段 4 复检**：仓库关键文件事实候选（README / CLAUDE.md / 入口 / 依赖 / API），验证 patch 未引入外部接口回归 | `propose_repo_facts` | [核心] | `focus="对外 API / 依赖关系", max_files=10` | [server.py:527](../mcp/cheap-research/server.py) | LLM 生成候选事实（`candidate=true`）→ 主代理 Read/rg 实证后对照审查，防 patch 改了入口忘改 README |
-| **1.5 部署/监听 LOG**：本轮增量长 log 收口分析 | `summarize` | [核心] | `focus="异常/fatal/失败"` | [server.py:194](../mcp/cheap-research/server.py) | 替代主代理读 8K log，节省 read 上下文 |
+| **1.5 部署/监听 LOG**：本轮增量长 log 收口分析（gate `patch.listen_log_summary`） | `summarize` | [核心] | `focus="异常/fatal/失败"` | [server.py:194](../mcp/cheap-research/server.py) | 增量候选日志 ≥ `long_text_threshold_bytes`（gates.json 常量 =8192）时收口分析；**每轮只统计本轮增量窗口，避免旧日志反复触发** |
+
+**patch gate 与 trace（机器化，阈值只读 `mcp/cheap-research/gates.json`）**：
+
+- **`patch.context_summary`**（tool=summarize）：**仅跨 session 恢复**时评估。跨 session 且待回顾产物候选文本 ≥ `long_text_threshold_bytes` → `eligible=true` 必须 called/cache_hit/degraded_after_attempt（evidence 含 cross_session/candidate_text_bytes/threshold）；非跨 session 或候选文本 < 阈值 → `eligible=false, skipped_not_eligible`。**不得替代首次全文/定点原文读取**。
+- **`patch.listen_log_summary`**（tool=summarize）：`--listen`/`--test` 每轮监听**只统计本轮增量窗口**（增量候选日志字节数 = `len(增量文本.encode("utf-8"))`）≥ `long_text_threshold_bytes` → `eligible=true` 必须 called/cache_hit/degraded_after_attempt；< 阈值 → 主代理直接读，`eligible=false, skipped_not_eligible`（evidence 含 listen_mode/incremental_bytes/threshold）。**禁止把历史旧日志反复计入触发**。
+- **部署验证型 patch（无代码修改）**：可跳过 trace_refs / diff_summary / compile scan / repo facts，但必须**分别用 eligibility 证据说明为何不成立**（如 `evidence={change_type:"deploy_only", no_code_diff:true}` 记 `skipped_not_eligible`），不能静默跳过。
+- **patch finalized 前校验**：运行 `python3 tools/lint_mcp_coverage.py {ICODE_OUT_DIR} --step patch --strict`——本 patch 的 in-scope gate 必须各有最终 trace 行。
 
 **patch 阶段 1 重审的 cheap-research 约束（修复场景防降质）**：
 

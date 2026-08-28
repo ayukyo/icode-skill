@@ -23,6 +23,9 @@
 > - 跳过 Free 15 角度 + A6 独立 3 质疑者 spawn
 > - 输出标记：`▶ 步骤5 fast 模式：仅 Reverse 阶段`
 > - 依赖 plan + 1 轮 review + Reverse 单阶段 + audit 四道关卡承担检查职责（fast 设计取舍）
+> - **gate 记录**：`deepcheck.fixed_scan` 与 `deepcheck.dedup` 在 fast 下必须各追加一行
+>   `decision=skipped_stage_not_reached, eligible=false, evidence={mode:"fast", phase:"reverse", ...}`
+>   到 `{ICODE_OUT_DIR}/.mcp_gate_trace.jsonl`——不可漏记（缺记录 = in-scope gate 未履行，转换校验失败）
 
 ## 前置校验
 
@@ -227,9 +230,10 @@ Free 阶段一次性完整覆盖全部 15 个角度。
 > - exclude_dirs = `["node_modules", ".git", "build", ".icode_output"]`
 > - max_files = 50（**经验值**：工程 > 100 文件时降低单步 token；用户在 metadata 可调高/低）, max_matches = 100（**经验值**：单 pattern 最多 100 命中防 context 爆炸）
 > - 输出 = `{pattern: [{file, line, snippet}], ...}`，主代理只看命中 + 上下文，**不替代 7 维度判定**
+> - **gate 绑定**：本预扫 = gate `deepcheck.fixed_scan`（tool=scan_patterns）。**full 模式进入 Fixed 且功能点非空** → eligible=true 必须 called/cache_hit/degraded_after_attempt；**功能点为空** → eligible=false `skipped_not_eligible`；**fast 模式不进入 Fixed** → eligible=false `skipped_stage_not_reached`（见顶部「fast 模式降级」段）
 > - **前提契约（§2 空降级）**：`03_plan_final.md` §2 功能需求为空或不存在 → `patterns=[]` → scan_patterns 退化为无操作（不报错）；写 `▶ scan_patterns 跳过：03_plan_final.md §2 无功能需求`
-> - **fast 模式行为**：`metadata.mode == "fast"` 时**不跑 Fixed 阶段**（[steps/05_deepcheck.md](05_deepcheck.md) §「fast 模式降级」段）→ scan_patterns 预扫不触发，无需处理（fast 模式下预扫节省的 token 同样不产生）
-> - **降级**：cheap-research 不可用 → 跳过预扫，走原流程（主代理自扫）；写 `[降级-scan_patterns 不可用]`
+> - **fast 模式行为**：`metadata.mode == "fast"` 时**不跑 Fixed 阶段**（[steps/05_deepcheck.md](05_deepcheck.md) §「fast 模式降级」段）→ scan_patterns 预扫不触发，但**必须**在 `.mcp_gate_trace.jsonl` 记 `skipped_stage_not_reached`（缺记录 = 转换校验失败）
+> - **降级**：cheap-research 不可用 → 跳过预扫，走原流程（主代理自扫）；写 `[降级-scan_patterns 不可用]` 并记 trace `decision=degraded_after_attempt, attempted=true`
 
 7 维度逐项检查（**每维度必须列 file:line 证据 + 评分理由 ≥2 句实质，不得只概括**）：
 1. 计划实施一致性 — 逐条对照每个功能点/接口/约束
@@ -258,9 +262,10 @@ Free 阶段一次性完整覆盖全部 15 个角度。
 > **强证据场景判定**（详见 [references/mcp_per_step.md §5 deepcheck](../references/mcp_per_step.md)）：
 >
 > - cheap-research 🟢（`mcp__cheap-research__extract` 可用）
-> - **函数数 ≥ 50**
+> - **函数数 ≥ 50**（阈值取自 `mcp/cheap-research/gates.json` 常量 `dedup_min_functions`，禁止在正文写死）
+> - **gate 绑定**：本阶段 = gate `deepcheck.dedup`（tool=extract）。**full 模式进入 Dedup 且函数数 ≥ 阈值** → eligible=true 必须 called/cache_hit/degraded_after_attempt；**函数数 < 阈值** → eligible=false `skipped_not_eligible`（evidence 含 function_count/threshold）；**fast 模式不进入 Dedup** → eligible=false `skipped_stage_not_reached`（evidence 含 mode/phase）。**函数 catalog 按受影响 Git 仓库计算**：从 `metadata.code_files` 与 `01_plan.md` 候选文件解析所属仓库（`git -C <dir> rev-parse --show-toplevel` 去重）→ 每仓跑函数 catalog → 记录每仓函数数与合计数，任一受影响仓库 ≥ 阈值即对该仓运行 dedup
 >
-> **任一不满足 → 整个 §9.4 跳过**，在思考块 `MCP 调用` 段写明降级原因，不写产物文件。
+> **任一不满足 → 整个 §9.4 跳过**，在思考块 `MCP 调用` 段写明降级原因 + 写 trace（不写产物文件）。
 >
 > **复用 §2.5.7 产物**：检测 `{ICODE_OUT_DIR}/<ticket>/dedup/categorized.json` 是否存在（由 §2 02_review §2.5.7 生成）→ **复用避免重跑分类阶段**（节省 haiku 调用的 token）。
 
@@ -335,7 +340,7 @@ Free 阶段一次性完整覆盖全部 15 个角度。
 **降级路径**：
 
 - cheap-research 不可用 → 整个 §9.4 跳过，记 `[降级-cheap-research 不可用]`
-- 函数数 < 50 → 输出 `▶ §9.4 跳过：函数数 {N} < 50，工程规模太小无需 dedup`，整个 §9.4 结束
+- 函数数 < `dedup_min_functions`（gates.json 常量）→ 输出 `▶ §9.4 跳过：函数数 {N} < {阈值}，工程规模太小无需 dedup`，整个 §9.4 结束
 - 函数数 > 500 → 分批（每批 100），合并结果
 - extract 返回 `schema_validation_failed` → 重试 1 次（自动改 instruction 加"严格按 schema 输出"），仍失败标"分类降级-单类跳过"
 - 高质量模型某类返回空数组 → 该类跳过（无重复），不报错
@@ -358,6 +363,9 @@ Free 阶段一次性完整覆盖全部 15 个角度。
   - Fixed 首次全 clean（`deepcheck_clean_rounds` 达 1）→ 切换 `deepcheck_phase = "free"`，`deepcheck_clean_rounds = 0`
   - Free 完成后 → 终止
 - 终止后更新 `.ico_metadata.json`：`status = deepcheck_done`，`completed_steps` 追加 `"5"`
+- **gate 转换校验**：置 `deepcheck_done` 前运行
+  `python3 tools/lint_mcp_coverage.py {ICODE_OUT_DIR} --step deepcheck --strict`——
+  `deepcheck.fixed_scan` / `deepcheck.dedup` 必须各有最终 trace 行（fast 为 `skipped_stage_not_reached`），eligible 未履行不得标流程合规
 - 全流程模式：**立即继续执行步骤6**
 
 
@@ -381,7 +389,7 @@ Free 阶段一次性完整覆盖全部 15 个角度。
 |-----|----------|------|
 | playwright | 🟢* | 跑 E2E--前端工程时 |
 | vision-bridge | 🟢* | UI 截图复检--用户给图时 |
-| **cheap-research** | 🟢* | **降本**：Fixed 预扫 scan_patterns（功能点×代码位置机械预扫）+ dedup extract（见 §9.4）。其余（Reverse 阶段 diff_summary / summarize 长审查输出压缩）可作可选增强，非强证据场景不评估。不接管决策：Fixed/Free 阶段/3 质疑者对抗走主会话 |
+| **cheap-research** | 🟢* | **降本**：Fixed 预扫 scan_patterns（gate `deepcheck.fixed_scan`）+ dedup extract（gate `deepcheck.dedup`，见 §9.4）。其余（Reverse 阶段 diff_summary / summarize 长审查输出压缩）可作可选增强，非强证据场景不评估。**fast 模式不进入 Fixed/Dedup，两个 gate 记 `skipped_stage_not_reached`**。不接管决策：Fixed/Free 阶段/3 质疑者对抗走主会话 |
 | context7 | ⚪ | 本步骤不推荐 |
 | memory | ⚪ | 本步骤不推荐 |
 

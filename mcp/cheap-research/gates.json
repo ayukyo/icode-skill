@@ -1,0 +1,101 @@
+{
+  "schema_version": 1,
+  "doc": "cheap-research gate 机器真源。文档只解释语义，阈值一律从本文件读取，禁止在 step 文档/脚本中各自写一套常量。condition 字段供人审与测试锚点；第一版验证器用显式分支计算 eligibility，不引入通用表达式解释器。",
+  "constants": {
+    "long_text_threshold_bytes": 8192,
+    "max_input_bytes_per_call": 65536,
+    "dedup_min_functions": 50,
+    "tb_comment_extract_min": 8,
+    "merge_min_rounds": 2
+  },
+  "gates": [
+    {
+      "id": "log.comments_extract",
+      "step": "log",
+      "tool": "extract",
+      "required_when_eligible": true,
+      "condition": "tb_comments_count >= tb_comment_extract_min && cheap_available",
+      "evidence_fields": ["tb_comments_count", "threshold", "cheap_available"]
+    },
+    {
+      "id": "log.long_log_summary",
+      "step": "log",
+      "tool": "summarize",
+      "required_when_eligible": true,
+      "condition": "candidate_text_bytes >= long_text_threshold_bytes && cheap_available",
+      "evidence_fields": ["candidate_text_bytes", "threshold", "cheap_available"]
+    },
+    {
+      "id": "review.dedup",
+      "step": "review",
+      "tool": "extract",
+      "required_when_eligible": true,
+      "condition": "affected_repo_function_count >= dedup_min_functions && rg_available && cheap_available",
+      "evidence_fields": ["affected_repo_roots", "function_count", "threshold", "rg_available", "cheap_available"]
+    },
+    {
+      "id": "review.result_summary",
+      "step": "review",
+      "tool": "summarize",
+      "required_when_eligible": true,
+      "condition": "review 已形成可消费结论文本（review_round_*.json 或 02_review.md 结构化结论）",
+      "evidence_fields": ["result_source", "review_rounds"]
+    },
+    {
+      "id": "merge.cross_round_summary",
+      "step": "merge",
+      "tool": "summarize",
+      "required_when_eligible": true,
+      "condition": "review_rounds >= merge_min_rounds",
+      "evidence_fields": ["review_rounds", "threshold"]
+    },
+    {
+      "id": "deepcheck.fixed_scan",
+      "step": "deepcheck",
+      "tool": "scan_patterns",
+      "required_when_eligible": true,
+      "condition": "进入 Fixed 阶段 && 功能点非空（fast 模式记为 skipped_stage_not_reached）",
+      "evidence_fields": ["mode", "phase", "function_points_count"]
+    },
+    {
+      "id": "deepcheck.dedup",
+      "step": "deepcheck",
+      "tool": "extract",
+      "required_when_eligible": true,
+      "condition": "进入 Dedup 阶段 && affected_repo_function_count >= dedup_min_functions（fast 模式记为 skipped_stage_not_reached）",
+      "evidence_fields": ["mode", "phase", "function_count", "threshold"]
+    },
+    {
+      "id": "audit.repo_facts",
+      "step": "audit",
+      "tool": "propose_repo_facts",
+      "required_when_eligible": true,
+      "condition": "audit 存在受影响仓库（affected_repo_roots 非空）",
+      "evidence_fields": ["affected_repo_roots"]
+    },
+    {
+      "id": "audit.plan_diff",
+      "step": "audit",
+      "tool": "diff_summary",
+      "required_when_eligible": true,
+      "condition": "audit 存在计划文本与实现 diff",
+      "evidence_fields": ["plan_source", "code_sources"]
+    },
+    {
+      "id": "patch.context_summary",
+      "step": "patch",
+      "tool": "summarize",
+      "required_when_eligible": true,
+      "condition": "跨 session 恢复 && 待回顾产物候选文本字节数 >= long_text_threshold_bytes",
+      "evidence_fields": ["cross_session", "candidate_text_bytes", "threshold"]
+    },
+    {
+      "id": "patch.listen_log_summary",
+      "step": "patch",
+      "tool": "summarize",
+      "required_when_eligible": true,
+      "condition": "--listen/--test 本轮增量候选日志字节数 >= long_text_threshold_bytes",
+      "evidence_fields": ["listen_mode", "incremental_bytes", "threshold"]
+    }
+  ]
+}

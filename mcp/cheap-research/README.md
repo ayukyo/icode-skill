@@ -131,5 +131,18 @@ session 模型只看工具返回的结构化 dict，**不直接调用 cheap-rese
 - **未装 cheap-research**：走 Agent(model="haiku") 兜底（不阻塞）
 - **不接管决策**：3 质疑者对抗 / 架构决策 / 终审裁决 / 修复方案一律不走本工具
 
+### gate / trace / cache 三者关系（机器化执行门）
+
+cheap-research 的强证据执行点由三层机器机制承载，文档只解释语义、不重复发明阈值：
+
+| 层 | 载体 | 作用 |
+|----|------|------|
+| **gate 真源** | `mcp/cheap-research/gates.json` | 11 个 gate 的 eligibility condition + 阈值常量（`long_text_threshold_bytes=8192` / `dedup_min_functions=50` / `tb_comment_extract_min=8` / `merge_min_rounds=2` / `max_input_bytes_per_call=65536`）。**阈值只从这里读**，禁止在 step 文档/脚本写死 |
+| **trace 轨迹** | `{ICODE_OUT_DIR}/.mcp_gate_trace.jsonl` | 每 gate 一条最终判定（`gate_id`/`eligible`/`evidence`/`decision`/`attempted`/`result`/`at`）。`decision` 词表 = `called`/`cache_hit`/`skipped_not_eligible`/`skipped_stage_not_reached`/`degraded_after_attempt`；eligible=true 只允许 `called` / `cache_hit` / `degraded_after_attempt`（`degraded_after_attempt` 须 `attempted=true` 且 `result=error|empty|timeout`），`skipped_*` 仅用于 eligible=false。**不保存**工具完整结果/日志正文/API key/Cookie/设备凭据 |
+| **cache 去重** | `{ICODE_OUT_DIR}/.cheap_research_cache.json` | 有效命中（`tool + args_hash`，source mtime 校验）→ gate 记 `decision=cache_hit`，**不重复调用**，等价履行 |
+| **运行时校验器** | `python3 tools/lint_mcp_coverage.py <out_dir> [--step <step>] [--strict] [--json]` | step 转换前跑：eligible 未履行 / missing gate / degraded-without-attempt / trace schema error / 敏感数据 → 退出码 1 阻断 |
+
+流程：**加载 gates.json → 确定性算 eligibility 并写 trace → eligible 先查 cache → 命中写 cache_hit / 未命中实际调用 → 更新 trace → step 转换前跑校验器**。详见 [references/thinking_core.md](../../references/thinking_core.md)「cheap-research 执行门（gate）流程」段与契约测试 [tests/test_cheap_research_gate_contract.sh](../../tests/test_cheap_research_gate_contract.sh)。
+
 详见 [mcp/cheap-research/server.py](server.py)、工具类型真源 [tools_manifest.json](tools_manifest.json)
 与核心契约测试 [tests/](tests/)。

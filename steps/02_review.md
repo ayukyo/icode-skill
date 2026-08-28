@@ -145,11 +145,19 @@
 > **强证据场景判定**（详见 [references/mcp_per_step.md §2 review](../references/mcp_per_step.md)）：
 >
 > - cheap-research 🟢（`mcp__cheap-research__extract` 可用）
-> - **函数数 ≥ 50**（ripgrep catalog.json 函数条目数判定）
+> - **函数数 ≥ 50**（阈值取自 `mcp/cheap-research/gates.json` 常量 `dedup_min_functions`，禁止在正文写死）
+> - **gate 绑定**：本子阶段 = gate `review.dedup`（tool=extract）。**函数数按受影响 Git 仓库计算**（见下），任一受影响仓库 ≥ 阈值 → eligible=true 必须 called/cache_hit/degraded_after_attempt；**全部 < 阈值** → eligible=false `skipped_not_eligible`（evidence 含 function_count/threshold/rg_available/cheap_available）
 >
-> **任一不满足 → 整个 §2.5.7 跳过**，在思考块 `MCP 调用` 段写明降级原因，不写产物文件。
+> **任一不满足 → 整个 §2.5.7 跳过**，在思考块 `MCP 调用` 段写明降级原因 + 写 trace `decision=skipped_not_eligible`（不写产物文件）。
 
 **执行步骤**（AI 直接照填）：
+
+> **受影响仓库函数数计算（§8.1，替代整仓 $PROJECT_ROOT 单扫）**：多仓工程下 `$PROJECT_ROOT` 可能漏扫被忽略的业务子仓——
+> 1. 从 `metadata.code_files` 与 `01_plan.md` 候选修改文件确定所属 Git 仓库（每个文件目录 `git -C <dir> rev-parse --show-toplevel`）
+> 2. 去重得 `affected_repo_roots`
+> 3. 在每个受影响仓库根运行下方函数 catalog 命令
+> 4. 记录每仓函数数与合计数；**任一受影响仓库 ≥ `dedup_min_functions` 时，对该仓运行 dedup**
+> 5. review 时 `code_files` 尚空 → 从 `01_plan.md` 文件清单解析候选路径；仍无法解析 → 标 `degraded_after_attempt` 或 L2 流程问题，**不能默认为 <50**
 
 1. **函数目录抽取**（ripgrep 优先）：
 
@@ -175,7 +183,7 @@
 
    **ripgrep 不可用**（未装）：整个 §2.5.7 跳过
 2. **函数数判定**（阈值与分批）：
-   - 函数数 < 50 → 输出 `▶ §2.5.7 跳过：函数数 {N} < 50，工程规模太小无需 dedup`，整个 §2.5.7 结束
+   - 函数数 < `dedup_min_functions`（gates.json 常量）→ 输出 `▶ §2.5.7 跳过：函数数 {N} < {阈值}，工程规模太小无需 dedup` + 写 trace `review.dedup: eligible=false, skipped_not_eligible`，整个 §2.5.7 结束
    - 函数数 > 500 → 分批（每批 100）。**理由**：high质量模型(用户配置)单次处理 5-10 函数合理，10000 函数全跑高质量模型不可能；500 函数通常分 ~30-50 sub_category，每个 5-15 函数，高质量模型 50 次 ≈ $0.04 cost。
 3. **分类阶段（haiku 降本）——双层分类**：调 `mcp__cheap-research__extract` 输入 = catalog.json 文本 + **双层分类 schema**（实测单层分类后处理映射会跨家族合并——例如把"JSON解析"/"字典合并"/"列表过滤"全部归到 `data-transform`，高质量模型找重复时跨家族做无意义比较）。**必须用 `parent_category`（23 类标准化）+ `sub_category`（LLM 自由细粒度）双层**，高质量模型按 `sub_category` 分组工作，输出 → `{ICODE_OUT_DIR}/<ticket>/dedup/categorized.json`：
 
@@ -464,15 +472,17 @@
    - 输出告警：`⚠️ 步骤2 触达硬上限{absolute_cap}轮仍有未解决问题，建议回到步骤1`
 
 5. **终止后更新 metadata**：`status = review_done`，`completed_steps` 追加 `"2"`，保留 `extended_rounds` / `unresolved_issues_at_cap` / `pending_verification` 字段供后续步骤参考
-6. **审查输出压缩（供 merge 步骤消费）**：调 `mcp__cheap-research__summarize` 压缩本轮审查输出（`review_round_*.json` 的 `new_issues` + 对抗裁决 + 维度审查结论），摘要 ≈ 300-500 token，写入 `{ICODE_OUT_DIR}/_review_summary.md`（**仅含**：审查轮次 + 总问题数 + 关键 HIGH 问题 + 未解决标记）。**降级**（cheap-research 不可用）：跳过，`_review_summary.md` 不存在时 merge 步骤直接读各轮 JSON 原文。
-7. **全流程模式**：
+6. **审查输出压缩（供 merge 步骤消费）**（gate `review.result_summary`）：**先落结构化结论**——本轮有 issue 时已写 `review_round_{total_rounds}.json`；clean 轮不写 JSON 时，以 `02_review.md` 的结构化结论（轮次/总问题数/关键 HIGH/未解决标记）为摘要输入（**不得改去摘要 `01_plan.md` 并声称已履行本 gate**）。再调 `mcp__cheap-research__summarize` 压缩，摘要 ≈ 300-500 token，写入 `{ICODE_OUT_DIR}/_review_summary.md`。**gate trace**：review 已形成可消费结论文本 → `review.result_summary: eligible=true` 必须 called/cache_hit/degraded_after_attempt（evidence 含 `result_source`/`review_rounds`）；**降级**（cheap-research 不可用）：跳过，`_review_summary.md` 不存在时 merge 步骤直接读各轮 JSON 原文，并记 trace `decision=degraded_after_attempt, attempted=true`。
+7. **gate 转换校验**：置 `review_done` 前运行
+   `python3 tools/lint_mcp_coverage.py {ICODE_OUT_DIR} --step review --strict`——`review.dedup` / `review.result_summary` 必须各有最终 trace 行，eligible 未履行不得标流程合规。
+8. **全流程模式**：
    - 若 `unresolved_issues_at_cap == true`：**暂停**全流程串联，输出 `⚠️ 步骤2 存在未解决问题，请手动决定是否继续 /icode merge 或回到 /icode plan`
    - 否则：**立即继续执行步骤3**
 ## MCP 推荐（强证据二元化）
 | MCP | 推荐级别 | 用途 |
 |-----|----------|------|
 | vision-bridge | 🟢* | 截图分析--用户给图时 |
-| **cheap-research** | 🟢* | **降本**：extract（dedup 函数分类 + 找重复，见 §2.5.7）+ summarize（审查输出压缩，供 merge 步骤消费，见步骤 6）。其余（diff_summary 增量审查 / fill_template 维度结果 / retrieve_similar 历史 issue / scan_patterns / trace_refs）可作可选增强，非强证据场景不评估。不接管决策：3 质疑者对抗/审查合成走主会话 |
+| **cheap-research** | 🟢* | **降本**：extract（dedup 函数分类 + 找重复，gate `review.dedup`，见 §2.5.7）+ summarize（审查输出压缩，gate `review.result_summary`，供 merge 步骤消费，见步骤 6）。其余（diff_summary 增量审查 / fill_template 维度结果 / retrieve_similar 历史 issue / scan_patterns / trace_refs）可作可选增强，非强证据场景不评估。不接管决策：3 质疑者对抗/审查合成走主会话 |
 | context7 | ⚪ | 本步骤不推荐 |
 | memory | ⚪ | 本步骤不推荐 |
 | playwright | ⚪ | 本步骤不推荐 |

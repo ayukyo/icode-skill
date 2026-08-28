@@ -89,6 +89,16 @@ cd ~/.claude/skills/icode/mcp/cheap-research
 
 如果 cheap-research 装了但 `config.json` 还没填三件套，工具调用会返回 fallback 提示 dict，session 模型按默认会话模型处理——**等同于未装 cheap-research 的行为**。不报错、不阻塞。
 
+### 执行门覆盖率检查（coverage）
+
+每个 cheap-research 调用点都有机器可读的 gate（`mcp/cheap-research/gates.json`，阈值唯一真源）与工单内运行痕迹（`{ICODE_OUT_DIR}/.mcp_gate_trace.jsonl`）。可用校验器确认每个 eligible gate 是否真实履行（或带结构化证据合法跳过）：
+
+```bash
+python3 tools/lint_mcp_coverage.py <out_dir>              # Markdown 报告，退出码 0/1/2
+python3 tools/lint_mcp_coverage.py <out_dir> --json       # 机器可读报告
+python3 tools/lint_mcp_coverage.py <out_dir> --step review --strict
+```
+
 详见 [mcp/cheap-research/README.md](mcp/cheap-research/README.md)。
 
 ### 其他 4 个 MCP（sequential-thinking / memory / context7 / playwright）

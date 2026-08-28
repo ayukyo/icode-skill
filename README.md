@@ -171,6 +171,14 @@ cd ~/.claude/skills/icode/mcp/cheap-research
 
 Offloads 23 low-risk sub-tasks (long-context compression / history retrieval / template filling / structured extraction / TB-comment pre-extraction / code-fact audit / pattern scanning / symbol tracing / diff summaries) to a cheap model. It **never takes over decisions** — 3-skeptic adversarial verification, architecture decisions, final audit, and fix proposals stay on the main session (zero gray area).
 
+**Coverage check (execution gates)**: each cheap-research call site has a machine-readable gate (`mcp/cheap-research/gates.json`) and a per-ticket trace (`{ICODE_OUT_DIR}/.mcp_gate_trace.jsonl`). Run the validator to confirm every eligible gate was actually fulfilled (or legitimately skipped with structured evidence):
+
+```bash
+python3 tools/lint_mcp_coverage.py <out_dir>              # markdown report, exit 0/1/2
+python3 tools/lint_mcp_coverage.py <out_dir> --json       # machine-readable report
+python3 tools/lint_mcp_coverage.py <out_dir> --step review --strict
+```
+
 ### The Other 4 MCPs (sequential-thinking / memory / context7 / playwright)
 
 The remaining 4 of the 6 MCPs are workflow utilities, installed by `/icode install` and used by the steps — no per-user config needed:
