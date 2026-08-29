@@ -45,21 +45,25 @@ def resolve_npx_cli(node_path: str) -> str | None:
     return None
 
 
-def build_server_entry(node_path: str, npx_path: str, package: str) -> dict:
+def build_server_entry(node_path: str, npx_path: str, package: str, env: dict | None = None) -> dict:
     """构造 mcpServers 条目。三平台通用。
 
     Args:
         node_path: node 可执行路径 (可解析的)
         npx_path:  npx 可执行路径 (可解析的)
         package:   npm 包名 (e.g. @modelcontextprotocol/server-memory)
+        env:       可选环境变量注入 (e.g. {"DISABLE_THOUGHT_LOGGING": "true"})；
+                   仅在需要时传，不影响其他 npx 系工程 (context7/memory/playwright)。
 
     Returns:
-        dict: 包含 command/args,可选 _fallback 字段
+        dict: 包含 command/args,可选 env 与 _fallback 字段
     """
     entry = {
         "command": npx_path,
         "args": ["-y", package],
     }
+    if env:
+        entry["env"] = dict(env)
     npx_cli = resolve_npx_cli(node_path)
     if npx_cli:
         entry["_fallback"] = {

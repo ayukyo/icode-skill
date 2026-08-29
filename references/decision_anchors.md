@@ -75,10 +75,42 @@ icode 步骤间靠产物文件（00_init.md / 01_plan.md 等）传递信息，�
 - 锚点字段缺失 -> 视为空，不阻塞
 - 锚点与产物矛盾 -> **以产物为准**（锚点是摘要可能过时，产物是权威；下游发现矛盾时以产物为准并提示刷新锚点）
 
+## L1 决策记录契约（reasoning gate L1 步骤）
+
+> reasoning gate 把 L1 步骤（readme/ppt/close/reopen/worktree/init/doc/limit/merge）的「强制思考」收敛为**简短决策记录**：不输出完整思维链、不调用 sequential-thinking，只写结构化、可审计的短记录。复用本文件 `.decision_anchors.json`，为对应步骤增加以下 `reasoning_gate` 摘要对象：
+
+```json
+{
+  "reasoning_gate": {
+    "tier": "L1",
+    "objective": "本步骤要决定什么",
+    "facts": [
+      {"claim": "已确认事实", "evidence": "文件:行号、日志时间点、命令或测试结果"}
+    ],
+    "assumptions": ["尚未证实但本步骤依赖的前提"],
+    "alternatives": ["被考虑的可行选项"],
+    "disconfirming_evidence": ["不支持当前决定的证据；没有则为空数组"],
+    "risks": ["主要风险及约束"],
+    "decision": "最终决定及一句话理由",
+    "verification_plan": ["可执行验证动作"],
+    "open_questions": []
+  }
+}
+```
+
+约束：
+
+- `facts[].evidence` 不能为空；没有证据的内容必须放入 `assumptions`。
+- `decision` 必须能回指至少一条事实，或明确标记为等待验证。
+- 不保存逐 token 思考、自由联想、密钥、Cookie、设备凭据或大段日志原文。
+- 下游步骤读取摘要时仍需回读关键证据，锚点不能替代事实源。
+- L2/L3 完成后也写相同摘要，只把 `tier` 改为实际等级；sequential-thinking 的原始 `thought` 不复制进锚点。
+- L1 步骤的 trace（`.thinking_gate_trace.jsonl`）记录 `mechanism=decision_record`、`attempted=true`、`result=success`；L0/L1 若调用了 sequential-thinking 记 `over_invoked=true`（灰度观察项）。
+
 ## 反偷懒
 
 - **禁止锚点复制产物全文**：锚点是精炼摘要，每字段 ≤200 token；超量 = 偷懒（未提炼）
-- **禁止跳过写锚点**：`anchors_enabled=true` 时，各步骤完成后必须写（init/plan/code/deepcheck/audit 五处）
+- **禁止跳过写锚点**：`anchors_enabled=true` 时，各步骤完成后必须写（init/plan/code/deepcheck/audit 五处；L1 决策记录按「L1 决策记录契约」追加 `reasoning_gate` 对象）
 - **禁止锚点替代产物**：产物仍是权威，锚点是补充；下游不得"只读锚点不读产物"做关键决策
 - **禁止锚点写工程元数据**：锚点字段只含决策摘要，不含 ticket_id/步骤号等 icode 内部元数据
 

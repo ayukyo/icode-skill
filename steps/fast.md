@@ -126,7 +126,7 @@
 
 fast 模式的"精简"不等于"偷懒"：
 
-1. **每步仍必须执行强制思考前置**（按 `references/thinking_core.md`「强制思考前置·统一契约」段执行三件套 Read，缺证据视为不合规）
+1. **每步仍按分级思考 reasoning gate 执行**（按 [references/mcp_per_step.md](../references/mcp_per_step.md)「通用前置·分级思考」段执行：L1 记决策字段，L2 用 sequential-thinking，L0 不强制；缺证据视为不合规）
 2. **每步仍必须产出对应产物文件**（不跳过 01_plan.md / 02_review.md / 03_plan_final.md / 04_code_review_fix.md / 05_deepcheck.md / 06_audit.md）；**plan 步骤1 前置 limit 硬基线的 `{ICODE_OUT_DIR}/limit_checkpoint.md` 阶段块照常落盘**（读 limit 的当场留痕是**审计刚性**，不因 fast 精简跳过——即使本工程无 limit 也追加记录"无"，见 [01_plan.md](01_plan.md) 前置 limit 硬基线第 4 项）
 3. **入口警告必须如实打印**（不静默跳过提示）
 4. **跳过对抗验证不是"省略证据"**，而是承认 fast 模式下没有对抗资源——用户自负其责

@@ -13,7 +13,7 @@
 3. **降低轮次**：步骤 2 审查、步骤 5 复检要求的轮次未达标就提前终止（如 `max_rounds=3` 只跑 1 轮就声称"已无新问题"）
 4. **示意/伪代码替代实现**：步骤 4 编码时用 `// TODO`、`// ...`、`// 省略类似实现` 等占位符代替真实代码
 5. **审查/复检走过场**：审查意见全是"无问题"、"通过"等空泛结论，无具体证据
-6. **跳过强制思考**：未输出 `ultrathink` 触发词、未做 MCP 思考或降级文字思考块（详见 [thinking_core.md](../references/thinking_core.md) + [thinking_detail.md](../references/thinking_detail.md)）
+6. **跳过分级思考（reasoning gate）**：L2/L3 步骤未调 sequential-thinking 或降级文字思考块、L1 步骤未记 `.decision_anchors.json` 决策字段、未写 `.thinking_gate_trace.jsonl`（详见 [mcp_per_step.md](mcp_per_step.md)「通用前置·分级思考」+ [thinking_core.md](../references/thinking_core.md) + [thinking_detail.md](../references/thinking_detail.md)）
 7. **跳过自检报告**：修改后未输出完整的 7 维自检报告
 8. **跳过对抗验证**：步骤 2.5 逐维审查产出的 issue 未经独立质疑者子代理对抗就下 `confirmed` 结论（**步骤 2.4 已用 Read/Grep 实证验证失败的 issue 例外**，已有铁证可直接 `confirmed` 无需对抗）；或把主代理推理过程喂给质疑者当既定事实（破坏独立性）；或对抗未收敛时和稀泥默认通过（详见 [adversarial.md](adversarial.md)）。**质疑者必须用 Agent 工具独立 spawn，不得主代理自演**——产物（review_round_*.json 的 adversarial_verification）必须记录每个质疑者的**独立 Agent 调用证据**（spawn 的 agent 返回内容摘要），无 spawn 证据=自演=不合规。**子代理失败时禁用自演兜底**：质疑者返回空/截断/无 verdict 时，按 adversarial.md「子代理失败处理」重试 2 次（含 1 次换 subagent_type）→仍失败诚实降级为 `[未验证-子代理对抗失败]` 计入 `pending_verification`，**绝不改由主代理自演裁决、绝不伪造 confirmed**（自演=既当运动员又当裁判，确认偏误倾向确认自己结论，对抗形同虚设）。主代理 Read/Grep 实证铁证属事实核查不算自演，判断性结论才必须独立 spawn
 9. **伪造共识 / 默认通过**：issue 无 `evidence_pointer` 证据回指就确认；断言无法实证验证时不标 `[未验证-证据不足]` 而默认通过；对抗裁决分裂时不降级而强行 `confirmed`
@@ -36,7 +36,7 @@
 
 **跨仓库/子仓库检索（多 git 根，防「主仓库 0 命中误判不存在」）**：repo 管理多子仓库场景，主仓库 `git grep` / `git log -S` 对子仓库代码**必然 0 命中**（子仓库被主仓库 `.gitignore`，`.git` 是指向子仓库真实 git 目录的符号链接）——主仓库检索 0 命中**不能判定「不存在」**，须 `grep -r` 扫子仓库路径或 `git -C <子仓>` 在子仓库内检索。**判断功能何时引入/部署产物含某版本，用 `git -C <子仓> log/show <hash>`，禁止用源码 mtime 推断**（mtime 只反映工作区最后编辑，不反映 git 历史/编译时刻；mtime 推断为间接推断，须标不确定性，细则见 [adversarial.md](adversarial.md)「证据获取方法可靠性约束」）。
 
-**双保险强制触发**（治本"只触发 sequential-thinking"问题）：
+**双保险强制触发**（治本"只触发 sequential-thinking"问题；sequential-thinking 现为 reasoning gate 判 L2/L3 才用）：
 - **A 层·执行步骤内嵌**：各 step 执行步骤主体里有独立的"第 N 步"调用指令（非末尾推荐表），AI 顺序执行必然走到
 - **B 层·thinking_core MCP gate**：[thinking_core.md](thinking_core.md) 通用流程第 3 步--思考块先列本步 🟢 MCP（不含 sequential-thinking）（工具已在列表直接可见则直接调用，不可见才 ToolSearch 取 schema）-> 实际调用一次 -> 结果进思考块。覆盖 context7/memory/vision-bridge/playwright
 - **硬约束**：🟢 MCP **必须先实际调用一次**（A 层内嵌点或 B 层 gate），调用返回错误/超时/空结果才能标"降级"或"不适用"--不得未经实际调用就标"不适用"

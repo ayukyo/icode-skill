@@ -228,9 +228,9 @@ find "${GIT_ROOT}" -maxdepth 3 -name "<module_name>" -type d
   - 该模块非独立仓库 -> 生成 `project_docs` 该模块章节 + 固定章节（00/90/99）
   - 其余章节按代码特征自适应生成；**不因用户只点一个模块而省略固定章节**（00/90/99 永远生成）
 
-### 4. 强制思考前置（不可跳过）
+### 4. 思考分级
 
-**必须按 [references/thinking_core.md](../references/thinking_core.md)「强制思考前置·统一契约」段执行三件套 Read + Read [references/doc_template.md](../references/doc_template.md) 完整内容**（doc 模板多 Read 场景）。子项（≥4步）= 扫描结果分析 → 章节规划 → 元信息字段准备 → 风险评估（手动编辑/冲突）。
+本步骤为 **L1（短决策记录）**（见 [references/mcp_per_step.md](../references/mcp_per_step.md)「通用前置·分级思考」段），不调用 sequential-thinking；三件套 Read + Read [references/doc_template.md](../references/doc_template.md) 完整内容（doc 模板多 Read 场景）。决策字段记入 `.decision_anchors.json` = 扫描结果分析 → 章节规划 → 元信息字段准备 → 风险评估（手动编辑/冲突）。
 
 ### 5. 生成 module_docs（依赖）+ 工程章节
 

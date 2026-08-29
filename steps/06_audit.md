@@ -26,7 +26,7 @@
 
 检查 `{ICODE_OUT_DIR}/03_plan_final.md` 和步骤4创建的代码文件是否存在，缺失则报错。
 
-> **模块文档检索（新增）**：在强制思考前置之前，Read `~/.claude/icode_data/project_docs/<project_id>/<branch_safe>/_meta.json` 取 `module_deps` 列表，对每个 dep 检 `~/.claude/icode_data/module_docs/<key>/_meta.json` 的 `current_commit` 是否与 `_meta.json.module_deps[].commit` 一致（不一致标 `⚠️ commit 漂移`，仍读但附警告）。命中模块的章节作为上下文**只进思考块，不写入产物文件**（audit 是消费方，模块文档已在 plan 阶段固化）。**降级**：路径不存在或 Read 失败 → 静默跳过本段，主流程继续。**复用缓存**：本 ticket 内已通过 01_plan / 02_review / 05_deepcheck 段零检索注入过的模块文档不重复 Read（`_inject_cache.json` 按 `(source, ref_id, slice)` 去重，slice=`section:<file>`，路径 `{ICODE_OUT_DIR}/_inject_cache.json`，与上游步骤共用同一缓存文件——参见 [references/dir_and_metadata.md](../references/dir_and_metadata.md)「注入缓存机制」段）。**前提契约**：同 02_review.md「模块文档检索」段——依赖上游段零检索已执行；`_inject_cache.json` 不存在时退化为全量 Read + 写 `▶ 步骤 6 模块文档检索退化：无 _inject_cache.json 可复用`。
+> **模块文档检索（新增）**：在思考分级之前，Read `~/.claude/icode_data/project_docs/<project_id>/<branch_safe>/_meta.json` 取 `module_deps` 列表，对每个 dep 检 `~/.claude/icode_data/module_docs/<key>/_meta.json` 的 `current_commit` 是否与 `_meta.json.module_deps[].commit` 一致（不一致标 `⚠️ commit 漂移`，仍读但附警告）。命中模块的章节作为上下文**只进思考块，不写入产物文件**（audit 是消费方，模块文档已在 plan 阶段固化）。**降级**：路径不存在或 Read 失败 → 静默跳过本段，主流程继续。**复用缓存**：本 ticket 内已通过 01_plan / 02_review / 05_deepcheck 段零检索注入过的模块文档不重复 Read（`_inject_cache.json` 按 `(source, ref_id, slice)` 去重，slice=`section:<file>`，路径 `{ICODE_OUT_DIR}/_inject_cache.json`，与上游步骤共用同一缓存文件——参见 [references/dir_and_metadata.md](../references/dir_and_metadata.md)「注入缓存机制」段）。**前提契约**：同 02_review.md「模块文档检索」段——依赖上游段零检索已执行；`_inject_cache.json` 不存在时退化为全量 Read + 写 `▶ 步骤 6 模块文档检索退化：无 _inject_cache.json 可复用`。
 
 ### 前置：统一拓扑门禁（共享检查器）
 
@@ -64,7 +64,7 @@ git rev-list --count <worktree_branch>..<目标基分支>     # 目标基分支 
 2. 读取 `03_plan_final.md` 和 `.ico_metadata.json` 的 `code_files` 列表 + `code_deviations`（步骤4主动偏离记录，供6.2偏差备忘汇总）
 3. 额外读取 `05_deepcheck.md`（若存在）
 
-> **步骤 6 propose_repo_facts 仓库事实候选预审（新增，强制思考前置前）**（gate `audit.repo_facts`）：调 `mcp__cheap-research__propose_repo_facts` 生成工程仓库事实**候选**——
+> **步骤 6 propose_repo_facts 仓库事实候选预审（新增，思考分级前）**（gate `audit.repo_facts`）：调 `mcp__cheap-research__propose_repo_facts` 生成工程仓库事实**候选**——
 > - repo_path = `<project_root>`
 > - focus = "对外 API / 依赖关系 / README 声明 vs 代码事实"
 > - max_files = 10（README / CLAUDE.md / 入口 / 依赖清单 / 公共 API 头文件）
@@ -74,7 +74,7 @@ git rev-list --count <worktree_branch>..<目标基分支>     # 目标基分支 
 > - **前提契约（关键文件全缺降级）**：README / CLAUDE.md / 入口文件**全部不存在** → propose_repo_facts 无对象可审 → 跳过本段；写 `▶ propose_repo_facts 跳过：工程无 README/CLAUDE.md/入口文件可审计` + trace `eligible=false, skipped_not_eligible, evidence={affected_repo_roots:[]}`
 > - **降级**：cheap-research 不可用 → 跳过预审，走原流程（主代理自审）；写 `[降级-propose_repo_facts 不可用]` + trace `decision=degraded_after_attempt, attempted=true`
 
-4. **强制思考前置**（不可跳过，缺证据视为不合规；按 [references/thinking_core.md](../references/thinking_core.md)「强制思考前置·统一契约」段执行）：本步骤子项（至少3步）= 构建追溯矩阵（计划功能点→代码位置）→ 汇步骤历史 → 规划 6 维度审计策略
+4. **思考分级（L2：sequential-thinking）**（按 [references/mcp_per_step.md](../references/mcp_per_step.md)「通用前置·分级思考」段执行）：本步骤为 L2，调用 sequential-thinking（3~5 步）。思考职责 = 构建追溯矩阵（计划功能点→代码位置）→ 汇步骤历史 → 规划 6 维度审计策略
 5. 输出：`▶ 步骤6 终审开始`
 6. **重新读取所有代码文件**
 7. **计划vs代码差异摘要**（gate `audit.plan_diff`）：用已读取的 `03_plan_final.md` 内容（步骤2）和代码文件内容（步骤6），调 `mcp__cheap-research__diff_summary(text_a=计划文本, text_b=实现文本, focus="计划vs代码偏离")`，输出差异摘要（偏离项 + 未实现功能点 + 新增功能点，≤500 token）。**gate trace**：audit 存在计划文本与实现 diff → `audit.plan_diff: eligible=true` 必须 called/cache_hit/degraded_after_attempt（evidence 含 plan_source/code_sources）。**降级**（cheap-research 不可用）：主代理手动对比，不阻塞 + trace `decision=degraded_after_attempt, attempted=true`。**结果供 6.1 维度 2「执行精准度」+ 维度 3「方案偏离度」直接引用**。

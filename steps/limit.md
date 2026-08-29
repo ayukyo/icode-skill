@@ -121,9 +121,9 @@ LOCAL_FILE="$LOCAL_DIR/$PROJECT_ID.md"
 
 > **整文件覆盖语义**：为避免"按编号/标题合并"复杂度，**本实现采用整文件覆盖**——local 存在时把 local 文件整体当作 limit 视图；local 不存在时显示 main。**理由**：limit 条目通常不多（典型 5~20 条），复杂合并规则维护成本高于收益。**约定**：用户编辑 local 时自行把想保留的 main 条目复制进去。如未来需要精细合并可迭代。
 
-### 3. 强制思考前置（不可跳过）
+### 3. 思考分级
 
-**必须按 [references/thinking_core.md](../references/thinking_core.md)「强制思考前置·统一契约」段执行**。子项（≥3步）：
+本步骤为 **L1（短决策记录）**（见 [references/mcp_per_step.md](../references/mcp_per_step.md)「通用前置·分级思考」段），不调用 sequential-thinking。决策字段记入 `.decision_anchors.json`：
 - 需求分解（自然语言 → 1~N 条约束条目）
 - 条目格式校验（每条是否满足"红线 N：X 描述 + 理由 + 适用范围"）
 - 现有 main 内容核查（追加是否与现有红线冲突/重复）

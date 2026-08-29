@@ -161,4 +161,4 @@ PY
 
 ## MCP 推荐
 
-本步骤仅用 sequential-thinking 强制思考（见 [references/mcp_per_step.md](../references/mcp_per_step.md)「通用前置」段）。其他 MCP 本步骤不推荐（纯文件复制 + 索引字段更新，无 LLM 分析子任务）。
+本步骤为 **L0（确定性执行，不强制思考）**（见 [references/mcp_per_step.md](../references/mcp_per_step.md)「通用前置·分级思考」段）：纯文件复制 + 索引字段更新，无 LLM 分析子任务，不调用 sequential-thinking，也**不推荐**其他 MCP。

@@ -289,16 +289,16 @@ eval("2147483648") rc=3 (expect 3 OVERFLOW)
 - ❌ `code_deviations`/`adversarial_verification` → ✅ "实现偏差/对抗验证"
 - ❌ `步骤2`/`步骤5`/`步骤6` 等步骤编号 → ✅ "审查阶段/复检阶段/终审阶段"
 
-## 强制思考前置
+## 思考分级（L1：决策记录）
 
-**必须按 [references/thinking_core.md](../references/thinking_core.md)「强制思考前置·统一契约」段执行三件套 Read**。本步骤子项（至少5步）= 通读产物要点 → 识别报告类型(log/功能) → 提炼自包含内容 → 规划章节结构 → **精简为其它模块视角的简报内容（保留本次改动/修复的必要代码片段与链路，省去交付报告完整展开，提炼真实时间点）**。
+本步骤为 **L1**（见 [references/mcp_per_step.md](../references/mcp_per_step.md)「通用前置·分级思考」段），不调用 sequential-thinking；三件套 Read 照常执行。决策字段记入 `.decision_anchors.json`（见 [references/decision_anchors.md](../references/decision_anchors.md)「L1 决策记录契约」）= 通读产物要点 → 识别报告类型(log/功能) → 提炼自包含内容 → 规划章节结构 → **精简为其它模块视角的简报内容（保留本次改动/修复的必要代码片段与链路，省去交付报告完整展开，提炼真实时间点）**。
 
 ## 执行流程
 
 1. 检测最新目录，确定 `ICODE_OUT_DIR`
 2. 读取 `.ico_metadata.json`：确认 `status==completed` + 提取 `requirement` + `completed_steps` + `code_files` + `created_at`
 3. 读取所有产物（`00_init.md`/`log_analysis.md`/`01_plan.md`/`02_review.md`/`03_plan_final.md`/`05_deepcheck.md`/`06_audit.md`，**存在时含 `08_patch.md`**——补丁演进与 `patch_history.at` 时间点）+ 代码文件 + Makefile
-4. 强制思考前置（见上方）
+4. 思考分级 L1（见上方）
 5. **生成文件名**：从 `requirement` 提炼关键词 + 工程简名 → 一对（交付报告 + `_brief` 简报）
 6. **选择模板**：`completed_steps` 含 `"log"` → 查BUG模板，否则 → 功能开发模板
 7. **逐章提取要点**（自包含，不引用内部文件名）

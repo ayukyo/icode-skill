@@ -14,6 +14,10 @@
 3. **模板完整性**：`tools/ppt/templates/` 下应有 `INDEX.md` + ≥1 套模板（每套 4 文件：`template.pptx`/`intro.md`/`detail.json`/`preview.png`）。缺失 → 报错提示模板目录不完整。
 4. **中文字体**：模板用「微软雅黑」，机器无此字体时渲染预览会缺字；`fc-list | grep -i "yahei\|noto.*cjk\|wenquanyi"` 无命中 → 提示配 fontconfig alias（微软雅黑 → Noto Sans CJK SC），不阻断产出。
 
+## 0.5 思考分级（L1：决策记录）
+
+本步骤为 **L1**（见 [references/mcp_per_step.md](../references/mcp_per_step.md)「通用前置·分级思考」段）：模板与内容取舍，不调用 sequential-thinking；场景/主题/模板选择等结构化决策字段记入 `.decision_anchors.json`（见 [references/decision_anchors.md](../references/decision_anchors.md)「L1 决策记录契约」）。
+
 ## 1. 场景识别（自然语言 → 4 类）
 
 从命令参数自然语言识别目标场景与主题；无参数时按以下默认规则探测。**命名**：`工程简名` = `git rev-parse --show-toplevel` 的 basename；`场景关键词` = 简短标识（`_project`/`_模块`/`_<功能>`/`_<修复>`）。

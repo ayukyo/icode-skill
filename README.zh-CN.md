@@ -105,7 +105,7 @@ python3 tools/lint_mcp_coverage.py <out_dir> --step review --strict
 
 6 个 MCP 里剩下 4 个是工作流工具，`/icode install` 装好后各步骤直接使用，**无需单独配置**：
 
-- **sequential-thinking**——强制思考前置：plan 模式/复杂修改/重构/重设计前先结构化思考（每步先列本步必调 MCP 再实际调用）
+- **sequential-thinking**——分级思考 reasoning gate 的 L2/L3 载体：复杂修改/重构/重设计前结构化思考 3~5 步（L0/L1 步骤不调用；每步先列本步必调 MCP 再实际调用）
 - **memory**——跨工程知识图谱（`mcp__memory__read_graph`），历史检索/段零注入时唤起，跨会话回看过去工单与工程文档
 - **context7**——第三方库文档实时查询，init/plan/code 且需求涉及第三方库时调用
 - **playwright**——浏览器自动化，deepcheck/audit + 前端工程时调用

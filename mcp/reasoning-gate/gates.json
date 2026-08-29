@@ -1,0 +1,64 @@
+{
+  "schema_version": 1,
+  "doc": "reasoning gate 机器真源（分级思考治理）。文档只解释语义，默认等级与升级触发器一律从本文件读取，禁止在 step 文档/脚本中各自写一套常量。step 文档中的默认等级必须与本文件一致；若不一致以本文件为校验真源。",
+  "constants": {
+    "l2_min_steps": 3,
+    "l2_max_steps": 5,
+    "l3_min_steps": 4
+  },
+  "steps": {
+    "status":  {"default_tier": "L0", "requires_trace": false, "desc": "纯查询和格式化，依赖 schema/索引校验即可"},
+    "list":    {"default_tier": "L0", "requires_trace": false, "desc": "纯查询和格式化，依赖 schema/索引校验即可"},
+    "help":    {"default_tier": "L0", "requires_trace": false, "desc": "纯查询和格式化，依赖 schema/索引校验即可"},
+    "install": {"default_tier": "L0", "requires_trace": true,  "desc": "依赖检测、路径校验、原子写和回读，不需要思维链"},
+    "bak":     {"default_tier": "L0", "requires_trace": true,  "desc": "纯文件复制 + 索引更新，结果可由脚本直接校验"},
+    "readme":  {"default_tier": "L1", "requires_trace": true,  "desc": "交付内容取舍，通常不涉及新根因裁决"},
+    "ppt":     {"default_tier": "L1", "requires_trace": true,  "desc": "模板与内容取舍，通常不涉及新根因裁决"},
+    "close":   {"default_tier": "L1", "requires_trace": true,  "desc": "使用 submission guard 与不可逆操作确认；多仓歧义升级"},
+    "reopen":  {"default_tier": "L1", "requires_trace": true,  "desc": "结构化状态机执行；多仓歧义升级"},
+    "worktree":{"default_tier": "L1", "requires_trace": true,  "desc": "结构化状态机执行；多仓歧义升级"},
+    "init":    {"default_tier": "L1", "requires_trace": true,  "desc": "需求初稿汇总与待决策倾向；范围冲突或多方案升级"},
+    "doc":     {"default_tier": "L1", "requires_trace": true,  "desc": "汇总需求与规则；范围冲突或多方案升级"},
+    "limit":   {"default_tier": "L1", "requires_trace": true,  "desc": "汇总约束；范围冲突或多方案升级"},
+    "merge":   {"default_tier": "L1", "requires_trace": true,  "desc": "审查结论一致时直接合并；存在冲突意见时升级 L2"},
+    "plan":    {"default_tier": "L2", "requires_trace": true,  "desc": "方案、调用链或实施风险"},
+    "review":  {"default_tier": "L2", "requires_trace": true,  "desc": "多候选方案与反证"},
+    "code":    {"default_tier": "L2", "requires_trace": true,  "desc": "方案、调用链或实施风险"},
+    "patch":   {"default_tier": "L2", "requires_trace": true,  "desc": "通常包含方案、调用链或实施风险"},
+    "log":     {"default_tier": "L2", "requires_trace": true,  "desc": "根因候选、反证和完整性判断"},
+    "deepcheck":{"default_tier": "L2", "requires_trace": true, "desc": "根因候选、反证和完整性判断"},
+    "audit":   {"default_tier": "L2", "requires_trace": true,  "desc": "根因候选、反证和完整性判断"}
+  },
+  "mechanisms_by_tier": {
+    "L0": "deterministic_checks",
+    "L1": "decision_record",
+    "L2": "sequential-thinking",
+    "L3": "sequential-thinking+adversarial"
+  },
+  "tier_order": ["L0", "L1", "L2", "L3"],
+  "escalation_triggers": {
+    "to_l2": [
+      "multiple_candidates",
+      "multi_module_multi_file",
+      "concurrency_state_machine",
+      "evidence_conflict",
+      "deviation_escalation",
+      "unverified_key_assumption",
+      "shared_interface_change"
+    ],
+    "to_l3": [
+      "destructive_irreversible",
+      "new_global_gate",
+      "conflicting_high_confidence",
+      "conclusion_repeatedly_overturned",
+      "external_evidence_conflict"
+    ]
+  },
+  "non_escalation": [
+    "文档很长",
+    "用户要求认真分析",
+    "MCP 已安装",
+    "当前步骤过去习惯调用 sequential-thinking",
+    "为满足固定调用次数而人为拆分同一句结论"
+  ]
+}

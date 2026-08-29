@@ -15,7 +15,7 @@
 
 | MCP | 🟢 强证据场景（满足即必调） | ⚪ 否则 |
 |-----|---------------------------|--------|
-| **sequential-thinking** | 所有步骤（强制思考前置，已嵌入 thinking_core） | 无 |
+| **sequential-thinking** | L2/L3 复杂推理/高风险对抗步骤（按 [thinking_core.md](thinking_core.md)「分级思考（reasoning gate）规则」分级；默认 L2：plan/review/code/patch/log/deepcheck/audit；升 L3 时另加对抗） | L0/L1（不进入可用性探测） |
 | **context7** | init/plan/code 步骤 **且** 需求或代码涉及第三方库（package.json/Cargo.toml/go.mod/requirements.txt/pom.xml/build.gradle 等声明依赖，且需求触及该库 API） | 其余步骤 / 不涉及第三方库 |
 | **vision-bridge** | 任意步骤 **且** (a) 用户主动提供图片/截图/视频（会话中含媒体附件/路径，直接调） **或** (b) TB 缺陷源拉取的附件含视频/图片（`{ICODE_OUT_DIR}/tb_source/<ID>/` 下，**vision-bridge 可用则主动调**：视频先用 ffmpeg 本地提取关键帧再传图片帧给 vision-bridge 省钱——见 [steps/log.md](../steps/log.md)「附件分析（含本地路径 + TB 源）与 ffmpeg 抽帧」段） **或** (c) `/icode log` 本地日志目录含视频/图片文件（`find <log_dir> -type f \( -name '*.mp4' -o -name '*.mov' -o -name '*.png' -o -name '*.jpg' -o -name '*.jpeg' \)`，**vision-bridge 可用则主动调**，行为同 (b) 的 ffmpeg 抽帧流程） | vision-bridge 未安装 / `~/.claude/skills/icode/mcp/vision-bridge/config.json` 三件套未配齐 → 仅提示不主动调（防纯文字模型报错）；ffmpeg 不可用时降级为直接传视频（需用户确认，可能耗 API 额度） |
 | **playwright** | deepcheck/audit 步骤 **且** 前端工程（含 .html/.jsx/.tsx/.vue 或 package.json 含 react/vue） | CLI/后端/嵌入式工程 |
@@ -45,13 +45,38 @@
 
 **为什么不写"请并发"具体场景**：写"阶段 N 用 X 个并发调用"是过度指令——(1) AI 引擎已自动做，(2) 写法会误导 AI 在不该并发时（如禁区 #1）触发并发，(3) 实际节省在 IO 比例较低的步骤可忽略。
 
-## 通用前置（所有步骤必用）
+## 通用前置（分级思考 reasoning gate）
 
-> **所有步骤**必用 `sequential-thinking` 🟢（承载「强制思考前置」，**每步至少 3 步 + 每步对应该步骤声明的子项之一**）。详见 [references/thinking_core.md](../references/thinking_core.md)「通用流程」第 4 步。**该行为是默认常量，不在下方矩阵中重复标注**。
+> **强制思考不再以「每步必调 sequential-thinking ≥3 次」承载**，改为 **reasoning gate 分级（L0～L3）** 选择思考载体：
+>
+> - **L0 确定性执行**（status/list/help/install/bak）：不调用 sequential-thinking，只执行机器门禁（`mechanism=deterministic_checks`）。
+> - **L1 简短决策**（readme/ppt/close/reopen/worktree/init/doc/limit/merge）：写 `.decision_anchors.json` 决策摘要（`mechanism=decision_record`），不调用 sequential-thinking。
+> - **L2 复杂推理**（plan/review/code/patch/log/deepcheck/audit）：**必须调用** sequential-thinking 3～5 步（`mechanism=sequential-thinking`），不可用时结构化降级。
+> - **L3 高风险对抗**（任意步骤命中升级触发器）：L2 + 独立对抗验证（`mechanism=sequential-thinking+adversarial`）。
+>
+> 默认等级表 + 升级触发器唯一真源 = `mcp/reasoning-gate/gates.json`（本文件只作索引，不重复定义常量）。分级/触发原因写入 `{ICODE_OUT_DIR}/.thinking_gate_trace.jsonl`，校验器 `python3 tools/lint_thinking_gate.py` 在步骤转换前强制校验。完整流程见 [thinking_core.md](thinking_core.md)「reasoning gate 执行门（gate）流程」段。
+>
+> **默认等级表（速查）**：
+>
+> | 命令/步骤 | 默认等级 | 说明 |
+> |---|---|---|
+> | help / status / list | L0 | 纯查询和格式化，依赖 schema/索引校验 |
+> | install / bak | L0 | 依赖检测、路径校验、原子写和回读 |
+> | readme / ppt | L1 | 交付内容取舍，通常不涉及新根因裁决 |
+> | close / reopen / worktree | L1 | submission guard + 不可逆操作确认；多仓歧义升级 |
+> | init / doc / limit | L1 | 汇总需求和规则；范围冲突或多方案时升级 |
+> | merge | L1 | 审查结论一致时直接合并；冲突意见升级 L2 |
+> | plan / review / code / patch | L2 | 方案、调用链或实施风险 |
+> | log / deepcheck / audit | L2 | 根因候选、反证和完整性判断 |
+> | 任意架构级/高风险场景 | L3 | 与当前步骤名称无关，触发即升级 |
+>
+> **升级触发器索引**：升 L2 = `multiple_candidates` / `multi_module_multi_file` / `concurrency_state_machine` / `evidence_conflict` / `deviation_escalation` / `unverified_key_assumption` / `shared_interface_change`；升 L3 = `destructive_irreversible` / `new_global_gate` / `conflicting_high_confidence` / `conclusion_repeatedly_overturned` / `external_evidence_conflict`。语义见 [thinking_core.md](thinking_core.md)「分级思考（reasoning gate）规则」。`fast` 不固定降级思考等级——只减少 review/deepcheck 流程轮次，命中 L2/L3 触发器仍按对应等级执行。
+>
+> **L2/L3 的 sequential-thinking 可用性判定与降级**：见 [thinking_core.md](thinking_core.md)「判定 MCP 是否可用」；L0/L1 **不进入**该探测。
 
 ## 推荐矩阵
 
-> 矩阵只标**除 sequential-thinking 外的**MCP 默认推荐；sequential-thinking 见上方「通用前置」。实际执行按上方「强证据场景判定」动态判定。强证据场景不满足时，即使下表标 🟢 也降为 ⚪。
+> 矩阵标**除 sequential-thinking 外的**MCP 默认推荐；sequential-thinking 只对 L2/L3 生效（见上方「通用前置」）。实际执行按上方「强证据场景判定」动态判定。强证据场景不满足时，即使下表标 🟢 也降为 ⚪。
 
 | Step | context7 | vision-bridge | playwright | memory | **cheap-research** |
 |---|---|---|---|---|---|
@@ -105,7 +130,7 @@
 - **dedup 子阶段**：见 §2.5.7。**强证据** = cheap-research 🟢 + 函数数 ≥ `dedup_min_functions`（gates.json 常量）→ ripgrep 抽函数（catalog.json）+ `mcp__cheap-research__extract`（haiku 分类 + 高质量模型找 top 5 重复）。**降级**：函数数 < 阈值 / ripgrep 不可用 / cheap-research 不可用 → 整个 §2.5.7 跳过
 
 ### 3 merge（合并审查意见）
-- **sequential-thinking**：强制思考前置（逐条甄别审查意见 → 判断采纳/驳回 → 规划修改策略）
+- **reasoning gate**：默认 L1（决策记录：逐条甄别审查意见 → 判断采纳/驳回 → 规划修改策略，写入 `.decision_anchors.json`）；存在冲突意见或跨模块歧义时升级 L2/L3
 - **cheap-research**（🟢*）：跨轮 review 汇总（`summarize` 压合并后的 issue JSON 到 ≤1K token，见 [steps/03_merge.md](../steps/03_merge.md)「合并定稿」段）——**仅多轮 review（>1 轮）时**，N=1 轮跳过；主代理看 merged_summary 决定采纳/驳回，**细节仍以逐 JSON 细读为准**，不替代回读原文。**不接管决策**：采纳/驳回/分流决定走主会话
 
 ### 4 code（编码）
@@ -136,7 +161,7 @@
 
 ### patch（追加修改）
 
-> **全场景开放步骤**：patch 不预设任何 MCP 不适用——测试发现的问题可能涉及 UI 截图/视频证据、前端行为、第三方库、历史工单记忆等。除 sequential-thinking 必用外全部 🟢*，**满足强证据场景才必调，不满足自动降 ⚪ 无需声明**。
+> **全场景开放步骤**：patch 不预设任何 MCP 不适用——测试发现的问题可能涉及 UI 截图/视频证据、前端行为、第三方库、历史工单记忆等。reasoning gate 默认 L2（sequential-thinking），命中升级触发器升 L3；其余 MCP 全部 🟢*，**满足强证据场景才必调，不满足自动降 ⚪ 无需声明**。
 
 - **context7**：涉及第三方库 API 时实时查库（同 code 规则）
 - **vision-bridge**：用户测试发现问题带截图/视频证据 / TB 缺陷源附件含媒体时（同 log 附件规则）
@@ -145,10 +170,10 @@
 - **cheap-research**（🟢*）：阶段1 现状摘要（`summarize` 压缩长产物/长日志）。**不接管决策**：增量计划 / 修改决策 / 复检结论走主会话（与 code 同级，推理敏感不走）
 
 ### install / list / bak
-- **sequential-thinking**：仅此（install 装依赖；list 纯查询内置 index.json + 过滤 + 表格化；bak 纯文件复制 + 索引 `backup_path` 字段更新，均不需 cheap-research）
+- **reasoning gate**：L0（install/bak 只执行机器门禁 + 写 trace；list 为纯查询，无 trace 要求），不调用 sequential-thinking，不需 cheap-research
 
 ### status
-- **sequential-thinking**：仅此
+- **reasoning gate**：L0（纯查询；`--scan-verdict` 是**零 LLM** 信号词匹配；`--validate` 纯机器校验），不调用 sequential-thinking，无 trace 要求
 - **cheap-research**（⚪）：本步骤正文**无 cheap-research 调用执行点**——`--scan-verdict` 是**零 LLM** 信号词匹配（`回退|不可行|证伪|废弃...` 粗筛 00_init 末轮/06_audit 结论段，见 [steps/status.md](../steps/status.md)「模式三」步骤 3），不调 `extract`；`--validate` 纯机器校验。**不接管决策**：verdict 标注走主会话（用户决策）
 
 ## 调用覆盖率强制化规则
@@ -167,10 +192,10 @@
 
 ## 双保险机制
 
-🟢 MCP 由两层强制驱动，确保真实触发（治本"只触发 sequential-thinking"问题）：
+🟢 MCP 由两层强制驱动，确保真实触发（治本"只调某个必用项、其余 🟢 全跳过"问题）：
 
-1. **执行步骤内嵌**（A 层）：cheap-research 等在各 step 执行步骤主体里有独立的调用指令（非末尾推荐表），AI 顺序执行必然走到——复制 sequential-thinking 的成功模式
-2. **thinking_core MCP gate**（B 层）：强制思考前置流程里，思考块先列本步 🟢 MCP（工具已在列表直接可见则直接调用，不可见才 ToolSearch 取 schema）-> 实际调用 -> 结果进思考块。覆盖 context7/memory/vision-bridge/playwright
+1. **执行步骤内嵌**（A 层）：cheap-research 等在各 step 执行步骤主体里有独立的调用指令（非末尾推荐表），AI 顺序执行必然走到——复制 L2/L3 sequential-thinking 的强制模式
+2. **thinking_core MCP gate**（B 层）：L2/L3 思考前置流程里，思考块先列本步 🟢 MCP（工具已在列表直接可见则直接调用，不可见才 ToolSearch 取 schema）-> 实际调用 -> 结果进思考块。覆盖 context7/memory/vision-bridge/playwright
 
 两层任一触发即合规。cheap-research 走 A 层（执行步骤内嵌）+ B 层，其余 🟢 MCP 走 B 层（thinking_core gate）。
 

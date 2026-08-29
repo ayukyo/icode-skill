@@ -538,7 +538,7 @@ python3 -c "import json,sys; d=json.load(open('{ICODE_OUT_DIR}/.ico_metadata.jso
 
 | 主题 | 真源 | 核心要点 |
 |------|------|---------|
-| 强制思考前置 | [references/thinking_core.md](references/thinking_core.md)（每步必读）+ [references/thinking_detail.md](references/thinking_detail.md)（按需读） | 每步开始前先 `ultrathink`，首选 `sequential-thinking` MCP 至少 3 步；MCP 不可用降级 `### 结构化思考` 文字块；思考子项见各 step 文件 |
+| 强制思考前置（分级 reasoning gate） | [references/thinking_core.md](references/thinking_core.md)（每步必读）+ [references/thinking_detail.md](references/thinking_detail.md)（按需读） | 每步开始前先按 **reasoning gate 分级 L0～L3**：L0（status/list/install/bak）只执行机器门禁；L1（readme/ppt/close/reopen/worktree/init/doc/limit/merge）写 `.decision_anchors.json` 决策记录；**L2/L3（plan/review/code/patch/log/deepcheck/audit）才首选 `sequential-thinking` MCP 3～5 步**，MCP 不可用降级 `### 结构化思考` 文字块；思考子项见各 step 文件。分级判定机器真源 = `mcp/reasoning-gate/gates.json`，运行痕迹 = `{ICODE_OUT_DIR}/.thinking_gate_trace.jsonl`，校验器 = `python3 tools/lint_thinking_gate.py` |
 | 反偷懒约束 | [references/anti_laziness.md](references/anti_laziness.md) | 37 条典型偷懒行为 + 正面合规要求；引用 references 必须每步重新 Read 输出 `📖 已 Read` 确认行；思考块每子项 ≥2 句实质内容 |
 
 ### 根因优先决策准则（修复缺陷逻辑本身，优先于规避/绕过/补丁/开关）
@@ -816,7 +816,7 @@ test -f "{ICODE_OUT_DIR}/03_plan_final.md" && python3 -c "import json,sys; d=jso
 > - `.cheap_research_cache.json` 管"工具调用结果去重"（防同输入重复调 API）
 > - **典型场景**：01_plan 段零检索已 Read module_docs 章节 + 写进 `_inject_cache.json`；05_deepcheck 又调 `propose_repo_facts(repo_path, focus)`——两者**完全独立的缓存机制**，不冲突
 
-> **核心问题**：AI 默认只调 sequential-thinking（必用项），其他 MCP 全部跳过--根因是"形式强制"（产物必含记录段）而非"执行强制"（流程必走调用）。**治本**：消除 🟡"应该调"模糊地带，二元化（🟢 必须调 / ⚪ 不必调），并用**双保险**把 🟢 MCP 写进执行流：
+> **核心问题**：AI 默认只调 sequential-thinking（旧版每步必调项），其他 MCP 全部跳过--根因是"形式强制"（产物必含记录段）而非"执行强制"（流程必走调用）。**治本**：① sequential-thinking 从「全步骤强制必调」降级为 **reasoning gate 判 L2/L3 才用**（L0/L1 不调用）；② 消除 🟡"应该调"模糊地带，二元化（🟢 必须调 / ⚪ 不必调）；③ 用**双保险**把 🟢 MCP 写进执行流：
 
 **强制规则**：
 
@@ -889,7 +889,7 @@ icode 工作流可调用 6 个 MCP（`/icode install` 一键安装）。**双保
 
 **🟢 MCP 承载**：
 - context7 / memory / vision-bridge / playwright -> B 层（thinking_core gate）
-- sequential-thinking -> thinking_core 通用流程第 4 步（结构化思考载体）
+- sequential-thinking -> thinking_core 通用流程第 5 步（L2/L3 结构化思考载体，非 L0/L1）
 
 **未调用合规处理**：🟢 需在思考块「MCP 调用」段写降级原因（先实际调用一次，失败/空才能降级）；⚪ 无需记录。
 
@@ -897,7 +897,7 @@ icode 工作流可调用 6 个 MCP（`/icode install` 一键安装）。**双保
 
 | MCP | 用途 | 🟢 强证据场景 | 承载层 |
 |---|---|---|---|
-| **sequential-thinking** | 强制思考前置 | 所有步骤 | thinking_core 第 4 步 |
+| **sequential-thinking** | L2/L3 复杂推理/高风险对抗思考载体 | reasoning gate 判 L2/L3（默认 plan/review/code/patch/log/deepcheck/audit；其余步骤命中升级触发器时） | thinking_core 通用流程第 5 步 |
 | **context7** | 库文档实时查询 | init/plan/code + 涉及第三方库 | B 层·thinking_core gate |
 | **vision-bridge** | 图片/视频理解 | 任意步骤 + 用户给图(直接调) / TB 缺陷源附件含视频/图片时 **vision-bridge 可用则主动调**(视频先用 ffmpeg 本地抽帧省钱；不可用时仅提示不主动调，防纯文字模型报错)，详见 [steps/log.md](steps/log.md)「附件分析（含本地路径 + TB 源）与 ffmpeg 抽帧」 | B 层·thinking_core gate |
 | **playwright** | 浏览器自动化 | deepcheck/audit + 前端工程 | B 层·thinking_core gate |
@@ -929,11 +929,12 @@ icode 工作流可调用 6 个 MCP（`/icode install` 一键安装）。**双保
 
 - 示例：`mcp__sequential-thinking__sequentialthinking` / `mcp__vision-bridge__analyze_media` / `mcp__memory__read_graph` / `mcp__playwright__browser_navigate`
 
-### sequential-thinking（强制思考前置）
+### sequential-thinking（L2/L3 复杂推理依赖）
 
-- **必装**。所有步骤必用，详见 [references/thinking_core.md](references/thinking_core.md)
-- 强证据：`mcp__sequential-thinking__sequentialthinking`（至少 3 步）
-- 降级：`### 结构化思考` 文字块（一项不可省）
+- **建议装**（reasoning gate 判 L2/L3 时必用：plan/review/code/patch/log/deepcheck/audit 默认 L2；其余步骤命中升级触发器时）。详见 [references/thinking_core.md](references/thinking_core.md)「分级思考（reasoning gate）规则」
+- 强证据：`mcp__sequential-thinking__sequentialthinking`（L2 3～5 步；L3 另加独立对抗）
+- 降级：`### 结构化思考` 文字块（仅 L2/L3；必须有真实调用失败证据）
+- 隐私：注册默认注入 `DISABLE_THOUGHT_LOGGING=true`（禁止服务端把完整 `thought` 打到 stderr）；`thought` 本身仍不得含密钥/Cookie/设备凭据
 
 ### vision-bridge（图片/视频理解）
 

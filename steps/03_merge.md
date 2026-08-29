@@ -23,7 +23,7 @@
 
 1. 执行目录管理中的「检测最新目录」逻辑，确定 `ICODE_OUT_DIR`
 2. 读取 `{ICODE_OUT_DIR}/01_plan.md`（原始计划）和 `{ICODE_OUT_DIR}/02_review.md`（审查意见）
-3. **强制思考前置**（不可跳过，缺证据视为不合规；按 [references/thinking_core.md](../references/thinking_core.md)「强制思考前置·统一契约」段执行）：本步骤子项（至少3步）= 逐条甄别审查意见 → 判断采纳/驳回 → 规划修改策略
+3. **思考分级（L1：决策记录）**（按 [references/mcp_per_step.md](../references/mcp_per_step.md)「通用前置·分级思考」段执行）：本步骤为 L1，不调用 sequential-thinking；决策字段记入 `.decision_anchors.json`（见 [references/decision_anchors.md](../references/decision_anchors.md)「L1 决策记录契约」）= 逐条甄别审查意见 → 判断采纳/驳回 → 规划修改策略
 4. 输出步骤确认：`▶ 步骤3 定稿开始`
 
 ### 合并定稿
@@ -100,7 +100,7 @@ sys.exit(0 if (n>=9 and has_memo) else 1)
 
 ## MCP 推荐
 
-- **sequential-thinking**：强制思考前置（逐条甄别审查意见 → 判断采纳/驳回 → 规划修改策略），见 [references/mcp_per_step.md](../references/mcp_per_step.md)「通用前置」段
+- **sequential-thinking**：本步骤为 L1 不调用（决策记录进 `.decision_anchors.json`），见 [references/mcp_per_step.md](../references/mcp_per_step.md)「通用前置·分级思考」段
 - **cheap-research**（🟢*）：**仅多轮 review（>1 轮）** 时，跨轮 issue 合并汇总调 `mcp__cheap-research__summarize`（见上方「合并定稿」段；N=1 轮跳过，不评估）。其他 5 个 MCP 本步骤不推荐。
 
 **强制约束**：🟢/🟢*/⚪ 语义 + 双保险机制（执行步骤内嵌 + thinking_core gate）详见 [SKILL.md「MCP 调用覆盖强制化」](../SKILL.md) + [references/mcp_per_step.md「双保险机制」](../references/mcp_per_step.md)；本步骤表内的 🟢/🟢* 标注按上方真源判定。

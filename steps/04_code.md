@@ -89,7 +89,7 @@
 1. 执行目录管理中的「检测最新目录」逻辑，确定 `ICODE_OUT_DIR`
 2. 自动迁移（如上）—— 仅迁移到 v1.1
 3. 读取 `{ICODE_OUT_DIR}/03_plan_final.md` 获取定稿计划
-4. **强制思考前置**（不可跳过，缺证据视为不合规；按 [references/thinking_core.md](../references/thinking_core.md)「强制思考前置·统一契约」段执行）：本步骤子项（至少4步）= 梳理文件清单 → 规划接口 → 预判冲突点 → 确认注释策略
+4. **思考分级（L2：sequential-thinking）**（按 [references/mcp_per_step.md](../references/mcp_per_step.md)「通用前置·分级思考」段执行）：本步骤为 L2，调用 sequential-thinking（3~5 步）。思考职责 = 梳理文件清单 → 规划接口 → 预判冲突点 → 确认注释策略
 
    - 计划中的伪代码和行号引用需要在此步骤展开为完整实现。读取引用的源文件获取完整上下文
 5. 输出步骤确认：`▶ 步骤4 编码开始`
@@ -201,7 +201,7 @@
      - **3 次仍失败** → 设 `metadata.test_failures=true` + `metadata.test_outcome=fail`，代码仍写入（**不阻断**，L3 警告，与 `code_compile_failed` 同级），进入 Code Review Fix
      - **test_cmd=null** → 设 `metadata.test_outcome=skipped`，跳过测试验证，进入 Code Review Fix
    - **1.5 子段·Code Review Fix（4 维度复检，1 的强制子段）**：编译+测试验证后**必须执行**（**所有工单都触发**，不论 init/log 入口）。**作用**：核对实施是否与计划设计的 4 维度一致——同事提示词"修 bug 后做代码 review 修复，确保没有逻辑 bug 和副作用，确保没有竞态死锁问题，确保解决了日志反映的问题"的工程化复检机制
-     - **强制思考前置**（不可跳过）：本步骤子项（至少3步）= 读计划设计的 4 维度基线 → 列实施对照点 → 预判复检偏差
+     - **思考分级（L2：sequential-thinking）**：思考职责 = 读计划设计的 4 维度基线 → 列实施对照点 → 预判复检偏差
      - **对照基线读取**（**任一缺失则视为设计遗漏**，须先回到 `/icode plan` 补设计）：
        - log 工单：必须 Read `03_plan_final.md`「4.5 修复方案设计 + 4 维度设计态固化」段（log 工单必填）+ `log_analysis.md` §7 + `00_init.md` §5
        - init 工单：必须 Read `03_plan_final.md`「4.5 修复方案设计 + 4 维度设计态固化」段（init 工单必填）+ `00_init.md` §7

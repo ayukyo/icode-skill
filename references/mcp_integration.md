@@ -21,11 +21,12 @@
 
 ## 6 个 MCP 的强证据 + 降级路径
 
-### ① sequential-thinking（**必装**）
+### ① sequential-thinking（**L2/L3 复杂推理依赖**）
 
-- **强证据**：`mcp__sequential-thinking__sequentialthinking`（至少 3 步）
-- **降级**：`### 结构化思考` 文字块（每步骤强制思考不可省）
-- **触发场景**：**所有步骤**（强制思考前置）
+- **强证据**：`mcp__sequential-thinking__sequentialthinking`（reasoning gate 判 L2/L3 时必调 3～5 步；L3 另加独立对抗）
+- **降级**：`### 结构化思考` 文字块（仅 L2/L3；必须有真实调用失败证据才能降级）
+- **触发场景**：**L2/L3 复杂推理/高风险对抗步骤**（plan/review/code/patch/log/deepcheck/audit 默认 L2；其余步骤命中升级触发器时升 L2/L3）。**L0/L1 不调用**，不进入可用性探测
+- **隐私**：注册默认注入 `DISABLE_THOUGHT_LOGGING=true`（禁止服务端把完整 `thought` 打到 stderr）；`thought` 本身仍不得含密钥/Cookie/设备凭据
 - **当前状态**：已装
 
 ### ② vision-bridge（**推荐装，需配三件套**）
@@ -129,10 +130,10 @@
 
 | 场景 | 推荐安装 |
 |---|---|
-| 全新 clone icode-skill | sequential-thinking（必装） + vision-bridge（推荐装，需配三件套） |
+| 全新 clone icode-skill | sequential-thinking（L2/L3 复杂推理依赖，建议装）+ vision-bridge（推荐装，需配三件套） |
 | 纯后端项目 | sequential-thinking + vision-bridge + context7 |
 | 前端项目 | 上述 + playwright |
 | 长期项目 | 上述 + memory（跨工单积累） |
-| **降本场景** | 上述 + **cheap-research**（仅低风险候选/压缩/结构化提取子任务，以各步骤正文执行点为真源；3 质疑者对抗 / 架构决策 / 终审裁决 / 修复方案一律不走） |
+| **降本场景** | 上述 + **cheap-research**（仅低风险候选/压缩/结构化提取子任务，以各步骤正文执行点为真源；3 质疑者对抗 / 架构决策 / 终审裁决 / 修复方案一律不走）。**L0/L1 步骤不调用 sequential-thinking**，本身即降本 |
 
 完整安装：`/icode install`（一键扫描 `mcp/` 目录里所有 `install.sh`）

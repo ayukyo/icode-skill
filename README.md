@@ -183,7 +183,7 @@ python3 tools/lint_mcp_coverage.py <out_dir> --step review --strict
 
 The remaining 4 of the 6 MCPs are workflow utilities, installed by `/icode install` and used by the steps — no per-user config needed:
 
-- **sequential-thinking** — mandatory structured-thinking gate before plan mode / complex / refactor tasks (each step lists its required MCPs first, then calls them)
+- **sequential-thinking** — the L2/L3 carrier of the tiered reasoning gate: structured 3~5-step thinking before complex / refactor / redesign tasks (L0/L1 steps do not call it; each step lists its required MCPs first, then calls them)
 - **memory** — cross-project knowledge graph (`mcp__memory__read_graph`), recalled during search/injection so past tickets and project docs resurface across sessions
 - **context7** — live library-doc lookup during init/plan/code when the requirement touches third-party libraries
 - **playwright** — browser automation during deepcheck/audit for front-end projects

@@ -8,16 +8,49 @@
 
 ## 各步骤思考子项（步骤文件已声明本步骤的子项，本节主要作为速查）
 
-- **步骤0 init**（至少5步）：需求分解 → 现状盘点（基于读码） → 影响面分析（基于读码） → 待决策项识别 → 待决策倾向自审（逐条回溯现状/影响面证据，主动找反证；无反证保留、有反证修正并记反证）
-- **步骤1 plan**（至少3步）：需求分解 → 方案分析 → 风险评估
-- **步骤2 review**（至少3步）：首轮—需求分解→独立方案构思→对比要点预判；续跑—回顾历史轮次问题→增量审查范围界定→跨章节影响预判
-- **步骤3 merge**（至少3步）：逐条甄别审查意见 → 判断采纳/驳回 → 规划修改策略
-- **步骤4 code**（至少4步）：梳理文件清单 → 规划接口 → 预判冲突点 → 确认注释策略
-- **步骤5 deepcheck**（至少3步）：梳理代码清单 → 回顾计划要点 → 制定逆推/Fixed/Free 检查策略
-- **步骤6 audit 6.1**（至少3步）：构建追溯矩阵（计划功能点→代码位置）→ 汇步骤历史 → 规划 6 维度审计策略
-- **步骤7 readme**（至少4步）：通读产物要点 → 识别报告类型(log/功能) → 提炼自包含内容 → 规划章节结构
-- **步骤8 patch**（至少4步）：现状重审要点 → 修改点清单 → 影响面预判 → 复检策略（阶段4 复检子项至少3步：列修改点 → 预判破坏面 → 定复检断言）
-- **入口 log**（至少4步）：症状分解 → 基线预判 → 链路假设 → 验证策略
+> 每步先按 reasoning gate 分级（默认等级表见 [mcp_per_step.md](mcp_per_step.md)「通用前置」），再按下述子项执行：
+> - **L0**：不调用 sequential-thinking，只执行机器门禁（status/list/help/install/bak）。
+> - **L1**：子项即 L1 决策记录内容（写入 `.decision_anchors.json`），不调用 sequential-thinking（init/merge/readme 等）。
+> - **L2/L3**：子项即 sequential-thinking 3～5 步的 thought 职责（每步对应一个子项）。
+
+- **步骤0 init**（默认 L1；决策记录字段）：需求分解 → 现状盘点（基于读码） → 影响面分析（基于读码） → 待决策项识别 → 待决策倾向自审（逐条回溯现状/影响面证据，主动找反证；无反证保留、有反证修正并记反证）。命中范围冲突/多方案/历史证据冲突时升级 L2/L3
+- **步骤1 plan**（默认 L2；thought 职责）：需求分解 → 方案分析 → 风险评估
+- **步骤2 review**（默认 L2；thought 职责）：首轮—需求分解→独立方案构思→对比要点预判；续跑—回顾历史轮次问题→增量审查范围界定→跨章节影响预判
+- **步骤3 merge**（默认 L1；决策记录字段）：逐条甄别审查意见 → 判断采纳/驳回 → 规划修改策略；存在冲突意见/跨模块歧义时升级 L2/L3
+- **步骤4 code**（默认 L2；thought 职责）：梳理文件清单 → 规划接口 → 预判冲突点 → 确认注释策略
+- **步骤5 deepcheck**（默认 L2；thought 职责）：梳理代码清单 → 回顾计划要点 → 制定逆推/Fixed/Free 检查策略
+- **步骤6 audit 6.1**（默认 L2；thought 职责）：构建追溯矩阵（计划功能点→代码位置）→ 汇步骤历史 → 规划 6 维度审计策略
+- **步骤7 readme**（默认 L1；决策记录字段）：通读产物要点 → 识别报告类型(log/功能) → 提炼自包含内容 → 规划章节结构
+- **步骤8 patch**（默认 L2；thought 职责）：现状重审要点 → 修改点清单 → 影响面预判 → 复检策略（阶段4 复检子项：列修改点 → 预判破坏面 → 定复检断言）
+- **入口 log**（默认 L2；thought 职责）：症状分解 → 基线预判 → 链路假设 → 验证策略
+
+## thinking gate trace（运行痕迹 schema）
+
+每个 step 最终在 `{ICODE_OUT_DIR}/.thinking_gate_trace.jsonl` 追加一行（不记录思维正文）：
+
+```json
+{
+  "schema_version": 1,
+  "ticket_id": "工单号",
+  "step": "log",
+  "tier": "L2",
+  "default_tier": "L2",
+  "triggers": ["multiple_candidates", "concurrency_state_machine"],
+  "mechanism": "sequential-thinking",
+  "attempted": true,
+  "result": "success",
+  "degraded_reason": null,
+  "over_invoked": false,
+  "at": "运行时 ISO-8601 时间"
+}
+```
+
+词表约束（校验器 `python3 tools/lint_thinking_gate.py` 强制）：
+- `tier`：`L0`/`L1`/`L2`/`L3`，必须 ≥ `default_tier`（只能升级不能降级）
+- `mechanism`：`deterministic_checks`（L0）/ `decision_record`（L1）/ `sequential-thinking`（L2）/ `sequential-thinking+adversarial`（L3）
+- `result`：`success`/`degraded`/`blocked`；`degraded` 必须 `attempted=true` 且 `degraded_reason` 非空
+- `triggers`：只允许 `mcp/reasoning-gate/gates.json` 内稳定枚举，禁止自然语言扩张；`tier > default_tier` 时非空
+- **禁止保存**：thought 正文、密钥、Cookie、设备凭据、大段日志正文；L0/L1 出现 sequential-thinking 记 `over_invoked=true`（灰度观察项）
 
 ## 历史参考小节（仅 init/plan/log/start 历史检索命中时 Read）
 

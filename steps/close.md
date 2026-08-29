@@ -96,6 +96,6 @@ close 操作开始后目标 ref 又前进时：记录实际解析到的 commit�
 
 ## MCP 推荐
 
-close 是结构化状态机执行，不需要 spawn 子代理；仅用 sequential-thinking（强制思考前置：证据核验 → 清理顺序 → 残留处理 → 风险，≥4 步）。其余 MCP 不推荐。
+close 为 **L1（短决策记录）**：结构化状态机执行（判断+git/归档操作），不需要 spawn 子代理，不调用 sequential-thinking；决策字段（证据核验 → 清理顺序 → 残留处理 → 风险评估）记入 `.decision_anchors.json`（见 [references/decision_anchors.md](../references/decision_anchors.md)「L1 决策记录契约」）。其余 MCP 不推荐。
 
 **强制约束**：🟢/🟢*/⚪ 语义 + 双保险机制（执行步骤内嵌 + thinking_core gate）详见 [SKILL.md「MCP 调用覆盖强制化」](../SKILL.md) + [references/mcp_per_step.md「双保险机制」](../references/mcp_per_step.md)。

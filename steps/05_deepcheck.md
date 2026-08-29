@@ -33,7 +33,7 @@
 
 检查 `{ICODE_OUT_DIR}/03_plan_final.md` 和步骤4创建的代码文件是否存在，缺失则报错并提示先执行 `/icode code`。
 
-> **模块文档检索（新增）**：在强制思考前置之前，Read `~/.claude/icode_data/project_docs/<project_id>/<branch_safe>/_meta.json` 取 `module_deps` 列表，对每个 dep 检 `~/.claude/icode_data/module_docs/<key>/_meta.json` 的 `current_commit` 是否与 `_meta.json.module_deps[].commit` 一致（不一致标 `⚠️ commit 漂移`，仍读但附警告）。命中模块的章节作为上下文**只进思考块，不写入产物文件**（deepcheck 是消费方，模块文档已在 plan 阶段固化）。**降级**：路径不存在或 Read 失败 → 静默跳过本段，主流程继续。**复用缓存**：本 ticket 内已通过 01_plan / 02_review 段零检索注入过的模块文档不重复 Read（`_inject_cache.json` 按 `(source, ref_id, slice)` 去重，slice=`section:<file>`，路径 `{ICODE_OUT_DIR}/_inject_cache.json`，与上游步骤共用同一缓存文件——参见 [references/dir_and_metadata.md](../references/dir_and_metadata.md)「注入缓存机制」段）。**前提契约**：同 02_review.md「模块文档检索」段——依赖上游段零检索已执行；`_inject_cache.json` 不存在时退化为全量 Read + 写 `▶ 步骤 5 模块文档检索退化：无 _inject_cache.json 可复用`。
+> **模块文档检索（新增）**：在思考分级之前，Read `~/.claude/icode_data/project_docs/<project_id>/<branch_safe>/_meta.json` 取 `module_deps` 列表，对每个 dep 检 `~/.claude/icode_data/module_docs/<key>/_meta.json` 的 `current_commit` 是否与 `_meta.json.module_deps[].commit` 一致（不一致标 `⚠️ commit 漂移`，仍读但附警告）。命中模块的章节作为上下文**只进思考块，不写入产物文件**（deepcheck 是消费方，模块文档已在 plan 阶段固化）。**降级**：路径不存在或 Read 失败 → 静默跳过本段，主流程继续。**复用缓存**：本 ticket 内已通过 01_plan / 02_review 段零检索注入过的模块文档不重复 Read（`_inject_cache.json` 按 `(source, ref_id, slice)` 去重，slice=`section:<file>`，路径 `{ICODE_OUT_DIR}/_inject_cache.json`，与上游步骤共用同一缓存文件——参见 [references/dir_and_metadata.md](../references/dir_and_metadata.md)「注入缓存机制」段）。**前提契约**：同 02_review.md「模块文档检索」段——依赖上游段零检索已执行；`_inject_cache.json` 不存在时退化为全量 Read + 写 `▶ 步骤 5 模块文档检索退化：无 _inject_cache.json 可复用`。
 
 ## 前置：统一拓扑门禁（共享检查器）
 
@@ -154,7 +154,7 @@ Free 阶段一次性完整覆盖全部 15 个角度。
 1. 检测最新目录，确定 `ICODE_OUT_DIR`
 2. 读取 `03_plan_final.md` 和 `.ico_metadata.json`
    - 若 `.ico_metadata.json.code_compile_failed == true`，输出 `⚠️ 步骤4编译失败，仍继续复检` 警告；若 `test_failures == true`，输出 `⚠️ 步骤4测试未通过（test_outcome=fail），重点复检测试失败相关功能点` 警告
-3. **强制思考前置**（不可跳过，缺证据视为不合规；按 [references/thinking_core.md](../references/thinking_core.md)「强制思考前置·统一契约」段执行）：本步骤子项（至少3步）= 梳理代码清单 → 回顾计划要点 → 制定逆推/Fixed/Free 检查策略
+3. **思考分级（L2：sequential-thinking）**（按 [references/mcp_per_step.md](../references/mcp_per_step.md)「通用前置·分级思考」段执行）：本步骤为 L2，调用 sequential-thinking（3~5 步）。思考职责 = 梳理代码清单 → 回顾计划要点 → 制定逆推/Fixed/Free 检查策略
 4. **分步续跑**：若 `status == "deepcheck_in_progress"`，从 metadata 恢复 `deepcheck_total_rounds` / `deepcheck_clean_rounds` / `deepcheck_phase`，同时读取已存在的 `05_deepcheck.md`（若含「Reverse 逆推」段 **且 `metadata.patch_count` 为 0/缺失（无补丁修改）** 则跳过 Reverse；**有补丁（`patch_count > 0`）时不跳过**——补丁修改必须重新纳入 Reverse 逆推，重跑 Reverse 覆盖更新逆推段，再进入后续阶段）
 5. 否则初始化 `deepcheck_clean_rounds = 0`, `deepcheck_total_rounds = 1`, `deepcheck_phase = "reverse"`, `status = deepcheck_in_progress`
 6. 输出：`▶ 步骤5 复检开始`

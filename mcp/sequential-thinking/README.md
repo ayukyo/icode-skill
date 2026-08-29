@@ -1,10 +1,12 @@
 # sequential-thinking (MCP server for icode-skill)
 
-为 icode-skill 工作流提供「强制思考前置」首选载体——sequential-thinking MCP server。
+为 icode-skill 工作流的 **L2/L3 复杂推理/高风险对抗步骤** 提供结构化思考载体——sequential-thinking MCP server。
 
 > icode 工作流在 [SKILL.md](../../SKILL.md) 与 [references/thinking_core.md](../../references/thinking_core.md)
-> 中规定：**每个步骤开始前必须 ultrathink 并完成结构化思考**。首选路径是调用本 MCP，
-> 不可用时降级为「### 结构化思考」文字块。
+> 中规定：**reasoning gate 分级（L0～L3）决定思考载体**。L2/L3（plan/review/code/patch/log/deepcheck/audit
+> 默认 L2；其余步骤命中升级触发器时）首选路径是调用本 MCP，不可用时降级为「### 结构化思考」文字块。
+> **L0/L1（status/list/help/install/bak/readme/ppt/close/reopen/worktree/init/doc/limit/merge）不调用本 MCP**，
+> 不进入可用性探测——避免简单步骤的仪式化调用、额外延迟与上下文噪声。
 
 ---
 
@@ -36,8 +38,8 @@ cd <你的 icode-skill 仓库>/mcp/sequential-thinking
 
 ### 2. 重启 Claude Code
 
-让 MCP 注册生效。此后 icode 工作流的每一步首选调用 `mcp__sequential-thinking__sequentialthinking`，
-而不是降级到文字块。
+让 MCP 注册生效。此后 icode 工作流中 reasoning gate 判 **L2/L3** 的步骤首选调用
+`mcp__sequential-thinking__sequentialthinking`，而不是降级到文字块；**L0/L1 步骤不调用**。
 
 ---
 
@@ -73,10 +75,25 @@ cd <你的 icode-skill 仓库>/mcp/sequential-thinking
 
 ## SKILL 端约定（已在主 SKILL.md 声明）
 
-- **装好后**：icode 工作流每步的「强制思考前置」必须首选 `sequential-thinking` MCP
-- **未装好**：走降级文字块路径，但工作流仍可运行（思考环节不省略，只换载体）
+- **装好后**：icode 工作流中 reasoning gate 判 **L2/L3** 的步骤必须首选 `sequential-thinking` MCP（3～5 步；L3 另加独立对抗）
+- **未装好**：L2/L3 走降级文字块路径，但工作流仍可运行（思考环节不省略，只换载体）；**L0/L1 不受影响**
 - **判定 MCP 是否可用**的严谨逻辑见 [references/thinking_core.md](../../references/thinking_core.md)——
-  简言之：工具列表直接可见（标准 `mcp__sequential-thinking__sequentialthinking` 或代理前缀形态）或 ToolSearch 取到 schema 即视为"已配置可用"
+  简言之（**仅 L2/L3**）：工具列表直接可见（标准 `mcp__sequential-thinking__sequentialthinking` 或代理前缀形态）或 ToolSearch 取到 schema 即视为"已配置可用"
+
+## 隐私（DISABLE_THOUGHT_LOGGING）
+
+官方服务端默认会把完整 `thought` 打到 stderr，可能进入宿主日志。icode-skill 注册时**默认注入**：
+
+```json
+{
+  "env": {
+    "DISABLE_THOUGHT_LOGGING": "true"
+  }
+}
+```
+
+该配置只禁止服务端 stderr 打印，**不保证宿主不保存工具调用**；所以 `thought` 本身仍不得包含密钥、Cookie、
+设备凭据或不必要的个人信息。用户显式开启日志时，不得被重装/同步脚本反复覆盖（保持用户显式覆盖能力）。
 
 ---
 

@@ -60,6 +60,6 @@ reopen 与相关命令的边界：
 
 ## MCP 推荐
 
-reopen 是结构化状态机执行，不需要 spawn 子代理；仅用 sequential-thinking（强制思考前置：恢复必要性 → 基线选择 → 子仓影响 → 风险，≥4 步）。其余 MCP 不推荐。
+reopen 为 **L1（短决策记录）**：结构化状态机执行（判断+git 操作），不需要 spawn 子代理，不调用 sequential-thinking；决策字段（恢复必要性 → 基线选择 → 子仓影响 → 风险评估）记入 `.decision_anchors.json`（见 [references/decision_anchors.md](../references/decision_anchors.md)「L1 决策记录契约」）。其余 MCP 不推荐。
 
 **强制约束**：🟢/🟢*/⚪ 语义 + 双保险机制（执行步骤内嵌 + thinking_core gate）详见 [SKILL.md「MCP 调用覆盖强制化」](../SKILL.md) + [references/mcp_per_step.md「双保险机制」](../references/mcp_per_step.md)。

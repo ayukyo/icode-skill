@@ -13,7 +13,7 @@ icode 工作流强依赖 MCP（每个 mcp 子工程自带 `install.sh` 提供一
 
 | MCP | 形态 | 对 icode 工作流的增益 | KEY |
 |---|---|---|---|
-| **sequential-thinking** | npm | 强制思考前置（每步必用） | ❌ |
+| **sequential-thinking** | npm | 分级思考 reasoning gate（L2/L3 步骤才用，本步骤 L0 不用） | ❌ |
 | **vision-bridge** | Python venv | 图片/视频理解（步骤 0 init/6 audit） | ✅ 推荐装（需配三件套） |
 | **memory** | npm | 跨工单记忆 | ❌ |
 | **context7** | npm | 库文档实时查询，步骤 0/1/4 | ❌ |
@@ -45,10 +45,7 @@ icode 工作流强依赖 MCP（每个 mcp 子工程自带 `install.sh` 提供一
 
 ## 执行步骤
 
-1. **强制思考前置**（不可跳过，缺证据视为不合规；按 [references/thinking_core.md](../references/thinking_core.md)「强制思考前置·统一契约」段执行）：本步骤子项（至少 3 步）=
-   - 本次作用域明确（本步骤直接调用 `mcp/install.sh`，不读写工程文件）
-   - 当前 `~/.claude.json` mcpServers 段速读（了解现状，避免重复注册）
-   - 执行结果逐项验证（不只看 install.sh 退出码，还要确认每个 mcpServer 已写入）
+1. **思考分级**（本步骤为 **L0：确定性执行**，不强制思考；见 [references/mcp_per_step.md](../references/mcp_per_step.md)「通用前置·分级思考」段）。作用域明确：本步骤直接调用 `mcp/install.sh`，不读写工程文件；注意 `~/.claude.json` mcpServers 段避免重复注册、执行结果逐项验证（不只看 install.sh 退出码，还要确认每个 mcpServer 已写入）。
 2. **运行 `bash <工程根>/mcp/install.sh [<name>] [--no-auto-install] [--client claude|codex|all]`**（cwd 必须在 icode-skill 工程根；用 `git rev-parse --show-toplevel` 解析工程根，失败则报错"请在 icode-skill 工程根内运行"）。`--client` 默认 `claude`（不碰 Codex）；仅显式 `codex`/`all` 才触达 Codex
 3. install.sh 顶层脚本会：
    - 扫描 `mcp/*/install.sh`（含 6 个声明的子工程，**新加 mcp 自动被识别**）
@@ -129,6 +126,6 @@ icode 工作流强依赖 MCP（每个 mcp 子工程自带 `install.sh` 提供一
 - npm/uv 缓存系统级保留（不删，下次装仍可用）
 ## MCP 推荐
 
-本步骤仅用 sequential-thinking 强制思考（见 [references/mcp_per_step.md](../references/mcp_per_step.md)「通用前置」段）。其他 5 个 MCP 本步骤不推荐。
+本步骤为 **L0（确定性执行，不强制思考）**（见 [references/mcp_per_step.md](../references/mcp_per_step.md)「通用前置·分级思考」段）：安装脚本 + 配置校验，无 LLM 分析子任务，不调用 sequential-thinking。其他 5 个 MCP 本步骤不推荐。
 
 **强制约束**：🟢/🟢*/⚪ 语义 + 双保险机制（执行步骤内嵌 + thinking_core gate）详见 [SKILL.md「MCP 调用覆盖强制化」](../SKILL.md) + [references/mcp_per_step.md「双保险机制」](../references/mcp_per_step.md)；本步骤表内的 🟢/🟢* 标注按上方真源判定。
