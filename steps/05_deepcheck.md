@@ -374,12 +374,22 @@ Free 阶段一次性完整覆盖全部 15 个角度。
 **复检发现新问题的范围升级（scope_escalations，反偷懒第 33 条）**：Reverse/Fixed/Free 阶段发现**计划之外**的新问题拟纳入实施范围时，同样按 `scope_escalations` 分类并写 metadata——`A_now` 须给直接复发证据链（无证据回指默认 `B_confirm` 需用户确认，未获确认不得实施）/ `C_follow_up` 范围外 / `refuted` 丢弃。**不得因"复检发现"直接采纳实施**（与步骤2 over-design 审查对齐）。
 
 
+## 生命周期一致性复检（workflow gate·验收收敛，防"即时过了就部署"）
+
+> **目的**：对改变权威状态/实体身份的修改，只验证"权威提交立即完成后的直接查询"远远不够——必须覆盖**即时 / 异步收敛 / 重启恢复 / 重复执行**四阶段的一致性（P1 生命周期验收，见 [SKILL.md「工作流硬门禁」](../SKILL.md)）。本段把 `metadata.acceptance_contract` 的验收矩阵**逆推成复检角度**，逐项核对实际行为是否与 `expected` 一致：
+> - **immediate**：权威提交后立即查询/选择/解析/投影 → 只返回存活实体、无旧身份
+> - **converged**：异步投影/缓存/注册表/观察者收敛后 → 运行时索引无已淘汰身份、聚合选择 = 权威集合
+> - **restart**：进程重启恢复后 → 恢复结果 = 提交后的最终结果
+> - **replay**：相同操作重复执行/重放 → 幂等、无额外副作用
+> 每阶段 × 每消费者（直接查询/聚合选择/依赖归属/外部投影）给一个复检结论（file:line 证据）；**无法在本机验证的（如 real_env）记 `[未验证-需真实环境]`，不得写成"已通过"**。`delivery_verdict=verified` 前提是矩阵无空 cell（lint `--step deploy` 校验）。
+
 ## 完成前自检（必须填，未填项标 ❌=不合规）
 
 - □ Reverse/Fixed/Free 三阶段都输出了 `📖 已 Read` 确认行（列出实际 Read 的代码文件）
 - □ Free 每个角度 ≥3 检查点（file:line），表格填满
 - □ Fixed 每维度有 file:line 证据 + 评分理由 ≥2 句实质
 - □ 无"整体通过""无问题"等空泛结论（每条结论有具体证据）
+- □ 涉及生命周期/身份变化时，**生命周期一致性复检**的 `phases × consumers` 每项有结论（或显式标 `[未验证-需真实环境]`），空 cell = 验证不完整
 ## 决策锚点（步骤5 完成后写）
 
 步骤5 复检完成后，若 `metadata.anchors_enabled != false`，刷新 `.decision_anchors.json`：刷新 `open_risks`（deepcheck 残留风险）。详见 [references/decision_anchors.md](../references/decision_anchors.md)。

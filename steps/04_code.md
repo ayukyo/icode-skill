@@ -23,7 +23,9 @@
 
 检查 `{ICODE_OUT_DIR}/03_plan_final.md` 是否存在，不存在则报错并提示先执行 `/icode merge`。
 
-**用户语义变更检测（O-4，同 [02_review.md](02_review.md) 前置校验）**：读 `metadata.scope_contract`（缺失视为 null＝未冻结，跳过，向后兼容旧工单）；若**用户本次输入**改变冻结契约语义（状态身份或生命周期 / 允许或拒绝条件 / 持久化一致性或回滚承诺 / 验收条件、调用方语义或真实环境验证场景）——先分类写入 `metadata.requirement_deltas`（追加，分类枚举与判定同 02_review 前置），**未分流不得实施对应变更**（`needs_user_confirm` 未确认 / `needs_replan` 未重定稿 → 先回步骤3 分流）。若用户输入仅澄清不改变契约，则无 delta，正常实施。
+**用户语义变更检测（O-4，同 [02_review.md](02_review.md) 前置校验）**：读 `metadata.scope_contract`（缺失视为 null＝未冻结，跳过，向后兼容旧工单）；若**用户本次输入**改变冻结契约语义（状态身份或生命周期 / 允许或拒绝条件 / 持久化一致性或回滚承诺 / 验收条件、调用方语义或真实环境验证场景）——先分类写入 `metadata.requirement_deltas`（追加，分类枚举与判定同 02_review 前置），**未分流不得实施对应变更**（`needs_user_confirm` 未确认 / `needs_replan` 未重定稿 → 先回步骤3 分流）。若用户输入仅澄清不改变契约，则无 delta，正常实施。**workflow gate 联动**：本次输入若新增/改变入口、改变存活身份/依赖迁移/失败语义、改变持久化/事务/回滚/恢复、新增跨组件/跨仓/外部消费者影响、验证边界扩大 → `requirement_deltas` 记 `severity=major, needs_replan=true`（重大增量，先回流 plan，不得在本步骤静默吸收）。
+
+**workflow gate 前置门禁（L1，未过不得编码）**：进入实施前运行 `python3 tools/lint_workflow_contract.py {ICODE_OUT_DIR} --step code --json`——退出码非 0 时**停止编码**：①存在未解决 `semantic_decisions` → 先获用户确认（禁止"最保守/最安全"代替选择）；②`impact_contract.identity_change=true` 且 `completeness != complete` 或 9 维未填完整 → 回 plan 补齐；③重大 `requirement_deltas` 未回流 → 先重跑 plan。**从验收矩阵生成测试清单**：若 `metadata.acceptance_contract` 声明生命周期场景（`requires_lifecycle=true` 或身份变化），进入实施前把验收矩阵的 `phases × consumers` 必填单元**转成可执行测试清单**（每个 `(phase, consumer)` 对应一个验证动作：immediate=提交后立即查询/选择/解析；converged=等异步收敛后复查；restart=重启后比对；replay=重复执行断言无额外副作用），按"先验证再实现"逐项驱动编码——**只测直接查询 ≠ 验收完整**（lint `--step deploy` 会阻断 verified）。
 
 ## 前置：统一拓扑门禁（共享检查器）
 

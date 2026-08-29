@@ -251,6 +251,8 @@ git rev-list --count <worktree_branch>..<目标基分支>     # 目标基分支 
 
 > **交付措辞按 delivery_verdict 与数据处置二选一定（防"completed"被误读为"已验证/已恢复"）**：`status=completed` 只表示流程步骤结束，**不自动等价于已验证**。若 `metadata.delivery_verdict = verification_pending`（如 O-6 用户自担验证豁免 / 实机验证待办 / 测试失败未修复），交付总结必须用"已完成代码修改，待实机验证"，**不得写成"已修复/已验证"**；`blocked` → 标注"验证因 <原因> 未完成"；`not_applicable` → 标注"本需求不要求该类验证"。若 plan §4.5 选"仅防复发"（已受影响数据处置 B 档），交付总结必须用"已阻止复发路径，现有数据修复待 <交接>（触发条件：<...>，部署后验证项：<...>）"，**不得写成"当前功能已恢复"**。
 
+> **workflow gate 终审验收门（P1，无完整验收证据不得标 verified）**：终审前运行 `python3 tools/lint_workflow_contract.py {ICODE_OUT_DIR} --step audit-verified --json`——若工单**改变权威状态或实体身份**（`acceptance_contract` 声明生命周期 / `impact_contract.identity_change=true`）且验收矩阵**缺必填单元**（`phases × consumers` 有空 cell）→ `delivery_verdict` **不得标 `verified`**（只能 `verification_pending` / `blocked` / `not_applicable`），并在 6.1 问题清单记"生命周期验收矩阵不完整"。只验证直接查询不能标完成（lint 阻断）。终审报告须能解释每项结论对应的**合同字段 + 验证证据**（见 [SKILL.md「工作流硬门禁」](../SKILL.md)）。
+
 ## 6.4 交付报告提示
 
 步骤6 完成后，提示用户：`▶ 步骤6 终审完成。可选：运行 /icode readme 生成交付报告 + 跨领域简报（两份）`
@@ -310,6 +312,7 @@ du -sh <各 worktree 路径>                                  # 空间占用
 - □ 测试结果已核对（§6.1 测试核对：`test_outcome` 值 + 失败项是否记入问题清单）
 - □ 无"无新问题""整体通过"等空泛结论（每条结论有具体证据）
 - □ 终审时确认了 verdict（默认 `unknown` 不阻塞流程；标注 `verified`/`disproved`/`superseded` 时回填 `verdict_reason`/`correct_direction`/`verdict_source`/`verdict_at`，双写 metadata + index 同步）
+- □ workflow gate 验收门已跑（`lint_workflow_contract.py --step audit-verified`）：涉及生命周期/身份变化且矩阵缺单元时，`delivery_verdict` 未标 `verified`；`verified` 前提 = 矩阵无空 cell + `tdd` 有有效 RED（若有行为变更）
 
 ### 产物集完整性终检（完成前自检的机器命令）
 

@@ -478,7 +478,13 @@ fi
 - `scope_escalations`（新增，可选，默认 `[]`）：**范围升级记录**——review/deepcheck/audit 阶段发现**计划之外**的新问题/新架构信号（新增持久化协议、全局门控、生命周期语义、跨职责边界组件、新故障模型）拟纳入实施范围时的分类记录数组（每条 `{at, source_step, change_desc, classification, evidence, user_confirm, impact}`）。**审查采纳 ≠ 实施授权**：标 `A_now` 必须给**直接复发证据链**（回答"不做这一项、完成已有 A 项后，哪个已记录证据场景会再次产生原故障"），无证据回指**默认 `B_confirm`**（需用户确认，未获确认前不得进入编码，与 `confirmed_B_fixes` 机制一致）；`C_follow_up` 进范围外；`refuted` 丢弃。**字段缺失视为 `[]`（向后兼容旧 metadata）**。写入点见 [steps/02_review.md](steps/02_review.md) 2.5.6 / [steps/05_deepcheck.md](steps/05_deepcheck.md) over-design 复检 / [steps/06_audit.md](steps/06_audit.md) 终审；细则见 反偷懒第 33 条
 - `delivery_verdict`（新增，可选，默认 `null`）：**验证完成度**（与 `verdict` 方向结论**正交**——`verdict` 答"方案方向对不对"，`delivery_verdict` 答"验证动作完成没"）。枚举：`verified`（目标改动已获得所要求的验证）/ `verification_pending`（流程文档已完成但目标验证未完成，如 O-6 用户自担验证豁免 / 实机验证待办 / 测试失败未通过）/ `blocked`（验证因外部条件无法继续）/ `not_applicable`（需求明确不需要该类验证）。由步骤6 终审回填（[steps/06_audit.md](steps/06_audit.md)），status 展示 + readme 交付措辞读取。**`status=completed` 不自动等价于 `delivery_verdict=verified`**——交付文案以 delivery_verdict 为准。**字段缺失视为 `null`（向后兼容旧 metadata，读作"未回填"）**
 - `scope_contract`（新增，可选，默认 `null`）：**范围契约**——plan 完成时冻结的语义基线（`{summary, at, source_step}`，summary 为"根因方向 + A/B/C 分档 + 验收边界"的一句话指纹）。供 review/merge/code/deepcheck/audit 核对用户输入或审查是否改变既有契约（O-4 语义冻结，见 [steps/02_review.md](steps/02_review.md) 前置校验）。**字段缺失视为 `null`（向后兼容旧 metadata，读作"未冻结"）**
-- `requirement_deltas`（新增，可选，默认 `[]`）：**用户语义变更记录**——自动流程期间用户输入改变计划语义（状态身份/生命周期、允许/拒绝条件、持久化一致性或回滚承诺、验收条件/调用方语义/真实环境验证场景）时的分类记录数组（每条 `{at, user_input_summary, changed_aspect, classification, impact, user_confirm}`）。`classification` 枚举：`clarification_only`（仅澄清，不改变实现）/ `a_now_with_evidence`（改变 A 档但已有直接证据）/ `needs_user_confirm`（需用户确认）/ `needs_replan`（需回到 plan/review 重新定稿）。**delta 未分流前不得继续扩大代码设计或验收矩阵**（冻结点）。**字段缺失视为 `[]`（向后兼容旧 metadata）**
+- `requirement_deltas`（新增，可选，默认 `[]`）：**用户语义变更记录**——自动流程期间用户输入改变计划语义（状态身份/生命周期、允许/拒绝条件、持久化一致性或回滚承诺、验收条件/调用方语义/真实环境验证场景）时的分类记录数组（每条 `{at, user_input_summary, changed_aspect, classification, impact, user_confirm}`）。`classification` 枚举：`clarification_only`（仅澄清，不改变实现）/ `a_now_with_evidence`（改变 A 档但已有直接证据）/ `needs_user_confirm`（需用户确认）/ `needs_replan`（需回到 plan/review 重新定稿）。**delta 未分流前不得继续扩大代码设计或验收矩阵**（冻结点）。**字段缺失视为 `[]`（向后兼容旧 metadata）**。**workflow gate 升级**（机器判定）：`severity=major` 且 `needs_replan=true` 且未 `resolved` → 当前阶段阻断并路由回 plan/review（`patch` 不得静默吸收重大增量），见 [mcp/workflow-gate/gates.json](mcp/workflow-gate/gates.json) + [tools/lint_workflow_contract.py](tools/lint_workflow_contract.py)
+- `workflow_gate_schema_version`（新增，可选，默认缺省 = legacy-untracked）：`1` = 本工单从计划阶段起启用 workflow gate 硬门禁。缺省 = legacy-untracked（阶段一提示模式：缺字段补默认值，只读审计不阻断；`--strict` 强制模式判失败）。机器真源 [mcp/workflow-gate/gates.json](mcp/workflow-gate/gates.json)
+- `semantic_decisions`（新增，可选，默认 `[]`）：**语义决策合同**——任一分析/计划/评审出现"同一输入有两种及以上会改变外部行为的处理方式 / 结论含待确认、未定义、需要选择、策略不唯一 / 需决定允许、拒绝、合并、替换、保留、迁移 / 需决定存活身份、冲突优先级、兼容阈值、失败语义 / 当前证据只能说明缺机制不能唯一推导期望行为"时，必须先把决策写入本数组。每条 `{dimension, alternatives, selected, evidence, user_confirmed, status}`，`status` ∈ `resolved`/`open`/`pending`/`rejected`。**门禁（机器判定）**：存在 `status != resolved` 且非 `diagnosis_only` → `plan`/`code`/`patch` 阻断；**禁止以"最保守/最安全/通常如此"代替用户选择**；诊断命令可结束但必须显式标 `diagnosis_only=true`（"仅诊断"），不得进入实现。**字段缺失视为 `[]`（向后兼容旧 metadata）**。写入点：plan §4.5 落盘 fix_tiers 处；消费点：plan/code/patch 前置校验 + merge 定稿检查
+- `diagnosis_only`（新增，可选，默认 `false`）：bool。语义决策门禁第二终态——**本轮只交付诊断结论，不允许进入实现阶段**。置 `true` 时未解决语义决策允许诊断结束（lint 全量扫描 pass + warning "仅诊断"），但 `--step plan/code/patch` 仍阻断
+- `impact_contract`（新增，可选，默认 `null`）：**身份变化影响合同**——设计/代码涉及实体身份变化（合并/删除/去重/重命名/重新分配、实体替代、依赖归属变化、权威状态与运行时投影不一致、旧身份提交后不应继续被查询/枚举/执行）时必须填完整 9 维影响清单。结构 `{identity_change, authoritative_writer, persistent_references, derived_metadata, runtime_indexes, queries_and_selectors, async_links, recovery_paths, external_projections, rollback_and_failure, completeness}`——9 维每项 `{status: "affected"|"not-affected"|"unassessed", evidence}`（必答且带证据）。**门禁（机器判定）**：`identity_change=true` 且 `completeness != complete` → `code`/`deploy`/`audit-verified` 阻断；`completeness=complete` 时 9 维每项必答。**字段缺失视为 `null`（向后兼容旧 metadata，读作"未声明身份变化"）**
+- `acceptance_contract`（新增，可选，默认 `null`）：**生命周期验收合同**——任何改变权威状态或实体身份的修改必须覆盖四阶段（`immediate` 权威提交立即完成后 / `converged` 异步投影与运行时状态收敛后 / `restart` 进程重启并恢复后 / `replay` 重复执行或重放后）× 四类消费者（`direct_query` 直接查询 / `aggregate_selector` 聚合或批量选择 / `persistent_reference` 依赖记录的归属解析 / `external_projection` 外部投影与持久化恢复）的验收矩阵。结构 `{requires_lifecycle, authoritative_state_change, scope, invariants, matrix}`，`matrix` 每项 `{scenario, phase, consumer, expected, evidence, status}`。**门禁（机器判定）**：涉及生命周期/身份变化时矩阵必须覆盖全部 `phases × consumers` 必填单元（空 cell = 验证不完整），**只验证直接查询不能 `delivery_verdict=verified`**。**字段缺失视为 `null`（向后兼容旧 metadata）**
+- `risk_profile`（新增，可选，默认 `null`）：**快速模式风险档案**——fast 模式风险自动升级记录。结构 `{requested_mode, effective_mode, triggers, risk_flags, override}`，`triggers`/`risk_flags` 词表见 [mcp/workflow-gate/gates.json](mcp/workflow-gate/gates.json) `fast_risk_triggers`（`cross_component`/`persistent_identity_change`/`dependency_migration`/`async_observer_or_cache`/`restart_replay_semantics`/`external_consumer_change`/`real_env_verification`/`unresolved_semantic_decision`/`major_requirement_delta`）。**门禁（机器判定）**：`mode=fast` 且命中任一风险但 `effective_mode != full` 且 `override != true` → 违规（须自动升级 full 或显式 override 并记录风险接受事实）；低风险、单文件、纯计算且无外部状态变化仍可保持 fast。**字段缺失视为 `null`（向后兼容旧 metadata）**
 - `anchors_enabled`（可选，默认 `true`）：决策锚点机制开关。`true` 时各步骤完成后写 `.decision_anchors.json` + 下游启动读（传递关键决策摘要，省 token + 不丢上下文）；`false` 跳过。详见 [references/decision_anchors.md](references/decision_anchors.md)。**字段缺失视为 `true`（向后兼容旧 metadata）**
 - `patch_count`（可选，默认 `0`）：追加修改次数（`/icode patch` 调用次数累计）。`/icode patch` 启动时读它确定本次 `Patch N` 序号（N = patch_count + 1），完成后写回新值。**不改变 `status`/`completed_steps`**——patch 是横向追加非纵向推进。**字段缺失视为 `0`（向后兼容旧 metadata）**
 - `patch_history`（可选，默认 `[]`）：追加修改历史数组，每次 `/icode patch` 完成**追加**一条 `{"patch_no": N, "summary": "一句话（≤100 token）", "files": ["相对项目根路径..."], "at": "时间", "status": "done"|"issues"}`（`issues` = 阶段4 复检发现新引入问题且当场未修复，L2 警告不阻断）。供回读工单演进链 / 历史检索 / 06_audit 补丁记录对齐。**字段缺失视为 `[]`（向后兼容旧 metadata）**。详见 [steps/08_patch.md](steps/08_patch.md)
@@ -539,7 +545,7 @@ python3 -c "import json,sys; d=json.load(open('{ICODE_OUT_DIR}/.ico_metadata.jso
 | 主题 | 真源 | 核心要点 |
 |------|------|---------|
 | 强制思考前置（分级 reasoning gate） | [references/thinking_core.md](references/thinking_core.md)（每步必读）+ [references/thinking_detail.md](references/thinking_detail.md)（按需读） | 每步开始前先按 **reasoning gate 分级 L0～L3**：L0（status/list/install/bak）只执行机器门禁；L1（readme/ppt/close/reopen/worktree/init/doc/limit/merge）写 `.decision_anchors.json` 决策记录；**L2/L3（plan/review/code/patch/log/deepcheck/audit）才首选 `sequential-thinking` MCP 3～5 步**，MCP 不可用降级 `### 结构化思考` 文字块；思考子项见各 step 文件。分级判定机器真源 = `mcp/reasoning-gate/gates.json`，运行痕迹 = `{ICODE_OUT_DIR}/.thinking_gate_trace.jsonl`，校验器 = `python3 tools/lint_thinking_gate.py` |
-| 反偷懒约束 | [references/anti_laziness.md](references/anti_laziness.md) | 37 条典型偷懒行为 + 正面合规要求；引用 references 必须每步重新 Read 输出 `📖 已 Read` 确认行；思考块每子项 ≥2 句实质内容 |
+| 反偷懒约束 | [references/anti_laziness.md](references/anti_laziness.md) | 39 条典型偷懒行为 + 正面合规要求；引用 references 必须每步重新 Read 输出 `📖 已 Read` 确认行；思考块每子项 ≥2 句实质内容 |
 
 ### 根因优先决策准则（修复缺陷逻辑本身，优先于规避/绕过/补丁/开关）
 
@@ -583,6 +589,26 @@ test -f "{ICODE_OUT_DIR}/03_plan_final.md" && python3 -c "import json,sys; d=jso
 统一规则：**步骤 4/5/6（代码相关步骤）启动时 Read `{ICODE_OUT_DIR}/08_patch.md`**（存在且有 Patch 段才需配合；不存在走原流程）。步骤 2/3 只动计划文档、不碰代码，无需读补丁。决策锚点 `patch_summary` 已随 patch 刷新，下游读锚点时可感知补丁存在（[references/decision_anchors.md](references/decision_anchors.md)）。
 
 步骤 2/5 的 `*_in_progress` 状态 + 轮次计数器支持**断点续跑**（步骤0的 `init_in_progress` 不参与，详见上节"两种语义"）；步骤 4 的 `code_in_progress`（编译失败时保留）支持**整体续跑**——重跑步骤4时**在已写入的代码基础上继续修复**（编译失败时代码文件和 `code_files` 已保留落盘，不丢弃、不从计划重新编码），不带轮次断点。
+
+### 工作流硬门禁（workflow gate，P0 四类 + P1 生命周期验收）
+
+> 本段把已有 `scope_contract` / `requirement_deltas` 从"文字要求"升级为**机器可判定的硬门禁**。真源 = [mcp/workflow-gate/gates.json](mcp/workflow-gate/gates.json)（触发条件/阻断步骤/必填单元只从这里读），运行时校验器 = `python3 tools/lint_workflow_contract.py <out_dir> [--step <step>] [--strict] [--json]`（退出码 0=通过 / 1=有阻断 / 2=参数或目录错误）。旧工单缺 `workflow_gate_schema_version` 输出 legacy-untracked 兼容警告（提示模式不阻断；`--strict` 强制模式判失败）。实施来源：WORKFLOW_OPTIMIZATION_PROPOSAL.md。
+
+**四类硬门禁 + 生命周期验收（机器判定，步骤转换前跑校验器）**：
+
+| 门禁 | 触发 | 阻断 | 校验字段 |
+|---|---|---|---|
+| **语义决策门禁** | 同一输入存在 ≥2 种会改变外部行为的方案 / 结论含"待确认、未定义、策略不唯一" / 需决定允许·拒绝·合并·替换·保留·迁移 / 需决定存活身份·冲突优先级·兼容阈值·失败语义 / 证据只能说明缺机制 | 存在 `semantic_decisions[].status != resolved`（非 diagnosis-only）→ `plan`/`code`/`patch` 阻断 | `semantic_decisions` + `diagnosis_only` |
+| **身份变化影响门禁** | 合并/删除/去重/重命名/重新分配实体身份 / 实体替代 / 依赖归属变化 / 权威状态与运行时投影不一致 / 旧身份提交后不应继续被查询·枚举·执行 | `impact_contract.identity_change=true` 且 `completeness != complete` → `code`/`deploy`/`audit-verified` 阻断；`complete` 时 9 维每项必答 | `impact_contract` |
+| **需求增量强制升级** | `requirement_deltas` 出现 `severity=major`（新增/改变入口、拒绝改允许、改变存活身份/依赖迁移/失败语义、改变持久化/事务/回滚/恢复、新增跨组件/跨仓/外部消费者影响、验证边界扩大） | `severity=major` 且 `needs_replan=true` 且未 `resolved` → 当前阶段阻断并路由回 plan/review；`patch` 不得静默吸收 | `requirement_deltas` |
+| **快速模式风险自动升级** | `mode=fast` 命中任一 `fast_risk_triggers`（跨组件/持久化身份变化/依赖迁移/异步观察者·缓存·注册表/重启恢复重放/外部消费者变化/真实环境验证/未解决语义决策/重大需求增量） | `effective_mode != full` 且 `override != true` → 违规（须自动升级 full 或显式 override 记录风险接受） | `risk_profile` |
+| **生命周期验收合同**（P1） | 改变权威状态或实体身份 | 涉及生命周期/身份变化时验收矩阵未覆盖全部 `phases × consumers` 必填单元 → 不得 `delivery_verdict=verified`（只验证直接查询不能标完成） | `acceptance_contract` |
+
+**两阶段启用（兼容迁移，见 gates.json `legacy` 段）**：
+- **阶段一·提示模式（默认）**：新任务 plan 起写入完整新字段；历史任务缺字段补默认值并标 `legacy-untracked`，校验器输出警告不阻断只读审计
+- **阶段二·强制模式（`--strict`）**：新任务所有入口统一校验；重大需求增量必须回流计划；高风险快速任务自动升级；缺少生命周期证据不能完成审计。迁移只补结构默认值，**不伪造用户确认或测试证据**
+
+**建议实施顺序**（对应 WORKFLOW_OPTIMIZATION_PROPOSAL.md §9）：先定义 schema 与校验器 → 接语义决策门禁与重大增量回流 → 接身份变化影响合同 → 接快速模式自动升级 → 接生命周期验收矩阵 → 更新各阶段说明与反偷懒规则 → 增加正反合同测试 → 先提示模式跑一轮再启用强制模式。
 
 ### 历史检索复用（跨工程/跨工单借鉴）
 
@@ -1010,7 +1036,7 @@ icode 工作流可调用 6 个 MCP（`/icode install` 一键安装）。**双保
 |---------|------|--------|
 | [references/thinking_core.md](references/thinking_core.md) | 强制思考前置核心（每步必读：MCP+降级文字块/结构化思考/Read references） | 所有 step |
 | [references/thinking_detail.md](references/thinking_detail.md) | 强制思考前置细节（按需读：各步骤子项速查/历史参考小节） | 所有 step |
-| [references/anti_laziness.md](references/anti_laziness.md) | 反偷懒约束（37条偷懒行为+合规要求+references必读+确认行） | 所有 step |
+| [references/anti_laziness.md](references/anti_laziness.md) | 反偷懒约束（39条偷懒行为+合规要求+references必读+确认行） | 所有 step |
 | [references/adversarial.md](references/adversarial.md) | 对抗分析模式（3质疑者/裁决优先级/诚实降级/证据回指） | 02_review / log |
 | [references/dir_and_metadata.md](references/dir_and_metadata.md) | 目录管理（创建新目录含**硬熔断①②**：建前 test -d + 建后 ls -A 验证 + **硬熔断③工作区根校验**，禁手写目录号/echo 伪确认）+ ticket_id 生成 + 全局索引写入（含LRU淘汰） + metadata 模板 + **过时校验（含 worktree 归档工单**：archive_path 有效→archived 活跃态读档历史参考，正常续期；**含 `/icode bak` 备份工单**：backup_path 有效→backup 活跃态读档历史参考，工程优先→备份兜底） + **注入缓存机制（防重复注入，两源共用）** + **project_docs 工程文档库 + 段零检索** | init / log / plan / start / fast / doc / bak |
 | [references/doc_template.md](references/doc_template.md) | icode doc 章节模板：前 50 行四块结构（项目元信息/KEYS/简要说明/目录）+ 十位桶编号 + 自适应 grep 关键词表 + 99 章审计策略 + **v2.0.0 双视角必含元素清单（14 项）+ 业务流独立成章 + 英文首次中文备注 + 链路中文说明 + 质量审视检查清单 + 模板版本自举迁移** | doc |
@@ -1018,3 +1044,4 @@ icode 工作流可调用 6 个 MCP（`/icode install` 一键安装）。**双保
 | [references/first_activation_path.md](references/first_activation_path.md) | **首次激活路径一致性检查**：静态分析盲区（"写了从没实机执行过"的死路径既有 bug）+ 触发条件 + 检测法（软信号、不阻断）+ 双侧校验一致性核对清单 + 部署后验证建议下游输出 | plan（断言⑤）/ deepcheck（Reverse）/ audit（部署后建议）/ patch（部署后验证发现） |
 | [references/worktree_isolation.md](references/worktree_isolation.md) | **git worktree 多需求隔离**：worktree 决策与创建（**opt-in 参数触发**：`--worktree` 才走创建，否则默认原地，不弹问；**预检/公示告知/失败降级**）+ cwd 契约 + metadata 字段族 + 回流指引（F2 二选一）+ **产物归档（自动，防 remove 丢档）** + 防误删护栏 + 空间自查 | 新建工单入口加 `--worktree` 时（init/log/start/plan/fast）/ 续跑与只读（review/code/deepcheck/audit/patch/status/readme） |
 | [references/debug_mode.md](references/debug_mode.md) | **debug 模式（独立孪生工单）**：`/icode init --debug` / `/icode log --debug` 产出对照工单，不入全局索引、不参与主流程（各主流程步骤 L1 阻断）；目录在 `.icode_output/.debug/` 下、N 独立递增；`debug: true` 元数据标志 + 独立状态名；忽略 `--worktree` | init / log（`--debug` 时） |
+| [mcp/workflow-gate/gates.json](mcp/workflow-gate/gates.json) + [tools/lint_workflow_contract.py](tools/lint_workflow_contract.py) | **workflow gate 工作流硬门禁（P0 四类 + P1 生命周期验收）**：语义决策 / 身份变化影响 / 需求增量强制升级 / 快速模式风险自动升级 / 生命周期验收矩阵；机器真源 + 运行时校验器（`--step plan/code/patch/merge/deploy/audit-verified/fast`，`--strict` 强制模式）；两阶段兼容迁移（legacy-untracked 提示 → 强制） | plan（写合同 + 7.5 自检）/ review（影响清单审查）/ merge（11.5 定稿硬校验）/ fast（risk_profile 自动升级）/ code（前置门禁 + 验收矩阵测试清单）/ deepcheck（生命周期一致性复检）/ audit（验收门）/ patch（2.7 重大增量回流） |

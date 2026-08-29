@@ -1,0 +1,149 @@
+{
+  "schema_version": 1,
+  "doc": "workflow gate（工作流硬门禁）机器真源。文档只解释语义，门禁触发条件、阻断步骤与校验规则一律从本文件读取，禁止在 step 文档/脚本中各自写一套常量。step 文档中的描述必须与本文件一致；若不一致以本文件为校验真源。本文件实现 WORKFLOW_OPTIMIZATION_PROPOSAL.md 的 P0 四类硬门禁 + P1 生命周期验收收敛。校验器为 tools/lint_workflow_contract.py（显式分支计算，不引入通用表达式解释器；condition 字段供人审与测试锚点）。",
+  "constants": {
+    "impact_checklist_dimensions": [
+      "authoritative_writer",
+      "persistent_references",
+      "derived_metadata",
+      "runtime_indexes",
+      "queries_and_selectors",
+      "async_links",
+      "recovery_paths",
+      "external_projections",
+      "rollback_and_failure"
+    ],
+    "acceptance_phases": ["immediate", "converged", "restart", "replay"],
+    "acceptance_consumers": [
+      "direct_query",
+      "aggregate_selector",
+      "persistent_reference",
+      "external_projection"
+    ],
+    "fast_risk_triggers": [
+      "cross_component",
+      "persistent_identity_change",
+      "dependency_migration",
+      "async_observer_or_cache",
+      "restart_replay_semantics",
+      "external_consumer_change",
+      "real_env_verification",
+      "unresolved_semantic_decision",
+      "major_requirement_delta"
+    ],
+    "major_delta_severity": "major",
+    "delta_terminal_classifications": [
+      "clarification_only",
+      "a_now_with_evidence",
+      "needs_user_confirm",
+      "needs_replan"
+    ]
+  },
+  "semantic_decision_gate": {
+    "doc": "语义决策门禁：任一分析/计划/评审出现外部行为不同的多方案、或存在未定义/待确认/策略不唯一结论时，必须先把决策写入结构化合同（semantic_decisions），未解决前禁止进入实现阶段。禁止以「最保守/最安全/通常如此」代替用户选择。",
+    "trigger_conditions": [
+      "同一输入存在两种及以上会改变外部行为的处理方式",
+      "结论含待确认/未定义/需要选择/策略不唯一",
+      "需要决定允许/拒绝/合并/替换/保留/迁移",
+      "需要决定存活身份/冲突优先级/兼容阈值/失败语义",
+      "当前证据只能说明缺少机制，不能唯一推导期望行为"
+    ],
+    "terminal_states": ["resolved"],
+    "diagnosis_only_marker": "diagnosis-only",
+    "blocked_steps": ["plan", "code", "patch"],
+    "block_condition": "存在 semantic_decisions[].status != resolved 且非 diagnosis-only → plan/code/patch 阻断"
+  },
+  "identity_change_gate": {
+    "doc": "身份变化影响门禁：设计/代码涉及合并、删除、去重、重命名、重新分配实体身份、实体替代、依赖归属变化、权威状态与运行时投影不一致、旧身份提交后不应继续被查询/枚举/执行时，必须填完整 9 维影响清单（impact_contract），身份变化未填完整前禁止进入编码或部署。",
+    "trigger_conditions": [
+      "合并/删除/去重/重命名/重新分配实体身份",
+      "一个实体替代另一个实体",
+      "依赖关系的归属对象发生变化",
+      "权威状态与运行时投影的实体集合可能不同",
+      "旧身份在提交后不应继续被查询/枚举/执行"
+    ],
+    "checklist": [
+      {"key": "authoritative_writer", "question": "哪个组件决定最终实体集合和存活身份？"},
+      {"key": "persistent_references", "question": "哪些依赖记录保存实体身份？如何迁移或清理？"},
+      {"key": "derived_metadata", "question": "归属、计数、汇总值是否需要重算？"},
+      {"key": "runtime_indexes", "question": "缓存、注册表、索引是否删除已淘汰身份？"},
+      {"key": "queries_and_selectors", "question": "单项查询、全选、批量选择是否只返回存活实体？"},
+      {"key": "async_links", "question": "观察者乱序、延迟刷新时是否会产生短暂错误状态？"},
+      {"key": "recovery_paths", "question": "重启、重放、幂等重试能否得到相同结果？"},
+      {"key": "external_projections", "question": "下游消费者收到的身份、顺序和数量是否一致？"},
+      {"key": "rollback_and_failure", "question": "中途失败时权威状态和派生状态是否保持原样？"}
+    ],
+    "status_enum": ["affected", "not-affected", "unassessed"],
+    "completeness_enum": ["complete", "incomplete"],
+    "block_condition": "impact_contract.identity_change == true 且 completeness != complete → code/deploy 阻断",
+    "blocked_steps": ["code", "deploy", "audit-verified"]
+  },
+  "requirement_delta_escalation": {
+    "doc": "需求增量强制升级：把 requirement_deltas 从记录项升级为流程控制项。severity=major 且 needs_replan=true 未回流重定稿时，当前阶段必须终止并路由回 plan/review，patch 不得静默吸收重大增量；轻量修补只允许处理不改变合同的实现缺陷。",
+    "major_severities": ["major"],
+    "major_triggers": [
+      "新增或改变操作入口",
+      "从拒绝改为允许，或从保留改为收敛",
+      "改变存活身份/依赖迁移/失败语义",
+      "改变持久化/事务/回滚/恢复行为",
+      "新增跨组件/跨仓库/外部消费者影响",
+      "原计划只覆盖单体场景，新需求增加传递关联或多实体场景",
+      "原验证边界扩大到真实环境/重启/异步收敛"
+    ],
+    "needs_replan_route": [
+      "需求增量",
+      "更新范围合同",
+      "补齐语义决策",
+      "重建影响合同",
+      "更新验收矩阵",
+      "重新评审",
+      "才能继续实现"
+    ],
+    "block_condition": "存在 severity=major 且 needs_replan=true 且 status != resolved → 阻断当前阶段并路由回 plan/review",
+    "lightweight_allowed": "仅处理不改变合同的实现缺陷"
+  },
+  "fast_risk_upgrade": {
+    "doc": "快速模式风险自动升级：fast 模式命中任一风险标志时 effective_mode 自动设为 full；允许用户显式 override 但必须记录风险接受事实（risk_profile.override=true）。低风险、单文件、纯计算且无外部状态变化的任务仍可保持 fast。",
+    "effective_mode_full": "full",
+    "risk_flags": {
+      "cross_component": "跨组件修改",
+      "persistent_identity_change": "持久化实体身份变化",
+      "dependency_migration": "依赖关系迁移",
+      "async_observer_or_cache": "异步观察者、缓存或注册表参与",
+      "restart_replay_semantics": "重启、恢复或重放语义受影响",
+      "external_consumer_change": "外部消费者行为发生变化",
+      "real_env_verification": "需要真实环境验证",
+      "unresolved_semantic_decision": "出现尚未解决的语义决策",
+      "major_requirement_delta": "执行中发生重大需求增量"
+    },
+    "block_condition": "metadata.mode == fast 且任一 risk flag 为 true 且 (risk_profile.effective_mode != full 且 override != true) → 违规（须记录风险接受或自动升级 full）",
+    "keeps_fast_allowed": "低风险、单文件、纯计算且无外部状态变化"
+  },
+  "acceptance_contract": {
+    "doc": "生命周期验收合同：任何改变权威状态或实体身份的修改，必须覆盖四个阶段（即时/异步收敛/重启恢复/重复执行）与四类消费者（直接查询/聚合选择/依赖归属/外部投影）。只验证直接查询不能把任务标记为 verified。矩阵中任何必填单元为空 = 验证不完整。",
+    "lifecycle_scopes": ["authoritative_state_change", "identity_change"],
+    "verified_requires": "acceptance_contract.matrix 覆盖全部 required_phases × required_consumers 且无空 cell 才能 delivery_verdict=verified",
+    "scenario_seed": [
+      "等价",
+      "单向包含",
+      "部分关联",
+      "仅边界接触",
+      "无关联",
+      "一个新实体同时关联多个既有实体",
+      "多个输入构成传递关联",
+      "存在依赖记录",
+      "失败、重试和回滚"
+    ]
+  },
+  "legacy": {
+    "untracked_marker": "legacy-untracked",
+    "doc": "阶段一提示模式：旧工单缺少新字段时补默认值并标记 legacy-untracked，校验器输出警告不阻断只读审计；新任务从计划阶段开始执行硬门禁。阶段二强制模式由 --strict 开启（缺字段判失败）。",
+    "defaults": {
+      "semantic_decisions": [],
+      "impact_contract": null,
+      "acceptance_contract": null,
+      "risk_profile": null,
+      "diagnosis_only": false
+    }
+  }
+}

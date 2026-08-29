@@ -61,8 +61,25 @@
 **新增字段**（仅 fast 模式有值，full 模式可省略或留空，默认 `"full"`）：
 - `mode`：工单模式，`"fast"` / `"full"`（默认 `"full"`）
 - `max_rounds`：步骤2 软上限，fast 固定为 1（full 默认 3）
+- **`risk_profile`**（workflow gate·快速模式风险自动升级，写 metadata）：fast 模式创建/续跑时**自动风险识别**，命中任一 `fast_risk_triggers`（见 [mcp/workflow-gate/gates.json](../mcp/workflow-gate/gates.json)）→ `effective_mode` 自动设为 `"full"`（走全流程），否则保持 `"fast"`。风险标志（词表）：
+  - `cross_component`（跨组件修改）/ `persistent_identity_change`（持久化实体身份变化）/ `dependency_migration`（依赖关系迁移）/ `async_observer_or_cache`（异步观察者、缓存或注册表参与）/ `restart_replay_semantics`（重启、恢复或重放语义受影响）/ `external_consumer_change`（外部消费者行为变化）/ `real_env_verification`（需要真实环境验证）/ `unresolved_semantic_decision`（出现尚未解决的语义决策）/ `major_requirement_delta`（执行中发生重大需求增量）
+  - 低风险、单文件、纯计算且无外部状态变化 → 保持 `effective_mode="fast"`
+- **`risk_profile.override`**：用户显式覆盖自动升级时记 `true` 并记录风险接受事实（`effective_mode` 仍按用户覆盖值）；**未 override 且 `effective_mode != full` 时 lint 判违规**（见 [tools/lint_workflow_contract.py](../tools/lint_workflow_contract.py)）
 
-复用入口态目录时，沿用现有 metadata，只追加/更新 `mode="fast"`、`max_rounds=1`。
+结构示例：
+```json
+{
+  "risk_profile": {
+    "requested_mode": "fast",
+    "effective_mode": "full",
+    "triggers": ["cross_component", "async_observer_or_cache"],
+    "risk_flags": {"cross_component": true, "persistent_identity_change": false, "async_observer_or_cache": true},
+    "override": false
+  }
+}
+```
+
+复用入口态目录时，沿用现有 metadata，只追加/更新 `mode="fast"`、`max_rounds=1`，并按上方规则写入/刷新 `risk_profile`。
 
 ### 3. 入口警告
 
@@ -78,6 +95,8 @@
 ```
 
 ### 4. 串联执行
+
+> **workflow gate 自动升级（fast 风险命中时强制走 full 流程）**：串联前运行 `python3 tools/lint_workflow_contract.py {ICODE_OUT_DIR} --step fast --json`——若 `risk_profile.effective_mode=full`（命中风险自动升级）→ **按 `/icode start` 全流程执行**（步骤2 多轮 + 对抗、步骤5 三阶段），并打印 `▶ fast 命中风险标志（<triggers>），自动升级 full 模式`；`effective_mode=fast` 且未命中风险 → 按下方 fast 精简流程执行；`effective_mode != full` 且 `override != true` → 违规，提示用户记录风险接受或改 full（不得静默继续 fast）。
 
 按以下顺序调用对应步骤文件：
 

@@ -77,6 +77,10 @@
    - **非 null**（本工单有活动 checkout）→ **必须先 `cd {active_checkout.path}` 再继续本步骤**（cwd 契约照常，与 status --validate / 06_audit / 07_readme 同，见 [references/worktree_isolation.md §2](../references/worktree_isolation.md)）；在主仓跑会找不到 `.icode_output_N/` 内产物 → 误报缺失
    - **null**（原地工单）→ 直接继续
    - **已 close**（`submitted_baseline` 非 null 或 `submitted_baselines` 非空）→ 见「定位」段分流：必须先 reopen 再 patch（L1 阻断）
+2.7. **workflow gate 前置（L1，重大语义变化不得静默吸收）**：patch 启动时运行 `python3 tools/lint_workflow_contract.py {ICODE_OUT_DIR} --step patch --json`——退出码非 0 时**先分流再 patch**：
+   - 存在未解决 `semantic_decisions`（`status != resolved` 且非 diagnosis-only）→ 先获用户确认写入合同，**不得以"最保守/最安全/通常如此"代替用户选择**
+   - 本次 patch 输入**新增/改变操作入口、从拒绝改为允许或保留改收敛、改变存活身份/依赖迁移/失败语义、改变持久化/事务/回滚/恢复、新增跨组件/跨仓/外部消费者影响、验证边界扩大** → 属**重大增量**，写入 `requirement_deltas` 记 `severity=major, needs_replan=true` 并**回流完整计划**（重跑 plan/review 更新 `scope_contract`/`semantic_decisions`/`impact_contract`/`acceptance_contract`），**不在轻量 patch 路径吸收**；轻量修补只允许处理不改变合同的实现缺陷
+   - 身份变化（`impact_contract.identity_change=true`）且影响清单不完整 → 回 plan 补齐 9 维后再 patch
 3. 确定本次 `N`（**双源取大，防编号冲突**）：
    - 读 `metadata.patch_count`（缺失视为 0）
    - 读 `08_patch.md` 最大 Patch 段编号（`grep -oP '^## Patch \K\d+' {ICODE_OUT_DIR}/08_patch.md 2>/dev/null | sort -n | tail -1`——**须重定向 stderr**：文件不存在时 grep 会报错，重定向后无输出、`tail` 为空 → 视为 0）

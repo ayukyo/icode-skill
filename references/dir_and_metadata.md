@@ -326,6 +326,25 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
 >
 > **`requirement_deltas` 字段族**（用户语义变更记录，可选，默认 `[]`，详见 SKILL.md「可选字段」段）：自动流程期间用户输入改变计划语义（状态身份/生命周期、允许/拒绝条件、持久化一致性或回滚承诺、验收条件/调用方语义/真实环境验证场景）时的分类记录数组（每条 `{at, user_input_summary, changed_aspect, classification, impact, user_confirm}`）。`classification` 枚举：`clarification_only`（仅澄清不改变实现）/ `a_now_with_evidence`（改变 A 档但已有直接证据）/ `needs_user_confirm`（需用户确认）/ `needs_replan`（需回到 plan/review 重新定稿）。**delta 未分流前不得继续扩大代码设计或验收矩阵**（冻结点）。字段缺失视为 `[]`（向后兼容）。写入点：review 前置校验 / merge / code 前置检测用户输入；消费点：merge 定稿检查（未分流禁止定稿）+ code 实施核对
 >
+> **`workflow_gate_schema_version` 字段族**（workflow gate 版本，可选，默认缺省 = legacy-untracked）：`1` 表示本工单从计划阶段起启用 workflow gate 硬门禁（`semantic_decisions`/`impact_contract`/`acceptance_contract`/`risk_profile`）。字段缺失视为 `legacy-untracked`（阶段一提示模式：缺字段补默认值，只读审计不阻断；`--strict` 强制模式判失败）。写入点：plan 完成时与 `semantic_decisions` 一并写；机器真源 `mcp/workflow-gate/gates.json` + 校验器 `tools/lint_workflow_contract.py`
+>
+> **`semantic_decisions` 字段族**（语义决策合同，可选，默认 `[]`，详见 SKILL.md「可选字段」段）：任一分析/计划/评审出现**同一输入有两种及以上会改变外部行为的处理方式**、或结论含"待确认/未定义/需要选择/策略不唯一"、或需决定允许/拒绝/合并/替换/保留/迁移、或需决定存活身份/冲突优先级/兼容阈值/失败语义、或当前证据只能说明缺机制不能唯一推导期望行为时，必须先把决策写入本数组。每条 `{dimension, alternatives, selected, evidence, user_confirmed, status}`：
+  - `dimension`：决策维度（如"关系冲突处理"）
+  - `alternatives`：候选方案数组（会改变外部行为的选项）
+  - `selected`：用户已明确选择的值（未选择为 `null`）
+  - `evidence`：`user-confirmed`（用户确认）或其他证据回指
+  - `user_confirmed`：bool，是否用户显式确认
+  - `status`：`resolved`（已解决）/ `open` / `pending` / `rejected`
+  - **门禁（机器判定）**：存在 `status != resolved` 且非 `diagnosis_only` → `plan`/`code`/`patch` 阻断（`python3 tools/lint_workflow_contract.py` 校验，真源 [mcp/workflow-gate/gates.json](../mcp/workflow-gate/gates.json)）。**禁止以"最保守/最安全/通常如此"代替用户选择**。诊断命令可结束但必须显式标 `diagnosis_only=true`（"仅诊断"），不得进入实现。写入点：plan §4.5 落盘 fix_tiers 处；消费点：plan/code/patch 前置校验 + merge 定稿检查
+>
+> **`diagnosis_only` 字段族**（仅诊断标记，可选，默认 `false`）：bool。语义决策门禁的第二个终态——**本轮只交付诊断结论，不允许进入实现阶段**。置 `true` 时 `semantic_decisions` 未解决允许诊断结束（lint 全量扫描 pass + warning "仅诊断"），但 `--step plan/code/patch` 仍阻断（不得进入实现）。字段缺失视为 `false`
+>
+> **`impact_contract` 字段族**（身份变化影响合同，可选，默认 `null`，详见 SKILL.md「可选字段」段）：设计/代码涉及**实体身份变化**（合并/删除/去重/重命名/重新分配、实体替代、依赖归属变化、权威状态与运行时投影不一致、旧身份提交后不应继续被查询/枚举/执行）时必须填完整 9 维影响清单。结构 `{identity_change, authoritative_writer, persistent_references, derived_metadata, runtime_indexes, queries_and_selectors, async_links, recovery_paths, external_projections, rollback_and_failure, completeness}`——除 `identity_change`（bool）与 `completeness`（`complete`/`incomplete`）外，9 维每项 `{status: "affected"|"not-affected"|"unassessed", evidence}`（必答且必须带证据）。**门禁（机器判定）**：`identity_change=true` 且 `completeness != complete` → `code`/`deploy`/`audit-verified` 阻断；`completeness=complete` 时 9 维每项必答。字段缺失视为 `null`（未声明身份变化，不阻断，向后兼容）。写入点：plan §4.5；消费点：code/deepcheck/audit 前置核对
+>
+> **`acceptance_contract` 字段族**（生命周期验收合同，可选，默认 `null`，详见 SKILL.md「可选字段」段）：任何**改变权威状态或实体身份**的修改必须覆盖四阶段 × 四类消费者的验收矩阵。结构 `{requires_lifecycle, authoritative_state_change, scope, invariants, matrix}`——`matrix` 每项 `{scenario, phase, consumer, expected, evidence, status}`。`phase` ∈ `immediate`（权威提交立即完成后）/ `converged`（异步投影与运行时状态收敛后）/ `restart`（进程重启并恢复后）/ `replay`（相同操作重复执行或重放后）；`consumer` ∈ `direct_query`（直接查询）/ `aggregate_selector`（聚合或批量选择）/ `persistent_reference`（依赖记录的归属解析）/ `external_projection`（外部投影与持久化恢复）。**门禁（机器判定）**：涉及生命周期/身份变化时矩阵必须覆盖全部 `phases × consumers` 必填单元（空 cell = 验证不完整），**只验证直接查询不能 `delivery_verdict=verified`**。字段缺失视为 `null`（不强制，向后兼容）。写入点：plan §4.5；消费点：deepcheck 一致性核对 + audit 终审验收
+>
+> **`risk_profile` 字段族**（快速模式风险档案，可选，默认 `null`，详见 SKILL.md「可选字段」段）：fast 模式风险自动升级记录。结构 `{requested_mode, effective_mode, triggers, risk_flags, override}`——`requested_mode`=`fast`（用户请求）/ `effective_mode`=`fast`|`full`（实际生效）/ `triggers`=命中风险标志数组（词表见 [mcp/workflow-gate/gates.json](../mcp/workflow-gate/gates.json) `fast_risk_triggers`：`cross_component`/`persistent_identity_change`/`dependency_migration`/`async_observer_or_cache`/`restart_replay_semantics`/`external_consumer_change`/`real_env_verification`/`unresolved_semantic_decision`/`major_requirement_delta`）/ `risk_flags`=各标志 bool 映射 / `override`=bool（用户显式覆盖自动升级时记 `true` 并记录风险接受事实）。**门禁（机器判定）**：`mode=fast` 且命中任一风险但 `effective_mode != full` 且 `override != true` → 违规（须自动升级 full 或显式 override）。低风险、单文件、纯计算且无外部状态变化仍可保持 fast。写入点：fast 模式创建/续跑时
+>
 > **`workload_estimate` 字段族**（工作量评估，v2 新增）：由步骤 0 init 收尾时自动评估，辅助用户决定走 `/icode start` 还是 `/icode fast`。详见 SKILL.md「workload_estimate 字段族」与 [steps/00_init.md](../steps/00_init.md)「步骤 9 工作量评估」段：
 > - `workload_estimate`（可选，枚举，默认 `"medium"`）：工作量等级。`"small"` 建议 `/icode fast`，`"medium"` 建议 `/icode start`，`"large"` **必须** `/icode start`
 > - `workload_reason`（可选，≤80 token）：评估理由

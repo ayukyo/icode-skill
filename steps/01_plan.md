@@ -379,6 +379,13 @@
    - **常规新建目录情况**（此前未入索引）：此时需**首次生成并写入**条目。`ticket_id` 按 `{工程名}-{N}` 规则生成（工程名冲突时加 `project_path` 短 hash 后缀，规则同步骤0），`has_00_init` = false，`has_plan` = true，`project_path`/`out_dir`/`created_at`/`requirement_summary`/`keywords` 取自本步骤 metadata；写入索引后**回填 metadata 的 `ticket_id` 字段**。
    - **复用步骤0目录情况**：metadata 已有 `ticket_id`，按该 id 更新对应条目（`has_plan` 置 true，刷新 `requirement_summary`），不新建条目。
 
+5.5. **落盘 workflow gate 合同（P0 硬门禁，写 `semantic_decisions` / `impact_contract` / `acceptance_contract` / `workflow_gate_schema_version`）**：在写 `fix_tiers`/`scope_contract` 处**一并写**以下字段（机器真源 [mcp/workflow-gate/gates.json](../mcp/workflow-gate/gates.json)，校验器 [tools/lint_workflow_contract.py](../tools/lint_workflow_contract.py)，结构见 [references/dir_and_metadata.md](../references/dir_and_metadata.md) 相应字段族）：
+   - `workflow_gate_schema_version = 1`（本工单从计划阶段起启用硬门禁；旧工单缺 = legacy-untracked，提示模式不阻断）
+   - **`semantic_decisions`**：把 init §5「语义决策识别」标出的候选 + 本计划 §4 ADR 中出现的**会改变外部行为的策略选择**写入（每条 `{dimension, alternatives, selected, evidence, user_confirmed, status}`）。用户已明确选择的 → `status=resolved, user_confirmed=true`；用户未确认的策略 → `status=open`（**不得以"最保守/最安全/通常如此"替用户选**；未 resolved 时 plan/code/patch 被 lint 阻断，见「定稿机器硬校验」后追加的 workflow gate 校验）。本轮只做诊断的策略未定 → 标 `diagnosis_only=true`
+   - **`impact_contract`**：计划涉及**实体身份变化**（合并/删除/去重/重命名/重新分配、实体替代、依赖归属变化、权威状态与运行时投影不一致、旧身份提交后不应继续被查询/枚举/执行）时，**必须**填 `identity_change=true` + 9 维影响清单每项 `{status, evidence}` + `completeness=complete`；不涉及 → 不写或 `identity_change=false`（向后兼容）。**9 维**：`authoritative_writer`（哪个组件决定最终实体集合）/ `persistent_references`（哪些依赖记录保存身份、如何迁移）/ `derived_metadata`（归属/计数/汇总是否重算）/ `runtime_indexes`（缓存/注册表/索引是否删除淘汰身份）/ `queries_and_selectors`（单项/全选/批量是否只返回存活）/ `async_links`（观察者乱序/延迟刷新短暂错误态）/ `recovery_paths`（重启/重放/幂等重试相同结果）/ `external_projections`（下游身份/顺序/数量一致）/ `rollback_and_failure`（中途失败权威与派生保持原样）
+   - **`acceptance_contract`**：计划**改变权威状态或实体身份**时，**必须**生成验收矩阵（`matrix` 每项 `{scenario, phase, consumer, expected, evidence, status}`），覆盖 4 阶段（`immediate`/`converged`/`restart`/`replay`）× 4 消费者（`direct_query`/`aggregate_selector`/`persistent_reference`/`external_projection`）全部必填单元；场景种子见 gates.json `scenario_seed`（等价/单向包含/部分关联/仅边界接触/无关联/一新实体关联多既有实体/多输入传递关联/存在依赖记录/失败重试回滚）。不涉及生命周期 → 不写（向后兼容）
+   - **`risk_profile`**：`mode=fast` 且命中任一 `fast_risk_triggers` 风险 → 写 `{requested_mode:"fast", effective_mode:"full", triggers:[...], risk_flags:{...}, override}`（自动升级 full；用户显式覆盖记 `override=true` 并记录风险接受事实）
+
 6. **检索留痕**（检索可审计，防"检索成为会话内不可验证行为"）：若全局索引 `~/.claude/icode_data/index.json` 存在，`{ICODE_OUT_DIR}/_inject_cache.json` **必须存在**（即使 `injections` 为空数组，缓存文件也应已创建，见「执行步骤」第 2 步「注入防重复」）或本工单**显式声明** `[检索跳过-原因]`（如"全局索引无候选"）；两者皆无 → 标注检索留痕缺失（重做场景复盘盲区）
 
 7. **limit_refs 机器自检（L1：计划引用 limit 未记录 / 前置读留痕缺失 = 不合规）**：运行下方命令，退出码非 0 则停下补齐后重跑：
@@ -415,6 +422,8 @@ sys.exit(1 if missing else 0)
      - `["0"]`/`["log"]` → 下一步是步骤1
      - `["0","1"]` 或 `["1"]` 或 `["log","1"]` → 下一步是步骤2
      - `["0","1","2"]` 或 `["1","2"]` → 下一步是步骤3
+7.5. **workflow gate 机器自检（L1：未解决语义决策 / 重大增量未回流 = 不合规）**：运行 `python3 tools/lint_workflow_contract.py {ICODE_OUT_DIR} --step plan --json`——退出码非 0 时停下补齐（把 init §5 语义决策候选/计划 ADR 策略选择写入 `semantic_decisions` 并获用户确认、或把重大 `requirement_deltas` 完成分流）后重跑。通过后才算步骤1 完成，可进入步骤2。
+
 ## 决策锚点（步骤1 完成后写）
 
 步骤1 写完 `01_plan.md` + metadata 后，若 `metadata.anchors_enabled != false`，刷新 `.decision_anchors.json`：刷新 `requirement_digest` + `key_decisions`（ADR 摘要）+ `design_4dims`（plan §4.5 4 维度设计态）。详见 [references/decision_anchors.md](../references/decision_anchors.md)。

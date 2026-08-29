@@ -21,8 +21,9 @@
 /tools/tb/config.json
 /tools/tb/scripts/__pycache__/
 
-# --- 2b. tools/dingtalk：cookie 落在 ~/.cache（600 权限），仅忽略字节码 ---
+# --- 2b. tools/dingtalk / tools/ppt：cookie 落在 ~/.cache（600 权限），仅忽略字节码 ---
 /tools/dingtalk/scripts/__pycache__/
+/tools/ppt/scripts/__pycache__/
 /tools/__pycache__/
 
 # --- 2c. scripts/：顶层 Python 工具字节码（防 rsync 把 .pyc 带入 installed）---
