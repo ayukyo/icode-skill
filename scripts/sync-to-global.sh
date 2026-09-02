@@ -47,30 +47,64 @@ for arg in "$@"; do
 done
 
 # 前置检查
-if ! command -v rsync >/dev/null 2>&1; then
-  echo "❌ rsync 未安装,请先安装: sudo apt install rsync" >&2
+if [ ! -f "$DEV_REPO/.gitignore" ]; then
+  echo "❌ $DEV_REPO/.gitignore 不存在,无法应用排除规则(.gitignore)" >&2
   exit 1
 fi
 
-if [ ! -f "$DEV_REPO/.gitignore" ]; then
-  echo "❌ $DEV_REPO/.gitignore 不存在,无法应用 --filter=':- .gitignore'" >&2
-  exit 1
+# 传输引擎: rsync 优先(带 --delete 镜像 + .gitignore filter)。
+# rsync 缺失时(如 Windows Git Bash 默认不含)自动降级到 cp 增量同步,
+# 与 mcp/*/install.sh 的既有兜底模式一致; cp 兜底不做 --delete,
+# 故 --no-delete 语义天然满足。
+if command -v rsync >/dev/null 2>&1; then
+  SYNC_ENGINE="rsync"
+else
+  SYNC_ENGINE="cp"
+  echo "⚠️ rsync 未安装(Windows Git Bash 默认不含),自动降级到 cp 增量同步兜底。"
+  echo "   cp 兜底不做 --delete(不删目标端多余文件),故 --no-delete 语义天然满足。"
+  echo "   如需 rsync 全量镜像语义,请先安装: sudo apt install rsync / pacman -S rsync"
+  echo ""
 fi
 
 if [ "$MODE" = "apply" ]; then
-  echo "⚠️  即将执行实际同步 (--apply)"
+  echo "⚠️  即将执行实际同步 (--apply)  [引擎: $SYNC_ENGINE]"
   echo "   src: $DEV_REPO/"
   echo "   dst: $GLOBAL_DIR/"
   echo "   dst: $AGENTS_DIR/   (共享 skills, 供 CODEX 等其它 agent)"
   echo "   规则: 顶层 .gitignore + 默认排除 .git/ .claude/ demo/ tests/"
   echo ""
 else
-  echo "🔍 dry-run 模式 (默认),加 --apply 才会真正写入"
+  echo "🔍 dry-run 模式 (默认),加 --apply 才会真正写入  [引擎: $SYNC_ENGINE]"
   echo "   src: $DEV_REPO/"
   echo "   dst: $GLOBAL_DIR/"
   echo "   dst: $AGENTS_DIR/   (共享 skills, 供 CODEX 等其它 agent)"
   echo ""
 fi
+
+# cp 兜底: 用 git ls-files 枚举"已跟踪 + 未忽略未跟踪"文件(自动应用 .gitignore),
+# 再显式排除与 rsync --exclude 对齐的 .git/ .claude/ demo/ tests/。
+# 用 tar 单流管道复制(不经变量, 避免 bash 命令替换剥掉 NUL 分隔符),
+# 保留目录结构/权限, 避免逐文件 cp 在 Windows 上过慢。
+sync_with_cp() {
+  local dst="$1"
+  mkdir -p "$dst"
+  local count
+  count="$(git -C "$DEV_REPO" ls-files --cached --others --exclude-standard \
+    | grep -v -E '^(\.git/|\.claude/|demo/|tests/)' | wc -l)"
+  if [ "$MODE" = "apply" ]; then
+    ( cd "$DEV_REPO"
+      git ls-files -z --cached --others --exclude-standard \
+        | grep -z -v -E '^(\.git/|\.claude/|demo/|tests/)' \
+        | tar --null -T - -cf - ) \
+      | tar -xf - -C "$dst"
+    echo "   ✅ copied $count files -> $dst"
+  else
+    echo "   (dry-run) would copy $count files -> $dst"
+    git -C "$DEV_REPO" ls-files --cached --others --exclude-standard \
+      | grep -v -E '^(\.git/|\.claude/|demo/|tests/)' | head -5 \
+      | sed 's/^/   would copy: /'
+  fi
+}
 
 # 核心命令 —— 同一份排除规则依次镜像到各目标目录
 # --filter=':- .gitignore'  : rsync 自动读 dev_repo 顶层 .gitignore 并应用排除规则
@@ -79,13 +113,17 @@ fi
 #                            (dev repo 删除的文件会同步删除; --no-delete 可关闭)
 #                            被 .gitignore 排除的 mcp/*/config.json 等用户配置不受影响
 for dst in "$GLOBAL_DIR" "$AGENTS_DIR"; do
-  rsync -avc --delete "${RSYNC_ARGS[@]}" \
-    --filter=':- .gitignore' \
-    --exclude='.git/' \
-    --exclude='.claude/' \
-    --exclude='demo/' \
-    --exclude='tests/' \
-    "$DEV_REPO/" "$dst/"
+  if [ "$SYNC_ENGINE" = "rsync" ]; then
+    rsync -avc --delete "${RSYNC_ARGS[@]}" \
+      --filter=':- .gitignore' \
+      --exclude='.git/' \
+      --exclude='.claude/' \
+      --exclude='demo/' \
+      --exclude='tests/' \
+      "$DEV_REPO/" "$dst/"
+  else
+    sync_with_cp "$dst"
+  fi
 done
 
 echo ""

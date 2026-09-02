@@ -89,7 +89,7 @@ else
 fi
 
 echo "📦 装依赖..."
-"$PYBIN/pip" install --quiet --disable-pip-version-check -U pip
+"$PYBIN/python" -m pip install --quiet --disable-pip-version-check -U pip
 
 # pip 装包:清华源优先,fallback 默认 PyPI
 pip_install() {

@@ -83,7 +83,13 @@ def _resolve_executable(name_or_path: str) -> str | None:
     - shutil.which 还会按 PATHEXT 自动补 .exe/.cmd(Windows)。
     - Linux/macOS 下行为与 command -v 等价。
     """
-    return shutil.which(name_or_path)
+    resolved = shutil.which(name_or_path)
+    if resolved:
+        return resolved
+    # Git Bash/MinGW 下 command -v 返回 MSYS 路径(/c/Program Files/...),
+    # shutil.which 直接解析会失败;退化为按 basename 再查一次
+    # (shutil.which 自动补 PATHEXT .exe/.cmd),兼容 Windows。
+    return shutil.which(Path(name_or_path).name)
 
 
 def main():
