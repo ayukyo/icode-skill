@@ -27,7 +27,14 @@
   启动：cd <工程目录> && nohup python3 tb_watch.py --config watch.json > /tmp/tb_watch.log 2>&1 &
   停止：python3 tb_watch.py --config watch.json --stop   （读 pid 文件 SIGTERM 优雅退出）
 """
-import argparse, fcntl, json, os, re, signal, subprocess, sys, time
+import argparse, json, os, re, shutil, signal, subprocess, sys, time
+
+# Windows 下 stdout/stderr 默认 locale 编码(gbk)，中文日志/JSON 会乱码或报错；强制 UTF-8 输出
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
 
 _STOP = False
 
@@ -40,6 +47,52 @@ def _stop_handler(signum, frame):
 
 signal.signal(signal.SIGTERM, _stop_handler)
 signal.signal(signal.SIGINT, _stop_handler)
+
+# 跨平台标记：Windows 无 SIGTERM handler 投递（os.kill(SIGTERM)=TerminateProcess，handler 不会执行），
+# 用 os.name 分流平台专属逻辑；单实例锁 fcntl(Linux)/msvcrt(Windows) 二选一。
+IS_WINDOWS = (os.name == "nt")
+
+def _lock_file(fh):
+    """独占式锁单实例（非阻塞）。Linux 用 fcntl.flock，Windows 用 msvcrt.locking。"""
+    if IS_WINDOWS:
+        import msvcrt
+        fh.seek(0)
+        msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
+    else:
+        import fcntl
+        fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+def _unlock_file(fh):
+    if IS_WINDOWS:
+        import msvcrt
+        fh.seek(0)
+        msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
+    else:
+        import fcntl
+        fcntl.flock(fh, fcntl.LOCK_UN)
+
+def _stop_marker_path(cfg):
+    return os.path.join(watch_dir_of(cfg["project_dir"]), ".watch.stop")
+
+def _write_stop_marker(cfg):
+    """写停止标记（Windows 优雅停止用：守护在下一个 sleep 分片内检测退出）。"""
+    try:
+        with open(_stop_marker_path(cfg), "w") as f:
+            f.write("stop")
+        return True
+    except OSError:
+        return False
+
+def _stop_marker_exists(cfg):
+    return os.path.exists(_stop_marker_path(cfg))
+
+def _cleanup_stop_marker(cfg):
+    try:
+        p = _stop_marker_path(cfg)
+        if os.path.exists(p):
+            os.remove(p)
+    except OSError:
+        pass
 
 PROBE_PY = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tb_pull.py")
 DEFAULT_STATUS_NAMES = "打开,未完成"
@@ -85,7 +138,8 @@ def load_config(path, cli_args):
     未给顶层时全局锚点取第一个 project 的 project_dir。
     """
     if path and os.path.exists(path):
-        with open(path) as f:
+        # 显式 UTF-8：配置可能含中文（status_names 等），Windows 默认 gbk 会解码失败
+        with open(path, encoding="utf-8") as f:
             cfg = json.load(f)
     else:
         cfg = {}
@@ -210,7 +264,7 @@ def scan_debug_worktickets(project_dir):
         if not os.path.exists(md_path):
             continue
         try:
-            with open(md_path) as f:
+            with open(md_path, encoding="utf-8") as f:
                 meta = json.load(f)
         except (json.JSONDecodeError, OSError):
             continue
@@ -258,7 +312,7 @@ def scan_debug_halfdone(project_dir):
                 break
         if mp:
             try:
-                with open(mp) as f:
+                with open(mp, encoding="utf-8") as f:
                     uid = json.load(f).get("uniqueId", "")
                 if uid:
                     num = str(uid)
@@ -331,7 +385,7 @@ def run_probe(proj, watch_dir):
         # 网络卡死/挂载慢时不能卡死守护：转成检测失败，本轮跳过、下一轮重试
         raise RuntimeError(f"probe 超时（>{PROBE_TIMEOUT}s）：{proj['pid']}") from e
     probe_file = os.path.join(out_dir, f"{proj['pid']}.json")
-    with open(probe_file) as f:
+    with open(probe_file, encoding="utf-8") as f:
         items = json.load(f)
     if not isinstance(items, list):
         raise RuntimeError(f"probe 输出异常：期望 list，实得 {type(items).__name__}")
@@ -356,7 +410,7 @@ def detect_project(project_dir, proj, watch_dir):
         wdir, meta, mp = find_debug_prev(project_dir, proj, num, dbg_tickets)
         old_meta = None
         if mp:
-            with open(mp) as f:
+            with open(mp, encoding="utf-8") as f:
                 old_meta = json.load(f)
         if wdir is None or old_meta is None:
             # 无 metadata 但可能有"超时中断的半成品"（附件已下载）→ 按该单续跑而非新建，防死循环
@@ -421,7 +475,7 @@ def write_report(cfg, results):
             lines.append("")
         report_path = os.path.join(project_dir, ".icode_output", "tb_watch_report.md")
         os.makedirs(os.path.dirname(report_path), exist_ok=True)
-        with open(report_path, "w") as f:
+        with open(report_path, "w", encoding="utf-8") as f:
             f.write("\n".join(lines))
         written.append(report_path)
     return written
@@ -466,10 +520,12 @@ def _low_priority_preexec():
     会饿死远程挂载（SMB/sshfs）下载/解压/抽帧（实测百 MB 级日志包下载+解压被拖到超时）；best-effort -n 7 仍低于
     其它普通 IO，但不会被完全饿死。nice 5 比 nice 10 权重约翻倍，仍低于默认(0)。
     """
-    try:
-        os.nice(5)
-    except OSError:
-        pass
+    # os.nice 仅 Unix 有；Windows 无对应物，直接跳过（nice/ionice 只在 Linux 挂载生态有意义）
+    if hasattr(os, "nice"):
+        try:
+            os.nice(5)
+        except OSError:
+            pass
     try:
         subprocess.run(["ionice", "-c", "2", "-n", "7", "-p", str(os.getpid())],
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -488,7 +544,9 @@ GVD_DANGER_HITS = 2
 
 
 def _mount_fstype(path):
-    """返回 path 所在挂载的文件系统类型（findmnt -T），失败返回 ''。"""
+    """返回 path 所在挂载的文件系统类型（findmnt -T），失败返回 ''。Windows 无 findmnt，返回 'windows'。"""
+    if IS_WINDOWS:
+        return "windows"
     try:
         out = subprocess.check_output(["findmnt", "-T", path, "-o", "FSTYPE", "-n"],
                                       stderr=subprocess.DEVNULL, text=True)
@@ -512,6 +570,24 @@ def _check_mount_health(project_dir, mount_required=False):
     """
     info = {"fstype": "", "mount_ok": True, "gvfsd_smb_fd": 0, "file_max": 0,
             "danger": False, "hard": False, "error": ""}
+    # ---- Windows 分支：无 findmnt/gvfs/sshfs 概念。mount_required 仅校验工程路径真实可访问
+    #      （防映射盘掉线后路径退化成空/本地时在假目录生成 .icode_output，语义与 Linux 一致）。----
+    if IS_WINDOWS:
+        info["fstype"] = "windows"
+        accessible = False
+        try:
+            accessible = os.path.isdir(project_dir) and os.access(project_dir, os.R_OK)
+        except OSError as e:
+            info["error"] = f"路径不可访问：{e}"
+        if mount_required and not accessible:
+            info["mount_ok"] = False
+            info["danger"] = True
+            info["hard"] = True
+            info["error"] = info["error"] or f"mount_required=true 但路径不可访问/不存在：{project_dir}"
+            return False, info
+        info["mount_ok"] = accessible
+        return True, info
+
     gvfs_root = f"/run/user/{os.getuid()}/gvfs"
     fstype = _mount_fstype(project_dir)
     info["fstype"] = fstype
@@ -577,6 +653,8 @@ def _check_mount_health(project_dir, mount_required=False):
 
 def _recycle_gvfsd_smb():
     """危险时 recycle gvfsd-smb：SIGTERM 该进程让 gvfsd-daemon 重启它。失败降级记日志。"""
+    if IS_WINDOWS:
+        return False, "Windows 无 gvfsd-smb，跳过 recycle"
     out = subprocess.run(["pgrep", "-f", "gvfsd-smb"], capture_output=True, text=True)
     killed = []
     for pid_str in out.stdout.split():
@@ -603,6 +681,31 @@ def _recycle_gvfsd_smb():
     return True, f"recycled {killed}（替代进程未必立即起来）"
 
 
+def _resolve_claude_cmd(cfg):
+    """解析 claude 可执行路径：配置 claude_cmd > PATH 中的 claude > Windows npm 全局常见位置。
+
+    Windows 上由 Git Bash 启动的原生 python，其 PATH 常缺 npm 全局目录（%APPDATA%\\npm），
+    subprocess 会 WinError 2 找不到 claude，须显式探测。优先 native claude.exe，其次 npm shim。
+    """
+    cmd = (cfg.get("claude_cmd") or "").strip()
+    if cmd:
+        return cmd
+    if IS_WINDOWS:
+        # Windows 优先 native claude.exe（可被 CreateProcess 直跑、少一层 shim 转发）；
+        # 其次 npm 全局 claude.cmd shim。
+        base = os.path.expandvars(r"%APPDATA%\npm")
+        for c in (
+            os.path.join(base, "node_modules", "@anthropic-ai", "claude-code-win32-x64", "claude.exe"),
+            os.path.join(base, "claude.cmd"),
+        ):
+            if c and os.path.isfile(c):
+                return c
+    found = shutil.which("claude")
+    if found:
+        return found
+    return "claude"
+
+
 def trigger_claude(cfg, proj, num, label, reason):
     """拉起 claude -p 无头会话执行该单 debug 增量分析，返回 (rc, 耗时秒)。
 
@@ -611,12 +714,15 @@ def trigger_claude(cfg, proj, num, label, reason):
     prompt = PROMPT_TMPL.format(lib=proj["lib"] or "(未知，按 pid 匹配)", num=num, label=label,
                                 domain=proj["domain"], pid=proj["pid"],
                                 project_dir=proj["project_dir"], reason=reason)
-    cmd = [cfg.get("claude_cmd", "claude"), "-p", prompt]
+    cmd = [_resolve_claude_cmd(cfg), "-p", prompt]
     if cfg.get("claude_skip_permissions"):
         cmd.append("--dangerously-skip-permissions")
     print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] 触发 claude debug 增量分析 {label} ...")
     t0 = time.time()
-    preexec = _low_priority_preexec if cfg.get("low_priority", True) else None
+    # Windows 不支持 subprocess preexec_fn（传了就 ValueError）；且无 nice/ionice，降级在 Windows 上不生效。
+    preexec = None
+    if not IS_WINDOWS and cfg.get("low_priority", True):
+        preexec = _low_priority_preexec
     # env 构造：继承 os.environ + 注入 CLAUDE_CODE_MAX_CONTEXT_TOKENS（强制 claude 把上下文窗口切到目标值）
     # settings.json 里的 CLAUDE_CODE_AUTO_COMPACT_WINDOW 仍控制自动压缩阈值；本变量是上限，二者不冲突。
     # 用 .get() 容错：万一用户清掉默认值，env 不传这个键（claude 退回到 settings.json 默认）。
@@ -627,6 +733,7 @@ def trigger_claude(cfg, proj, num, label, reason):
     try:
         # cwd 强制 = 该项目的工程根：claude 的 /icode log --debug 在该目录运行，产物才落 {工程}/.icode_output/.debug/
         proc = subprocess.run(cmd, timeout=cfg["claude_timeout"], capture_output=True, text=True,
+                              encoding="utf-8", errors="replace",
                               cwd=proj["project_dir"], preexec_fn=preexec, env=sub_env)
         rc, timed_out = proc.returncode, False
     except subprocess.TimeoutExpired:
@@ -657,9 +764,12 @@ def acquire_lock(cfg):
     watch_dir = watch_dir_of(cfg["project_dir"])
     os.makedirs(watch_dir, exist_ok=True)
     lock_path = os.path.join(watch_dir, ".watch.lock")
-    fh = open(lock_path, "w")
     try:
-        fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        # Windows 上持锁文件的 'w' 截断会先抛 PermissionError（也是被锁），一并纳入单实例判定
+        fh = open(lock_path, "w")
+        fh.write("0")   # msvcrt.locking 需要文件至少包含所锁定的字节数
+        fh.flush()
+        _lock_file(fh)
     except OSError:
         print(f"[lock] 已有 tb_watch 实例在运行（{lock_path}），本次退出。", file=sys.stderr)
         sys.exit(3)
@@ -674,9 +784,30 @@ def write_pid(cfg):
 
 
 def stop_daemon(cfg):
-    """--stop：读 pid 文件 SIGTERM 优雅停止常驻 watch。"""
+    """--stop：优雅停止常驻 watch。
+
+    Windows 无 SIGTERM handler 投递（os.kill(SIGTERM)=TerminateProcess，handler 不会执行），
+    改走"写停止标记"：守护在下一个 sleep 分片内检测到标记即优雅退出并清理 pid/标记；
+    Linux 保持原 SIGTERM 语义（当前轮结束后停）。
+    """
     watch_dir = watch_dir_of(cfg["project_dir"])
     pid_file = os.path.join(watch_dir, "watch.pid")
+    if IS_WINDOWS:
+        if not os.path.exists(pid_file) and not os.path.exists(_stop_marker_path(cfg)):
+            print(f"无 pid 文件（{pid_file}），没有在跑的 watch。")
+            return 0
+        if _write_stop_marker(cfg):
+            print("已写停止标记（.watch.stop）：守护将在当前轮结束/下一个 sleep 分片内优雅退出。")
+        else:
+            print("停止标记写入失败，尝试 SIGTERM 兜底。")
+            try:
+                with open(pid_file) as f:
+                    pid = int(f.read().strip())
+                os.kill(pid, signal.SIGTERM)
+                print(f"已向 {pid} 发送 SIGTERM（Windows 下为直接终止）。")
+            except (ProcessLookupError, ValueError, OSError):
+                pass
+        return 0
     if not os.path.exists(pid_file):
         print(f"无 pid 文件（{pid_file}），没有在跑的 watch。")
         return 0
@@ -694,7 +825,7 @@ def stop_daemon(cfg):
 def _append_log(log_file, line):
     """追加一行 watch.log；写失败（如挂载断开）只降级到 stderr，绝不抛异常杀守护。"""
     try:
-        with open(log_file, "a") as f:
+        with open(log_file, "a", encoding="utf-8") as f:
             f.write(line + "\n")
     except OSError as e:
         print(f"[tb_watch] watch.log 写入失败（{e}）：{line}", file=sys.stderr)
@@ -774,8 +905,8 @@ def main_loop(cfg, once=False):
     last_trigger_dir = None
     while True:
         # 顶部统一检查退出标志：检测失败分支的 continue / sleep 被信号中断后
-        # 都会回到这里，确保 SIGTERM(优雅 stop) 在任何路径下都能让守护退出
-        if _STOP:
+        # 都会回到这里，确保 SIGTERM(优雅 stop) / Windows 停止标记 在任何路径下都能让守护退出
+        if _STOP or _stop_marker_exists(cfg):
             break
         round_no += 1
         stamp = time.strftime("%Y-%m-%d %H:%M:%S")
@@ -930,6 +1061,8 @@ def main():
         return 1
 
     cfg["detect_only"] = args.detect_only
+    # 清理上次可能的残留停止标记（Windows 优雅停异常退出遗留），避免新守护一启动就被判停
+    _cleanup_stop_marker(cfg)
     if args.detect_only or args.once:
         main_loop(cfg, once=True)
     else:
@@ -938,7 +1071,8 @@ def main():
             write_pid(cfg)
             main_loop(cfg)
         finally:
-            fcntl.flock(lock, fcntl.LOCK_UN)
+            _unlock_file(lock)
+            _cleanup_stop_marker(cfg)
             pid_file = os.path.join(watch_dir_of(cfg["project_dir"]), "watch.pid")
             if os.path.exists(pid_file):
                 os.remove(pid_file)

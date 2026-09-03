@@ -20,6 +20,25 @@ CFG="${TB_WATCH_CONFIG:-$HOME/.claude/icode_data/tb_watch.json}"
 MULTI=1
 [ -n "${TB_WATCH_CONFIG:-}" ] && MULTI=0
 
+# 平台判断：Git Bash / MSYS2 视作 Windows（跨平台分支）
+IS_WINDOWS=""
+case "$(uname -s)" in
+  MINGW*|MSYS*) IS_WINDOWS=1;;
+esac
+
+# 跨平台 python 解释器：Windows 上 python3 常解析到商店占位 stub（静默退出无输出），
+# 优先探测可用的 python3，否则退回 python；也允许 TB_WATCH_PYTHON 显式指定。
+PY_BIN="${TB_WATCH_PYTHON:-}"
+if [ -z "$PY_BIN" ]; then
+  if command -v python3 >/dev/null 2>&1 && python3 -c 'import sys' >/dev/null 2>&1; then
+    PY_BIN=python3
+  elif command -v python >/dev/null 2>&1 && python -c 'import sys' >/dev/null 2>&1; then
+    PY_BIN=python
+  else
+    PY_BIN=python3
+  fi
+fi
+
 usage() {
   echo "用法: $0 {start|stop|status} [--config <path>] [--project-dir <path>] [--force]"
   echo "  默认（不带 --config）对所有工程实例生效（配置目录下全部 tb_watch*.json，排除 example/bak）"
@@ -68,8 +87,13 @@ all_instances() {
 # 从配置读 project_dir（全局运行时锚点）：顶层 project_dir 优先，否则第一个 project 的
 # project_dir，否则缺省 = 当前目录。规范写法是每 project 自带 project_dir，顶层可省。
 project_dir_of() {
-  python3 - "$CFG" <<'PY'
+  "$PY_BIN" - "$CFG" <<'PY'
 import json, sys, os
+try:
+    # Windows 下管道默认 CRLF 换行会让 bash 读到残留 \r，强制纯 LF
+    sys.stdout.reconfigure(newline="\n")
+except Exception:
+    pass
 try:
     cfg = json.load(open(sys.argv[1]))
     pd = cfg.get("project_dir")
@@ -87,8 +111,13 @@ PY
 
 # 从配置读网页服务段 web {enable, host, port, project_dir}（缺省 = 启用 0.0.0.0:8000）
 web_info() {
-  python3 - "$CFG" <<'PY'
+  "$PY_BIN" - "$CFG" <<'PY'
 import json, sys, os
+try:
+    # Windows 下管道默认 CRLF 换行会让 bash 读到残留 \r，强制纯 LF
+    sys.stdout.reconfigure(newline="\n")
+except Exception:
+    pass
 try:
     cfg = json.load(open(sys.argv[1]))
     web = cfg.get("web") or {}
@@ -105,6 +134,34 @@ try:
 except Exception:
     print("True 0.0.0.0 8000 " + os.getcwd())
 PY
+}
+
+# 本机局域网 IPv4 列表（跨平台：Windows/Linux，与 tb_web.py 的 _local_ips 同逻辑；一行一个）
+local_ips() {
+  "$PY_BIN" - <<'PY'
+import socket
+try:
+    # Windows 下管道默认 CRLF 换行会让 bash 读到残留 \r，强制纯 LF
+    import sys
+    sys.stdout.reconfigure(newline="\n")
+except Exception:
+    pass
+try:
+    ips = set()
+    for info in socket.getaddrinfo(socket.gethostname(), None):
+        ip = info[4][0]
+        if not ip.startswith("127."):
+            ips.add(ip)
+    for ip in sorted(ips):
+        print(ip)
+except Exception:
+    pass
+PY
+}
+
+# 列出某 PID 的直接子进程 PID（跨平台：Linux 与 MSYS 的 ps -ef 第三列均为 PPID）
+children_of() {
+  ps -ef | awk -v p="$1" '$3==p {gsub(/[ \t]/, "", $2); printf "%s ", $2}'
 }
 
 # 停网页服务（读 <proj>/.icode_output/tb_watch/web.pid）
@@ -129,7 +186,7 @@ access_url() {
     if [ -n "$hn" ]; then
       printf "http://%s.local:%s/  (mDNS 稳定地址, 本机 IP 变化不影响)\n" "$hn" "$port"
     fi
-    ips=$(hostname -I 2>/dev/null | tr ' ' '\n' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | grep -v '^127\.' | tr '\n' ' ')
+    ips=$(local_ips | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | tr '\n' ' ')
     [ -z "$ips" ] && ips="<本机IP>"
     for ip in $ips; do printf "http://%s:%s/ " "$ip" "$port"; done
     echo
@@ -144,7 +201,7 @@ ip_change_note() {
   local proj="$1"
   local f="$proj/.icode_output/tb_watch/last_ips"
   local cur old
-  cur=$(hostname -I 2>/dev/null | tr ' ' '\n' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | grep -v '^127\.' | sort | tr '\n' ' ')
+  cur=$(local_ips | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | sort | tr '\n' ' ')
   cur="${cur% }"
   mkdir -p "$(dirname "$f")" 2>/dev/null
   if [ -f "$f" ]; then
@@ -163,8 +220,13 @@ ip_change_note() {
 # 输出配置里所有 mount_required=true 的工程根（每 project 带自己的 project_dir + mount_required，
 # 缺省继承顶层；去重，一行一个）。多工程单配置时 start 要对每个需挂载的工程做前置检查。
 mount_required_dirs() {
-  python3 - "$CFG" <<'PY'
+  "$PY_BIN" - "$CFG" <<'PY'
 import json, os, sys
+try:
+    # Windows 下管道默认 CRLF 换行会让 bash 读到残留 \r，强制纯 LF
+    sys.stdout.reconfigure(newline="\n")
+except Exception:
+    pass
 try:
     cfg = json.load(open(sys.argv[1]))
 except Exception:
@@ -181,13 +243,25 @@ for p in cfg.get("projects") or []:
 PY
 }
 
-# 校验工程路径位于网络挂载（sshfs 或 gvfs SMB）。就绪返回 0，否则返回 1 并打印原因。
+# 校验工程路径位于网络挂载（Linux: sshfs 或 gvfs SMB；Windows: 映射驱动器可达即可）。
+# 就绪返回 0，否则返回 1 并打印原因。
 # 用于 start 前置检查：任一 mount_required=true 的工程若挂载未恢复（路径退化成普通本地目录），
 # 直接拒绝启动——防止守护在本地空目录上生成假的 .icode_output/（与 NAS 真实产物对不上）。
 mount_ready() {
   local proj ft rc=0
   while read -r proj; do
+    proj="${proj%$'\r'}"
     [ -n "$proj" ] || continue
+    if [ -n "$IS_WINDOWS" ]; then
+      # Windows 无 findmnt：目录存在且可读可写 即等价于“挂载/驱动器就绪”
+      if [ -d "$proj" ] && [ -r "$proj" ] && [ -w "$proj" ]; then
+        continue
+      fi
+      echo "[tb_watch] 启动中止：mount_required=true 但工程路径不可访问/不可写（当前: $proj）"
+      echo "[tb_watch]   请先确认网络驱动器已映射且目录存在（例如 Z:\\rl2601\\tuya\\mowerware_rl2601）"
+      rc=1
+      continue
+    fi
     ft=$(findmnt -T "$proj" -o FSTYPE -n 2>/dev/null | head -1)
     case "$ft" in
       fuse.sshfs) continue;;
@@ -240,10 +314,20 @@ case "$CMD" in
     fi
     ARGS="--config $CFG"
     if [ -n "${PDIR:-}" ]; then ARGS="$ARGS --project-dir $PDIR"; fi
-    nohup python3 "$PY" $ARGS > /tmp/tb_watch_console.log 2>&1 &
-    echo "[tb_watch] 已启动 PID=$!（日志 /tmp/tb_watch_console.log）"
+    nohup "$PY_BIN" "$PY" $ARGS > /tmp/tb_watch_console.log 2>&1 &
+    DPID=$!
+    echo "[tb_watch] 已启动 PID=$DPID（日志 /tmp/tb_watch_console.log）"
     sleep 2
     tail -3 /tmp/tb_watch_console.log 2>/dev/null || true
+    # Windows(MSYS)：python 写入 watch.pid 的是 Windows PID，与 ps/kill 用的 MSYS pid 不一致，
+    # 导致 status/stop 的 kill -0 误判。用 bash 的 $!（MSYS pid）覆盖 watch.pid，保证后续可查活可杀。
+    if [ -n "$IS_WINDOWS" ]; then
+      for _ in 1 2 3 4 5; do
+        [ -f "$PIDF" ] && break
+        sleep 1
+      done
+      echo "$DPID" > "$PIDF"
+    fi
     # 网页只读查看服务（配置 web.enable 缺省开启；失败不拖累守护）
     read -r WENABLE WHOST WPORT _ <<< "$(web_info)"
     if [ "$WENABLE" = "True" ]; then
@@ -253,7 +337,7 @@ case "$CMD" in
       else
         WEBROOT=""
         [ -n "${PDIR:-}" ] && WEBROOT="--root $PDIR/.icode_output"
-        nohup python3 "$SCRIPT_DIR/tb_web.py" --config "$CFG" $WEBROOT --quiet > /tmp/tb_web.log 2>&1 &
+        nohup "$PY_BIN" "$SCRIPT_DIR/tb_web.py" --config "$CFG" $WEBROOT --quiet > /tmp/tb_web.log 2>&1 &
         WEBPID=$!
         echo "$WEBPID" > "$WEBPIDF"
         sleep 1
@@ -278,7 +362,7 @@ case "$CMD" in
       if [ -f "$PIDF" ]; then
         DPID=$(cat "$PIDF")
         # 先中断正在跑的分析子进程（claude），再杀守护；未退出则强杀
-        CHILD=$(ps --ppid "$DPID" -o pid= 2>/dev/null | tr -d ' ')
+        CHILD=$(children_of "$DPID"); CHILD="${CHILD% }"
         [ -n "$CHILD" ] && kill -TERM $CHILD 2>/dev/null && echo "[tb_watch] 已中断分析子进程 $CHILD"
         kill -TERM "$DPID" 2>/dev/null && echo "[tb_watch] 已发 SIGTERM 给守护 $DPID"
         sleep 2
@@ -292,7 +376,7 @@ case "$CMD" in
         echo "[tb_watch] 无 pid 文件，未在跑（若确认仍有残留守护进程，可用 pgrep -af tb_watch.py 定位后 kill）"
       fi
     else
-      python3 "$PY" --config "$CFG" --stop
+      "$PY_BIN" "$PY" --config "$CFG" --stop
       stop_web "$(project_dir_of)"
     fi
     ;;
@@ -306,7 +390,7 @@ case "$CMD" in
     if [ -f "$PIDF" ]; then
       DPID=$(cat "$PIDF")
       if kill -0 "$DPID" 2>/dev/null; then
-        CHILD=$(ps --ppid "$DPID" -o pid= 2>/dev/null | tr -d ' ')
+        CHILD=$(children_of "$DPID"); CHILD="${CHILD% }"
         echo "[tb_watch] 运行中 PID=$DPID（工程: $PROJ）${CHILD:+| 分析子进程: $CHILD}"
       else
         echo "[tb_watch] pid 文件存在但进程 $DPID 已死（可能异常退出，建议 stop --force 清理）"

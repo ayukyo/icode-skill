@@ -21,10 +21,11 @@
 ## 依赖
 
 ```
-pip install requests cryptography secretstorage
+pip install requests cryptography secretstorage markdown
 ```
 - `requests`：tb_pull 必需。
 - `cryptography` + `secretstorage`：仅 tb_cookie.py 的 Chrome 自动解密需要；手动粘贴 cookie 可不装。
+- `markdown`：仅 tb_web.py 网页服务渲染 .md 报告需要（缺失时报告页报 "No module named 'markdown'"）。
 
 ## 首次配置
 

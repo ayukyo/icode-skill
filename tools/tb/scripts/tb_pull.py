@@ -28,6 +28,13 @@
 import argparse, json, os, re, shutil, socket, sys
 import requests
 
+# Windows 下 stdout/stderr 默认 locale 编码(gbk)，中文输出/JSON 会乱码或 UnicodeEncodeError；强制 UTF-8
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
+
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
@@ -53,7 +60,8 @@ def load_config():
     for rel in ("../config.json", "../config.example.json"):
         p = os.path.join(SCRIPT_DIR, rel)
         if os.path.exists(p):
-            with open(p) as f:
+            # 显式 UTF-8：配置含中文（如 status_names），Windows 默认 gbk 解码会 UnicodeDecodeError
+            with open(p, encoding="utf-8") as f:
                 return json.load(f)
     return {}
 
@@ -68,7 +76,7 @@ def session(cfg):
         print(f"[error] cookie 不存在：{cp}\n        先跑：python3 {os.path.join(SCRIPT_DIR, 'tb_cookie.py')}", file=sys.stderr)
         sys.exit(1)
     s = requests.Session()
-    s.headers["Cookie"] = open(cp).read().strip()
+    s.headers["Cookie"] = open(cp, encoding="utf-8").read().strip()
     return s
 
 
@@ -324,7 +332,7 @@ def cmd_defect(args):
     if os.path.exists(meta_path):
         shutil.copy2(meta_path, prev_meta_path)
         print(f"  [backup] 旧 meta 已备份 -> {prev_meta_path}（供同单续分析时增量对比：prev vs current）")
-    with open(meta_path, "w") as f:
+    with open(meta_path, "w", encoding="utf-8") as f:
         json.dump(meta, f, ensure_ascii=False, indent=2)
 
     print(f"\n[ok] 日志目录：{dest_dir}")
@@ -379,7 +387,7 @@ def cmd_probe(args):
     out_dir = os.path.expanduser(args.out or "~/.claude/icode_data/tb_probe")
     os.makedirs(out_dir, exist_ok=True)
     probe_path = os.path.join(out_dir, f"{pid}.json")
-    with open(probe_path, "w") as f:
+    with open(probe_path, "w", encoding="utf-8") as f:
         json.dump(result, f, ensure_ascii=False, indent=2)
 
     lib = args.lib or pid
