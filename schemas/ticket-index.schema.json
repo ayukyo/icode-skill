@@ -1,0 +1,75 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "ticket-index.schema.json",
+  "title": "icode global ticket index v1",
+  "description": "全局索引 ~/.claude/icode_data/index.json 的混合代际契约。无 control_schema_version 的 legacy 条目只做最小可读校验；index-write 新写或接管的条目必须标记 control_schema_version=3，并按 definitions.vnextEntry 严格校验。",
+  "type": "object",
+  "required": ["version", "updated_at", "tickets"],
+  "additionalProperties": true,
+  "properties": {
+    "version": {
+      "description": "legacy 索引可能保存为数字字符串；任一成功的 index-write 会规范化为整数 1。",
+      "type": ["integer", "string"],
+      "pattern": "^[0-9]+$"
+    },
+    "updated_at": { "type": "string" },
+    "tickets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["ticket_id"],
+        "additionalProperties": true,
+        "allOf": [
+          {
+            "if": { "required": ["control_schema_version"] },
+            "then": { "$ref": "#/definitions/vnextEntry" }
+          }
+        ],
+        "properties": {
+          "ticket_id": { "type": "string", "minLength": 1 }
+        }
+      }
+    }
+  },
+  "definitions": {
+    "vnextEntry": {
+      "type": "object",
+      "required": ["control_schema_version", "ticket_id", "project_path", "out_dir", "status"],
+      "additionalProperties": true,
+      "properties": {
+        "control_schema_version": { "const": 3 },
+        "ticket_id": { "type": "string", "minLength": 1 },
+        "project_path": { "type": "string", "minLength": 1 },
+        "out_dir": {
+          "description": "必须是相对路径条目（相对项目根），如 .icode_output/.icode_output_3；禁止绝对路径。",
+          "type": "string",
+          "pattern": "^\\.icode_output/(\\.debug/)?\\.icode_output_[0-9]+$"
+        },
+        "status": {
+          "enum": ["log_in_progress", "log_done", "init_in_progress", "plan_done", "review_in_progress", "review_done", "plan_finalized", "code_in_progress", "code_done", "deepcheck_in_progress", "deepcheck_done", "completed", "debug_in_progress", "debug_done", "archived", "backup"]
+        },
+        "updated_at": { "type": "string" },
+        "created_at": { "type": ["string", "null"] },
+        "last_used_at": { "type": ["string", "null"] },
+        "hit_count": { "type": "integer", "minimum": 0 },
+        "stale": { "type": "boolean" },
+        "stale_reason": { "type": ["string", "null"] },
+        "stale_checked_commit": { "type": ["string", "null"] },
+        "has_00_init": { "type": "boolean" },
+        "has_plan": { "type": "boolean" },
+        "requirement_summary": { "type": ["string", "null"] },
+        "requirement_points": { "type": ["array", "null"] },
+        "keywords": { "type": ["array", "null"] },
+        "verdict": { "enum": ["unknown", "verified", "disproved", "superseded", null] },
+        "verdict_at": { "type": ["string", "null"] },
+        "verdict_review_needed": { "type": ["boolean", "null"] },
+        "delivery_verdict": { "enum": ["verified", "verification_pending", "blocked", "not_applicable", null] },
+        "workload_estimate": { "enum": ["small", "medium", "large", null] },
+        "workload_reason": { "type": ["string", "null"] },
+        "tb_source": { "type": ["object", "null"] },
+        "archive_path": { "type": ["string", "null"] },
+        "backup_path": { "type": ["string", "null"] }
+      }
+    }
+  }
+}

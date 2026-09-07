@@ -35,3 +35,35 @@
 ## 与 adversarial.md 的关系
 
 质疑者对抗的「显式等待 + 超时机制」「整合墙钟硬截止」两段是**本契约的质疑者实例**——机械等待与墙钟规则与本契约**逐条对齐**（同一组常量：`BACKGROUND_WATCHDOG_SECONDS=600` / `TIMEOUT_SECONDS=120` / `INTEGRATION_WALL_CLOCK_DEADLINE_SECONDS=1200`）；质疑者特有内容（3 质疑者分工、verdict schema、anti-coaching、裁决优先级、`no_spawn_env` 代行门控）仅存于 adversarial.md。本契约与 adversarial.md 冲突时以本契约为准。
+
+## 观测记录契约（spawn 留痕，防"子代理干了什么"不可审计）
+
+每次 spawn 子代理（含质疑者对抗、doc 审计、facts 提取、haiku 兜底、摘要消化、并行子任务等全部 5 类非对抗 spawn 点）在**发起前**把观测字段写进 metadata `extensions.agent.spawns`（vNext 工单；legacy 缺失视为不强制，向后兼容）：
+
+```json
+{
+  "extensions": {
+    "agent": {
+      "spawns": [
+        {
+          "spawn_id": "<uuid>",
+          "at": "<发起时刻>",
+          "task_scope": "一句话：本次子代理负责什么、边界在哪",
+          "expected_artifact": "预期返回产物（文件/JSON 片段/结论）",
+          "evidence_boundary": "子代理可读的证据范围（禁止越界读/改）",
+          "join_condition": "如何判定加入整合（结果 schema / 超时 / deadline 降级）",
+          "result": "joined | timed_out | stopped | failed",
+          "adopted": "主代理是否采纳其结果（yes / partial / no + 原因）"
+        }
+      ]
+    }
+  }
+}
+```
+
+**强制规则**：
+1. **spawn 前必写**：`task_scope` / `expected_artifact` / `evidence_boundary` / `join_condition` 四项在发起前落盘（防"发出去了才想边界"）
+2. **收尾必补**：`result`（joined/timed_out/stopped/failed）+ `adopted`（采纳与否 + 原因）在整合后回填——**采纳记录防"子代理结果被静默丢弃或伪造采纳"**
+3. **并发上限（每工单软预算）**：同一工单并行 spawn 上限 3（超出排队串行）；估算总 token 超软预算时先问用户，不无限并行
+4. **降级联动**：`deadline` 强制收敛 / `no_spawn_env` 代行时，对应 spawn 条记 `result=stopped|failed` + 注明触发原因，与 [adversarial.md](adversarial.md) 降级标签一致
+5. **校验入口**：`python3 tools/icode_control.py validate --dir <out_dir>` 对 extensions.agent 结构做轻量 shape 检查（缺四项字段报违例提示），真源 schema 见 [schemas/ticket-metadata.schema.json](../schemas/ticket-metadata.schema.json) `extensions`

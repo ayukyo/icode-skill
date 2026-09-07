@@ -39,7 +39,7 @@
 | 命令 | 行为 |
 |------|------|
 | `/icode init --debug [<粗略需求>]` | 创建 debug 工单目录 + metadata；**不写** index.json；status = `debug_in_progress`，运行过程同正常 init |
-| `/icode log --debug [零散信息...]` | 创建 debug 工单目录 + metadata；**不写** index.json；status = `debug_done`，运行过程同正常 log |
+| `/icode log --debug [零散信息...]` | 先创建 debug 工单目录 + metadata；**不写** index.json；status = `debug_in_progress`，完成后由控制面流转为 `debug_done` |
 
 `--debug` 与现有 flag（`--listen` / `--test` 仅 patch）**互不冲突**。
 
@@ -56,7 +56,7 @@
   "debug": true,                  // bool — 仅 debug 工单为 true；正常工单不写此字段
   "indexed": false,               // 永远 false（debug 工单永不写入 index.json）
   "status": "debug_in_progress",  // init 的调试态 / 或 "debug_done"（log 调试终态）
-  "ticket_id": "",                // debug 工单无 ticket_id（不参与索引）
+  "ticket_id": "debug:<project>-<N>", // debug 域内唯一且非空；仅作事件链/产物身份，不参与全局索引
   "project_path": "<当前工程根绝对路径>",   // 当前工程根绝对路径（git rev-parse --show-toplevel；非 git 仓库 = pwd）。正常工单的 project_path 在索引条目里，debug 不入索引 → 只能写进 metadata 作产物唯一回追锚点（写错副本时能凭它识别真实位置）
   "tb_source": {...},             // TB 缺陷单溯源（从 TB 拉取时填完整版 {lib,num,pid,label,url,meta_path}，无 TB 源时 null）。正常工单的 tb_source 摘要存索引条目、debug 不入索引 → 只能写进 metadata 作 debug 域内"按 lib+num+pid 复用匹配"的唯一依据（批量 TB + --debug 复用判定扫它，见 steps/log.md「批量 TB 分析」段步骤3 debug 变体）
   "requirement": "...",           // 调试用输入（与正常工单相同字段）
@@ -66,7 +66,7 @@
 ```
 
 **关键决策**：
-- **使用独立 status 名**（`debug_in_progress` / `debug_done`，不复用 `init_in_progress` / `log_done`——下游易识别，见 00_init/log 步骤「`--debug` 模式差异」段）；debug 状态名**不进** SKILL.md「status 字段枚举」主流程词表（词表校验只作用于正常工单，debug 目录在 `.icode_output/.debug/` 下天然被「检测最新目录」排除、不入 `--validate` 范围，不产生状态机冲突）
+- **使用独立 status 名**（`debug_in_progress` / `debug_done`，不复用 `init_in_progress` / `log_done`——下游易识别，见 00_init/log 步骤「`--debug` 模式差异」段）；二者已进入 schema 和 SKILL.md 的统一 status 词表，并由同一控制面校验，但 debug 目录仍被正常工单发现逻辑排除且永不入索引
 - **debug 标志用元数据 `debug: true` 字段**（不依赖 status 名判断）——各主流程步骤 L1 检测段、以及手动扫描 `.debug/` 下的 debug 工单时都读它区分
 
 ---
@@ -176,20 +176,22 @@ cd /path/to/project-B
 
 ## 12. 中断半成品识别与续跑（防超时死循环）
 
-**背景**：tb_watch 定时增量监控触发的 claude 分析可能**超时被杀**（单次 `claude_timeout` 到点 / 会话中断），留下**中断半成品 debug 工单**：目录 + 已下载 TB 附件齐全，但**未写完 `.ico_metadata.json`**（metadata 是流程末步才写）。若不识别，下次分析会把它当"无 debug 孪生"→ 新建第二个 debug 工单 → 重复下载附件 → 同一批单无限重建（实测死循环：同一批单反复重建、重复下载附件）。
+**背景**：tb_watch 定时增量监控触发的分析可能**超时被杀**（单次 `claude_timeout` 到点 / 会话中断），留下已有 metadata、附件却尚未到 `debug_done` 的中断工单。若只匹配终态孪生，下次分析会新建第二个 debug 工单并重复下载。schema v3 起 metadata 与 `ticket_created` 在工作开始前由 `create --birth debug-*` 原子建立，因此“有目录但无 metadata”仅视为 legacy 残留，不能直接补写成 vNext。
 
-**识别标准（中断半成品）**：`.icode_output/.debug/` 下的目录，**同时满足**：
-- **无 `.ico_metadata.json`**（与正式 debug 孪生区分——正式孪生必有 metadata）
-- **有已下载的 TB 附件**：`tb_source/<LIB>-<NUM>/` 子目录存在，或其内 `*_meta.json`（排除 `.prev.json`）带 `uniqueId` 字段
+**识别标准（vNext 中断工单）**：`.icode_output/.debug/` 下的目录同时满足：
+- `.ico_metadata.json` 可通过 `icode_control.py validate --dir <目录>`；`debug=true`、`indexed=false`、`status=debug_in_progress`
+- metadata 的 `tb_source` 与目标 TB 单一致，或已下载附件 `tb_source/<LIB>-<NUM>/` 的 `*_meta.json`（排除 `.prev.json`）给出相同 `uniqueId`
+
+无 metadata 但已有附件的旧目录只允许只读识别和复用附件；必须新建一个受控 vNext debug 工单并记录旧目录为外部证据来源，禁止在旧目录手工补 metadata/事件链。
 
 **归属单识别**：优先读 `tb_source/<LIB>-<NUM>/<LIB>-<NUM>_meta.json`（附件下载产物的 meta）的 `uniqueId` 为权威单号；目录名 `<LIB>-<NUM>` 提供 lib+num（两者存在且一致时以 uniqueId 为准）。真实半成品的 meta.json 就在 `tb_source/<LIB>-<NUM>/` 子目录（附件下载产物），**非工单顶层**——扫描必须递归。
 
-**复用续跑（命中半成品时，不新建第二个 debug 工单）**：
-1. `ICODE_OUT_DIR` = 半成品目录（如 `.icode_output/.debug/.icode_output_2`），**不新建**
-2. **附件复用**：半成品已下载附件（`tb_source/` 下 tgz/mp4/已抽帧、日志已解压到 `extracted/`）**直接复用、跳过重复下载**，仅补拉缺失附件
-3. 完成分析后**收尾补写 `.ico_metadata.json`**：`debug: true` / `indexed: false` / `status: debug_done` / `project_path` / `tb_source` 完整 `{lib,num,pid,label,url,meta_path}`——补写后该目录即正式 debug 孪生，后续走正常 debug 复用匹配（§4）
+**复用续跑（命中 vNext 中断工单时，不新建第二个 debug 工单）**：
+1. `ICODE_OUT_DIR` = 中断目录（如 `.icode_output/.debug/.icode_output_2`），先运行 `validate` 校验 metadata 与事件链
+2. **附件复用**：已有 tgz/mp4/抽帧及 `extracted/` 直接复用，仅补拉缺失附件
+3. 完成分析后经 `transition --dir {ICODE_OUT_DIR} --to debug_done` 原子收尾，由控制面追加完成步骤和事件；禁止直接改 metadata
 
-**与正常 debug 复用匹配的关系**（统一判定顺序）：① 正常复用匹配（扫 metadata 的 `tb_source`，见 [steps/log.md](../steps/log.md) 步骤1 debug 变体 / 批量步骤3 debug 变体）优先 → ② 匹配不到再扫**中断半成品**（本 §）→ ③ 两者皆无才「创建新目录」debug 变体新建。命中①或②均**自动判定复用、不询问**（debug 无人值守场景如 tb_watch 不能弹问），与批量 debug 的"自动判定、不逐单弹问"一致。
+**与正常 debug 复用匹配的关系**（统一判定顺序）：① 先匹配可校验 metadata 的同 TB debug 工单；终态用于历史对照，`debug_in_progress` 才能续跑 → ② 再识别无 metadata 的 legacy 附件目录，只复用其证据并新建受控工单 → ③ 两者皆无才新建。无人值守批量任务按此规则自动判定，不逐单弹问。
 
 ---
 

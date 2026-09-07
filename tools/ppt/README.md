@@ -52,7 +52,7 @@ python3 tools/ppt/scripts/build_pptx.py \
 python3 tools/ppt/scripts/render_slides.py .icode_output/ppt/{名称}.pptx .icode_output/ppt/preview --dpi 144
 ```
 
-完整编辑规则（只改文字不破坏排版 / 占位必替换 / 禁省略号截断 / 同级字号一致 / 章节呼应）见 [steps/ppt.md](../steps/ppt.md)「内容铁律」。
+完整编辑规则（只改文字不破坏排版 / 占位必替换 / 禁省略号截断 / 同级字号一致 / 章节呼应）见 [steps/ppt.md](../../steps/ppt.md)「内容铁律」。
 
 ## 用自备模板（模式B，商用安全）
 

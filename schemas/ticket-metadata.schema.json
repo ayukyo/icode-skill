@@ -1,0 +1,176 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "ticket-metadata.schema.json",
+  "title": "icode ticket metadata v3 (vNext)",
+  "description": "工单 .ico_metadata.json 的 v3 契约。核心字段禁止任意新增顶层 key；专用/实验字段必须进入 namespaced extensions。legacy 工单（无 schema_version 字段）不适用本 schema（只读适配，见 references/control_plane.md「legacy 适配」）。校验器：tools/icode_control.py validate（内置轻量校验器，schema 保持 draft-07 兼容可被外部 jsonschema 消费）。",
+  "type": "object",
+  "required": ["schema_version", "requirement", "created_at", "status", "completed_steps", "ticket_id"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "const": 3 },
+    "template_version": { "type": "string" },
+    "migration_log": { "type": "array" },
+    "workflow_gate_schema_version": { "description": "workflow 契约门禁 schema 版本（vNext 出生即带，--strict 门禁的前置）", "type": "integer", "minimum": 1 },
+    "thinking_gate_schema_version": { "description": "reasoning 分级门禁 schema 版本（vNext 出生即带，--strict 门禁的前置）", "type": "integer", "minimum": 1 },
+    "mcp_gate_schema_version": { "description": "cheap-research 覆盖门禁 schema 版本（vNext 出生即带，--strict 门禁的前置）", "type": "integer", "minimum": 1 },
+
+    "requirement": { "type": "string" },
+    "requirement_summary": { "type": "string" },
+    "requirement_points": { "type": ["array", "null"], "items": { "type": "string" }, "maxItems": 8 },
+    "keywords": { "type": ["array", "null"], "items": { "type": "string" }, "maxItems": 8 },
+    "created_at": { "type": "string" },
+    "status": {
+      "description": "status 词表（与 SKILL.md 词表和 mcp/workflow-gate/gates.json state_machine.states 一致）",
+      "enum": ["log_in_progress", "log_done", "init_in_progress", "plan_done", "review_in_progress", "review_done", "plan_finalized", "code_in_progress", "code_done", "deepcheck_in_progress", "deepcheck_done", "completed", "debug_in_progress", "debug_done"]
+    },
+    "completed_steps": { "type": "array", "items": { "type": "string" } },
+    "indexed": { "type": "boolean" },
+    "ticket_id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$" },
+    "code_deviations": { "type": ["array", "null"] },
+    "total_rounds": { "type": ["integer", "null"] },
+    "clean_rounds": { "type": ["integer", "null"] },
+    "max_rounds": { "type": ["integer", "null"] },
+    "absolute_cap": { "type": ["integer", "null"] },
+    "extended_rounds": { "type": ["integer", "null"] },
+    "unresolved_issues_at_cap": { "type": ["boolean", "null"] },
+    "pending_verification": { "type": ["array", "null"] },
+    "code_compile_failed": { "type": ["boolean", "null"] },
+    "deepcheck_total_rounds": { "type": ["integer", "null"] },
+    "deepcheck_clean_rounds": { "type": ["integer", "null"] },
+    "deepcheck_phase": { "type": ["string", "null"] },
+    "code_files": { "type": ["array", "null"] },
+
+    "workload_estimate": { "enum": ["small", "medium", "large", null] },
+    "workload_reason": { "type": ["string", "null"] },
+    "mode": { "enum": ["full", "fast", null] },
+    "limit_refs": { "type": ["array", "null"] },
+    "fix_tiers": {
+      "type": ["object", "null"],
+      "properties": {
+        "A": { "type": "array", "items": { "type": "string" } },
+        "B": { "type": "array", "items": { "type": "string" } },
+        "C": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": false
+    },
+    "confirmed_B_fixes": { "type": ["array", "null"] },
+    "scope_escalations": { "type": ["array", "null"] },
+    "scope_contract": { "type": ["object", "null"] },
+    "requirement_deltas": { "type": ["array", "null"] },
+    "semantic_decisions": { "type": ["array", "null"] },
+    "impact_contract": { "type": ["object", "null"] },
+    "acceptance_contract": { "type": ["object", "null"] },
+    "risk_profile": { "description": "快速模式风险档案（对象）：{requested_mode, effective_mode, triggers, risk_flags, override}，见 mcp/workflow-gate/gates.json fast_risk_upgrade", "type": ["object", "null"] },
+    "diagnosis_only": { "type": ["boolean", "null"] },
+    "anchors_enabled": { "type": ["boolean", "null"] },
+    "tdd": {
+      "type": ["object", "null"],
+      "properties": {
+        "mode": { "enum": ["required", "contract", "characterization", "device_split", "blocked", "exempt", "not_assessed"] },
+        "status": { "enum": ["not_assessed", "red_verified", "green_verified", "regression_verified", "blocked", "exempt"] },
+        "reason": { "type": ["string", "null"] },
+        "red": { "type": ["object", "null"] },
+        "green": { "type": ["object", "null"] },
+        "regression": { "type": ["object", "null"] }
+      },
+      "additionalProperties": false
+    },
+    "test_cmd": { "type": ["string", "null"] },
+    "test_outcome": { "enum": ["pass", "fail", "skipped", null] },
+    "test_failures": { "type": ["boolean", "null"] },
+    "test_timeout": { "type": ["integer", "null"] },
+    "code_review_fix_with_issues": { "type": ["boolean", "null"] },
+
+    "verdict": { "enum": ["unknown", "verified", "disproved", "superseded", null] },
+    "verdict_reason": { "type": ["string", "null"] },
+    "correct_direction": { "type": ["string", "null"] },
+    "verdict_source": { "type": ["string", "null"] },
+    "verdict_at": { "type": ["string", "null"] },
+    "superseded_by": { "type": ["string", "null"] },
+    "verdict_premise_deps": { "type": ["array", "null"] },
+    "verdict_review_needed": { "type": ["boolean", "null"] },
+    "delivery_verdict": {
+      "description": "交付分层结论（§交付证据分层）：宿主验证通过不得自动映射为 verified；transition --to completed 必须显式携带。",
+      "enum": ["verified", "verification_pending", "blocked", "not_applicable", null]
+    },
+
+    "debug": { "description": "debug 孪生工单标志；true 时走 .debug 隔离域，不跑通用门禁", "type": "boolean" },
+    "project_path": { "type": ["string", "null"] },
+    "tb_source": {
+      "description": "TB 来源完整追溯信息；索引仅保留 lib/num/pid/label 摘要。",
+      "type": ["object", "null"],
+      "properties": {
+        "lib": { "type": ["string", "null"] },
+        "num": { "type": ["string", "integer", "null"] },
+        "pid": { "type": ["string", "null"] },
+        "label": { "type": ["string", "null"] },
+        "url": { "type": ["string", "null"] },
+        "meta_path": { "type": ["string", "null"] }
+      },
+      "additionalProperties": true
+    },
+    "artifact_root": { "type": ["string", "null"] },
+    "archive_path": { "type": ["string", "null"] },
+    "backup_path": { "type": ["string", "null"] },
+    "cross_project_refs": { "type": ["array", "null"] },
+    "task_timeout_seconds": { "type": ["integer", "null"] },
+    "no_spawn_env": { "type": ["boolean", "null"] },
+
+    "worktree_path": { "type": ["string", "null"] },
+    "worktree_branch": { "type": ["string", "null"] },
+    "wt_degraded": { "type": ["boolean", "null"] },
+    "sub_worktrees": { "type": ["array", "null"] },
+    "active_checkout": { "type": ["object", "null"] },
+    "checkout_history": { "type": ["array", "null"] },
+    "migration": { "type": ["object", "null"] },
+    "submitted_baseline": { "type": ["string", "null"] },
+    "submitted_baselines": { "type": ["array", "null"] },
+    "submission_contracts": { "type": ["array", "null"] },
+    "submission_audit": { "type": ["object", "null"] },
+
+    "patch_count": { "type": ["integer", "null"] },
+    "patch_history": { "type": ["array", "null"] },
+    "patch_phase": { "enum": ["plan_done", "implementing", "listening", "awaiting_user_action", "finalized", null] },
+    "runtime_code_baselines": { "type": ["array", "object", "null"] },
+    "analysis_code_baselines": { "type": ["array", "object", "null"] },
+    "verification_code_baselines": { "type": ["array", "object", "null"] },
+
+    "verification_runs": {
+      "description": "实机验证运行记录：kind 记实际动作，build_source 单独记是否复用构建。与 patch_history 分离，由 record-verification 原子追加。",
+      "type": ["array", "null"],
+      "items": {
+        "type": "object",
+        "required": ["run_id", "at", "kind", "outcome"],
+        "properties": {
+          "run_id": { "type": "string" },
+          "at": { "type": "string" },
+          "kind": { "enum": ["deploy", "listen", "device_test"] },
+          "build_source": { "enum": ["fresh", "reused", "existing", "unknown", null] },
+          "device": { "type": ["string", "null"] },
+          "artifact_identity": { "type": ["string", "null"] },
+          "window": { "type": ["string", "null"] },
+          "outcome": { "enum": ["pass", "fail", "inconclusive"] },
+          "evidence": { "type": ["string", "null"] },
+          "note": { "type": ["string", "null"] }
+        },
+        "additionalProperties": false
+      }
+    },
+
+    "close_state": {
+      "description": "v3 新增：关闭分阶段状态（gates.json state_machine.close_phases）。每阶段幂等，禁止跨阶段跳转；closed 为终态。",
+      "enum": ["close_planned", "archived", "roots_verified", "checkouts_removed", "branches_removed", "closed", null]
+    },
+
+    "control_plane_degraded": {
+      "description": "历史降级直写的遗留标记；新 vNext 工单 fail-closed，不再允许产生此标记。validate 将 true 计为违例。",
+      "type": "boolean"
+    },
+
+    "extensions": {
+      "description": "专用/实验字段命名空间。顶层 key 只能是本 schema 列出的核心字段；实验字段一律 extensions.<namespace>.<field>（namespace 用小写下划线）。",
+      "type": "object",
+      "propertyNames": { "pattern": "^[a-z][a-z0-9_]*$" }
+    }
+  }
+}

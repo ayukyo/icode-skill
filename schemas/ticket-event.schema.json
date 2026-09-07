@@ -1,0 +1,26 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "ticket-event.schema.json",
+  "title": "icode ticket event log v1",
+  "description": "工单事件日志 .ico_events.jsonl 每行的契约（JSONL，每行一个事件）。事件链为哈希链：previous_event_hash=上一行 event_hash，首事件 previous_event_hash 为全 0；event_hash=sha256(去掉 event_hash 字段后的 canonical JSON)。validate 对整链做完整性校验，篡改/断链/重排都会报 gate_id=event_chain。",
+  "type": "object",
+  "required": ["schema_version", "event_id", "ticket_id", "timestamp", "actor", "event_type", "payload", "previous_event_hash", "event_hash"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "const": 1 },
+    "event_id": { "type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$" },
+    "ticket_id": { "type": "string", "minLength": 1 },
+    "request_id": {
+      "description": "幂等键（可选）：同 request_id + 同目标状态的重放返回已应用摘要不重复执行。",
+      "type": ["string", "null"]
+    },
+    "timestamp": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}" },
+    "actor": { "enum": ["icode", "user", "watch", "system"] },
+    "event_type": {
+      "enum": ["ticket_created", "step_started", "artifact_written", "gate_checked", "state_changed", "metadata_updated", "verification_recorded", "snapshot_written", "close_phase", "ticket_reopened", "requirement_delta", "agent_spawned", "agent_result", "doc_module_status", "index_updated", "migration_applied", "idempotent_hit", "external_note"]
+    },
+    "payload": { "type": "object" },
+    "previous_event_hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "event_hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+  }
+}

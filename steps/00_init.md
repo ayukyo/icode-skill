@@ -31,6 +31,7 @@
    - 触发 → 走 worktree 创建路径（创建**前**展示路径 + 分支名作为**告知非询问**；用户触发意图即一次性同意）；未触发 → 直接原地（默认行为，**不弹问**）
    - **违规阻止例外**：limit 「worktree 强制禁止」红线命中时（[steps/limit.md](../steps/limit.md) §7），AI 提示一次"本工程 limit 禁止 worktree，本工单回退原地建" + 回退原地（不创建 worktree）
    - AI **不得自创理由另行弹问** worktree（是否用 worktree = 用户消息意图决定，不由 AI 判断）
+   - **目录仍为空时立即建立控制面出生记录**：生成非空 `ticket_id`，在写 `00_init.md`、trace、checkpoint 等任何产物前调用 `python3 tools/icode_control.py create --dir {ICODE_OUT_DIR} --ticket-id <id> --requirement '<原始需求>' --birth init|debug-init`。`create` 会拒绝非空目录和 normal/debug 域错配；不得拖到步骤 7 才创建，否则中断目录没有可验证身份。
 2. **历史检索复用**（强制思考之前，全局索引存在时必须执行，详见 SKILL.md「历史检索复用」段）：
    - **`--debug` 分支（独立孪生对照 → 跳过源1·历史工单检索）**：debug 工单是**独立孪生**——它应**被参考**（产物供正常工单并列对照研读），**不去参考历史工单**。历史检索读 `index.json` 注入的是**历史正式工单**结论（debug 工单不入索引），参考它们会被既有结论带偏、无法独立形成自己的思考——正常工单与 debug 孪生两份对照收敛到同一历史结论，对照价值尽失。因此 debug 模式**整段跳过**下方源1·历史工单检索（两段式检索 / verdict 分流注入 / 重复模式检测），**保留**源2·段零工程文档检索 + limit 红线检查点。**跳过后在思考块「历史参考」标注**"debug 模式跳过历史工单检索（独立孪生对照），无历史工单参考，仅注入段零工程文档"（与 log.md 步骤4 debug 分支一致）
    - **源1·历史工单检索**（**debug 模式整段跳过，见上方 debug 分支**）：Read `~/.claude/icode_data/index.json`（不存在则跳过检索）
@@ -38,7 +39,7 @@
    - **`/icode init` 注入分支**：命中工单只读其 `requirement_points`（需求要点清单，≤500 token/条），作为后续讨论的启发——提示用户"上次相似需求曾关注过这些点，本次是否也需要考虑"。**只进会话上下文，绝不写进 `00_init.md`**。
    - **结论级时效校验（防"历史需求要点被后续 commit 有意推翻"）**：注入前若发现"当前代码行为与某条历史工单需求要点冲突"（如历史工单要求新增的行为已被后续 commit 回滚/替代），对该工单执行 [references/dir_and_metadata.md](../references/dir_and_metadata.md)「过时校验」第 5 步（git 演进史判定）；判定"有意设计演进"→ 该条需求要点降级为"历史快照"，注入附 ⚠️ 警告「该要点已被 commit `<hash>` 演进/回退，当前行为以最新代码为准」，不作当前需求讨论基准。与「证据权威优先级」硬规则联动（[SKILL.md](../SKILL.md) 历史检索复用段）
    - **段零·工程文档检索**（与历史检索并行，候选合并排序；本入口检索时机：建目录后）：完整流程以 [references/dir_and_metadata.md](../references/dir_and_metadata.md)「段零·工程文档检索」+「module_docs 工程模块库」段为准（含步骤 1-5 + 3.5 反查父项目 + 3.6 关联工程检索 + 3.6 源码路径定位 [project_path+manifest+兜底]），**执行前必须 Read 该段全文（含顶部「段零步骤速查」导航），不得凭本行摘要执行**；stale 降级 / commit 校验 / 注入防重复等细节同该段
-   - **注入防重复**（两源共用 `_inject_cache.json`）：无缓存则创建空 `{"ticket_id":"<本工单>","injections":[]}`（ticket_id 读 metadata，暂无填空串）；注入前按 `(source, ref_id, slice)` 查缓存去重，已注入的跳过。历史源 slice=`requirement_points`；段零 slice=`section:<file>`。详见 [references/dir_and_metadata.md](../references/dir_and_metadata.md)「注入缓存机制」段
+   - **注入防重复**（两源共用 `_inject_cache.json`）：无缓存则创建 `{"ticket_id":"<本工单非空 ID>","injections":[]}`，ticket_id 只从已由 `create` 建立的 metadata 读取；无 metadata 的 legacy 目录不新建缓存。注入前按 `(source, ref_id, slice)` 查缓存去重，已注入的跳过。历史源 slice=`requirement_points`；段零 slice=`section:<file>`。详见 [references/dir_and_metadata.md](../references/dir_and_metadata.md)「注入缓存机制」段
    - **段零只读当前分支子目录是反交叉污染设计，不要误读为"被覆盖"**：详见 [steps/doc.md](doc.md) 顶部「⚠️ 多分支设计·反偷懒强约束」段（`dir_and_metadata.md`「段零·工程文档检索」段），跨分支不交叉读是为防止跨分支借鉴失真；用户反馈"看不到其他分支文档"时**默认不是 bug**，应先 `ls project_docs/<id>/` 看是否有多分支子目录再判
    - 零命中不注入，不强凑参考
 3. 处理输入参数（**两种都支持**，本步骤只**构思内容框架**，实际 Write 在步骤6；深度读代码在步骤4）：
@@ -47,7 +48,7 @@
 4. **了解现有工程**：阅读项目中相关代码，识别现状、可复用模块、相关接口（**先于思考**，为步骤5的"现状盘点/影响面分析"提供代码依据）。**进入工程第一步先做 git 状态快照（O-2）**：执行 `git -C <project_path> status --short` + `ls -ld <project_path>/.git` 做 **`.git` 三形态判别**：**目录**=普通 git 仓库 / **symlink**=repo 独立仓（`.git` 指向 repo 管理目录，父仓 `.gitignore` 忽略子仓、父仓根目录 `git diff` 恒为空）/ **普通文件**（内容以 `gitdir:` 开头）= **git worktree 成员**（`git status` 正常，勿误判为异常；project_id 归主仓见 [references/dir_and_metadata.md](../references/dir_and_metadata.md)「project_id 与 branch 语义」F1）；记录三态（staged / unstaged / untracked）；repo 多仓工程**禁止**在父仓根目录用 `git diff` 判定子仓改动归属。**必须同步执行「现有功能覆盖度检查」**（防重复实现机制，完整规则见 [references/necessity_check.md](../references/necessity_check.md)）：对 §3 每个新增需求点，全工程检索关键词 → Read 命中处上下文（≥20 行，消费点必须追行为链）→ 三类判定（已覆盖/部分/未覆盖）——**结论写入 §2 的「2.X 现有功能覆盖度检查」子段 + §5 预筛表「是否已覆盖」列**。本检查在 §2 现状盘点之后、§3 新增需求点之前执行
 5. **思考分级（L1：决策记录）**（按 [references/mcp_per_step.md](../references/mcp_per_step.md)「通用前置·分级思考」段执行）：本步骤为 L1，不调用 sequential-thinking；结构化决策字段记入 `.decision_anchors.json`（见 [references/decision_anchors.md](../references/decision_anchors.md)「L1 决策记录契约」） = 需求分解 → 现状盘点（基于步骤4读码结果） → 影响面分析（基于步骤4读码结果） → 待决策项识别 → 待决策倾向自审（逐条回溯现状盘点/影响面证据，主动找反证；无反证保留、有反证修正并记反证依据）。**若步骤2有历史参考，在此处「历史参考」小节记录命中工单 id 与要点，作为思考输入**
 6. 使用 Write 工具写入 `{ICODE_OUT_DIR}/00_init.md`（模板见下文）。**第 6 节链路图初稿**（一图流总览）：before 画步骤 4 读码所得现状链路（关键节点标 file:line），after 画构思的改动后链路并标 `[+]`/`[~]`/`[-]`，改动点清单对齐第 3 节新增需求点；无参数/信息不足时画已知部分 + `?` 待补，**不得整节留空或仅写"待补"**
-7. 创建 `{ICODE_OUT_DIR}/.ico_metadata.json`：
+7. 完善步骤 1 已创建的 `{ICODE_OUT_DIR}/.ico_metadata.json`：
 
    ```json
    {
@@ -62,25 +63,31 @@
      "workload_estimate": "small|medium|large（4 维度 max 算法，见步骤9）",
      "workload_reason": "{≤80 token 一句话评估理由}",
      "indexed": false,
-     "ticket_id": "{步骤8 写入索引后回填，初始创建时为空字符串}"
+     "ticket_id": "{在 create 前按工程名+N 规则生成的非空唯一 ID}",
+     "schema_version": 3,
+     "workflow_gate_schema_version": 1,
+     "thinking_gate_schema_version": 1,
+     "mcp_gate_schema_version": 1
    }
    ```
+
+   > **控制面接线**：原子出生已在步骤 1 的空目录阶段完成。本步骤只原子合并 `requirement_summary/requirement_points/keywords/workload_*` 等业务字段；不得再次调用 `create`，也不得改写 `ticket_id/created_at/status/completed_steps/indexed/project_path` 等受保护字段。
 
    **`--debug` 模式差异**（详 [references/debug_mode.md](../references/debug_mode.md)）：
    - `status` 改为 `"debug_in_progress"`（不是 `"init_in_progress"`——下游易识别）
    - **新增字段** `"debug": true`（metadata 元数据标志，明确标识此工单是 debug 孪生）
-   - `ticket_id` 留空字符串（`""`，debug 工单永不写入 index.json）
+   - `ticket_id` 使用 `debug:<工程>-<N>` 类本地唯一非空 ID（debug 工单仍永不写入 index.json）
    - `project_path` = 当前工程根绝对路径（`git rev-parse --show-toplevel`；非 git 仓库 = pwd）。正常工单的 `project_path` 在索引条目里，debug 不入索引 → 只能写进 metadata 作产物唯一回追锚点（写错副本时能凭 metadata 识别真实位置）
    - `workload_estimate` / `workload_reason` 可省（debug 工单不需要工作量评估）
    - `indexed` 永远是 `false`（debug 工单永不索引）
 
-8. **写入全局索引**（步骤7之后立即执行）：Read `~/.claude/icode_data/index.json`（不存在则创建 `{"version":"1","updated_at":"当前时间","tickets":[]}`），追加一条新记录：
+8. **写入全局索引**（步骤7之后立即执行）：**vNext 工单走 `python3 tools/icode_control.py index-write --ticket-dir {ICODE_OUT_DIR}`**（内置锁+写前重读合并+schema 校验+原子写+写后唯一性验证；`ticket_id` 已在 `create` 前生成）。legacy 工单仅只读，需先显式迁移才能写索引；控制面不可用时 fail-closed，禁止直写 `index.json`。索引条目语义如下：
    - `ticket_id` = `{工程名}-{N}`（工程名取 `project_path` 的 basename；N 为当前 `.icode_output_N` 的 N）。**工程名冲突处理**：若索引中已存在相同 `{工程名}-{N}` 但 `project_path` 不同的条目，ticket_id 追加 `project_path` 的短 hash 后缀（如 `myproject-1-a3f2`）以保唯一
    - `project_path` = 当前工程根绝对路径
    - `out_dir` = `.icode_output/.icode_output_{N}`
    - `requirement_summary` / `keywords` / `workload_estimate` / `workload_reason` 取自步骤7 metadata；`requirement_points` 暂为空数组
    - `has_00_init` = true，`has_plan` = false，`status` = `init_in_progress`，`created_at` = 当前时间，`last_used_at` = 当前时间（首次写入=created_at），`hit_count` = 0，`stale` = false，`stale_reason` = null，`stale_checked_commit` = null，`created_commit` = `git rev-parse HEAD`（只读，非 git 仓库为 null），`created_branch` = `git rev-parse --abbrev-ref HEAD`
-   - 写回 index.json，同时置 metadata `indexed = true`、`ticket_id = {生成的 ticket_id}`（持久化 ticket_id，供后续步骤检索时排除当前工单，避免反推）；**写后执行唯一性验证**（见 [references/dir_and_metadata.md](../references/dir_and_metadata.md)「全局索引写入·写后唯一性验证」，防工程名冲突未加 hash 后缀）
+   - `index-write` 在索引锁内写前重读合并、schema 校验和写后唯一性验证，并原子置 metadata `indexed=true` + 追加 `index_updated` 事件
 
    **`--debug` 跳过写索引**（**硬门，防误索引**）：
    - 步骤 7 metadata 已写 `"debug": true` → 步骤 8 入口先**判 metadata.debug**，若是 `true` 则**整段跳过**：
@@ -144,7 +151,7 @@
 1. **先 Read 现有 `00_init.md`**，理解当前文档状态
 2. 跟用户讨论（回答疑问、提出反问、澄清歧义）
 3. **本轮对话结束前，必须用 Write 工具更新 `00_init.md`**，把本轮新信息合并进对应章节，保持文档结构完整。**若本轮涉及现状（第 2 节）/改动方案/新增需求点（第 3 节）/影响面（第 4 节）任一变化，必须同步刷新第 6 节链路图**：before 按现状补充、after 反映最新改动方案（标 `[+]`/`[~]`/`[-]`）、改动点清单与第 3 节需求点保持一致（三者一致：图上标注 = 改动点清单 = 第 3 节需求点）--链路图是「截至当前最终改什么」的总览锚点，多轮结论须收敛于此图而非淹没在正文文字里。**若本轮新增或修改了第5节待决策项，或本轮改了第2/4节（现状/影响面）导致第5节某倾向的证据基础变化**，须对受影响的倾向补跑「待决策倾向自审」（回溯第2/4节证据点找反证、证据须 Read/Grep 实证），结果回写第5节（已查无反证+证据点 / 已修正+反证 / 无代码证据-留步骤1 ADR），**并更新一行反证搜索简记（grep/Read 了哪些候选反证点、结论；保留最新、历史见 git diff），使后续可验证非空泛"已查无反证"**
-4. **刷新全局索引条目**：从 `00_init.md`「3.新增需求点」提炼 `requirement_points`（≤8 条，每条 ≤30 token），结合本轮讨论刷新 `requirement_summary`。**注**：`requirement_points` 仅在步骤0首轮和步骤1完成时刷新，每轮对话不重复刷（防止索引条目膨胀），并**按 metadata 的 `ticket_id` 定位** `~/.claude/icode_data/index.json` 中本工单条目，更新其 `requirement_summary` / `requirement_points` / `workload_estimate` / `workload_reason`（**`workload_*` 每轮都重评**——`requirement_points` 不每轮刷防索引膨胀，但工作量评估依赖 00_init.md 实时第 3 节内容，每轮可能变化）。**用户无感，不写进 `00_init.md`**。
+4. **刷新全局索引条目**：从 `00_init.md`「3.新增需求点」提炼并先合并回 metadata 的 `requirement_summary/requirement_points/workload_*`，再调 `index-write --ticket-dir {ICODE_OUT_DIR}` 同步索引。`requirement_points` 仅在步骤0首轮和步骤1完成时刷新，`workload_*` 每轮重评。禁止直写 index。
 5. 不需要等待用户说"结束"才落档，**每轮都增量更新**
 
 6. **理解核对清单（本次新增·每轮触发）**：AI 主动列出对当前需求的理解点（5~10 条），用户逐条确认/修正。

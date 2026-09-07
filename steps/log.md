@@ -31,7 +31,7 @@
      - **匹配到旧工单**：比对旧工单的 `project_path` 与当前工程根（cwd）
        - **同工程**（`project_path` == 当前工程）：询问用户"检测到 TB 单 `<ID>` 的旧工单 `.icode_output_M`（上次根因：`<摘要>`），TB 上可能有新评论/附件。① 复用旧目录继续(重拉最新数据+增量对抗) / ② 新建独立分析"；选① -> ICODE_OUT_DIR = 旧目录（`{project_path}/{out_dir}`），走下方「同 TB 单复用流程」；选② -> 强制新建
        - **跨工程副本**（`project_path` != 当前工程）：提示"检测到 TB 单 `<ID>` 的旧工单在**另一工程副本** `{project_path}`（上次根因：`<摘要>`），当前工程是 `{cwd}`，两份源码拷贝后可能已分叉。① 跨工程复用旧目录续旧分析(⚠️风险：源码可能对不上、旧根因可能失效) / ② 当前工程新建独立分析(读旧工单 `log_analysis.md` 根因/证据作参考，须用当前源码验证) / ③ 去 `{project_path}` 目录继续"；选① -> 走「同 TB 单复用流程」(ICODE_OUT_DIR 用旧工程目录，⚠️标注跨工程源码分叉风险)；选② -> 强制新建 + 读旧工单 `log_analysis.md` 根因结论+决定性证据作参考注入会话(标注跨工程、源码可能分叉、须当前源码验证)；选③ -> 提示用户切到 `{project_path}` 再跑 `/icode log`，本次中止
-     - **`--debug` 变体（复用检测扫 debug 域，不查 index）**：debug 工单不入 index，**同 TB 单复用检测不再查 index**，改扫当前工程 `.icode_output/.debug/` 下 debug 工单 metadata 的 `tb_source` 按 `lib+num+pid` 匹配旧 **debug 孪生**（不匹配正常工单，debug 是独立孪生对照）——① 匹配到 → 复用旧 debug 孪生目录，走「同 TB 单复用流程」（debug 语义：不写 index、独立状态名、产物只在 debug 域，**自动判定不询问**）；② 匹配不到 → 再扫**「中断半成品」**（无 `.ico_metadata.json` 但有 `tb_source/<LIB>-<NUM>/` 附件，识别与续跑见 [references/debug_mode.md](../references/debug_mode.md) §12）→ 命中 → **复用该目录续跑**（附件复用、收尾补写 metadata，防超时死循环）；③ 两者皆无 → 走下方「创建新目录」debug 变体（强制新建）
+     - **`--debug` 变体（复用检测扫 debug 域，不查 index）**：debug 工单不入 index，改扫当前工程 `.icode_output/.debug/` 下可通过 `icode_control.py validate` 的 debug metadata，以 `tb_source.lib+num+pid` 匹配旧孪生：终态只作历史对照，`debug_in_progress` 才续跑。若只命中“无 metadata 但有附件”的 legacy 残留，只复用其证据并新建受控 vNext debug 工单，禁止在旧目录补写 metadata；都未命中才强制新建（详见 [references/debug_mode.md](../references/debug_mode.md) §12）。
      - **无匹配 / 无 TB 引用**：走下方「创建新目录」（强制新建），行为与改前 100% 一致
    - **创建新目录**（强制新建，不做其他复用判定；**`--debug` 时**：走「创建新目录」**debug 变体**（目录建在 `.icode_output/.debug/.icode_output_N`，N 与正常工单互不干扰，见 [references/dir_and_metadata.md](../references/dir_and_metadata.md)「创建新目录·debug 变体」），且 **debug 模式忽略 `--worktree`**（debug 需「同一 cwd 状态」作孪生对照，worktree 切换 checkout 违背该前提，见 [references/debug_mode.md](../references/debug_mode.md) §9）。**非 debug 时**：前置 worktree opt-in 判定，详 [SKILL.md「目录管理·worktree 决策与创建」](../SKILL.md) + [references/worktree_isolation.md](../references/worktree_isolation.md) §1①）：
      - **判定两种触发形式之一**：A. flag 形式（消息命令位置的**独立 token** `--worktree`（双短横独立；不接受 `-worktree`/`--worktree=true` 等变体）） / B. 自然语言意图声明（"用 worktree 隔离做" 等显式措辞）；满足其一即触发 worktree 创建路径
@@ -46,6 +46,7 @@
      - **违规阻止例外**：limit 「worktree 强制禁止」红线命中时（[steps/limit.md](../steps/limit.md) §7），AI 提示一次"本工程 limit 禁止 worktree，本工单回退原地建" + 回退原地（不创建 worktree）
      - AI **不得自创理由另行弹问** worktree（是否用 worktree = 用户消息意图决定，不由 AI 判断）
      - 随后执行目录管理中的「创建新目录」逻辑（含硬熔断，见真源），确定 `ICODE_OUT_DIR`
+   - **仅新建分支，目录仍为空时立即建立控制面出生记录**：生成非空 `ticket_id`，调用 `python3 tools/icode_control.py create --dir {ICODE_OUT_DIR} --ticket-id <id> --requirement '<原始输入>' --birth log|debug-log`。必须早于 limit checkpoint、附件下载、trace 和报告落盘；复用既有工单时不 create，而按「同 TB 单复用流程」切回分析态。
    - **前置：limit 红线检查点（防"忽略项目级约定违反"，必须先于步骤2 历史检索/文档注入执行）**：在进入步骤2 历史检索/段零文档注入**之前**，**必须**盘点本工程的 limit 红线（与 plan 步骤「前置：limit 硬基线」对齐，防"历史根因/文档先入为主后才读到红线"的对照滞后），不得静默跳过：
      - **路径解析**（同 [steps/limit.md](limit.md) + [01_plan.md](01_plan.md) 前置逻辑）：`PROJECT_ID = basename(git rev-parse --show-toplevel)`，**含 worktree 归一化（F1）**：worktree 内 `.git` 是普通文件 = git worktree 成员，project_id 须归一到**主仓根**（`git worktree list --porcelain` 首行），否则主存读不到（详见 [references/dir_and_metadata.md](../references/dir_and_metadata.md)「project_id 与 branch 语义」）；主存 `~/.claude/icode_data/limits/<project_id>.md`，覆盖 `<project_root>/.icode_output/limit.local/<project_id>.md`
      - **读取合并**（local 完全覆盖 main，同 limit 步骤合并规则）：main 存在 -> 读其所有条目；local 存在 -> 整文件覆盖 main（local 文件内容直接当作完整 limit 视图）；都不存在 -> 标注"本工程无 limit 红线"（柔性提示，不阻断）
@@ -384,25 +385,29 @@
   3. **不做自动写入**——memory 是持久化元知识，需人工确认（防噪音记忆污染索引）
 - **集成 claudeception**：若环境支持 claudeception skill，建议在内存沉淀后由 claudeception 二次提炼跨界知识为独立 skill
 
-9. **创建/更新 `.ico_metadata.json`**：
+9. **更新步骤 1 已创建的 `.ico_metadata.json`**：
 
    ```json
    {
      "requirement": "{根因转成的修复需求描述}",
      "created_at": "当前时间",
-     "status": "log_done",
-     "completed_steps": ["log"],
+     "status": "log_in_progress",
+     "completed_steps": [],
      "code_files": [],
      "limit_refs": [],
      "requirement_summary": "{根因一句话摘要，≤100 token}",
      "requirement_points": ["修复要点1", "修复要点2"],
      "keywords": "{≤8个技术关键词}",
      "indexed": false,
-     "ticket_id": "{写入索引后回填}",
+     "ticket_id": "{在 create 前生成的非空唯一 ID}",
      "tb_source": null,
      "runtime_code_baselines": [],
      "analysis_code_baselines": [],
-     "verification_code_baselines": []
+     "verification_code_baselines": [],
+     "schema_version": 3,
+     "workflow_gate_schema_version": 1,
+     "thinking_gate_schema_version": 1,
+     "mcp_gate_schema_version": 1
    }
    ```
 
@@ -411,13 +416,15 @@
    > **新建 metadata 增加 `"mcp_gate_schema_version": 1`**（见 [references/thinking_core.md](../references/thinking_core.md)「cheap-research 执行门（gate）流程」段）。
    > **log 完成前 gate 校验**：置 `log_done` 前运行
    > `python3 tools/lint_mcp_coverage.py {ICODE_OUT_DIR} --step log --strict`——`log.comments_extract` / `log.long_log_summary` 必须各有最终 trace 行（评论/候选日志未达阈值时记 `skipped_not_eligible`），eligible 未履行不得标流程合规。
+   >
+   > **控制面接线（schema v3）**：原子出生已在步骤 1 的空目录阶段完成。本步骤只原子合并 `tb_source`、三基线、检索字段等非受保护业务字段；不得重跑 `create` 或改写受保护出生字段。报告和 gate 完成后经 `transition --to log_done|debug_done` 收尾，工具自动追加 `"log"`；正常工单索引写入走 `index-write`。
 
    > **三基线字段（P0，默认 `[]` 向后兼容；字段缺失视为 `[]`）**：现场运行版本基线门（阶段1）与步骤 9.6 版本基线完成门落地用。`runtime_code_baselines` = 现场运行代码版本证据数组，每条 `{module, repo_path, evidence_source, raw_version, commit, dirty, resolved, confidence, relation_to_analysis_head}`（`module` 实现模块名、`repo_path` 归属仓库绝对路径、`evidence_source` 版本证据回指（启动日志/build_info/version.json/manifest/--version/TB 评论）、`raw_version` 原文版本串（含 `dirty` 形如 `git=<hash>-dirty`）、`commit` 解析出的提交 Hash、`dirty` 是否带未提交差异、`resolved` Hash 是否本地可解析、`confidence` ∈ `high`/`medium`/`low`（高/中/低）、`relation_to_analysis_head` ∈ `same_as_head`/`ancestor_of_head`/`ahead_or_forked`/`unresolved`，Hash 不可解析时 `commit=null`+`relation=unresolved`）；`analysis_code_baselines` = 当前分析版本，每条 `{module, repo_path, commit, branch}`（缺省为 `git rev-parse HEAD` 所在仓库）；`verification_code_baselines` = 修复验证版本，每条 `{module, commit, verified_at, scenarios}`。字段定义与只读约束见 [references/dir_and_metadata.md](../references/dir_and_metadata.md)「metadata 三基线字段」。
 
    **`--debug` 模式差异**（详 [references/debug_mode.md](../references/debug_mode.md)）：
-   - `status` 改为 `"debug_done"`（不是 `"log_done"`——下游易识别）
+   - 出生 `status` 为 `"debug_in_progress"`，收尾经 transition 到 `"debug_done"`
    - **新增字段** `"debug": true`（metadata 元数据标志，明确标识此工单是 debug 孪生）
-   - `ticket_id` 留空字符串（`""`，debug 工单永不写入 index.json）
+   - `ticket_id` 使用 `debug:<工程>-<N>` 类本地唯一非空 ID（debug 工单仍永不写入 index.json）
    - `project_path` = 当前工程根绝对路径（`git rev-parse --show-toplevel`；非 git 仓库 = pwd）。正常工单的 `project_path` 在索引条目里，debug 不入索引 → 只能写进 metadata 作产物唯一回追锚点（写错副本时能凭 metadata 识别真实位置）
    - `indexed` 永远是 `false`（debug 工单永不索引）
    > `limit_refs`（默认 `[]`，log 版）：本次对照核验引用的 limit 红线编号数组，每条 `{redline_no: int, source: "main"|"local", title: str, applied_in: [...]}`（字段结构同 plan，`applied_in` 为报告引用章节如 `§2.3`/`§6`）。报告 `log_analysis.md §2.3/§6` 出现「红线 N」/「红 N」引用时必须记录，完全未引用才可留空；填写后经步骤 9.5 机器自检校验。**字段缺失视为 `[]`（向后兼容旧 metadata）**。⚠️ `limit_refs` 是**事后回补**，只证明"后来引用了哪些红线"，**不证明**步骤1 前置检查点"先读索引→精读命中条目"的读取发生过——读取留痕靠步骤1 落盘的 `{ICODE_OUT_DIR}/limit_checkpoint.md`（步骤 9.5 维度④校验，缺失按未读处理）
@@ -495,13 +502,13 @@ print('✓ 版本基线门：现场版本已绑定 + 证据可回指 + 与 HEAD 
 - **补录边界**：§2.0.1 / 三基线字段应在**正常流程的阶段1 与步骤9 天然生成**，不是靠 9.6 触发补录；确系漏落、靠自检才补写的，`evidence_source` 须如实标注补证来源，不得伪装成阶段1 时点已采集
 - **只读白名单**：本门只允许 `git cat-file -e` / `git show` / `git log` / `git diff` / `git merge-base` / `git blame` 等只读命令（见 [references/dir_and_metadata.md](../references/dir_and_metadata.md)「Git 操作安全白名单」）；Hash 本地不可达时如实降级 `unresolved`，**禁止 fetch/checkout 改变工作区**
 
-10. **写入全局索引**（步骤9之后）：Read `~/.claude/icode_data/index.json`（不存在则创建），追加一条记录：
+10. **写入全局索引**（步骤9之后）：非 debug vNext 工单调用 `python3 tools/icode_control.py index-write --ticket-dir {ICODE_OUT_DIR}`；禁止手工读-改-写 `index.json`。工具按下列契约合并条目：
     - `ticket_id` = `{工程名}-{N}`（冲突时加 `project_path` 短 hash 后缀，规则同 init）
     - `project_path` = 当前工程根绝对路径；`out_dir` = `.icode_output/.icode_output_{N}`
     - `requirement_summary` / `requirement_points` / `keywords` 取自步骤9 metadata
     - `has_00_init` = true（log 已产出 `00_init.md`），`has_plan` = false，`status` = `log_done`，`created_at` = 当前时间，`last_used_at` = 当前时间（首次写入=created_at），`hit_count` = 0，`stale` = false，`stale_reason` = null，`stale_checked_commit` = null，`created_commit` = `git rev-parse HEAD`（只读，非 git 仓库为 null），`created_branch` = `git rev-parse --abbrev-ref HEAD`
     - `tb_source` = 步骤9 metadata 的 `tb_source`（无 TB 源时 null）
-    - 写回 index.json，置 metadata `indexed = true`、`ticket_id`；**写后执行唯一性验证**（见 [references/dir_and_metadata.md](../references/dir_and_metadata.md)「全局索引写入·写后唯一性验证」）
+    - 工具在索引锁内写前重读合并、校验和写后复验，并原子置 metadata `indexed=true` + 追加 `index_updated` 事件
 
    **`--debug` 跳过写索引**（**硬门，防误索引**）：
    - 步骤 9 metadata 已写 `"debug": true` → 步骤 10 入口先**判 metadata.debug**，若是 `true` 则**整段跳过**：
@@ -662,12 +669,12 @@ TB 附件已落盘后，若 `{ICODE_OUT_DIR}` 位于**网络挂载（SMB 等）*
 当步骤1 检测到同 `lib+num+pid` 的旧工单、且用户选择"复用旧目录继续"时：
 
 1. **复用旧目录**：`ICODE_OUT_DIR` = 旧工单目录（如 `.icode_output/.icode_output_3`），不新建；读其 `.ico_metadata.json` 的 `ticket_id`，**步骤2 历史检索须排除此旧 ticket_id 防自参考**（与新建场景步骤2「本次工单尚未入索引故无需排除」不同）
-2. **切回分析态**：metadata `status` 从 `log_done` 切回 `log_in_progress`；`completed_steps` 仍含 `"log"`
+2. **切回分析态**：metadata `status` 从 `log_done` 切回 `log_in_progress`（经 `python3 tools/icode_control.py transition --dir {ICODE_OUT_DIR} --to log_in_progress`）；`completed_steps` 仍含 `"log"`。legacy 工单需先显式迁移，不允许直写状态。
 3. **重拉最新数据**：调 `python3 ~/.claude/skills/icode/tools/tb/scripts/tb_pull.py --domain <域名> --pid <pid> defect <LIB>-<NUM> --out {ICODE_OUT_DIR}/tb_source`。tb_pull 自动把旧 `<ID>_meta.json` 备份为 `<ID>_meta.prev.json`（不丢旧数据），再写最新全量 meta。**重拉后**若 `{ICODE_OUT_DIR}` 在网络挂载，按「TB 缺陷源拉取」段「附件本地镜像」重建 `LOCAL_TB_SRC`（同样 `cp -r` 整个 `tb_source/<ID>/` 到 `/tmp/icode_attach_mirror/...`，增量分析期间一律读本地镜像）
 4. **识别新增**：读 `<ID>_meta.prev.json`（旧）与 `<ID>_meta.json`（新）对比，按 `created`（评论时间戳）+ `content.comment` 为键找出**新评论**（旧 `comments[]` 没有的，**新评论同样须逐条研读、回捞时间点/日志原文进现场时间线**，不得只看条数增量）；和**新附件**（旧 files 没有的、或同名新拉取的 `_1` 后缀文件）
 5. **增量对抗**：读旧 `log_analysis.md` 的「核心结论 + 对抗分析记录」-> 把新增评论/附件作**新证据** -> 重跑对抗（复用 icode 步骤2 对抗模式）。新证据可能：① 确认旧根因（追加佐证）/ ② 补充旧根因遗漏环节 / ③ **推翻旧根因**（标注「本次增量推翻旧结论」+推翻理由+新结论，旧结论不删但标已推翻）
 6. **追加增量段**：在 `log_analysis.md` 追加「## 增量分析（<日期>，TB 单更新）」段：新增评论/附件清单 + 新对抗结论（确认/补充/推翻）+ 最终根因
-7. **收尾**：metadata `status` 切回 `log_done`，更新 `tb_source.meta_path`（指向新 meta）；若根因变化刷新 `requirement_summary`/`keywords`；index 记录续期 `last_used_at`+`hit_count`，同步刷新 `requirement_summary`/`keywords`
+7. **收尾**：metadata `status` 经 `transition --to log_done` 切回完成态；更新 `tb_source.meta_path`、检索字段后经 `index-write` 刷新索引。legacy 工单需先显式迁移。
 
 > 无新增评论/附件（prev 与 current 一致）时，提示"TB 单无新数据，旧根因仍成立"，不重跑对抗、保留旧结论。
 
@@ -689,7 +696,7 @@ TB 附件已落盘后，若 `{ICODE_OUT_DIR}` 位于**网络挂载（SMB 等）*
 
 1. **解析目标**：pid/domain（URL > config label > config lib）；状态名集合（**默认 `打开,未完成`——即"分析所有TB单"的默认范围，其它状态单除非用户显式指定否则不分析**；用户可显式扩展或收窄，如"分析所有打开且待修复的单" -> `打开,待修复`、"所有TB单含已解决" -> `打开,未完成,已解决`，逗号分隔）
 2. **枚举+探测（零附件下载）**：调 `python3 ~/.claude/skills/icode/tools/tb/scripts/tb_pull.py --domain <域名> --pid <pid> probe --status-names <集合> --out <探测目录>` -> Read `<探测目录>/<pid>.json`（每单 uniqueId/status/comments[]/files[]/updated，**不下载任何附件**；状态名不在集合内的单已过滤）
-3. **分流三档**（**非 debug**：每单 Read `~/.claude/icode_data/index.json`，按 `tb_source` 的 `lib+num+pid` 匹配旧工单；**`--debug` 变体**：debug 工单不入 index，改扫**当前工程** `.icode_output/.debug/` 下各 debug 工单 metadata 的 `tb_source` 按 `lib+num+pid` 匹配旧 **debug 孪生**，不匹配正常工单（debug 是独立孪生对照）；**匹配不到再扫「中断半成品」**（无 `.ico_metadata.json` 但有 `tb_source/<LIB>-<NUM>/` 附件，识别与续跑见 [references/debug_mode.md](../references/debug_mode.md) §12）→ 命中 → 复用该目录续跑（附件复用、收尾补写 metadata）；**此步即批量场景的"复用/新建"决策，自动判定、不逐单弹问**）。**更新判定比对键**：probe.json 与旧工单 `<ID>_meta.json` 的 comments **按 `created+评论文本` 为键**比对（两文件 comments 结构不同——probe 简化 `{created,comment}`、meta 原始 `content.comment`，不能整数组直接比对，比对键口径对齐「同 TB 单复用流程」步骤4）、files 按附件名+扩展名比对、**status 按状态名比对——仅当旧 meta 含 `status` 字段时才比（旧版 tb_pull 拉的 meta 无 status 字段，缺失时跳过状态比对、视为一致，否则"无更新"会被误判"有更新"；实测旧版拉取的 meta 均无 status）**：
+3. **分流三档**（**非 debug**：每单 Read `~/.claude/icode_data/index.json`，按 `tb_source` 的 `lib+num+pid` 匹配旧工单；**`--debug` 变体**：只匹配 debug 域内可校验的同 TB metadata，终态作对照、`debug_in_progress` 可续跑；无 metadata 的 legacy 残留只复用附件并新建受控工单，详见 [references/debug_mode.md](../references/debug_mode.md) §12。**此步即批量场景的“复用/新建”决策，自动判定、不逐单弹问**）。**更新判定比对键**：probe.json 与旧工单 `<ID>_meta.json` 的 comments **按 `created+评论文本` 为键**比对（两文件 comments 结构不同——probe 简化 `{created,comment}`、meta 原始 `content.comment`，不能整数组直接比对，比对键口径对齐「同 TB 单复用流程」步骤4）、files 按附件名+扩展名比对、**status 按状态名比对——仅当旧 meta 含 `status` 字段时才比（旧版 tb_pull 拉的 meta 无 status 字段，缺失时跳过状态比对、视为一致，否则"无更新"会被误判"有更新"；实测旧版拉取的 meta 均无 status）**：
    - **待新建**：无匹配旧工单**且无中断半成品**（`--debug` 变体下两者皆无才走其 debug 变体）-> 走「创建新目录」（`--debug` 变体下走其 debug 变体）全新对抗分析（`ICODE_OUT_DIR` 编号自增新建）
    - **无更新跳过**：有旧工单且 probe.json 与旧工单 `<ID>_meta.json` 按上比对键全一致（含 status 兼容规则）-> 提示"TB 单无新数据，旧根因仍成立"，不重跑对抗、不新建
    - **有更新 -> 增量分析**：复用旧工单目录（`--debug` 变体下复用旧 debug 孪生目录），按步骤4 分级定动作
@@ -705,7 +712,7 @@ TB 附件已落盘后，若 `{ICODE_OUT_DIR}` 位于**网络挂载（SMB 等）*
 - 逐单串行的代价是**一单卡住会阻塞后续所有单**，故每单设**单级墙钟硬截止**（建议 `BATCH_PER_TICKET_WALL_CLOCK_DEADLINE_SECONDS=1800`，30 分钟，可按 `metadata.batch_ticket_wallclock_seconds` 覆盖）：从该单开始计，到点仍未正常完成 -> 判定该单「超时/未完成」，**立即中止、不等它**，继续下一单
 - 单内各等待点**仍受既有细粒度超时约束，单级墙钟只是兜底总闸、不另立档位**：对抗等待+整合阶段受 `INTEGRATION_WALL_CLOCK_DEADLINE_SECONDS=1200`（20 分钟）约束（见 [references/adversarial.md](../references/adversarial.md)「整合墙钟硬截止」）；子代理 spawn 受 `TaskOutput(block=true, timeout=...)` 阻塞等约束（见 adversarial.md「显式等待 + 超时机制」）；单级墙钟只兜"单内无等待点但整体停滞 / 工具无响应 / 网络卡死"的极端情况
 - **疑似卡住信号**：单内连续无实质进展输出（如 5 分钟无任何产出）-> 视为疑似卡住，用户可随时插话干预，或等单级墙钟到点自动中止；**禁止为等某一单无限延长**
-- **超时/失败单的已产出分析产物保留**（不删，作下轮增量基础）；后续可对该单单独走「同 TB 单复用流程」增量补跑（线上最新数据 + 已保留产物对比，**`--debug` 批量下同走 debug 域复用旧 debug 孪生；该单上次若被超时杀成"中断半成品"（无 metadata 有附件），识别复用续跑而非新建**，见 [references/debug_mode.md](../references/debug_mode.md) §12），**不重新全量分析**
+- **超时/失败单的已产出分析产物保留**（不删，作下轮增量基础）；后续可对该单单独走「同 TB 单复用流程」补跑。vNext 因步骤 1 已先创建 metadata，应从 `debug_in_progress` 原目录续跑；若只有无 metadata 的 legacy 附件目录，则只复用证据并新建受控工单（见 [references/debug_mode.md](../references/debug_mode.md) §12）。
 
 **决策与交互边界（防歧义）**：
 - 批量场景的**复用/新建决策 = 步骤3 分流自动决定**（待新建=新建、有更新=复用增量、无更新=跳过），**不逐单弹问"复用/新建"**（与单 TB 路径的询问机制不同）；**全程仅一次主动交互 = 步骤5 汇总预览**（一次性确认执行范围 + 中影响单拍板），之后默认全程不打断（阶段1-3 自主收敛），用户可随时插话重定向（同单 TB 追问机制 C）

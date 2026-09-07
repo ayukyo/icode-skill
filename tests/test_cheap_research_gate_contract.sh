@@ -54,14 +54,14 @@ check_not_contains() {  # $1=文件 $2=文本 $3=描述
   if grep -q "$2" "$1" 2>/dev/null; then bad "$3 ($1 意外含: $2)"; else ok "$3"; fi
 }
 
-check_contains SKILL.md "\.mcp_gate_trace\.jsonl" "SKILL.md 引用 .mcp_gate_trace.jsonl"
+check_contains references/mcp_per_step.md "\.mcp_gate_trace\.jsonl" "mcp_per_step.md 引用 .mcp_gate_trace.jsonl"
 check_contains SKILL.md "gates\.json" "SKILL.md 引用 gate catalog"
 check_contains references/thinking_core.md "\.mcp_gate_trace\.jsonl" "thinking_core.md 引用 .mcp_gate_trace.jsonl"
 check_contains references/thinking_core.md "gates\.json" "thinking_core.md 引用 gate catalog"
 check_contains references/mcp_per_step.md "\.mcp_gate_trace\.jsonl" "mcp_per_step.md 引用 .mcp_gate_trace.jsonl"
 check_contains references/mcp_per_step.md "gates\.json" "mcp_per_step.md 引用 gate catalog"
-check_contains SKILL.md "产物文件不记录 MCP 调用信息" "SKILL.md 正式产物不写 MCP 调用信息"
 check_contains references/mcp_per_step.md "产物文件不记录 MCP 调用信息" "mcp_per_step.md 正式产物不写 MCP 调用信息"
+check_contains references/thinking_core.md "\.mcp_gate_trace" "thinking_core.md 引用 .mcp_gate_trace"
 check_not_contains tools/lint_mcp_coverage.py "MCP 调用记录" "lint 不再搜索「MCP 调用记录」章节"
 # fast 文档矛盾：fast 只跑 Reverse，deepcheck Fixed/dedup 记为 skipped_stage_not_reached
 if grep -q "deepcheck（Fixed 预扫 scan_patterns + dedup extract）" steps/fast.md 2>/dev/null; then

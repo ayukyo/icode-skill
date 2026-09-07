@@ -86,6 +86,7 @@
       - 若 `/icode start` / `/icode plan` 命令行同时携带了需求字符串，仅作为**补充上下文**（次优先级），不覆盖 `00_init.md`
       - 在 `01_plan.md` 的"需求描述"章节中明确标注：本计划基于 `00_init.md` 展开（若来自 log，标注"基于根因报告 log_analysis.md 的修复需求"），并引用其关键章节
    c. **不满足复用条件**：执行常规「创建新目录」逻辑，确定 `ICODE_OUT_DIR`，需求输入采用命令行参数
+   d. **仅常规新建分支，目录仍为空时立即创建控制面工单**：生成非空 `ticket_id`，调用 `python3 tools/icode_control.py create --dir {ICODE_OUT_DIR} --ticket-id <id> --requirement '<原始需求>' --birth plan`。必须早于历史检索留痕、trace 和 `01_plan.md` 落盘；复用 init/log 工单时不得再次 create。
 
 2. **历史检索复用**（目录管理之后、强制思考之前，全局索引存在时必须执行，详见 SKILL.md「历史检索复用」段）。**置于目录管理之后**：此时需求来源已确定（复用情况已读 `00_init.md`，常规新建情况用命令行参数），可用完整需求做相关性判断：
    - Read `~/.claude/icode_data/index.json`（不存在则跳过检索）
@@ -351,8 +352,10 @@
 
 5. **创建或更新 `{ICODE_OUT_DIR}/.ico_metadata.json`**：
 
+   > **控制面接线（schema v3）**：常规新建目录先生成非空 `ticket_id`，用 `create --birth plan` 原子创建 `init_in_progress` metadata + `ticket_created` 事件；然后统一经 `python3 tools/icode_control.py transition --dir {ICODE_OUT_DIR} --to plan_done`收尾。复用工单的 `init_in_progress`/`log_done` 也走同一 transition。`plan_done` 不是出生态，禁止随模板直写跳过三 gate linter。
+   >
    - **复用步骤0目录的情况**：metadata 已存在，需**更新**（而非覆盖）以下字段：
-     - `status`: `init_in_progress` → `plan_done`
+     - `status`: `init_in_progress` → `plan_done`（经 transition，见上）
      - `completed_steps`: 在原有 `["0"]` 后追加 `"1"`，形成 `["0", "1"]`
      - 保留原有 `requirement`、`created_at`，可在 requirement 后追加命令行参数（若有）
      - **刷新检索字段**：基于完整计划刷新 `requirement_summary`（一句话摘要，≤100 token）；`requirement_points` 保持步骤0的值或补全；`keywords` 按计划涉及的技术栈补全；保留 `indexed=true`
@@ -362,21 +365,29 @@
 {
   "requirement": "{用户输入的原始需求}",
   "created_at": "当前时间",
-  "status": "plan_done",
-  "completed_steps": ["1"],
+  "status": "init_in_progress",
+  "completed_steps": [],
   "code_files": [],
   "requirement_summary": "{基于完整计划的一句话摘要，≤100 token}",
   "requirement_points": [],
   "keywords": "{≤8个技术关键词数组}",
   "indexed": false,
-  "ticket_id": "{刷新全局索引时回填，初始创建时为空字符串（步骤1 常规新建首跑时首次写索引生成，复用步骤0目录时已有 ticket_id）}",
+  "ticket_id": "{在 create 前按工程名+N 规则生成的非空唯一 ID}",
   "mode": "full",
-  "max_rounds": 3
+  "max_rounds": 3,
+  "template_version": "v1.1",
+  "migration_log": [],
+  "schema_version": 3,
+  "workflow_gate_schema_version": 1,
+  "thinking_gate_schema_version": 1,
+  "mcp_gate_schema_version": 1
 }
 ```
 
-   - **两种情况都要刷新全局索引**（步骤5之后）：Read `~/.claude/icode_data/index.json`，按 `ticket_id` 更新本工单条目——`requirement_summary` 用刷新后的值、`has_plan` = true、`status` = `plan_done`，写回 index.json，置 metadata `indexed = true`；**写后执行唯一性验证**（见 [references/dir_and_metadata.md](../references/dir_and_metadata.md)「全局索引写入·写后唯一性验证」）。
-   - **常规新建目录情况**（此前未入索引）：此时需**首次生成并写入**条目。`ticket_id` 按 `{工程名}-{N}` 规则生成（工程名冲突时加 `project_path` 短 hash 后缀，规则同步骤0），`has_00_init` = false，`has_plan` = true，`project_path`/`out_dir`/`created_at`/`requirement_summary`/`keywords` 取自本步骤 metadata；写入索引后**回填 metadata 的 `ticket_id` 字段**。
+   常规新建工单已在步骤 1d 原子出生；此处原子合并上述非受保护业务字段。不得重跑 `create`，也不得修改其受保护出生字段。计划产物和合同落盘完成后再调 `transition --to plan_done`，工具自动追加 `"1"` 到 `completed_steps`。
+
+   - **两种情况都要刷新全局索引**（步骤5之后）：vNext 调 `python3 tools/icode_control.py index-write --ticket-dir {ICODE_OUT_DIR}`；禁止手工直改 index.json。legacy 工单只读，需先运行 migration 显式升级。
+   - **常规新建目录情况**（此前未入索引）：`ticket_id` 已在 `create` 前按 `{工程名}-{N}` 规则生成（工程名冲突时加 `project_path` 短 hash 后缀）；直接用 `index-write` 写入条目，禁止先留空 ID 再回填。
    - **复用步骤0目录情况**：metadata 已有 `ticket_id`，按该 id 更新对应条目（`has_plan` 置 true，刷新 `requirement_summary`），不新建条目。
 
 5.5. **落盘 workflow gate 合同（P0 硬门禁，写 `semantic_decisions` / `impact_contract` / `acceptance_contract` / `workflow_gate_schema_version`）**：在写 `fix_tiers`/`scope_contract` 处**一并写**以下字段（机器真源 [mcp/workflow-gate/gates.json](../mcp/workflow-gate/gates.json)，校验器 [tools/lint_workflow_contract.py](../tools/lint_workflow_contract.py)，结构见 [references/dir_and_metadata.md](../references/dir_and_metadata.md) 相应字段族）：

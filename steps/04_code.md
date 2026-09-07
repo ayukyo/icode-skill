@@ -126,6 +126,8 @@
 
 严格按定稿计划实施编码。
 
+> **控制面接线（进入编码先流转）**：进入编码实施（TDD 准入门通过后）先把状态流转到 `code_in_progress`——`python3 tools/icode_control.py transition --dir {ICODE_OUT_DIR} --to code_in_progress`（`plan_finalized → code_in_progress` 合法流转，进行态仅做状态机判定）。此后状态保持 `code_in_progress`（下方编译失败兜底等的 `code_in_progress` 直写计数器不再需要重复流转），收尾 `code_done` 经 `transition --to code_done`（完成态门禁点，三 gate linter 失败则状态不前移），见 [references/control_plane.md](../references/control_plane.md)。
+
 **符号定位（grep 优先）**：编码前对计划 §5 声明的待改符号，用 `grep -rn '<符号>'` 定位待改符号定义、`grep -rn '<符号>('` 找所有调用点（跨仓库/子仓库见 反偷懒第 21 条「跨仓库/子仓库检索」段），结果作为下方「准入三链预扫」的增强输入。检索结果只进思考块，不写入产物文件。
 
 **准入（强制三链预扫，每条按 `文件:行号` 给出至少 1 条命中否则禁止 Edit）**：

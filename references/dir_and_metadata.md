@@ -70,6 +70,7 @@ grep -qE '^[^#]*\.icode_output' "$WORKSPACE_ROOT/.gitignore" 2>/dev/null && echo
 
 - 正常工单的「创建新目录」`ls -d "$WORKSPACE_ROOT"/.icode_output/.icode_output_*` 只匹配**顶层**目录，天然排除 `.debug/` 子目录下的 debug 工单（物理隔离，互不污染）
 - debug 工单 metadata 写 `debug: true` + 独立状态名（`debug_in_progress` / `debug_done`），详见 [debug_mode.md](debug_mode.md)
+- **空目录即出生（vNext 强制）**：硬熔断②确认目录为空后，下一项写操作必须是 `icode_control.py create`；正常入口用 `--birth init|plan|log`，debug 入口用 `--birth debug-init|debug-log`。`create` 自身会复验目录形状、normal/debug 域和空目录所有权；trace、checkpoint、附件或步骤报告均不得先于出生事件落盘。
 
 ### 复用 / 创建新目录决策（用于 start / plan / fast）
 
@@ -117,34 +118,52 @@ fi
 - `REUSE=0`（非入口态）→ 带参新建、无参报错
 - **不得擅自复用**（会丢失新需求）也**不得擅自新建**（会丢失 init/log 上下文）
 
-### 检测最新目录（用于 review / merge / code / deepcheck / audit）
+### 检测最新目录 / 当前控制根（用于 review / merge / code / deepcheck / audit / patch / status）
 
 ```bash
 # 工作区根锚定（同「创建新目录」段）：ICODE_OUT_DIR 一律基于当前工作区根绝对路径，防 cwd 漂移误定位
 WORKSPACE_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
 LAST=$(ls -d "$WORKSPACE_ROOT"/.icode_output/.icode_output_* 2>/dev/null | grep -oP '(?<=\.icode_output_)\d+' | sort -n | tail -1)
-if [ -z "$LAST" ]; then
+if [ -n "$LAST" ]; then
+  ICODE_OUT_DIR="$WORKSPACE_ROOT/.icode_output/.icode_output_${LAST}"
+elif [ -f "$WORKSPACE_ROOT/.icode_output/.active_ticket.json" ]; then
+  # reopen 后产物的永久控制根在归档目录，新 checkout 只放身份指针。
+  ICODE_OUT_DIR=$(python3 - "$WORKSPACE_ROOT/.icode_output/.active_ticket.json" <<'PY'
+import json, pathlib, sys
+p=json.load(open(sys.argv[1], encoding="utf-8"))
+root=pathlib.Path(p["control_root"]).resolve()
+m=json.load(open(root/".ico_metadata.json", encoding="utf-8"))
+assert m.get("ticket_id")==p.get("ticket_id"), "active ticket pointer 与 metadata 身份不一致"
+assert pathlib.Path(m.get("artifact_root") or "").resolve()==root, "artifact_root 不一致"
+print(root)
+PY
+  ) || exit 1
+  echo "🗂️ reopened 工单控制根 = $ICODE_OUT_DIR"
+else
   echo "错误：没有找到 .icode_output/.icode_output_N 目录，请先运行 /icode start <需求> 或 /icode init"
   exit 1
 fi
-ICODE_OUT_DIR="$WORKSPACE_ROOT/.icode_output/.icode_output_${LAST}"
 ```
+
+`reopen` 不把旧工单目录复制回新 checkout；它写入小指针 `.icode_output/.active_ticket.json`，以 `ticket_id + control_root` 找回归档产物。代码操作根始终是 `metadata.active_checkout.path`，产物/事件根始终是 `ICODE_OUT_DIR=metadata.artifact_root`，两者不得混用。
 
 ## ticket_id 生成规则
 
 - `ticket_id` = `{工程名}-{N}`（工程名取 `project_path` 的 basename；N 为当前 `.icode_output_N` 的 N）
-- **工程名冲突处理（生成时必须检查）**：生成 ticket_id 后，**必须 Python 解析 index.json 检查是否已有相同 `{工程名}-{N}` 但 `project_path` 不同的条目**；有则追加 `project_path` 短 hash 后缀（`sha256(project_path)[:4]`，如 `myproject-1-a3f2`）保唯一。**写后唯一性验证兜底**（见「全局索引写入」段），即使生成时漏检，写后硬检查会自动修正
+- **工程名冲突处理（生成时必须检查）**：生成 ticket_id 后，**必须 Python 解析 index.json 检查是否已有相同 `{工程名}-{N}` 但 `project_path` 不同的条目**；有则追加 `project_path` 短 hash 后缀（`sha256(project_path)[:4]`，如 `myproject-1-a3f2`）保唯一。若生成时漏检，`index-write` 会以 `ticket_id_ownership` fail-closed，不会自动改 ID 或覆盖旧条目。
 - **入口命令（init/log）共享 N 序列**：init/log 各自创建新目录时，N 是当前目录下**所有** `.icode_output_*` 中的最大 N + 1，不区分 init/log（demo-5 是 init，demo-9 是 log，N 单调递增）
-- 生成后**回填 metadata 的 `ticket_id` 字段**，供后续步骤检索时排除当前工单（避免反推）
-- **唯一性保证**：写索引前 Python 解析 index.json 检查无重复 ticket_id；**写后唯一性验证兜底**（见「全局索引写入」段，强制硬检查）：发现同 ticket_id 不同 project_path 自动加 hash 后缀修正，同 ticket_id 同 project_path 去重（保留 status 最靠后的）。手工误操作或 AI 漏检均由写后硬检查兜底
+- 生成后立即传给 `create --ticket-id`，**不允许空 ID 出生后再回填**。
+- **唯一性保证**：创建前检查；`index-write` 再做 ticket_id/out_dir 所有权硬熔断和写后唯一性验证。
 
 ## 全局索引写入（首次写入）
 
-Read `~/.claude/icode_data/index.json`（不存在则创建 `{"version":"1","updated_at":"当前时间","tickets":[]}`），追加一条新记录：
+> **vNext 工单索引写入唯一入口**：`python3 tools/icode_control.py index-write --ticket-dir {ICODE_OUT_DIR}`——锁覆盖完整读-合并-写窗口，并做混合代际整文件校验、fsync+原子 rename、写后唯一性验证。vNext 工单**禁止手工直改 index.json**；legacy **工单**需先显式迁移。legacy **索引条目**不要求批量重写：无 `control_schema_version` 的旧条目按最小可读契约保留，新写/接管条目标记 `control_schema_version=3` 并严格校验；工具不可用时 fail-closed，只允许只读诊断。以下字段段落是索引语义契约，不是绕过 writer 的手工写入授权。
+
+控制面在锁内读取 `~/.claude/icode_data/index.json`（不存在则创建 `{"version":1,"updated_at":"当前时间","tickets":[]}`），合并一条新记录；调用方不得自行追加：
 
 > **"当前时间"取值约定（强制，防 LRU 失效）**：`updated_at` / `created_at` / `last_used_at` 等**所有时间字段必须是运行时取的真实系统当前时间**（如 Bash `date +%Y-%m-%dT%H:%M:%S`、Python `datetime.now()`），**禁止写死固定值**（如 `2026-06-29T09:30:00`）。理由：LRU 淘汰与排序依赖 `last_used_at` 区分新旧，若时间戳被写死成同一个固定值，所有条目时间相同 → LRU 退化为随机删除、排序失序、续期续错（见历史 bug：某工单 `last_used_at` 被刷新但 `hit_count=0` 的数据失真）。
 
-- `ticket_id` / `project_path`（当前工程根绝对路径）/ `out_dir`（`.icode_output/.icode_output_{N}`）
+- `control_schema_version` = `3` / `ticket_id` / `project_path`（当前工程根绝对路径）/ `out_dir`（`.icode_output/.icode_output_{N}`）
 - `requirement_summary` / `requirement_points` / `keywords` / `workload_estimate` / `workload_reason` 取自本步骤 metadata
 - 入口命令的标记：
   - `/icode log` 产出：`has_00_init` = true（已产出 00_init.md）、`has_plan` = false、`status` = `log_done`
@@ -161,17 +180,13 @@ Read `~/.claude/icode_data/index.json`（不存在则创建 `{"version":"1","upd
 - `verdict` = `"unknown"`（**新增**：方向结论，详见 SKILL.md「verdict 字段族」；首次写入固定 `unknown`，由后续标注/终审/批量识别改写）
 - `verdict_reason` / `correct_direction` / `verdict_source` / `verdict_at` / `superseded_by` = `null`（**新增**：verdict 关联字段，标注时按需填）
 - `verdict_premise_deps` = `[]` / `verdict_review_needed` = `false`（**新增**：硬复活字段，默认空/false；`disproved`/`superseded` 标注时按需填 `verdict_premise_deps` 支持依赖变化检测）
-- **写前重读合并（并发安全，多 worktree = 多会话并行配套，防竞态丢条目）**：从首次 Read 到写回之间可能已有其他会话写入（各会话读旧快照 → 后写覆盖先写 → 丢工单条目）。**写回前必须重新 Read 最新 index.json**（丢弃最初快照），把本会话要追加/修改的内容合并进最新 `tickets` 数组，再原子写回——**绝不在旧快照上直接覆盖**。index.json 所有读-改-写统一按此契约：**读最新 → 合并本会话改动 → 原子写**（原子写防写中断损坏，写前重读合并防并发丢失，两者都要）
-- 写回 index.json，置 metadata `indexed = true`、`ticket_id = {生成的 ticket_id}`
-- **写后唯一性验证（强制硬检查，防 AI 偷懒漏检冲突）**：写回后 Python 验证 `tickets` 数组 `ticket_id` 全局唯一：
-  - **同 ticket_id 不同 project_path**（工程名冲突未加后缀）-> 自动给**后写入的**（`created_at` 较晚）追加 `project_path` 短 hash 后缀（`sha256(project_path)[:4]`，如 `myproject-14-a3f2`），同步该工单 `metadata.ticket_id` + 重新排序
-  - **同 ticket_id 同 project_path**（真重复条目，手工误操作）-> 去重，保留 `status` 最靠后的（流程最接近完成），删另一个
-  - 修正后重新写回 index.json（原子写）
+- **并发与唯一性**：`index-write/index-update` 在跨进程文件锁内完成整个读-合并-校验-写后复验窗口。同 ticket_id 指向不同目录或同目录指向不同 ticket_id 均 fail-closed，不自动改身份；必须先按短 hash 规则生成正确 ID 再重试。成功后工具原子置 metadata `indexed=true` 并留 `index_updated` 事件。
+- **写入后执行 LRU 淘汰**（见下方「索引淘汰规则」）
 - **写入后执行 LRU 淘汰**（见下方「索引淘汰规则」）
 
 ## 索引条目更新（已有 ticket_id 的情况）
 
-按 metadata 的 `ticket_id` 定位 index.json 中本工单条目，更新对应字段。**写回前必须写前重读合并**（同「全局索引写入」段契约）：重新 Read 最新 index.json → 在最新快照上定位本工单条目更新 → 原子写回，勿在旧快照覆盖（多会话并行时防丢其他工单条目）：
+按 metadata 的 `ticket_id` 定位 index 中本工单条目。metadata 镜像字段先合并回 metadata，再统一调 `python3 tools/icode_control.py index-write --ticket-dir {ICODE_OUT_DIR}`；检索命中/stale 等索引独有字段调 `index-update`。legacy 需先显式迁移，不允许人工读-改-写绕过锁。
 
 - 步骤0 每轮对话后：刷新 `requirement_summary` / `requirement_points`（从 `00_init.md`「3.新增需求点」自动提炼）
 - 步骤1 写完 `01_plan.md` 后：`requirement_summary`（基于完整计划刷新）、`has_plan` = true、`status` = `plan_done`
@@ -247,14 +262,14 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
 
 > **stale 与 verdict 正交**：`stale=true` 优先跳过注入（技术过时，锚点都没了，连避坑都不用）；`stale=false` 才按 verdict 分流。verdict 抓"方向证伪"（锚点在但方向错），stale 抓"技术过时"（锚点没了），互补不重叠。
 
-> **verdict_review_needed 被动检测**（检索命中 disproved/superseded 注入前）：若 `verdict_premise_deps` 非空，逐 dep 取 `git -C {dep.path} rev-parse HEAD`（只读，stale 白名单内）比对 dep.commit，变了则置 `verdict_review_needed=true` 写回 index.json，该工单本次降级走 unknown 对抗质疑（不硬反转，防漏过后来又可行的方向）；未变则 `verdict_review_needed=false` 走硬反转+证伪前提断言。主动检测见 `/icode status --scan-verdict`（[steps/status.md](../steps/status.md)）
+> **verdict_review_needed 被动检测**（检索命中 disproved/superseded 注入前）：若 `verdict_premise_deps` 非空，逐 dep 取 `git -C {dep.path} rev-parse HEAD` 比对 dep.commit；变化时经 `index-update --ticket-id <id> --set-json '{"verdict_review_needed":true}'` 写回，未变则同入口写 false。本次分流语义不变。
 
 ### stale 字段
 
 - index.json 每条加 `stale`（默认 false）+ `stale_reason`（默认 null）+ `stale_checked_commit`（默认 null）
 - `stale=true` 的工单：**不再注入**（检索时跳过），但仍保留在索引（不删，留追溯）
 - stale 工单默认**不被段一粗筛命中**（关键词交集前即排除）、不参与 hit_count 续期（不再被命中）--但有**可复活例外**（见下）
-- stale 由五种途径触发，每种填对应 `stale_reason`：①检索命中注入前被动校验失败（`path_gone`/`checkout_mismatch`/`anchor_gone`/`semantic_deviation`）；②每次写索引后主动扫描最旧 K 条锚点失效（`anchor_gone`）；③僵尸未完成态超时降级（`timeout`，见「索引淘汰规则」规则 5）
+- stale 由三类途径触发，每种填对应 `stale_reason`：①检索命中注入前被动校验失败（`path_gone`/`checkout_mismatch`/`anchor_gone`/`semantic_deviation`）；②工作流写索引前由调用方主动扫描最旧 K 条，锚点失效（`anchor_gone`）；③僵尸未完成态超时降级（`timeout`，见「索引淘汰规则」规则 5）
 - **软 stale vs 硬 stale**：`checkout_mismatch`/`anchor_gone`/`path_gone`/`semantic_deviation` 为**软 stale**（依赖当前 checkout，可复活）；`timeout` 为**硬 stale**（活动维度，checkout 变化不复活，下次写索引刷新活动时自然解除；**注意此处"硬"方向与 verdict 的"硬复活"相反**——"硬 stale"的"硬"=timeout 强制不可复活，"硬复活"的"硬"=确定性可复活，见 verdict_premise_deps 字段）
 - **可复活规则**（解决 checkout 假阳性，核心）：检索段一前对每条 stale 工单取 `H = git -C {project_path} rev-parse HEAD`（该工单工程当前 HEAD）；对每条 `stale=true` 且 `stale_reason != timeout` 且 `stale_checked_commit != H` 的工单，**临时置 `stale=false`** 让其重入段一候选集，按「过时校验」重评。重评仍失败→`stale=true` 且更新 `stale_checked_commit=H`（同 HEAD 下次不再重评，省算）；用户 checkout 回正常→`stale_checked_commit != H` 成立→自动复活重评。**临时 checkout 旧提交误判的 stale，回正常 HEAD 后自动复活，不再永久粘住**（每条 stale 工单一次 `git -C` 调用 <10ms，stale 通常少数；git 调用只读，见「过时校验·Git 操作安全白名单」）
 - 若该工单产物被刷新（如重跑步骤6终审）：**步骤6 终审刷新索引时已自动重置** `stale=false`+`stale_reason=null`+`stale_checked_commit=null`（旧 stale 判据失效，下次检索按当前 `01_plan` 锚点重评）；其他产物刷新场景可手动重置
@@ -266,7 +281,7 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
 - `last_used_at` = 当前时间（续期，LRU不淘汰）--仅 `verified`/`unknown`；`disproved`/`superseded` 跳过
 - `hit_count` += 1（累计命中次数）--仅 `verified`/`unknown`；`disproved`/`superseded` 跳过
 - `verdict_at` = 当前时间（仅 `disproved`/`superseded` 命中时更新，记录提醒次数，不触发续期）
-- 写回 index.json
+- 续期经 `index-update --ticket-id <id> --increment-hit`；disproved/superseded 仅更新 `verdict_at` 时用 `--set-json`，不加 hit
 - `stale_checked_commit` 在「过时校验」评估阶段已更新为当前 `H`（**与 hit_count 解耦**--续期去重跳过 hit_count +1 时，stale_checked_commit 仍随评估更新，保证可复活判据准确）
 
 > **归档/备份工单正常续期（archived/backup 活跃态）**：`archive_path` 有效（走「归档读档」注入）或 `backup_path` 有效（走「备份读档」注入）的工单，命中**正常续期**（`last_used_at`+`hit_count` 原子同步），与主仓工单一致——归档/备份是已完成交付的真实工单，被复用越多越有保留价值，应参与 LRU 正常保留；仅 `verdict` 为 `disproved`/`superseded` 时按 verdict 语义跳过续期（见上）。续期去重缓存照常写记录（防同目录重复注入）
@@ -277,29 +292,31 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
 
 **目的**：index.json 是检索缓存非档案，随工单增长会膨胀。靠 LRU 淘汰失去复用价值的老工单，保留高价值工单。淘汰只删索引条目，**不删各工程 `.icode_output/` 产物**（产物保留，索引只是指针）。
 
-**触发时机**：每次写索引（首次写入/条目更新/命中续期）后执行：先排序，再淘汰扫描，最后主动 stale 扫描。
+**触发时机**：工作流调用方在写索引前完成主动 stale 扫描并用 `index-update` 回写；每次受控写索引（首次写入/条目更新/命中续期）时，确定性内核执行僵尸超时降级、排序和 LRU 收缩。
 
-**排序规则**（写入时重排 tickets 数组）：按复合键 `(verdict_priority, hit_count)` 降序、同值按 `last_used_at` 降序。`verdict_priority`：`verified`=0（最高）> `unknown`=1 > `superseded`=2 > `disproved`=3（最低，沉底）。高价值已验证工单排前，被证伪工单沉底；段一粗筛扫 `keywords` 时主代理先看到高价值项，判断相关性更快；LRU 淘汰时最老的自然在末尾。**向后兼容**：旧工单无 `verdict` 视为 `unknown`=1，与现状所有工单按 `hit_count` 排序完全等价（仅对有 verdict 的工单生效）
+**排序规则**（写入时重排 tickets 数组）：按复合键 `(verdict_priority, hit_count, last_used_at)` 降序。`verdict_priority`：`verified`=3（最高）> `unknown`=2 > `superseded`=1 > `disproved`=0（最低，沉底）。旧工单无 verdict 视为 unknown。
 
 **淘汰规则**：
-1. **容量上限 200 条**：tickets 数组超 200 时触发淘汰
+1. **目标容量 200 条**：tickets 数组超 200 时触发淘汰；若剩余条目全部受永久保留/未完成态保护，允许暂时超过 200，待出现可淘汰条目后再收缩，不为凑硬上限破坏保留契约
 2. **永久保留**：`hit_count >= 20` **且 `verdict != "disproved"`** 的工单永久不淘汰（被复用≥20 次的高价值工单）。**例外**：`verdict="disproved"` 的工单即使 `hit_count >= 20` 也不永久保留--被证伪的方案不应作为高价值正面参考永久保留（仍可被反转注入避坑，但走正常淘汰流）
-3. **未完成态保留**：`status` 为 `init_in_progress`/`log_done`/`log_in_progress`/`review_in_progress`/`deepcheck_in_progress`/`code_in_progress` 的工单**默认**不淘汰（流程未结束）——**但有超时降级例外**（见规则 5）
-4. **LRU 淘汰**：超上限时，在**可淘汰集**中淘汰 `last_used_at` 最老的（数组末尾），直到条目数 ≤ 200。**可淘汰集** = `hit_count < 20` 且满足下列**任一**：① `stale=false` 且 `status = completed/code_done/review_done/deepcheck_done/plan_done/plan_finalized`（正常已完成/推进态）；② `stale=true` 且 `stale_reason = timeout`（规则 5 超时降级的僵尸未完成态，status 仍 in_progress 但已降级可淘汰）。**`stale=true` 且 `stale_reason != timeout` 的软 stale 工单不在可淘汰集**（保留待 checkout 变化后复活重评）
+3. **未完成态保留**：`status` 为 `init_in_progress`/`log_in_progress`/`review_in_progress`/`deepcheck_in_progress`/`code_in_progress` 的工单**默认**不淘汰（流程未结束）——**但有超时降级例外**（见规则 5）。`log_done` 已完成日志分析，属可淘汰完成态。
+4. **LRU 淘汰**：超目标容量时，在**可淘汰集**中淘汰 `last_used_at` 最老的，直到条目数 ≤ 200 或已无可淘汰条目。**可淘汰集** = `hit_count < 20` 且满足下列**任一**：① `stale=false` 且 `status = completed/code_done/review_done/deepcheck_done/plan_done/plan_finalized/log_done`（正常已完成/推进态）；② `stale=true` 且 `stale_reason = timeout`（规则 5 超时降级的僵尸未完成态，status 仍 in_progress 但已降级可淘汰）。**`stale=true` 且 `stale_reason != timeout` 的软 stale 工单不在可淘汰集**（保留待 checkout 变化后复活重评）
 5. **僵尸未完成态超时降级**：未完成态工单（init/log/review/deepcheck/code in_progress）若 `last_used_at` 距当前**超过 30 天**无更新，视为"建了就扔"的僵尸工单——**不删 status，改置 `stale=true`+`stale_reason=timeout`**（复用 stale 机制，不污染 status 语义），降级后该条不再受规则 3 的未完成态保护，**纳入规则 4 可淘汰集②**（status 仍 in_progress，由可淘汰集②的 `stale_reason=timeout` 判定可淘汰）。**触发时机**：每次写索引触发淘汰扫描时，顺带检查所有未完成态工单是否超时。区分"正在用"（30 天内有更新）与"建了就扔"（超时）。**timeout 为硬 stale**：复活条件 `stale_reason != timeout` 排除它，超时降级不复活、直接走淘汰
 6. **淘汰不报错**：静默移除，用户无感
 
 **主动 stale 扫描**（防过时信息堆积，规则 5 之外的第二道清理）：
 
 - **现状漏洞**：原设计 stale 校验只在"检索命中准备注入前"才做——没被命中的老条目永远 stale=false，永远不会被这个机制清理，stale 清理形同虚设。
-- **新增主动扫描**：每次写索引触发淘汰扫描后，**顺带对 `last_used_at` 最旧的 K 条**（**K=min(30, 当前条目数)**，索引 150 条时覆盖率 20%）做一次代码锚点 Grep 校验（方法同「过时校验」段第3步）。锚点失效→置 `stale=true`+`stale_reason=anchor_gone`+`stale_checked_commit=H`（H=该工单 `git -C {project_path} rev-parse HEAD`（只读）；属软 stale，checkout 变化时可复活）。把"被动校验"变"主动清理"。
+- **新增主动扫描**：每次工作流写索引前，**调用方**对 `last_used_at` 最旧的 K 条（**K=min(30, 当前条目数)**）做一次代码锚点 Grep 校验（方法同「过时校验」段第3步），再通过 `index-update` 原子写回结果。`maintain_index_tickets()` 是无外部 I/O 的确定性内核，只负责超时降级、排序与 LRU，不会自行 Grep。锚点失效→置 `stale=true`+`stale_reason=anchor_gone`+`stale_checked_commit=H`（H=该工单 `git -C {project_path} rev-parse HEAD`）。
 - **归档/备份豁免（防误标 anchor_gone）**：主动扫描对每条先做 `test -d {project_path}`——失效但 `backup_path` 或 `archive_path` 有效（活跃态）→ **跳过锚点校验**（历史快照无当前代码可 grep，不因 grep 失败误标 stale）；两源都失效才按锚点校验/`path_gone` 标 stale。对齐「过时校验」段第1步的并行判定。
 - **控 token**：只扫最旧的 K 条（最可能过时），不扫全量；Grep 单条锚点 <1K token。
-- stale 工单仍受排序影响沉在数组末尾，但**不注入不续期**，可在后续 LRU 淘汰中被规则 4 移除（若它已达可淘汰态）或长期留追溯（若未完成态）。
+- stale 工单仍受排序影响，但**不注入不续期**；`timeout` 硬 stale 可按规则 4 淘汰，其他软 stale 保留等待 checkout 变化后复活重评。
 
 ## .ico_metadata.json 模板
 
 入口命令（init/log）和步骤1常规新建目录时创建。完整字段定义见 SKILL.md「元信息文件」段，此处仅列入口创建时的最小模板：
+
+> **`schema_version` 字段（vNext 控制面，schema v3）**：所有新建工单一律先确定非空唯一 `ticket_id`，再用 `tools/icode_control.py create` 原子产生 `schema_version:3` metadata + `ticket_created` 事件；三个 gate schema 版本均为 `1`。旧工单无 schema_version = legacy（只读适配，不静默伪装 vNext）。
 
 > **`template_version` 字段**（schema 版本，自 [v1.1 升级](../steps/01_plan.md) 起所有新建工单默认带）：
 >
@@ -384,17 +401,21 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
 {
   "requirement": "{根因转成的修复需求描述}",
   "created_at": "当前时间",
-  "status": "log_done",
-  "completed_steps": ["log"],
+  "status": "log_in_progress",
+  "completed_steps": [],
   "code_files": [],
   "limit_refs": [],
   "requirement_summary": "{根因一句话摘要，≤100 token}",
   "requirement_points": ["修复要点1", "修复要点2"],
   "keywords": "{≤8个技术关键词}",
   "indexed": false,
-  "ticket_id": "{写入索引后回填}",
+  "ticket_id": "{在 create 前生成的非空唯一 ID}",
   "template_version": "v1.1",
-  "migration_log": []
+  "migration_log": [],
+  "schema_version": 3,
+  "workflow_gate_schema_version": 1,
+  "thinking_gate_schema_version": 1,
+  "mcp_gate_schema_version": 1
 }
 ```
 
@@ -415,9 +436,13 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
   "workload_estimate": "small|medium|large",
   "workload_reason": "{≤80 token 一句话评估理由}",
   "indexed": false,
-  "ticket_id": "{步骤8 写入索引后回填}",
+  "ticket_id": "{在 create 前生成的非空唯一 ID}",
   "template_version": "v1.1",
-  "migration_log": []
+  "migration_log": [],
+  "schema_version": 3,
+  "workflow_gate_schema_version": 1,
+  "thinking_gate_schema_version": 1,
+  "mcp_gate_schema_version": 1
 }
 ```
 
@@ -427,22 +452,26 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
 {
   "requirement": "{用户输入的原始需求}",
   "created_at": "当前时间",
-  "status": "plan_done",
-  "completed_steps": ["1"],
+  "status": "init_in_progress",
+  "completed_steps": [],
   "code_files": [],
   "requirement_summary": "{基于完整计划的一句话摘要，≤100 token}",
   "requirement_points": [],
   "keywords": "{≤8个技术关键词数组}",
   "indexed": false,
-  "ticket_id": "{刷新全局索引时回填}",
+  "ticket_id": "{在 create 前生成的非空唯一 ID}",
   "mode": "full",
   "max_rounds": 3,
   "template_version": "v1.1",
-  "migration_log": []
+  "migration_log": [],
+  "schema_version": 3,
+  "workflow_gate_schema_version": 1,
+  "thinking_gate_schema_version": 1,
+  "mcp_gate_schema_version": 1
 }
 ```
 
-> 复用步骤0目录的情况：metadata 已存在，步骤1只更新 status（→plan_done）、completed_steps（追加"1"）、刷新检索字段，不重建。
+> 常规新建先 `create --birth plan`（出生态 `init_in_progress`），复用步骤0目录则沿用已有 metadata；两者都在计划产物/合同完成后经 `transition --to plan_done`，由工具追加 `"1"`。
 
 ### `/icode fast` 新建目录
 
@@ -450,18 +479,22 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
 {
   "requirement": "{用户输入的原始需求}",
   "created_at": "当前时间",
-  "status": "plan_done",
-  "completed_steps": ["1"],
+  "status": "init_in_progress",
+  "completed_steps": [],
   "code_files": [],
   "requirement_summary": "{基于完整计划的一句话摘要，≤100 token}",
   "requirement_points": [],
   "keywords": "{≤8个技术关键词数组}",
   "indexed": false,
-  "ticket_id": "{写入索引后回填}",
+  "ticket_id": "{在 create 前生成的非空唯一 ID}",
   "mode": "fast",
   "max_rounds": 1,
   "template_version": "v1.1",
-  "migration_log": []
+  "migration_log": [],
+  "schema_version": 3,
+  "workflow_gate_schema_version": 1,
+  "thinking_gate_schema_version": 1,
+  "mcp_gate_schema_version": 1
 }
 ```
 
@@ -583,7 +616,7 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
 
 - **跟随工单目录 + append-only**：`.icode_output_N/` 删除→缓存消失；每条注入立即写盘，崩溃不丢、重启不重复注入
 - **与续跑机制正交**：不读 `*_in_progress`，不影响步骤 2/5 断点续跑
-- **向后兼容**：旧工单无缓存→首次检索创建空缓存 `{"ticket_id":"<本工单>","injections":[]}`（ticket_id 读 metadata，暂无填空串）
+- **向后兼容**：旧工单有 metadata 且 `ticket_id` 非空、但无缓存 → 首次检索可创建 `{"ticket_id":"<本工单>","injections":[]}`；无 metadata 或空 `ticket_id` 的 legacy 目录只读，不创建无身份缓存
 
 ### 工程污染防护
 

@@ -210,6 +210,47 @@ find "${GIT_ROOT}" -maxdepth 3 -name "<module_name>" -type d
 
 **代码特征扫描**（grep 优先）：用 Grep 扫描工程代码特征识别 entry 函数/导出 API/关键数据结构，结果作为 00_overview.md「核心模块清单」+「全栈图」输入，按本表「动态章节」段（doc_template.md「五」）决定追加哪些章节（AI 根据工程实际技术栈选 grep 模式，**不硬编码框架名**）。汇总「章节规划清单」：固定（00/10/90/99）+ 命中的动态章节。
 
+### 2.5 工作清单（doc_worklist.json，防中断丢进度）
+
+**动机**：doc 全量/多模块生成耗时长，中断后重跑若靠"重扫模块→重判增量"恢复，会重复生成已完成的章节（浪费 token）或漏掉半成品。步骤 2 检测完成后把**候选清单固化为磁盘状态**，每次生成/跳过/更新都更新它——中断续跑 = 只处理未完成项。
+
+**位置**：`$DOC_DIR/doc_worklist.json`（与工程 `_meta.json` 同级，`$DOC_DIR = ~/.claude/icode_data/project_docs/<project_id>/`）。
+
+**结构**：
+
+```json
+{
+  "schema_version": 1,
+  "project_id": "<project_id>",
+  "request_id": "<本次 /icode doc 调用的幂等键，新调用生成新 id>",
+  "generated_at": "date +%Y-%m-%dT%H:%M:%SZ",
+  "items": [
+    {
+      "id": "<章节名或 module_docs key>",
+      "kind": "project_chapter | module_doc | fixed_chapter",
+      "candidate": "<章节/模块显示名>",
+      "reason": "候选原因：新依赖 / 代码特征命中 / 用户指定 / 增量 diff 命中 / 固定章节",
+      "baseline": "<current commit，或 prev..HEAD diff 摘要>",
+      "target": "<目标相对路径，如 00_overview.md 或 module_docs/<key>/>",
+      "status": "pending | generated | verified | done | blocked | deferred | out_of_scope",
+      "note": ""
+    }
+  ]
+}
+```
+
+**状态机**：`pending`（候选待生成）→ `generated`（初稿已写）→ `verified`（99 章代码事实审计核验通过）→ `done`（收尾完成）；失败/无法生成 → `blocked`（附 `note` 原因）；本次跳过（用户点模块/不在本次范围）→ `deferred`；明确范围外（如 `C_follow_up` 型）→ `out_of_scope`。
+
+**读写契约**：
+- **步骤 2 末**：初始化/重建 worklist（保持已存在项，只补新增候选；`request_id` 更新为本次）
+- **每个模块/章节生成后**：更新对应 item `status`（generated/blocked）+ `note`；**99 章审计对单章节核验通过后** → `verified`
+- **收尾（步骤 7）**：全部 item 达 `done`/`blocked`/`deferred`/`out_of_scope` 后置 `request_id` 保持 + 汇总
+- **幂等续跑**：doc 再次调用时读现有 worklist——`verified`/`done` 项跳过；`pending`/`generated`/`blocked` 项续跑（generated 重跑审计，blocked 重试或维持）；**同 `request_id` 续跑是幂等重放，不重复生成已验证项**
+- **写前重读合并 + 原子写**：与全局索引同契约（并发 doc 会话防丢项）
+- vNext 工单上下文下，每次状态迁移追加 `doc_module_status` 事件（`event --type doc_module_status --payload '{"module":"<id>","status":"<新状态>","request_id":"<id>"}'`）；doc 独立运行时无工单目录 → 状态记录以 worklist 本身为准，不强制事件
+
+**报告列**（步骤 7 末尾汇总输出）：`done / blocked / deferred / out_of_scope` 各计数 + 失败原因清单，禁止把 blocked 项并入 done 假装完成。
+
 ### 3. 增量判定（非全量时）
 
 - `$DOC_DIR` 不存在 → 首次全量

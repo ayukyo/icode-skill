@@ -1,11 +1,14 @@
 # 步骤：提交后收敛（/icode worktree --close）
 
-**命令**: `/icode worktree --close`
+**命令**: `/icode worktree --close [--ticket <ticket_id>]`
 - 默认（无参）：用户已自行完成 commit/push/merge 后，关闭本工单本地 checkout 并记录在线基线（close 本义即「用户已提交后的收敛」，无额外参数）
-**产出**: 工单 metadata 更新（`active_checkout` → `checkout_history` 置 `submitted`、`submitted_baseline`、`migration=null`）+ 安全清理 checkout；不产出新的工单产物文件
+- `--ticket <ticket_id>`：**显式身份解析**（变更类命令推荐）——`python3 tools/icode_control.py resolve-ticket --ticket <ticket_id> --workspace <工程根>` 解析目标工单目录；命中多个候选 → **拒绝猜测报错退出**（exit 4，输出候选清单）；未命中 → 索引兜底 / path_gone 报告
+**产出**: 工单 metadata 更新（`active_checkout` → `checkout_history` 置 `submitted`、`submitted_baseline`、`migration=null`、`close_state` 分阶段推进）+ 归档 manifest/事件留痕 + 安全清理 checkout；不产出新的业务实现文件
 **会话**: 主会话
 
 > close **不替用户 commit/push/merge**，只做「用户已提交后的本地收敛」——核验在线证据 → 状态收敛 → 安全清理。`/icode worktree --close` 之后工单仍可从归档正常检索和复用（归档产物不随 checkout 删除）。
+>
+> **关闭分阶段状态（vNext，schema v3）**：close 按 `close_state` 分阶段推进（`close_planned → archived → roots_verified → checkouts_removed → branches_removed → closed`，真源 [mcp/workflow-gate/gates.json](../mcp/workflow-gate/gates.json) `state_machine.close_phases`）。`close_planned/archived` 在源 `{ICODE_OUT_DIR}` 执行；`archived` 成功后命令返回 `control_root=<archive_path>`，**后续所有阶段必须改用该归档根作为 `--dir`**。这样 checkout 被 remove 后仍能留痕并续跑。legacy 工单只读；需先显式迁移至 vNext 才能启动 close，禁止直写 close_state。
 
 ## 本步骤 L1/L2 检查项声明
 
@@ -14,7 +17,7 @@
 | **L1·致命** | 无最新工单目录（`.ico_output_N/` 不存在或 metadata 缺失） | 报错退出，提示先 `/icode init` / `/icode start` 创建工单 |
 | **L1·致命** | 统一拓扑门禁 verdict=blocked（双活动实现根 / 子仓逃逸 / 未完成迁移 / cwd 不符） | 报错退出（[references/worktree_isolation.md §3.8](../references/worktree_isolation.md)） |
 | **L1·致命** | 前置证据不满足（§2 在线证据核验失败，如预期提交不可从**契约 `target_remote_ref`** 到达 / 活动 checkout 仍含未保存唯一修改 / 契约仓库未登记） | 报错退出，报告缺失证据，**用户说"已提交"不是跳过 git 证据校验的理由** |
-| **L1·致命** | 产物未归档且不可迁移到保留根 | 报错退出，先完成归档（06_audit 自动归档或手动复制）再 close |
+| **L1·致命** | 产物源不完整，或 `archive_path` 不可写/无法迁移到保留根 | 报错退出；06_audit 只准备目标，close 的 `archived` 阶段负责复制与完整性验证 |
 | **L2·关键** | 目标在线 ref 在 close 期间又前进（commit 变化） | 重新解析 + 重新校验包含性（§6），不得把分支名当稳定 commit |
 
 ## 定位
@@ -30,9 +33,10 @@
 
 ## 前置校验
 
-1. 按 [references/dir_and_metadata.md「检测最新目录」段](../references/dir_and_metadata.md) 确定 `ICODE_OUT_DIR`
+1. **身份解析**：带 `--ticket` 时按命令行说明走 `resolve-ticket`（多义即拒绝）；无参时按 [references/dir_and_metadata.md「检测最新目录」段](../references/dir_and_metadata.md) 确定 `ICODE_OUT_DIR`
 2. 调用统一拓扑门禁（§3.8），verdict=blocked 报错退出
 3. 读 `active_checkout`（缺失按 §3.7 推导）：非 null 才可 close；原地工单直接提示「无 checkout 可收敛」
+4. **已 closed 终态检查**：metadata `close_state == "closed"` → 只回放摘要（保留产物路径 / 逐仓基线 / 未清理资源），**不重复执行任何核验与清理动作**，正常退出
 
 ## §2 前置证据核验（close 前必须全部确认，G4）
 
@@ -40,23 +44,41 @@
 2. **逐仓读取提交契约**（`submission_contracts`，缺失按 [references/worktree_isolation.md](../references/worktree_isolation.md) §3.7 推导，见 §3.5.5「兼容」）：close 的目标真源 = 每个契约仓库的 `target_remote_ref`——**不临时猜测**目标分支（G4 目标真源，见 [references/worktree_isolation.md](../references/worktree_isolation.md) §3.10）
 3. **本工单预期提交确实可从精确 `target_remote_ref` 到达**（逐仓，super + 子仓一视同仁）：`git fetch <remote_name>` 或 `git ls-remote <remote_url> <target_push_ref>` 获取**在线目标 SHA**（不用本地缓存 ref 防过期）→ `git merge-base --is-ancestor <ticket 分支 HEAD> <target_remote_ref>`（退出码 0 = 可达；只读命令）。不可达 → 报告差异并让用户确认实际落地 commit（可选指定）；**不得跳过**
 4. 活动 super checkout 与各子仓不存在未保存的唯一修改（`git status --porcelain` + 未推送提交检查）
-5. ICode 核心产物已归档或迁移到保留根（`archive_path` 有效，或产物已复制到不随 checkout 删除的位置）
+5. ICode 归档源产物完整可读，`archive_path` 已指向可写的保留根；此时仅是归档准备，完整复制与 manifest/hash 验证在 `archived` 阶段执行
 6. 全局 index 中工单身份与本地 metadata 一致
 7. **检查 remote 上是否出现本工单同名意外分支**（`git ls-remote <remote_url> refs/heads/icode/<ticket-slug>*`，与本工单契约目标分支不同者）→ 发现则**报告但不自动删除**（历史事故：ticket 分支无 upstream 被误推到新建同名远端分支）
 
-## 执行流程（按顺序）
+## 执行流程（分阶段推进，每阶段完成即 close-phase 留痕）
 
-1. **冻结拓扑快照**：读取并记录当前 `active_checkout`/`sub_worktrees`/checkout 分支 HEAD
-2. **逐仓校验在线目标 ref 包含预期提交**（G4：§2 第 3 项，super + 每个契约子仓；任一仓库不可达 → 停止 close，报告差异）
-3. **确认产物归档完整性**：`archive_path` 有效且 `test -d` 通过（未归档 → 先执行 06_audit 归档段或手动复制，见 [references/worktree_isolation.md 「产物归档」](../references/worktree_isolation.md)）
-4. **活动 checkout 置 `submitted`**：`active_checkout` 移入 `checkout_history`（`state="submitted"`，`superseded_at`/`removed_at` 按实际），`active_checkout` 置 `null`
-5. **记录后续维护基线（逐仓化）**：`submitted_baselines` = 每个契约仓库 `{repo_path, target_remote_ref, commit}`（commit = 在线目标 ref 实际解析 commit，**用 commit 不用分支名**）；super 仓库 commit 同步写 `submitted_baseline`（兼容旧字段）
-6. **清理业务子仓 checkout**（经用户确认后）：先对每个子仓隔离 checkout 确认已 merge 回原子仓 → `git -C <原子仓> worktree remove <子仓隔离路径>` → `git -C <原子仓> branch -d icode/<ticket-slug>-<子仓slug>`（安全删除，被拒则保留分支并报告）
-7. **清理 super checkout**（经用户确认后）：`git worktree remove <active_checkout.path>`（在非该 checkout 的位置执行；含未提交改动时 remove 失败是保护，**禁止自动 `--force`**）
-8. **删除分支**：已合并分支仅用安全删除 `git branch -d`；被 Git 拒绝（未完全合并）时**保留分支并报告**，不自动 `-D`
-9. **prune**：`git worktree prune` 清理失效管理记录
-10. **更新 metadata + index**：`checkout_history` 中已清理项的 `removed_at=<ts>`、`submitted_baselines`（含兼容 `submitted_baseline`）、`submission_audit`（G4 审计结果）、`active_checkout=null` 同步写 metadata + 全局 index（写前重读合并契约见 [references/dir_and_metadata.md「全局索引写入」](../references/dir_and_metadata.md)）
-11. **输出**：保留产物路径（`archive_path`）、逐仓在线基线（`submitted_baselines`）、意外远端分支报告（如有）、未清理资源清单（未能安全删除的分支/worktree）
+> **阶段语义表**（vNext 工单执行；每阶段完成即调 `close-phase` 记录，失败/中断重跑从 `close_state` 锚定续跑）：
+
+| 阶段 | 动作（对应原步骤 1-11） | 完成即留痕 |
+|---|---|---|
+| `close_planned` | §2 前置证据核验全部通过 + **冻结拓扑快照**（active_checkout/sub_worktrees/分支 HEAD）+ **输出身份计划**（见下「§7 身份计划」） | ✓ |
+| `archived` | 执行 [worktree_isolation.md「产物归档」](../references/worktree_isolation.md) 的小文件复制；再运行 `python3 tools/icode_control.py archive-manifest --dir {ICODE_OUT_DIR} --archive-dir <archive_path> --write`，要求必需控制文件齐全、源/归档 SHA-256 一致、三 linter 归档前后等价通过；最后在源根记录本阶段，控制面会把最新 metadata/事件链交接至归档根并返回 `control_root` | ✓ |
+| `roots_verified` | **从本阶段起 `close-phase --dir <control_root>`**。逐仓校验在线目标 ref 包含预期提交（G4：§2 第 3 项，super + 每个契约子仓；任一仓库不可达 → 停止 close，报告差异）+ 检查意外同名远端分支（§2 第 7 项，发现**报告不自动删除**） | ✓ |
+| `checkouts_removed` | 收敛 + 清理 checkout（原步骤 4-7+9，**经用户确认后**）：活动 checkout 置 `submitted`（`active_checkout` 移入 `checkout_history`，`active_checkout=null`）→ 记录 `submitted_baselines`（逐仓 `{repo_path, target_remote_ref, commit}`，super 兼容写 `submitted_baseline`）→ 清理子仓/super checkout + `git worktree prune` | ✓ |
+| `branches_removed` | 删除分支（原步骤 8）：已合并分支仅用安全删除 `git branch -d`；被 Git 拒绝（未完全合并）时**保留分支并报告**，不自动 `-D` | ✓ |
+| `closed` | 更新 metadata + index 最终态（原步骤 10-11）：`checkout_history` 已清理项 `removed_at=<ts>`、`submitted_baselines`、`submission_audit`（G4 审计结果）、`active_checkout=null`；输出保留产物路径 / 逐仓基线 / 意外远端分支报告 / 未清理资源清单 | ✓ |
+
+> 注：`submitted_baselines`/`submission_audit`/`removed_at`/`active_checkout` 等非 status 字段也禁止直写，统一用 `metadata-update --set-json/--append-json --request-id <key>` 原子写回并留 `metadata_updated` 事件；`close_state` 本身由 `close-phase` 独占推进。`archived` 之后这些写回和最终 `index-write --ticket-dir <control_root>` 都必须针对归档根；索引 writer 保留原 `project_path/out_dir` 身份三元组。
+
+> 注：清理业务子仓 checkout 前先确认已 merge 回原子仓；`git worktree remove` 含未提交改动时 remove 失败是保护，**禁止自动 `--force`**（I-5）。
+
+## §7 身份计划（identity plan，close_planned 阶段输出）
+
+close 开始（`close_planned`）时输出**可机读身份计划**，作为「预期关闭结果」锚，与最终 `closed` 状态比对：
+
+```text
+identity plan:
+  ticket: <ticket_id>  source_out_dir: <ICODE_OUT_DIR>  status: completed
+  active_checkout: <path> → 置 submitted（移入 checkout_history）
+  per-repo: {repo_path, target_remote_ref, expected_commit, action: [置submitted + 清理checkout + 安全删分支]}
+  cleanup: [<子仓隔离路径>, <super checkout 路径>]  branches: [<ticket-slug-* 分支>]
+  control_root: <ICODE_OUT_DIR> → <archive_path>（archived 阶段交接）
+```
+
+若最终 `closed` 状态与身份计划不一致（如某分支被 Git 拒绝保留、某 checkout 未能清理）→ 留在输出报告的「未清理资源清单」，**不伪造已收敛**。
 
 ## 关闭后状态
 
@@ -80,8 +102,10 @@ close 操作开始后目标 ref 又前进时：记录实际解析到的 commit�
 ## 幂等性
 
 重复执行 close：
-- 已 close（`submitted_baseline` 非 null 或 `submitted_baselines` 非空，且 `active_checkout` null）→ 报告「本工单已关闭，基线 {commit}；如需恢复请 /icode worktree --reopen」，不重复清理
-- 清理中途中断 → 重跑只执行剩余安全清理（checkout 已 remove 的跳过）
+- **已 closed**（`close_state == "closed"`，或 legacy 判定：`submitted_baseline` 非 null / `submitted_baselines` 非空 且 `active_checkout` null）→ 只回放摘要（保留产物路径 / 逐仓基线 / 未清理资源清单），报告「本工单已关闭，基线 {commit}；如需恢复请 /icode worktree --reopen」，**不重复执行任何核验与清理动作**
+- **分阶段幂等（vNext）**：`close-phase` 对当前阶段重放返回「已应用」摘要（不重复执行）；`archived` 重放会补做未完成的控制根交接自愈；之后从归档 `control_root` 的 `close_state` 锚定下一阶段，checkout 已 remove 也不影响续跑
+- **禁止跨阶段跳转**：close-phase 收到非相邻阶段 → fail-closed 拒绝（门禁 `close_phase_order`）
+- **并发保护**：close 属变更类命令，必须用显式身份解析（`--ticket`/`resolve-ticket`）+ `close-phase` 锁内写（`.icontrol.lock`），杜绝多会话重复清理
 
 ## 反偷懒
 

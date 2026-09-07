@@ -29,7 +29,7 @@
 范围契约: {scope_contract 字段读取方式：直接读 metadata.scope_contract，缺失视为 "未冻结"；显示 summary 摘要（截断 ≤60 字）+ 冻结时间。requirement_deltas 读取：缺失视为 []；存在未分流条目（classification 未定 / needs_user_confirm 未确认 / needs_replan 未重审）时显示「⚠️ 有 N 条未分流语义变更」——提示先分流再继续} 
 schema: {template_version 字段读取方式：直接读 metadata.template_version 字段，缺失视为 "未知"；显示 schema 版本 + migration_log 长度，如 "v1.1 (3 migrations, 最近 2026-07-25 12:34)" 或 "v0（待迁移）" 或 "未知（field 缺失）"}
 worktree: {worktree_path 字段读取方式：读 metadata.active_checkout（缺失按 [references/worktree_isolation.md](../references/worktree_isolation.md) §3.7 用 worktree_path 内存推导，不写回），null 显示「主仓」；非 null 显示路径 + branch（如 "…/<repo>-wt-<ticket-slug>（分支 icode/<ticket-slug>）"，另注意续跑须 cd 进该 worktree，见 [references/worktree_isolation.md](../references/worktree_isolation.md) §2）；wt_degraded=true 时附注「（降级原地，未用 worktree）」}
-拓扑: {active_checkout 字段读取方式：读 metadata.active_checkout，缺失则按 [references/worktree_isolation.md](../references/worktree_isolation.md) §3.7 用 worktree_path 内存推导（不写回）。null 显示「原地（无活动 checkout）」；已 close（submitted_baseline 非 null）显示「已关闭，基线 {submitted_baseline 前 12 位}」；非 null 显示「{path}（分支 {branch}，{state}）」——state 为 `preparing`（迁移中间态，§3.5）时附注「（迁移中，未获活动权）」；state 为 `submitted`（close 后）时显示「已提交（close），基线 {submitted_baseline 前 12 位}」。迁移状态：migration 非 null 时附注「迁移: {migration.state}」。历史 checkout：{checkout_history 长度（推导时 worktree_path 非 null 计 1）} 个（state 分布：{逐条统计 `superseded`/`submitted`/`removed`/`abandoned` 计数，如 superseded×1、removed×1}，词表见 §3.6）。**双活动根检测**：checkout_history 中 state=active 与 active_checkout 同时存在 → 拓扑判定 BLOCKED，输出各冲突路径 + 各自 dirty/commit 情况，禁止自行选择"较新的那个"（§3.8）}
+拓扑: {active_checkout 字段读取方式：读 metadata.active_checkout，缺失则按 [references/worktree_isolation.md](../references/worktree_isolation.md) §3.7 用 worktree_path 内存推导（不写回）。vNext 仅 `close_state=closed` 显示「已关闭，基线 {submitted_baseline 前 12 位}」；只有 legacy 工单才以“有 submitted 基线且 active_checkout=null”兜底判关闭。active_checkout 非 null 则显示「{path}（分支 {branch}，{state}）」，即使保留历史 submitted_baseline 也不误判为仍关闭。state 为 `preparing` 时附注「迁移中，未获活动权」。迁移状态：migration 非 null 时附注「迁移: {migration.state}」。历史 checkout：{checkout_history 长度与 state 分布}。**双活动根检测**：checkout_history 中 state=active 与 active_checkout 同时存在 → 拓扑判定 BLOCKED，输出各冲突路径 + dirty/commit，禁止自行选择"较新的那个"（§3.8）。reopen 工单另显示 `artifact_root`，明确代码根与产物根分离}
 已完成: {completed_steps 链路，如 log -> 1 -> 2 -> 3 -> 4}
 下一步: {根据续跑判定规则推断，如 "/icode deepcheck (步骤5复检)"}
 代码文件: {code_files 列表，无则"未编码"}
@@ -74,7 +74,7 @@ worktree: {worktree_path 字段读取方式：读 metadata.active_checkout（缺
    - `superseded` 时额外写 `superseded_by`（来自 `--superseded-by` 参数）
    - 若有 `--premise-dep` 参数：写 `verdict_premise_deps`（数组，每条 `{module, commit, path}`）+ 初始化 `verdict_review_needed=false`（首次标注未检测前为 false，后续由 `--scan-verdict` 或检索命中被动检测改写）
    - **幂等覆盖**：已有 verdict 也覆盖（刷新 `verdict_at`），不报错；verdict 变化时记录新 verdict_at
-   - 写回 metadata + index.json（两处同步，不得只写其一）；**写 index 前必须写前重读合并**（同 [references/dir_and_metadata.md](../references/dir_and_metadata.md)「全局索引写入」段契约：重新 Read 最新 index → 在最新快照上定位本工单条目改 verdict → 原子写回，勿在旧快照覆盖——多会话并行时防丢其他工单条目）
+   - vNext 先调 `python3 tools/icode_control.py metadata-update --dir <out_dir> --set-json '<verdict 字段对象>' --request-id '<唯一键>'` 原子写回并留事件，再调 `python3 tools/icode_control.py index-write --ticket-dir <out_dir>` 同步镜像字段；禁止手工读-改-写 metadata/index
 4. **输出确认**：`✅ 已标注 {ticket_id} verdict={verdict}（source={source}）；后续检索命中将按 verdict 分流注入（disproved 反转避坑 / superseded 注替代指针 / verified 正常借鉴）`
 
 **反偷懒**：
@@ -98,8 +98,8 @@ worktree: {worktree_path 字段读取方式：读 metadata.active_checkout（缺
 4. **对 B·disproved/superseded 候选（复活检测）**：
    - 读其 `verdict_premise_deps`（空数组跳过--无硬复活能力，靠软复活）
    - 对每个 dep，取当前 commit：`git -C {dep.path} rev-parse HEAD`（只读，stale 白名单内；`dep.path` 目录不存在则记 `path_gone`，视为变化）
-   - 若 `dep.commit != 当前 HEAD`：证伪前提依赖已变化，置 `verdict_review_needed=true` 写回 index.json（客观 commit 比对，**可自动写**，不写 verdict 本身）；**写前重读合并**（同上方 `--verdict` 契约：写回前重新 Read 最新 index → 合并本会话改写 → 原子写回，防并发覆盖其他条目）
-   - 若所有 `dep.commit == 当前 HEAD`：`verdict_review_needed=false`（证伪前提依赖未变，保持硬反转+证伪前提断言）
+   - 若 `dep.commit != 当前 HEAD`：证伪前提依赖已变化，调 `index-update --ticket-id <id> --set-json '{"verdict_review_needed":true}'`；不写 verdict 本身
+   - 若所有 `dep.commit == 当前 HEAD`：经同一 `index-update` 入口置 `verdict_review_needed=false`
 5. **汇总输出**（按信号/变化命中数排序）：
 
 ```
@@ -140,7 +140,7 @@ worktree: {worktree_path 字段读取方式：读 metadata.active_checkout（缺
 
 **执行流程**：
 
-0. **落点约束（worktree 工单）**：读 metadata `active_checkout`（缺失按 [references/worktree_isolation.md §3.7](../references/worktree_isolation.md) 用 `worktree_path` 推导），非 null → 提示「本工单产物在 worktree 内，请先 `cd {active_checkout.path}` 再运行本校验」并**退出**（在主仓跑会找不到 worktree 内产物 → 误报缺失，cwd 契约的机器校验延伸）；用户已在该 worktree 内 → 正常执行。null（原地工单）→ 直接执行
+0. **落点约束（worktree 工单）**：读 metadata `active_checkout`（缺失按 [references/worktree_isolation.md §3.7](../references/worktree_isolation.md) 用 `worktree_path` 推导），非 null 时先核对当前 cwd 就是 `{active_checkout.path}`。普通 worktree 工单在该 checkout 校验产物；**reopen 工单**则从 `.icode_output/.active_ticket.json` 取 `control_root`，在归档根校验产物/事件，同时在 active checkout 校验代码。null（原地工单）直接执行。
 1. 确定工单目录：`--validate` → 用「检测最新目录」逻辑；`--validate N` → 指定 `.icode_output/.icode_output_N`
 2. 运行机器校验（Bash 一行命令，输出逐项结果，任何一项不通过记入问题清单）：
 

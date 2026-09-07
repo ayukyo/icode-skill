@@ -45,18 +45,24 @@
 {
   "requirement": "{用户输入的原始需求}",
   "created_at": "当前时间",
-  "status": "plan_done",
-  "completed_steps": ["1"],
+  "status": "init_in_progress",
+  "completed_steps": [],
   "code_files": [],
   "requirement_summary": "{基于完整计划的一句话摘要，≤100 token}",
   "requirement_points": [],
   "keywords": "{≤8个技术关键词数组，从需求/计划技术栈提炼，不得为空--空 keywords 工单无法被段一粗筛命中}",
   "indexed": false,
-  "ticket_id": "{写入索引后回填}",
+  "ticket_id": "{在 create 前生成的非空唯一 ID}",
   "mode": "fast",
-  "max_rounds": 1
+  "max_rounds": 1,
+  "schema_version": 3,
+  "workflow_gate_schema_version": 1,
+  "thinking_gate_schema_version": 1,
+  "mcp_gate_schema_version": 1
 }
 ```
+
+> **控制面接线（schema v3）**：先生成非空 `ticket_id`，将其他字段传给 `python3 tools/icode_control.py create --dir {ICODE_OUT_DIR} --ticket-id <id> --requirement '<原始需求>' --birth plan --metadata-json '<json>'`，原子产生 `init_in_progress` + `ticket_created`。计划产物/合同完成后调 `transition --to plan_done`，工具自动追加 `"1"`；索引写入走 `index-write`。禁止把 `plan_done` 直写为出生态。
 
 **新增字段**（仅 fast 模式有值，full 模式可省略或留空，默认 `"full"`）：
 - `mode`：工单模式，`"fast"` / `"full"`（默认 `"full"`）

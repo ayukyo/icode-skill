@@ -42,7 +42,7 @@
 
 **`<ticket-slug>` 占位符语义（**关键，避免 AI 误用**）**：
 - **定义**：由 AI 在判定·触发之后、执行·创建之前**自行提炼**（基于当前需求文本；命名规则见下方「命名」段）
-- **与 ticket_id 区别**：ticket_id = `{工程名}-{N}`（步骤8 索引写入后回填，**带工程名前缀+目录号 N**）；`<ticket-slug>` 是**纯英文短横线 slug**（不带前缀、不带 N），早于 ticket_id 生成
+- **与 ticket_id 区别**：ticket_id = `{工程名}-{N}`（创建 metadata 前生成，**带工程名前缀+目录号 N**）；`<ticket-slug>` 是**纯英文短横线 slug**（不带前缀、不带 N），用于分支/路径命名。
 - **回显与创建共用一处**：判定·触发回显中"准备创建 ../<repo>-wt-<ticket-slug>/（分支 icode/<ticket-slug>）"→ 执行·创建 `git worktree add -b "icode/<ticket-slug>" "../<repo>-wt-<ticket-slug>"` → **两者必须用同一值**（一处提炼两处用）
 - **冲突处理**：与 `git worktree list` 已存在的路径/分支冲突 → 追加 `-2` / `-3`（见下方「命名」段）；提炼后立即用 `git worktree list` 检查冲突，命中即重提炼
 - **AI 必须自己提炼、勿向用户索取**；勿用占位符字符串直接执行创建
@@ -135,7 +135,7 @@ fi
 
 ## 2. cwd 契约（续跑硬性前提）
 
-- 续跑 worktree 工单（`review/code/deepcheck/audit/patch/status/readme`）**必须先 `cd` 进对应 worktree**——产物在 worktree 内 `.icode_output_N/`，主工作区找不到；且在错误 checkout 会命中**错误的最新工单**
+- 续跑 worktree 工单（`review/code/deepcheck/audit/patch/status/readme`）**必须先 `cd` 进对应 worktree**。普通周期的产物在 worktree 内 `.icode_output_N/`；**reopen 周期是明确例外**：新 checkout 的 `.icode_output/.active_ticket.json` 指向归档 `control_root`，代码仍在 worktree 操作，产物/事件仍在 control_root 读写。必须同时校验 cwd 与指针身份，禁止在错误 checkout 命中错工单。
 - 定位：`git worktree list` 找到对应 worktree → `cd <worktree>` → 调步骤命令；或读 metadata `active_checkout`（缺失按 §3.7 用 `worktree_path` 推导）
 - **业务子仓续跑**：含子仓隔离的 worktree 工单，`cd` 进 super-worktree 后业务子仓文件即位于 worktree 内对应相对路径（见 §1「⑤ 业务子仓隔离」），正常操作；勿 cd 回原工程路径的子仓改代码（污染）
 - 已在 worktree 内再新建工单 → 不再嵌套，**原地建普通工单且 `worktree_path` 不写（null）**——本工单非 worktree 隔离工单（不触发回流提醒/remove 关联；避免与既有 worktree 工单共享工作树时被误当隔离工单，导致回流/清理互相干扰）。产物在当前 checkout 的 `.icode_output_N` 内，续跑仍在当前 checkout（cwd 契约照常，勿在主仓跑——物理产物在 worktree 内，主仓找不到）
@@ -489,25 +489,30 @@ git worktree remove --force ../<repo>-wt-<ticket-slug>   # --force 仅限改动�
 - **顺序陷阱（两重保护）**：`git branch -d` 有两道检查——① 分支仍 checkout 于 worktree 时被拒 → **先 `worktree remove` 再 `branch -d`**；② 分支未完全合并时被拒（`没有完全合并`）→ 方案① merge 后自然满足；只 commit 不 merge（想暂留分支）则 branch -d 被拒是 git 正常保护——保留分支等以后合并，或用户自行 `git branch -D`（icode 不执行 `-D`）
 - **执行位置（git 2.34.1 实测，非"失败未生效"）**：`git worktree remove` **必须在主工作区执行**——在 worktree 内对自身执行 remove 会**成功删除目录**（exit 0、无报错，git 不阻止），删除后当前 shell 目录悬空、后续命令报「不能读取当前工作目录」；**切勿把"删空后报错"误认为"remove 失败、目录未受影响"**（错误认识会误导用户原地重试，实际目录已删）。`git branch -d` 的失败与 cwd **无关**：分支仍被某 worktree 检出于任意位置都报「error: 无法删除检出于 '<worktree>' 的分支」（顺序陷阱①的检出保护），先 remove 再 branch -d 即解。回流命令前先确认在主工作区执行
 - **严禁**未处理改动就 remove（会失败——失败是保护，绝不由 icode 自动 `--force`）
-- **回流前产物留档（自动归档）**：07_readme 交付报告与产物都在 worktree 内，remove 后随之消失——**06_audit 终审已完成自动归档**（见下方「产物归档」），remove 前无需人工复制；若工单未走 06_audit 而直接 remove，需留档仍须人工复制出 worktree 再 remove
+- **回流前产物留档（close 阶段归档）**：07_readme 交付报告与产物都在 worktree 内，remove 后随之消失——06_audit 只准备 `archive_path`；**close 的 `archived` 阶段必须先复制并通过 manifest/hash + linter roundtrip，才能 remove**。未走该阶段不得直接 remove。
 - **改动涉及 submodule**：submodule 内改动需**在 worktree 内 submodule 里单独 commit**（主仓 `git add -A && git commit` 只更新 gitlink，不带 submodule 内部改动）
 - **业务子仓隔离回流（repo 工程，非 submodule）**：子仓隔离 checkout 在 super-worktree 内，remove super-worktree 会连子仓 checkout 一并消失——子仓改动须**先在里面 commit + merge 回原子仓**（见方案①循环），再 remove；勿直接 remove 把未回流子仓改动丢掉。子仓改动不随 super-worktree 产物归档（已 merge 回原子仓即持久）
 - 未完成工单：worktree 保留，`git worktree list` 可随时看到，`cd` 回去续跑
 
 ### 产物归档（自动，防 worktree remove 丢档）
 
-**目的**：worktree 工单的 `.icode_output_N/` 全在 worktree 内，`git worktree remove` 后随 worktree 消失（全局索引仅留摘要，完整 ADR/根因/交付报告丢失，复用价值打折）。归档把**核心产物**复制到 remove 不丢的位置，供后续检索复用完整结论。
+**目的**：worktree 工单的 `.icode_output_N/` 全在 worktree 内，`git worktree remove` 后随 worktree 消失。归档必须保留所有“小而关键”的控制面产物，使关闭后仍能复跑门禁；不能再只复制少数摘要文件。
 
-- **触发时机**：`06_audit` 终审标记 `status=completed` 时，若 `metadata.active_checkout` 非 null（缺失按 §3.7 用 `worktree_path` 推导）→ 自动归档（remove 前归档已完成，remove 是用户回流手动步）。原地工单不触发（产物本在主仓，不丢）。
+- **触发时机**：`06_audit` 只准备 `archive_path`；真正的完整性归档在 `/icode worktree --close` 的 `close_planned → archived` 阶段执行，并且必须早于任何 checkout remove。原地工单不触发（产物本在主仓，不丢）。
 - **归档目标**：`~/.claude/icode_data/worktree_archive/<project_id>/<ticket_id>/`（与全局索引同层，天然不随 worktree 走；独立目录不污染 project_docs/module_docs；`ticket_id` 唯一防冲突）
-- **归档内容**（核心高价值产物，`cp` 只复制存在的）：`.ico_metadata.json` + `00_init.md` + `01_plan.md` + `03_plan_final.md` + `log_analysis.md`。**不归档**：中间审查 JSON（`review_round_*.json`）、`tb_source/` 等大目录、临时文件。
-- **归档命令**：
+- **归档内容**：复制工单顶层所有不超过 2 MiB 的常规文件（metadata、事件链、三类 trace、decision anchors、各步骤报告、review JSON、snapshot 等）；控制面按 `completed_steps` 计算的必需文件缺一即失败。顶层超过 2 MiB 的大文件不复制，由 manifest 记录外部引用、大小和 SHA-256；子目录中的原始日志/附件不在当前 manifest 的递归归档范围，关键证据必须已回指到 `log_analysis.md`/终审报告，不得把未归档的原始目录声称为 manifest 已保存。临时文件、锁和未完成事务不得入档。
+- **归档命令**（示意；复制后必须由控制面复验，不能凭 `cp` 成功宣称归档完成）：
   ```bash
   ARCHIVE_DIR="$HOME/.claude/icode_data/worktree_archive/<project_id>/<ticket_id>"
   mkdir -p "$ARCHIVE_DIR"
-  cp "$ICODE_OUT_DIR/.ico_metadata.json" "$ICODE_OUT_DIR/00_init.md" "$ICODE_OUT_DIR/01_plan.md" "$ICODE_OUT_DIR/03_plan_final.md" "$ICODE_OUT_DIR/log_analysis.md" "$ARCHIVE_DIR/" 2>/dev/null
+  find "$ICODE_OUT_DIR" -maxdepth 1 -type f -size -2097153c \
+    ! -name '.icontrol.lock' ! -name '.icontrol_txn.json' ! -name '*.tmp' \
+    -exec cp -p -t "$ARCHIVE_DIR" -- {} +
+  python3 tools/icode_control.py archive-manifest --dir "$ICODE_OUT_DIR" \
+    --archive-dir "$ARCHIVE_DIR" --write
   ```
-- **索引记录**：归档后写 `metadata.archive_path = "$ARCHIVE_DIR"`，并在刷新全局索引时同步写 index 条目 `archive_path`（metadata + index 同步，不得只写其一）。
+- **完成判据与控制根交接**：`archive_manifest.json` 必须列全控制文件、hash/size 全匹配，三 linter 在源目录和归档目录均通过且结果等价；随后才允许在源根执行 `close-phase --phase archived`。该命令会把**已含 archived 事件**的最新 metadata/事件链再同步到归档根、刷新 manifest hash，并返回 `control_root=$ARCHIVE_DIR`。从 `roots_verified` 开始所有 `close-phase` 和 metadata/index 收敛都针对该归档根；手工裁剪 manifest、缺事件链或缺必需文件均 fail-closed。
+- **索引记录**：准备归档时原子写 `metadata.archive_path = "$ARCHIVE_DIR"`，并在交接前先对源工单用 `index-write` 建立唯一身份条目；禁止直接改 index。交接后的最终刷新使用 `index-write --ticket-dir "$ARCHIVE_DIR"`，writer 保留原 `project_path/out_dir`。`archive_path` 只是目标指针，只有 manifest 和 `close_state=archived` 均通过才表示归档完成。
 - **检索回退（读档复用，archived 活跃态）**：`archive_path` 非 null 时该工单为 **archived 活跃历史工单**，不标 stale——后续检索命中时 `project_path` 已失效（worktree remove）但 `archive_path` 存在 → 从归档目录读 `01_plan.md`（ADR/风险）或 `log_analysis.md`（根因/结论）注入，走**历史参考**语义（作启发，未经当前代码实证，须 Grep/Read 验证，见 [dir_and_metadata.md](dir_and_metadata.md)「过时校验」校验方法第 1 步·归档工单分支），命中**正常续期 + 按 verdict 分流**，待遇与主仓工单一致（仅产物来源不同）。
 
 ---

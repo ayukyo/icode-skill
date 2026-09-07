@@ -5,7 +5,7 @@
 >
 > 历史参考小节（init/plan/log/start 检索命中时）按 verdict 分流标注在 [thinking_detail.md](thinking_detail.md)「历史参考小节」段。
 >
-> **分级思考治理（reasoning gate）**：本文件从「所有步骤固定调用 sequential-thinking ≥3 次」改为「按复杂度分级 L0～L3 选择思考载体」。分级判定机器真源 = `mcp/reasoning-gate/gates.json`（默认等级/升级触发器**只从这里读**）；运行痕迹 = `{ICODE_OUT_DIR}/.thinking_gate_trace.jsonl`（每 step 一条最终判定）；校验器 = `python3 tools/lint_thinking_gate.py <out_dir> [--step <step>] [--strict] [--json]`。完整说明见 `ICODE_SEQUENTIAL_THINKING_OPTIMIZATION.md`。
+> **分级思考治理（reasoning gate）**：本文件从「所有步骤固定调用 sequential-thinking ≥3 次」改为「按复杂度分级 L0～L3 选择思考载体」。分级判定机器真源 = `mcp/reasoning-gate/gates.json`（默认等级/升级触发器**只从这里读**）；运行痕迹 = `{ICODE_OUT_DIR}/.thinking_gate_trace.jsonl`（每 step 一条最终判定）；校验器 = `python3 tools/lint_thinking_gate.py <out_dir> [--step <step>] [--strict] [--json]`。分级规则完整定义以 `mcp/reasoning-gate/gates.json` 为准；历史出处见 [docs/adr/ADR-0001-optimization-proposal-provenance.md](../docs/adr/ADR-0001-optimization-proposal-provenance.md)。
 
 ## 强证据化总览
 

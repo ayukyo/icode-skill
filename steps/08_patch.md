@@ -12,7 +12,7 @@
 | **L1·致命** | 最新工单处于入口态（`init_in_progress` / `log_done`，无 `01_plan.md`） | 报错退出，提示先 `/icode plan` / `/icode start` 进入主流程（patch 只作用于已有主流程产物的工单） |
 | **L1·致命** | 当前工单是 debug 工单（`metadata.debug == true`） | 报错退出，提示：`/icode patch` 不接受 debug 工单（debug 工单是 1 次研究产物、不支持 patch 续跑；如需修代码，请用 `/icode init` 重建正常工单走主流程；详情见 [references/debug_mode.md](../references/debug_mode.md)） |
 | **L1·致命** | 统一拓扑门禁 verdict=blocked（双活动实现根 / 子仓逃逸 / 未完成迁移 / cwd 不符） | 报错退出，输出冲突路径与各自 dirty/commit 情况，提示先 `/icode worktree --update` 或人工裁决（[references/worktree_isolation.md §3.8](../references/worktree_isolation.md)） |
-| **L1·致命** | 工单已 close（`submitted_baseline` 非 null 或 `submitted_baselines` 非空）但未 reopen | 报错退出，提示先 `/icode worktree --reopen` 在最新在线基线上创建新的活动 checkout，再 patch（禁止在已关闭的旧目录上继续改） |
+| **L1·致命** | `close_state=closed` 或（有 submitted 基线且 `active_checkout=null`），即工单已 close 但未 reopen | 报错退出，提示先 `/icode worktree --reopen` 在最新在线基线上创建新的活动 checkout，再 patch（禁止在已关闭的旧目录上继续改） |
 | **L2·关键** | 阶段4 复检发现新引入问题且无法当场修复 | 警告 + 记入 metadata（`patch_history` 末条 `status="issues"`）+ 流程继续（user 可再跑 `/icode patch` 处理） |
 
 ## 定位
@@ -29,9 +29,11 @@
 
 **对状态机的影响**：patch **不改变** `status` 和 `completed_steps`（completed 保持 completed，中途状态保持原状态）。patch 是横向追加，不是纵向推进——靠 `patch_count` / `patch_history` 字段记录（见「强制操作」段），主流程推进逻辑（以 `completed_steps` 最大编号推进）完全不受影响。
 
+**验证记录分离（verify 契约）**：`--listen`/`--test` 为**兼容别名（deprecated）**——纯验证语义（不改代码）的独立入口是 `/icode verify`（[steps/verify.md](verify.md)），别名仍可用但语义 = patch 四段式 + 转发同一实机验证契约。**1.5 实机验证结果一律记入 metadata `verification_runs`**（与 `patch_history` 分离）：无文件 mutation 的验证轮**不新增** `patch_history` 条；验证通过**不自动升级** `delivery_verdict=verified`（终审判定）。字段结构见 [schemas/ticket-metadata.schema.json](../schemas/ticket-metadata.schema.json)。
+
 **completed 工单分流（lifecycle）**：`status=completed` 时区分两种情况——
-1. **未 close**（`submitted_baseline` 为 null 或缺失且 `submitted_baselines` 为空，活动 checkout 未关闭）：patch 可在当前唯一活动根继续（现有行为）
-2. **已 close**（`submitted_baseline` 非 null 或 `submitted_baselines` 非空）：必须**先 `/icode worktree --reopen`** 在最新在线基线上创建新的活动 checkout（不新建 ticket、不清 patch 历史），再 patch。**禁止偷偷复活旧目录**（见 [steps/reopen.md](reopen.md)）。reopen 是新的一代 checkout，写入 `checkout_history`，本次恢复原因记入工单历史。
+1. **未 close**（vNext：`close_state != "closed"`；legacy 兜底：无 submitted 基线且仍有活动 checkout）：patch 可在当前唯一活动根继续。历史 `submitted_baseline(s)` 在 reopen 后仍保留，不能再被当作“当前仍关闭”的判据
+2. **已 close**（`close_state=closed`，或有 submitted 基线且 `active_checkout=null`）：必须**先 `/icode worktree --reopen`** 在最新在线基线上创建新的活动 checkout（不新建 ticket、不清 patch 历史），再 patch。**禁止偷偷复活旧目录**（见 [steps/reopen.md](reopen.md)）。reopen 是新的一代 checkout，写入 `checkout_history`，本次恢复原因记入工单历史。
 
 **后续主流程步骤的配合**：patch 之后继续跑步骤 4/5/6 时，各步骤启动会 Read `08_patch.md` 把补丁纳入计划侧基准（code 在 patch 基础上实施 / deepcheck Reverse 不误判偏离 / audit 追溯矩阵纳入补丁）——详见 [SKILL.md「patch 与主流程步骤的配合」](../SKILL.md) + 各步骤文件「前置：patch 配合」段。review/merge 只动计划文档，不需要配合。
 
@@ -73,10 +75,10 @@
    - `init_in_progress` / `log_done`（入口态，无 `01_plan.md`）→ **报错退出**，提示先 `/icode plan` / `/icode start`
    - `review_in_progress` / `deepcheck_in_progress` → **柔性提示**"当前有未完成的主流程步骤（步骤 2/5 中断态），建议先重跑 `/icode review` / `/icode deepcheck` 续跑"，**不阻断**，用户明确要 patch 则继续
    - 其余状态（`plan_done` 及以后 / `completed`）→ 直接进入执行流程
-2.5. **worktree 工单落点约束**：读 `metadata.active_checkout`（缺失则按 [references/worktree_isolation.md §3.7](../references/worktree_isolation.md) 用 `worktree_path` 推导）：
-   - **非 null**（本工单有活动 checkout）→ **必须先 `cd {active_checkout.path}` 再继续本步骤**（cwd 契约照常，与 status --validate / 06_audit / 07_readme 同，见 [references/worktree_isolation.md §2](../references/worktree_isolation.md)）；在主仓跑会找不到 `.icode_output_N/` 内产物 → 误报缺失
+2.5. **worktree 工单双根约束**：读 `metadata.active_checkout`（缺失则按 [references/worktree_isolation.md §3.7](../references/worktree_isolation.md) 用 `worktree_path` 推导）：
+   - **非 null**（本工单有活动 checkout）→ 必须在 `{active_checkout.path}` 修改/验证代码。普通 worktree 工单的产物根仍在该 checkout；**reopen 工单**则从 `{active_checkout.path}/.icode_output/.active_ticket.json` 读 `control_root`，把它作为 `ICODE_OUT_DIR`，产物/事件继续写归档根。不得因新 checkout 没有 `.icode_output_N` 而新建 ticket 或误报产物缺失
    - **null**（原地工单）→ 直接继续
-   - **已 close**（`submitted_baseline` 非 null 或 `submitted_baselines` 非空）→ 见「定位」段分流：必须先 reopen 再 patch（L1 阻断）
+   - **已 close 且未 reopen**（`close_state=closed`，或有 submitted 基线且 `active_checkout=null`）→ 见「定位」段分流：必须先 reopen 再 patch（L1 阻断）
 2.7. **workflow gate 前置（L1，重大语义变化不得静默吸收）**：patch 启动时运行 `python3 tools/lint_workflow_contract.py {ICODE_OUT_DIR} --step patch --json`——退出码非 0 时**先分流再 patch**：
    - 存在未解决 `semantic_decisions`（`status != resolved` 且非 diagnosis-only）→ 先获用户确认写入合同，**不得以"最保守/最安全/通常如此"代替用户选择**
    - 本次 patch 输入**新增/改变操作入口、从拒绝改为允许或保留改收敛、改变存活身份/依赖迁移/失败语义、改变持久化/事务/回滚/恢复、新增跨组件/跨仓/外部消费者影响、验证边界扩大** → 属**重大增量**，写入 `requirement_deltas` 记 `severity=major, needs_replan=true` 并**回流完整计划**（重跑 plan/review 更新 `scope_contract`/`semantic_decisions`/`impact_contract`/`acceptance_contract`），**不在轻量 patch 路径吸收**；轻量修补只允许处理不改变合同的实现缺陷
@@ -314,7 +316,7 @@
 
 1. **更新元信息**（`.ico_metadata.json`）：
    - `patch_count` = N（本次序号，追问归并**不增加**，见「patch 会话语义」段）
-   - `patch_history` **追加**一条（新 patch 完成时）：`{"patch_no": N, "summary": "一句话（≤100 token）", "files": ["相对项目根路径..."], "at": "date +%Y-%m-%dT%H:%M:%S", "status": "done"|"issues"}`；**追问归并时不新增条**，只刷新末条（`summary` 变化则更新 + `files` 同步追加本次新增/修改文件（去重）+ `at` 刷新 + `status` 保持）
+   - `patch_history` **追加**一条（新 patch 完成时）：`{"patch_no": N, "summary": "一句话（≤100 token）", "files": ["相对项目根路径..."], "at": "date +%Y-%m-%dT%H:%M:%S", "status": "done"|"issues"}`；**追问归并时不新增条**，只刷新末条（`summary` 变化则更新 + `files` 同步追加本次新增/修改文件（去重）+ `at` 刷新 + `status` 保持）；**纯验证轮（1.5 无文件 mutation）不新增 `patch_history` 条**——验证结果记 `verification_runs`（见「对状态机的影响」段 verify 契约）
    - `code_files` **追加**本次新增/修改的文件（去重，保留历史）
    - `patch_phase`（可选字段，枚举 `plan_done` / `implementing` / `listening` / `awaiting_user_action` / `finalized`）**写 `finalized`**（本次 patch 收尾完成；进行中阶段的写回点：增量计划落盘后 = `plan_done`、进入监听 = `listening`、触发准备/监听循环运行中等待外部触发/三态「未触发」等待用户操作 = `awaiting_user_action`、闭环修复中 = `implementing`；缺失向后兼容，续跑判定见「前置校验·未完成段处理」）
    - 状态字段**不动**：`status` / `completed_steps` 保持原值（见「定位」段）

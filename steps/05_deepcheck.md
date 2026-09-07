@@ -156,7 +156,7 @@ Free 阶段一次性完整覆盖全部 15 个角度。
    - 若 `.ico_metadata.json.code_compile_failed == true`，输出 `⚠️ 步骤4编译失败，仍继续复检` 警告；若 `test_failures == true`，输出 `⚠️ 步骤4测试未通过（test_outcome=fail），重点复检测试失败相关功能点` 警告
 3. **思考分级（L2：sequential-thinking）**（按 [references/mcp_per_step.md](../references/mcp_per_step.md)「通用前置·分级思考」段执行）：本步骤为 L2，调用 sequential-thinking（3~5 步）。思考职责 = 梳理代码清单 → 回顾计划要点 → 制定逆推/Fixed/Free 检查策略
 4. **分步续跑**：若 `status == "deepcheck_in_progress"`，从 metadata 恢复 `deepcheck_total_rounds` / `deepcheck_clean_rounds` / `deepcheck_phase`，同时读取已存在的 `05_deepcheck.md`（若含「Reverse 逆推」段 **且 `metadata.patch_count` 为 0/缺失（无补丁修改）** 则跳过 Reverse；**有补丁（`patch_count > 0`）时不跳过**——补丁修改必须重新纳入 Reverse 逆推，重跑 Reverse 覆盖更新逆推段，再进入后续阶段）
-5. 否则初始化 `deepcheck_clean_rounds = 0`, `deepcheck_total_rounds = 1`, `deepcheck_phase = "reverse"`, `status = deepcheck_in_progress`
+5. 否则初始化 `deepcheck_clean_rounds = 0`, `deepcheck_total_rounds = 1`, `deepcheck_phase = "reverse"`, `status = deepcheck_in_progress`（**控制面接线**：经 `python3 tools/icode_control.py transition --dir {ICODE_OUT_DIR} --to deepcheck_in_progress`，进行态流转仅做状态机合法性判定，见 [references/control_plane.md](../references/control_plane.md)）
 6. 输出：`▶ 步骤5 复检开始`
 
 ### 前置强制执行门（防"只写结论不执行"）
@@ -362,7 +362,7 @@ Free 阶段一次性完整覆盖全部 15 个角度。
 - 无 issues → `deepcheck_clean_rounds += 1`
   - Fixed 首次全 clean（`deepcheck_clean_rounds` 达 1）→ 切换 `deepcheck_phase = "free"`，`deepcheck_clean_rounds = 0`
   - Free 完成后 → 终止
-- 终止后更新 `.ico_metadata.json`：`status = deepcheck_done`，`completed_steps` 追加 `"5"`
+- 终止后更新 `.ico_metadata.json`：`status = deepcheck_done`（**控制面接线**：经 `python3 tools/icode_control.py transition --dir {ICODE_OUT_DIR} --to deepcheck_done`——完成态门禁点，三 gate linter 任一失败状态不前移），`completed_steps` 追加 `"5"`
 - **gate 转换校验**：置 `deepcheck_done` 前运行
   `python3 tools/lint_mcp_coverage.py {ICODE_OUT_DIR} --step deepcheck --strict`——
   `deepcheck.fixed_scan` / `deepcheck.dedup` 必须各有最终 trace 行（fast 为 `skipped_stage_not_reached`），eligible 未履行不得标流程合规

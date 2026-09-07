@@ -113,9 +113,9 @@ assert_contains "$AUDIT_DOC" "tdd" "06_audit 消费 tdd 证据"
 assert_contains "$AUDIT_DOC" "有效 RED" "06_audit 以有效 RED 为 verified 前提"
 
 echo ""
-echo "=== 8. SKILL.md：tdd metadata 字段与默认值 ==="
-assert_contains "$SKILL_DOC" "tdd" "SKILL 定义 tdd metadata 对象"
-assert_contains "$SKILL_DOC" "not_assessed" "SKILL 定义 tdd.status 默认 not_assessed（旧工单兼容）"
+echo "=== 8. tdd metadata 字段与默认值（真源：steps/04_code.md TDD 准入门 + schemas）==="
+assert_contains "steps/04_code.md" "tdd" "04_code.md 定义 tdd metadata 对象"
+assert_contains "steps/04_code.md" "not_assessed" "04_code.md 定义 tdd.status 默认 not_assessed（旧工单兼容）"
 
 echo ""
 echo "=== 9. 主流程编号 / completed_steps 合法值未增加 ==="

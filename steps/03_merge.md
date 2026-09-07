@@ -96,7 +96,7 @@ sys.exit(0 if (n>=9 and has_memo) else 1)
 
 ### 强制操作
 
-- **更新 `.ico_metadata.json`**：`status = plan_finalized`，`completed_steps` 追加 `"3"`（写回前按 SKILL.md「status 写回校验」对照词表）
+- **更新 `.ico_metadata.json`**：`status = plan_finalized`（**控制面接线**：经 `python3 tools/icode_control.py transition --dir {ICODE_OUT_DIR} --to plan_finalized`——完成态门禁点，三 gate linter 任一失败状态不前移，见 [references/control_plane.md](../references/control_plane.md)），`completed_steps` 追加 `"3"`（写回前按 SKILL.md「status 写回校验」对照词表）
 - 全流程模式：**通过「定稿机器硬校验」后立即继续执行步骤4**
 
 ## MCP 推荐

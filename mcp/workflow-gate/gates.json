@@ -145,5 +145,61 @@
       "risk_profile": null,
       "diagnosis_only": false
     }
+  },
+  "state_machine": {
+    "doc": "vNext 工单（metadata.schema_version=3）状态机真源。tools/icode_control.py transition 按此判定合法性；steps/*.md 的状态写回必须经 `python3 tools/icode_control.py transition --dir <out_dir> --to <status>`，禁止绕过直写（validate 会校验 metadata.status 与最后一条 state_changed 事件一致性）。legacy 工单（metadata 无 schema_version）为只读适配对象，不走 transition（validate 报 legacy-untracked 不阻断只读审计）。",
+    "states": ["log_in_progress","log_done","init_in_progress","plan_done","review_in_progress","review_done","plan_finalized","code_in_progress","code_done","deepcheck_in_progress","deepcheck_done","completed","debug_in_progress","debug_done"],
+    "terminal_states_of_ticket": ["completed","debug_done"],
+    "transitions": [
+      {"from": "log_in_progress", "to": "log_done"},
+      {"from": "log_done", "to": "log_in_progress", "note": "用户质疑回退重查"},
+      {"from": "init_in_progress", "to": "plan_done"},
+      {"from": "log_done", "to": "plan_done", "note": "start/plan 复用已有 log 定稿"},
+      {"from": "plan_done", "to": "review_in_progress"},
+      {"from": "review_in_progress", "to": "review_done"},
+      {"from": "review_done", "to": "review_in_progress", "note": "重新审查"},
+      {"from": "review_done", "to": "plan_finalized", "note": "merge 定稿"},
+      {"from": "plan_finalized", "to": "code_in_progress"},
+      {"from": "code_in_progress", "to": "code_done"},
+      {"from": "code_done", "to": "code_in_progress", "note": "重跑代码实施"},
+      {"from": "code_done", "to": "deepcheck_in_progress"},
+      {"from": "deepcheck_in_progress", "to": "deepcheck_done"},
+      {"from": "deepcheck_done", "to": "deepcheck_in_progress", "note": "重新深检"},
+      {"from": "deepcheck_done", "to": "completed", "note": "audit 完成；必须 --delivery-verdict 显式回填交付结论，禁止缺省推断"},
+      {"from": "completed", "to": "review_in_progress", "note": "已完成工单按用户指令重新审查"},
+      {"from": "debug_in_progress", "to": "debug_done"}
+    ],
+    "gate_policy": {
+      "doc": "状态前移门禁分级：to 完成态（gated_targets）→ 依次运行三个 gate linter（vNext 工单一律 --strict），任一失败即 fail-closed 状态不前移；to 进行态（*_in_progress）→ 仅做状态机合法性判定，不跑 linter。completed 额外强制 delivery_verdict 显式回填。debug 孪生工单（metadata.debug=true）走 .debug 隔离域，不跑通用门禁。",
+      "gated_targets": ["log_done","plan_done","review_done","plan_finalized","code_done","deepcheck_done","completed"],
+      "step_by_target": {
+        "log_done": "log",
+        "plan_done": "plan",
+        "review_done": "review",
+        "plan_finalized": "merge",
+        "code_done": "code",
+        "deepcheck_done": "deepcheck",
+        "completed": "audit"
+      },
+      "completed_step_by_target": {
+        "log_done": "log",
+        "plan_done": "1",
+        "review_done": "2",
+        "plan_finalized": "3",
+        "code_done": "4",
+        "deepcheck_done": "5",
+        "completed": "6",
+        "debug_done": "log"
+      },
+      "gate_linters": {
+        "thinking_gate": ["python3","tools/lint_thinking_gate.py","--strict","--json"],
+        "mcp_coverage": ["python3","tools/lint_mcp_coverage.py","--strict","--json"],
+        "workflow_contract": ["python3","tools/lint_workflow_contract.py","--strict","--json"]
+      },
+      "completed_requires": "transition --to completed 必须携带 --delivery-verdict ∈ {verified,verification_pending,blocked,not_applicable}（交付分层契约：宿主验证通过不得自动映射为 verified）"
+    },
+    "close_phases": ["close_planned","archived","roots_verified","checkouts_removed","branches_removed","closed"],
+    "close_phase_doc": "关闭分阶段状态（metadata.close_state）。每阶段幂等（重放同阶段=已应用），禁止跨阶段跳转；用 tools/icode_control.py close-phase 记录。archived 成功后控制根从源 out_dir 交接到 archive_path，roots_verified 起必须在归档根续跑，保证源 checkout 删除后仍可留痕。closed 为终态，重复 close 对已 closed 工单只回放摘要不重复清理。"
   }
+
 }
