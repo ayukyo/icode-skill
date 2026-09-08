@@ -135,6 +135,44 @@
     "analysis_code_baselines": { "type": ["array", "object", "null"] },
     "verification_code_baselines": { "type": ["array", "object", "null"] },
 
+    "claims": {
+      "description": "结构化证据账本。由 record-claim 原子追加；事实、推断、被反驳结论与未观测边界不得互相冒充。",
+      "type": ["array", "null"],
+      "items": {
+        "type": "object",
+        "required": ["claim_id", "at", "statement", "kind", "source", "boundary", "evidence", "contradicted_by", "next_action", "status"],
+        "properties": {
+          "claim_id": { "type": "string" },
+          "at": { "type": "string" },
+          "statement": { "type": "string", "minLength": 1 },
+          "kind": { "enum": ["fact", "inference", "unobserved", "refuted"] },
+          "source": { "type": "string", "minLength": 1 },
+          "boundary": { "type": "string", "minLength": 1 },
+          "evidence": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+          "contradicted_by": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+          "next_action": { "type": ["string", "null"] },
+          "status": { "enum": ["supported", "open", "refuted"] }
+        },
+        "additionalProperties": false
+      }
+    },
+
+    "verification_contract": {
+      "description": "显式分层验证合同。仅 required=true 时，delivery_verdict=verified 需要 required_layers × required_consumers × required_scenarios 的最新记录全部 pass。",
+      "type": ["object", "null"],
+      "required": ["required", "required_layers", "required_consumers", "required_scenarios"],
+      "properties": {
+        "required": { "type": "boolean" },
+        "required_layers": {
+          "type": "array",
+          "items": { "enum": ["static", "unit", "build", "host", "deploy", "delivery", "consumption", "settings_preview", "operation_view", "closed_client", "physical"] }
+        },
+        "required_consumers": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "required_scenarios": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+      },
+      "additionalProperties": false
+    },
+
     "verification_runs": {
       "description": "实机验证运行记录：kind 记实际动作，build_source 单独记是否复用构建。与 patch_history 分离，由 record-verification 原子追加。",
       "type": ["array", "null"],
@@ -149,6 +187,10 @@
           "device": { "type": ["string", "null"] },
           "artifact_identity": { "type": ["string", "null"] },
           "window": { "type": ["string", "null"] },
+          "layer": { "enum": ["static", "unit", "build", "host", "deploy", "delivery", "consumption", "settings_preview", "operation_view", "closed_client", "physical", null] },
+          "consumer": { "type": ["string", "null"] },
+          "scenario": { "type": ["string", "null"] },
+          "baseline": { "type": ["string", "null"] },
           "outcome": { "enum": ["pass", "fail", "inconclusive"] },
           "evidence": { "type": ["string", "null"] },
           "note": { "type": ["string", "null"] }
@@ -170,7 +212,38 @@
     "extensions": {
       "description": "专用/实验字段命名空间。顶层 key 只能是本 schema 列出的核心字段；实验字段一律 extensions.<namespace>.<field>（namespace 用小写下划线）。",
       "type": "object",
-      "propertyNames": { "pattern": "^[a-z][a-z0-9_]*$" }
+      "propertyNames": { "pattern": "^[a-z][a-z0-9_]*$" },
+      "properties": {
+        "skills": {
+          "type": "object",
+          "required": ["runs"],
+          "properties": {
+            "runs": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["run_id", "at", "skill", "trigger", "result", "adopted", "evidence_refs", "elapsed_ms", "estimated_tokens", "unique_findings", "agent_id"],
+                "properties": {
+                  "run_id": { "type": "string" },
+                  "at": { "type": "string" },
+                  "skill": { "type": "string", "minLength": 1 },
+                  "trigger": { "type": "string", "minLength": 1 },
+                  "result": { "enum": ["success", "failure", "degraded", "skipped"] },
+                  "adopted": { "type": "boolean" },
+                  "evidence_refs": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+                  "elapsed_ms": { "type": "integer", "minimum": 0 },
+                  "estimated_tokens": { "type": "integer", "minimum": 0 },
+                  "unique_findings": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+                  "agent_id": { "type": ["string", "null"] }
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": true
     }
   }
 }

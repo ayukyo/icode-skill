@@ -12,18 +12,44 @@ set -e
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 
+usage() {
+  cat <<'EOF'
+Usage: ./mcp/install.sh [--check] [--client claude|codex|all] [mcp-name]
+
+Installs all MCP subprojects, or one named subproject. This is the MCP-only
+maintenance entry; use the repository root install.sh for a full installation.
+
+Options:
+  --check  Validate arguments and selected installer entrypoints without writes.
+EOF
+}
+
 # 解析参数: --client <v> 或 --client=<v>, 其余为子工程名
 client="claude"
+check_only=false
 positional=()
 while [ $# -gt 0 ]; do
   case "$1" in
+    --check)
+      check_only=true; shift ;;
     --client)
       if [ $# -lt 2 ]; then echo "❌ --client 需要参数: claude|codex|all"; exit 1; fi
       client="$2"; shift 2 ;;
     --client=*)
       client="${1#--client=}"; shift ;;
+    -h|--help)
+      usage; exit 0 ;;
+    -*)
+      echo "❌ 不支持的选项: $1" >&2
+      usage >&2
+      exit 2 ;;
     *)
-      positional+=("$1"); shift ;;
+      positional+=("$1")
+      if [ ${#positional[@]} -gt 1 ]; then
+        echo "❌ 最多指定一个 MCP 子工程" >&2
+        exit 2
+      fi
+      shift ;;
   esac
 done
 case "$client" in
@@ -62,6 +88,35 @@ if [ -n "${positional[0]:-}" ]; then
     exit 1
   fi
   installers=("$target")
+fi
+
+# The public root installer calls this before writing ICODE or shared skills.
+# Entrypoints are invoked through bash, so readability and syntax matter; an
+# executable bit is intentionally not required for historical compatibility.
+for installer in "${installers[@]}"; do
+  if [ ! -f "$installer" ] || [ ! -r "$installer" ]; then
+    echo "❌ MCP 安装入口不可读: $installer" >&2
+    exit 1
+  fi
+  if ! bash -n "$installer"; then
+    echo "❌ MCP 安装入口语法检查失败: $installer" >&2
+    exit 1
+  fi
+done
+if [ "$client" = "codex" ] || [ "$client" = "all" ]; then
+  if [ -z "$PYTHON_BIN" ]; then
+    echo "❌ Codex MCP 注册需要 python3/python" >&2
+    exit 1
+  fi
+  if [ ! -f "$HERE/_lib/client_registry.py" ] \
+    || [ ! -r "$HERE/_lib/client_registry.py" ]; then
+    echo "❌ Codex MCP 注册入口不可读: $HERE/_lib/client_registry.py" >&2
+    exit 1
+  fi
+fi
+if [ "$check_only" = true ]; then
+  echo "✅ MCP 预检通过: ${#installers[@]} 个子工程 [client=$client]"
+  exit 0
 fi
 
 echo "📦 mcp 一键安装:扫描到 ${#installers[@]} 个子工程"

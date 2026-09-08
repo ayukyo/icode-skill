@@ -5,6 +5,9 @@
 **会话**: 主会话
 **定位**: **与 init/start/fast/plan 并列的入口命令，非流程步骤编号**。把"一坨设备/服务日志 + 模糊症状"转化为"有证据、经对抗验证、可信"的根因报告，并自动转成修复需求衔接步骤1。**领域无关**——适用于任何能产生日志的系统（机器人/服务端/嵌入式/Web 等均不限）。完成后用户敲 `/icode plan`（仅步骤1）/ `/icode start`（全流程）/ `/icode fast`（精简全流程）（无参）复用同目录进入修复流程，详见 SKILL.md「调用命令」段的目录复用规则说明。
 
+> **共享技能路由**：阶段 1 建立基线前读取 [references/skill_routing.md](../references/skill_routing.md)，只加载命中当前证据场景的技能；宿主调用差异见 `host_adapters.md`。
+> **证据习惯真源**：基线、claim 分类、无日志反查与结论边界统一执行 [references/evidence_and_verification.md](../references/evidence_and_verification.md)，本步骤不自建副本。
+
 ## 设计借鉴（方法论，非绑定具体技能）
 
 - **基线检查优先**：grep 日志前先做基线检查（git diff / 状态链路图 / 文档参考不盲信）——防"直接猜根因走弯路"

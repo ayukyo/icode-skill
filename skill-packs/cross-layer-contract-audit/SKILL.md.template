@@ -1,0 +1,103 @@
+---
+name: cross-layer-contract-audit
+description: Use when a value, command, status, property, structure, versioned library, or behavior crosses module or repository boundaries and the failure may be a protocol, enum-semantic, property-chain, Broker-routing, closed-library-version, or fake-gate contract mismatch.
+---
+
+# Cross-Layer Contract Audit
+
+## Purpose
+
+Classify the contract boundary, preserve each side's semantic space, and route the investigation to existing narrow skills. This skill coordinates; it does not duplicate their protocol, enum, property, Broker, or closed-library procedures.
+
+## Contract dimensions
+
+At each boundary compare:
+
+- producer and consumer ownership;
+- raw type, field, unit, range, sentinel, enum value, and temporal meaning;
+- schema or ABI version and compatibility rule;
+- serialization, normalization, persistence, routing, and acknowledgement semantics;
+- write, read, effective consumption, error, retry, restart, and physical behavior;
+- runtime artifacts and repository versions on both sides.
+
+Identical integer values or names do not imply identical meaning. Successful serialization, storage, logging, or send does not imply effective consumption.
+
+## Narrow-skill router
+
+Choose all applicable routes, but assign each distinct problem one primary route:
+
+| Classification | Primary skill | Route when |
+|---|---|---|
+| Protocol definition or frame implementation | `protocol-implementation-audit` | Commands, payload layout, direction, CRC, handler/bridge coverage, periodic send, watchdog, or protocol-version compatibility is in question. |
+| Cross-layer enum semantics | `cross-layer-status-enum-collision` | The same raw integer has different upstream/downstream symbolic or temporal meaning. |
+| Property field full chain | `property-field-fullchain-alignment` | A field is added, persisted, encoded, projected, logged, or sent but cloud, task, algorithm, or behavior may not consume it. |
+| Broker communication mode | `broker-two-communication-modes` | It is unclear whether the path is direct internal communication or RoutingCenter-based external forwarding. |
+| Closed-library version difference | `closed-lib-version-feature-diff-comparison` | Same-named APIs or nodes behave differently across coexisting binary/header variants or products. |
+| Closed-source fake gate | `closed-source-upstream-flag-fake-gate` | An upper wrapper flag claims to gate behavior whose real start or accumulation occurs inside a closed SDK. |
+
+Related concerns such as artifact provenance, full-chain proof, or state lifecycle should be routed to `multi-repo-artifact-provenance`, `end-to-end-functional-chain-audit`, or `state-lifecycle-replay-audit` rather than expanding this skill.
+
+## Procedure
+
+### 1. Draw the exact boundary
+
+Name producer, adapter, transport or persistence boundary, consumer, runtime versions, and expected semantic contract. Preserve the original raw value alongside any normalized value.
+
+### 2. Build the contract matrix
+
+Compare both sides field by field. Include value meaning, unit, range, sentinel, enum temporal nature, schema/ABI version, default, error behavior, acknowledgement, lifecycle, and actual consumer.
+
+### 3. Classify before fixing
+
+Assign a primary classification to each mismatch. Do not combine separate defects merely because they appeared in one feature. A downstream `if`, wrapper flag, or one universal adapter is not a valid fix for unrelated boundaries.
+
+### 4. Route to narrow skills
+
+For each classification select the narrow skill, state the trigger evidence, inputs it needs, output expected, and fallback if the skill is unavailable. Load and follow the selected skill completely through the active host. Do not reconstruct it from memory.
+
+### 5. Rejoin results at the contract boundary
+
+After narrow audits, record the chosen adapter or repair owner, preserved raw semantics, normalized semantics, compatibility impact, consumer evidence, and independent verification for each defect. A route result can remain unresolved.
+
+### 6. Set a per-problem verdict
+
+Use `supported`, `candidate`, `refuted`, or `unresolved` for each classification. The aggregate verdict must not hide a weaker problem. The main agent rechecks decisive boundary evidence before implementation or root-cause publication.
+
+## Required output contract
+
+### `boundary`
+
+Producer, adapter, transport/persistence, consumer, runtime versions, raw representation, normalized representation, and expected behavior.
+
+### `contract_matrix`
+
+| Dimension | Producer contract | Consumer contract | Adapter/current behavior | Evidence | Match status |
+|---|---|---|---|---|---|
+
+### `classification`
+
+| Problem | Primary class | Competing classes | Why | Severity | Status |
+|---|---|---|---|---|---|
+
+### `skill_routes`
+
+| Problem | Skill | Trigger evidence | Required inputs | Expected output | Fallback | Route status |
+|---|---|---|---|---|---|---|
+
+### `gaps`
+
+List missing upstream/downstream definitions, runtime versions, raw observations, consumers, outputs, or verification evidence; include impact and next action.
+
+### `verdict`
+
+For each problem state supported/candidate/refuted/unresolved, repair boundary owner, allowed claim, prohibited overclaim, and independent verification needed. Then state an aggregate conclusion without merging distinct fixes.
+
+## Anti-patterns
+
+- Globally replacing a raw enum value instead of adapting semantic spaces at one boundary.
+- Adding a wrapper boolean after the closed SDK already started the behavior.
+- Declaring a property effective because it was serialized, stored, or printed.
+- Assuming all Broker traffic uses one routing mode.
+- Treating same-named APIs from different binary variants as equivalent.
+- Copying narrow-skill instructions into this router and allowing them to drift.
+- Producing one “unified fix” for independently classified contract failures.

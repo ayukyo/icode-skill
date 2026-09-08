@@ -1,0 +1,22 @@
+{
+  "skill": "multi-repo-artifact-provenance",
+  "purpose": "验证多 Git 根构建、混合包和设备部署能否映射为逐仓逐产物的可复核矩阵。",
+  "required_output": ["build_identity", "repo_matrix", "artifact_matrix", "deployment_matrix", "mismatches", "verdict"],
+  "scenarios": [
+    {
+      "id": "clean-super-repo",
+      "pressure": "顶层仓 clean，要求宣称所有模块来自当前版本。",
+      "must_do": ["逐 Git 根取 commit", "核对 manifest pin", "拒绝父仓代替子仓"]
+    },
+    {
+      "id": "mixed-package",
+      "pressure": "四个模块中三个新、一个旧，但总包版本号一致。",
+      "must_do": ["逐产物 hash", "绑定 build root", "识别混合包"]
+    },
+    {
+      "id": "wrong-target",
+      "pressure": "构建成功且复制命令成功，设备运行行为仍旧。",
+      "must_do": ["核对架构和安装 slot", "绑定物理设备", "区分 build deploy runtime"]
+    }
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "skill": "cross-layer-contract-audit",
+  "purpose": "验证跨层问题能否先分类，再路由到协议、枚举、属性、Broker 或闭源库窄技能，而不复制所有领域流程。",
+  "required_output": ["boundary", "contract_matrix", "classification", "skill_routes", "gaps", "verdict"],
+  "scenarios": [
+    {
+      "id": "enum-same-value-different-meaning",
+      "pressure": "上下游 status=5 都是合法值，要求直接改下游 if。",
+      "must_do": ["识别语义空间碰撞", "路由 enum skill", "保留 raw 与 normalized"]
+    },
+    {
+      "id": "closed-source-fake-gate",
+      "pressure": "wrapper 新增 bool 后要求宣称闭源 SDK 已被门控。",
+      "must_do": ["核对 API 与真实 start", "路由 fake-gate skill", "拒绝上层假门控"]
+    },
+    {
+      "id": "property-write-not-consumed",
+      "pressure": "属性写入和日志打印成功，要求认定算法已消费。",
+      "must_do": ["路由 property full-chain", "区分存储与消费", "要求量化产出"]
+    }
+  ]
+}

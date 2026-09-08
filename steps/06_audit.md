@@ -4,6 +4,9 @@
 **产出**: `{ICODE_OUT_DIR}/06_audit.md`（含修复日志段）+ 回写 `{ICODE_OUT_DIR}/03_plan_final.md` 的「实现偏差备忘」段（6.2 第5步）
 **会话**: 主会话
 
+> **共享技能路由**：终审证据收集前读取 [references/skill_routing.md](../references/skill_routing.md)，复核已命中技能的输出与实际代码/验证记录一致。
+> **证据习惯真源**：主代理决定性证据复核、claim ledger 和交付分层统一执行 [references/evidence_and_verification.md](../references/evidence_and_verification.md)。
+
 ## 本步骤 L1/L2 检查项声明
 
 按 SKILL.md「强制阻断边界矩阵」定义，本步骤触发的检查项：

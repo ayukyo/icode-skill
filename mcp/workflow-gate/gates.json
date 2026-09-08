@@ -20,6 +20,19 @@
       "persistent_reference",
       "external_projection"
     ],
+    "verification_layers": [
+      "static",
+      "unit",
+      "build",
+      "host",
+      "deploy",
+      "delivery",
+      "consumption",
+      "settings_preview",
+      "operation_view",
+      "closed_client",
+      "physical"
+    ],
     "fast_risk_triggers": [
       "cross_component",
       "persistent_identity_change",
@@ -134,6 +147,12 @@
       "存在依赖记录",
       "失败、重试和回滚"
     ]
+  },
+  "delivery_evidence_gate": {
+    "doc": "显式分层交付证据门禁。verification_contract.required=true 时，verified 必须覆盖 required_layers × required_consumers × required_scenarios；每个单元取最新 verification_run，结果必须 pass，且 evidence 与 baseline 均非空。",
+    "blocked_steps": ["audit-verified"],
+    "block_condition": "verification_contract.required == true 且任一 required cell 缺失、最新 outcome != pass、evidence 为空或 baseline 为空 → 禁止 delivery_verdict=verified",
+    "compatibility": "verification_contract 缺失或 required=false 时不强制，避免给非现场任务和历史工单虚构真机要求"
   },
   "legacy": {
     "untracked_marker": "legacy-untracked",

@@ -1,0 +1,90 @@
+---
+name: bug-investigation-baseline-checklist
+description: Use when a bug, field failure, old log, or multi-repository incident has an unknown cause and current source, device identity, time window, deployed artifact, or child-repository provenance may differ.
+---
+
+# Bug Investigation Baseline Checklist
+
+## Purpose
+
+Establish the evidence baseline before naming a root cause or editing code. Treat the deployed runtime, current checkout, verification checkout, device, and log window as separate objects until evidence proves they match.
+
+## Non-negotiable boundaries
+
+- IP, hostname, container ID, and virtual MAC are lookup hints, not physical-device identity. Prefer serial number or physical MAC.
+- Current HEAD, a clean super-repository, source modification time, a header declaration, and a binary string do not prove what the field device ran.
+- A rejected handler, missing downstream log, successful echo, or vendor statement identifies an observation or rejection point, not automatically a root cause.
+- In a multi-Git-root project, record every participating repository independently. A clean parent does not prove child commits.
+- Separate facts, inferences, refuted claims, and unobserved boundaries. Never promote one category into another without new evidence.
+
+## Required procedure
+
+### 1. Freeze the evidence object
+
+Record the original ticket, attachments, raw log files, capture method, and any transformations. Preserve the complete fields and nearby context before filtering. Mark missing or truncated sources explicitly.
+
+### 2. Bind physical identity and time
+
+Resolve the device by serial number or physical MAC. Record timezone, clock source or offset, exact start/end timestamps, and why the chosen window contains the event. If identity or clock alignment is unresolved, lower the conclusion ceiling.
+
+### 3. Build three code baselines
+
+Keep these baselines distinct:
+
+- `runtime`: commits and artifacts actually installed when the event happened.
+- `analysis`: commits being inspected now.
+- `verification`: commits and artifacts used to test a proposed repair.
+
+For every participating Git root record repository path, commit, branch or detached state, dirty state, manifest or superproject pin, build root, and relationship to each baseline. Use `unknown` rather than guessing.
+
+### 4. Bind artifact to device
+
+Record product or target, artifact name and hash, architecture, build timestamp when trustworthy, install path or slot, package or manifest identity, and the physical device that received it. A build success without this mapping is host evidence only.
+
+### 5. Trace the minimum decisive path
+
+Identify the symptom, request source, first observed acceptance or rejection, relevant state or cache gate, transaction, downstream consumer, and missing observation. Use current source only as a candidate explanation until its relation to the runtime baseline is proven.
+
+### 6. Set the conclusion ceiling
+
+State the strongest conclusion the available evidence permits. Examples:
+
+- `observation_only`: the symptom or rejection point is confirmed.
+- `candidate_path`: a plausible source path is found but runtime provenance is open.
+- `root_cause_supported`: identity, time, runtime provenance, and decisive branch agree.
+- `fix_verified_host`: repair passed host or build checks only.
+- `fix_verified_field`: required deployed, consumer, UI, or physical layers passed on the bound device.
+
+The main agent must recheck the decisive raw evidence before publishing `root_cause_supported` or any verified conclusion.
+
+## Required output contract
+
+Return this table, using `unknown` and an owner/next action for unresolved cells:
+
+| Section | Required fields |
+|---|---|
+| `identity` | serial or physical MAC, lookup hints, match evidence, status |
+| `time_window` | start, end, timezone, clock offset/source, selection reason |
+| `repo_matrix` | repo, runtime commit, analysis commit, verification commit, manifest pin, dirty state |
+| `artifact_identity` | target, artifact, hash, architecture, install path/slot, device binding |
+| `evidence_sources` | source, raw/transformed, completeness, supported fact |
+| `unresolved` | missing fact, impact, owner, next action |
+| `conclusion_ceiling` | allowed level, supported statement, prohibited overclaim |
+
+Then provide a short claim ledger:
+
+| Claim | Kind | Source | Boundary | Status |
+|---|---|---|---|---|
+| statement | fact/inference/refuted/unobserved | exact evidence pointer | what it does not prove | supported/open/refuted |
+
+## Anti-patterns
+
+- Starting with broad log grep before fixing identity, window, and provenance.
+- Treating project documentation as runtime fact without checking current and deployed code.
+- Collapsing multiple Git roots into one top-level commit.
+- Calling a handler rejection the root cause before resolving its guard and upstream input.
+- Calling a repair complete because compilation, DP echo, or one downstream send succeeded.
+
+## Related skills
+
+Use `vendor-claim-log-evidence-verification` when a verbal or closed-source claim conflicts with observed logs. Use `end-to-end-functional-chain-audit` after the baseline is fixed and the full producer-to-consumer path must be proven.

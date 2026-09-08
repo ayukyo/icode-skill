@@ -1,0 +1,97 @@
+---
+name: cross-node-timeline-reconstruction
+description: Use when an incident spans logs, traces, devices, Apps, clouds, services, processes, or files with different clocks, NTP adjustments, truncated fields, buffering, asynchronous delivery, or missing downstream observations and causality must be reconstructed.
+---
+
+# Cross-Node Timeline Reconstruction
+
+## Purpose
+
+Build an evidence-preserving timeline across clock domains. Keep raw timestamps, clock uncertainty, correlation identifiers, payload/state transitions, source completeness, and causality strength explicit so textual order and missing logs are not mistaken for physical order or fault location.
+
+## Core rules
+
+- Never sort different clock domains by displayed timestamp before measuring offset and discontinuities.
+- Preserve raw timestamps and sources. Add normalized time; do not overwrite the original.
+- NTP, suspend/resume, reboot, timezone changes, log rotation, buffering, and batch flush can create discontinuities or reorder appearance.
+- Adjacent events are not causal without a request, transaction, payload, state transition, sequence, or other mechanism linking them.
+- A missing downstream log is an observation gap unless upstream evidence proves delivery and the downstream observation point is known active.
+- Filtered or transformed logs are secondary evidence. Recover the complete raw fields and surrounding window when possible.
+
+## Procedure
+
+### 1. Fix scope
+
+Record incident, physical identity, date, timezone, candidate start/end, operations, nodes, raw sources, capture methods, and expected causal chain. Hash or otherwise identify immutable raw sources when investigation integrity matters.
+
+### 2. Model every clock domain
+
+For each source record clock type, timezone, resolution, monotonic availability, boot or process epoch, known offset, offset evidence, uncertainty, NTP or manual adjustments, buffering, and discontinuity segments. Use an interval rather than a single normalized timestamp when uncertainty remains.
+
+### 3. Recover complete events
+
+Extract full JSON or structured records, request/transaction IDs, sequence numbers, device identity, payload fields, state before/after, return codes, retries, and send/receive direction. Record whether each row is raw, transformed, truncated, or inferred.
+
+### 4. Normalize without losing provenance
+
+Assign a normalized time or bounded interval using explicit offset evidence. If clocks cannot be aligned, order events only within the same domain and use logical dependencies across domains.
+
+### 5. Link events by evidence strength
+
+Classify links:
+
+- `causal`: a mechanism and matching correlation/payload/state prove the transition.
+- `correlated`: identifiers or content match, but the causal transition is not observed.
+- `candidate`: time and behavior are compatible but decisive fields are missing.
+- `refuted`: ordering, identity, payload, state, or mechanism contradicts the link.
+
+List competing explanations for correlated or candidate links.
+
+### 6. Mark missing windows and boundaries
+
+Record source, exact raw and normalized interval, missing fields/events, truncation or retention cause, impact on conclusions, and recovery action. Reverse-check upstream gates before assigning a downstream defect.
+
+### 7. Set verdict
+
+State the last causal event, first candidate or missing boundary, verified and unresolved ordering, allowed root-cause statement, and prohibited overclaim. The main agent rechecks decisive raw events before publishing cross-node causality.
+
+## Required output contract
+
+### `scope`
+
+Incident, physical identity, date/timezone, raw window, nodes, sources/capture methods, expected chain, and source-integrity identifiers.
+
+### `clock_matrix`
+
+| Source/node | Clock type | Timezone | Resolution | Offset/segment | Uncertainty | Adjustment evidence | Buffering | Status |
+|---|---|---|---|---|---|---|---|---|
+
+### `event_timeline`
+
+| Event ID | Source | Raw time | Normalized time/interval | Correlation | Direction | Payload/state | Evidence pointer | Completeness | Status |
+|---|---|---|---|---|---|---|---|---|---|
+
+### `causal_links`
+
+| From | To | Link type | Mechanism | Matching evidence | Contradictions | Competing explanations | Status |
+|---|---|---|---|---|---|---|---|
+
+Use only `causal`, `correlated`, `candidate`, or `refuted` for link type.
+
+### `missing_windows`
+
+| Source | Raw/normalized interval | Missing event/field | Cause | Impact | Recovery action |
+|---|---|---|---|---|---|
+
+### `verdict`
+
+State clock-alignment confidence, last causal event, first candidate or missing boundary, allowed claim, prohibited overclaim, and next smallest evidence recovery step.
+
+## Anti-patterns
+
+- Sorting App, device, cloud, and service logs by wall-clock text alone.
+- Applying one constant offset across an NTP jump or reboot.
+- Dropping raw timestamps after normalization.
+- Calling nearby events causal without matching identity, request, payload, sequence, or state.
+- Treating grep output as complete raw evidence.
+- Assigning a downstream fault because its log is absent after an upstream rejection.

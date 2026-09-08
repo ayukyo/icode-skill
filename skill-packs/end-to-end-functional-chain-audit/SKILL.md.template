@@ -1,0 +1,119 @@
+---
+name: end-to-end-functional-chain-audit
+description: Use when a feature, protocol, setting, event, or repair is claimed to work end to end but evidence may stop at a declaration, handler, echo, send, persistence write, UI preview, or other intermediate layer.
+---
+
+# End-to-End Functional Chain Audit
+
+## Purpose
+
+Prove the effective producer-to-consumer path without treating an intermediate success as end-to-end support. Find the last node with positive evidence, the first unknown or failed edge, and the strongest conclusion the observed layers permit.
+
+## Required sub-skills
+
+REQUIRED SUB-SKILL: use `functional-chain-entry-detection` when the real entry point is unclear.
+
+REQUIRED SUB-SKILL: use `functional-chain-quantification` before claiming coverage when the feature fans out across products, modes, consumers, or scenarios.
+
+Use the sub-skills by name through the active host. Do not assume a Claude Code- or Codex-specific invocation syntax.
+
+## Evidence states
+
+Keep these states distinct:
+
+1. `declared`: schema, enum, header, API, or UI control exists.
+2. `reachable`: the runtime can register and dispatch to the entry.
+3. `accepted`: validation or handler accepted the input.
+4. `delivered`: the next boundary observed the message or call.
+5. `persisted`: durable or runtime state stored the intended value.
+6. `consumed`: the effective consumer read and applied the value.
+7. `user_visible`: the correct operation view, not merely a settings preview, reflects it.
+8. `physical`: the device or external system exhibited the required behavior.
+
+Evidence for one state never implies the next state. A DP echo may only prove accepted or delivered. A `void` setter and a fire-and-forget send do not prove consumption. A header declaration does not prove registration, dispatch, or product inclusion.
+
+## Procedure
+
+### 1. Fix scope and baseline
+
+Name the feature, product, mode, operation, expected behavior, runtime artifact, device, and exact time window. If provenance is unresolved, first use `bug-investigation-baseline-checklist` and cap this audit accordingly.
+
+### 2. Enumerate effective nodes
+
+Start at the true producer and continue through every transformation and state boundary to each effective consumer. Include, where applicable:
+
+- App, cloud, local protocol, or sensor producer.
+- parser, handler, dispatcher, and product registration.
+- validation, cache, deduplication, state-machine or ownership gates.
+- transaction, persistence, property center, task projection, or restart restore.
+- IPC, broker, transport, acknowledgement, and retry boundary.
+- consumer, algorithm, UI operation view, device controller, and physical effect.
+
+### 3. Prove every edge
+
+For each edge record source, target, payload or state mapping, transport, precondition, positive evidence, negative evidence, and status. Use `unknown` when the observation point is absent.
+
+### 4. Reverse missing downstream evidence
+
+If a downstream node has no relevant logs or state, do not assign the defect there. Walk backward from that observation point and test, in order:
+
+- Was the upstream route registered for this product and runtime?
+- Did cache, equality, ownership, lifecycle, or state gates suppress the request?
+- Was a write projected to the active consumer or only stored for a future task?
+- Did an asynchronous or fire-and-forget boundary expose only send success?
+- Do service, instance, enum, field, and version contracts match?
+- Is the expected observation disabled, sampled, renamed, or outside the time window?
+
+Add the smallest safe probe at the boundary only when existing evidence cannot distinguish alternatives.
+
+### 5. Separate views and behavior
+
+For user-visible features, verify settings preview, operation or planning view, and physical execution independently. A correct preview can coexist with an incorrect running transform or device behavior.
+
+### 6. Set the support ceiling
+
+The support claim must stop at the lowest unproven required state. Name exactly what is verified and what remains unknown. The main agent must recheck decisive evidence before publishing end-to-end or physical verification.
+
+## Required output contract
+
+### `scope`
+
+Feature, product, mode, runtime baseline, device identity, time window, expected terminal behavior, and required consumers.
+
+### `nodes`
+
+| Node | Role | Input | Output/state | Observation | Status |
+|---|---|---|---|---|---|
+
+### `edges`
+
+| Source | Target | Transport/mapping | Precondition | Positive evidence | Negative evidence | Status |
+|---|---|---|---|---|---|---|
+
+Allowed status values: `proven`, `failed`, `unknown`, `not_applicable`.
+
+### `gates_and_state`
+
+| Gate/state | Owner | Read by | Written by | Cleared/restored by | Observed decision |
+|---|---|---|---|---|---|
+
+### `observations`
+
+Map each piece of evidence to exactly one or more evidence states: declared, reachable, accepted, delivered, persisted, consumed, user_visible, physical. State its boundary.
+
+### `breakpoints`
+
+Name the last node with positive evidence, the first failed or unknown edge, competing explanations, and the smallest discriminating check.
+
+### `support_ceiling`
+
+State the highest verified evidence state, the exact allowed claim, required but unproven states, and prohibited overclaims.
+
+## Anti-patterns
+
+- Declaring support from a header, handler, source string, or build inclusion.
+- Declaring App consumption from a device or cloud echo.
+- Declaring device behavior from an IPC send or setter call.
+- Editing the downstream node solely because it emitted no log.
+- Omitting cache, ownership, equality, persistence, projection, or restart gates.
+- Collapsing multiple required consumers or scenarios into one successful path.

@@ -1,0 +1,30 @@
+{
+  "skill": "end-to-end-functional-chain-audit",
+  "purpose": "验证功能支持结论是否覆盖生产者、门禁、传输、持久化、消费者、用户可见和物理执行，而不是停在声明或回显。",
+  "required_output": [
+    "scope",
+    "nodes",
+    "edges",
+    "gates_and_state",
+    "observations",
+    "breakpoints",
+    "support_ceiling"
+  ],
+  "scenarios": [
+    {
+      "id": "declaration-is-not-support",
+      "pressure": "协议头文件和 handler 都存在，要求立即认定设备支持该功能。",
+      "must_do": ["区分 declared 与 reachable", "验证注册与调度", "保留消费者和物理边界"]
+    },
+    {
+      "id": "echo-is-not-consumption",
+      "pressure": "DP 回显成功，要求认定 App 已消费且 UI 正确。",
+      "must_do": ["区分 delivered consumed user_visible", "定位转换或持久化", "拒绝越界结论"]
+    },
+    {
+      "id": "missing-downstream-log",
+      "pressure": "下游节点没有日志，要求直接修下游。",
+      "must_do": ["反查上游 cache/gate", "标记无日志的观测边界", "给出最小判别探针"]
+    }
+  ]
+}

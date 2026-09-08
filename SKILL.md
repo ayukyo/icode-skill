@@ -275,7 +275,7 @@ test -f "{ICODE_OUT_DIR}/03_plan_final.md" && python3 -c "import json,sys; d=jso
 | doc | `doc` | [steps/doc.md](steps/doc.md) |
 | limit | `limit` | [steps/limit.md](steps/limit.md)（独立步骤，不参与 1~6 流程推进；plan 步骤硬基线引用源） |
 | ppt | `ppt` | [steps/ppt.md](steps/ppt.md)（独立交付步骤：项目/模块/本次功能开发/本次BUG修复 → .pptx） |
-| - | `install` | [steps/install.md](steps/install.md)（独立 MCP 装/同步步骤）|
+| - | `install` | [steps/install.md](steps/install.md)（开源统一安装步骤：ICODE + 共享技能 + MCP）|
 | - | `status` | [steps/status.md](steps/status.md) |
 | - | `list` | [steps/list.md](steps/list.md)（跨工程工单查找，纯查询） |
 | - | `bak` | [steps/bak.md](steps/bak.md)（工程工单手动备份到全局，删工程前安全网；写索引 `backup_path`） |
@@ -302,6 +302,9 @@ test -f "{ICODE_OUT_DIR}/03_plan_final.md" && python3 -c "import json,sys; d=jso
 | [references/thinking_detail.md](references/thinking_detail.md) | 强制思考前置细节（按需读：各步骤子项速查/历史参考小节） | 所有 step |
 | [references/anti_laziness.md](references/anti_laziness.md) | 反偷懒约束（39条偷懒行为+合规要求+references必读+确认行） | 所有 step |
 | [references/adversarial.md](references/adversarial.md) | 对抗分析模式（3质疑者/裁决优先级/诚实降级/证据回指） | 02_review / log |
+| [references/skill_routing.md](references/skill_routing.md) | **共享 SKILL 懒路由**：按机器路由表判触发、准备输入合同、消费输出合同；无命中不加载 | log / plan / code / deepcheck / audit / verify |
+| [references/evidence_and_verification.md](references/evidence_and_verification.md) | **证据与验证习惯真源**：现场事实、主代理复核、无日志反查、多 Git 根、诊断/实现/验证分层 | log / plan / deepcheck / audit / verify |
+| [references/host_adapters.md](references/host_adapters.md) | Claude Code / Codex 宿主工具适配；共享技能正文禁止绑定具体工具语法 | 共享 SKILL 被路由时 |
 | [references/control_plane.md](references/control_plane.md) | **工单控制面（schema v3）**：状态机/事件链/索引单一 writer/迁移/关闭分阶段/降级路径；执行器 `tools/icode_control.py`，真源 `mcp/workflow-gate/gates.json`「state_machine」 | 所有 step（状态写回点 / index-write / close / verify） |
 | [references/dir_and_metadata.md](references/dir_and_metadata.md) | 目录管理（创建新目录含**硬熔断①②**：建前 test -d + 建后 ls -A 验证 + **硬熔断③工作区根校验**，禁手写目录号/echo 伪确认）+ ticket_id 生成 + 全局索引写入（含LRU淘汰） + metadata 模板 + **过时校验（含 worktree 归档工单**：archive_path 有效→archived 活跃态读档历史参考，正常续期；**含 `/icode bak` 备份工单**：backup_path 有效→backup 活跃态读档历史参考，工程优先→备份兜底） + **注入缓存机制（防重复注入，两源共用）** + **project_docs 工程文档库 + 段零检索** | init / log / plan / start / fast / doc / bak |
 | [references/doc_template.md](references/doc_template.md) | icode doc 章节模板：前 50 行四块结构（项目元信息/KEYS/简要说明/目录）+ 十位桶编号 + 自适应 grep 关键词表 + 99 章审计策略 + **v2.0.0 双视角必含元素清单（14 项）+ 业务流独立成章 + 英文首次中文备注 + 链路中文说明 + 质量审视检查清单 + 模板版本自举迁移** | doc |

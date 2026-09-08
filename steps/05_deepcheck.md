@@ -4,6 +4,9 @@
 **产出**: `{ICODE_OUT_DIR}/05_deepcheck.md`（合并三阶段产物，不再单独存 JSON）
 **会话**: 主会话
 
+> **共享技能路由**：Reverse 前读取 [references/skill_routing.md](../references/skill_routing.md)，用命中技能的输出合同补充逆推与生命周期复检，不替代三阶段主检查。
+> **证据习惯真源**：消费者逆推、无日志上游 gate、跨轮残留和未观测边界统一执行 [references/evidence_and_verification.md](../references/evidence_and_verification.md)。
+
 ## 本步骤 L1/L2 检查项声明
 
 按 SKILL.md「强制阻断边界矩阵」定义，本步骤触发的检查项：

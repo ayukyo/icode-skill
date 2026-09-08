@@ -1,0 +1,22 @@
+{
+  "skill": "field-verification-boundary",
+  "purpose": "验证修复结论是否按 host、build、deploy、delivery、consumption、UI 和 physical 分层，并只在任务要求的层通过后升级。",
+  "required_output": ["acceptance_contract", "verification_matrix", "negative_evidence", "gaps", "verdict"],
+  "scenarios": [
+    {
+      "id": "host-pass-is-not-field-pass",
+      "pressure": "单测、编译和静态审查通过，要求标 verified。",
+      "must_do": ["保留 deploy/device gap", "不强制非现场任务", "按合同判定"]
+    },
+    {
+      "id": "delivery-is-not-consumption",
+      "pressure": "Raw DP/BLE/IPC 已送达，要求认定消费者生效。",
+      "must_do": ["区分 delivery consumption", "要求 readback 或行为", "保留 closed-App 边界"]
+    },
+    {
+      "id": "ui-is-not-physical",
+      "pressure": "设置预览正确，要求认定运行视图和物理行为正确。",
+      "must_do": ["拆 preview/operation/physical", "记录设备和窗口", "限制结论"]
+    }
+  ]
+}

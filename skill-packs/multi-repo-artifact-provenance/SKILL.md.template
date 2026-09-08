@@ -1,0 +1,86 @@
+---
+name: multi-repo-artifact-provenance
+description: Use when software is built from multiple Git roots, manifests, worktrees, modules, packages, architectures, devices, or A/B slots and a build, copy, version string, or clean parent repository is being used to claim the deployed runtime is correct.
+---
+
+# Multi-Repo Artifact Provenance
+
+## Purpose
+
+Prove, for every required module, the identity chain from repository commit through build input, artifact, package member, device file, and runtime-loaded object. Detect mixed packages, stale staging directories, wrong worktrees, wrong targets, wrong install paths, and processes that never loaded the copied file.
+
+## Boundaries
+
+- Parent or super-repository cleanliness says nothing about an independent child repository's commit or dirty state.
+- A successful build proves command completion, not that the intended checkout supplied every source.
+- A package-level version cannot identify each module in a mixed package.
+- A successful copy proves transfer completion, not target architecture, slot, install path, restart, or runtime loading.
+- Source modification time and embedded strings are hints; prefer commit, cryptographic hash, build ID, package manifest, and runtime load evidence.
+
+## Procedure
+
+### 1. Fix build identity
+
+Record build invocation, product or target, architecture, toolchain, absolute build root, working directory, timestamp, manifest or superproject revision, cache policy, and expected module set. Verify compile or build metadata points to the intended checkout.
+
+### 2. Resolve every Git root
+
+For every required repository record absolute path, expected manifest pin, actual commit, branch or detached state, dirty state, remote, and relationship to runtime, analysis, and verification baselines. Do not collapse modules that share a package.
+
+### 3. Bind source to artifacts
+
+For every module record build input root, output path, filename, format, architecture, hash, build ID, debug/version metadata, and build-log evidence. Verify packaging consumes this exact output rather than a historical staging path.
+
+### 4. Inspect package members
+
+Record package name and hash, member path, member hash/build ID, expected module and destination. A matching outer package name or version does not override a mismatched member.
+
+### 5. Bind deployment and runtime
+
+Resolve physical-device identity, exact deploy and verification time window, target path, symlink, slot, permissions, device-side hash/build ID, process restart, and actual runtime-loaded executable/library. Where possible inspect the running process, loader map, startup manifest, or module self-report.
+
+### 6. Classify mismatches
+
+Classify each difference as `repo_mismatch`, `wrong_build_root`, `stale_artifact`, `package_member_mismatch`, `wrong_architecture`, `wrong_target`, `wrong_slot`, `device_file_mismatch`, `runtime_not_reloaded`, or `unresolved`.
+
+### 7. Set verdict per module and aggregate
+
+Allowed module states are `proven`, `mismatch`, and `unresolved`. The aggregate can be `proven` only when every required module is proven. One mismatched or unresolved required module prevents a deployment-correct verdict.
+
+## Required output contract
+
+### `build_identity`
+
+| Invocation | Product/target | Architecture | Toolchain | Build root | Time | Manifest revision | Cache policy | Expected modules |
+|---|---|---|---|---|---|---|---|---|
+
+### `repo_matrix`
+
+| Module | Git root | Manifest pin | Actual commit | Branch | Dirty | Remote | Baseline relation | Status |
+|---|---|---|---|---|---|---|---|---|
+
+### `artifact_matrix`
+
+| Module | Build input root | Output path | Local hash/build ID | Package/member | Member hash/build ID | Architecture | Evidence | Status |
+|---|---|---|---|---|---|---|---|---|
+
+### `deployment_matrix`
+
+| Module | Device identity | Deploy window | Install path/slot | Device hash/build ID | Process restart | Runtime-loaded object | Verification window | Status |
+|---|---|---|---|---|---|---|---|---|
+
+### `mismatches`
+
+List mismatch class, affected module, expected identity, observed identity, evidence pointer, impact, and next discriminating action.
+
+### `verdict`
+
+State aggregate `proven`, `mismatch`, or `unresolved`; list per-module results, allowed claim, prohibited overclaim, and whether observed behavior agrees with artifact identity.
+
+## Anti-patterns
+
+- Recording only the parent commit or a single package version.
+- Hashing local outputs but not package members and device files.
+- Comparing device files without checking architecture, install slot, symlinks, and the loaded process.
+- Treating compile success, scp success, or a startup string as deployment proof.
+- Rebuilding from a different worktree and assuming the artifact still represents the analyzed code.

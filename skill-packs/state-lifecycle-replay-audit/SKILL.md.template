@@ -1,0 +1,100 @@
+---
+name: state-lifecycle-replay-audit
+description: Use when a state machine, singleton coordinator, transaction, owner, latch, retry, restart, rollback, or asynchronous callback may leak state or side effects across attempts, rounds, tasks, or process lifecycles.
+---
+
+# State Lifecycle Replay Audit
+
+## Purpose
+
+Prove that every operation round owns its state and side effects, failures converge to a defined reusable baseline, retries are idempotent, and a later success does not hide an earlier leaked owner, latch, transaction, callback, or persistent artifact.
+
+## Conditional sub-skills
+
+Use `singleton-state-machine-cross-round-heal` when a process-lifetime object retains per-round state or an entry must self-heal stale state.
+
+Use `btcpp-reactive-recovery-pattern` when BehaviorTree.CPP reactive control, recovery, or running-node halt semantics participate in the lifecycle.
+
+Invoke sub-skills by name through the active host; do not embed host-specific command syntax.
+
+## Core rules
+
+- A second request that later succeeds proves only that the second path succeeded. It does not prove the first round recovered.
+- Assign every round a generation, request, transaction, or equivalent identity. Late callbacks from one round must not mutate another.
+- For each state record who writes, reads, clears, restores, persists, and owns it.
+- External side effects need idempotency and compensation rules, not only in-memory state reset.
+- Restart is a separate transition: memory disappears, while files, databases, device state, queued messages, and remote effects may remain.
+- A happy path cannot establish failure convergence, retry safety, replay safety, or rollback completeness.
+
+## Procedure
+
+### 1. Define the operation scope
+
+Fix the operation entry, terminal success, terminal failure, round identity, process lifetime, persistence boundary, external actors, and expected reusable baseline.
+
+### 2. Inventory lifecycle state
+
+Include state-machine phase, owner, latches, guards, request and transaction IDs, retry counters, callbacks, timers, cancellation tokens, files, property or database entries, queues, device effects, and remote acknowledgements. For each, name write/read/clear/restore responsibility.
+
+### 3. Map transitions and cleanup
+
+For every entry, success, rejection, timeout, cancellation, crash, rollback failure, and completion transition, record guard, side effect, compensation, next state, and round-identity check. Do not accept a transition that relies on the next request to clean the previous round unless that is an explicit, tested recovery contract.
+
+### 4. Execute the six mandatory replay dimensions
+
+1. `immediate`: inspect state and externally visible effects immediately after the action or failure.
+2. `converged`: wait for documented asynchronous convergence without issuing a new business request.
+3. `restart`: restart the relevant process or subsystem and inspect restored state and durable effects.
+4. `replay`: resend the same request or deliver duplicate/late callbacks; verify idempotency and generation isolation.
+5. `rollback`: force rollback or cancellation at each side-effect boundary, including rollback failure.
+6. `failure`: inject failure at each transition and verify owner, latch, timers, transactions, artifacts, and external effects converge.
+
+Do not use a later business request as the waiting mechanism for `converged`; that is a replay or new round.
+
+### 5. Diagnose leaks and conflicts
+
+Compare expected and observed state across rounds. Highlight stale owners, true latches detached from real readiness, orphaned files, duplicate sends, reused transaction IDs, callbacks without generation checks, and rollback that cleans only the happy-path subset.
+
+### 6. Set the verdict
+
+The lifecycle passes only when all applicable mandatory dimensions pass for each critical state and side effect. A missing dimension is `unobserved`, not pass. The main agent must recheck decisive failure and recovery evidence before declaring convergence.
+
+## Required output contract
+
+### `scope`
+
+Operation, entry, round identity, expected terminal states, reusable baseline, process lifetime, persistence boundary, and external side effects.
+
+### `state_inventory`
+
+| State/artifact | Lifetime | Owner | Written by | Read by | Cleared by | Restored from | Invariant |
+|---|---|---|---|---|---|---|---|
+
+### `transition_matrix`
+
+| From | Event/guard | Round check | Side effect | Compensation | To | Evidence | Status |
+|---|---|---|---|---|---|---|---|
+
+### `replay_matrix`
+
+| Dimension | Initial state | Stimulus | Expected state/effect | Observed | Cleanup | Status |
+|---|---|---|---|---|---|---|
+
+Include exactly one or more rows for each of: `immediate`, `converged`, `restart`, `replay`, `rollback`, `failure`.
+
+### `leaks_and_conflicts`
+
+For every mismatch state the owning round, affected later round, user impact, smallest reproducer, and repair responsibility.
+
+### `verdict`
+
+State `pass`, `fail`, or `unobserved`; list proven dimensions, missing or failed dimensions, allowed conclusion, prohibited overclaim, and the next discriminating test.
+
+## Anti-patterns
+
+- Calling a second-round success automatic recovery.
+- Clearing owner but leaving latch, transaction, callback, timer, or persistent artifact behind.
+- Testing restart without durable state, or retry without duplicate external effects.
+- Reusing a request ID or accepting a late callback without a generation check.
+- Rolling back only the last side effect while earlier writes remain.
+- Treating an absent failure-injection test as evidence that failure cleanup works.

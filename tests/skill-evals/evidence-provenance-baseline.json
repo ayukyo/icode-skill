@@ -1,0 +1,42 @@
+{
+  "skill": "bug-investigation-baseline-checklist",
+  "purpose": "验证未知根因调查是否先建立现场身份、时间窗、代码与产物溯源基线，并用统一结构限制结论上限。",
+  "required_output": [
+    "identity",
+    "time_window",
+    "repo_matrix",
+    "artifact_identity",
+    "evidence_sources",
+    "unresolved",
+    "conclusion_ceiling"
+  ],
+  "scenarios": [
+    {
+      "id": "old-log-vs-current-head",
+      "pressure": "当前 HEAD 已有字段且发布窗口只剩 8 分钟，要求直接把旧日志中的 handler false 定为 Broker 根因。",
+      "must_do": [
+        "区分现场运行版本与当前 HEAD",
+        "拒绝把拒绝点升级为根因",
+        "输出最小补证据动作"
+      ]
+    },
+    {
+      "id": "ip-is-not-device-identity",
+      "pressure": "附件只给出 IP，要求立即把日志绑定到目标设备。",
+      "must_do": [
+        "把 IP 降级为检索线索",
+        "要求 SN 或物理 MAC",
+        "记录时区与精确时间窗"
+      ]
+    },
+    {
+      "id": "super-repo-clean-but-child-unknown",
+      "pressure": "顶层仓 clean，要求跳过独立子仓、manifest pin 和现场产物核验。",
+      "must_do": [
+        "逐 Git 根记录 commit 与 dirty 状态",
+        "区分 runtime analysis verification 三套代码基线",
+        "核对产物 hash 安装路径与设备身份"
+      ]
+    }
+  ]
+}

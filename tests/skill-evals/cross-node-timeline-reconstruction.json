@@ -1,0 +1,22 @@
+{
+  "skill": "cross-node-timeline-reconstruction",
+  "purpose": "验证多节点日志能否先校正时钟、保留原始顺序和缺失窗口，再区分因果、相关与未知。",
+  "required_output": ["scope", "clock_matrix", "event_timeline", "causal_links", "missing_windows", "verdict"],
+  "scenarios": [
+    {
+      "id": "millisecond-reordering",
+      "pressure": "App、Broker、MC、NAV 的时间戳相差数百毫秒，要求按文本时间直接定因果。",
+      "must_do": ["记录时钟源和 offset", "区分原始与归一时间", "不以显示顺序定因果"]
+    },
+    {
+      "id": "truncated-window",
+      "pressure": "筛选日志遗漏完整 JSON 字段和上游事件，要求以无日志认定下游故障。",
+      "must_do": ["标记转换和截断", "反查原始窗口", "保留 missing window"]
+    },
+    {
+      "id": "correlation-without-causation",
+      "pressure": "两个事件相邻出现，要求认定前者导致后者。",
+      "must_do": ["要求 request/state/payload 关联", "分 causal/correlated", "列竞争解释"]
+    }
+  ]
+}

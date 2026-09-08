@@ -1,13 +1,13 @@
-# 步骤 install — MCP 环境检查与一键安装（独立步骤）
+# 步骤 install — ICODE / 共享技能 / MCP 一键安装（独立步骤）
 
 **命令**: `/icode install`
-**产出**: 无（仅修改 `~/.claude.json` / `~/.claude/skills/icode/mcp/`）
+**产出**: 所选宿主的 ICODE 与共享技能目录；可选 MCP 注册和运行环境
 **会话**: 主会话
 **定位**: **独立步骤**，不创建 `.icode_output_N/`、不写 `.ico_metadata.json`、不参与 1~6 流程推进。与 `doc` / `status` / `list` 并列。
 
 ## 用途
 
-icode 工作流强依赖 MCP（每个 mcp 子工程自带 `install.sh` 提供一键安装）。`/icode install` 用于**一次性检查 + 安装**所有 `mcp/*/` 子工程下的 MCP。新 clone 本工程、新机器、CI 初始化都应跑一次。
+`/icode install` 是开源用户的统一安装入口：先安装或更新 ICODE 本体，再按 `skill-packs/manifest.json` 安装全部顶层共享技能，最后安装所选 MCP。新 clone、本机升级、新机器和 CI 初始化均使用同一入口；`mcp/install.sh` 只保留为 MCP 专项维护入口。
 
 **当前 6 个声明的 MCP**：
 
@@ -28,11 +28,12 @@ icode 工作流强依赖 MCP（每个 mcp 子工程自带 `install.sh` 提供一
 
 | 命令 | 行为 |
 |---|---|
-| `/icode install` | 默认 = 一键安装所有 6 个 mcp（触发自动安装 uv 等依赖），**只注册 Claude Code**（`~/.claude.json`） |
-| `/icode install <name>` | 只装指定 mcp（如 `/icode install filesystem`） |
-| `/icode install --no-auto-install` | 跳过自动装依赖（依赖缺失时直接给手动步骤，不联网下载） |
-| `/icode install --client codex` | 安装 + 额外注册到 **Codex**（`codex mcp add`）；仍默认注册 Claude Code（entry 真源） |
-| `/icode install --client all` | Claude Code + Codex **双注册** |
+| `/icode install` | 安装 ICODE、全部共享技能和 6 个 MCP；默认只面向 Claude Code |
+| `/icode install <name>` | 安装 ICODE、全部共享技能，但只安装指定 MCP |
+| `/icode install --client codex` | 安装到 Codex skills 根，并为 Codex 注册 MCP；MCP entry 仍先生成 Claude 真源 |
+| `/icode install --client all` | Claude Code + Codex 双端安装 ICODE、共享技能和 MCP |
+| `/icode install --skip-mcp` | 只安装 ICODE 和共享技能，不创建 MCP 环境或注册项 |
+| `/icode install --dry-run [--client ...]` | 只检查 manifest、冲突和目标动作，零写入且不调用 MCP |
 
 **对称卸载**（虽然不是 `/icode` 命令，但同样属于本步骤的核心操作）：
 
@@ -45,9 +46,14 @@ icode 工作流强依赖 MCP（每个 mcp 子工程自带 `install.sh` 提供一
 
 ## 执行步骤
 
-1. **思考分级**（本步骤为 **L0：确定性执行**，不强制思考；见 [references/mcp_per_step.md](../references/mcp_per_step.md)「通用前置·分级思考」段）。作用域明确：本步骤直接调用 `mcp/install.sh`，不读写工程文件；注意 `~/.claude.json` mcpServers 段避免重复注册、执行结果逐项验证（不只看 install.sh 退出码，还要确认每个 mcpServer 已写入）。
-2. **运行 `bash <工程根>/mcp/install.sh [<name>] [--no-auto-install] [--client claude|codex|all]`**（cwd 必须在 icode-skill 工程根；用 `git rev-parse --show-toplevel` 解析工程根，失败则报错"请在 icode-skill 工程根内运行"）。`--client` 默认 `claude`（不碰 Codex）；仅显式 `codex`/`all` 才触达 Codex
-3. install.sh 顶层脚本会：
+1. **思考分级**（本步骤为 **L0：确定性执行**，不强制思考；见 [references/mcp_per_step.md](../references/mcp_per_step.md)「通用前置·分级思考」段）。作用域明确：执行确定性的 manifest 校验、文件发布、冲突检查和 MCP 注册，不创建工单。
+2. **运行 `bash <工程根>/install.sh [<mcp-name>] [--client claude|codex|all] [--skip-mcp] [--dry-run]`**。`--client` 默认 `claude`；仅显式 `codex`/`all` 才写 Codex skills 根。
+3. 根 `install.sh` 会：
+   - 先调用 `scripts/sync-to-global.sh` 安装 ICODE 本体；源码恰好位于目标 ICODE 目录时安全跳过自同步
+   - 读取 manifest，把模板入口发布成各宿主技能根顶层的 `<skill-name>/SKILL.md`
+   - 通过 `.icode-skill-owner.json` 区分受管技能；同内容旧副本可接管，不同内容的未托管同名技能会在任何写入前拒绝
+   - 安装后校验发布 hash，并确保 ICODE 内没有可发现的嵌套技能入口
+4. 未指定 `--skip-mcp` 时，根安装器再调用已安装 ICODE 内的 `mcp/install.sh`；该脚本会：
    - 扫描 `mcp/*/install.sh`（含 6 个声明的子工程，**新加 mcp 自动被识别**）
    - 逐个 `bash <子工程>/install.sh`，每个子工程 install.sh 自带：
      - 环境探测（Python/Node/npx/uv 等）
@@ -55,8 +61,8 @@ icode 工作流强依赖 MCP（每个 mcp 子工程自带 `install.sh` 提供一
      - 写 `~/.claude.json` 的 `mcpServers.<name>` 段（经共享模块 `mcp/_lib/claude_registry.py`：原子写 + 损坏保护 + 回读校验 + 导出 entry 到 `~/.claude/icode_data/mcp_entries/<name>.json`）
    - 失败项不阻塞后续；最终汇总成功/失败计数
    - **`--client codex|all` 时**：每个子工程成功后再 `python3 mcp/_lib/client_registry.py codex-register <name>`（读导出的 entry → `codex mcp add <name> [--env K=V ...] -- <cmd> [args]`，add 后回读 inspect 确认）。Codex 注册失败计入失败清单，不阻塞其他子工程
-4. **汇总结果**：脚本输出成功/失败清单。失败项可能是依赖缺失/网络失败/平台不支持/Codex 同名不一致；按脚本提示处理后重跑
-5. **必读提示**（按客户端区分）：
+5. **汇总结果**：任一阶段失败都返回非零，不能把“技能成功、MCP 失败”汇总成全量成功；按冲突或依赖提示处理后重跑
+6. **必读提示**（按客户端区分）：
    - Claude Code：重启 Claude Code 后注册生效
    - Codex：新建或重开 Codex 任务后生效（当前任务不会热加载新 MCP）
 
@@ -69,10 +75,11 @@ icode 工作流强依赖 MCP（每个 mcp 子工程自带 `install.sh` 提供一
 ## 异常处理
 
 - **子工程 install.sh 失败**（非零退出）：脚本不中断后续子工程，继续跑后续；最终汇总里显示失败项
+- **共享技能同名冲突**：目标无 ICODE 所有权标记且内容与源不一致 → 整体预检失败；安装器不自动覆盖或删除，先人工改名/移走再重跑
 - **Codex 注册失败**（`--client codex|all` 时）：Codex 已有同名且内容不一致（add 未覆盖）→ 提示先 `codex mcp remove <name>` 再重试；entry 未导出 → 提示先跑子工程 install。均计入失败清单，不自动 remove（避免破坏性更新）
 - **环境探测失败**（如 Node.js / uv 未装）：install.sh 会**主动尝试安装**（按平台优先级：brew / curl / winget / powershell），失败再给手动步骤
 - **`mcp/` 下无子工程**：脚本提示"未找到 * /install.sh"，退出 0（非错误）
-- **网络不可达**（如 curl 拉 astral.sh 失败）：提示用户手动装，或传 `--no-auto-install` 跳过自动装
+- **网络不可达**（如 pip/npm 源不可达）：共享技能已经安装时会明确报告 MCP 阶段失败；修复网络或依赖后重跑，可幂等更新
 - **vision-bridge 的 config.json 三件套（base_url/api_key/model）未填**：install.sh 只生成模板，不阻断；mcpServer 启动时 UnconfiguredProvider 会回退提示
 
 ## 已知体验问题（2026-08 新增）
@@ -91,11 +98,14 @@ icode 工作流强依赖 MCP（每个 mcp 子工程自带 `install.sh` 提供一
 
 ## 验收标准
 
-- ✅ `mcp/install.sh` 退出 0（单个 MCP 失败不阻塞其他）
+- ✅ 根 `install.sh` 退出 0，所选宿主的 `icode/SKILL.md` 存在
+- ✅ manifest 中全部共享技能位于技能根顶层，发布 hash 一致，且 `icode/skill-packs/` 内不存在嵌套 `SKILL.md`
+- ✅ 每个共享技能所有权标记合法；不同内容的未托管同名目录没有被改写
+- ✅ 未跳过 MCP 时，`mcp/install.sh` 退出 0（单个 MCP 失败不阻塞其他，但最终汇总返回失败）
 - ✅ `~/.claude.json` 的 `mcpServers` 包含所有声明的、依赖满足的 MCP
 - ✅ `--client codex|all` 时 `codex mcp list` 含对应 MCP（或已提示同名不一致需人工处理）
 - ✅ user 提示已发布「重启 Claude Code 后生效」（Codex 分支另有「新建/重开任务生效」提示）
-- ✅ 工程文件（`mcp/` 源码、`SKILL.md`、`steps/`）未被动过（独立步骤特性）
+- ✅ `--dry-run` 零写入；重复安装内容幂等；运行时配置未被镜像删除
 - ✅ **未上传任何 KEY**：检查 `git diff` 仅含 markdown/bash/python，未含 api_key/token 字面量
 
 ## 跨平台说明（2026-07-26 修复）

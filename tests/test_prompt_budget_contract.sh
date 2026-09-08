@@ -71,10 +71,10 @@ then ok "三 schema 版本/枚举/结构合法"; else bad "schema 非法"; fi
 if python3 tools/icode_control.py --help 2>&1 | grep -q 'resolve-ticket'; then
   help=$(python3 tools/icode_control.py --help 2>&1)
   missing=0
-  for cmd in create resolve-ticket validate event transition metadata-update index-write index-update migration record-verification archive-manifest close-phase reopen snapshot; do
+  for cmd in create resolve-ticket validate event transition metadata-update index-write index-update migration record-verification record-claim record-skill-run archive-manifest close-phase reopen snapshot; do
     printf '%s' "$help" | grep -q "$cmd" || missing=1
   done
-  [ "$missing" -eq 0 ] && ok "icode_control.py 14 个控制面子命令可用" || bad "icode_control.py 子命令不完整"
+  [ "$missing" -eq 0 ] && ok "icode_control.py 16 个控制面子命令可用" || bad "icode_control.py 子命令不完整"
 else bad "icode_control.py 子命令缺失"; fi
 
 echo "PASS=$PASS FAIL=$FAIL"

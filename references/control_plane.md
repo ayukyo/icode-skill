@@ -51,7 +51,7 @@ python3 tools/icode_control.py create --dir <out_dir> --ticket-id <id> \
 ### 4.1 普通 metadata 单一 writer
 
 - 已登记业务字段统一调用 `python3 tools/icode_control.py metadata-update --dir <out_dir> [--set-json '<object>'] [--append-json '<field-to-array>'] [--request-id <key>]`；数组追加必须用 `--append-json`，避免读旧数组后覆盖并发增量。
-- `status/completed_steps/delivery_verdict`、`verification_runs`、`close_state`、`indexed` 等控制字段分别由 `transition`、`record-verification`、`close-phase`、`index-write` 独占，`metadata-update` 拒绝改写；未登记顶层字段拒绝，实验数据放 `extensions.<namespace>`。
+- `status/completed_steps/delivery_verdict`、`claims`、`verification_runs`、`close_state`、`indexed` 等控制字段分别由 `transition`、`record-claim`、`record-verification`、`close-phase`、`index-write` 独占，`metadata-update` 拒绝改写；未登记顶层字段拒绝，实验数据放 `extensions.<namespace>`。
 - 每次 metadata 事务事件自动记录整个写后对象的 `metadata_hash_after`。`validate` 比对当前 metadata 与最近一次受控写 hash，因此即使只绕过工具直写一个非状态字段也会 fail-closed。旧事件链没有该字段时保持可读兼容，下一次受控写后开始强校验。
 - 进入关闭流程后只允许经该命令更新拓扑、提交、迁移、归档账本字段；`archived` 后只能写归档 `control_root`；`closed` 后只允许专用 `reopen` 解冻。
 
@@ -85,6 +85,10 @@ Git checkout 和逐仓提交契约由 `steps/reopen.md` 先创建/校验；然�
 
 `record-verification` 在一个事务中追加 `verification_runs` 和 `verification_recorded` 事件，不修改 `patch_history/status/completed_steps/delivery_verdict`。`--evidence` 必填；复用构建时 `--build-source reused` 还必须提供 `--artifact-identity`。
 
+需要分层验收时，在 metadata 声明 `verification_contract={required,required_layers,required_consumers,required_scenarios}`，并用 `record-verification --layer --consumer --scenario --baseline` 逐单元记录。只有 `required=true` 才启用 verified 门禁；每个必需单元取最新记录，必须 `outcome=pass` 且 evidence/baseline 非空。合同缺失或 `required=false` 不会给纯 host/历史任务强加真实环境要求。
+
+`record-claim` 在一个事务中追加 `claims` 和 `claim_recorded` 事件。`kind` 仅允许 `fact/inference/unobserved/refuted`；所有 claim 必须写明 `source` 和“该证据不能证明什么”的 `boundary`，`fact/refuted` 还必须至少有一条 `--evidence`。普通 `metadata-update` 与通用 `event` 均不得伪造 claim。
+
 ## 9. 故障边界（控制面不可用时）
 
 `tools/icode_control.py` 缺失、损坏或执行环境异常时，vNext 的状态、普通 metadata、事件、验证记录、关闭阶段和全局索引写入一律 **fail-closed**：停止变更，报告故障与修复入口。只读诊断可继续。禁止通过手工直写 metadata/index 绕过门禁；`control_plane_degraded=true` 仅作为历史遗留检测标记。
@@ -101,7 +105,8 @@ Git checkout 和逐仓提交契约由 `steps/reopen.md` 先创建/校验；然�
 | index-write | 索引单一 writer | `--ticket-dir` |
 | index-update | 更新索引独有字段 | `--ticket-id [--increment-hit] [--set-json]` |
 | migration | legacy→v3 迁移 | `--dir [--apply]` |
-| record-verification | 原子记录验证 | `--dir --kind --outcome --evidence [--build-source]` |
+| record-verification | 原子记录验证 | `--dir --kind --outcome --evidence [--layer --consumer --scenario --baseline]` |
+| record-claim | 原子记录证据结论 | `--dir --kind --statement --source --boundary [--evidence ...]` |
 | archive-manifest | 生成/校验归档 hash 清单 | `--dir --archive-dir [--write]` |
 | close-phase | 关闭阶段记录 | `--dir --phase [--request-id]` |
 | reopen | 在归档控制根解冻 closed 工单 | `--dir --metadata-json --reason [--request-id]` |

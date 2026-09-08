@@ -1,0 +1,191 @@
+{
+  "schema_version": 1,
+  "routes": [
+    {
+      "skill": "bug-investigation-baseline-checklist",
+      "triggers": [
+        "unknown_root_cause",
+        "field_log_analysis",
+        "runtime_source_mismatch_risk",
+        "multi_repo_provenance"
+      ],
+      "steps": [
+        "log",
+        "plan",
+        "verify"
+      ],
+      "input_contract": [
+        "symptom and raw evidence locations",
+        "candidate physical-device identity and exact or candidate time window",
+        "participating repositories and known artifact information"
+      ],
+      "output_contract": [
+        "identity and time_window",
+        "repo_matrix and artifact_identity",
+        "evidence_sources and unresolved",
+        "conclusion_ceiling and bounded claim ledger"
+      ],
+      "fallback": "If identity, time, or runtime provenance cannot be resolved, preserve the evidence, mark unknown fields, and cap the conclusion at observation_only or candidate_path."
+    },
+    {
+      "skill": "end-to-end-functional-chain-audit",
+      "triggers": [
+        "end_to_end_support_claim",
+        "intermediate_success_only",
+        "missing_downstream_evidence",
+        "multiple_consumers_or_views"
+      ],
+      "steps": [
+        "plan",
+        "code",
+        "deepcheck",
+        "audit",
+        "verify"
+      ],
+      "input_contract": [
+        "feature scope product mode and expected terminal behavior",
+        "runtime baseline device identity and exact time window",
+        "known producers consumers observations and required scenarios"
+      ],
+      "output_contract": [
+        "scope nodes and edges",
+        "gates_and_state and observations",
+        "breakpoints and support_ceiling"
+      ],
+      "fallback": "If a required edge lacks an observation point, mark it unknown, identify the last positive node and smallest discriminating check, and stop the support claim before that edge."
+    },
+    {
+      "skill": "state-lifecycle-replay-audit",
+      "triggers": [
+        "cross_round_state",
+        "retry_or_replay",
+        "restart_or_rollback",
+        "owner_latch_or_late_callback"
+      ],
+      "steps": [
+        "plan",
+        "code",
+        "deepcheck",
+        "audit",
+        "verify"
+      ],
+      "input_contract": [
+        "operation entry terminal states and reusable baseline",
+        "state owner latch transaction persistence and external side effects",
+        "known retry restart replay rollback and failure observations"
+      ],
+      "output_contract": [
+        "scope and state_inventory",
+        "transition_matrix and replay_matrix",
+        "leaks_and_conflicts and verdict"
+      ],
+      "fallback": "If a mandatory replay dimension cannot be executed, mark it unobserved, prohibit a lifecycle pass, and name the smallest safe test required to resolve it."
+    },
+    {
+      "skill": "multi-repo-artifact-provenance",
+      "triggers": [
+        "multi_git_root_build",
+        "mixed_package_risk",
+        "deployment_identity_claim",
+        "wrong_target_or_slot_risk"
+      ],
+      "steps": [
+        "plan",
+        "code",
+        "deepcheck",
+        "audit",
+        "verify"
+      ],
+      "input_contract": [
+        "build invocation product architecture root and manifest revision",
+        "required repositories modules packages and target device",
+        "artifact package deploy and runtime evidence locations"
+      ],
+      "output_contract": [
+        "build_identity and repo_matrix",
+        "artifact_matrix and deployment_matrix",
+        "mismatches and verdict"
+      ],
+      "fallback": "If any required module cannot be mapped from commit to runtime-loaded object, mark it unresolved and prohibit an aggregate deployment-correct verdict."
+    },
+    {
+      "skill": "field-verification-boundary",
+      "triggers": [
+        "verified_or_completed_claim",
+        "delivery_vs_consumption",
+        "ui_vs_physical_behavior",
+        "closed_client_or_field_acceptance"
+      ],
+      "steps": [
+        "plan",
+        "deepcheck",
+        "audit",
+        "verify"
+      ],
+      "input_contract": [
+        "explicit expected behavior required layers consumers and scenarios",
+        "environment device baseline and artifact identity when applicable",
+        "test actions observations and evidence locations"
+      ],
+      "output_contract": [
+        "acceptance_contract and verification_matrix",
+        "negative_evidence and gaps",
+        "verdict with allowed and prohibited claims"
+      ],
+      "fallback": "If acceptance is ambiguous, preserve partial layer results, mark broader verification blocked, and request only the missing acceptance boundary."
+    },
+    {
+      "skill": "cross-layer-contract-audit",
+      "triggers": [
+        "cross_module_contract_mismatch",
+        "enum_property_protocol_or_abi_boundary",
+        "closed_library_behavior_mismatch",
+        "multiple_possible_narrow_skills"
+      ],
+      "steps": [
+        "plan",
+        "code",
+        "deepcheck",
+        "audit"
+      ],
+      "input_contract": [
+        "producer adapter transport consumer and runtime versions",
+        "raw fields values units enums schemas and observed behavior",
+        "candidate contract class and available narrow skills"
+      ],
+      "output_contract": [
+        "boundary and contract_matrix",
+        "classification and skill_routes",
+        "gaps and per-problem verdict"
+      ],
+      "fallback": "If a narrow skill is unavailable, preserve the classification and boundary evidence, record the missing route, and perform only a bounded contract comparison without inventing the missing procedure."
+    },
+    {
+      "skill": "cross-node-timeline-reconstruction",
+      "triggers": [
+        "multiple_clock_domains",
+        "cross_node_incident",
+        "truncated_or_buffered_logs",
+        "causality_from_timestamps"
+      ],
+      "steps": [
+        "log",
+        "plan",
+        "deepcheck",
+        "audit",
+        "verify"
+      ],
+      "input_contract": [
+        "incident identity date timezone nodes and candidate window",
+        "raw sources capture methods and known clock adjustments",
+        "available correlation payload state and sequence fields"
+      ],
+      "output_contract": [
+        "scope and clock_matrix",
+        "event_timeline and causal_links",
+        "missing_windows and verdict"
+      ],
+      "fallback": "If clocks or raw fields cannot be recovered, preserve per-source order, use logical dependencies only, mark cross-source links candidate, and prohibit timestamp-only causality."
+    }
+  ]
+}

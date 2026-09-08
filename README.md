@@ -29,11 +29,12 @@ ICode is a Claude Code Skill that breaks the journey from requirement to deliver
 ## Quick Start
 
 ```bash
-# 1) Install into your skills directory (needs one-time setup)
-git clone https://github.com/ayukyo/icode-skill ~/.claude/skills/icode
+# 1) Clone the open-source installer
+git clone https://github.com/ayukyo/icode-skill ~/icode-skill
+cd ~/icode-skill
 
-# 2) Install the 6 MCP servers the workflow relies on (self-checking, fills in what's missing)
-/icode install
+# 2) Install ICODE, shared skills, and MCPs for Claude Code + Codex
+./install.sh --client all
 
 # 3) Run a full flow
 /icode start Implement a feature module
@@ -120,20 +121,37 @@ Every step produces a real artifact in `.icode_output/.icode_output_N/` (plan â†
 
 ## Installation
 
-Clone this repository into your Claude Code skills directory:
+### One public installer
+
+Clone the source into a neutral directory, then use the root installer. It installs ICODE, every shared skill declared by [`skill-packs/manifest.json`](skill-packs/manifest.json), and the MCP servers. The installer default is Claude (`--client` default: claude); use `--client all` for Claude Code and Codex together.
+
+```bash
+git clone https://github.com/ayukyo/icode-skill ~/icode-skill
+cd ~/icode-skill
+./install.sh --client all
+```
+
+Use `./install.sh --dry-run --client all` for a zero-write preflight, or `--skip-mcp` when only ICODE and the shared skills are required. ICODE is installed as `<skills-root>/icode/`; each shared skill is generated from its source template at `<skills-root>/<skill-name>/SKILL.md`. Source templates cannot be discovered as nested skills.
+
+The installer writes an ownership marker into managed skills. An identical unmanaged same-name skill is adopted safely; a different unmanaged same-name skill is refused before either host is modified. Runtime configuration and caches are preserved.
+
+The historical direct-Claude clone remains supported as a compatibility path. After Claude Code discovers ICODE, run the same unified command:
 
 ```bash
 git clone https://github.com/ayukyo/icode-skill ~/.claude/skills/icode
+/icode install --client all
 ```
 
-Then run the MCP environment check + one-click install (scans `mcp/*/install.sh`, self-checks venv/Node/npm per sub-project, fills in what's missing, registers to Claude Code (`~/.claude.json`; add `--client all` to also register to Codex via `codex mcp add`, default `--client claude` never touches Codex):
+### Developer update command
+
+Repository contributors can preview and publish the current checkout without running MCP installation:
 
 ```bash
-/icode install
-/icode install --client all   # also register to Codex (default: claude only)
+./scripts/sync-to-global.sh --dry-run --client all
+./scripts/sync-to-global.sh --apply --client all
 ```
 
-New clone / new machine / CI bootstrap â†’ run once. The workflow degrades gracefully if optional MCPs aren't installed (declared downgrade paths, never blocks).
+[`mcp/workflow-gate/skill-routes.json`](mcp/workflow-gate/skill-routes.json) maps ICODE triggers to shared-skill input/output contracts. Optional MCPs still degrade gracefully when unavailable, but the installer reports their installation failure honestly.
 
 ## Optional Data Source: Pull from DingTalk Docs
 

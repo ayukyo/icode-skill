@@ -1,0 +1,95 @@
+---
+name: field-verification-boundary
+description: Use when a fix, feature, ticket, deployment, message delivery, UI preview, or test result is being called verified and the required host, build, deploy, delivery, consumption, UI, closed-client, or physical-device acceptance layers may differ.
+---
+
+# Field Verification Boundary
+
+## Purpose
+
+Turn the task's acceptance statement into explicit verification layers, record evidence at each required layer, and prevent a lower-layer success from being promoted into field, user-visible, closed-client, or physical verification.
+
+## Required sub-skill
+
+REQUIRED SUB-SKILL: use `cross-validate-fix-ticket` when reviewing a ticket already marked completed or verified by another implementation path.
+
+Invoke the sub-skill by name through the active host. Do not embed host-specific invocation syntax.
+
+## Verification layers
+
+Use only layers relevant to the acceptance contract, but keep their meanings distinct:
+
+1. `static`: review, schema, lint, type, or source inspection.
+2. `unit`: isolated tests and mocks.
+3. `build`: required target modules build from the intended checkout.
+4. `host`: executable or integration behavior on the development host.
+5. `deploy`: intended artifact is installed and loaded on the bound target.
+6. `delivery`: message, DP, BLE, IPC, protocol, or callback reached a boundary.
+7. `consumption`: the effective business or algorithm consumer read and applied it.
+8. `settings_preview`: configuration UI preview reflects it.
+9. `operation_view`: active operation, planning, or runtime view reflects it.
+10. `closed_client`: behavior works while the App or client is closed or disconnected, when required.
+11. `physical`: the real device or external system exhibited the specified behavior.
+
+Delivery does not imply consumption. A `void` setter, send success, DP echo, or Raw-DP/BLE receipt does not prove the effective consumer. Settings preview does not imply operation view. Operation view does not imply physical behavior.
+
+## Procedure
+
+### 1. Freeze the acceptance contract
+
+Extract the user's exact expected behavior, required layers, consumers, scenarios, products, environment, device identity, baseline, and pass criteria. If no field behavior is requested, do not invent a physical-device requirement. If real behavior is requested, host success cannot satisfy it.
+
+### 2. Bind environment and artifact
+
+For device or deployed checks, record physical identity, exact time window, runtime artifact, install path or slot, and configuration. Use `multi-repo-artifact-provenance` when artifact identity is not already proven.
+
+### 3. Test each required layer independently
+
+For every layer record command or action, expected observation, actual observation, evidence pointer, and result. Use `pass`, `fail`, `inconclusive`, `blocked`, or `not_required`. Do not infer an unobserved layer from an adjacent pass.
+
+### 4. Record negative evidence and counterfactuals
+
+Negative evidence includes missing consumer logs, stale readback, divergent operation view, unchanged physical behavior, wrong device identity, or an observation outside the agreed window. State whether it refutes the claim or only exposes an observation gap.
+
+### 5. Compare required consumers and scenarios
+
+Repeat checks for each consumer and scenario named by acceptance: active task versus next task, App open versus closed, settings versus operation view, restart, product slice, or physical mode. One successful subset cannot satisfy a broader contract.
+
+### 6. Set the verdict
+
+`verified` requires every required layer, consumer, and scenario to pass with bound evidence. A required `fail`, `inconclusive`, `blocked`, or missing row prevents verified. Preserve precise partial results such as `build_passed`, `deployed`, or `delivery_observed`.
+
+The main agent must recheck decisive evidence before publishing a field or physical verdict.
+
+## Required output contract
+
+### `acceptance_contract`
+
+| Expected behavior | Required layers | Consumers | Scenarios | Environment/device | Baseline | Pass criteria |
+|---|---|---|---|---|---|---|
+
+### `verification_matrix`
+
+| Layer | Required | Consumer | Scenario | Environment/device | Baseline/artifact | Action | Evidence | Result |
+|---|---|---|---|---|---|---|---|---|
+
+### `negative_evidence`
+
+List observation, evidence pointer, affected layer or claim, whether it refutes or is inconclusive, and next discriminating action.
+
+### `gaps`
+
+List every missing required layer, consumer, or scenario; owner; safe next action; and whether the gap blocks verified.
+
+### `verdict`
+
+State `verified`, `partially_verified`, `failed`, or `blocked`; list passed scope, unverified scope, exact allowed claim, prohibited overclaim, and ticket status recommendation.
+
+## Anti-patterns
+
+- Marking verified from compile, unit, deployment, send, or echo success alone.
+- Assuming a consumer acted because a transport accepted a message.
+- Using settings preview as evidence for running-map or physical behavior.
+- Treating App-open delivery as closed-App receipt or consumption.
+- Requiring a physical device for a task whose explicit acceptance is host-only.
+- Hiding a required failed or inconclusive layer inside a general “mostly passed” verdict.

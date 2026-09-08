@@ -28,20 +28,37 @@ ICode 是一个 Claude Code 技能（Skill），将需求到交付拆解为严�
 
 ## 安装
 
-将本仓库克隆到 Claude Code skills 目录：
+### 开源统一安装入口
+
+把源码 clone 到普通目录，再运行仓库顶层安装器。它会一次性安装 ICODE、[`skill-packs/manifest.json`](skill-packs/manifest.json) 声明的全部共享技能和 MCP。默认只安装 Claude（`--client claude`）；Claude Code 与 Codex 双端使用 `--client all`。
 
 ```bash
-git clone <repo-url> ~/.claude/skills/icode
+git clone https://github.com/ayukyo/icode-skill ~/icode-skill
+cd ~/icode-skill
+./install.sh --client all
 ```
 
-然后跑 MCP 环境检查 + 一键安装（扫描 `mcp/*/install.sh`，每个子工程自检环境（venv/Node/npm）并缺啥补啥、注册到 Claude Code（`~/.claude.json`；加 `--client all` 可同时注册到 Codex（`codex mcp add`），默认 `--client claude` 不碰 Codex）：
+`./install.sh --dry-run --client all` 可做零写入预检；`--skip-mcp` 只安装 ICODE 和共享技能。ICODE 本体发布到 `<skills-root>/icode/`，每个共享技能从不可发现的源模板生成到顶层 `<skills-root>/<skill-name>/SKILL.md`，不会再出现嵌套同名技能。
+
+安装器通过所有权标记管理共享技能：内容一致的旧副本可以无损接管；内容不同的未托管的同名技能会在任何宿主写入前拒绝，不会静默覆盖。运行配置和缓存继续保留。
+
+历史上的 Claude skills 目录直装方式继续兼容。Claude Code 发现 ICODE 后，执行同一个统一命令：
 
 ```bash
-/icode install
-/icode install --client all   # 同时注册到 Codex（默认只注册 Claude Code）
+git clone https://github.com/ayukyo/icode-skill ~/.claude/skills/icode
+/icode install --client all
 ```
 
-新 clone 仓库 / 新机器 / CI 初始化时跑一次。可选 MCP 未装时工作流优雅降级（显式声明降级路径，不阻塞）。
+### 开发者更新命令
+
+仓库开发者只想把当前 checkout 发布到本机、但不安装 MCP 时，使用：
+
+```bash
+./scripts/sync-to-global.sh --dry-run --client all
+./scripts/sync-to-global.sh --apply --client all
+```
+
+[`mcp/workflow-gate/skill-routes.json`](mcp/workflow-gate/skill-routes.json) 继续声明 ICODE 到共享技能的触发条件与输入/输出合同。可选 MCP 不可用时工作流仍可显式降级，但安装失败不会伪报成功。
 
 ## 可选增强：图片/视频理解
 

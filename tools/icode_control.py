@@ -14,6 +14,8 @@
   event           追加事件（哈希链；仅 vNext 工单）
   transition      状态流转（fail-closed：合法性 → 门禁 linter → 原子写 + state_changed 事件）
   metadata-update 原子 set/append 已登记业务字段（控制字段由专用命令独占）
+  record-claim    原子记录结构化 claim 与对应事件
+  record-skill-run 原子记录共享技能路由观测与对应事件
   index-write     全局索引单一 writer（写前重读合并 → 整文件校验 → 原子写 → 写后唯一性验证）
   index-update    原子更新索引独有的命中/stale 字段
   migration       legacy → vNext 迁移（dry-run 三分类报告 / --apply 单工单幂等）
@@ -57,14 +59,15 @@ TXN_NAME = ".icontrol_txn.json"
 GENESIS_HASH = "0" * 64
 DELIVERY_VERDICTS = ["verified", "verification_pending", "blocked", "not_applicable"]
 CONTROL_EVENT_TYPES = {
-    "ticket_created", "state_changed", "verification_recorded", "snapshot_written",
+    "ticket_created", "state_changed", "claim_recorded", "verification_recorded",
+    "skill_run_recorded", "snapshot_written",
     "close_phase", "ticket_reopened", "metadata_updated", "index_updated",
     "migration_applied", "idempotent_hit",
 }
 CONTROLLED_BIRTH_FIELDS = {
     "schema_version", "ticket_id", "requirement", "created_at", "status",
     "completed_steps", "indexed", "debug", "project_path", "close_state",
-    "delivery_verdict", "verification_runs", "control_plane_degraded",
+    "delivery_verdict", "claims", "verification_runs", "control_plane_degraded",
     "workflow_gate_schema_version", "thinking_gate_schema_version",
     "mcp_gate_schema_version",
 }
@@ -680,6 +683,21 @@ def validate_event_semantics(events, meta):
     metadata_runs = meta.get("verification_runs") or []
     if event_runs != metadata_runs:
         problems.append("verification_recorded 事件与 metadata.verification_runs 不一致")
+    event_claims = [{key: value for key, value in (event.get("payload") or {}).items()
+                     if key != "metadata_hash_after"}
+                    for event in events
+                    if event.get("event_type") == "claim_recorded"]
+    metadata_claims = meta.get("claims") or []
+    if event_claims != metadata_claims:
+        problems.append("claim_recorded 事件与 metadata.claims 不一致")
+    event_skill_runs = [{key: value for key, value in (event.get("payload") or {}).items()
+                         if key != "metadata_hash_after"}
+                        for event in events
+                        if event.get("event_type") == "skill_run_recorded"]
+    metadata_skill_runs = ((((meta.get("extensions") or {}).get("skills") or {})
+                            .get("runs")) or [])
+    if event_skill_runs != metadata_skill_runs:
+        problems.append("skill_run_recorded 事件与 metadata.extensions.skills.runs 不一致")
     hashed_events = [event for event in events
                      if isinstance(event.get("payload"), dict)
                      and event["payload"].get("metadata_hash_after")]
@@ -1980,7 +1998,7 @@ def known_metadata_fields():
 
 METADATA_UPDATE_PROTECTED = {
     "schema_version", "ticket_id", "created_at", "status", "completed_steps",
-    "indexed", "delivery_verdict", "verification_runs", "close_state",
+    "indexed", "delivery_verdict", "claims", "verification_runs", "close_state",
     "control_plane_degraded", "debug", "project_path",
     "workflow_gate_schema_version", "thinking_gate_schema_version",
     "mcp_gate_schema_version",
@@ -2020,8 +2038,9 @@ def cmd_metadata_update(args):
         raise ControlError(
             f"字段由专用控制面命令维护，metadata-update 禁止改写: {protected}",
             exit_code=2, gate_id="metadata_update_protected",
-            hint="status/completed_steps/delivery_verdict 用 transition；验证记录用 "
-                 "record-verification；close_state 用 close-phase；indexed 用 index-write")
+            hint="status/completed_steps/delivery_verdict 用 transition；证据结论用 "
+                 "record-claim；验证记录用 record-verification；close_state 用 close-phase；"
+                 "indexed 用 index-write")
     invalid_append = sorted(key for key, value in appends.items()
                             if not isinstance(value, list))
     if invalid_append:
@@ -2080,6 +2099,15 @@ def cmd_metadata_update(args):
                     f"metadata.{key} 当前不是数组，不能 append",
                     exit_code=1, gate_id="metadata_append_target")
             updated[key] = list(current) + values
+        current_skill_runs = ((((meta.get("extensions") or {}).get("skills") or {})
+                               .get("runs")) or [])
+        updated_skill_runs = ((((updated.get("extensions") or {}).get("skills") or {})
+                               .get("runs")) or [])
+        if updated_skill_runs != current_skill_runs:
+            raise ControlError(
+                "extensions.skills.runs 由 record-skill-run 专用命令维护，"
+                "metadata-update 禁止改写",
+                exit_code=2, gate_id="metadata_update_protected")
         if updated == meta:
             print(json.dumps({"ok": True, "no_change": True,
                               "changed_fields": []}, ensure_ascii=False, indent=2))
@@ -2098,6 +2126,78 @@ def cmd_metadata_update(args):
     return 0
 
 
+def cmd_record_claim(args):
+    """原子追加结构化证据 claim，并用事件链约束其来源与边界。"""
+    out_dir = Path(args.dir).resolve()
+    statement = (args.statement or "").strip()
+    source = (args.source or "").strip()
+    boundary = (args.boundary or "").strip()
+    evidence = [item.strip() for item in (args.evidence or []) if item.strip()]
+    contradicted_by = [item.strip() for item in (args.contradicted_by or []) if item.strip()]
+    next_action = args.next_action.strip() if args.next_action and args.next_action.strip() else None
+    if not statement:
+        raise ControlError("claim statement 不能为空", exit_code=2,
+                           gate_id="claim_statement")
+    if not source or not boundary:
+        raise ControlError("claim 必须提供非空 --source 与 --boundary", exit_code=2,
+                           gate_id="claim_source_boundary")
+    if args.kind in {"fact", "refuted"} and not evidence:
+        raise ControlError(
+            f"{args.kind} claim 必须至少提供一条 --evidence",
+            exit_code=2, gate_id="claim_evidence_required")
+    status_by_kind = {
+        "fact": "supported",
+        "inference": "open",
+        "unobserved": "open",
+        "refuted": "refuted",
+    }
+    input_payload = {
+        "statement": statement,
+        "kind": args.kind,
+        "source": source,
+        "boundary": boundary,
+        "evidence": evidence,
+        "contradicted_by": contradicted_by,
+        "next_action": next_action,
+        "status": status_by_kind[args.kind],
+    }
+    with DirLock(out_dir):
+        recover_pending_transaction(out_dir)
+        meta = load_metadata(out_dir)
+        require_vnext(meta, out_dir)
+        require_valid_metadata(meta)
+        if meta.get("close_state") is not None:
+            raise ControlError(
+                "工单已进入关闭流程，禁止继续追加 claim；需修改请先 reopen",
+                exit_code=1, gate_id="closed_ticket_mutation_frozen")
+        events, problems = verify_event_chain(out_dir, meta)
+        if problems:
+            raise ControlError("现有事件链不完整，拒绝记录 claim", exit_code=1,
+                               gate_id="event_chain", violations=problems)
+        prior = find_idempotent_event(
+            events, args.request_id, "claim_recorded", input_payload,
+            actor=args.actor, payload_keys=tuple(input_payload))
+        if prior:
+            print(json.dumps({"ok": True, "already_applied": True,
+                              "request_id": args.request_id,
+                              "claim_id": prior["payload"].get("claim_id"),
+                              "event_id": prior["event_id"]},
+                             ensure_ascii=False, indent=2))
+            return 0
+        claim = {"claim_id": str(uuid.uuid4()), "at": now_iso(), **input_payload}
+        before_meta = dict(meta)
+        claims = list(meta.get("claims") or [])
+        claims.append(claim)
+        meta["claims"] = claims
+        require_valid_metadata(meta)
+        event = commit_metadata_and_event(
+            out_dir, before_meta, meta, "claim_recorded", claim,
+            request_id=args.request_id, actor=args.actor)
+    print(json.dumps({"ok": True, "claim": claim, "event_id": event["event_id"]},
+                     ensure_ascii=False, indent=2))
+    return 0
+
+
 def cmd_record_verification(args):
     out_dir = Path(args.dir).resolve()
     if not args.evidence or not args.evidence.strip():
@@ -2112,6 +2212,10 @@ def cmd_record_verification(args):
         "device": args.device,
         "artifact_identity": args.artifact_identity,
         "window": args.window,
+        "layer": args.layer,
+        "consumer": args.consumer,
+        "scenario": args.scenario,
+        "baseline": args.baseline,
         "outcome": args.outcome,
         "evidence": args.evidence,
         "note": args.note,
@@ -2147,6 +2251,75 @@ def cmd_record_verification(args):
         event = commit_metadata_and_event(
             out_dir, before_meta, meta, "verification_recorded", run,
             request_id=args.request_id)
+    print(json.dumps({"ok": True, "run": run, "event_id": event["event_id"]},
+                     ensure_ascii=False, indent=2))
+    return 0
+
+
+def cmd_record_skill_run(args):
+    """原子记录技能路由的采用、成本与独有发现，不改变工单 verdict。"""
+    out_dir = Path(args.dir).resolve()
+    skill = (args.skill or "").strip()
+    trigger = (args.trigger or "").strip()
+    evidence_refs = [item.strip() for item in (args.evidence_ref or []) if item.strip()]
+    unique_findings = [item.strip() for item in (args.unique_finding or []) if item.strip()]
+    agent_id = args.agent_id.strip() if args.agent_id and args.agent_id.strip() else None
+    if not skill or not trigger:
+        raise ControlError("skill run 必须提供非空 --skill 与 --trigger", exit_code=2,
+                           gate_id="skill_run_identity")
+    if not evidence_refs:
+        raise ControlError("skill run 至少需要一条 --evidence-ref", exit_code=2,
+                           gate_id="skill_run_evidence")
+    if args.elapsed_ms < 0 or args.estimated_tokens < 0:
+        raise ControlError("--elapsed-ms/--estimated-tokens 不能为负数", exit_code=2,
+                           gate_id="skill_run_cost")
+    input_payload = {
+        "skill": skill,
+        "trigger": trigger,
+        "result": args.result,
+        "adopted": args.adopted == "true",
+        "evidence_refs": evidence_refs,
+        "elapsed_ms": args.elapsed_ms,
+        "estimated_tokens": args.estimated_tokens,
+        "unique_findings": unique_findings,
+        "agent_id": agent_id,
+    }
+    with DirLock(out_dir):
+        recover_pending_transaction(out_dir)
+        meta = load_metadata(out_dir)
+        require_vnext(meta, out_dir)
+        require_valid_metadata(meta)
+        if meta.get("close_state") is not None:
+            raise ControlError(
+                "工单已进入关闭流程，禁止继续追加 skill run；需修改请先 reopen",
+                exit_code=1, gate_id="closed_ticket_mutation_frozen")
+        events, problems = verify_event_chain(out_dir, meta)
+        if problems:
+            raise ControlError("现有事件链不完整，拒绝记录 skill run", exit_code=1,
+                               gate_id="event_chain", violations=problems)
+        prior = find_idempotent_event(
+            events, args.request_id, "skill_run_recorded", input_payload,
+            actor=args.actor, payload_keys=tuple(input_payload))
+        if prior:
+            print(json.dumps({"ok": True, "already_applied": True,
+                              "request_id": args.request_id,
+                              "run_id": prior["payload"].get("run_id"),
+                              "event_id": prior["event_id"]},
+                             ensure_ascii=False, indent=2))
+            return 0
+        run = {"run_id": str(uuid.uuid4()), "at": now_iso(), **input_payload}
+        before_meta = dict(meta)
+        extensions = dict(meta.get("extensions") or {})
+        skills_ns = dict(extensions.get("skills") or {})
+        runs = list(skills_ns.get("runs") or [])
+        runs.append(run)
+        skills_ns["runs"] = runs
+        extensions["skills"] = skills_ns
+        meta["extensions"] = extensions
+        require_valid_metadata(meta)
+        event = commit_metadata_and_event(
+            out_dir, before_meta, meta, "skill_run_recorded", run,
+            request_id=args.request_id, actor=args.actor)
     print(json.dumps({"ok": True, "run": run, "event_id": event["event_id"]},
                      ensure_ascii=False, indent=2))
     return 0
@@ -2659,10 +2832,49 @@ def build_parser():
     p.add_argument("--device")
     p.add_argument("--artifact-identity")
     p.add_argument("--window")
+    p.add_argument("--layer", choices=[
+        "static", "unit", "build", "host", "deploy", "delivery", "consumption",
+        "settings_preview", "operation_view", "closed_client", "physical",
+    ])
+    p.add_argument("--consumer")
+    p.add_argument("--scenario")
+    p.add_argument("--baseline", help="本次验证绑定的代码/产物/设备基线")
     p.add_argument("--evidence", required=True)
     p.add_argument("--note")
     p.add_argument("--request-id", help="幂等键（同键同记录重放=已应用）")
     p.set_defaults(func=cmd_record_verification)
+
+    p = sub.add_parser("record-claim", help="原子记录 claims + claim_recorded 事件")
+    p.add_argument("--dir", required=True)
+    p.add_argument("--kind", required=True,
+                   choices=["fact", "inference", "unobserved", "refuted"])
+    p.add_argument("--statement", required=True)
+    p.add_argument("--source", required=True)
+    p.add_argument("--boundary", required=True)
+    p.add_argument("--evidence", action="append", default=[],
+                   help="可重复；fact/refuted 至少一条")
+    p.add_argument("--contradicted-by", action="append", default=[])
+    p.add_argument("--next-action")
+    p.add_argument("--request-id", help="幂等键（同键同记录重放=已应用）")
+    p.add_argument("--actor", default="icode", choices=["icode", "user", "watch", "system"])
+    p.set_defaults(func=cmd_record_claim)
+
+    p = sub.add_parser("record-skill-run",
+                       help="原子记录 extensions.skills.runs + skill_run_recorded 事件")
+    p.add_argument("--dir", required=True)
+    p.add_argument("--skill", required=True)
+    p.add_argument("--trigger", required=True)
+    p.add_argument("--result", required=True,
+                   choices=["success", "failure", "degraded", "skipped"])
+    p.add_argument("--adopted", required=True, choices=["true", "false"])
+    p.add_argument("--evidence-ref", action="append", default=[], required=True)
+    p.add_argument("--elapsed-ms", type=int, required=True)
+    p.add_argument("--estimated-tokens", type=int, required=True)
+    p.add_argument("--unique-finding", action="append", default=[])
+    p.add_argument("--agent-id")
+    p.add_argument("--request-id", help="幂等键（同键同记录重放=已应用）")
+    p.add_argument("--actor", default="icode", choices=["icode", "user", "watch", "system"])
+    p.set_defaults(func=cmd_record_skill_run)
 
     p = sub.add_parser("archive-manifest",
                        help="生成/校验归档清单、hash 与门禁 roundtrip")

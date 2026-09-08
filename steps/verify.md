@@ -10,6 +10,9 @@
 **产出**: metadata `verification_runs` 追加一条 + `verification_recorded` 事件；**不创建 Patch N 段、不写 `patch_history`、不改变 status/completed_steps**（纯验证不改代码）
 **会话**: 主会话
 
+> **共享技能路由**：部署/监听前读取 [references/skill_routing.md](../references/skill_routing.md)，按设备、产物、多仓和消费者场景加载验证类技能。
+> **证据习惯真源**：验证 baseline、layer/consumer/scenario 记录和 verified 边界统一执行 [references/evidence_and_verification.md](../references/evidence_and_verification.md)。
+
 > verify 是**纯实机验证独立入口**：不承载代码修改语义（无文件 mutation），因此**不写 `patch_history`**（patch_history 只记录有变更的 Patch）；验证结果单独记 `verification_runs`。**验证通过不自动升级 `delivery_verdict=verified`**——delivery_verdict 是交付分层结论（`verified`/`verification_pending`/`blocked`/`not_applicable`），由 06_audit 终审结合全部验证证据（含本步骤记录）人工判定（见 [SKILL.md「可选字段」段](../SKILL.md)）。设备侧执行细节（轮询监听/三态判定/特征可见性核查/行为证据闭合）**全部复用 [08_patch.md §1.5](08_patch.md)**，本步骤只定义独立入口 + 记录契约，不复制设备流程。
 
 ## 定位

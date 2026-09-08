@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "skills": [
+    {
+      "name": "bug-investigation-baseline-checklist",
+      "path": "bug-investigation-baseline-checklist",
+      "entrypoint": "SKILL.md.template"
+    },
+    {
+      "name": "end-to-end-functional-chain-audit",
+      "path": "end-to-end-functional-chain-audit",
+      "entrypoint": "SKILL.md.template"
+    },
+    {
+      "name": "state-lifecycle-replay-audit",
+      "path": "state-lifecycle-replay-audit",
+      "entrypoint": "SKILL.md.template"
+    },
+    {
+      "name": "multi-repo-artifact-provenance",
+      "path": "multi-repo-artifact-provenance",
+      "entrypoint": "SKILL.md.template"
+    },
+    {
+      "name": "field-verification-boundary",
+      "path": "field-verification-boundary",
+      "entrypoint": "SKILL.md.template"
+    },
+    {
+      "name": "cross-layer-contract-audit",
+      "path": "cross-layer-contract-audit",
+      "entrypoint": "SKILL.md.template"
+    },
+    {
+      "name": "cross-node-timeline-reconstruction",
+      "path": "cross-node-timeline-reconstruction",
+      "entrypoint": "SKILL.md.template"
+    }
+  ]
+}

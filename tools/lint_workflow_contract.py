@@ -16,6 +16,9 @@ lint_workflow_contract.py —— workflow gate（工作流硬门禁）运行时�
 - 生命周期验收合同（acceptance_contract）：
     涉及权威状态/实体身份变化时，验收矩阵必须覆盖 required_phases × required_consumers 全部必填单元；
     只验证直接查询不能 delivery_verdict=verified。
+- 分层交付证据（verification_contract）：
+    required=true 时，全部必需 layer × consumer × scenario 的最新记录必须 pass，
+    且带 evidence/baseline，才能 delivery_verdict=verified。
 
 机器真源：mcp/workflow-gate/gates.json（触发条件/阻断步骤/必填单元只从这里读，禁止脚本内各自写一套）。
 
@@ -65,10 +68,13 @@ STEP_GATES = {
     "patch": ["semantic_decision", "requirement_delta"],
     "merge": ["requirement_delta"],
     "deploy": ["identity_change", "acceptance"],
-    "audit-verified": ["identity_change", "acceptance"],
+    "audit-verified": ["identity_change", "acceptance", "delivery_evidence"],
     "fast": ["fast_risk"],
 }
-ALL_GATES = ["semantic_decision", "identity_change", "requirement_delta", "fast_risk", "acceptance"]
+ALL_GATES = [
+    "semantic_decision", "identity_change", "requirement_delta", "fast_risk",
+    "acceptance", "delivery_evidence",
+]
 
 MAX_EVIDENCE_VALUE_CHARS = 2048
 MAX_LINE_CHARS = 4096
@@ -322,6 +328,72 @@ def validate_acceptance(metadata: Dict, catalog: Dict) -> List[str]:
     return issues
 
 
+def validate_delivery_evidence(metadata: Dict, catalog: Dict) -> List[str]:
+    """显式 required 合同下，verified 必须覆盖全部分层验证单元。"""
+    issues: List[str] = []
+    contract = metadata.get("verification_contract")
+    if contract is None:
+        return issues
+    if not isinstance(contract, dict):
+        return ["verification_contract 非对象"]
+    required = contract.get("required")
+    if not isinstance(required, bool):
+        return ["verification_contract.required 非布尔"]
+    if not required:
+        return issues
+
+    layers = contract.get("required_layers")
+    consumers = contract.get("required_consumers")
+    scenarios = contract.get("required_scenarios")
+    dimensions = {
+        "required_layers": layers,
+        "required_consumers": consumers,
+        "required_scenarios": scenarios,
+    }
+    for key, values in dimensions.items():
+        if not isinstance(values, list) or not values:
+            issues.append(f"verification_contract.{key} 在 required=true 时必须是非空数组")
+        elif len(values) != len(set(values)):
+            issues.append(f"verification_contract.{key} 含重复值")
+    if issues:
+        return issues
+
+    allowed_layers = set(catalog["constants"]["verification_layers"])
+    unknown_layers = sorted(set(layers) - allowed_layers)
+    if unknown_layers:
+        issues.append(f"verification_contract.required_layers 含未知层: {unknown_layers}")
+        return issues
+
+    runs = metadata.get("verification_runs") or []
+    if not isinstance(runs, list):
+        return ["verification_runs 非数组"]
+    latest: Dict[Tuple[str, str, str], Dict] = {}
+    for run in runs:
+        if not isinstance(run, dict):
+            continue
+        key = (run.get("layer"), run.get("consumer"), run.get("scenario"))
+        if key[0] in layers and key[1] in consumers and key[2] in scenarios:
+            latest[key] = run
+
+    for layer in layers:
+        for consumer in consumers:
+            for scenario in scenarios:
+                key = (layer, consumer, scenario)
+                run = latest.get(key)
+                label = f"layer={layer}, consumer={consumer}, scenario={scenario}"
+                if run is None:
+                    issues.append(f"delivery_evidence 缺 required cell: {label}")
+                    continue
+                outcome = run.get("outcome")
+                if outcome != "pass":
+                    issues.append(f"delivery_evidence required cell {label} 最新 outcome={outcome}")
+                if not isinstance(run.get("evidence"), str) or not run["evidence"].strip():
+                    issues.append(f"delivery_evidence required cell {label} 缺 evidence")
+                if not isinstance(run.get("baseline"), str) or not run["baseline"].strip():
+                    issues.append(f"delivery_evidence required cell {label} 缺 baseline")
+    return issues
+
+
 def build_report(out_dir: Path, step_filter: Optional[str], metadata: Dict,
                  catalog: Dict, legacy: bool, strict: bool) -> Dict:
     """构造校验报告。"""
@@ -343,6 +415,7 @@ def build_report(out_dir: Path, step_filter: Optional[str], metadata: Dict,
         "requirement_delta": (validate_requirement_deltas, "requirement_delta_escalation"),
         "fast_risk": (validate_fast_risk, "fast_risk_upgrade"),
         "acceptance": (validate_acceptance, "acceptance_contract"),
+        "delivery_evidence": (validate_delivery_evidence, "delivery_evidence_gate"),
     }
     blocking_impl = step_filter in ("plan", "code", "patch")
     for gate in gates_to_check:

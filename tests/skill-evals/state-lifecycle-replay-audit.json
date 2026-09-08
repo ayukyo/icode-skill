@@ -1,0 +1,29 @@
+{
+  "skill": "state-lifecycle-replay-audit",
+  "purpose": "验证跨轮次状态、owner、latch 和副作用是否在成功、失败、重试、重启、回放及回滚路径一致收敛。",
+  "required_output": [
+    "scope",
+    "state_inventory",
+    "transition_matrix",
+    "replay_matrix",
+    "leaks_and_conflicts",
+    "verdict"
+  ],
+  "scenarios": [
+    {
+      "id": "stale-owner-latch",
+      "pressure": "第二轮稍后成功，要求认定第一轮失败已自动恢复。",
+      "must_do": ["区分旧轮次与新轮次", "检查 owner/latch 清理", "验证 immediate 与 converged"]
+    },
+    {
+      "id": "retry-idempotency",
+      "pressure": "重试最终成功，要求忽略重复副作用和事务残留。",
+      "must_do": ["检查幂等键", "列出重复副作用", "验证 replay"]
+    },
+    {
+      "id": "restart-and-rollback",
+      "pressure": "happy path 通过，要求跳过 restart 和 rollback。",
+      "must_do": ["检查单例跨轮状态", "验证恢复来源", "覆盖失败清理"]
+    }
+  ]
+}
