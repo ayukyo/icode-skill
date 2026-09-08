@@ -25,7 +25,8 @@
   python3 tb_pull.py --lib DEMO probe --status-names 打开,未完成
   python3 tb_pull.py --pid <项目ID> defect DEMO-26 --out ~/work/log
 """
-import argparse, json, os, re, shutil, socket, sys
+import argparse, hashlib, json, os, re, shutil, socket, subprocess, sys
+from urllib.parse import urlsplit
 import requests
 
 # Windows 下 stdout/stderr 默认 locale 编码(gbk)，中文输出/JSON 会乱码或 UnicodeEncodeError；强制 UTF-8
@@ -36,6 +37,7 @@ except Exception:
     pass
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+EVIDENCE_INTAKE_PY = os.path.abspath(os.path.join(SCRIPT_DIR, "..", "..", "evidence_intake.py"))
 
 
 def normalize_domain(domain):
@@ -252,17 +254,138 @@ def unique_path(dest):
     return f"{base}_{n}{e}"
 
 
+def _url_fingerprint(url):
+    """生成不含 query/fragment 凭据的稳定 URL 指纹。"""
+    if not url:
+        return None
+    parsed = urlsplit(str(url))
+    stable = f"{parsed.scheme.lower()}://{parsed.netloc.lower()}{parsed.path}"
+    return hashlib.sha256(stable.encode("utf-8", errors="replace")).hexdigest()
+
+
+def _remote_file_key(file_obj, activity_key):
+    return _remote_file_aliases(file_obj, activity_key)[0]
+
+
+def _remote_file_aliases(file_obj, activity_key):
+    aliases = []
+    remote_id = (file_obj.get("remote_id") or file_obj.get("_id") or file_obj.get("fileId")
+                 or file_obj.get("file_id"))
+    if remote_id:
+        aliases.append(("remote_id", str(remote_id)))
+    fingerprint = file_obj.get("url_fingerprint") or _url_fingerprint(
+        file_obj.get("url") or file_obj.get("downloadUrl"))
+    if fingerprint:
+        aliases.append(("url", fingerprint))
+    if aliases:
+        return aliases
+    name = file_obj.get("name") or file_obj.get("fileName") or "file"
+    ext = file_obj.get("ext") or file_obj.get("fileType") or ""
+    size = file_obj.get("size") if file_obj.get("size") is not None else file_obj.get("fileSize")
+    return [("metadata", str(name).casefold(), str(ext).lstrip(".").casefold(), size, activity_key)]
+
+
 def collect_files(activities):
-    """从评论类 activity 抽取所有附件。兼容 action=activity.comment / activity.comment.attachments（两者 content 都可能含 files[]/attachments[]），content.files[]（name/url/ext/size）与 content.attachments[]（fileName/downloadUrl/fileSize/fileType，含图片 imageHeight/imageWidth）两种字段都抽。"""
+    """抽取并规范化评论附件；同一远端附件的双字段表示只保留一份。"""
     files = []
+    seen = {}
     for a in activities:
         if not (a.get("action") or "").startswith("activity.comment"):
             continue
         content = a.get("content") or {}
+        activity_key = str(a.get("_id") or a.get("id") or a.get("created") or "")
         for key in ("files", "attachments"):
             for f in content.get(key) or []:
-                files.append(f)
+                if not isinstance(f, dict):
+                    continue
+                aliases = _remote_file_aliases(f, activity_key)
+                raw_remote_id = (f.get("remote_id") or f.get("_id") or f.get("fileId")
+                                 or f.get("file_id"))
+                matches = []
+                for identity in aliases:
+                    existing = seen.get(identity)
+                    existing_id = None if existing is None else (
+                        existing.get("remote_id") or existing.get("_id")
+                        or existing.get("fileId") or existing.get("file_id"))
+                    if (existing is not None and identity[0] == "url" and raw_remote_id
+                            and existing_id and str(existing_id) != str(raw_remote_id)):
+                        continue
+                    if existing is not None and existing not in matches:
+                        matches.append(existing)
+                if matches:
+                    # 两种 TB 字段常各自携带一部分属性；只补缺失值，不改变首个表示的语义。
+                    primary = matches[0]
+                    for duplicate in matches[1:]:
+                        for field, value in duplicate.items():
+                            if primary.get(field) in (None, "") and value not in (None, ""):
+                                primary[field] = value
+                        if duplicate in files:
+                            files.remove(duplicate)
+                        for identity, owner in list(seen.items()):
+                            if owner is duplicate:
+                                seen[identity] = primary
+                    for field, value in f.items():
+                        if primary.get(field) in (None, "") and value not in (None, ""):
+                            primary[field] = value
+                    for identity in aliases:
+                        owner = seen.get(identity)
+                        owner_id = None if owner is None else (
+                            owner.get("remote_id") or owner.get("_id")
+                            or owner.get("fileId") or owner.get("file_id"))
+                        primary_id = (primary.get("remote_id") or primary.get("_id")
+                                      or primary.get("fileId") or primary.get("file_id"))
+                        if (owner is not None and owner is not primary and identity[0] == "url"
+                                and owner_id and primary_id and str(owner_id) != str(primary_id)):
+                            seen[identity] = None
+                        elif identity not in seen or owner is not None:
+                            seen[identity] = primary
+                    continue
+                copied = dict(f)
+                for identity in aliases:
+                    owner = seen.get(identity)
+                    owner_id = None if owner is None else (
+                        owner.get("remote_id") or owner.get("_id")
+                        or owner.get("fileId") or owner.get("file_id"))
+                    if (owner is not None and identity[0] == "url" and raw_remote_id
+                            and owner_id and str(owner_id) != str(raw_remote_id)):
+                        seen[identity] = None
+                    elif identity not in seen or owner is not None:
+                        seen[identity] = copied
+                files.append(copied)
     return files
+
+
+def _write_evidence_manifest(dest_dir, meta_path, downloaded, label):
+    """以独立工具刷新证据清单；失败只告警，不掩盖已成功的 TB 拉取。"""
+    if not os.path.exists(EVIDENCE_INTAKE_PY):
+        print(f"  [warn] evidence intake 工具不存在，跳过 manifest：{EVIDENCE_INTAKE_PY}", file=sys.stderr)
+        return None
+    # args.out 允许相对路径；传给 intake 前固定成绝对 root，避免 root/path 被重复拼接。
+    dest_dir = os.path.abspath(dest_dir)
+    meta_path = os.path.abspath(meta_path)
+    manifest_path = os.path.join(dest_dir, "evidence_manifest.json")
+    previous_manifest_path = os.path.join(dest_dir, "evidence_manifest.prev.json")
+    cmd = [sys.executable, EVIDENCE_INTAKE_PY,
+           "--root", dest_dir, "--source-json", meta_path,
+           "--source-label", label, "--path", dest_dir,
+           "--exclude-path", meta_path,
+           "--exclude-path", manifest_path,
+           "--exclude-path", previous_manifest_path,
+           "--output", manifest_path]
+    meta_prev_path = os.path.join(dest_dir, f"{label}_meta.prev.json")
+    if os.path.exists(meta_prev_path):
+        cmd.extend(["--exclude-path", meta_prev_path])
+    try:
+        if os.path.exists(manifest_path):
+            shutil.copy2(manifest_path, previous_manifest_path)
+            cmd.extend(["--previous", previous_manifest_path])
+        subprocess.run(cmd, check=True, capture_output=True, text=True)
+    except (OSError, subprocess.CalledProcessError) as exc:
+        detail = getattr(exc, "stderr", "") or str(exc)
+        print(f"  [warn] evidence manifest 生成失败，不影响本次 TB 拉取：{detail.strip()}", file=sys.stderr)
+        return None
+    print(f"  [ok] 证据清单：{manifest_path}")
+    return manifest_path
 
 
 def cmd_defect(args):
@@ -298,7 +421,12 @@ def cmd_defect(args):
             except Exception as e:
                 # token 可能过期 -> 刷新 activities 重取同 (name,ext) 的 url
                 print(f"  [retry] {fname} 下载失败（{type(e).__name__}），刷新 token 重试...")
-                url = _refresh_url(s, cfg, tid, f.get("name") or f.get("fileName"), f.get("ext") or f.get("fileType"))
+                url = _refresh_url(
+                    s, cfg, tid,
+                    f.get("name") or f.get("fileName"), f.get("ext") or f.get("fileType"),
+                    remote_id=(f.get("remote_id") or f.get("_id") or f.get("fileId") or f.get("file_id")),
+                    prior_url=f.get("url") or f.get("downloadUrl"),
+                )
                 if not url:
                     print(f"  [fail] {fname}：刷新后仍无可用 url")
                     continue
@@ -307,22 +435,33 @@ def cmd_defect(args):
                 except Exception as e2:
                     print(f"  [fail] {fname}：{e2}")
                     continue
-            downloaded.append({"name": fname, "path": os.path.relpath(dest, dest_dir), "size": sz})
+            downloaded.append({
+                "name": fname,
+                "path": os.path.relpath(dest, dest_dir),
+                "size": sz,
+                "remote_id": (f.get("remote_id") or f.get("_id") or f.get("fileId") or f.get("file_id")),
+                "url_fingerprint": _url_fingerprint(url),
+            })
             print(f"  [ok] {fname}（{sz:,} bytes）")
 
     meta = {
         "id": label, "title": task.get("content"), "note": task.get("note"),
-        "uniqueId": uid, "_id": tid,
+        "uniqueId": uid, "num": uid, "_id": tid, "task_id": tid,
+        "lib": lib or args.lib,
+        "pid": args.pid or ((cfg.get("projects", {}).get(lib or args.lib) or {}).get("pid")),
         # 真实任务流状态名（list 接口不含；isDone 与状态名不同步——实测 isDone=True 但状态可为"未完成"）
         "status": st, "_taskflowstatusId": detail.get("_taskflowstatusId"),
         "isDone": detail.get("isDone"), "updated": detail.get("updated"),
         "attachmentsCount_cache": task.get("attachmentsCount"),
-        "comments": [{"action": a.get("action"), "created": a.get("created"),
+        "comments": [{"id": a.get("_id") or a.get("id"),
+                      "action": a.get("action"), "created": a.get("created"),
                       "content": a.get("content")} for a in comments],
         "files": [{"name": f.get("name") or f.get("fileName"),
                    "ext": f.get("ext") or f.get("fileType"),
                    "mimeType": f.get("mimeType") or f.get("contentType") or f.get("fileType"),
                    "size": f.get("size") if f.get("size") is not None else f.get("fileSize"),
+                   "remote_id": (f.get("remote_id") or f.get("_id") or f.get("fileId") or f.get("file_id")),
+                   "url_fingerprint": _url_fingerprint(f.get("url") or f.get("downloadUrl")),
                    "url": f.get("url") or f.get("downloadUrl")} for f in files],
         "downloaded": downloaded,
         "dir": dest_dir,
@@ -334,6 +473,7 @@ def cmd_defect(args):
         print(f"  [backup] 旧 meta 已备份 -> {prev_meta_path}（供同单续分析时增量对比：prev vs current）")
     with open(meta_path, "w", encoding="utf-8") as f:
         json.dump(meta, f, ensure_ascii=False, indent=2)
+    _write_evidence_manifest(dest_dir, meta_path, downloaded, label)
 
     print(f"\n[ok] 日志目录：{dest_dir}")
     print(f"[ok] 元信息：{meta_path}")
@@ -367,6 +507,7 @@ def cmd_probe(args):
         result.append({
             "uniqueId": t.get("uniqueId"),
             "lib": args.lib,
+            "pid": pid,
             "_id": tid,
             "status": st,
             "_taskflowstatusId": detail.get("_taskflowstatusId"),
@@ -374,15 +515,22 @@ def cmd_probe(args):
             "updated": detail.get("updated") or t.get("updated"),
             "title": t.get("content"),
             "comments_count": len(comments),
-            "comments": [{"created": c.get("created"),
+            "comments": [{"id": c.get("_id") or c.get("id"),
+                          "created": c.get("created"),
                           "comment": (c.get("content") or {}).get("comment"),
-                          "files": [(f.get("name") or f.get("fileName"))
-                                    for f in ((c.get("content") or {}).get("files") or [])]}
+                          "files": list(dict.fromkeys(
+                              (f.get("name") or f.get("fileName"))
+                              for key in ("files", "attachments")
+                              for f in ((c.get("content") or {}).get(key) or [])
+                              if isinstance(f, dict) and (f.get("name") or f.get("fileName"))))}
                          for c in comments],
             "files": [{"name": f.get("name") or f.get("fileName"),
                        "ext": f.get("ext") or f.get("fileType"),
                        "size": f.get("size") if f.get("size") is not None else f.get("fileSize"),
-                       "mimeType": f.get("mimeType") or f.get("contentType")} for f in files],
+                       "mimeType": f.get("mimeType") or f.get("contentType"),
+                       "remote_id": (f.get("remote_id") or f.get("_id") or f.get("fileId") or f.get("file_id")),
+                       "url_fingerprint": _url_fingerprint(f.get("url") or f.get("downloadUrl"))}
+                      for f in files],
         })
     out_dir = os.path.expanduser(args.out or "~/.claude/icode_data/tb_probe")
     os.makedirs(out_dir, exist_ok=True)
@@ -399,8 +547,10 @@ def cmd_probe(args):
     print(f"[ok] probe.json -> {probe_path}（{len(result)} 条，未下载任何附件）")
 
 
-def _refresh_url(s, cfg, tid, name, ext):
+def _refresh_url(s, cfg, tid, name, ext, remote_id=None, prior_url=None):
     try:
+        fallback = None
+        prior_fingerprint = _url_fingerprint(prior_url)
         for a in fetch_activities(s, cfg, tid):
             content = a.get("content") or {}
             for key in ("files", "attachments"):
@@ -408,10 +558,17 @@ def _refresh_url(s, cfg, tid, name, ext):
                     fn = f.get("name") or f.get("fileName")
                     fe = f.get("ext") or f.get("fileType")
                     if fn == name and fe == ext:
-                        return f.get("url") or f.get("downloadUrl")
+                        candidate = f.get("url") or f.get("downloadUrl")
+                        candidate_id = (f.get("remote_id") or f.get("_id") or f.get("fileId")
+                                        or f.get("file_id"))
+                        if remote_id and str(candidate_id or "") == str(remote_id):
+                            return candidate
+                        if prior_fingerprint and _url_fingerprint(candidate) == prior_fingerprint:
+                            return candidate
+                        fallback = fallback or candidate
+        return fallback
     except Exception:
         return None
-    return None
 
 
 def main():

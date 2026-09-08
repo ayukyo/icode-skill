@@ -2,16 +2,17 @@
 
 **命令**:
 - `/icode status`：只读查当前工单状态
-- `/icode status --verdict <ticket_id> <verified|disproved|superseded> "<reason>" [--correct "<正确方向>"] [--source <machine_test|review|user|auto_signal>] [--superseded-by <ticket_id>] [--premise-dep <module>:<commit>[:<path>]]...`：手动标注工单方向结论（双写 metadata + 全局索引）
-- `/icode status --scan-verdict`：批量扫描 unknown 完成态工单的证伪信号，提示标注
+- `/icode status --verdict <ticket_id> <verified|disproved|superseded> "<reason>" [--correct "<正确方向>"] [--source <machine_test|review|user|auto_signal>] [--replacement <ticket_id>] [--dependency <module>:<commit>[:<path>]]...`：手动标注工单方向结论（双写 metadata + 全局索引）
+- `/icode status --scan`：批量扫描 unknown 完成态工单的证伪信号，提示标注
 - `/icode status --validate [N]`：机器校验工单产物集完整性（产物缺件 / status 词表外 / code_files 空），只读 + 输出问题清单
+- `/icode status --pending [--project <path>]`：跨工单汇总 required 验证单元的未完成/失败/证据缺失债务，只读源工单
 
-**产出**: 默认无（只读）；`--verdict` 写 `{ICODE_OUT_DIR}/.ico_metadata.json` + `~/.claude/icode_data/index.json`（不写工程内源码文件）；`--scan-verdict` / `--validate` 只读 + 输出提示/问题清单
+**产出**: 默认无（只读）；`--verdict` 写 `{ICODE_OUT_DIR}/.ico_metadata.json` + `~/.claude/icode_data/index.json`（不写工程内源码文件）；`--scan` / `--validate` 只读 + 输出提示/问题清单；`--pending` 只读源工单并写 `<project>/.icode_output/verification_debt.json/.md` 派生报告
 **会话**: 主会话
 
 ## 定位
 
-会话中断后恢复时，用户不知道当前在哪个步骤。此命令默认纯读 metadata 输出摘要帮助快速定位；`--verdict` 给历史工单标方向结论（防误导新需求，详见 SKILL.md「verdict 字段族」+「注入形式·按 verdict 分流」）；`--scan-verdict` 批量识别可能被证伪但未标注的旧工单（治本，比一个个手动标高效）。
+会话中断后恢复时，用户不知道当前在哪个步骤。此命令默认纯读 metadata 输出摘要帮助快速定位；`--verdict` 给历史工单标方向结论（防误导新需求，详见 SKILL.md「verdict 字段族」+「注入形式·按 verdict 分流」）；`--scan` 批量识别可能被证伪但未标注的旧工单（治本，比一个个手动标高效）。
 
 ## 模式一：默认只读查询（`/icode status`）
 
@@ -62,8 +63,8 @@ worktree: {worktree_path 字段读取方式：读 metadata.active_checkout（缺
 - `"<reason>"`：必填，`verdict_reason`（≤150 token）。`disproved` 时填证伪原因（如"某接口实机发现语义是重置而非冻结，方案从根上不可行"）
 - `--correct "<正确方向>"`：可选，`correct_direction`（≤150 token）。`disproved`/`superseded` 时建议填（反转注入避坑的核心载体），如"改用上报抑制机制替代暂停数据流"
 - `--source <machine_test|review|user|auto_signal>`：可选，`verdict_source`，默认 `user`
-- `--superseded-by <ticket_id>`：可选，`superseded` 时填替代工单 id
-- `--premise-dep <module>:<commit>[:<path>]`：可选，可多次。`disproved`/`superseded` 时填证伪前提依赖的外部模块（支持硬复活）。`module`=模块名、`commit`=证伪当时的 commit SHA（`git rev-parse HEAD` 只读）、`path`=该模块代码路径（`git -C` 定位用，可省略）。填后 `--scan-verdict` 能检测该模块 commit 变化，变了置 `verdict_review_needed=true` 降级注入（防漏过后来又可行的方向）
+- `--replacement <ticket_id>`：可选，`superseded` 时填替代工单 id
+- `--dependency <module>:<commit>[:<path>]`：可选，可多次。`disproved`/`superseded` 时填证伪前提依赖的外部模块（支持硬复活）。`module`=模块名、`commit`=证伪当时的 commit SHA（`git rev-parse HEAD` 只读）、`path`=该模块代码路径（`git -C` 定位用，可省略）。填后 `--scan` 能检测该模块 commit 变化，变了置 `verdict_review_needed=true` 降级注入（防漏过后来又可行的方向）
 
 **执行流程**：
 1. **定位工单**：按 `<ticket_id>` 在 `~/.claude/icode_data/index.json` 查找条目（`json.load` 全量解析，找不到则报错退出）；由条目的 `project_path` + `out_dir` 定位工单目录的 `.ico_metadata.json`
@@ -71,8 +72,8 @@ worktree: {worktree_path 字段读取方式：读 metadata.active_checkout（缺
 3. **双写 verdict 字段**（metadata + index 同步，原子写回）：
    - 读 metadata `.ico_metadata.json` + index 对应条目
    - 写 `verdict` / `verdict_reason` / `correct_direction` / `verdict_source` / `verdict_at`（运行时取系统时间 `date +%Y-%m-%dT%H:%M:%S`，禁写死，同 `last_used_at` 约定）
-   - `superseded` 时额外写 `superseded_by`（来自 `--superseded-by` 参数）
-   - 若有 `--premise-dep` 参数：写 `verdict_premise_deps`（数组，每条 `{module, commit, path}`）+ 初始化 `verdict_review_needed=false`（首次标注未检测前为 false，后续由 `--scan-verdict` 或检索命中被动检测改写）
+   - `superseded` 时额外写 `superseded_by`（来自 `--replacement` 参数）
+   - 若有 `--dependency` 参数：写 `verdict_premise_deps`（数组，每条 `{module, commit, path}`）+ 初始化 `verdict_review_needed=false`（首次标注未检测前为 false，后续由 `--scan` 或检索命中被动检测改写）
    - **幂等覆盖**：已有 verdict 也覆盖（刷新 `verdict_at`），不报错；verdict 变化时记录新 verdict_at
    - vNext 先调 `python3 tools/icode_control.py metadata-update --dir <out_dir> --set-json '<verdict 字段对象>' --request-id '<唯一键>'` 原子写回并留事件，再调 `python3 tools/icode_control.py index-write --ticket-dir <out_dir>` 同步镜像字段；禁止手工读-改-写 metadata/index
 4. **输出确认**：`✅ 已标注 {ticket_id} verdict={verdict}（source={source}）；后续检索命中将按 verdict 分流注入（disproved 反转避坑 / superseded 注替代指针 / verified 正常借鉴）`
@@ -82,7 +83,7 @@ worktree: {worktree_path 字段读取方式：读 metadata.active_checkout（缺
 - **禁止标 disproved/superseded 不标 correct_direction**：`correct_direction` 缺失则降级注入 ADR+⛔警告，价值打折，应尽量补全（`--correct`）
 - **禁止编造 verdict**：verdict 须基于实证（实机验证/审查结论/用户确认），不得猜测；`verdict_source` 须如实标
 
-## 模式三：批量识别证伪信号（`/icode status --scan-verdict`）
+## 模式三：批量识别证伪信号（`/icode status --scan`）
 
 **用途**：扫描所有 `verdict=unknown` 的完成态工单（`status=completed`）的 `00_init.md` 末轮对话摘要 + `06_audit.md`，识别含证伪信号的，提示用户标注。**同时扫 `disproved`/`superseded` 工单的 `verdict_premise_deps`**，检测证伪前提依赖的模块 commit 是否变化，变了置 `verdict_review_needed=true`（硬复活检测，防漏过后来又可行的方向）。解决"旧工单没标 verdict 但可能有坑"+"已标 disproved 但依赖更新可能又可行"的批量治理。**只读 + 提示，不自动写 verdict**（NLP 判方向不可靠，必须用户确认后用 `--verdict` 标注；但 `verdict_review_needed` 是客观 commit 比对，可自动写）。
 
@@ -108,7 +109,7 @@ worktree: {worktree_path 字段读取方式：读 metadata.active_checkout（缺
 ⚠️ A·疑似证伪（unknown 完成态，建议标 disproved）：
   1. {ticket_id}（{requirement_summary 摘要}）
      信号：末轮「{匹配的信号词 + 上下文片段}」
-     建议命令：/icode status --verdict {ticket_id} disproved "{证伪原因}" --correct "{正确方向}" --premise-dep {module}:{commit}:{path}
+     建议命令：/icode status --verdict {ticket_id} disproved "{证伪原因}" --correct "{正确方向}" --dependency {module}:{commit}:{path}
   2. ...
 
 🔁 B·证伪前提待重新评估（disproved/superseded，依赖已变化，已置 verdict_review_needed=true）：
@@ -116,7 +117,7 @@ worktree: {worktree_path 字段读取方式：读 metadata.active_checkout（缺
      证伪依赖：{module}@{旧commit}（当前 {新commit}，已变化）
      后续命中将降级走 unknown 对抗质疑（不硬避坑）
      建议：重新评估证伪前提是否仍成立
-       - 仍成立：/icode status --verdict {ticket_id} disproved "..." --premise-dep {module}:{新commit}:{path}  # 刷新依赖 commit
+       - 仍成立：/icode status --verdict {ticket_id} disproved "..." --dependency {module}:{新commit}:{path}  # 刷新依赖 commit
        - 已失效：/icode status --verdict {ticket_id} unknown  # 复活为 unknown（方向可重新考虑）
   2. ...
 
@@ -132,7 +133,7 @@ worktree: {worktree_path 字段读取方式：读 metadata.active_checkout（缺
 **反偷懒**：
 - **禁止自动判定 verdict**：信号词只是提示，必须用户确认后用 `--verdict` 标注（防误判--"回退"等词在正常上下文也出现）
 - **禁止跳过 06_audit.md**：有些证伪写在终审结论而非 00_init 末轮，两处都要扫
-- **禁止只扫当前工程**：`--scan-verdict` 扫全局索引所有 unknown 完成态工单（跨工程批量治理）
+- **禁止只扫当前工程**：`--scan` 扫全局索引所有 unknown 完成态工单（跨工程批量治理）
 
 ## 模式四：产物集完整性校验（`/icode status --validate [N]`）
 
@@ -179,11 +180,29 @@ sys.exit(1 if (missing or bad or empty_cf) else 0)
 - **禁止改动文件**：`--validate` 纯只读，发现问题提示走对应步骤修复，不在此模式内 Write/Edit
 - **禁止用"内容好"豁免缺件**：产物缺失就是不合规，即使会话里讨论过，磁盘上缺 = 下游步骤/回读断链
 
+## 模式五：验证债务查询（`/icode status --pending`）
+
+**用途**：把 `verification_contract.required=true` 的 `layers × consumers × scenarios` 展开，按单元读取最新 matching `verification_runs`，生成跨工单待验证队列。它只回答“还欠什么验证”，不修改 verdict、metadata、事件链或全局索引。
+
+执行：
+
+```bash
+PROJECT_ROOT="<--project 或当前工程根>"
+python3 tools/verification_debt.py pending \
+  --project "$PROJECT_ROOT" \
+  --output "$PROJECT_ROOT/.icode_output/verification_debt.json" \
+  --markdown "$PROJECT_ROOT/.icode_output/verification_debt.md"
+```
+
+判定合同：required 单元只有最新 run 为 `pass` 且 `evidence`、`baseline` 均非空才算满足；缺失、`fail`、`inconclusive`、证据空或 baseline 空都形成债务。合同缺失的旧工单只标 `legacy_untracked`，不得反推/虚构 required 维度；全局 index 的陈旧路径写入报告 `errors/status=partial`，不阻断项目内可读取工单的汇总。
+
+输出先给总债务数，再按 ticket/layer/scenario 列阻断原因和建议动作。报告是可删除重建的派生产物，禁止把生成报告等同于执行验证。
+
 ## 思考分级（L0：不强制思考）
 
-默认只读模式与 `--scan-verdict`（只读+提示）与 `--validate`（只读+提示）不产出代码/计划/审查文件，为 **L0（确定性执行，不强制思考）**，不需要 Read references。`--verdict` 标注模式是结构化字段写入（非思考/审查/编码），同样为 **L0**，但须遵守本文件「反偷懒」约束。
+默认只读模式、`--scan`、`--validate` 与 `--pending` 为 **L0（确定性执行，不强制思考）**。`--verdict` 标注模式是结构化字段写入（非思考/审查/编码），同样为 **L0**，但须遵守本文件「反偷懒」约束。
 ## MCP 推荐
 
-默认只读模式不调用 sequential-thinking；`--scan-verdict` 批量扫描是**零 LLM** 信号词匹配（见上方「模式三」步骤 3，不调 cheap-research `extract`）；`--validate` 纯机器校验；其余 5 个 MCP 不推荐。
+默认只读模式不调用 sequential-thinking；`--scan` 批量扫描是**零 LLM** 信号词匹配（见上方「模式三」步骤 3，不调 cheap-research `extract`）；`--validate` 纯机器校验；其余 5 个 MCP 不推荐。
 
 **强制约束**：🟢/🟢*/⚪ 语义 + 双保险机制（执行步骤内嵌 + thinking_core gate）详见 [SKILL.md「MCP 调用覆盖强制化」](../SKILL.md) + [references/mcp_per_step.md「双保险机制」](../references/mcp_per_step.md)；本步骤表内的 🟢/🟢* 标注按上方真源判定。

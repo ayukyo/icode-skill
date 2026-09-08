@@ -3,7 +3,7 @@
 """
 scripts/submission_guard.py — worktree 提交契约机器闸门（提案 worktree-upstream-push-guard 阶段 4 落地）
 
-职责（只读检查 + 一次性迁移；ICode 红线不变——本脚本不 commit / 不 push / 不改 git 分支目标）：
+职责（只读检查 + 受控合并 + 一次性迁移；ICode 红线不变——本脚本不 commit / 不 push）：
 
   normalize-url <url>
       规范化 remote URL：去首尾空白 / 去尾斜杠 / 去 .git 后缀 / SSH 与 HTTPS 等价归一。
@@ -25,10 +25,14 @@ scripts/submission_guard.py — worktree 提交契约机器闸门（提案 workt
         HEAD 与 target 可解析 / tracking_verified==true。
       任一违约 → 该仓库 verdict=blocked，总 verdict=blocked（L1）。无契约 → 提示跳过（只读工单）。
 
-  submit-check --metadata <path>
-      G3 交付前逐仓提交清单（只读）：枚举 super + 全部契约子仓（不只看 code_files），输出逐仓表格，
-      对有变更/含 ticket commit 的仓库给出精确安全 push 命令
-      `git push <remote_name> HEAD:refs/heads/<target-branch>`；target 前进 → 标 behind 不给出可直接 push。
+  submit-check --metadata <path> [--merge]
+      G3 交付前逐仓提交清单：默认只读刷新并检查线上目标；显式 --merge 时先对全部契约仓库
+      完成只读预检，再执行 fast-forward 或无冲突的 `merge --no-commit --no-ff`。
+      不自动 commit / push；fetch 或冲突预检失败时不退回缓存 ref 误报 pass。
+
+  handoff --metadata <path> --output <json> [--markdown <md>]
+      生成多仓交付矩阵。只读取本地 Git 与 extensions.handoff.inputs，不 fetch、不修改 metadata/Git；
+      缺少构建、部署、文档或提交处置证据时保留 null/unresolved，不从 clean 状态猜测已完成交付。
 
 退出码：0 = pass / 2 = needs_user_confirm 或 blocked / 1 = 用法或执行错误。
 """
@@ -40,6 +44,8 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -178,6 +184,19 @@ def atomically_write(path: Path, data: dict) -> None:
     os.replace(tmp, path)
 
 
+def atomically_write_text(path: Path, content: str) -> None:
+    """先完整写临时文件，再原子替换文本目标；失败不破坏既有目标。"""
+    tmp = path.with_name(path.name + ".tmp")
+    try:
+        tmp.write_text(content, encoding="utf-8")
+        os.replace(tmp, path)
+    except Exception:
+        try:
+            tmp.unlink(missing_ok=True)
+        finally:
+            raise
+
+
 # ---------------------------------------------------------------------------
 # 子命令：migrate-legacy
 # ---------------------------------------------------------------------------
@@ -303,75 +322,843 @@ def cmd_g2(args) -> int:
 # 子命令：submit-check（G3 交付前逐仓清单）
 # ---------------------------------------------------------------------------
 
+def run_git(cwd: Path, *args: str, timeout: int = 30,
+            env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
+    """执行 Git 并保留返回码与 stderr，供 fail-closed 的 merge 门禁使用。"""
+    try:
+        return subprocess.run(
+            ["git", "-C", str(cwd), *args],
+            capture_output=True, text=True, timeout=timeout,
+            env={**os.environ, **(env or {})},
+        )
+    except (subprocess.SubprocessError, OSError) as error:
+        return subprocess.CompletedProcess(
+            ["git", "-C", str(cwd), *args], 1, "", str(error)
+        )
+
+
+def _git_stdout(repo_path: Path, *args: str) -> tuple[str, str | None]:
+    result = run_git(repo_path, *args)
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "git command failed").strip()
+        return "", detail
+    return result.stdout.strip(), None
+
+
+def _git_is_ancestor(repo_path: Path, older: str, newer: str) -> bool:
+    return run_git(repo_path, "merge-base", "--is-ancestor", older, newer).returncode == 0
+
+
+def _exact_target_refs(contract: dict) -> tuple[str, str, str | None]:
+    """校验 push/remote refs 指向同一契约 remote 与分支。"""
+    remote_name = contract.get("remote_name")
+    target_push_ref = contract.get("target_push_ref")
+    target_remote_ref = contract.get("target_remote_ref")
+    if not all(isinstance(value, str) and value for value in (
+            remote_name, target_push_ref, target_remote_ref)):
+        return "", "", "missing remote_name/target refs"
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", remote_name):
+        return "", "", f"invalid remote_name: {remote_name}"
+    match = re.fullmatch(r"refs/heads/(.+)", target_push_ref)
+    if not match:
+        return "", "", f"invalid target_push_ref: {target_push_ref}"
+    expected_remote_ref = f"refs/remotes/{remote_name}/{match.group(1)}"
+    if target_remote_ref != expected_remote_ref:
+        return "", "", (
+            f"target ref mismatch: {target_remote_ref} != {expected_remote_ref}"
+        )
+    return target_push_ref, target_remote_ref, None
+
+
+def _simulate_merge(repo_path: Path, head_sha: str,
+                    target_sha: str) -> tuple[bool, str]:
+    """在临时 shared clone 中运行真实 merge，绝不写用户 checkout。"""
+    try:
+        with tempfile.TemporaryDirectory(prefix="icode_merge_preflight_") as tmp:
+            clone = Path(tmp) / "repo"
+            cloned = subprocess.run(
+                ["git", "clone", "--shared", "--no-checkout", "--quiet",
+                 str(repo_path), str(clone)],
+                capture_output=True, text=True, timeout=60,
+            )
+            if cloned.returncode != 0:
+                return False, (cloned.stderr or "temporary clone failed").strip()
+            checkout = run_git(clone, "checkout", "--detach", "--quiet", head_sha)
+            if checkout.returncode != 0:
+                return False, (checkout.stderr or "temporary checkout failed").strip()
+            merge = run_git(
+                clone, "-c", "core.hooksPath=/dev/null", "merge",
+                "--no-commit", "--no-ff", target_sha, timeout=60,
+            )
+            unresolved = run_git(
+                clone, "diff", "--name-only", "--diff-filter=U"
+            )
+            merge_head = run_git(clone, "rev-parse", "-q", "--verify", "MERGE_HEAD")
+            if (merge.returncode != 0 or unresolved.returncode != 0
+                    or unresolved.stdout.strip()
+                    or merge_head.returncode != 0
+                    or merge_head.stdout.strip() != target_sha):
+                detail = (merge.stderr or merge.stdout or unresolved.stderr
+                          or "merge result is incomplete").strip()
+                return False, detail
+            return True, "clean"
+    except (subprocess.SubprocessError, OSError) as error:
+        return False, str(error)
+
+
+def _new_merge_row(contract) -> dict:
+    role = contract.get("repo_role", "?") if isinstance(contract, dict) else "?"
+    return {
+        "contract": contract,
+        "repo_role": role,
+        "repo_path": None,
+        "branch": "?",
+        "upstream": "?",
+        "remote_url": "?",
+        "target_remote_ref": "?",
+        "target_push_ref": "?",
+        "original_head": "",
+        "target_sha": "",
+        "ahead": None,
+        "behind": None,
+        "dirty": None,
+        "relation": "unknown",
+        "status": "blocked",
+        "action": "none",
+        "git_check": "not_run",
+        "issues": [],
+        "pending_merge": False,
+    }
+
+
+def _preflight_merge_contract(contract, merge_enabled: bool) -> dict:
+    row = _new_merge_row(contract)
+    if not isinstance(contract, dict):
+        row["issues"].append("invalid submission contract")
+        return row
+
+    repo_value = contract.get("repo_path")
+    if not isinstance(repo_value, str) or not repo_value.strip():
+        row["issues"].append("missing repo_path")
+        return row
+    repo_path = Path(repo_value).expanduser()
+    row["repo_path"] = repo_path
+    if not repo_path.is_dir() or git(repo_path, "rev-parse", "--is-inside-work-tree") != "true":
+        row["issues"].append("repository unavailable or not Git")
+        return row
+
+    target_push_ref, target_remote_ref, ref_issue = _exact_target_refs(contract)
+    row["target_push_ref"] = contract.get("target_push_ref", "?")
+    row["target_remote_ref"] = contract.get("target_remote_ref", "?")
+    if ref_issue:
+        row["issues"].append(ref_issue)
+        return row
+
+    branch, branch_error = _git_stdout(repo_path, "rev-parse", "--abbrev-ref", "HEAD")
+    upstream, upstream_error = _git_stdout(
+        repo_path, "rev-parse", "--symbolic-full-name", "@{u}"
+    )
+    head_sha, head_error = _git_stdout(repo_path, "rev-parse", "--verify", "HEAD")
+    remote_url, remote_error = _git_stdout(
+        repo_path, "remote", "get-url", contract.get("remote_name", "")
+    )
+    row.update({
+        "branch": branch or "?",
+        "upstream": upstream or "?",
+        "remote_url": remote_url or "?",
+        "original_head": head_sha,
+    })
+    if branch_error or branch in {"", "HEAD"}:
+        row["issues"].append("detached or unresolved HEAD")
+    elif branch != contract.get("worktree_branch"):
+        row["issues"].append(
+            f"branch drift: {branch} != {contract.get('worktree_branch')}"
+        )
+    if upstream_error or not upstream:
+        row["issues"].append("missing upstream")
+    elif upstream != target_remote_ref:
+        row["issues"].append(f"upstream drift: {upstream} != {target_remote_ref}")
+    if head_error or not head_sha:
+        row["issues"].append("HEAD cannot be resolved")
+    if remote_error or not remote_url:
+        row["issues"].append("remote URL cannot be resolved")
+    elif normalize_url(remote_url) != normalize_url(contract.get("remote_url", "")):
+        row["issues"].append("remote URL mismatch")
+    if contract.get("tracking_verified") is not True:
+        row["issues"].append("tracking_verified is not true")
+    if row["issues"]:
+        return row
+
+    fetch = run_git(
+        repo_path, "fetch", "--no-tags", "-q", contract["remote_name"],
+        f"+{target_push_ref}:{target_remote_ref}", timeout=60,
+    )
+    if fetch.returncode != 0:
+        detail = (fetch.stderr or fetch.stdout or "fetch failed").strip()
+        row["issues"].append(f"fetch failed: {detail}")
+        return row
+    target_sha, target_error = _git_stdout(
+        repo_path, "rev-parse", "--verify", target_remote_ref
+    )
+    if target_error or not target_sha:
+        row["issues"].append("fetched target cannot be resolved")
+        return row
+    row["target_sha"] = target_sha
+
+    status_result = run_git(
+        repo_path, "status", "--porcelain=v1", "--untracked-files=all"
+    )
+    if status_result.returncode != 0:
+        row["issues"].append("git status failed")
+        return row
+    row["dirty"] = bool(status_result.stdout.strip())
+    unresolved = run_git(repo_path, "diff", "--name-only", "--diff-filter=U")
+    merge_head_result = run_git(repo_path, "rev-parse", "-q", "--verify", "MERGE_HEAD")
+    merge_head = merge_head_result.stdout.strip() if merge_head_result.returncode == 0 else ""
+    if unresolved.returncode != 0 or unresolved.stdout.strip():
+        row["issues"].append("unmerged entries exist")
+        return row
+    if merge_head:
+        unstaged = run_git(repo_path, "diff", "--quiet")
+        untracked = run_git(repo_path, "ls-files", "--others", "--exclude-standard")
+        if merge_head != target_sha:
+            row["issues"].append("MERGE_HEAD does not match frozen target")
+            return row
+        if unstaged.returncode != 0 or untracked.returncode != 0 or untracked.stdout.strip():
+            row["issues"].append("pending merge has new unstaged or untracked changes")
+            return row
+        row["pending_merge"] = True
+    elif merge_enabled and row["dirty"]:
+        row["issues"].append("dirty checkout blocks automatic merge")
+        return row
+
+    behind_text, behind_error = _git_stdout(
+        repo_path, "rev-list", "--count", f"{head_sha}..{target_sha}"
+    )
+    ahead_text, ahead_error = _git_stdout(
+        repo_path, "rev-list", "--count", f"{target_sha}..{head_sha}"
+    )
+    try:
+        if behind_error or ahead_error:
+            raise ValueError("rev-list failed")
+        row["behind"] = int(behind_text)
+        row["ahead"] = int(ahead_text)
+    except ValueError:
+        row["issues"].append("ahead/behind cannot be calculated")
+        return row
+
+    if row["pending_merge"]:
+        row.update(relation="pending_merge", status="merge_pending",
+                   action="recheck", git_check="preflight_pass")
+        return row
+    if head_sha == target_sha:
+        row.update(relation="equal", status="unchanged", git_check="preflight_pass")
+        return row
+    if _git_is_ancestor(repo_path, target_sha, head_sha):
+        row.update(relation="local_ahead", status="local_ahead",
+                   git_check="preflight_pass")
+        return row
+    if _git_is_ancestor(repo_path, head_sha, target_sha):
+        row.update(relation="fast_forward", status="behind" if not merge_enabled else "ready",
+                   git_check="preflight_pass")
+        return row
+
+    merge_base, merge_base_error = _git_stdout(
+        repo_path, "merge-base", head_sha, target_sha
+    )
+    if merge_base_error or not merge_base:
+        row["issues"].append("merge base cannot be resolved")
+        return row
+    merge_ok, detail = _simulate_merge(repo_path, head_sha, target_sha)
+    if not merge_ok:
+        row["issues"].append(f"merge conflict or uncertain preflight: {detail}")
+        return row
+    row.update(relation="diverged", status="behind" if not merge_enabled else "ready",
+               git_check="preflight_pass")
+    return row
+
+
+def _post_merge_check(row: dict) -> list[str]:
+    repo_path = row["repo_path"]
+    contract = row["contract"]
+    issues = []
+    unresolved = run_git(repo_path, "diff", "--name-only", "--diff-filter=U")
+    if unresolved.returncode != 0 or unresolved.stdout.strip():
+        issues.append("unmerged entries after merge")
+    for args, label in ((('diff', '--check'), "working-tree diff check failed"),
+                        (('diff', '--cached', '--check'), "index diff check failed")):
+        if run_git(repo_path, *args).returncode != 0:
+            issues.append(label)
+    if row["relation"] == "fast_forward":
+        frozen_range = f'{row["original_head"]}..{row["target_sha"]}'
+        if run_git(repo_path, "diff", "--check", frozen_range).returncode != 0:
+            issues.append("frozen target diff check failed")
+    branch = git(repo_path, "rev-parse", "--abbrev-ref", "HEAD")
+    upstream = git(repo_path, "rev-parse", "--symbolic-full-name", "@{u}")
+    remote_url = git(repo_path, "remote", "get-url", contract.get("remote_name", ""))
+    if branch != contract.get("worktree_branch"):
+        issues.append("branch changed during merge")
+    if upstream != contract.get("target_remote_ref"):
+        issues.append("upstream changed during merge")
+    if normalize_url(remote_url) != normalize_url(contract.get("remote_url", "")):
+        issues.append("remote URL changed during merge")
+    current_head = git(repo_path, "rev-parse", "--verify", "HEAD")
+    merge_head = git(repo_path, "rev-parse", "-q", "--verify", "MERGE_HEAD")
+    if row["relation"] == "fast_forward":
+        if current_head != row["target_sha"] or merge_head:
+            issues.append("fast-forward result does not match frozen target")
+    else:
+        if current_head != row["original_head"] or merge_head != row["target_sha"]:
+            issues.append("pending merge identity does not match frozen snapshot")
+    return issues
+
+
+def _abort_failed_merge(row: dict, original_status: str) -> list[str]:
+    """只撤销当前失败 merge，并验证预检快照；绝不 reset 已完成仓库。"""
+    repo_path = row["repo_path"]
+    issues = []
+    if run_git(repo_path, "rev-parse", "-q", "--verify", "MERGE_HEAD").returncode == 0:
+        aborted = run_git(repo_path, "merge", "--abort")
+        if aborted.returncode != 0:
+            issues.append("merge abort failed")
+    current_head = git(repo_path, "rev-parse", "--verify", "HEAD")
+    current_status = git(
+        repo_path, "status", "--porcelain=v1", "--untracked-files=all"
+    )
+    if current_head != row["original_head"] or current_status != original_status:
+        issues.append("checkout did not return to the preflight snapshot")
+    return issues
+
+
+def _refresh_frozen_target(row: dict) -> str | None:
+    contract = row["contract"]
+    fetched = run_git(
+        row["repo_path"], "fetch", "--no-tags", "-q", contract["remote_name"],
+        f"+{row['target_push_ref']}:{row['target_remote_ref']}", timeout=60,
+    )
+    if fetched.returncode != 0:
+        return "online recheck fetch failed"
+    current = git(row["repo_path"], "rev-parse", "--verify", row["target_remote_ref"])
+    if current != row["target_sha"]:
+        return f"online target moved: {row['target_sha']} -> {current or '?'}"
+    return None
+
+
+def _print_merge_rows(rows: list[dict], merge_enabled: bool) -> None:
+    print("| Repo | Branch | Upstream | Remote URL | Target | Frozen SHA | Ahead/Behind | Dirty | Status |")
+    print("|---|---|---|---|---|---|---|---|---|")
+    for row in rows:
+        ahead = "?" if row["ahead"] is None else row["ahead"]
+        behind = "?" if row["behind"] is None else row["behind"]
+        dirty = "?" if row["dirty"] is None else "yes" if row["dirty"] else "no"
+        target_sha = row["target_sha"][:12] if row["target_sha"] else "?"
+        print(
+            f"| {row['repo_role']} | {row['branch']} | {row['upstream']} | "
+            f"{row['remote_url']} | {row['target_remote_ref']} | {target_sha} | "
+            f"+{ahead}/-{behind} | {dirty} | {row['status']} |"
+        )
+        if row["issues"]:
+            print(f"  → blocked: {'; '.join(row['issues'])}")
+        elif merge_enabled:
+            print(
+                f"  → relation={row['relation']}; action={row['action']}; "
+                f"git_check={row['git_check']}"
+            )
+        elif row["status"] == "behind":
+            print(
+                "  → target 领先或已分叉，先 fetch/merge/rebase；"
+                "建议显式运行 /icode worktree --merge"
+            )
+        else:
+            target_br = row["target_push_ref"].removeprefix("refs/heads/")
+            if row["dirty"] or row["status"] in {"unchanged", "local_ahead"}:
+                print(
+                    f"  → 精确安全命令：git push "
+                    f"{row['contract'].get('remote_name', '<remote>')} "
+                    f"HEAD:refs/heads/{target_br}"
+                )
+
+
 def cmd_submit_check(args) -> int:
     meta = load_metadata(Path(args.metadata).expanduser())
-    contracts = meta.get("submission_contracts") or []
+    merge_enabled = bool(getattr(args, "merge", False))
+    contracts = meta.get("submission_contracts")
+    if not isinstance(contracts, list):
+        print("❌ submission_contracts 必须是数组", file=sys.stderr)
+        return 1
     if not contracts:
+        if merge_enabled:
+            print("❌ /icode worktree --merge 要求非空 submission_contracts", file=sys.stderr)
+            return 2
         print("ℹ️ 无提交契约（只读工单或未迁移）。仅枚举变更文件供人工确认。")
         return 0
-    print("| Repo | Branch | Upstream | Remote URL | Target(remote branch) | Ahead/Behind | Dirty | Verdict |")
-    print("|---|---|---|---|---|---|---|---|")
-    overall_blocked = False
-    overall_behind = False
-    for c in contracts:
-        repo_path = Path(c.get("repo_path", ""))
-        row = c.get("repo_role", "?")
-        # G3 规则 4：behind 判定前先 fetch 目标分支取在线状态（防本地 fetch 过时误报 +0/-0，
-        # 与 G4 规则 1「不用本地缓存 ref」一致）；fetch 失败（远程不可达）→ 降级本地 ref 并标注
-        m = re.match(r"^refs/heads/(.+)$", c.get("target_push_ref", ""))
-        fb = m.group(1) if m else None
-        fetch_ok = True
-        if fb:
-            fetch_ok = git_exit0(repo_path, "fetch", "-q", c.get("remote_name", ""), f"refs/heads/{fb}")
-        branch = git(repo_path, "rev-parse", "--abbrev-ref", "HEAD") or "?"
-        upstream = git(repo_path, "rev-parse", "--symbolic-full-name", "@{u}") or "?"
-        remote_url = git(repo_path, "remote", "get-url", c.get("remote_name", "")) or "?"
-        target = c.get("target_remote_ref", "?")
-        if not fetch_ok:
-            target += " (本地缓存)"
-        dirty = bool(git(repo_path, "status", "--porcelain"))
-        # ahead/behind：target 领先本地 → behind；本地领先 target → ahead（仅展示，不影响 verdict）
-        # 注意 `git rev-list --count A..B`（B 领先 A 数）；漏掉 `..` 会变成"共同可达数"，误报（真源 §3.10 G3 规则 4）
-        behind = 0
-        ahead = 0
+
+    # Phase 1：全部仓库只读预检。除 remote-tracking refs 外不修改用户仓库。
+    rows = [_preflight_merge_contract(contract, merge_enabled) for contract in contracts]
+    seen_repo_paths: dict[str, dict] = {}
+    for row in rows:
+        repo_path = row.get("repo_path")
+        if not isinstance(repo_path, Path):
+            continue
         try:
-            behind = int(git(repo_path, "rev-list", "--count", f"HEAD..{target}") or 0)
-            ahead = int(git(repo_path, "rev-list", "--count", f"{target}..HEAD") or 0)
-        except ValueError:
-            behind = ahead = 0
-        verdict = "pass"
-        if branch == "HEAD" or branch != c.get("worktree_branch"):
-            verdict = "blocked"
-        elif not upstream or upstream != c.get("target_remote_ref"):
-            verdict = "blocked"
-        elif remote_url and normalize_url(remote_url) != normalize_url(c.get("remote_url", "")):
-            verdict = "blocked"
-        elif not c.get("tracking_verified"):
-            verdict = "blocked"
-        elif behind > 0:
-            verdict = "behind"
-        if verdict == "blocked":
-            overall_blocked = True
-        elif verdict == "behind":
-            overall_behind = True
-        ab = f"+{ahead}/-{behind}"
-        print(f"| {row} | {branch} | {upstream} | {remote_url} | {target} | {ab} | {'yes' if dirty else 'no'} | {verdict} |")
-        # 目标分支来自契约 target_push_ref 的远端分支部分
-        m = re.match(r"^refs/heads/(.+)$", c.get("target_push_ref", ""))
-        target_br = m.group(1) if m else "?"
-        if verdict == "blocked":
-            print(f"  → 未给出 push 指令（契约违约，先跑 g2-check 或由用户显式确认目标）")
-        elif verdict == "behind":
-            print(f"  → target 领先本地 {behind} commit，先 fetch/merge/rebase，由用户决定，ICode 不自动改历史")
-        elif dirty or verdict == "pass":
-            print(f"  → 精确安全命令：git push {c.get('remote_name','<remote>')} HEAD:refs/heads/{target_br}")
-    if overall_blocked:
-        print("\n❌ 总 verdict = blocked——存在契约违约仓库，不宣称“可以提交”", file=sys.stderr)
+            repo_key = str(repo_path.resolve())
+        except OSError:
+            repo_key = str(repo_path.absolute())
+        previous = seen_repo_paths.get(repo_key)
+        if previous is not None:
+            issue = f"duplicate repository contract: {repo_key}"
+            if issue not in previous["issues"]:
+                previous["issues"].append(issue)
+                previous["status"] = "blocked"
+            row["issues"].append(issue)
+            row["status"] = "blocked"
+        else:
+            seen_repo_paths[repo_key] = row
+    if any(row["issues"] for row in rows):
+        _print_merge_rows(rows, merge_enabled)
+        print("\n❌ 总状态 = blocked——全量预检未通过，未执行本地 merge", file=sys.stderr)
         return 2
-    if overall_behind:
-        print("\n⚠️ 总 verdict = behind——存在落后仓库，先 fetch/merge/rebase 后再提交（未执行任何 push；红线不变：ICode 不 commit / 不 push）")
+
+    if not merge_enabled:
+        _print_merge_rows(rows, False)
+        if any(row["status"] == "behind" for row in rows):
+            print(
+                "\n❌ 总状态 = blocked——只读检查发现线上差异；"
+                "先运行 /icode worktree --merge，未执行 merge / commit / push",
+                file=sys.stderr,
+            )
+            return 2
+        print("\n✅ 总状态 = pass（只读检查；未执行 merge / commit / push）")
         return 0
-    print("\n✅ 总 verdict = pass（未执行任何 push；红线不变：ICode 不 commit / 不 push）")
+
+    # Phase 2：只有所有仓库通过 Phase 1 才开始修改，并且永不创建 commit。
+    execution_failed = False
+    for row in rows:
+        if execution_failed:
+            row.update(status="blocked", action="skipped_after_failure",
+                       git_check="not_run")
+            row["issues"].append("earlier repository merge failed")
+            continue
+        if row["relation"] in {"equal", "local_ahead"}:
+            row["action"] = "none"
+            row["git_check"] = "pass"
+            continue
+        if row["relation"] == "pending_merge":
+            post_issues = _post_merge_check(row)
+            if post_issues:
+                row["issues"].extend(post_issues)
+                row.update(status="blocked", git_check="failed")
+                execution_failed = True
+            else:
+                row.update(status="merge_pending", action="recheck", git_check="pass")
+            continue
+
+        repo_path = row["repo_path"]
+        original_status = git(
+            repo_path, "status", "--porcelain=v1", "--untracked-files=all"
+        )
+        if row["relation"] == "fast_forward":
+            merged = run_git(
+                repo_path, "-c", "core.hooksPath=/dev/null", "merge",
+                "--ff-only", row["target_sha"], timeout=60,
+            )
+            desired_status = "recheck_pending"
+            desired_action = "fast_forwarded"
+        else:
+            merged = run_git(
+                repo_path, "-c", "core.hooksPath=/dev/null", "merge",
+                "--no-commit", "--no-ff", row["target_sha"], timeout=60,
+            )
+            desired_status = "merge_pending"
+            desired_action = "merged_no_commit"
+        if merged.returncode != 0:
+            detail = (merged.stderr or merged.stdout or "merge failed").strip()
+            row["issues"].append(f"actual merge failed: {detail}")
+            row["issues"].extend(_abort_failed_merge(row, original_status))
+            row.update(status="blocked", action="aborted", git_check="failed")
+            execution_failed = True
+            continue
+        row.update(status=desired_status, action=desired_action)
+        post_issues = _post_merge_check(row)
+        if post_issues:
+            row["issues"].extend(post_issues)
+            row.update(status="blocked", git_check="failed")
+            execution_failed = True
+        else:
+            row["git_check"] = "pass"
+
+    # 再次读取精确线上目标，防止 merge 窗口内 remote 又前进。
+    for row in rows:
+        if row["status"] == "blocked":
+            continue
+        moved_issue = _refresh_frozen_target(row)
+        if moved_issue:
+            row["issues"].append(moved_issue)
+            row.update(status="online_moved", git_check="failed")
+
+    _print_merge_rows(rows, True)
+    if any(row["issues"] or row["status"] in {"blocked", "online_moved"}
+           for row in rows):
+        print("\n❌ 总状态 = blocked——未输出 push 指令；检查部分完成状态", file=sys.stderr)
+        return 2
+    if any(row["status"] in {"merge_pending", "recheck_pending"} for row in rows):
+        print(
+            "\n⚠️ 总状态 = pending——未 commit / push；"
+            "merge_pending 需人工检查并提交，recheck_pending 需重跑既有业务验证"
+        )
+        return 3
+    print("\n✅ 总状态 = pass（未 commit / push）")
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# 子命令：handoff（多仓交付矩阵，只读）
+# ---------------------------------------------------------------------------
+
+HANDOFF_REASONS = {
+    "modified",
+    "build_only",
+    "already_upstream",
+    "not_in_scope",
+    "unresolved",
+}
+
+
+def _bool_or_none(value):
+    """只接受明确布尔值；缺失或其它类型都保持未知。"""
+    return value if isinstance(value, bool) else None
+
+
+def _normalise_handoff_inputs(meta: dict) -> list[dict]:
+    inputs = (((meta.get("extensions") or {}).get("handoff") or {}).get("inputs") or [])
+    if isinstance(inputs, dict):
+        # 兼容以 repo path 为 key 的紧凑写法，同时保持 list 为首选合同。
+        return [dict(value, repo_path=key) for key, value in inputs.items() if isinstance(value, dict)]
+    if not isinstance(inputs, list):
+        return []
+    return [value for value in inputs if isinstance(value, dict)]
+
+
+def _path_key(value) -> str:
+    if not isinstance(value, str) or not value:
+        return ""
+    try:
+        return str(Path(value).expanduser().resolve())
+    except OSError:
+        return value
+
+
+def _input_for_contract(inputs: list[dict], contract: dict) -> dict:
+    repo_path = _path_key(contract.get("repo_path"))
+    path_matches = [item for item in inputs if _path_key(item.get("repo_path")) == repo_path]
+    if len(path_matches) == 1:
+        return path_matches[0]
+    if len(path_matches) > 1:
+        return {}
+    role = contract.get("repo_role")
+    role_matches = [item for item in inputs if item.get("repo_role") == role]
+    return role_matches[0] if len(role_matches) == 1 else {}
+
+
+def _normalise_excluded_paths(value) -> tuple[list[dict], list[str]]:
+    if not isinstance(value, list):
+        return [], []
+    result = []
+    issues = []
+    for item in value:
+        path = item if isinstance(item, str) else item.get("path") if isinstance(item, dict) else None
+        if not isinstance(path, str) or not path:
+            continue
+        # 排除项只允许仓库内相对路径；否则 `../source` 会被 lstrip 误当作 `source`，隐藏真实变更。
+        path_parts = re.split(r"[/\\]+", path)
+        cross_platform_absolute = bool(re.match(r"^(?:[/\\]|[A-Za-z]:[/\\])", path))
+        if cross_platform_absolute or Path(path).is_absolute() or ".." in path_parts or "\x00" in path:
+            issues.append(f"invalid_excluded_path:{path}")
+            continue
+        if isinstance(item, str):
+            result.append({"path": path, "reason": "explicitly excluded"})
+        else:
+            reason = item.get("reason")
+            result.append({
+                "path": path,
+                "reason": reason if isinstance(reason, str) and reason else "explicitly excluded",
+            })
+    return result, issues
+
+
+def _dirty_paths(status: str) -> list[str]:
+    paths = []
+    for line in status.splitlines():
+        if len(line) < 4:
+            continue
+        path = line[3:]
+        if " -> " in path:
+            path = path.split(" -> ", 1)[1]
+        paths.append(path.strip('"'))
+    return paths
+
+
+def _is_excluded(path: str, excluded: list[dict]) -> bool:
+    normalised = path.rstrip("/")
+    for item in excluded:
+        prefix = item["path"].lstrip("./").rstrip("/")
+        if prefix and (normalised == prefix or normalised.startswith(prefix + "/")):
+            return True
+    return False
+
+
+def _unresolved_handoff_row(repo_role="unresolved", repo_path=None,
+                            target_remote_ref=None, issues=None) -> dict:
+    return {
+        "repo_role": repo_role or "unresolved",
+        "repo_path": repo_path,
+        "branch": None,
+        "upstream": None,
+        "target_remote_ref": target_remote_ref,
+        "head": None,
+        "ahead": None,
+        "behind": None,
+        "dirty": None,
+        "modified": None,
+        "build_participant": None,
+        "deployed": None,
+        "deployment_evidence": [],
+        "deploy_target": None,
+        "submit_required": None,
+        "submit_reason": "unresolved",
+        "docs_required": None,
+        "docs_ready": None,
+        "excluded_paths": [],
+        "artifact_identity": None,
+        "resolution": "unresolved",
+        "issues": list(issues or []),
+    }
+
+
+def _normalise_deployment_evidence(value) -> list:
+    if isinstance(value, str):
+        return [value] if value else []
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, (str, dict)) and item]
+
+
+def _normalise_submit_disposition(handoff_input: dict, modified,
+                                  issues: list[str]) -> tuple[bool | None, str]:
+    reason = handoff_input.get("submit_reason")
+    if reason not in HANDOFF_REASONS:
+        if reason is not None:
+            issues.append("invalid_submit_reason")
+        reason = "modified" if modified is True else "unresolved"
+
+    required = _bool_or_none(handoff_input.get("submit_required"))
+    expected = None
+    if reason == "modified":
+        expected = True
+    elif reason in {"build_only", "already_upstream", "not_in_scope"}:
+        expected = False
+
+    conflict = (
+        (required is not None and expected is not None and required != expected)
+        or (required is True and modified is False)
+        or (reason == "modified" and modified is False)
+        or (reason in {"build_only", "not_in_scope"} and modified is True)
+    )
+    if conflict:
+        issues.append("submit_disposition_conflict")
+        return None, "unresolved"
+    if required is None:
+        required = expected
+    return required, reason
+
+
+def build_handoff_report(meta: dict, metadata_path: Path) -> dict:
+    """由契约、显式交付观测与本地 Git 事实构造证据有界矩阵。"""
+    raw_contracts = meta.get("submission_contracts")
+    report_issues = []
+    if raw_contracts is None:
+        contracts = []
+    elif isinstance(raw_contracts, list):
+        contracts = raw_contracts
+    else:
+        contracts = []
+        report_issues.append("invalid_submission_contracts")
+    inputs = _normalise_handoff_inputs(meta)
+    repositories = []
+
+    for contract in contracts:
+        if not isinstance(contract, dict):
+            repositories.append(_unresolved_handoff_row(issues=["invalid_submission_contract"]))
+            continue
+        repo_path_value = contract.get("repo_path")
+        if not isinstance(repo_path_value, str) or not repo_path_value.strip():
+            repositories.append(_unresolved_handoff_row(
+                repo_role=contract.get("repo_role"),
+                target_remote_ref=contract.get("target_remote_ref"),
+                issues=["missing_repo_path"],
+            ))
+            continue
+
+        repo_path = Path(repo_path_value).expanduser()
+        handoff_input = _input_for_contract(inputs, contract)
+        excluded, issues = _normalise_excluded_paths(handoff_input.get("excluded_paths"))
+        is_git_repo = repo_path.is_dir() and git(repo_path, "rev-parse", "--is-inside-work-tree") == "true"
+        if not is_git_repo:
+            issues.append("repo_unavailable_or_not_git")
+        status = git(repo_path, "status", "--porcelain=v1", "--untracked-files=all") if is_git_repo else ""
+        dirty = bool(status) if is_git_repo else None
+        relevant_dirty = [path for path in _dirty_paths(status) if not _is_excluded(path, excluded)]
+
+        modified = _bool_or_none(handoff_input.get("modified"))
+        if modified is None and relevant_dirty:
+            modified = True
+
+        submit_required, submit_reason = _normalise_submit_disposition(
+            handoff_input, modified, issues
+        )
+
+        target = contract.get("target_remote_ref")
+        target_resolved = bool(is_git_repo and target and git_exit0(repo_path, "rev-parse", "--verify", target))
+        ahead = behind = None
+        if target_resolved:
+            try:
+                behind = int(git(repo_path, "rev-list", "--count", f"HEAD..{target}"))
+                ahead = int(git(repo_path, "rev-list", "--count", f"{target}..HEAD"))
+            except (TypeError, ValueError):
+                ahead = behind = None
+
+        artifact_identity = handoff_input.get("artifact_identity")
+        if artifact_identity in ("", []):
+            artifact_identity = None
+        deployment_evidence = _normalise_deployment_evidence(handoff_input.get("deployment_evidence"))
+        deploy_target = handoff_input.get("deploy_target")
+        if not isinstance(deploy_target, str) or not deploy_target:
+            deploy_target = None
+        deployed = _bool_or_none(handoff_input.get("deployed"))
+        if deployed is True:
+            if artifact_identity is None:
+                issues.append("deployed_without_artifact_identity")
+            if not deployment_evidence:
+                issues.append("deployed_without_deployment_evidence")
+            if artifact_identity is None and not deployment_evidence:
+                issues.append("deployed_without_evidence")
+                deployed = None
+        repositories.append({
+            "repo_role": contract.get("repo_role") or "unresolved",
+            "repo_path": str(repo_path),
+            "branch": git(repo_path, "rev-parse", "--abbrev-ref", "HEAD") or None if is_git_repo else None,
+            "upstream": git(repo_path, "rev-parse", "--symbolic-full-name", "@{u}") or None if is_git_repo else None,
+            "target_remote_ref": target,
+            "head": git(repo_path, "rev-parse", "HEAD") or None if is_git_repo else None,
+            "ahead": ahead,
+            "behind": behind,
+            "dirty": dirty,
+            "modified": modified,
+            "build_participant": _bool_or_none(handoff_input.get("build_participant")),
+            "deployed": deployed,
+            "deployment_evidence": deployment_evidence,
+            "deploy_target": deploy_target,
+            "submit_required": submit_required,
+            "submit_reason": submit_reason,
+            "docs_required": _bool_or_none(handoff_input.get("docs_required")),
+            "docs_ready": _bool_or_none(handoff_input.get("docs_ready")),
+            "excluded_paths": excluded,
+            "artifact_identity": artifact_identity,
+            "resolution": "resolved" if is_git_repo else "unresolved",
+            "issues": issues,
+        })
+
+    return {
+        "schema_version": "1.0",
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "read_only": True,
+        "metadata_path": str(metadata_path.expanduser().resolve()),
+        "repositories": repositories,
+        "issues": report_issues,
+    }
+
+
+def _markdown_value(value) -> str:
+    if value is None:
+        return "unresolved"
+    if isinstance(value, bool):
+        return "yes" if value else "no"
+    if isinstance(value, (dict, list)):
+        value = json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+    return str(value).replace("|", "\\|").replace("\n", " ")
+
+
+def render_handoff_markdown(report: dict) -> str:
+    lines = [
+        "# Multi-repo handoff matrix",
+        "",
+        "> Read-only report. `unresolved` means no sufficient explicit evidence was available.",
+        "",
+        "| Repo | Path | Branch | Dirty | Modified | Build | Deployed | Submit | Reason | Docs required | Docs ready | Artifact | Excluded paths |",
+        "|---|---|---|---|---|---|---|---|---|---|---|---|---|",
+    ]
+    for row in report["repositories"]:
+        excluded = "; ".join(
+            f"{item['path']} ({item['reason']})" for item in row["excluded_paths"]
+        )
+        cells = [
+            row["repo_role"], row["repo_path"], row["branch"], row["dirty"],
+            row["modified"], row["build_participant"], row["deployed"],
+            row["submit_required"], row["submit_reason"], row["docs_required"],
+            row["docs_ready"], row["artifact_identity"], excluded,
+        ]
+        lines.append("| " + " | ".join(_markdown_value(value) for value in cells) + " |")
+    return "\n".join(lines) + "\n"
+
+
+def _same_destination(left: Path, right: Path) -> bool:
+    """识别字符串差异、符号链接和已有硬链接指向的同一文件。"""
+    if left.resolve() == right.resolve():
+        return True
+    try:
+        return left.exists() and right.exists() and os.path.samefile(left, right)
+    except OSError:
+        return False
+
+
+def _validate_handoff_destinations(metadata_path: Path, output_path: Path,
+                                   markdown_path: Path | None) -> None:
+    ticket_root = metadata_path.expanduser().resolve().parent
+    destinations = [("--output", output_path)]
+    if markdown_path is not None:
+        destinations.append(("--markdown", markdown_path))
+    for option, destination in destinations:
+        resolved_destination = destination.expanduser().resolve()
+        try:
+            resolved_destination.relative_to(ticket_root)
+        except ValueError as exc:
+            raise ValueError(
+                f"{option} 必须位于 metadata 工单目录内: {resolved_destination}"
+            ) from exc
+        if destination.name.startswith(".ico_"):
+            raise ValueError(f"{option} 不得覆盖 .ico_* 控制文件: {destination}")
+        if _same_destination(destination, metadata_path):
+            raise ValueError(f"{option} 不得覆盖 metadata: {metadata_path}")
+    if markdown_path is not None and _same_destination(output_path, markdown_path):
+        raise ValueError("--output 与 --markdown 不得指向同一文件")
+
+
+def cmd_handoff(args) -> int:
+    metadata_path = Path(args.metadata).expanduser()
+    output_path = Path(args.output).expanduser()
+    markdown_path = Path(args.markdown).expanduser() if args.markdown else None
+    try:
+        _validate_handoff_destinations(metadata_path, output_path, markdown_path)
+    except ValueError as error:
+        print(f"❌ handoff 输出路径无效: {error}", file=sys.stderr)
+        return 1
+    report = build_handoff_report(load_metadata(metadata_path), metadata_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    atomically_write(output_path, report)
+    if markdown_path is not None:
+        markdown_path.parent.mkdir(parents=True, exist_ok=True)
+        atomically_write_text(markdown_path, render_handoff_markdown(report))
+    print(f"✅ handoff matrix: {len(report['repositories'])} repos → {output_path}")
     return 0
 
 
@@ -401,8 +1188,17 @@ def main(argv: list[str]) -> int:
     p_g2 = sub.add_parser("g2-check", help="G2 ⑩ 契约校验（只读）")
     p_g2.add_argument("--metadata", required=True)
 
-    p_ck = sub.add_parser("submit-check", help="G3 交付前逐仓清单（只读）")
+    p_ck = sub.add_parser("submit-check", help="G3 交付前逐仓清单（默认只读）")
     p_ck.add_argument("--metadata", required=True)
+    p_ck.add_argument(
+        "--merge", action="store_true",
+        help="全量预检后执行 fast-forward 或保留未提交 merge；绝不 commit/push",
+    )
+
+    p_handoff = sub.add_parser("handoff", help="生成多仓交付矩阵（本地只读，不 fetch）")
+    p_handoff.add_argument("--metadata", required=True)
+    p_handoff.add_argument("--output", required=True, help="JSON 真源输出路径")
+    p_handoff.add_argument("--markdown", help="可选 Markdown 输出路径")
 
     args = parser.parse_args(argv)
     if args.cmd == "normalize-url":
@@ -414,6 +1210,8 @@ def main(argv: list[str]) -> int:
         return cmd_g2(args)
     if args.cmd == "submit-check":
         return cmd_submit_check(args)
+    if args.cmd == "handoff":
+        return cmd_handoff(args)
     parser.print_help()
     return 1
 

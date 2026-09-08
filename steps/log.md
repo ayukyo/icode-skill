@@ -83,6 +83,8 @@
 3. **阶段0 输入要素收敛**（最多1-2轮，不拖成长讨论）：
    - 解析用户零散输入，提取已有信息
    - **TB 缺陷源拉取（可选）**：零散输入含 TB 项目 URL（`tb.example.com/.../project/<pid>/...`）或 `<LIB>-<NUM>`（如 `DEMO-26`）时，按下方「TB 缺陷源拉取」段拉取缺陷单的日志/评论/附件作为分析输入；**无 TB 引用时跳过，走纯本地日志路径，行为与改前 100% 一致**
+   - **证据清单编译（TB/本地均执行，先于根因判断）**：TB 拉取完成后优先读取自动生成的 `tb_source/<ID>/evidence_manifest.json`；纯本地日志用 `python3 tools/evidence_intake.py --root "<日志可信根>" --path "<日志文件或目录>" [--previous "<旧 manifest>"] --output "{ICODE_OUT_DIR}/evidence_manifest.json"` 生成清单。manifest 只做活动/附件/本地文件规范化、SHA256、重复表示、真实新增、派生关系与覆盖提示，不得把它当根因结论；远端未下载文件必须保留 `content_hash_pending=true`。复用时 `delta.duplicate_representation=true` 且 `new_semantic_evidence=false` 只刷新清单，不重跑完整因果分析；真实新增证据才进入增量对抗。工具输入必须位于显式可信根内，越界符号链接只记录失败、不读取内容
+   - **debug 本地目录（仅 `--debug`）**：先运行 `python3 tools/debug_catalog.py rebuild --project "<工程根>"`，再以 `query --pid <pid> --lib <lib> --num <num> [--manifest <path>]` 查询。精确身份+同 fingerprint → 复用且不重分析；精确身份+新证据 → 在原孪生增量分析；相似命中只给候选并重新核对版本/时间窗/证据，禁止复用结论。catalog 固定写 `.icode_output/.debug/debug_catalog.json`，永不写全局 index
    - **附件分析（本地日志目录 或 TB 缺陷源附件含视频/图片,vision-bridge 可用则主动调,防"分析错时间点"走弯路）**：**本地日志目录**或**TB 缺陷源附件**含视频/图片时,**先判定 vision-bridge 可用性(双通道:MCP 工具 或 本地 CLI,`config.json` 三件套配齐即可用)**。**可用→主动调**(视频先用 ffmpeg 本地提取关键帧再传图片帧省钱,本地路径扫目录下文件,TB 附件从 meta.json 取——见下方「附件分析（含本地路径 + TB 源）与 ffmpeg 抽帧」段);**两通道均不可用→仅提示附件清单+关键帧落盘待人工**(防纯文字模型场景报错)。**⚠️ 图片/视频绝不注入会话模型消息**(codex 第三方模型注入即报 "Model only support text input")。**触发范围**:TB 拉取后 + 本地日志目录含视频/图片文件时均触发,纯本地日志路径若有视频/图片也走分析流程
    - **能推断的推断**(日志目录/时间点/症状按上表推断),推断的标注"推断"
    - **推断不了的才问**,且一次性集中问(不挤牙膏)
@@ -118,6 +120,7 @@
      3. **代码库归属**：复用 §2.0 判定结果，将模块绑定到正确仓库（多仓库/子仓/独立业务仓库**按模块分别绑定**，不能只记 super repo HEAD；某节点日志中的 Hash 只能绑定该节点或明确声明的组件）。
      4. **可解析验证**：`git -C <repo> cat-file -e <hash>^{commit}` 验证本地可解析；**Hash 本地不可达时不自动 fetch**，如实记录 `unresolved` 降级（由用户决定是否补齐仓库对象或发布清单）。
      5. **记录三基线**：现场 Hash（runtime）/ 当前 HEAD（analysis）/ 二者关系（`same_as_head` / `ancestor_of_head` / `ahead_or_forked` / `unresolved`），写入 metadata 三基线字段（见步骤9）+ `log_analysis.md §2.0.1` 模块版本矩阵。
+        - 对每个参与模块准备显式 `--repo-map <module>=<git-root>`，运行 `python3 tools/runtime_baseline.py --root "<覆盖这些 Git 根和证据的可信根>" --repo-map ... --evidence-manifest "<manifest>" --log "<log>" --output "{ICODE_OUT_DIR}/baseline_manifest.json" --markdown "{ICODE_OUT_DIR}/baseline_manifest.md"`。工具只用本地 `rev-parse/cat-file/merge-base`，不 fetch，不跨仓把 super HEAD 代替 child；候选不可达/歧义时保留 unresolved 和补证动作。主代理复核 JSON 后才能通过控制面写 metadata 三基线字段
      6. **按现场 Hash 读历史代码**：根因假设涉及的代码行/函数，先用 `git -C <repo> show <hash>:<path>` 读取**现场版本源码**逐行核对（只读白名单，见 [references/dir_and_metadata.md](../references/dir_and_metadata.md)「Git 操作安全白名单」；禁止 checkout/switch/reset/stash/clean），并在根因代码事实处**注明"取自现场 Hash X 还是当前 HEAD"**。**核对与演进对照必须按相关函数/代码段定位**（用函数名/`case` 分支等锚点划界），**不得对整文件做字符串级比对**——同一防御性检查字符串可能出现在多处（如多个函数各有同类溢出守卫），整文件 grep 会把"其他函数已有同类检查"误判成"现场已修复"，导致判定矩阵失真。
      7. **现场→HEAD 演进对照**：`git -C <repo> log --oneline <hash>..HEAD -- <path>` + `git -C <repo> diff <hash>..HEAD -- <path>` 列出相关文件演进，按判定矩阵给结论：
         | 现场 Hash 代码 | 当前 HEAD 代码 | 结论与后续动作 |

@@ -9,6 +9,8 @@
 
 `/icode install` 是开源用户的统一安装入口：先安装或更新 ICODE 本体，再按 `skill-packs/manifest.json` 安装全部顶层共享技能，最后安装所选 MCP。新 clone、本机升级、新机器和 CI 初始化均使用同一入口；`mcp/install.sh` 只保留为 MCP 专项维护入口。
 
+**内置能力与独立 Skill 的安装边界**：`tools/evidence_intake.py`、`debug_catalog.py`、`runtime_baseline.py`、`verification_debt.py`、`learn.py`、`scripts/submission_guard.py handoff` 及 `steps/learn.md` 都属于 ICODE 本体，随 ICODE 目录一次复制到所选宿主，**不**写入 `skill-packs/manifest.json`。manifest 只声明需要在技能根顶层独立发现的跨项目共享 Skill；`--client all` 会同时安装 ICODE 本体和这些共享 Skill 到 Claude Code、Codex。
+
 **当前 6 个声明的 MCP**：
 
 | MCP | 形态 | 对 icode 工作流的增益 | KEY |
@@ -32,8 +34,8 @@
 | `/icode install <name>` | 安装 ICODE、全部共享技能，但只安装指定 MCP |
 | `/icode install --client codex` | 安装到 Codex skills 根，并为 Codex 注册 MCP；MCP entry 仍先生成 Claude 真源 |
 | `/icode install --client all` | Claude Code + Codex 双端安装 ICODE、共享技能和 MCP |
-| `/icode install --skip-mcp` | 只安装 ICODE 和共享技能，不创建 MCP 环境或注册项 |
-| `/icode install --dry-run [--client ...]` | 只检查 manifest、冲突和目标动作，零写入且不调用 MCP |
+| `/icode install --basic` | 只安装 ICODE 和共享技能，不创建 MCP 环境或注册项 |
+| `/icode install --preview [--client ...]` | 只检查 manifest、冲突和目标动作，零写入且不调用 MCP |
 
 **对称卸载**（虽然不是 `/icode` 命令，但同样属于本步骤的核心操作）：
 
@@ -47,13 +49,13 @@
 ## 执行步骤
 
 1. **思考分级**（本步骤为 **L0：确定性执行**，不强制思考；见 [references/mcp_per_step.md](../references/mcp_per_step.md)「通用前置·分级思考」段）。作用域明确：执行确定性的 manifest 校验、文件发布、冲突检查和 MCP 注册，不创建工单。
-2. **运行 `bash <工程根>/install.sh [<mcp-name>] [--client claude|codex|all] [--skip-mcp] [--dry-run]`**。`--client` 默认 `claude`；仅显式 `codex`/`all` 才写 Codex skills 根。
+2. **参数翻译后运行根安装器**：公开 `--basic` 映射为内部 `install.sh --skip-mcp`，公开 `--preview` 映射为内部 `install.sh --dry-run`；最终命令为 `bash <工程根>/install.sh [<mcp-name>] [--client claude|codex|all] [--skip-mcp] [--dry-run]`。`--client` 默认 `claude`；仅显式 `codex`/`all` 才写 Codex skills 根。内部参数不是 `/icode` 的公开别名。
 3. 根 `install.sh` 会：
    - 先调用 `scripts/sync-to-global.sh` 安装 ICODE 本体；源码恰好位于目标 ICODE 目录时安全跳过自同步
    - 读取 manifest，把模板入口发布成各宿主技能根顶层的 `<skill-name>/SKILL.md`
    - 通过 `.icode-skill-owner.json` 区分受管技能；同内容旧副本可接管，不同内容的未托管同名技能会在任何写入前拒绝
    - 安装后校验发布 hash，并确保 ICODE 内没有可发现的嵌套技能入口
-4. 未指定 `--skip-mcp` 时，根安装器再调用已安装 ICODE 内的 `mcp/install.sh`；该脚本会：
+4. 未指定公开 `--basic`（即内部未传 `--skip-mcp`）时，根安装器再调用已安装 ICODE 内的 `mcp/install.sh`；该脚本会：
    - 扫描 `mcp/*/install.sh`（含 6 个声明的子工程，**新加 mcp 自动被识别**）
    - 逐个 `bash <子工程>/install.sh`，每个子工程 install.sh 自带：
      - 环境探测（Python/Node/npx/uv 等）
@@ -105,7 +107,7 @@
 - ✅ `~/.claude.json` 的 `mcpServers` 包含所有声明的、依赖满足的 MCP
 - ✅ `--client codex|all` 时 `codex mcp list` 含对应 MCP（或已提示同名不一致需人工处理）
 - ✅ user 提示已发布「重启 Claude Code 后生效」（Codex 分支另有「新建/重开任务生效」提示）
-- ✅ `--dry-run` 零写入；重复安装内容幂等；运行时配置未被镜像删除
+- ✅ 公开 `--preview`（内部 `--dry-run`）零写入；重复安装内容幂等；运行时配置未被镜像删除
 - ✅ **未上传任何 KEY**：检查 `git diff` 仅含 markdown/bash/python，未含 api_key/token 字面量
 
 ## 跨平台说明（2026-07-26 修复）

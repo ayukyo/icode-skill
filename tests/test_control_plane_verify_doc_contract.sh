@@ -15,9 +15,15 @@ if grep -q 'patch_history' steps/verify.md && grep -q '不写 `patch_history`' s
 if grep -q '不自动升级' steps/verify.md && grep -q 'delivery_verdict' steps/verify.md; then
   ok "verify 不自动升级 delivery_verdict"; else bad "verify 未声明 delivery_verdict 不自动升级"; fi
 
-# 2) patch --listen/--test 标注为兼容别名（deprecated）且验证结果记 verification_runs
-if grep -q '兼容别名' steps/08_patch.md && grep -q 'verification_runs' steps/08_patch.md; then
-  ok "08_patch 标注 --listen/--test 为兼容别名 + verification_runs 分离"; else bad "08_patch 未标注别名/分离"; fi
+# 2) patch 只保留修改后监听；显式触发验证归 verify --test，结果仍记 verification_runs
+if grep -q '仅用于 patch 修改后的自动监听' steps/08_patch.md \
+  && grep -q '/icode verify --test <target>' steps/08_patch.md \
+  && ! grep -Eq '/icode patch --test([[:space:]`]|$)' steps/08_patch.md \
+  && grep -q 'verification_runs' steps/08_patch.md; then
+  ok "08_patch 仅保留 --listen，显式测试归 verify + verification_runs 分离"
+else
+  bad "08_patch 的 patch/verify 分离契约不完整"
+fi
 
 # 3) metadata schema 含 verification_runs 严格结构（kind/outcome 枚举）
 if python3 - <<'PY'

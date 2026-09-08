@@ -12,6 +12,7 @@
     "help":    {"default_tier": "L0", "requires_trace": false, "desc": "纯查询和格式化，依赖 schema/索引校验即可"},
     "install": {"default_tier": "L0", "requires_trace": true,  "desc": "依赖检测、路径校验、原子写和回读，不需要思维链"},
     "bak":     {"default_tier": "L0", "requires_trace": true,  "desc": "纯文件复制 + 索引更新，结果可由脚本直接校验"},
+    "learn":   {"default_tier": "L0", "requires_trace": false, "desc": "项目内只读观测分类与派生报告，不执行 Skill 晋升或发布"},
     "readme":  {"default_tier": "L1", "requires_trace": true,  "desc": "交付内容取舍，通常不涉及新根因裁决"},
     "ppt":     {"default_tier": "L1", "requires_trace": true,  "desc": "模板与内容取舍，通常不涉及新根因裁决"},
     "close":   {"default_tier": "L1", "requires_trace": true,  "desc": "使用 submission guard 与不可逆操作确认；多仓歧义升级"},

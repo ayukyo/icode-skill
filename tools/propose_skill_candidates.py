@@ -7,14 +7,38 @@ from collections import defaultdict
 from pathlib import Path
 
 
-def load_runs(root):
+def load_runs(root, diagnostics=None):
+    root = Path(root).resolve()
     rows = []
-    for path in sorted(Path(root).resolve().rglob(".ico_metadata.json")):
+    for path in sorted(root.rglob(".ico_metadata.json")):
         try:
-            metadata = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
+            resolved = path.resolve(strict=True)
+            resolved.relative_to(root)
+        except (OSError, ValueError) as exc:
+            if diagnostics is not None:
+                diagnostics.append({"path": str(path), "error": f"out_of_scope: {exc}"})
             continue
-        runs = (((metadata.get("extensions") or {}).get("skills") or {}).get("runs") or [])
+        if path.is_symlink():
+            if diagnostics is not None:
+                diagnostics.append({"path": str(path), "error": "symlink_metadata_skipped"})
+            continue
+        try:
+            metadata = json.loads(resolved.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            if diagnostics is not None:
+                diagnostics.append({"path": str(path), "error": str(exc)})
+            continue
+        if not isinstance(metadata, dict):
+            if diagnostics is not None:
+                diagnostics.append({"path": str(path), "error": "metadata_top_level_not_object"})
+            continue
+        extensions = metadata.get("extensions") or {}
+        skills = extensions.get("skills") if isinstance(extensions, dict) else None
+        if not isinstance(extensions, dict) or (skills is not None and not isinstance(skills, dict)):
+            if diagnostics is not None:
+                diagnostics.append({"path": str(path), "error": "invalid_extensions_skills"})
+            continue
+        runs = ((skills or {}).get("runs") or [])
         if not isinstance(runs, list):
             continue
         for run in runs:
@@ -27,7 +51,7 @@ def load_runs(root):
             trigger = run.get("trigger")
             if not isinstance(trigger, str) or not trigger.strip():
                 continue
-            rows.append((metadata.get("ticket_id"), path, run))
+            rows.append((metadata.get("ticket_id"), resolved, run))
     return rows
 
 

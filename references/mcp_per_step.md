@@ -20,7 +20,7 @@
 | **vision-bridge** | 任意步骤 **且** (a) 用户主动提供图片/截图/视频（会话中含媒体附件/路径，直接调） **或** (b) TB 缺陷源拉取的附件含视频/图片（`{ICODE_OUT_DIR}/tb_source/<ID>/` 下，**vision-bridge 可用则主动调**：视频先用 ffmpeg 本地提取关键帧再传图片帧给 vision-bridge 省钱——见 [steps/log.md](../steps/log.md)「附件分析（含本地路径 + TB 源）与 ffmpeg 抽帧」段） **或** (c) `/icode log` 本地日志目录含视频/图片文件（`find <log_dir> -type f \( -name '*.mp4' -o -name '*.mov' -o -name '*.png' -o -name '*.jpg' -o -name '*.jpeg' \)`，**vision-bridge 可用则主动调**，行为同 (b) 的 ffmpeg 抽帧流程） | vision-bridge 未安装 / `~/.claude/skills/icode/mcp/vision-bridge/config.json` 三件套未配齐 → 仅提示不主动调（防纯文字模型报错）；ffmpeg 不可用时降级为直接传视频（需用户确认，可能耗 API 额度） |
 | **playwright** | deepcheck/audit 步骤 **且** 前端工程（含 .html/.jsx/.tsx/.vue 或 package.json 含 react/vue） | CLI/后端/嵌入式工程 |
 | **memory** | init/plan 步骤 **且** 本工程历史工单数 ≥ 1（`~/.claude/icode_data/index.json` 中本 project_path 工单数 ≥ 1） | 新工程首个工单 / demo |
-| **cheap-research** | log/doc/review/deepcheck/audit/patch 步骤 **且** 命中正文有执行点的候选子任务（TB 评论预提取 / 远程 README 拉取 / dedup 分类找重复 / 审查输出压缩 / Fixed 预扫 / 仓库事实候选 / 差异摘要 / patch 各阶段映射），**或** merge 步骤 **且** 多轮 review（跨轮 issue 合并汇总 summarize，见 [steps/03_merge.md](../steps/03_merge.md)「合并定稿」段；N=1 轮时跳过）——**实际以 [tools_manifest.json](../mcp/cheap-research/tools_manifest.json) 与各步骤正文执行点为真源，推荐表不与正文矛盾**（init/plan/code/status/readme 正文无 cheap-research 调用执行点：历史检索/ADR 检索/现状盘点/文件名/模板选择均走确定性机制 Read/rg/规则，`--scan-verdict` 零 LLM 信号词匹配，标 ⚪） | **不接管决策**：3 质疑者对抗 / 架构决策 / 终审裁决 / 修复方案 / 用户对话一律不走；推理敏感度中等的"灰区"也不走（零灰区原则）；install/list/bak 无入选子任务 |
+| **cheap-research** | log/doc/review/deepcheck/audit/patch 步骤 **且** 命中正文有执行点的候选子任务（TB 评论预提取 / 远程 README 拉取 / dedup 分类找重复 / 审查输出压缩 / Fixed 预扫 / 仓库事实候选 / 差异摘要 / patch 各阶段映射），**或** merge 步骤 **且** 多轮 review（跨轮 issue 合并汇总 summarize，见 [steps/03_merge.md](../steps/03_merge.md)「合并定稿」段；N=1 轮时跳过）——**实际以 [tools_manifest.json](../mcp/cheap-research/tools_manifest.json) 与各步骤正文执行点为真源，推荐表不与正文矛盾**（init/plan/code/status/readme 正文无 cheap-research 调用执行点：历史检索/ADR 检索/现状盘点/文件名/模板选择均走确定性机制 Read/rg/规则，`--scan` 零 LLM 信号词匹配，标 ⚪） | **不接管决策**：3 质疑者对抗 / 架构决策 / 终审裁决 / 修复方案 / 用户对话一律不走；推理敏感度中等的"灰区"也不走（零灰区原则）；install/list/bak 无入选子任务 |
 
 **判定执行**：
 
@@ -49,7 +49,7 @@
 
 > **强制思考不再以「每步必调 sequential-thinking ≥3 次」承载**，改为 **reasoning gate 分级（L0～L3）** 选择思考载体：
 >
-> - **L0 确定性执行**（status/list/help/install/bak）：不调用 sequential-thinking，只执行机器门禁（`mechanism=deterministic_checks`）。
+> - **L0 确定性执行**（status/list/help/install/bak/learn）：不调用 sequential-thinking，只执行机器门禁（`mechanism=deterministic_checks`）。
 > - **L1 简短决策**（readme/ppt/close/reopen/worktree/init/doc/limit/merge）：写 `.decision_anchors.json` 决策摘要（`mechanism=decision_record`），不调用 sequential-thinking。
 > - **L2 复杂推理**（plan/review/code/patch/log/deepcheck/audit）：**必须调用** sequential-thinking 3～5 步（`mechanism=sequential-thinking`），不可用时结构化降级。
 > - **L3 高风险对抗**（任意步骤命中升级触发器）：L2 + 独立对抗验证（`mechanism=sequential-thinking+adversarial`）。
@@ -62,6 +62,7 @@
 > |---|---|---|
 > | help / status / list | L0 | 纯查询和格式化，依赖 schema/索引校验 |
 > | install / bak | L0 | 依赖检测、路径校验、原子写和回读 |
+> | learn | L0 | 项目内只读观测分类；不在本步骤执行 Skill 晋升或发布 |
 > | readme / ppt | L1 | 交付内容取舍，通常不涉及新根因裁决 |
 > | close / reopen / worktree | L1 | submission guard + 不可逆操作确认；多仓歧义升级 |
 > | init / doc / limit | L1 | 汇总需求和规则；范围冲突或多方案时升级 |
@@ -83,6 +84,7 @@
 | **0 init** | 🟢* | 🟢* | ⚪ | 🟢* | ⚪ |
 | **0 log** | 🟢* | 🟢* | ⚪ | 🟢* | 🟢* |
 | **doc** | ⚪ | 🟢* | ⚪ | ⚪ | 🟢* |
+| **learn** | ⚪ | ⚪ | ⚪ | ⚪ | ⚪ |
 | **1 plan** | 🟢* | 🟢* | ⚪ | 🟢* | ⚪ |
 | **2 review** | ⚪ | 🟢* | ⚪ | ⚪ | 🟢* |
 | **3 merge** | ⚪ | ⚪ | ⚪ | ⚪ | 🟢* |
@@ -173,8 +175,12 @@
 - **reasoning gate**：L0（install/bak 只执行机器门禁 + 写 trace；list 为纯查询，无 trace 要求），不调用 sequential-thinking，不需 cheap-research
 
 ### status
-- **reasoning gate**：L0（纯查询；`--scan-verdict` 是**零 LLM** 信号词匹配；`--validate` 纯机器校验），不调用 sequential-thinking，无 trace 要求
-- **cheap-research**（⚪）：本步骤正文**无 cheap-research 调用执行点**——`--scan-verdict` 是**零 LLM** 信号词匹配（`回退|不可行|证伪|废弃...` 粗筛 00_init 末轮/06_audit 结论段，见 [steps/status.md](../steps/status.md)「模式三」步骤 3），不调 `extract`；`--validate` 纯机器校验。**不接管决策**：verdict 标注走主会话（用户决策）
+- **reasoning gate**：L0（纯查询；`--scan` 是**零 LLM** 信号词匹配；`--validate` 纯机器校验），不调用 sequential-thinking，无 trace 要求
+- **cheap-research**（⚪）：本步骤正文**无 cheap-research 调用执行点**——`--scan` 是**零 LLM** 信号词匹配（`回退|不可行|证伪|废弃...` 粗筛 00_init 末轮/06_audit 结论段，见 [steps/status.md](../steps/status.md)「模式三」步骤 3），不调 `extract`；`--validate` 纯机器校验。**不接管决策**：verdict 标注走主会话（用户决策）
+
+### learn
+- **reasoning gate**：L0。只运行项目范围、确定性的观测分类与输出校验，不调用 sequential-thinking，也不写 thinking trace。
+- **其它 MCP**：全部 ⚪。本步骤不联网补历史、不调用外部研究、不读取宿主私有会话；候选晋升另开正常 ICODE 工单后，才按对应步骤重新判定 MCP。
 
 ## 调用覆盖率强制化规则
 

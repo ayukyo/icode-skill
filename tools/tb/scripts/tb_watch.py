@@ -27,7 +27,7 @@
   启动：cd <工程目录> && nohup python3 tb_watch.py --config watch.json > /tmp/tb_watch.log 2>&1 &
   停止：python3 tb_watch.py --config watch.json --stop   （读 pid 文件 SIGTERM 优雅退出）
 """
-import argparse, json, os, re, shutil, signal, subprocess, sys, time
+import argparse, hashlib, importlib.util, json, os, re, shutil, signal, subprocess, sys, time
 
 # Windows 下 stdout/stderr 默认 locale 编码(gbk)，中文日志/JSON 会乱码或报错；强制 UTF-8 输出
 try:
@@ -95,6 +95,9 @@ def _cleanup_stop_marker(cfg):
         pass
 
 PROBE_PY = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tb_pull.py")
+EVIDENCE_INTAKE_PY = os.path.abspath(
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "evidence_intake.py"))
+_EVIDENCE_INTAKE = None
 DEFAULT_STATUS_NAMES = "打开,未完成"
 # claude_context_window 默认 256000：适配 AI 模型兼容性——深层架构类模型声明 1M context
 # 但实测长上下文触发分类器超时（与会话无关注册/会话关联成本有关），256K 是稳定的甜蜜点。
@@ -214,13 +217,17 @@ def _comment_key(comment, is_probe):
     return (created, text)
 
 
-def has_update(probe_item, meta):
-    """机械判定该单相对旧工单 meta 是否有新增内容。
-
-    返回 (has_update, reason_text)。无旧工单（meta 为 None）不算"有更新"，由调用方按待新建处理。
-    """
+def _legacy_update_detail(probe_item, meta):
+    """旧 meta 机械比较，供无 evidence manifest 的工单兼容复用。"""
     if meta is None:
-        return False, "无旧工单(待新建，非增量)"
+        return {
+            "has_update": False,
+            "reason": "无旧工单(待新建，非增量)",
+            "legacy_comparison": True,
+            "new_semantic_evidence": False,
+            "duplicate_representation": False,
+            "status_only": False,
+        }
     probe_comments = probe_item.get("comments", []) or []
     meta_comments = meta.get("comments", []) or []
     probe_keys = {_comment_key(c, True) for c in probe_comments}
@@ -233,10 +240,7 @@ def has_update(probe_item, meta):
     meta_fkeys = {(f.get("name", ""), f.get("ext", "")) for f in meta_files}
     new_files = probe_fkeys - meta_fkeys
 
-    status_changed = False
-    if "status" in meta and meta.get("status") != probe_item.get("status"):
-        status_changed = True
-
+    status_changed = "status" in meta and meta.get("status") != probe_item.get("status")
     reason = []
     if new_comments:
         reason.append(f"新增评论{len(new_comments)}条")
@@ -244,7 +248,120 @@ def has_update(probe_item, meta):
         reason.append(f"新增附件{len(new_files)}个")
     if status_changed:
         reason.append(f"状态变化 {meta.get('status')} -> {probe_item.get('status')}")
-    return bool(reason), "、".join(reason) or "无"
+    return {
+        "has_update": bool(reason),
+        "reason": "、".join(reason) or "无",
+        "legacy_comparison": True,
+        "new_semantic_evidence": bool(new_comments or new_files),
+        "duplicate_representation": False,
+        "status_only": bool(status_changed and not new_comments and not new_files),
+    }
+
+
+def _evidence_module():
+    global _EVIDENCE_INTAKE
+    if _EVIDENCE_INTAKE is not None:
+        return _EVIDENCE_INTAKE
+    if not os.path.exists(EVIDENCE_INTAKE_PY):
+        raise FileNotFoundError(EVIDENCE_INTAKE_PY)
+    spec = importlib.util.spec_from_file_location("icode_evidence_intake", EVIDENCE_INTAKE_PY)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    _EVIDENCE_INTAKE = module
+    return module
+
+
+def _manifest_semantic_ids(manifest, remote_only=False):
+    ids = set()
+    for item in manifest.get("activities", []):
+        semantic = item.get("semantic_id")
+        if not semantic:
+            payload = [item.get("activity_id"), item.get("summary_fingerprint")]
+            semantic = "activity:" + hashlib.sha256(
+                json.dumps(payload, separators=(",", ":")).encode("utf-8")).hexdigest()[:24]
+        ids.add(str(semantic))
+    for item in manifest.get("artifacts", []):
+        semantic = str(item.get("semantic_id") or item.get("artifact_id") or "")
+        if remote_only and semantic.startswith("sha256:"):
+            continue
+        ids.add(semantic)
+    return ids
+
+
+def _manifest_representation_ids(manifest, remote_only=False):
+    values = set()
+    for item in manifest.get("artifacts", []):
+        semantic = str(item.get("semantic_id") or "")
+        if remote_only and semantic.startswith("sha256:"):
+            continue
+        values.update(str(value) for value in item.get("representations", []) if value)
+    return values
+
+
+def compare_update(probe_item, meta, previous_manifest=None):
+    """返回机器可读增量结论；有 manifest 时优先比较语义证据。
+
+    probe 是远端快照，不包含本地派生文件，因此比较旧 manifest 时只取远端
+    artifact 和 activity；本地文件未出现在 probe 里不代表证据被删除。
+    """
+    if previous_manifest is None:
+        return _legacy_update_detail(probe_item, meta)
+    try:
+        module = _evidence_module()
+        current = module.build_manifest_from_objects(
+            os.path.dirname(os.path.abspath(__file__)),
+            [probe_item], [], previous=previous_manifest,
+            source_label="tb_watch_probe")
+        current_ids = _manifest_semantic_ids(current)
+        previous_ids = _manifest_semantic_ids(previous_manifest, remote_only=True)
+        new_ids = sorted(current_ids - previous_ids)
+        removed_ids = sorted(previous_ids - current_ids)
+        current_representations = _manifest_representation_ids(current)
+        previous_representations = _manifest_representation_ids(previous_manifest, remote_only=True)
+        new_representations = sorted(current_representations - previous_representations)
+        duplicate_representation = bool(new_representations) and not new_ids
+        old_status = None if meta is None else meta.get("status")
+        if old_status is None:
+            old_status = (previous_manifest.get("source_identity") or {}).get("status")
+        status_changed = old_status != probe_item.get("status")
+        status_only = bool(
+            status_changed and not new_ids and not removed_ids and not new_representations
+        )
+        reason = []
+        if new_ids:
+            reason.append(f"新增语义证据{len(new_ids)}项")
+        if duplicate_representation:
+            reason.append("仅重复表示")
+        if removed_ids:
+            reason.append(f"证据撤回或不可用{len(removed_ids)}项")
+        if status_changed:
+            reason.append(f"状态变化 {old_status} -> {probe_item.get('status')}")
+        return {
+            "has_update": bool(new_ids or removed_ids or status_changed),
+            "reason": "、".join(reason) or "无",
+            "legacy_comparison": False,
+            "new_semantic_evidence": bool(new_ids),
+            "new_semantic_ids": new_ids,
+            "duplicate_representation": duplicate_representation,
+            "new_representation_ids": new_representations,
+            "removed_or_unavailable": bool(removed_ids),
+            "removed_semantic_ids": removed_ids,
+            "status_only": status_only,
+        }
+    except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
+        detail = _legacy_update_detail(probe_item, meta)
+        detail["comparison_error"] = f"{type(exc).__name__}: {exc}"
+        return detail
+
+
+def has_update(probe_item, meta, previous_manifest=None):
+    """机械判定该单相对旧工单是否有新增内容。
+
+    返回兼容旧调用方的 ``(has_update, reason_text)``；需要机器细节时调用
+    :func:`compare_update`。无旧工单不算“有更新”，由调用方按待新建处理。
+    """
+    detail = compare_update(probe_item, meta, previous_manifest)
+    return detail["has_update"], detail["reason"]
 
 
 # ---------------------------------------------------------------------------
@@ -345,6 +462,32 @@ def locate_debug_meta(project_dir, workticket_dir, ts):
     return None
 
 
+def locate_evidence_manifest(workticket_dir, meta_path):
+    """定位同一 debug 孪生的 evidence_manifest.json；旧工单不存在时返回 None。"""
+    try:
+        workticket_root = os.path.realpath(workticket_dir)
+    except (OSError, TypeError):
+        return None
+    candidates = []
+    if meta_path:
+        candidates.append(os.path.join(os.path.dirname(meta_path), "evidence_manifest.json"))
+    candidates.append(os.path.join(workticket_dir, "evidence_manifest.json"))
+    for dirpath, _dirs, files in os.walk(workticket_dir):
+        if "evidence_manifest.json" in files:
+            candidates.append(os.path.join(dirpath, "evidence_manifest.json"))
+    for candidate in candidates:
+        if not os.path.isfile(candidate):
+            continue
+        try:
+            resolved = os.path.realpath(candidate)
+            if os.path.commonpath((workticket_root, resolved)) != workticket_root:
+                continue
+        except (OSError, ValueError):
+            continue
+        return resolved
+    return None
+
+
 def find_debug_prev(project_dir, proj, num, dbg_tickets):
     """在 debug 域找该单的旧 debug 孪生，返回 (workticket_dir, metadata, meta_path)。
 
@@ -423,7 +566,18 @@ def detect_project(project_dir, proj, watch_dir):
             else:
                 pend_new.append((num, label, it, None, "无 debug 基线(自动建基线)", None))
             continue
-        updated, reason = has_update(it, old_meta)
+        previous_manifest = None
+        manifest_path = locate_evidence_manifest(wdir, mp)
+        if manifest_path:
+            try:
+                with open(manifest_path, encoding="utf-8") as f:
+                    previous_manifest = json.load(f)
+            except (json.JSONDecodeError, OSError):
+                previous_manifest = None
+        comparison = compare_update(it, old_meta, previous_manifest)
+        # probe 是本轮本地中间产物；附加机器细节不会回写 TB，也不改变旧调用接口。
+        it["_evidence_comparison"] = comparison
+        updated, reason = comparison["has_update"], comparison["reason"]
         if updated:
             need_inc.append((num, label, it, wdir, reason, mp))
         else:

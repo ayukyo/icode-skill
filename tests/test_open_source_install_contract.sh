@@ -50,6 +50,48 @@ else
   bad "fresh all-client install publishes ICODE and every shared skill"
 fi
 
+BUNDLED_CAPABILITIES=(
+  tools/evidence_intake.py
+  tools/debug_catalog.py
+  tools/runtime_baseline.py
+  tools/verification_debt.py
+  tools/learn.py
+  steps/learn.md
+)
+BUNDLED_OK="$ALL_INSTALLED"
+for relative in "${BUNDLED_CAPABILITIES[@]}"; do
+  if [[ ! -f "$CLAUDE_ROOT/icode/$relative" ]] \
+    || [[ ! -f "$AGENTS_ROOT/icode/$relative" ]]; then
+    BUNDLED_OK=false
+  fi
+done
+if "$BUNDLED_OK"; then
+  ok "all-client install includes every bundled evidence and learning capability"
+else
+  bad "all-client install includes every bundled evidence and learning capability"
+fi
+
+COMMAND_CONTRACT_OK="$ALL_INSTALLED"
+for installed_icode in "$CLAUDE_ROOT/icode" "$AGENTS_ROOT/icode"; do
+  if ! rg -qF -- '/icode worktree --merge' "$installed_icode/SKILL.md" \
+    || ! rg -qF -- '/icode status --pending' "$installed_icode/SKILL.md" \
+    || ! rg -qF -- '--test' "$installed_icode/steps/verify.md" \
+    || ! rg -qF -- '--basic' "$installed_icode/steps/install.md"; then
+    COMMAND_CONTRACT_OK=false
+  fi
+  if rg -q -- '/icode worktree --submit-check|/icode status --verification-pending|/icode status --scan-verdict|/icode patch --test([[:space:]`]|$)' \
+      "$installed_icode/SKILL.md" "$installed_icode/README.md" \
+      "$installed_icode/README.zh-CN.md" "$installed_icode/steps" \
+      "$installed_icode/references"; then
+    COMMAND_CONTRACT_OK=false
+  fi
+done
+if "$COMMAND_CONTRACT_OK"; then
+  ok "Claude and Codex installs expose only the canonical public command names"
+else
+  bad "Claude and Codex installs expose only the canonical public command names"
+fi
+
 if "$ALL_INSTALLED" \
   && [[ "$(find "$CLAUDE_ROOT/icode/skill-packs" -type f -name SKILL.md | wc -l)" -eq 0 ]] \
   && [[ "$(find "$AGENTS_ROOT/icode/skill-packs" -type f -name SKILL.md | wc -l)" -eq 0 ]] \

@@ -85,7 +85,7 @@ Other entry points:
 /icode worktree --update    # Move the active implementation to a new checkout on the latest remote baseline (tracked upstream)
 /icode worktree --close     # After you committed/pushed/merged: verify online evidence + safe cleanup + record baseline
 /icode worktree --reopen    # Restore a closed ticket's active checkout on the latest baseline (then /icode patch)
-/icode worktree --submit-check  # Pre-submit commit-contract check (G3): per-repo target + exact push command, read-only, never pushes
+/icode worktree --merge         # Fetch online targets, preflight conflicts, merge safely, then recheck; never commits or pushes
 ```
 
 ## The Workflow
@@ -134,6 +134,8 @@ cd ~/icode-skill
 Use `./install.sh --dry-run --client all` for a zero-write preflight, or `--skip-mcp` when only ICODE and the shared skills are required. ICODE is installed as `<skills-root>/icode/`; each shared skill is generated from its source template at `<skills-root>/<skill-name>/SKILL.md`. Source templates cannot be discovered as nested skills.
 
 The installer writes an ownership marker into managed skills. An identical unmanaged same-name skill is adopted safely; a different unmanaged same-name skill is refused before either host is modified. Runtime configuration and caches are preserved.
+
+Evidence intake, the project-local debug catalog, runtime baseline resolution, verification debt, the multi-repo handoff matrix, and `/icode learn` are **bundled ICODE tools/steps**. They are copied with the ICODE directory to both Claude Code and Codex by `--client all`; they are not standalone entries in `skill-packs/manifest.json`. The seven reusable cross-project Skills remain separately installed from that manifest with the same ownership/hash collision protection.
 
 The historical direct-Claude clone remains supported as a compatibility path. After Claude Code discovers ICODE, run the same unified command:
 
@@ -213,7 +215,7 @@ Each MCP has an explicit strong-evidence trigger and a declared graceful-downgra
 | Command | Description |
 | --- | --- |
 | `/icode help` | Help: show usage examples |
-| `/icode log [scattered info...]` | Optional entry: log root-cause analysis → fix requirement `00_init.md` (domain-agnostic); auto-generates cross-audience brief at completion (`log_problem_brief.md`, `<ticket>_log_problem_brief.md` for TB sources; external wording follows the shared brief contract — attribution grading, role clarification, explicit fix/verify state) |
+| `/icode log [scattered info...]` | Optional entry: deterministic evidence manifest + project-local debug reuse + per-repo runtime baseline → root-cause analysis → fix requirement `00_init.md`; auto-generates a bounded cross-audience brief |
 | `/icode init [<rough req>]` | Optional Step 0: multi-turn dialogue → `00_init.md` |
 | `/icode start <req>` | Full flow: create/reuse dir → steps 1–6 |
 | `/icode fast <req>` | Trimmed full flow: plan→review(1 round, no adversarial)→merge→code→deepcheck(Reverse only)→audit (~65% cost) |
@@ -224,19 +226,20 @@ Each MCP has an explicit strong-evidence trigger and a declared graceful-downgra
 | `/icode deepcheck` | Step 5 only: three-phase progressive check (Reverse → Fixed → Free) |
 | `/icode audit` | Step 6 only: final audit + fix (produces `06_audit.md`) |
 | `/icode readme` | Optional Step 7: one call, two docs — full report (for yourself) + `_brief.md` (concise, for other modules' dev/test/PM, key changed code included) |
-| `/icode patch [issue or new need]` | Follow-up modification (standalone step): keep modifying an existing ticket after/between main steps — test findings / new needs. Lightweight 4-phase (re-survey → incremental plan → minimal change → reverse re-check), context reloaded from disk artifacts (continuable across sessions), appended to `08_patch.md`; optional `--listen` (auto-monitor) / `--test` (explicit trigger verify, deprecated aliases) → on-device deploy verify; configure `~/.claude/icode_data/device_config/<project_id>.json` (template `templates/device_config.json.template`, single-file multi-conn adb/ssh/serial) |
-| `/icode verify [--deploy\|--listen\|--device\|--reuse-build]` | On-device verification, standalone, no code change (deploy / auto-monitor / device test / reuse build); records `metadata.verification_runs` (separated from `patch_history`), never auto-upgrades `delivery_verdict` (see [steps/verify.md](steps/verify.md)) |
+| `/icode patch [issue or new need]` | Follow-up modification (standalone step): keep modifying an existing ticket after/between main steps — test findings / new needs. Lightweight 4-phase (re-survey → incremental plan → minimal change → reverse re-check), context reloaded from disk artifacts (continuable across sessions), appended to `08_patch.md`; optional `--listen` auto-monitors an on-device deployment; configure `~/.claude/icode_data/device_config/<project_id>.json` (template `templates/device_config.json.template`, single-file multi-conn adb/ssh/serial) |
+| `/icode verify [--deploy\|--listen\|--test\|--reuse]` / `/icode verify --plan [--ticket <id>]` | On-device verification or a read-only plan for remaining verification cells; plan mode writes no verification run and neither mode auto-upgrades `delivery_verdict` |
+| `/icode learn [--project <path>] [--ticket <id>] [--since <ISO-8601>]` | Project-scoped learning report from real skill-run observations; classifies reuse/composition/improvement/new-skill/tooling/no-action and never edits or publishes a Skill in this step |
 | `/icode doc [natural language]` | Project-level knowledge base (standalone step), auto-injected at phase zero |
 | `/icode limit [natural language]` | Project constraint red lines (standalone step); hard baseline for the plan step |
 | `/icode ppt [natural language]` | PPT generation (standalone deliverable step): natural language → real `.pptx` for **project / module / current feature dev / current bug fix**; content sourced from icode artifacts & knowledge base (no fabrication), 16 built-in templates (`tools/ppt/templates/`, the AI shortlists 2-3 style-matched candidates and the user picks; user may also name a template directly), editable `edits.json` for re-run; outputs to `<project_root>/.icode_output/ppt/` (outside any ticket dir); needs `pip install python-pptx` (LibreOffice+poppler optional for PNG preview). Built-in templates are **non-commercial** (see `tools/ppt/NOTICE`) |
-| `/icode status` | Read-only: query current ticket status (+ `--verdict` annotation) |
+| `/icode status [--pending]` | Query current ticket status or generate a read-only cross-ticket verification debt report (`--verdict` remains the explicit annotation mode) |
 | `/icode list [keywords]` | Cross-project ticket search (pure read-only) |
-| `/icode worktree --update [--to-ref <ref>]` | Worktree lifecycle (standalone): controlled migration of the active implementation checkout to a new one on the latest/specified baseline — 11-phase state machine, failure keeps the old active root, interrupt-recoverable & idempotent. Switching baselines must go through this command (no silent pointer changes); multi-subrepo handled as one transaction |
+| `/icode worktree --update [--target <ref>]` | Worktree lifecycle (standalone): controlled migration of the active implementation checkout to a new one on the latest/specified baseline — 11-phase state machine, failure keeps the old active root, interrupt-recoverable & idempotent. Switching baselines must go through this command (no silent pointer changes); multi-subrepo handled as one transaction |
 | `/icode worktree --close` | Worktree lifecycle (standalone): after you've committed/pushed/merged — verify online evidence → mark submitted → safely clean up checkouts → record `submitted_baseline`. Never commits/pushes for you; never deletes unique uncommitted code or unarchived artifacts; idempotent |
-| `/icode worktree --reopen [--to-ref <ref>]` | Worktree lifecycle (standalone): explicit restore for a closed `completed` ticket — create a new active checkout on the latest online baseline (no new ticket, patch history kept). Closed tickets must reopen before `patch` |
-| `/icode worktree --submit-check` | Worktree lifecycle (standalone, read-only): pre-submit commit-contract check (G3) — per-repo table of submit target + exact safe push command (`git push <remote> HEAD:refs/heads/<target>`), super repo and subrepos alike; never pushes; any repo L1 → total verdict blocked. See `steps/worktree.md` G3 + `references/worktree_isolation.md` §3.10 |
+| `/icode worktree --reopen [--target <ref>]` | Worktree lifecycle (standalone): explicit restore for a closed `completed` ticket — create a new active checkout on the latest online baseline (no new ticket, patch history kept). Closed tickets must reopen before `patch` |
+| `/icode worktree --merge` | Worktree lifecycle (standalone): fetch every contracted online target, preflight all repositories, safely fast-forward or leave a conflict-free uncommitted merge, then recheck; never commits or pushes |
 
-> Full command details (incl. "Creates Dir?" column + reuse rules + `--verdict`/`--scan-verdict` flags): see the [SKILL.md](SKILL.md) `Commands` section.
+> Full command details (incl. "Creates Dir?" column + reuse rules + `--verdict`/`--scan` flags): see the [SKILL.md](SKILL.md) `Commands` section.
 
 ## Execution / Directory Structure / Workflow
 

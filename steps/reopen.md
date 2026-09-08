@@ -1,8 +1,8 @@
 # 步骤：显式恢复（/icode worktree --reopen）
 
-**命令**: `/icode worktree --reopen [--ticket <ticket_id>] [--to-ref <ref>]`
+**命令**: `/icode worktree --reopen [--ticket <ticket_id>] [--target <ref>]`
 - 默认（无参）：在**最新在线基线**（远程跟踪 `@{u}` 的 ref）上创建新的活动 checkout
-- `--to-ref <ref>`：在用户显式指定的 ref 上创建新的活动 checkout（可选扩展）
+- `--target <ref>`：在用户显式指定的 ref 上创建新的活动 checkout（可选扩展）
 **产出**: 归档控制根 metadata 原子更新（`active_checkout`/`checkout_history`/`sub_worktrees`/`submission_contracts`/`migration=null`/`close_state=null`）+ `ticket_reopened` 事件 + 新 checkout 内 `.icode_output/.active_ticket.json` 指针；不新建 ticket、不清空 patch 历史
 **会话**: 主会话
 
@@ -28,9 +28,9 @@ reopen 与相关命令的边界：
 ## 前置校验
 
 1. 调 `python3 tools/icode_control.py resolve-ticket --ticket <ticket_id> --workspace <原工程根>`；原 checkout 已消失时，resolver 必须经全局索引回退到可读 `archive_path`，返回路径即 `ICODE_OUT_DIR/control_root`。无 `--ticket` 且候选不唯一时先询问用户，不以“最新目录”猜测。
-2. 读归档 metadata：`status == "completed"` 且 `close_state == "closed"`，并校验 `archive_manifest.json`；否则按 L1 表报错。`submitted_baseline(s)` 缺失不改变 closed 判定，但默认基线无法由提交证据恢复时必须从 `submission_contracts.target_remote_ref` 得到唯一目标，否则要求用户显式 `--to-ref`
+2. 读归档 metadata：`status == "completed"` 且 `close_state == "closed"`，并校验 `archive_manifest.json`；否则按 L1 表报错。`submitted_baseline(s)` 缺失不改变 closed 判定，但默认基线无法由提交证据恢复时必须从 `submission_contracts.target_remote_ref` 得到唯一目标，否则要求用户显式 `--target`
 3. 调用统一拓扑门禁（§3.8），verdict=blocked 报错退出
-4. 解析目标基线：默认 → **复用已提交契约**（读 `submission_contracts` 中 super 仓库契约的 `target_remote_ref`，缺失按 [references/worktree_isolation.md](../references/worktree_isolation.md) §3.7 推导）的远程 ref（本地不可解析则报错）——**不用当前环境临时推断目标**；`--to-ref <ref>`（可选扩展）→ 用户指定 ref，且**仅此时更新契约**（默认 reopen 不改变契约目标）
+4. 解析目标基线：默认 → **复用已提交契约**（读 `submission_contracts` 中 super 仓库契约的 `target_remote_ref`，缺失按 [references/worktree_isolation.md](../references/worktree_isolation.md) §3.7 推导）的远程 ref（本地不可解析则报错）——**不用当前环境临时推断目标**；`--target <ref>`（可选扩展）→ 用户指定 ref，且**仅此时更新契约**（默认 reopen 不改变契约目标）
 
 ## 执行流程
 
@@ -57,7 +57,7 @@ reopen 与相关命令的边界：
 - **禁止复活旧目录**：不在已 close 的旧 checkout 上继续 patch
 - **禁止覆盖未确认状态**：close 后旧 checkout 目录若仍存在，reopen 不自动删除（留用户确认）；`checkout_history` 如实记录旧目录存在状态
 - **禁止清空 patch 历史**：reopen 不重置 `patch_count`/`patch_history`（补丁历史是工单身份的一部分，见 I-3）
-- **禁止临时推断契约目标**：默认 reopen 复用已提交契约 `target_remote_ref`（G1 冻结），不得用当前环境临时推断；仅显式 `--to-ref` 才更新契约目标
+- **禁止临时推断契约目标**：默认 reopen 复用已提交契约 `target_remote_ref`（G1 冻结），不得用当前环境临时推断；仅显式 `--target` 才更新契约目标
 - **禁止真实项目术语**：示例/输出用通用占位符
 
 ## MCP 推荐

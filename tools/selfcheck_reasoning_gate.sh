@@ -30,7 +30,7 @@ for r in $(seq 1 "$ROUNDS"); do
 import json,sys
 g=json.load(open(sys.argv[1]))
 assert g["schema_version"]==1
-need={"status","list","install","bak","readme","ppt","close","reopen","worktree","init","doc","limit","merge","plan","review","code","patch","log","deepcheck","audit"}
+need={"status","list","install","bak","learn","readme","ppt","close","reopen","worktree","init","doc","limit","merge","plan","review","code","patch","log","deepcheck","audit"}
 assert need <= set(g["steps"].keys()), sorted(need-set(g["steps"]))
 assert g["mechanisms_by_tier"]=={"L0":"deterministic_checks","L1":"decision_record","L2":"sequential-thinking","L3":"sequential-thinking+adversarial"}
 assert len(g["escalation_triggers"]["to_l2"])>=7 and len(g["escalation_triggers"]["to_l3"])>=5

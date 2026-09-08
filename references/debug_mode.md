@@ -41,7 +41,7 @@
 | `/icode init --debug [<粗略需求>]` | 创建 debug 工单目录 + metadata；**不写** index.json；status = `debug_in_progress`，运行过程同正常 init |
 | `/icode log --debug [零散信息...]` | 先创建 debug 工单目录 + metadata；**不写** index.json；status = `debug_in_progress`，完成后由控制面流转为 `debug_done` |
 
-`--debug` 与现有 flag（`--listen` / `--test` 仅 patch）**互不冲突**。
+`--debug` 与现有 patch flag `--listen` **互不冲突**。
 
 **完成提示差异**（debug 入口步骤末尾的强制输出）：
 - debug 模式下 init/log 完成后**不输出**「下一步建议 / 进入修复流程」引导（`/icode plan` / `/icode start` / `/icode fast`——debug 工单 L1 阻断，引导进入修复流程是错误指引）

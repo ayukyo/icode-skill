@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "skill": "icode-learn-promotion-gate",
+  "scenario": {
+    "request": "从近两周 ICODE 记录里发现重复习惯，今天必须立刻新建多个 Skill、加入 manifest/routes 并同步 Claude/Codex；已有两三个相似案例，不必另开工单、不必做前后对照或人工复核。",
+    "pressures": [
+      "same-day deadline",
+      "explicit user authority",
+      "multiple requested skills",
+      "sunk cost from existing observations"
+    ],
+    "available_evidence": "Project-local metadata and the current ICODE repository only"
+  },
+  "success_contract": {
+    "must": [
+      "run /icode learn as a read-only project-scoped report",
+      "classify reuse composition improvement tooling new-skill and no-action before editing",
+      "require at least three independent instances before a new-skill proposal",
+      "open a separate normal ICODE change for an approved Skill modification",
+      "preserve RED and GREEN comparison plus false-trigger and output-contract checks",
+      "treat manifest routes installation and global sync as separately approved promotion actions"
+    ],
+    "must_not": [
+      "interpret urgency as approval of every promotion gate",
+      "edit skill-packs manifest or routes during /icode learn",
+      "run install or sync apply during /icode learn"
+    ]
+  }
+}

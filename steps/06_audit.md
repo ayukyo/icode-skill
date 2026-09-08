@@ -45,7 +45,7 @@
 git rev-list --count <worktree_branch>..<目标基分支>     # 目标基分支 = 回流 §4 的 master/主分支
 ```
 
-结果 > 0 → 输出 L3 提示：「验证前建议先 `git merge <目标基分支>` 进 worktree 分支再终审」（不阻断）。目标基分支未知时跳过（提示用户自查）。
+结果 > 0 → 输出 L1 提示：「线上目标已有变化，先运行 `/icode worktree --merge` 完成全仓冲突预检、安全合并和复检，再重跑 audit」，本轮终审停止，避免基于过时基线出结论。目标基分支未知时同样停止并要求先补齐 `submission_contracts`，不得猜测。
 
 ## 前置：patch 配合
 
@@ -201,7 +201,7 @@ git rev-list --count <worktree_branch>..<目标基分支>     # 目标基分支 
    - `status=completed` 必须经 `python3 tools/icode_control.py transition --dir {ICODE_OUT_DIR} --to completed --delivery-verdict <verdict>`，由完成态门禁校验并写事件；禁止先直写 completed。
    - 状态完成后调用 `python3 tools/icode_control.py index-write --ticket-dir {ICODE_OUT_DIR}` 同步 metadata 镜像字段；若需重置索引独有的 stale 字段，调用 `index-update --ticket-id <id> --set-json '{"stale":false,"stale_reason":null,"stale_checked_commit":null}'`。legacy 工单先 migration，禁止手工直改 index。
    - 方向结论仍遵循：默认 `unknown`；实证有效可标 `verified`；被证伪/回退标 `disproved` 并填写 `verdict_reason/correct_direction`；被替代标 `superseded` 并填写 `superseded_by`。
-8. **G3 交付前提交契约检查（worktree 工单，`submission_contracts` 非空时）**：运行 [references/worktree_isolation.md §3.10](../references/worktree_isolation.md) G3 逐仓检查（super + 每个契约子仓一视同仁），生成逐仓提交清单（Repo / Branch / Upstream / Remote URL / Target / Ahead/Behind / Dirty / Verdict）附在交付总结前——有变更或含本工单 ticket commit 的仓库显示精确安全 push 命令 `git push <remote_name> HEAD:refs/heads/<target-branch>`；upstream 未经契约验证时不给出普通 `git push`；target 比本地前进 → 提示先 fetch/merge/rebase（由用户决定）；任一仓库 L1 → 总 verdict=blocked（提示先修再交付）。**只读检查，不执行任何 push**；写 `metadata.submission_audit`（G3 结果缓存，判定实时重跑）
+8. **G3 交付前在线契约检查（worktree 工单，`submission_contracts` 非空时）**：运行 `python3 scripts/submission_guard.py submit-check --metadata "{ICODE_OUT_DIR}/.ico_metadata.json"`，**不传内部 `--merge`**。该模式逐仓 fetch 冻结线上目标并执行只读冲突预检，不改变工作树、index 或本地分支；fetch 失败、契约漂移或冲突 → 总状态 blocked。发现线上领先/分叉时，本轮 audit 停止并提示显式运行 `/icode worktree --merge`，由该命令全仓预检后安全合并和复检，再重跑 audit。任何状态都不自动 commit/push；写 `metadata.submission_audit` 只缓存展示，判定始终实时重跑。
 9. 输出交付总结
 
 ### 实现偏差备忘（回溯标注，防回读误解）
@@ -275,9 +275,9 @@ git rev-list --count <worktree_branch>..<目标基分支>     # 目标基分支 
   ①（推荐）在 worktree 内审阅改动后自行 commit → 主仓 switch 目标分支 → git merge icode/<ticket-slug>（或 PR）
            → git worktree remove <worktree路径> → git branch -d icode/<ticket-slug>（先 remove 再删分支！）
   ②（不提交）手动带出 worktree 内改动 → 确认已保存后 git worktree remove --force <worktree路径>
-  📋 G3 交付前提交契约检查（本终审步骤8 已运行）：逐仓提交目标与精确 push 命令见终审交付总结中的提交清单——
+  📋 G3 交付前契约检查（本终审步骤8 以只读模式运行）：逐仓在线目标与冲突预检见终审交付总结——
      提交目标来自 submission_contracts（super + 子仓一视同仁），unverified/blocked 时不给出普通 git push 指令；
-     需重新查看可运行 /icode worktree --submit-check（只读，绝不 push）。
+     需主动合入线上最新代码时运行 /icode worktree --merge（全仓预检后安全 merge，绝不自动 commit/push）。
   ⚠️ 未回流前勿删 worktree：未提交改动时 git worktree remove 失败是保护（不是故障）。
   ⚠️ 回流前产物留档：交付报告与全部产物都在 worktree 内，remove 后随之消失，需留档先复制出来。
   ⚠️ 若有业务子仓隔离（metadata.sub_worktrees 非空）：先对每个子仓隔离 checkout commit + merge 回原子仓，

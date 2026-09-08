@@ -1,9 +1,9 @@
-# 步骤：worktree 迁移（/icode worktree --update）
+# 步骤：worktree 迁移与在线合并（/icode worktree）
 
-**命令**: `/icode worktree --update [--to-ref <ref>]` / `/icode worktree --submit-check`
+**命令**: `/icode worktree --update [--target <ref>]` / `/icode worktree --merge`
 - 默认（无参）：目标基线 = 当前活动 checkout 所属仓库的远程跟踪最新（`@{u}` 的远程 ref，如 `refs/remotes/origin/master`）
-- `--to-ref <ref>`：目标基线 = 用户显式指定的 ref（本地分支 / 远程分支 / commit）
-- `--submit-check`：**交付前提交契约检查（G3）**——逐仓枚举提交目标与精确 push 命令，只读输出、不执行任何 push（见下「G3 交付前 submit-check」段）
+- `--target <ref>`：目标基线 = 用户显式指定的 ref（本地分支 / 远程分支 / commit）
+- `--merge`：**交付前在线刷新 + 全仓冲突预检 + 安全合并 + 复检**——可 fast-forward 或留下无冲突的未提交 merge；不自动 commit/push（见下「G3 交付前在线 merge」段）
 **产出**: 工单 metadata 更新（`active_checkout`/`checkout_history`/`migration`/`sub_worktrees`/`submission_contracts`/`submission_audit`）+ 新建 checkout + 可选清理旧 checkout；不产出新的工单产物文件
 **会话**: 主会话
 
@@ -45,7 +45,7 @@
 4. `git worktree list` 中是否已有同工单候选 checkout
 5. 受影响业务子仓集合（读 `03_plan_final.md` code_files/§5 + `metadata.sub_worktrees` + 实际 diff 联合核对，见 §6「未涉及子仓」）
 6. 每个子仓的当前分支、HEAD、dirty 状态和未推送提交
-7. 目标 ref 是否存在及对应 commit（默认 → 解析远程 ref；`--to-ref` → 解析用户 ref）
+7. 目标 ref 是否存在及对应 commit（默认 → 解析远程 ref；`--target` → 解析用户 ref）
 8. 旧 checkout 是否包含未归档的唯一产物
 9. 是否已有未完成迁移事务（`metadata.migration` 非 null 且 state ∉ {done, failed}）
 10. **冻结新目标提交契约（G1 迁移）**：修改型工单（`submission_contracts` 非空）迁移前须先确认新目标可冻结契约——新目标 ref 的 upstream/remote URL/目标 commit 可解析；**detached / 无 upstream / remote URL 不可识别 → L1 阻断**（不静默基于本地 HEAD 迁移），迁移后逐仓重建契约并比对（见「执行流程」阶段 2/3）
@@ -131,21 +131,36 @@ ICode **不默认替用户 commit**。迁移时按以下策略判断：
 | §14.4 旧 checkout 含未提交修改 | 默认保留旧 checkout；报告差异、未跟踪文件和未推送提交；只有用户明确选择移植/保存/丢弃后才继续清理；「在线已有类似文件」不能替代逐项包含性验证 |
 | §14.5 目标在线分支变化 | 关闭或迁移操作开始后目标 ref 又前进时，记录实际解析到的 commit；在提交活动切换前重新解析一次；commit 改变则重新进行必要的冲突和包含性校验；**不得把分支名当成稳定 commit 使用** |
 
-## G3 交付前 submit-check（/icode worktree --submit-check）
+## G3 交付前在线 merge（/icode worktree --merge）
 
-交付前（audit 末尾同样嵌入）运行**只读**提交契约检查，输出逐仓表格（真源见 [references/worktree_isolation.md §3.10](../references/worktree_isolation.md)）：
+命令先对 super repo 与全部 `submission_contracts` 子仓执行全量只读预检，全部通过后才进入本地合并阶段（真源见 [references/worktree_isolation.md §3.10](../references/worktree_isolation.md)）：
 
-| Repo | Branch | Upstream | Remote URL | Target(remote branch) | Ahead/Behind | Dirty | Verdict |
-|---|---|---|---|---|---|---|---|
+```bash
+python3 scripts/submission_guard.py submit-check \
+  --metadata "{ICODE_OUT_DIR}/.ico_metadata.json" --merge
+```
 
 规则要点：
-1. **枚举 super repo + 全部 `submission_contracts` 子仓**（不能只枚举 `code_files`——super 文档提交必须进清单）
-2. 有变更或含本工单 ticket commit 的仓库 → 显示精确安全命令 `git push <remote_name> HEAD:refs/heads/<target-branch>`（target 来自契约 `target_push_ref`）
-3. upstream 未经契约验证（`tracking_verified=false` / G2 ⑩ 未过）→ **不给出普通 `git push` 指令**，提示先修复或由用户显式确认目标
-4. target 比本地前进 → 提示先 fetch/merge/rebase，**由用户决定，ICode 不自动改历史**；判定前先 `git fetch <remote> <target-branch>` 取在线状态（防本地 fetch 过时误报，与 G4 规则 1 一致），fetch 失败降级本地 ref 并标注 `(本地缓存)`；存在落后仓库时总 verdict 显示 `behind`（⚠️，rc=0，先 fetch/merge/rebase）
-5. 明确显示 "remote server"（Remote URL）与 "remote branch"（Target）两列，避免「同一服务器 = 同名远端分支」歧义
-6. 任一仓库 L1 → **总 verdict = blocked**，不宣称"可以提交"
-7. ICode 红线不变：只检查与回显指引，**不 commit / 不 push**
+1. 校验契约、dirty/未合并状态、分支/upstream/remote URL，并用精确 refspec fetch 每个线上目标；fetch 失败直接 `blocked`，**禁止退回缓存 ref 后报 pass**。
+2. 冻结每个目标 SHA；分叉仓库在临时 shared clone 中运行同参数无提交 merge 预检。任一仓库失败时，所有仓库都不进入本地合并阶段。
+3. 线上与本地相同 → `unchanged`；本地领先 → `local_ahead`；仅线上领先 → `git merge --ff-only <frozen-sha>` 并标 `recheck_pending`；无冲突分叉 → `git merge --no-commit --no-ff <frozen-sha>` 并保留 `MERGE_HEAD`、标 `merge_pending`。
+4. 合并后复检 unmerged、diff check、分支/upstream/URL、HEAD/MERGE_HEAD，并再次 fetch；线上 SHA 又变化时标 `online_moved`，不给 push 指令。
+5. `recheck_pending` 由 ICODE 编排层从当前工单计划、代码复检和终审证据中恢复此前真实执行过的 build/test 命令并重跑；底层 Git 脚本不执行 metadata 中的任意字符串。找不到可重跑命令时保持 pending。
+6. 退出码：0=无需未决动作；3=`merge_pending/recheck_pending`；2=`blocked/online_moved`；1=调用或 metadata 错误。所有非 0 状态禁止输出可直接 push 命令。
+7. ICODE 红线不变：**不自动 commit、不 push、不 force、不 reset**；无冲突分叉的最终 merge commit 由用户检查后创建。
+
+`/icode audit` 末尾调用相同底层工具但**不传内部 `--merge`**，只允许 fetch 和冲突预检，不在 audit 后改变本地代码。只有用户显式调用 `/icode worktree --merge` 才授权合并。
+
+在上述契约检查后，必须基于同一 `.ico_metadata.json` 生成统一交付矩阵，供本步骤和 `/icode readme` 共用：
+
+```bash
+python3 scripts/submission_guard.py handoff \
+  --metadata "{ICODE_OUT_DIR}/.ico_metadata.json" \
+  --output "{ICODE_OUT_DIR}/handoff_matrix.json" \
+  --markdown "{ICODE_OUT_DIR}/handoff_matrix.md"
+```
+
+逐仓至少展示 `modified/build_participant/deployed/submit_required/submit_reason/docs_required/docs_ready/excluded_paths/artifact_identity`。缺构建、部署或文档证据时保持 `null/unresolved`；clean 不能单独推出 `submit_required=false`，也不能从文件名、mtime 或二进制存在推断“已部署”。工具只读本地 Git 和 `extensions.handoff.inputs`，不 fetch/checkout/commit/push；需要在线刷新仍按本节 G3 规则单独执行并明确标注来源。
 
 ## 反偷懒
 

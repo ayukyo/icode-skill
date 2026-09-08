@@ -42,6 +42,8 @@ cd ~/icode-skill
 
 安装器通过所有权标记管理共享技能：内容一致的旧副本可以无损接管；内容不同的未托管的同名技能会在任何宿主写入前拒绝，不会静默覆盖。运行配置和缓存继续保留。
 
+证据摄取、项目内 debug catalog、三基线解析、验证债务、多仓 handoff 矩阵和 `/icode learn` 属于 **ICODE 内置工具/步骤**：`--client all` 会随 ICODE 本体同时复制到 Claude Code 与 Codex，不作为独立项写入 `skill-packs/manifest.json`。现有 7 个跨项目共享 Skill 仍由 manifest 独立安装，并继续使用 ownership/hash 冲突保护。
+
 历史上的 Claude skills 目录直装方式继续兼容。Claude Code 发现 ICODE 后，执行同一个统一命令：
 
 ```bash
@@ -185,7 +187,7 @@ python3 tools/lint_mcp_coverage.py <out_dir> --step review --strict
 /icode worktree --update    # 迁移活动实现根到基于最新远程基线的新 checkout（自动跟踪上游）
 /icode worktree --close     # 你已 commit/push/merge 后：核验在线证据 + 安全清理 + 记录基线
 /icode worktree --reopen    # 已 close 工单恢复：在最新基线上重建活动 checkout（之后 /icode patch）
-/icode worktree --submit-check  # 交付前提交契约检查（G3）：逐仓提交目标 + 精确 push 命令，只读、绝不 push
+/icode worktree --merge         # 刷新线上目标、全仓冲突预检、安全合并并复检；绝不自动 commit/push
 
 # 从 bug 日志分析切入修复（先查根因，再修复）
 /icode log ~/work/log/服务异常 "启动后无响应"      # 入口：分析日志根因，产出 log_analysis.md + 修复需求 00_init.md + 对外简报 log_problem_brief.md（对外表达按统一契约：归因分级/角色澄清/修复状态明确）
@@ -208,7 +210,7 @@ python3 tools/lint_mcp_coverage.py <out_dir> --step review --strict
 | 命令 | 功能 |
 | ---- | ---- |
 | `/icode help` | 帮助：输出使用流程示例 |
-| `/icode log [零散信息...]` | 可选入口：日志根因分析→转修复需求 `00_init.md`（领域无关，每次都新建目录） |
+| `/icode log [零散信息...]` | 可选入口：确定性证据清单 + debug 本地复用 + 逐仓现场基线 → 日志根因分析 → 修复需求 `00_init.md` |
 | `/icode init [<粗略需求>]` | 可选步骤 0：多轮对话产出需求初稿 `00_init.md` |
 | `/icode start <需求>` | 全流程：创建/复用目录 → 步骤 1→6 |
 | `/icode fast <需求>` | 精简全流程：plan→review(1轮无对抗)→merge→code→deepcheck(Reverse)→audit（耗时约 65%） |
@@ -219,19 +221,20 @@ python3 tools/lint_mcp_coverage.py <out_dir> --step review --strict
 | `/icode deepcheck` | 仅步骤 5：三阶段递进复检（Reverse → Fixed → Free） |
 | `/icode audit` | 仅步骤 6：终极终审 + 统一修复（产出 `06_audit.md`） |
 | `/icode readme` | 可选步骤 7：一次生成两份——交付报告（给自己看，完整档案）+ 跨领域简报（`_brief.md`，给其它模块研发/测试/产品看，含必要代码，较简略；对外表达按统一契约） |
-| `/icode patch [问题或新需求]` | 追加修改（独立步骤）：主流程后/中途继续改——测试发现问题 / 新需求，在既有工单上打补丁。轻量四段式（重审现状→增量计划→最小实施→反向复检），靠磁盘产物重载上下文（换会话可继续），产出 `08_patch.md` 追加式；可选 `--listen`（自动监听）/ `--test`（显式触发验证，兼容别名 deprecated）→ 实机部署验证；先配 `~/.claude/icode_data/device_config/<project_id>.json`，模板 `templates/device_config.json.template`，单文件多连接 adb/ssh/串口） |
-| `/icode verify [--deploy\|--listen\|--device\|--reuse-build]` | 实机验证（独立步骤，不改代码）：部署/自动监听/设备测试/复用构建；结果记 `metadata.verification_runs`（与 patch_history 分离），不自动升级 delivery_verdict（见 [steps/verify.md](steps/verify.md)） |
+| `/icode patch [问题或新需求]` | 追加修改（独立步骤）：主流程后/中途继续改——测试发现问题 / 新需求，在既有工单上打补丁。轻量四段式（重审现状→增量计划→最小实施→反向复检），靠磁盘产物重载上下文（换会话可继续），产出 `08_patch.md` 追加式；可选 `--listen` 自动进行实机部署监听；先配 `~/.claude/icode_data/device_config/<project_id>.json`，模板 `templates/device_config.json.template`，单文件多连接 adb/ssh/串口） |
+| `/icode verify [--deploy\|--listen\|--test\|--reuse]` / `/icode verify --plan [--ticket <id>]` | 实机验证或只读生成剩余验证单元计划；plan 不记录 verification run，两种模式都不自动升级 delivery_verdict |
+| `/icode learn [--project <path>] [--ticket <id>] [--since <ISO-8601>]` | 基于项目内真实 skill-run 观测生成学习报告，分类复用/组合/增强/新建/工具化/no-action；本步骤不直接创建或发布 Skill |
 | `/icode doc [自然语言]` | 工程级知识库生成（独立步骤）：扫描代码特征生成全局知识库章节，供段零自动检索注入 |
 | `/icode limit [自然语言]` | 项目约束红线（独立步骤）：定义和维护本工程的红线/约束/禁区。主存全局 + 单 checkout 覆盖（自动 gitignore），追加式演进。plan 步骤引用作为硬基线 |
 | `/icode ppt [自然语言]` | PPT 生成（独立交付步骤）：自然语言 → 真实 `.pptx`，4 类场景——**项目 / 模块 / 本次功能开发 / 本次BUG修复**；内容源为 icode 产物/知识库（禁止编造），内置 16 套模板（`tools/ppt/templates/`，AI 先筛 2-3 个风格匹配候选、由用户挑选；也可直接点名模板），产出 `<工程根>/.icode_output/ppt/`（不放进工单目录）可回溯；依赖 python-pptx（必需），LibreOffice+poppler 可选（PNG 预览自检）；内置模板非商业授权（见 `tools/ppt/NOTICE`） |
-| `/icode status` | 只读：查当前工单状态 |
+| `/icode status [--pending]` | 查询当前工单状态，或只读生成跨工单验证债务报告（`--verdict` 仍是显式标注模式） |
 | `/icode list [关键词]` | 跨工程工单查找（纯只读） |
-| `/icode worktree --update [--to-ref <ref>]` | worktree 生命周期（独立步骤）：把活动实现根受控迁移到基于最新/指定基线的新 checkout——11 阶段状态机，失败保留旧活动根，可中断恢复 + 幂等。**换基线必须走本命令**（禁止静默改指针）；多业务子仓按整体事务处理 |
+| `/icode worktree --update [--target <ref>]` | worktree 生命周期（独立步骤）：把活动实现根受控迁移到基于最新/指定基线的新 checkout——11 阶段状态机，失败保留旧活动根，可中断恢复 + 幂等。**换基线必须走本命令**（禁止静默改指针）；多业务子仓按整体事务处理 |
 | `/icode worktree --close` | worktree 生命周期（独立步骤）：你已自行 commit/push/merge 后的本地收敛——核验在线证据 → 置 submitted → 安全清理 checkout → 记录 `submitted_baseline`。不替 commit/push，不删未提交唯一代码/未归档唯一产物，幂等 |
-| `/icode worktree --reopen [--to-ref <ref>]` | worktree 生命周期（独立步骤）：已 close 的 completed 工单显式恢复——在最新在线基线上创建新活动 checkout（不新建 ticket、保留 patch 历史）。**已 close 工单必须先 reopen 再 patch** |
-| `/icode worktree --submit-check` | worktree 生命周期（独立步骤，只读）：交付前提交契约检查（G3）——逐仓表格（super + 子仓一视同仁）列出提交目标与精确安全 push 命令（`git push <remote> HEAD:refs/heads/<target>`），**只读输出、绝不 push**；任一仓库 L1（detached/缺 upstream/drift/remote mismatch/未登记/tracking_verified=false）→ 总 verdict=blocked。见 [steps/worktree.md](steps/worktree.md) G3 段 + [references/worktree_isolation.md](references/worktree_isolation.md) §3.10 |
+| `/icode worktree --reopen [--target <ref>]` | worktree 生命周期（独立步骤）：已 close 的 completed 工单显式恢复——在最新在线基线上创建新活动 checkout（不新建 ticket、保留 patch 历史）。**已 close 工单必须先 reopen 再 patch** |
+| `/icode worktree --merge` | worktree 生命周期：逐仓刷新契约线上目标，全仓预检通过后安全快进或留下无冲突未提交 merge，再执行复检；不自动 commit、不 push |
 
-> 完整命令一览（含「创建目录？」列 + 复用规则 + `--verdict`/`--scan-verdict` 等参数详解）见 [SKILL.md「调用命令」段](SKILL.md)。
+> 完整命令一览（含「创建目录？」列 + 复用规则 + `--verdict`/`--scan` 等参数详解）见 [SKILL.md「调用命令」段](SKILL.md)。
 
 ## 执行方式 / 目录结构 / 工作流程
 

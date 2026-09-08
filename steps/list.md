@@ -1,7 +1,7 @@
 # 步骤 list — 跨工程工单查找（纯查询）
 
 **命令**:
-- `/icode list [关键词] [--project <path>] [--status <status>] [--since <duration>] [--limit N] [--no-color] [--include-stale]`
+- `/icode list [关键词] [--project <path>] [--status <status>] [--since <duration>] [--limit N] [--plain] [--all]`
 
 **产出**: 默认无（只读，控制台输出表格）；不写 metadata、不写 index.json、不写工程内任何文件
 **会话**: 主会话
@@ -21,7 +21,7 @@
 - **只读**：不写 metadata、不写 index.json、不写工程内任何文件。**禁止**任何 `--write` 之类的破坏性扩展
 - **不创建工单目录**：与 `/icode start` / `/icode init` / `/icode log` 区别（那些是"创建/复用"，list 是"查找"）
 - **不参与步骤1~6 推进**：与 `/icode plan` / `/icode review` / `/icode merge` 等区别（那些是"推进流程"，list 是"查询"）
-- **不修改全局索引**：与 `--verdict` / `--scan-verdict` 区别（那些是"标注"，list 是"只读浏览"）
+- **不修改全局索引**：与 `--verdict` / `--scan` 区别（那些是"标注"，list 是"只读浏览"）
 
 ## 执行步骤
 
@@ -31,8 +31,8 @@
    - `--status <status>`：按 `status` 过滤（精确匹配，支持 `,` 分隔多值如 `plan_done,code_done`）
    - `--since <duration>`：按 `last_used_at` 过滤（支持 `24h` / `7d` / `30d` / `1y`）
    - `--limit N`：限制条数（默认 50，0 = 不限）
-   - `--no-color`：禁用 ANSI 颜色（管道/重定向场景）
-   - `--include-stale`：包含 stale 工单（默认排除）
+   - `--plain`：禁用 ANSI 颜色（管道/重定向场景）
+   - `--all`：包含 stale 工单（默认排除）
 2. **读取全局索引**：`json.load` 全量解析 `~/.claude/icode_data/index.json` 的 `tickets` 数组（**禁止按行截断**）
 3. **空索引处理**：
    - 文件不存在 → 提示"无全局索引，请先跑 `/icode start` 或 `/icode init` 创建工单"后退出
@@ -46,11 +46,11 @@
    - **`--since` 过滤**：
      - `24h` / `7d` / `30d` / `1y` 等单位：`now - duration < last_used_at`（含未使用工单 `last_used_at=created_at`）
      - 无单位数字视为天数
-   - **stale 默认排除**（除非 `--include-stale`）：`stale=true` 的工单不显示
+   - **stale 默认排除**（除非 `--all`）：`stale=true` 的工单不显示
 5. **排序**（默认 `last_used_at` 倒序，最新在前）：
    - 同样时间按 `ticket_id` 升序兜底（稳定排序）
 6. **`--limit` 截断**（默认 50，0 = 不限；超出条数时末尾标注 `(还有 N 条未显示，加 --limit N 提高或加关键词缩小范围)`）
-7. **格式化输出**（表格 + ANSI 颜色，除非 `--no-color`）：
+7. **格式化输出**（表格 + ANSI 颜色，除非 `--plain`）：
 
    | 字段 | 来源 | 宽度 | 颜色规则 |
    |------|------|------|---------|
@@ -84,13 +84,13 @@
    4. `!project_valid` 且 `!archive_valid` 且 `backup_valid`（backup 活跃态，`/icode bak` 产物）→ 显示 `[path_gone→backup]` + 智能截断的 `backup_path`（内容实际所在处，用户可直接 `cd` 进去读完整产物）
    5. 均无有效来源（stale path_gone）→ 显示 `[path_gone]`
 
-   **stale 工单**（如 `--include-stale` 显式包含）：`STATUS` 列前缀 `[stale] `，`SUMMARY` 后缀 ` [stale_reason: X]`
+   **stale 工单**（如 `--all` 显式包含）：`STATUS` 列前缀 `[stale] `，`SUMMARY` 后缀 ` [stale_reason: X]`
 
-   **backup 活跃工单**（工程已删但有 `/icode bak` 备份）：`project_path` 失效、`archive_path` 无效但 `backup_path` 非空且 `test -d` 有效 → **非 stale**（设计保证，见 [references/dir_and_metadata.md](../references/dir_and_metadata.md)「过时校验·备份工单」），**默认显示、无需 `--include-stale`**——`PROJECT` 列按上方优先级 4 显示 `[path_gone→backup]` + `backup_path`（若归档与备份同时有效则按优先级 2 显示 `[path_gone→archive+backup]` + `archive_path`）
+   **backup 活跃工单**（工程已删但有 `/icode bak` 备份）：`project_path` 失效、`archive_path` 无效但 `backup_path` 非空且 `test -d` 有效 → **非 stale**（设计保证，见 [references/dir_and_metadata.md](../references/dir_and_metadata.md)「过时校验·备份工单」），**默认显示、无需 `--all`**——`PROJECT` 列按上方优先级 4 显示 `[path_gone→backup]` + `backup_path`（若归档与备份同时有效则按优先级 2 显示 `[path_gone→archive+backup]` + `archive_path`）
 
-   **archived 活跃工单**（worktree 已清理但有归档）：`project_path` 失效但 `archive_path` 非空且 `test -d` 有效 → **非 stale**（设计保证，见 [references/dir_and_metadata.md](../references/dir_and_metadata.md)「过时校验·归档工单」），**默认显示、无需 `--include-stale`**——`PROJECT` 列按上方优先级 3 显示 `[path_gone→archive]` + `archive_path`（归档与备份均有效则按优先级 2 显示 `[path_gone→archive+backup]`）
+   **archived 活跃工单**（worktree 已清理但有归档）：`project_path` 失效但 `archive_path` 非空且 `test -d` 有效 → **非 stale**（设计保证，见 [references/dir_and_metadata.md](../references/dir_and_metadata.md)「过时校验·归档工单」），**默认显示、无需 `--all`**——`PROJECT` 列按上方优先级 3 显示 `[path_gone→archive]` + `archive_path`（归档与备份均有效则按优先级 2 显示 `[path_gone→archive+backup]`）
 
-   **path_gone 工单**（工程已删且 archive/backup 均无有效来源）：`PROJECT` 列 `[path_gone]`，保留显示便于用户判断（默认被 stale 排除，`--include-stale` 才显示）
+   **path_gone 工单**（工程已删且 archive/backup 均无有效来源）：`PROJECT` 列 `[path_gone]`，保留显示便于用户判断（默认被 stale 排除，`--all` 才显示）
 8. **输出统计脚注**（表格下方）：
    ```
    共 N 条（过滤后）/ 全索引 M 条（stale K 条 / disproved L 条 / verified P 条）
@@ -106,7 +106,7 @@
 - 粗体（large workload 强调）：`\033[1m`
 - 重置：`\033[0m`
 
-**`--no-color` 模式**：所有颜色码替换为空字符串。**TTY 检测**：当 stdout 不是 TTY（如管道到 `less` / `grep` / 文件）时自动等价于 `--no-color`（防乱码）
+**`--plain` 模式**：所有颜色码替换为空字符串。**TTY 检测**：当 stdout 不是 TTY（如管道到 `less` / `grep` / 文件）时自动等价于 `--plain`（防乱码）
 
 ## 边界处理
 
@@ -120,10 +120,10 @@
 | `project_path` 已删但 `archive_path` 有效（archived 活跃态） | **非 stale**，默认显示；PROJECT 列 `[path_gone→archive]` + archive_path（实判 `test -d`） |
 | `project_path` 已删但 `archive_path` 与 `backup_path` 均有效 | **非 stale**，默认显示；PROJECT 列 `[path_gone→archive+backup]` + archive_path（归档直达，备份并行可用） |
 | `project_path` 已删但 `backup_path` 有效（backup 活跃态） | **非 stale**，默认显示；PROJECT 列 `[path_gone→backup]` + backup_path（实判 `test -d`） |
-| `project_path` 已删且 archive/backup 均无有效来源（`stale_reason=path_gone`） | PROJECT 列显示 `[path_gone]`，默认排除（除非 `--include-stale`） |
+| `project_path` 已删且 archive/backup 均无有效来源（`stale_reason=path_gone`） | PROJECT 列显示 `[path_gone]`，默认排除（除非 `--all`） |
 | 字段格式异常（如 `last_used_at` 缺） | 退化为 `-`，不中断整行渲染 |
 | `--limit` 截断 | 末尾标注 `(还有 N 条未显示...)` |
-| TTY 检测 | `sys.stdout.isatty() == False` 时自动 `--no-color` |
+| TTY 检测 | `sys.stdout.isatty() == False` 时自动 `--plain` |
 
 ## 反偷懒
 
@@ -139,7 +139,7 @@
 
 - 用户从 `/icode list` 看到感兴趣的 ticket_id → 用 `/icode status --verdict {ticket_id} ...` 标注
 - 用户从 `/icode list` 看到要继续推进的工单 → 用对应工程的 `/icode start` / `/icode plan`（**仍需在工程目录下运行**，list 不支持跳转）
-- 用户想批量扫证伪信号 → `/icode status --scan-verdict`（跨工程批量治理）
+- 用户想批量扫证伪信号 → `/icode status --scan`（跨工程批量治理）
 
 ## 性能
 
@@ -167,13 +167,13 @@
 /icode list --project <工程名> --status plan_done,code_done --since 30d
 
 # 禁用颜色（管道场景）
-/icode list --no-color | grep <品类代号>
+/icode list --plain | grep <品类代号>
 
 # 不限条数
 /icode list --limit 0
 
 # 包含 stale 工单（默认排除）
-/icode list --include-stale
+/icode list --all
 ```
 ## MCP 推荐
 

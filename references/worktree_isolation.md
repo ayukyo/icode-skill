@@ -12,7 +12,7 @@
 **① 参数触发（opt-in · 两种形式之一触发，AI 不弹问）**：
 
 **触发形式（满足其一即触发，AI 不再询问）**：
-1. **flag 形式**：用户消息命令位置出现**独立 token** `--worktree`（**只接受双短横独立 token**：`--worktree`，**不接受** `-worktree`（单短横）/ `--worktree=true` / `--worktree true` / 缩写变体——拒绝 AI 自主解析变体导致误触；与其它独立 flag token 共存如 `--listen`/`--test`）
+1. **flag 形式**：用户消息命令位置出现**独立 token** `--worktree`（**只接受双短横独立 token**：`--worktree`，**不接受** `-worktree`（单短横）/ `--worktree=true` / `--worktree true` / 缩写变体——拒绝 AI 自主解析变体导致误触；可与 `--listen` 等其它独立 flag token 共存）
 2. **自然语言意图声明**：用户在消息正文里显式声明意图，常见措辞如「用 worktree 隔离做」「走 worktree」「独立分支做」「在 worktree 里做」
 
 **不触发（防误触，AI 必须做语境识别）**：
@@ -299,7 +299,7 @@ fi
 **写入时机**：
 - **G1 创建**（新建 worktree 工单 §1「② 创建」+ 子仓隔离「⑤」）：逐仓冻结契约；只读工单跳过
 - **G1 迁移**（`/icode worktree --update`）：迁移前冻结新目标，迁移后逐仓重建契约并比对（见 [steps/worktree.md](../steps/worktree.md)）
-- **reopen**：默认复用已提交契约（不临时推断；显式 `--to-ref` 才更新契约，见 [steps/reopen.md](../steps/reopen.md)）
+- **reopen**：默认复用已提交契约（不临时推断；显式 `--target` 才更新契约，见 [steps/reopen.md](../steps/reopen.md)）
 - **close（G4）**：审计后更新 `submission_audit`，写 `submitted_baselines`，不删除契约（契约是工单提交历史的一部分）
 
 **兼容（旧工单无契约）**：按 §3.7 从 `active_checkout`/`sub_worktrees`/主工作区 repo 推导候选契约；**无 upstream / 多候选 remote / detached HEAD / 分支漂移任一时标 `needs_user_confirm`，不得自动选**；候选唯一且机器证据完整才允许一次性写入 `migration_source="legacy_inference"`——迁移器机器实现见 [scripts/submission_guard.py](../scripts/submission_guard.py) `migrate-legacy`（写前自动备份原 metadata、写后立即跑 G2、未通过则回滚写入、已有契约幂等跳过；`needs_user_confirm` 以退出码 2 + reason 报告，不写契约）。
@@ -372,7 +372,7 @@ fi
 ## 3.8 统一拓扑门禁（共享检查器）
 
 **以下入口进入实际工作前必须调用同一个共享检查器，禁止各自微改或绕过**：
-`/icode code` / `/icode patch` / `/icode deepcheck` / `/icode audit` / `/icode readme` / `/icode status --validate` / 带部署或实机测试的 patch 分支（`--listen`/`--test`）。
+`/icode code` / `/icode patch` / `/icode deepcheck` / `/icode audit` / `/icode readme` / `/icode status --validate` / 带部署监听的 patch 分支（`--listen`）。
 
 **检查内容**（伪代码，各步骤入口引用本段；重复执行迁移命令时跳过第 5 步或按 [steps/worktree.md](../steps/worktree.md)「幂等性」处理）：
 
@@ -415,10 +415,10 @@ fi
 
 | 命令 | 语义 | 真源 |
 |---|---|---|
-| `/icode worktree --update [--to-ref <ref>]` | 受控迁移：把活动实现根从旧 checkout 迁移到基于最新/指定基线的**新** checkout（11 阶段状态机 + 中断恢复 + 幂等） | [steps/worktree.md](../steps/worktree.md) |
+| `/icode worktree --update [--target <ref>]` | 受控迁移：把活动实现根从旧 checkout 迁移到基于最新/指定基线的**新** checkout（11 阶段状态机 + 中断恢复 + 幂等） | [steps/worktree.md](../steps/worktree.md) |
 | `/icode worktree --close` | 用户已完成提交后的本地收敛：核验在线证据 → 安全关闭 checkout（不替用户 commit/push） | [steps/close.md](../steps/close.md) |
-| `/icode worktree --reopen [--to-ref <ref>]` | 完成态工单补充修改的显式恢复：在最新在线基线上追加一代 checkout（不新建 ticket、不清 patch 历史） | [steps/reopen.md](../steps/reopen.md) |
-| `/icode worktree --submit-check` | **交付前提交契约检查（G3）**：逐仓枚举提交目标与精确 push 命令，只读输出、不执行任何 push（见 §3.10） | [steps/worktree.md](../steps/worktree.md) |
+| `/icode worktree --reopen [--target <ref>]` | 完成态工单补充修改的显式恢复：在最新在线基线上追加一代 checkout（不新建 ticket、不清 patch 历史） | [steps/reopen.md](../steps/reopen.md) |
+| `/icode worktree --merge` | **交付前在线合并（G3）**：逐仓刷新线上目标，全仓预检通过后安全快进或留下未提交 merge，再复检；不自动 commit/push（见 §3.10） | [steps/worktree.md](../steps/worktree.md) |
 
 - 迁移不得继续隐藏在 `/icode patch` 的临时操作中——换基线必须走 `/icode worktree --update`
 - `completed` 但**未 close** 的工单：`patch` 可在当前唯一活动根继续（现有行为）
@@ -428,23 +428,21 @@ fi
 
 ## 3.10 G3 / G4 提交闸门（交付前与 close 公共真源）
 
-四道机器闸门中 G1（创建，§1）与 G2（执行前，§3.8 ⑩）已定义；G3（交付前）/ G4（close 后）定义如下，`/icode worktree --submit-check`、`/icode audit` 末尾、`/icode worktree --close` 统一引用本段，**禁止各自微改或绕过**。
+四道机器闸门中 G1（创建，§1）与 G2（执行前，§3.8 ⑩）已定义；G3（交付前）/ G4（close 后）定义如下，`/icode worktree --merge`、`/icode audit` 末尾、`/icode worktree --close` 统一引用本段，**禁止各自微改或绕过**。
 
-### G3 交付前 submit-check（只读，不执行任何 push）
+### G3 交付前在线 merge（不自动 commit/push）
 
-`/icode worktree --submit-check` 与 `/icode audit` 末尾都运行同一检查；机器实现见 [scripts/submission_guard.py](../scripts/submission_guard.py) `submit-check`（逐仓表格 + 精确 push 命令 + behind 判定，退出码 0=pass 或 behind（提示性，先 fetch/merge/rebase）/ 2=blocked）。输出逐仓表格：
-
-| Repo | Branch | Upstream | Remote URL | Target(remote branch) | Ahead/Behind | Dirty | Verdict |
-|---|---|---|---|---|---|---|---|
+`/icode worktree --merge` 与 `/icode audit` 复用 [scripts/submission_guard.py](../scripts/submission_guard.py) 的 `submit-check`，但授权边界不同：worktree 命令传内部 `--merge`，audit 不传该开关并保持只读。
 
 规则：
-1. **枚举 super repo 与全部 `submission_contracts` 子仓，不能只枚举 `code_files`**——super repo 的文档提交必须进入清单（提案 §7 目标不变量 8：不能只检查业务代码仓漏掉 super 文档提交）
-2. 对**有变更或含本工单 ticket commit** 的仓库，显示精确安全命令：`git push <remote_name> HEAD:refs/heads/<target-branch>`（`target-branch` 来自契约 `target_push_ref` 的远端分支部分）
-3. **upstream 未经契约验证时（`tracking_verified=false` 或 G2 ⑩ 未过）不给出普通 `git push` 指令**——只提示先跑 G2 修复或由用户显式确认目标
-4. target 比本地**前进**（`git rev-list --count <本地 ticket 分支 HEAD>..<target_remote_ref>` > 0 = target 领先本地 → 本地落后）→ 提示先 fetch/merge/rebase，**由用户决定，ICode 不自动改历史**；禁止把旧基线误报为可直接 push。**判定前先 `git fetch <remote> <target-branch>` 取在线状态**（防本地 fetch 过时误报 +0/-0，与 G4 规则 1「不用本地缓存 ref」一致）；fetch 失败（远程不可达）→ 降级本地缓存 ref，Target 列标注 `(本地缓存)`
-5. **明确显示 "remote server"（Remote URL）与 "remote branch"（Target）两列**，避免「同一服务器 = 同名远端分支」的自然语言歧义
-6. 任一仓库 L1（detached / 缺 upstream / upstream drift / remote mismatch / 未登记 / tracking_verified=false）→ **总 verdict = blocked**，不宣称"可以提交"
-7. ICode 红线不变：只检查与回显指引，**不 commit / 不 push / 不 reset --hard / 不 push --force**
+1. **枚举 super repo 与全部 `submission_contracts` 子仓，不能只枚举 `code_files`**；校验分支、upstream、remote URL、`tracking_verified` 与 dirty/未合并状态。
+2. 对每仓执行精确 refspec fetch 并冻结目标 SHA。fetch 失败即 `blocked`，禁止退回本地缓存后报告 pass。
+3. 第一阶段只更新 remote-tracking refs；分叉仓库在临时 shared clone 中运行同参数无提交 merge 预检。任一仓库 blocked，则所有仓库都不进入第二阶段。
+4. 第二阶段：相同=`unchanged`；本地领先=`local_ahead`；仅线上领先=`git merge --ff-only <sha>` 后 `recheck_pending`；无冲突分叉=`git merge --no-commit --no-ff <sha>` 后 `merge_pending`。已有目标一致、无 unmerged/unstaged 的 `MERGE_HEAD` 只复检，不重复 merge。
+5. 合并后核验 unmerged、`git diff --check`、`git diff --cached --check`、分支/upstream/URL、HEAD/MERGE_HEAD，并再次 fetch；线上再次前进时标 `online_moved`。
+6. ICODE 编排层重跑当前工单证据里此前实际执行过的相关 build/test；找不到可重复命令则保持 `recheck_pending`。底层脚本不执行 metadata 中的任意命令字符串。
+7. 退出码 0=无需未决动作，3=`merge_pending/recheck_pending`，2=`blocked/online_moved`，1=调用或 metadata 错误。所有非 0 状态不输出可直接 push 指令。
+8. 红线：**不自动 commit、不 push、不 force、不 reset**；真实冲突不自动解决。意外 merge 失败只 `git merge --abort` 当前仓并核验恢复，已完成的其它仓库不破坏性回滚。
 
 ### G4 push 后 / close 闸门
 
@@ -460,7 +458,7 @@ fi
 
 ## 4. 完成后回流（icode 不 commit，用户手动执行）
 
-icode 自身 Git 红线不变：**禁止 `commit` / `push` / `reset --hard` / `push --force`**；`git merge` 属用户手动回流范畴。工单完成时输出**二选一**清理指引：
+icode 自身 Git 红线不变：**禁止自动 `commit` / `push` / `reset --hard` / `push --force`**；`/icode worktree --merge` 只允许把冻结线上目标安全合入 ticket 分支，ticket 分支最终回流权威分支仍属用户手动操作。工单完成时输出**二选一**清理指引：
 
 ```bash
 # 方案 ①（推荐：先提交再合并回流，最干净）
@@ -546,7 +544,7 @@ du -sh <各 worktree 路径>                      # 空间占用
 
 1. **`.git` 是普通文件**（非目录/symlink）= git worktree 成员，`git status` 正常，勿误判为损坏
 2. **project_id 归主仓**（F1）：worktree 内 `git rev-parse --show-toplevel` 返回 worktree 根，project_id 必须归一到主仓根（`git worktree list --porcelain` 首行，勿用 `$2` 字段避免含空格路径截断）——否则 limit 主存 / project_docs / device_config 读不到
-3. **验证基线落后**：worktree 分支落后主仓时（`git rev-list --count <branch>..<目标基分支>` > 0 = 落后），验证前建议先 `git merge <目标基分支>` 进 worktree 分支再终审（L3 提示）
+3. **验证基线落后**：worktree 分支落后线上目标时（`git rev-list --count <branch>..<目标基分支>` > 0 = 落后），终审前运行 `/icode worktree --merge` 完成全仓预检、安全合并与复检；未收口前停止 audit
 4. **机器校验落点**：产物集机器校验（`status --validate` / 终检）必须在对应 worktree 内执行，主仓跑会误报缺失
 5. **并发写竞态**：多 worktree = 多会话并行，index.json / limit 主存写入按「读最新 → 合并本会话改动 → 原子写」契约，勿在旧快照覆盖
 6. **步骤3 merge ≠ git merge**：`/icode merge` 是文档定稿，与 `git merge` 回流无关

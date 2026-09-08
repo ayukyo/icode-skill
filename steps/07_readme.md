@@ -297,7 +297,7 @@ eval("2147483648") rc=3 (expect 3 OVERFLOW)
 
 1. 检测最新目录，确定 `ICODE_OUT_DIR`
 2. 读取 `.ico_metadata.json`：确认 `status==completed` + 提取 `requirement` + `completed_steps` + `code_files` + `created_at`
-3. 读取所有产物（`00_init.md`/`log_analysis.md`/`01_plan.md`/`02_review.md`/`03_plan_final.md`/`05_deepcheck.md`/`06_audit.md`，**存在时含 `08_patch.md`**——补丁演进与 `patch_history.at` 时间点）+ 代码文件 + Makefile
+3. 读取所有产物（`00_init.md`/`log_analysis.md`/`01_plan.md`/`02_review.md`/`03_plan_final.md`/`05_deepcheck.md`/`06_audit.md`，**存在时含 `08_patch.md`**——补丁演进与 `patch_history.at` 时间点）+ 代码文件 + Makefile。若存在 `submission_contracts`，先运行 `python3 scripts/submission_guard.py handoff --metadata "{ICODE_OUT_DIR}/.ico_metadata.json" --output "{ICODE_OUT_DIR}/handoff_matrix.json" --markdown "{ICODE_OUT_DIR}/handoff_matrix.md"`，再读取同一 `handoff_matrix.json`；不得另行手算第二套逐仓结论
 4. 思考分级 L1（见上方）
 5. **生成文件名**：从 `requirement` 提炼关键词 + 工程简名 → 一对（交付报告 + `_brief` 简报）
 6. **选择模板**：`completed_steps` 含 `"log"` → 查BUG模板，否则 → 功能开发模板
@@ -305,6 +305,8 @@ eval("2147483648") rc=3 (expect 3 OVERFLOW)
 8. 使用 Write 工具写入 `{ICODE_OUT_DIR}/{工程简名}_{需求关键词}.md`（交付报告）
 9. **生成跨领域简报**：把步骤7 提炼的要点**精简为其它模块视角**——保留本次改动/修复的**必要代码片段**与变更链路，省去交付报告的完整接口表/错误码表/测试矩阵/全量调用链图，按「跨领域说明模板」用 Write 写入 `{ICODE_OUT_DIR}/{工程简名}_{需求关键词}_brief.md`——关键时间点从 `created_at` / `patch_history.at` / log 分析记录**真实提取**，不编造；**TB/日志源简报按「TB/日志源简报的强制语义槽位」组织 6 槽位 + 过「对外简报完成门」**
 10. 输出：`▶ 步骤7 交付报告生成完成 — {ICODE_OUT_DIR}/{工程简名}_{需求关键词}.md（含跨领域简报 _brief）`
+
+交付报告的代码仓库/worktree 状态段必须引用 `handoff_matrix.json`：逐仓明确 modified/build/deployed/submit/docs/excluded/artifact 状态；`unresolved` 原样保留为待办，禁止用“主仓 clean”覆盖 build-only 子仓、已由上游吸收的修改或缺失部署证据。跨领域简报仍不暴露内部绝对路径和 worktree 清理命令。
 
 ## 反偷懒机制
 
