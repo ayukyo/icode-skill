@@ -24,7 +24,7 @@ ICode 是一个 Claude Code 技能（Skill），将需求到交付拆解为严�
 - **决策锚点**：步骤间以精简决策摘要（`.decision_anchors.json`）传递上下文——省 token、保持推理连续性
 - **可选 TB 缺陷源**：`/icode log` 零散输入含 Teambition 项目 URL 或 `<LIB>-<NUM>` 时，可选拉取缺陷单的标题/描述/评论/日志附件作为分析输入（多项目文本配置，仅拉取分析、不回写 TB；无 TB 引用时走纯本地日志路径，行为不变）
 - **可选钉钉文档源**：入口（`/icode init` / `log` / `plan` / `start`）与 patch 阶段0 零散输入含钉钉分享链接（alidocs.dingtalk.com）时，可选拉取文档/钉盘文件作为需求与参考资料输入（仅拉取、不回写钉钉；原生格式需用户在钉钉 UI 导出；无钉钉引用时行为不变）
-- **能力感知视觉理解**：ICODE 先走确定性文本/结构提取，再按 `auto | native | bridge | dual | text_only` 路由视觉区域。宿主明确证明当前 GPT 等会话模型支持多模态时保留原生视觉；纯文本或能力未知时才由 `mcp/vision-bridge` 补盲；高风险证据可双通道独立复核，分歧保持未决。详见 [媒体路由真源](references/media_routing.md)。
+- **能力感知视觉理解**：ICODE 先走确定性文本/结构提取，再按 `auto | native | bridge | dual | text_only` 路由视觉区域。宿主明确证明当前 GPT 等会话模型支持多模态时保留原生视觉；纯文本或能力未知时才由 `mcp/vision-bridge` 补盲；高风险证据可双通道独立复核，分歧保持未决。多图、视频帧和页面 tile 受单消息硬上限保护，超限时串行分批并最终只聚合文本。详见 [媒体路由真源](references/media_routing.md)。
 
 ## 安装
 

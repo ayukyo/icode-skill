@@ -25,6 +25,9 @@
     "notes": ""
   },
 
+  "_max_images_per_message_doc": "单条 API 消息允许的图片硬上限。未知时保守使用 4；若平台文档或实测上限更低，必须改成更低值。视频帧超过此值时自动串行分批，最后只用文本聚合。",
+  "max_images_per_message": 4,
+
   "_timeout_doc": "可选: HTTP 超时秒, 默认 120",
   "timeout": 120,
 

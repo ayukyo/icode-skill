@@ -36,7 +36,7 @@
 - **宿主明确证明原生多模态**：普通视觉任务走 native，保留当前强模型能力；bridge 仅作失败兜底或显式/高风险双通道复核。
 - **纯文本或能力未知**：禁止试探性图片注入；bridge 健康则调 `analyze_media_evidence`（兼容旧调用可用 `analyze_media`），不可用则 `text_only` + 明确视觉缺口。
 - **能力画像**：`describe_capabilities` / CLI `--capabilities` 只返回 provider/model/已声明能力和 quality profile，不含 KEY。未评测能力为 `unknown`，bridge 输出只能作候选证据。
-- **触发场景**：涉及图片/视频/UI 截图、PDF 视觉区域或 TB/本地日志媒体附件时进入媒体路由；视频先用 ffmpeg 提取关键帧，密集图/原理图按页与重叠 tile 处理。
+- **触发场景**：涉及图片/视频/UI 截图、PDF 视觉区域或 TB/本地日志媒体附件时进入媒体路由；视频先用 ffmpeg 提取关键帧，密集图/原理图按页与重叠 tile 处理。所有媒体输入服从 `selected_max_images_per_message`：超限串行分批、逐批文本化、最终只聚合文本，禁止并行调用后重新形成超限消息。
 - **当前状态**：已装（用户在 `config.json` 填三件套后可用）
 
 ### ③ memory（推荐）

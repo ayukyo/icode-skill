@@ -46,6 +46,10 @@ class MediaProvider(ABC):
             declared = []
         model = getattr(self, "model", "unknown")
         profile_version = getattr(self, "profile_version", None)
+        transport_limits = {}
+        max_images = getattr(self, "max_images_per_message", None)
+        if isinstance(max_images, int) and not isinstance(max_images, bool) and max_images > 0:
+            transport_limits["max_images_per_message"] = max_images
         return {
             "provider": self.name,
             "model": model if isinstance(model, str) else "unknown",
@@ -55,6 +59,7 @@ class MediaProvider(ABC):
             )),
             "quality_profile": _safe_quality_profile(
                 getattr(self, "quality_profile", {})),
+            "transport_limits": transport_limits,
             "transport_support": {
                 "image": True,
                 "video": self.supports_video,

@@ -630,7 +630,7 @@ TB 附件已落盘后，若 `{ICODE_OUT_DIR}` 位于**网络挂载（SMB 等）*
    - **无条件记录附件清单**(文件名+大小+类型)到 `log_analysis.md §1`「附件清单」小节（可空章节，无视频/图片时该小节不存在）
 2. **选择媒体通道**：
    - 从宿主可靠能力信息判 `native=supported|unsupported|unknown`，不得按模型名称猜测或试传图片；检查 bridge MCP/CLI 与三件套，并用 `describe_capabilities`/`--capabilities` 取得不含密钥的能力画像。
-   - 执行 `python3 tools/media_router.py route --mode auto --native <state> --bridge <state> --task <general|small_text|video> --risk <normal|high>`；结果写入附件分析记录。
+   - 执行 `python3 tools/media_router.py route --mode auto --native <state> --bridge <state> --native-max-images-per-message <宿主证明值，未知填4> --task <general|small_text|video> --risk <normal|high>`；结果写入附件分析记录，并读取 `image_batching.selected_max_images_per_message` 作为当前通道的单消息硬上限。
    - `native` → 当前 session 直接分析；`bridge` → 优先 `analyze_media_evidence`/`--analyze-evidence`；`dual` → 两通道独立分析、分歧未决；`text_only` → 只落关键帧和视觉缺口。只有 selected mode 含 native 时才允许原生媒体输入。
 
 **分析流程**（路由选择 native/bridge/dual 时，在阶段0 内、附件枚举后、强制思考之前）：
@@ -649,7 +649,7 @@ TB 附件已落盘后，若 `{ICODE_OUT_DIR}` 位于**网络挂载（SMB 等）*
 
    - **ffmpeg 不可用**：只有 selected channel 明确支持视频且用户接受额度/体积风险时才直接分析视频；否则只处理图片附件并记录视频覆盖缺口
 2. **枚举关键帧**：`ls {LOCAL_TB_SRC}/frames_*.jpg`（TB 源）或 `{ICODE_OUT_DIR}/frames_*.jpg`（本地路径）列出所有关键帧文件
-3. **按 selected mode 分析图片帧**：native 由当前 session 分析；bridge 调 `analyze_media_evidence` 或 CLI `--analyze-evidence`；dual 对同一 hash/帧独立执行两路并记录分歧。对每个图片附件和关键帧至少一次，统一提示模板提取界面时钟、显示内容、操作序列、状态栏和错误提示。
+3. **按 selected mode 分析图片帧**：native 由当前 session 分析；bridge 调 `analyze_media_evidence` 或 CLI `--analyze-evidence`；dual 对同一 hash/帧独立执行两路并记录分歧。对每个图片附件和关键帧至少一次，统一提示模板提取界面时钟、显示内容、操作序列、状态栏和错误提示。图片数超过 `selected_max_images_per_message` 时保持原顺序串行分批：一批完成并保存文本结果后再处理下一批，禁止并行调用；最终只聚合各批文本，不得再次携带原图。
 4. **整理分析结果**(写入 `log_analysis.md §1`「附件分析结果」小节，可空章节允许留空)：
    - **时间点清单**：视频界面时钟时间(从关键帧图片读取) + 对应设备端日志时段推断(**视频时间点与设备端时间往往有偏移,需在阶段1 §2.1 状态链路图阶段估算**)
    - **现象描述**：视频/图片里直接可见的症状(界面显示/状态栏/错误提示/控件状态等)

@@ -180,7 +180,7 @@ cd ~/.claude/skills/icode/mcp/vision-bridge
 # restart Claude Code to take effect
 ```
 
-ICODE uses capability-aware routing rather than forcing every image through vision-bridge. Deterministic text/structure extraction runs first. A host-attested strong multimodal session uses native vision; a text-only or unknown session can use the MCP/CLI bridge; high-risk evidence can use independent dual review, where disagreements remain unresolved. Unknown native capability is never probed by trial image injection. See [`references/media_routing.md`](references/media_routing.md); bridge profiles may declare only capabilities actually evaluated locally.
+ICODE uses capability-aware routing rather than forcing every image through vision-bridge. Deterministic text/structure extraction runs first. A host-attested strong multimodal session uses native vision; a text-only or unknown session can use the MCP/CLI bridge; high-risk evidence can use independent dual review, where disagreements remain unresolved. Unknown native capability is never probed by trial image injection. Multi-image inputs, video frames, and page tiles obey a per-message hard limit; overflow is processed in serial batches and only text is aggregated afterward. See [`references/media_routing.md`](references/media_routing.md); bridge profiles may declare only capabilities actually evaluated locally.
 
 ### Cheap LLM Inference (cheap-research)
 

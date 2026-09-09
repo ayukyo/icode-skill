@@ -11,5 +11,6 @@
   "pdf_render_dpi": 300,
   "tile_size": 1536,
   "tile_overlap": 128,
+  "default_max_images_per_message": 4,
   "evidence_profile_version": "v1"
 }

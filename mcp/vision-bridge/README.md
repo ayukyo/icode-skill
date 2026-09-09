@@ -30,6 +30,7 @@ vim ~/.claude/skills/icode/mcp/vision-bridge/config.json
 - `base_url` —— 你平台的 API 端点（**没有默认值，请查平台文档**）
 - `api_key`  —— 你平台的 KEY
 - `model`    —— 你平台提供的"支持图片/视频"的模型名
+- `max_images_per_message` —— 单条消息的图片硬上限；未知时保守填 `4`，平台上限更低则填更低值
 
 **没有任何推荐值** —— 你用什么平台、什么模型完全由你决定。
 
@@ -78,6 +79,12 @@ model:    <你加载的视觉模型>
 | `local_ocr` | tesseract 本地装 | 否 | 否 | — | 仅 OCR 文字提取 |
 
 切换：在 `config.json` 改 `"provider": "local_ocr"`，重启 Claude Code。
+
+### 多图与视频分批
+
+`openai_compat` 不会再把全部视频关键帧塞进同一条消息。图片数超过 `max_images_per_message` 时，provider 会保持帧顺序串行分批；各批得到文本结果后，再发起一次不含图片的纯文本聚合请求。单张图片路径不变。
+
+默认上限为 `4`，这是未知平台的保守兼容值，不是对任意模型能力的猜测。平台文档或实测限制更低时必须在 `config.json` 下调。`describe_capabilities` 会通过 `transport_limits.max_images_per_message` 返回实际执行值。
 
 ---
 
@@ -145,5 +152,5 @@ VISION_BRIDGE_CONFIG=~/.claude/skills/icode/mcp/vision-bridge/config.json \
 
 - vision-bridge 是纯文本/能力未知会话的补盲通道，不因安装成功自动取代 GPT 等宿主已证明的强原生视觉。
 - 宿主能力未知时禁止试传图片；先用 ICODE `tools/media_router.py route` 判定。selected mode 为 bridge/dual 才调用本服务。
-- `declared_capabilities` 和 `quality_profile` 只声明实际评测边界。未知能力的输出只能作候选证据；高风险双通道分歧保持未决。
+- `declared_capabilities` 和 `quality_profile` 只声明实际评测边界。未知能力的输出只能作候选证据；高风险双通道分歧保持未决。`max_images_per_message` 属于传输硬限制，不等同于 `quality_profile.max_images`。
 - Codex 等未注入 MCP 工具的环境可用本地 CLI；结果仍须记录输入 hash、provider/model、prompt profile、页/裁剪/DPI 和状态。

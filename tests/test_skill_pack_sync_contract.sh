@@ -263,19 +263,27 @@ FAKE_MV_BIN="$TMP/fake-mv-bin"
 mkdir -p "$FAKE_MV_BIN"
 cat >"$FAKE_MV_BIN/mv" <<SH
 #!/usr/bin/env bash
-count=0
-[[ -f "\$MV_CALLS" ]] && count="\$(cat "\$MV_CALLS")"
-count=\$((count + 1))
-printf '%s\\n' "\$count" >"\$MV_CALLS"
-if [[ "\$count" -eq "\${MV_FAIL_AT:-4}" ]]; then
+source_dir="\${@: -2:1}"
+target_dir="\${@: -1}"
+if [[ -n "\${MV_FAIL_SOURCE_PATTERN:-}" \
+  && "\$source_dir" == \${MV_FAIL_SOURCE_PATTERN} \
+  && "\$target_dir" == \${MV_FAIL_TARGET_PATTERN} ]]; then
   exit 42
 fi
 exec "$REAL_MV" "\$@"
 SH
+cat >"$FAKE_MV_BIN/sleep" <<'SH'
+#!/usr/bin/env bash
+exit 0
+SH
 chmod +x "$FAKE_MV_BIN/mv"
-MV_CALLS="$TMP/mv-calls"
+chmod +x "$FAKE_MV_BIN/sleep"
 COMMIT_ROLLBACK_OK=true
-if PATH="$FAKE_MV_BIN:$PATH" MV_CALLS="$MV_CALLS" MV_FAIL_AT=4 \
+export MV_FAIL_SOURCE_PATTERN
+export MV_FAIL_TARGET_PATTERN
+MV_FAIL_SOURCE_PATTERN="$ROLLBACK_AGENTS/.icode-stage-icode.*"
+MV_FAIL_TARGET_PATTERN="$ROLLBACK_AGENTS/icode"
+if PATH="$FAKE_MV_BIN:$PATH" \
      ICODE_SYNC_ENGINE=cp run_sync "$ROLLBACK_CLAUDE" "$ROLLBACK_AGENTS" \
        --apply --client all >/dev/null 2>&1; then
   COMMIT_ROLLBACK_OK=false
@@ -283,8 +291,9 @@ elif [[ "$ROLLBACK_CLAUDE_HASH" != "$(find "$ROLLBACK_CLAUDE/icode" -type f -pri
   || [[ "$ROLLBACK_AGENTS_HASH" != "$(find "$ROLLBACK_AGENTS/icode" -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum)" ]]; then
   COMMIT_ROLLBACK_OK=false
 fi
-rm -f "$MV_CALLS"
-if PATH="$FAKE_MV_BIN:$PATH" MV_CALLS="$MV_CALLS" MV_FAIL_AT=3 \
+MV_FAIL_SOURCE_PATTERN="$ROLLBACK_AGENTS/icode"
+MV_FAIL_TARGET_PATTERN="$ROLLBACK_AGENTS/.icode-backup-icode.*"
+if PATH="$FAKE_MV_BIN:$PATH" \
      ICODE_SYNC_ENGINE=cp run_sync "$ROLLBACK_CLAUDE" "$ROLLBACK_AGENTS" \
        --apply --client all >/dev/null 2>&1; then
   COMMIT_ROLLBACK_OK=false
@@ -297,6 +306,7 @@ if [[ "$COMMIT_ROLLBACK_OK" == true ]]; then
 else
   bad "ICODE commit failure rolls back earlier selected targets"
 fi
+unset MV_FAIL_SOURCE_PATTERN MV_FAIL_TARGET_PATTERN
 
 cat >"$PACKS/bad.json" <<'JSON'
 {"schema_version":1,"skills":[

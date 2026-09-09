@@ -20,6 +20,7 @@
 python3 tools/media_router.py route \
   --mode auto --native supported --bridge available \
   --bridge-profile <vision-bridge-config-or-profile.json> \
+  --native-max-images-per-message 4 \
   --task schematic --risk high
 ```
 
@@ -32,6 +33,7 @@ bridge 配置可声明：
 ```json
 {
   "profile_version": "eval-2026-09",
+  "max_images_per_message": 4,
   "declared_capabilities": ["ocr", "small_text", "table", "diagram", "schematic", "spatial_reasoning", "video"],
   "quality_profile": {
     "evaluation_status": "tested",
@@ -42,7 +44,18 @@ bridge 配置可声明：
 }
 ```
 
+`max_images_per_message` 是传输层硬限制，与 `quality_profile.max_images` 的评测容量不是同一概念。前者未声明时按保守默认值 `4` 执行；平台文档或实测值更低时必须填写更低值。`describe_capabilities` 返回的能力画像把它放在 `transport_limits.max_images_per_message`。
+
 未声明或未测试的能力按 `unknown`，仍可用于候选提取，但原理图连通、器件极性等结论必须由 EDA/netlist/源码或人工复核闭环。能力画像只描述已验证边界，不根据模型名称猜测。
+
+## 单消息图片上限与串行分批
+
+`tools/media_router.py route` 的 `image_batching.selected_max_images_per_message` 是当前 selected mode 的执行上限。native 上限由宿主可靠能力信息传入 `--native-max-images-per-message`；未知时同样取 `4`。dual 取 native 与 bridge 两者较小值，确保两条独立通道都合法。
+
+- 图片附件、视频关键帧、PDF 页面和 tile 的**任何一条消息**都不得超过该上限；不能只限制一次任务的总图片数。
+- 超限时按原顺序串行分批，每批完成并落成文本结果后才能开始下一批；禁止并行媒体调用后让宿主把结果重新聚合进同一消息。
+- 所有批次完成后只聚合文本，不把原图片再次带入聚合消息。bridge 在 provider 内强制执行此规则；native/dual 由宿主适配层遵守路由输出。
+- 已经存在于会话历史中的超限用户消息无法由 ICODE 事后改写；若模型在 ICODE 执行前就拒绝该消息，需要宿主拆分附件或新建无污染会话。
 
 ## 页面渲染、裁剪与分块
 
@@ -52,7 +65,7 @@ bridge 配置可声明：
 python3 tools/media_router.py tiles --width <px> --height <px> --tile-size 1536 --overlap 128
 ```
 
-每个结果都绑定原始文件 hash、页码、DPI、crop、tile index。整页摘要不能替代分块中的 refdes、引脚号、网标、脚注或小字证据；分块结果也必须回到整页检查跨区域关系。
+每个结果都绑定原始文件 hash、页码、DPI、crop、tile index。整页摘要不能替代分块中的 refdes、引脚号、网标、脚注或小字证据；分块结果也必须回到整页检查跨区域关系。tile 数超过单消息上限时同样按上节串行分批。
 
 ## 视觉证据合同
 

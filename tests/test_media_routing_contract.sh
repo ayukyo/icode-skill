@@ -10,6 +10,10 @@ bad() { FAIL=$((FAIL + 1)); printf '  FAIL %s\n' "$1" >&2; }
 TOOL="tools/media_router.py"
 POLICY="references/media_routing.md"
 TEMPLATE="templates/media_policy.json.template"
+BRIDGE_CONFIG="mcp/vision-bridge/config.example.json"
+BRIDGE_README="mcp/vision-bridge/README.md"
+HOST_ADAPTERS="references/host_adapters.md"
+LOG_STEP="steps/log.md"
 TMP="$(mktemp -d -t icode-media-routing.XXXXXX)"
 trap 'rm -rf "$TMP"' EXIT
 
@@ -19,6 +23,7 @@ cat >"$TMP/profile.json" <<'JSON'
   "model": "vision-small",
   "api_key": "never-echo-this",
   "profile_version": "eval-1",
+  "max_images_per_message": 3,
   "declared_capabilities": ["ocr"],
   "quality_profile": {
     "evaluation_status": "passed-ocr-only",
@@ -30,7 +35,8 @@ JSON
 
 if [[ -f "$TOOL" && -f "$POLICY" && -f "$TEMPLATE" ]] \
   && python3 "$TOOL" route --native supported --bridge available \
-       --task schematic --bridge-profile "$TMP/profile.json" >"$TMP/native.json" \
+       --native-max-images-per-message 2 --task schematic \
+       --bridge-profile "$TMP/profile.json" >"$TMP/native.json" \
   && python3 - "$TMP/native.json" <<'PY'
 import json, sys
 d=json.load(open(sys.argv[1], encoding="utf-8"))
@@ -38,6 +44,9 @@ assert d["selected_mode"] == "native"
 assert d["status"] == "ready"
 assert d["primary_channel"] == "native"
 assert d["native_media_injection_allowed"] is True
+assert d["image_batching"]["channel_limits"] == {"native": 2, "bridge": 3}
+assert d["image_batching"]["selected_max_images_per_message"] == 2
+assert d["image_batching"]["strategy"] == "serial_batches_then_text_aggregate"
 raw=open(sys.argv[1], encoding="utf-8").read()
 assert "never-echo-this" not in raw and "also-never-echo" not in raw
 assert "nested" not in d["bridge_profile"]["quality_profile"]
@@ -53,6 +62,7 @@ assert d["selected_mode"] == "dual"
 assert d["primary_channel"] == "native" and d["secondary_channel"] == "bridge"
 assert d["status"] == "partial"
 assert d["bridge_qualification"] == "unqualified"
+assert d["image_batching"]["selected_max_images_per_message"] == 3
 assert set(d["missing_bridge_capabilities"]) == {"schematic", "spatial_reasoning"}
 assert "candidate evidence" in d["claim_ceiling"]
 assert any("disagreement" in item for item in d["rationale"])
@@ -69,8 +79,10 @@ bridge=json.load(open(sys.argv[1], encoding="utf-8"))
 text=json.load(open(sys.argv[2], encoding="utf-8"))
 assert bridge["selected_mode"] == "bridge" and bridge["status"] == "ready"
 assert bridge["bridge_qualification"] == "qualified"
+assert bridge["image_batching"]["selected_max_images_per_message"] == 3
 assert text["selected_mode"] == "text_only"
 assert text["status"] == "manual_visual_gap"
+assert text["image_batching"]["selected_max_images_per_message"] is None
 assert "visual or spatial claims remain unresolved" in text["claim_ceiling"]
 PY
 then ok "纯文本宿主安全走 bridge 或显式视觉缺口"; else bad "bridge/text_only 降级错误"; fi
@@ -136,6 +148,7 @@ class P(MediaProvider):
 d=P().capability_profile()
 assert d["declared_capabilities"] == ["ocr"]
 assert d["quality_profile"] == {"score": 8}
+assert d["transport_limits"] == {}
 assert "secret" not in repr(d)
 PY
 then ok "vision-bridge 能力画像脱敏且代码可解析"; else bad "vision-bridge 能力画像合同失败"; fi
@@ -175,7 +188,10 @@ with tempfile.TemporaryDirectory() as td:
     else:
         raise AssertionError("non-string provider accepted")
 
-for field, value in (("timeout", 0), ("video_frames", 0)):
+for field, value in (("timeout", 0), ("video_frames", 0),
+                     ("max_images_per_message", 0),
+                     ("max_images_per_message", 121),
+                     ("max_images_per_message", True)):
     config = {
         "base_url": "https://example.invalid/v1",
         "api_key": "test-only",
@@ -198,6 +214,69 @@ for media_type, max_tokens in (("audio", 10), ("image", 0)):
         raise AssertionError("invalid media request accepted")
 PY
 then ok "vision-bridge 配置与媒体边界 fail-closed"; else bad "vision-bridge 配置与媒体边界校验失败"; fi
+
+if PYTHONPATH=mcp/vision-bridge python3 - <<'PY'
+import asyncio
+
+from providers.openai_compat import OpenAICompatProvider
+
+
+class ProbeProvider(OpenAICompatProvider):
+    def __init__(self, frame_count, max_images_per_message=4):
+        super().__init__({
+            "base_url": "https://example.invalid/v1",
+            "api_key": "test-only",
+            "model": "test-model",
+            "video_frames": frame_count,
+            "max_images_per_message": max_images_per_message,
+        })
+        self.calls = []
+
+    def _extract_video_frames(self, video_path):
+        return [f"data:image/jpeg;base64,{index}" for index in range(self.video_frames)]
+
+    async def _chat(self, content, max_tokens):
+        self.calls.append(content)
+        return f"result-{len(self.calls)}"
+
+
+for frame_count, expected_image_counts in (
+        (1, [1]), (4, [4]), (5, [4, 1, 0]),
+        (6, [4, 2, 0]), (8, [4, 4, 0])):
+    provider = ProbeProvider(frame_count)
+    asyncio.run(provider._video("unused.mp4", "按时序分析", 128))
+    image_counts = [sum(item.get("type") == "image_url" for item in call)
+                    for call in provider.calls]
+    assert image_counts == expected_image_counts, (frame_count, image_counts)
+    assert all(count <= provider.max_images_per_message for count in image_counts)
+    assert provider.capability_profile()["transport_limits"] == {
+        "max_images_per_message": 4,
+    }
+    if frame_count > 4:
+        assert "批次 1/" in provider.calls[0][-1]["text"]
+        assert provider.calls[-1][0]["type"] == "text"
+
+custom = ProbeProvider(6, max_images_per_message=2)
+asyncio.run(custom._video("unused.mp4", "", 128))
+assert [sum(item.get("type") == "image_url" for item in call)
+        for call in custom.calls] == [2, 2, 2, 0]
+PY
+then ok "vision-bridge 视频帧按单消息上限分批并以纯文本聚合"; else bad "vision-bridge 图片分批合同失败"; fi
+
+if python3 - "$TEMPLATE" "$BRIDGE_CONFIG" <<'PY'
+import json, sys
+d=json.load(open(sys.argv[1], encoding="utf-8"))
+assert d["default_max_images_per_message"] == 4
+cfg=json.load(open(sys.argv[2], encoding="utf-8"))
+assert cfg["max_images_per_message"] == 4
+PY
+then ok "媒体策略和 bridge 配置声明保守单消息图片上限"; else bad "媒体策略或 bridge 配置缺单消息图片上限"; fi
+
+if rg -q 'max_images_per_message' "$POLICY" \
+  && rg -q 'selected_max_images_per_message' "$LOG_STEP" \
+  && rg -q 'max_images_per_message' "$BRIDGE_README" \
+  && rg -q '串行' "$HOST_ADAPTERS"
+then ok "native/bridge/dual 文档都声明单消息限额与串行分批"; else bad "媒体分批文档合同不完整"; fi
 
 if TMP_HOME="$TMP/vision-home" \
    VISION_BRIDGE_TARGET="$TMP/vision-bridge" \

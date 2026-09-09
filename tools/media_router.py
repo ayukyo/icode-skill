@@ -16,6 +16,7 @@ from pathlib import Path
 MODES = {"auto", "native", "bridge", "dual", "text_only"}
 CAPABILITY_STATES = {"supported", "unsupported", "unknown"}
 BRIDGE_STATES = {"available", "unavailable", "unknown"}
+DEFAULT_MAX_IMAGES_PER_MESSAGE = 4
 TASK_REQUIREMENTS = {
     "general": {"visual_reasoning"},
     "ocr": {"ocr"},
@@ -48,6 +49,19 @@ def _safe_profile(raw: dict | None) -> dict:
         quality = {}
     if not isinstance(quality, dict):
         raise MediaRouteError("quality_profile must be a JSON object")
+    transport = raw.get("transport_limits", {})
+    if transport is None:
+        transport = {}
+    if not isinstance(transport, dict):
+        raise MediaRouteError("transport_limits must be a JSON object")
+    declared_limit = raw.get(
+        "max_images_per_message",
+        transport.get("max_images_per_message", DEFAULT_MAX_IMAGES_PER_MESSAGE),
+    )
+    if declared_limit is None:
+        declared_limit = DEFAULT_MAX_IMAGES_PER_MESSAGE
+    bridge_limit = _positive_int(
+        declared_limit, "max_images_per_message", maximum=120)
     safe_quality = {
         str(key): value for key, value in quality.items()
         if not _is_sensitive_key(str(key))
@@ -59,6 +73,7 @@ def _safe_profile(raw: dict | None) -> dict:
         "profile_version": _safe_text(raw.get("profile_version"), None),
         "declared_capabilities": sorted(set(capabilities)),
         "quality_profile": safe_quality,
+        "transport_limits": {"max_images_per_message": bridge_limit},
     }
 
 
@@ -70,6 +85,14 @@ def _is_sensitive_key(key: str) -> bool:
 
 def _safe_text(value, default: str | None) -> str | None:
     return value if isinstance(value, str) and value.strip() else default
+
+
+def _positive_int(value, name: str, maximum: int | None = None) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        raise MediaRouteError(f"{name} must be a positive integer")
+    if maximum is not None and value > maximum:
+        raise MediaRouteError(f"{name} must be <= {maximum}")
+    return value
 
 
 def load_profile(path: str | None) -> dict:
@@ -89,7 +112,8 @@ def bridge_qualification(task: str, profile: dict) -> tuple[str, list[str]]:
 
 
 def route_media(mode: str, native: str, bridge: str, task: str,
-                risk: str, profile: dict) -> dict:
+                risk: str, profile: dict,
+                native_max_images_per_message: int = DEFAULT_MAX_IMAGES_PER_MESSAGE) -> dict:
     if mode not in MODES:
         raise MediaRouteError(f"unsupported mode: {mode}")
     if native not in CAPABILITY_STATES:
@@ -100,6 +124,11 @@ def route_media(mode: str, native: str, bridge: str, task: str,
         raise MediaRouteError(f"unsupported task: {task}")
     if risk not in {"normal", "high"}:
         raise MediaRouteError(f"unsupported risk: {risk}")
+    native_limit = _positive_int(
+        native_max_images_per_message,
+        "native_max_images_per_message",
+        maximum=120,
+    )
 
     qualification, missing = bridge_qualification(task, profile)
     bridge_ready = bridge == "available"
@@ -124,15 +153,18 @@ def route_media(mode: str, native: str, bridge: str, task: str,
     if selected == "native" and not native_ready:
         return _blocked_result(mode, selected, native, bridge, task, risk,
                                profile, qualification, missing,
-                               "native mode requires explicit host-attested support")
+                               "native mode requires explicit host-attested support",
+                               native_limit)
     if selected == "bridge" and not bridge_ready:
         return _blocked_result(mode, selected, native, bridge, task, risk,
                                profile, qualification, missing,
-                               "bridge mode requires a healthy configured bridge")
+                               "bridge mode requires a healthy configured bridge",
+                               native_limit)
     if selected == "dual" and not (native_ready and bridge_ready):
         return _blocked_result(mode, selected, native, bridge, task, risk,
                                profile, qualification, missing,
-                               "dual mode requires both attested native support and a healthy bridge")
+                               "dual mode requires both attested native support and a healthy bridge",
+                               native_limit)
 
     primary = {
         "native": "native",
@@ -173,13 +205,14 @@ def route_media(mode: str, native: str, bridge: str, task: str,
         "missing_bridge_capabilities": missing,
         "rationale": rationale,
         "claim_ceiling": claim_ceiling,
+        "image_batching": image_batching_contract(selected, native_limit, profile),
         "evidence_contract": evidence_contract(),
     }
 
 
 def _blocked_result(mode: str, selected: str, native: str, bridge: str,
                     task: str, risk: str, profile: dict, qualification: str,
-                    missing: list[str], reason: str) -> dict:
+                    missing: list[str], reason: str, native_limit: int) -> dict:
     return {
         "schema_version": 1,
         "requested_mode": mode,
@@ -197,7 +230,27 @@ def _blocked_result(mode: str, selected: str, native: str, bridge: str,
         "missing_bridge_capabilities": missing,
         "rationale": [reason],
         "claim_ceiling": "no visual claim",
+        "image_batching": image_batching_contract(selected, native_limit, profile),
         "evidence_contract": evidence_contract(),
+    }
+
+
+def image_batching_contract(selected: str, native_limit: int, profile: dict) -> dict:
+    bridge_limit = profile["transport_limits"]["max_images_per_message"]
+    selected_limit = {
+        "native": native_limit,
+        "bridge": bridge_limit,
+        "dual": min(native_limit, bridge_limit),
+        "text_only": None,
+    }[selected]
+    return {
+        "strategy": "serial_batches_then_text_aggregate",
+        "channel_limits": {
+            "native": native_limit,
+            "bridge": bridge_limit,
+        },
+        "selected_max_images_per_message": selected_limit,
+        "parallel_media_calls_allowed": False,
     }
 
 
@@ -311,6 +364,8 @@ def main() -> int:
     route.add_argument("--native", choices=sorted(CAPABILITY_STATES), default="unknown")
     route.add_argument("--bridge", choices=sorted(BRIDGE_STATES), default="unknown")
     route.add_argument("--bridge-profile")
+    route.add_argument("--native-max-images-per-message", type=int,
+                       default=DEFAULT_MAX_IMAGES_PER_MESSAGE)
     route.add_argument("--task", choices=sorted(TASK_REQUIREMENTS), default="general")
     route.add_argument("--risk", choices=["normal", "high"], default="normal")
 
@@ -339,7 +394,8 @@ def main() -> int:
     try:
         if args.command == "route":
             result = route_media(args.mode, args.native, args.bridge, args.task,
-                                 args.risk, load_profile(args.bridge_profile))
+                                 args.risk, load_profile(args.bridge_profile),
+                                 args.native_max_images_per_message)
         elif args.command == "evidence":
             result = build_evidence(args)
         else:

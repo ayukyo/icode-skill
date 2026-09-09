@@ -25,6 +25,7 @@ from providers.base import MediaProvider
 
 VIDEO_EXTS = {".mp4", ".mov", ".avi", ".mkv", ".webm", ".flv"}
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"}
+DEFAULT_MAX_IMAGES_PER_MESSAGE = 4
 
 
 class OpenAICompatProvider(MediaProvider):
@@ -36,8 +37,9 @@ class OpenAICompatProvider(MediaProvider):
         model:    模型名
 
     可选字段:
-        timeout:      HTTP 超时秒 (默认 120)
-        video_frames: 视频抽帧数 (默认 8)
+        timeout:                HTTP 超时秒 (默认 120)
+        video_frames:           视频抽帧数 (默认 8)
+        max_images_per_message: 单条请求的图片上限 (默认 4)
     """
 
     name = "openai_compat"
@@ -52,15 +54,23 @@ class OpenAICompatProvider(MediaProvider):
             raise ValueError("base_url 必须是 http(s) URL")
         self.api_key = config["api_key"]
         self.model = config["model"]
+        raw_max_images = config.get(
+            "max_images_per_message", DEFAULT_MAX_IMAGES_PER_MESSAGE)
+        if isinstance(raw_max_images, bool):
+            raise ValueError("max_images_per_message 必须是整数")
         try:
             self.timeout = int(config.get("timeout", 120))
             self.video_frames = int(config.get("video_frames", 8))
+            self.max_images_per_message = int(raw_max_images)
         except (TypeError, ValueError) as exc:
-            raise ValueError("timeout/video_frames 必须是整数") from exc
+            raise ValueError(
+                "timeout/video_frames/max_images_per_message 必须是整数") from exc
         if not 1 <= self.timeout <= 3600:
             raise ValueError("timeout 必须是 1..3600 秒")
         if not 1 <= self.video_frames <= 120:
             raise ValueError("video_frames 必须是 1..120")
+        if not 1 <= self.max_images_per_message <= 120:
+            raise ValueError("max_images_per_message 必须是 1..120")
         self.supports_video = bool(shutil.which("ffmpeg") and shutil.which("ffprobe"))
         self.profile_version = config.get("profile_version")
         self.declared_capabilities = config.get("declared_capabilities", [])
@@ -147,14 +157,64 @@ class OpenAICompatProvider(MediaProvider):
         frames = self._extract_video_frames(path)
         if not frames:
             return "[错误] 视频抽帧失败,请检查 ffmpeg 与文件。"
-        content = [{"type": "image_url", "image_url": {"url": f}} for f in frames]
-        content.append({
-            "type": "text",
-            "text": prompt or f"以下是视频的 {len(frames)} 帧关键画面,请综合描述视频内容。",
-        })
-        return await self._chat(content=content, max_tokens=max_tokens)
+        base_prompt = prompt or f"以下是视频的 {len(frames)} 帧关键画面,请综合描述视频内容。"
+        batches = [
+            frames[start:start + self.max_images_per_message]
+            for start in range(0, len(frames), self.max_images_per_message)
+        ]
+        if len(batches) == 1:
+            content = [
+                {"type": "image_url", "image_url": {"url": frame}}
+                for frame in batches[0]
+            ]
+            content.append({"type": "text", "text": base_prompt})
+            return await self._chat(content=content, max_tokens=max_tokens)
+
+        batch_results = []
+        total_batches = len(batches)
+        for index, batch in enumerate(batches, start=1):
+            first_frame = (index - 1) * self.max_images_per_message + 1
+            last_frame = first_frame + len(batch) - 1
+            content = [
+                {"type": "image_url", "image_url": {"url": frame}}
+                for frame in batch
+            ]
+            content.append({
+                "type": "text",
+                "text": (
+                    f"{base_prompt}\n"
+                    f"这是视频关键帧批次 {index}/{total_batches}，对应全局关键帧 "
+                    f"{first_frame}-{last_frame}。请只分析本批次并保留帧顺序。"
+                ),
+            })
+            batch_results.append(await self._chat(content=content, max_tokens=max_tokens))
+
+        ordered_results = "\n\n".join(
+            f"[批次 {index}/{total_batches}]\n{result}"
+            for index, result in enumerate(batch_results, start=1)
+        )
+        return await self._chat(
+            content=[{
+                "type": "text",
+                "text": (
+                    "以下是同一视频按时间顺序得到的分批视觉分析。"
+                    "请仅依据这些文本综合为一份连贯结论，保留时序、异常和不确定性。\n"
+                    f"原始任务：{base_prompt}\n\n{ordered_results}"
+                ),
+            }],
+            max_tokens=max_tokens,
+        )
 
     async def _chat(self, content: list, max_tokens: int) -> str:
+        image_count = sum(
+            item.get("type") == "image_url" for item in content
+            if isinstance(item, dict)
+        )
+        if image_count > self.max_images_per_message:
+            raise ValueError(
+                f"single message contains {image_count} images; configured limit is "
+                f"{self.max_images_per_message}"
+            )
         # 拼接完整 URL 供错误提示用（v2.1+：404 等错误时帮用户排查 base_url 路径）
         url = f"{self.base_url}/chat/completions"
         async with httpx.AsyncClient(timeout=self.timeout, trust_env=False) as client:
