@@ -19,6 +19,8 @@ At each boundary compare:
 - serialization, normalization, persistence, routing, and acknowledgement semantics;
 - write, read, effective consumption, error, retry, restart, and physical behavior;
 - runtime artifacts and repository versions on both sides.
+- build-time hardware selection across DTS, Kconfig, compiled DTB, booted DTB, and loaded driver;
+- clock, reset, power, GPIO, bus, kernel-driver/subdev, UAPI/ioctl, user-library ABI, pixel layout, buffer ownership, cache coherency, and timestamp semantics.
 
 Identical integer values or names do not imply identical meaning. Successful serialization, storage, logging, or send does not imply effective consumption.
 
@@ -34,8 +36,12 @@ Choose all applicable routes, but assign each distinct problem one primary route
 | Broker communication mode | `broker-two-communication-modes` | It is unclear whether the path is direct internal communication or RoutingCenter-based external forwarding. |
 | Closed-library version difference | `closed-lib-version-feature-diff-comparison` | Same-named APIs or nodes behave differently across coexisting binary/header variants or products. |
 | Closed-source fake gate | `closed-source-upstream-flag-fake-gate` | An upper wrapper flag claims to gate behavior whose real start or accumulation occurs inside a closed SDK. |
+| Embedded runtime identity | `embedded-runtime-provenance` | DTS/Kconfig/DTB, kernel module, rootfs, firmware, tuning, model, slot, or runtime-loaded object may not match the intended board or build. |
+| Camera pipeline boundary | `camera-pipeline-contract-audit` | Sensor/power/I2C/MIPI/media/V4L2/ISP/DMA/consumer contracts, formats, timestamps, or buffer ownership may diverge. |
 
 Related concerns such as artifact provenance, full-chain proof, or state lifecycle should be routed to `multi-repo-artifact-provenance`, `end-to-end-functional-chain-audit`, or `state-lifecycle-replay-audit` rather than expanding this skill.
+
+For embedded boundaries, do not collapse build selection and runtime identity: trace source DTS and Kconfig through the compiled DTB and boot selection, then bind kernel driver/subdev behavior to UAPI and user-space ABI. For camera data, preserve resolution, pixel format, stride, colorspace, timestamp domain, DMA/cache ownership, error propagation, and terminal consumer evidence at every edge.
 
 ## Procedure
 
@@ -99,5 +105,7 @@ For each problem state supported/candidate/refuted/unresolved, repair boundary o
 - Declaring a property effective because it was serialized, stored, or printed.
 - Assuming all Broker traffic uses one routing mode.
 - Treating same-named APIs from different binary variants as equivalent.
+- Treating a source DTS/Kconfig option as proof that the intended DTB or driver is running.
+- Treating a compatible ioctl number or struct name as proof of UAPI/ABI, layout, lifetime, and ownership compatibility.
 - Copying narrow-skill instructions into this router and allowing them to drift.
 - Producing one “unified fix” for independently classified contract failures.

@@ -1,0 +1,125 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "embedded-baseline.schema.json",
+  "title": "ICODE embedded verification baseline v1",
+  "description": "嵌入式/摄像头验证的只读身份与场景基线；不包含可执行命令。",
+  "type": "object",
+  "required": ["schema_version", "project_profile", "identity", "software", "components", "cameras", "verification"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "const": 1 },
+    "project_profile": { "enum": ["embedded", "camera"] },
+    "identity": {
+      "type": "object",
+      "required": ["device_id", "board_model", "board_revision", "soc"],
+      "additionalProperties": false,
+      "properties": {
+        "device_id": { "type": "string", "minLength": 1 },
+        "board_model": { "type": "string", "minLength": 1 },
+        "board_revision": { "type": "string", "minLength": 1 },
+        "soc": { "type": "string", "minLength": 1 }
+      }
+    },
+    "software": {
+      "type": "object",
+      "required": ["bootloader", "kernel", "dtb", "rootfs", "bsp", "toolchain"],
+      "additionalProperties": false,
+      "properties": {
+        "bootloader": { "type": "string", "minLength": 1 },
+        "kernel": { "type": "string", "minLength": 1 },
+        "dtb": { "type": "string", "minLength": 1 },
+        "rootfs": { "type": "string", "minLength": 1 },
+        "bsp": { "type": "string", "minLength": 1 },
+        "toolchain": { "type": "string", "minLength": 1 }
+      }
+    },
+    "components": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["name", "kind", "identity", "artifact_path", "hash", "build_id", "loaded_evidence", "required"],
+        "additionalProperties": false,
+        "properties": {
+          "name": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_.-]*$" },
+          "kind": { "type": "string", "minLength": 1 },
+          "identity": { "type": "string", "minLength": 1 },
+          "artifact_path": { "type": "string", "minLength": 1 },
+          "hash": { "type": "string", "minLength": 1 },
+          "build_id": { "type": "string", "minLength": 1 },
+          "loaded_evidence": { "type": "string", "minLength": 1 },
+          "required": { "type": "boolean" }
+        }
+      }
+    },
+    "cameras": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "sensor", "module", "lens", "eeprom_sn", "calibration_hash", "tuning_hash", "media_nodes"],
+        "additionalProperties": false,
+        "properties": {
+          "name": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_.-]*$" },
+          "sensor": { "type": "string", "minLength": 1 },
+          "module": { "type": "string", "minLength": 1 },
+          "lens": { "type": "string", "minLength": 1 },
+          "eeprom_sn": { "type": "string", "minLength": 1 },
+          "calibration_hash": { "type": "string", "minLength": 1 },
+          "tuning_hash": { "type": "string", "minLength": 1 },
+          "media_nodes": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } }
+        }
+      }
+    },
+    "verification": {
+      "type": "object",
+      "required": ["scenarios", "safety"],
+      "additionalProperties": false,
+      "properties": {
+        "scenarios": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["id", "layer", "consumer", "required_evidence", "metrics"],
+            "additionalProperties": false,
+            "properties": {
+              "id": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_.-]*$" },
+              "layer": { "enum": ["static", "unit", "build", "host", "deploy", "delivery", "consumption", "settings_preview", "operation_view", "closed_client", "physical"] },
+              "consumer": { "type": "string", "minLength": 1 },
+              "required_evidence": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+              "metrics": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": ["name", "unit", "operator", "value"],
+                  "additionalProperties": false,
+                  "properties": {
+                    "name": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_.-]*$" },
+                    "unit": { "type": "string", "minLength": 1 },
+                    "operator": { "enum": ["lt", "lte", "gt", "gte", "eq"] },
+                    "value": { "type": "number" }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "safety": {
+          "type": "object",
+          "required": ["read_only_probe_default", "mutations_require_explicit_authorization"],
+          "additionalProperties": false,
+          "properties": {
+            "read_only_probe_default": { "const": true },
+            "mutations_require_explicit_authorization": { "const": true }
+          }
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "project_profile": { "const": "camera" } } },
+      "then": { "properties": { "cameras": { "minItems": 1 } } }
+    }
+  ]
+}

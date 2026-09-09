@@ -1,0 +1,72 @@
+---
+name: camera-image-quality-calibration
+description: Use when camera image quality, focus, color, noise, HDR, calibration, stereo, or depth behavior changes across modules, lenses, EEPROM data, ISP tuning, firmware, environments, or releases and the comparison must be reproducible.
+---
+
+# Camera Image Quality and Calibration
+
+## Purpose
+
+Make image-quality and calibration claims only from comparable captures bound to exact hardware, calibration, tuning, software, scene, and acquisition parameters. Separate objective measurements from subjective observations; neither substitutes for the other.
+
+## Comparability gate
+
+Before comparing candidate and baseline, freeze and prove:
+
+- device, camera position, sensor, module, lens, EEPROM serial/revision;
+- calibration identity/hash and ISP tuning identity/hash;
+- firmware, driver, ISP, algorithm and loaded-artifact identity;
+- resolution, pixel format/bit depth, crop/scale, FPS, exposure/gain, AE/AWB/AF state, white balance, HDR mode, denoise/sharpening, lens shading and compression;
+- chart/scene, illumination spectrum and level, color temperature, distance, pose, temperature, stabilization/warmup, capture count and raw-evidence location.
+
+If an identity or capture parameter differs without a controlled experimental purpose, direct regression comparison is prohibited. Create a new baseline or repeat the capture; record the gap rather than normalizing it away.
+
+## Procedure
+
+1. State the user-visible claim, affected consumer, acceptance thresholds and baseline reference. Route uncertain loaded identities to `embedded-runtime-provenance` and upstream frame-contract failures to `camera-pipeline-contract-audit`.
+2. Build a scene matrix before capture. Cover applicable day/night, low light, high contrast/HDR, backlight, color/chart, flat field, texture/detail, near/far focus, motion, temperature, and stereo/depth scenes. Mark omissions `not_applicable` with a reason.
+3. Capture repeated baseline and candidate samples under locked parameters. Preserve originals and metadata; do not compare screenshots, auto-adjusted previews, differently compressed files, or a hand-picked best frame.
+4. Measure each acceptance property with a named method, unit, ROI, sample count and threshold. Typical metrics include exposure uniformity, white balance/color error, SNR/noise, dynamic range and clipping, MTF/sharpness, autofocus success/time, distortion, shading, bad pixels, temporal flicker, stereo reprojection error, depth bias/completeness/noise and invalid-pixel rate.
+5. Record subjective observations separately by scene and reviewer, preferably blinded and randomized. Words such as “cleaner”, “natural” or “sharper” are observations, not numeric passes.
+6. Check calibration validity independently from pleasing images: schema/version, sensor-module-lens binding, EEPROM read integrity, resolution/crop compatibility, coordinate convention, rectification, reprojection, depth scale and applicable temperature/focus dependency.
+7. Decide per scene, metric and consumer. One missing required scene, incomparable capture, failed threshold or unproven calibration identity prevents an aggregate pass.
+
+## Required output contract
+
+### `capture_baseline`
+
+| Capture set | Device/software identity | Mode and fixed parameters | Scene/lighting/geometry | Warmup/repeats | Raw evidence | Comparable |
+|---|---|---|---|---|---|---|
+
+### `calibration_identity`
+
+| Camera | Sensor | Module/lens | EEPROM identity | Calibration identity | Tuning identity | Loaded evidence | Compatibility/status |
+|---|---|---|---|---|---|---|---|
+
+### `scene_matrix`
+
+| Scene | Day/night/HDR/focus/color/noise/depth applicability | Controlled conditions | Baseline/candidate samples | Required observations/metrics | Status |
+|---|---|---|---|---|---|
+
+### `metric_matrix`
+
+| Scene/ROI | Metric and method | Unit/statistic/sample count | Baseline | Candidate | Threshold/delta | Raw evidence | Status |
+|---|---|---|---|---|---|---|---|
+
+Add a separate subjective-observation table with reviewer, blind/randomized state and evidence. Never merge subjective scores into objective metric rows.
+
+### `comparison_gaps`
+
+List every identity, parameter, scene, evidence or method mismatch; its impact on comparability; the smallest repeat or baseline-reset action; owner and authorization needed. EEPROM, calibration, tuning, register, illumination or device-state mutation requires explicit authorization and rollback evidence.
+
+### `verdict`
+
+For each scenario/consumer report `pass`, `fail`, `incomparable`, or `unresolved`, including passed and failed metrics, subjective observations, calibration validity, allowed claim, prohibited claim and next discriminating capture. Aggregate preserves the weakest required result.
+
+## Anti-patterns
+
+- Comparing different sensors, modules, lenses, EEPROM calibration, tuning, auto-control state, crop, illumination or compression as if only software changed.
+- Calling a visually pleasing preview calibrated, or calling a metric pass visually acceptable.
+- Reporting one frame, one ROI or the best run while hiding distribution, temporal defects or scene-specific regressions.
+- Treating rectification output as proof of depth scale, completeness or consumer behavior.
+- Reusing an old baseline after module, calibration or tuning identity changes.

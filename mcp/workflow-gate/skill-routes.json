@@ -186,6 +186,86 @@
         "missing_windows and verdict"
       ],
       "fallback": "If clocks or raw fields cannot be recovered, preserve per-source order, use logical dependencies only, mark cross-source links candidate, and prohibit timestamp-only causality."
+    },
+    {
+      "skill": "embedded-runtime-provenance",
+      "triggers": [
+        "embedded_build_or_deploy",
+        "bsp_dtb_driver_firmware_identity",
+        "runtime_loaded_object_uncertain"
+      ],
+      "steps": ["plan", "code", "deepcheck", "audit", "verify"],
+      "input_contract": [
+        "device board revision and SoC identity",
+        "intended bootloader kernel DTB rootfs BSP toolchain and component set",
+        "build package deployment slot and runtime-loaded evidence"
+      ],
+      "output_contract": [
+        "hardware_identity and software_baseline",
+        "component_matrix and deployment_runtime_matrix",
+        "mismatches and verdict"
+      ],
+      "fallback": "If a required identity cannot be bound from source and artifact to the target device and runtime-loaded object, mark it unresolved and prohibit an aggregate runtime-correct verdict."
+    },
+    {
+      "skill": "camera-pipeline-contract-audit",
+      "triggers": [
+        "camera_no_frame_or_consumer_gap",
+        "v4l2_media_isp_mipi",
+        "format_timestamp_buffer_contract"
+      ],
+      "steps": ["log", "plan", "code", "deepcheck", "audit", "verify"],
+      "input_contract": [
+        "camera sensor module lens and expected terminal consumer",
+        "power bus MIPI media V4L2 ISP and buffer topology",
+        "format stride colorspace timestamp ownership error and frame evidence"
+      ],
+      "output_contract": [
+        "pipeline_scope and node_matrix",
+        "edge_contract_matrix and buffer_ownership",
+        "breakpoints and verdict"
+      ],
+      "fallback": "If an edge or terminal consumer lacks an observation point, preserve the last positive node, mark later edges unobserved, and name the smallest safe discriminating capture."
+    },
+    {
+      "skill": "embedded-performance-stability",
+      "triggers": [
+        "fps_drop_or_tail_latency",
+        "thermal_throttle_or_resource_pressure",
+        "soak_or_power_budget"
+      ],
+      "steps": ["plan", "code", "deepcheck", "audit", "verify"],
+      "input_contract": [
+        "device software workload and environment baseline",
+        "metric budgets units windows sample rules and measurement points",
+        "resource thermal power and soak evidence locations"
+      ],
+      "output_contract": [
+        "performance_budget and measurement_matrix",
+        "resource_timeline and soak_faults",
+        "verdict"
+      ],
+      "fallback": "If the baseline, budget, raw samples, tail distribution, thermal steady state, or soak duration is missing, report the measured subset and keep stability unresolved."
+    },
+    {
+      "skill": "camera-image-quality-calibration",
+      "triggers": [
+        "image_quality_regression",
+        "camera_module_calibration_or_tuning_change",
+        "day_night_hdr_focus_color_noise"
+      ],
+      "steps": ["plan", "code", "deepcheck", "audit", "verify"],
+      "input_contract": [
+        "sensor module lens EEPROM calibration and tuning identity",
+        "fixed capture controls environment and scene definitions",
+        "reference captures objective metrics and subjective observations"
+      ],
+      "output_contract": [
+        "capture_baseline and calibration_identity",
+        "scene_matrix and metric_matrix",
+        "comparison_gaps and verdict"
+      ],
+      "fallback": "If capture settings, hardware, calibration, tuning, scene, or reference identity drifted, invalidate direct comparison, preserve observations, and request a matched recapture."
     }
   ]
 }

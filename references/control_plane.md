@@ -83,9 +83,9 @@ Git checkout 和逐仓提交契约由 `steps/reopen.md` 先创建/校验；然�
 
 ## 8. 实机验证记录
 
-`record-verification` 在一个事务中追加 `verification_runs` 和 `verification_recorded` 事件，不修改 `patch_history/status/completed_steps/delivery_verdict`。`--evidence` 必填；复用构建时 `--build-source reused` 还必须提供 `--artifact-identity`。
+`record-verification` 在一个事务中追加 `verification_runs` 和 `verification_recorded` 事件，不修改 `patch_history/status/completed_steps/delivery_verdict`。`--evidence` 必填；复用构建时 `--build-source reused` 还必须提供 `--artifact-identity`。embedded/camera 每个验证单元都必须附与合同完全一致的 `--profile`、`--baseline-ref sha256:<64hex>`；有量化指标时再附严格数值对象 `--metrics-json`。布尔、NaN、Infinity 或非对象在加锁写入前拒绝。
 
-需要分层验收时，在 metadata 声明 `verification_contract={required,required_layers,required_consumers,required_scenarios}`，并用 `record-verification --layer --consumer --scenario --baseline` 逐单元记录。只有 `required=true` 才启用 verified 门禁；每个必需单元取最新记录，必须 `outcome=pass` 且 evidence/baseline 非空。合同缺失或 `required=false` 不会给纯 host/历史任务强加真实环境要求。
+需要分层验收时，在 metadata 声明 `verification_contract={required,required_layers,required_consumers,required_scenarios}`，并用 `record-verification --layer --consumer --scenario --baseline` 逐单元记录。缺 `required_cells` 时保持历史语义：验证三维笛卡尔积；提供 `required_cells[]` 时仅验证显式列出的稀疏单元。只有 `required=true` 才启用 verified 门禁；每个必需单元取最新记录，必须 `outcome=pass` 且 evidence/baseline 非空。可选 `profile=generic|embedded|camera`（缺省 generic）与 `required_metrics[]` 为指定 cell 增加量化门槛；指标合同必须带 baseline 的 `sha256:` 摘要，最新记录还须 profile 与摘要匹配、指标满足 `lt/lte/gt/gte/eq`。合同缺失、`required=false` 或未声明指标不会给纯 host/历史任务强加真实环境或性能要求。
 
 `record-claim` 在一个事务中追加 `claims` 和 `claim_recorded` 事件。`kind` 仅允许 `fact/inference/unobserved/refuted`；所有 claim 必须写明 `source` 和“该证据不能证明什么”的 `boundary`，`fact/refuted` 还必须至少有一条 `--evidence`。普通 `metadata-update` 与通用 `event` 均不得伪造 claim。
 
@@ -105,7 +105,7 @@ Git checkout 和逐仓提交契约由 `steps/reopen.md` 先创建/校验；然�
 | index-write | 索引单一 writer | `--ticket-dir` |
 | index-update | 更新索引独有字段 | `--ticket-id [--increment-hit] [--set-json]` |
 | migration | legacy→v3 迁移 | `--dir [--apply]` |
-| record-verification | 原子记录验证 | `--dir --kind --outcome --evidence [--layer --consumer --scenario --baseline]` |
+| record-verification | 原子记录验证 | `--dir --kind --outcome --evidence [--layer --consumer --scenario --baseline --profile --baseline-ref --metrics-json]` |
 | record-claim | 原子记录证据结论 | `--dir --kind --statement --source --boundary [--evidence ...]` |
 | archive-manifest | 生成/校验归档 hash 清单 | `--dir --archive-dir [--write]` |
 | close-phase | 关闭阶段记录 | `--dir --phase [--request-id]` |

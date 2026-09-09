@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "project_profile": "camera",
+  "identity": {
+    "device_id": "camera-lab-001",
+    "board_model": "reference-board",
+    "board_revision": "rev-a",
+    "soc": "reference-soc"
+  },
+  "software": {
+    "bootloader": "u-boot-build-20260909",
+    "kernel": "linux-6.1-build-20260909",
+    "dtb": "reference-board.dtb@sha256:replace-with-real-hash",
+    "rootfs": "rootfs@sha256:replace-with-real-hash",
+    "bsp": "reference-bsp-1.0",
+    "toolchain": "aarch64-linux-gnu-gcc-13"
+  },
+  "components": [
+    {
+      "name": "camera-driver",
+      "kind": "kernel_module",
+      "identity": "camera-driver-build-20260909",
+      "artifact_path": "/lib/modules/camera.ko",
+      "hash": "sha256:replace-with-real-hash",
+      "build_id": "replace-with-real-build-id",
+      "loaded_evidence": "/proc/modules and module sysfs identity captured in the verification window",
+      "required": true
+    }
+  ],
+  "cameras": [
+    {
+      "name": "front",
+      "sensor": "reference-sensor",
+      "module": "reference-module",
+      "lens": "reference-lens",
+      "eeprom_sn": "replace-with-real-eeprom-sn",
+      "calibration_hash": "sha256:replace-with-real-calibration-hash",
+      "tuning_hash": "sha256:replace-with-real-tuning-hash",
+      "media_nodes": ["/dev/media0", "/dev/video0"]
+    }
+  ],
+  "verification": {
+    "scenarios": [
+      {
+        "id": "steady-stream",
+        "layer": "physical",
+        "consumer": "camera_pipeline",
+        "required_evidence": ["device identity, exact time window, frame sequence and timestamps"],
+        "metrics": [
+          {"name": "fps", "unit": "fps", "operator": "gte", "value": 29.0},
+          {"name": "drop_rate", "unit": "percent", "operator": "lte", "value": 0.1}
+        ]
+      }
+    ],
+    "safety": {
+      "read_only_probe_default": true,
+      "mutations_require_explicit_authorization": true
+    }
+  }
+}

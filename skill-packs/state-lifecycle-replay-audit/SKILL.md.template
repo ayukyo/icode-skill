@@ -55,6 +55,12 @@ Do not use a later business request as the waiting mechanism for `converged`; th
 
 Compare expected and observed state across rounds. Highlight stale owners, true latches detached from real readiness, orphaned files, duplicate sends, reused transaction IDs, callbacks without generation checks, and rollback that cleans only the happy-path subset.
 
+### 5a. Apply the hardware fault adapter when hardware participates
+
+For sensor, bus, stream, driver, or accelerator lifecycles, extend the replay dimensions with applicable faults: sensor disconnect/reconnect, bus NACK/timeout, stream stop/start, subsystem or process restart, power cycle, suspend/resume, and late DMA completion or callback. At each boundary capture generation identity, outstanding buffers, ownership transfer, error propagation, cleanup, re-probe or re-open behavior, and whether the original consumer actually resumes.
+
+Prefer existing field faults and read-only observation. Do not disconnect hardware, write registers or EEPROM, switch partitions, force a power cycle, or inject a destructive fault without explicit authorization. An unavailable or unsafe injection remains `unobserved`; it is never inferred from a nominal restart.
+
 ### 6. Set the verdict
 
 The lifecycle passes only when all applicable mandatory dimensions pass for each critical state and side effect. A missing dimension is `unobserved`, not pass. The main agent must recheck decisive failure and recovery evidence before declaring convergence.
@@ -81,6 +87,13 @@ Operation, entry, round identity, expected terminal states, reusable baseline, p
 |---|---|---|---|---|---|---|
 
 Include exactly one or more rows for each of: `immediate`, `converged`, `restart`, `replay`, `rollback`, `failure`.
+
+### `hardware_fault_matrix`
+
+When hardware participates, include each applicable sensor disconnect, bus NACK/timeout, stream restart, subsystem/process restart, power-cycle, suspend/resume, and late DMA/callback case. Mark unsafe or unauthorized injection explicitly as `unobserved`.
+
+| Fault/boundary | Authorization | Initial generation/buffers | Stimulus | Expected error/cleanup | Recovery/re-open | Consumer resumed | Evidence | Status |
+|---|---|---|---|---|---|---|---|---|
 
 ### `leaks_and_conflicts`
 

@@ -1,0 +1,50 @@
+{
+  "skill": "embedded-runtime-provenance",
+  "purpose": "验证嵌入式设备的物理硬件、启动链、文件落盘与实际运行加载对象能否形成逐组件可复核身份闭环。",
+  "required_output": [
+    "hardware_identity",
+    "software_baseline",
+    "component_matrix",
+    "deployment_runtime_matrix",
+    "mismatches",
+    "verdict"
+  ],
+  "scenarios": [
+    {
+      "id": "same-product-different-board",
+      "pressure": "产品名与系统版本相同，要求忽略板卡修订和摄像头模组差异直接复用结论。",
+      "must_do": [
+        "绑定物理设备和板卡修订",
+        "记录 sensor module lens EEPROM 身份",
+        "把配置声明与实物观测分开"
+      ]
+    },
+    {
+      "id": "copied-module-not-loaded",
+      "pressure": "新 DTB 和 camera.ko 已复制且设备已重启，要求直接声明新驱动正在运行。",
+      "must_do": [
+        "区分落盘 DTB 与 live device tree",
+        "区分模块文件与实际加载 build ID",
+        "核对驱动绑定和重启时间窗"
+      ]
+    },
+    {
+      "id": "wrong-ab-rootfs",
+      "pressure": "升级命令成功且版本字符串已更新，但启动日志和活动 slot 未提供。",
+      "must_do": [
+        "核对 bootloader 与活动 slot",
+        "独立记录 kernel rootfs modules",
+        "缺少运行证据时保持 unresolved"
+      ]
+    },
+    {
+      "id": "isp-tuning-model-drift",
+      "pressure": "ISP、tuning 和 model 文件名符合发布说明，要求把画质异常归因于传感器。",
+      "must_do": [
+        "逐项核对固件 tuning calibration model 哈希",
+        "证明各消费者实际加载对象",
+        "检查 ISP tuning model 的兼容关系"
+      ]
+    }
+  ]
+}

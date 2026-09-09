@@ -42,6 +42,8 @@ lint_workflow_contract.py —— workflow gate（工作流硬门禁）运行时�
 import sys
 import json
 import argparse
+import math
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -364,6 +366,88 @@ def validate_delivery_evidence(metadata: Dict, catalog: Dict) -> List[str]:
         issues.append(f"verification_contract.required_layers 含未知层: {unknown_layers}")
         return issues
 
+    raw_cells = contract.get("required_cells")
+    if raw_cells is None:
+        cells = [
+            (layer, consumer, scenario)
+            for layer in layers for consumer in consumers for scenario in scenarios
+        ]
+    else:
+        if not isinstance(raw_cells, list) or not raw_cells:
+            return ["verification_contract.required_cells 必须是非空数组"]
+        cells = []
+        for index, cell in enumerate(raw_cells):
+            prefix = f"verification_contract.required_cells[{index}]"
+            if not isinstance(cell, dict):
+                issues.append(f"{prefix} 非对象")
+                continue
+            if set(cell) != {"layer", "consumer", "scenario"}:
+                issues.append(f"{prefix} 必须且只能包含 layer/consumer/scenario")
+                continue
+            key = (cell["layer"], cell["consumer"], cell["scenario"])
+            if any(not isinstance(value, str) or not value.strip() for value in key):
+                issues.append(f"{prefix} 字段必须为非空字符串")
+                continue
+            if key[0] not in layers or key[1] not in consumers or key[2] not in scenarios:
+                issues.append(f"{prefix} 未落在 required 维度内")
+            cells.append(key)
+        if len(cells) != len(set(cells)):
+            issues.append("verification_contract.required_cells 含重复单元")
+        if issues:
+            return issues
+    cell_set = set(cells)
+
+    profile = contract.get("profile", "generic")
+    if profile not in {"generic", "embedded", "camera"}:
+        return [f"verification_contract.profile 非法: {profile!r}"]
+    required_metrics = contract.get("required_metrics", [])
+    if not isinstance(required_metrics, list):
+        return ["verification_contract.required_metrics 非数组"]
+    metric_keys = set()
+    operators = {"lt", "lte", "gt", "gte", "eq"}
+    for index, metric in enumerate(required_metrics):
+        prefix = f"verification_contract.required_metrics[{index}]"
+        if not isinstance(metric, dict):
+            issues.append(f"{prefix} 非对象")
+            continue
+        required_keys = {"name", "unit", "operator", "value", "layer", "consumer", "scenario"}
+        missing_keys = sorted(required_keys - set(metric))
+        if missing_keys:
+            issues.append(f"{prefix} 缺字段: {missing_keys}")
+            continue
+        string_fields = ("name", "unit", "operator", "layer", "consumer", "scenario")
+        invalid_strings = [
+            field for field in string_fields
+            if not isinstance(metric[field], str) or not metric[field].strip()
+        ]
+        if invalid_strings:
+            issues.append(f"{prefix} 字段必须为非空字符串: {invalid_strings}")
+            continue
+        key = (metric["layer"], metric["consumer"], metric["scenario"], metric["name"])
+        if key in metric_keys:
+            issues.append(f"{prefix} 重复指标: {key}")
+        metric_keys.add(key)
+        if key[:3] not in cell_set:
+            issues.append(f"{prefix} 未落在 required 验证单元内")
+        if metric["operator"] not in operators:
+            issues.append(f"{prefix}.operator 非法: {metric['operator']!r}")
+        value = metric["value"]
+        if isinstance(value, bool) or not isinstance(value, (int, float)) \
+                or not math.isfinite(value):
+            issues.append(f"{prefix}.value 必须是有限数值")
+    if issues:
+        return issues
+    expected_baseline_ref = contract.get("baseline_ref")
+    identity_required = profile in {"embedded", "camera"} or expected_baseline_ref is not None
+    if identity_required and (
+        not isinstance(expected_baseline_ref, str)
+        or re.fullmatch(r"sha256:[0-9a-f]{64}", expected_baseline_ref) is None
+    ):
+        return [
+            "verification_contract 的 embedded/camera profile 或显式基线"
+            "必须提供 sha256 baseline_ref"
+        ]
+
     runs = metadata.get("verification_runs") or []
     if not isinstance(runs, list):
         return ["verification_runs 非数组"]
@@ -372,25 +456,63 @@ def validate_delivery_evidence(metadata: Dict, catalog: Dict) -> List[str]:
         if not isinstance(run, dict):
             continue
         key = (run.get("layer"), run.get("consumer"), run.get("scenario"))
-        if key[0] in layers and key[1] in consumers and key[2] in scenarios:
+        if key in cell_set:
             latest[key] = run
 
-    for layer in layers:
-        for consumer in consumers:
-            for scenario in scenarios:
-                key = (layer, consumer, scenario)
-                run = latest.get(key)
-                label = f"layer={layer}, consumer={consumer}, scenario={scenario}"
-                if run is None:
-                    issues.append(f"delivery_evidence 缺 required cell: {label}")
-                    continue
-                outcome = run.get("outcome")
-                if outcome != "pass":
-                    issues.append(f"delivery_evidence required cell {label} 最新 outcome={outcome}")
-                if not isinstance(run.get("evidence"), str) or not run["evidence"].strip():
-                    issues.append(f"delivery_evidence required cell {label} 缺 evidence")
-                if not isinstance(run.get("baseline"), str) or not run["baseline"].strip():
-                    issues.append(f"delivery_evidence required cell {label} 缺 baseline")
+    for layer, consumer, scenario in cells:
+        key = (layer, consumer, scenario)
+        run = latest.get(key)
+        label = f"layer={layer}, consumer={consumer}, scenario={scenario}"
+        if run is None:
+            issues.append(f"delivery_evidence 缺 required cell: {label}")
+            continue
+        outcome = run.get("outcome")
+        if outcome != "pass":
+            issues.append(f"delivery_evidence required cell {label} 最新 outcome={outcome}")
+        if not isinstance(run.get("evidence"), str) or not run["evidence"].strip():
+            issues.append(f"delivery_evidence required cell {label} 缺 evidence")
+        if not isinstance(run.get("baseline"), str) or not run["baseline"].strip():
+            issues.append(f"delivery_evidence required cell {label} 缺 baseline")
+        if identity_required:
+            if run.get("profile") != profile:
+                issues.append(
+                    f"delivery_evidence required cell {label} "
+                    f"profile={run.get('profile')!r}，期望 {profile!r}")
+            if not isinstance(run.get("baseline_ref"), str) or not run["baseline_ref"].strip():
+                issues.append(f"delivery_evidence required cell {label} 缺 baseline_ref")
+            elif run["baseline_ref"] != expected_baseline_ref:
+                issues.append(
+                    f"delivery_evidence required cell {label} "
+                    f"baseline_ref={run['baseline_ref']!r}，期望 {expected_baseline_ref!r}")
+    comparisons = {
+        "lt": lambda actual, expected: actual < expected,
+        "lte": lambda actual, expected: actual <= expected,
+        "gt": lambda actual, expected: actual > expected,
+        "gte": lambda actual, expected: actual >= expected,
+        "eq": lambda actual, expected: actual == expected,
+    }
+    for metric in required_metrics:
+        key = (metric["layer"], metric["consumer"], metric["scenario"])
+        run = latest.get(key)
+        label = (f"metric {metric['name']} at layer={key[0]}, consumer={key[1]}, "
+                 f"scenario={key[2]}")
+        if run is None:
+            # 缺 cell 已在上方报告，避免重复噪音。
+            continue
+        metrics = run.get("metrics")
+        if not isinstance(metrics, dict) or metric["name"] not in metrics:
+            issues.append(f"delivery_evidence 缺 {label}")
+            continue
+        actual = metrics[metric["name"]]
+        if isinstance(actual, bool) or not isinstance(actual, (int, float)) \
+                or not math.isfinite(actual):
+            issues.append(f"delivery_evidence {label} 实测值必须是有限数值")
+            continue
+        expected = metric["value"]
+        if not comparisons[metric["operator"]](actual, expected):
+            issues.append(
+                f"delivery_evidence {label} 实测 {actual} 未满足 "
+                f"{metric['operator']} {expected} {metric['unit']}")
     return issues
 
 

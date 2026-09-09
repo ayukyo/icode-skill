@@ -35,6 +35,7 @@ import argparse
 import fcntl
 import hashlib
 import json
+import math
 import os
 import re
 import subprocess
@@ -91,13 +92,21 @@ def now_iso():
     return datetime.now().isoformat(timespec="seconds")
 
 
+def reject_nonfinite_json(value):
+    raise ValueError(f"JSON 禁止非有限数 {value}")
+
+
+def strict_json_loads(value):
+    return json.loads(value, parse_constant=reject_nonfinite_json)
+
+
 def load_json(path, what):
     try:
         with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
+            return json.load(f, parse_constant=reject_nonfinite_json)
     except FileNotFoundError:
         raise ControlError(f"{what} 不存在: {path}", exit_code=1, path=str(path))
-    except json.JSONDecodeError as exc:
+    except (json.JSONDecodeError, ValueError) as exc:
         raise ControlError(f"{what} JSON 解析失败: {path}: {exc}", exit_code=1, path=str(path))
 
 
@@ -190,7 +199,8 @@ def _check_type(value, types, path, errors):
         "array": lambda v: isinstance(v, list),
         "string": lambda v: isinstance(v, str),
         "integer": lambda v: isinstance(v, int) and not isinstance(v, bool),
-        "number": lambda v: isinstance(v, (int, float)) and not isinstance(v, bool),
+        "number": lambda v: isinstance(v, (int, float)) and not isinstance(v, bool)
+                            and math.isfinite(v),
         "boolean": lambda v: isinstance(v, bool),
         "null": lambda v: v is None,
     }
@@ -505,8 +515,8 @@ def read_events(out_dir):
                 if not line:
                     continue
                 try:
-                    events.append(json.loads(line))
-                except json.JSONDecodeError:
+                    events.append(strict_json_loads(line))
+                except (json.JSONDecodeError, ValueError):
                     raise ControlError(f"事件日志第 {lineno} 行 JSON 解析失败（可能被截断/篡改）: {path}",
                                        exit_code=1, event_chain_broken_at_line=lineno)
     except OSError as exc:
@@ -875,8 +885,8 @@ def run_gate_linters(out_dir, to_status=None, delivery_verdict=None, legacy=Fals
             continue
         report = None
         try:
-            report = json.loads(proc.stdout)
-        except json.JSONDecodeError:
+            report = strict_json_loads(proc.stdout)
+        except (json.JSONDecodeError, ValueError):
             pass
         # 所有门禁命令都声明 --json；exit 0 但没有 JSON 报告不能当成可审计通过。
         ok = proc.returncode == 0 and isinstance(report, dict)
@@ -914,8 +924,8 @@ def cmd_create(args):
     out_dir.parent.mkdir(parents=True, exist_ok=True)
     out_dir.mkdir(exist_ok=True)
     try:
-        seed = json.loads(args.metadata_json) if args.metadata_json else {}
-    except json.JSONDecodeError as exc:
+        seed = strict_json_loads(args.metadata_json) if args.metadata_json else {}
+    except (json.JSONDecodeError, ValueError) as exc:
         raise ControlError(f"--metadata-json 不是合法 JSON: {exc}", exit_code=2)
     if not isinstance(seed, dict):
         raise ControlError("--metadata-json 必须是 JSON 对象", exit_code=2)
@@ -1180,8 +1190,8 @@ def cmd_event(args):
             hint="使用 create/transition/metadata-update/record-verification/snapshot/"
                  "close-phase/reopen/index-write/migration")
     try:
-        payload = json.loads(args.payload) if args.payload else {}
-    except json.JSONDecodeError as exc:
+        payload = strict_json_loads(args.payload) if args.payload else {}
+    except (json.JSONDecodeError, ValueError) as exc:
         raise ControlError(f"--payload 不是合法 JSON: {exc}", exit_code=2)
     if not isinstance(payload, dict):
         raise ControlError("--payload 必须是 JSON 对象", exit_code=2)
@@ -1614,8 +1624,8 @@ def cmd_index_update(args):
     """更新索引独有的检索/LRU 字段；禁止改写工单身份三元组。"""
     index_path = Path(args.index) if args.index else INDEX_PATH
     try:
-        updates = json.loads(args.set_json) if args.set_json else {}
-    except json.JSONDecodeError as exc:
+        updates = strict_json_loads(args.set_json) if args.set_json else {}
+    except (json.JSONDecodeError, ValueError) as exc:
         raise ControlError(f"--set-json 不是合法 JSON: {exc}", exit_code=2)
     if not isinstance(updates, dict):
         raise ControlError("--set-json 必须是 JSON 对象", exit_code=2)
@@ -2014,9 +2024,9 @@ def cmd_metadata_update(args):
     """原子更新已登记业务字段；生命周期控制字段只允许专用命令维护。"""
     out_dir = Path(args.dir).resolve()
     try:
-        updates = json.loads(args.set_json) if args.set_json else {}
-        appends = json.loads(args.append_json) if args.append_json else {}
-    except json.JSONDecodeError as exc:
+        updates = strict_json_loads(args.set_json) if args.set_json else {}
+        appends = strict_json_loads(args.append_json) if args.append_json else {}
+    except (json.JSONDecodeError, ValueError) as exc:
         raise ControlError(f"metadata-update 参数不是合法 JSON: {exc}", exit_code=2)
     if not isinstance(updates, dict) or not isinstance(appends, dict):
         raise ControlError("--set-json/--append-json 必须是 JSON 对象", exit_code=2)
@@ -2206,6 +2216,25 @@ def cmd_record_verification(args):
     if args.build_source == "reused" and not args.artifact_identity:
         raise ControlError("--build-source reused 必须提供 --artifact-identity 核对产物",
                            exit_code=2, gate_id="reused_artifact_identity")
+    metrics = None
+    if args.metrics_json is not None:
+        try:
+            metrics = strict_json_loads(args.metrics_json)
+        except (json.JSONDecodeError, ValueError) as exc:
+            raise ControlError(f"--metrics-json 必须是严格 JSON 对象: {exc}", exit_code=2,
+                               gate_id="verification_metrics")
+        if not isinstance(metrics, dict):
+            raise ControlError("--metrics-json 必须是 JSON 对象", exit_code=2,
+                               gate_id="verification_metrics")
+        name_pattern = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]*$")
+        for name, value in metrics.items():
+            if not name_pattern.fullmatch(name):
+                raise ControlError(f"非法指标名: {name!r}", exit_code=2,
+                                   gate_id="verification_metrics")
+            if isinstance(value, bool) or not isinstance(value, (int, float)) \
+                    or not math.isfinite(value):
+                raise ControlError(f"指标 {name!r} 必须是有限数值", exit_code=2,
+                                   gate_id="verification_metrics")
     input_payload = {
         "kind": args.kind,
         "build_source": args.build_source,
@@ -2215,6 +2244,9 @@ def cmd_record_verification(args):
         "layer": args.layer,
         "consumer": args.consumer,
         "scenario": args.scenario,
+        "profile": args.profile,
+        "baseline_ref": args.baseline_ref,
+        "metrics": metrics,
         "baseline": args.baseline,
         "outcome": args.outcome,
         "evidence": args.evidence,
@@ -2399,8 +2431,8 @@ def cmd_reopen(args):
     """在永久归档控制根上解冻 closed 工单，保留原事件链和 ticket_id。"""
     out_dir = Path(args.dir).resolve()
     try:
-        updates = json.loads(args.metadata_json)
-    except json.JSONDecodeError as exc:
+        updates = strict_json_loads(args.metadata_json)
+    except (json.JSONDecodeError, ValueError) as exc:
         raise ControlError(f"--metadata-json 不是合法 JSON: {exc}", exit_code=2)
     if not isinstance(updates, dict):
         raise ControlError("--metadata-json 必须是 JSON 对象", exit_code=2)
@@ -2838,6 +2870,12 @@ def build_parser():
     ])
     p.add_argument("--consumer")
     p.add_argument("--scenario")
+    p.add_argument("--profile", choices=["generic", "embedded", "camera"])
+    p.add_argument(
+        "--baseline-ref",
+        help="与 verification_contract.baseline_ref 完全一致的 sha256:<64位小写十六进制> 摘要",
+    )
+    p.add_argument("--metrics-json", help="本次实测指标 JSON 对象，例如 {\"fps\":29.7}")
     p.add_argument("--baseline", help="本次验证绑定的代码/产物/设备基线")
     p.add_argument("--evidence", required=True)
     p.add_argument("--note")

@@ -158,18 +158,61 @@
     },
 
     "verification_contract": {
-      "description": "显式分层验证合同。仅 required=true 时，delivery_verdict=verified 需要 required_layers × required_consumers × required_scenarios 的最新记录全部 pass。",
+      "description": "显式分层验证合同。仅 required=true 时，delivery_verdict=verified 需要 required_cells（缺省为三个 required 维度的笛卡尔积）的最新记录全部 pass；embedded/camera profile 必须绑定 baseline 摘要，并可声明量化指标门槛。",
       "type": ["object", "null"],
       "required": ["required", "required_layers", "required_consumers", "required_scenarios"],
       "properties": {
         "required": { "type": "boolean" },
+        "profile": { "enum": ["generic", "embedded", "camera"] },
+        "baseline_ref": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
         "required_layers": {
           "type": "array",
           "items": { "enum": ["static", "unit", "build", "host", "deploy", "delivery", "consumption", "settings_preview", "operation_view", "closed_client", "physical"] }
         },
         "required_consumers": { "type": "array", "items": { "type": "string", "minLength": 1 } },
-        "required_scenarios": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+        "required_scenarios": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "required_cells": {
+          "description": "可选稀疏验证单元；存在时替代三个 required 维度的笛卡尔积。",
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["layer", "consumer", "scenario"],
+            "properties": {
+              "layer": { "enum": ["static", "unit", "build", "host", "deploy", "delivery", "consumption", "settings_preview", "operation_view", "closed_client", "physical"] },
+              "consumer": { "type": "string", "minLength": 1 },
+              "scenario": { "type": "string", "minLength": 1 }
+            },
+            "additionalProperties": false
+          }
+        },
+        "required_metrics": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "unit", "operator", "value", "layer", "consumer", "scenario"],
+            "properties": {
+              "name": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_.-]*$" },
+              "unit": { "type": "string", "minLength": 1 },
+              "operator": { "enum": ["lt", "lte", "gt", "gte", "eq"] },
+              "value": { "type": "number" },
+              "layer": { "enum": ["static", "unit", "build", "host", "deploy", "delivery", "consumption", "settings_preview", "operation_view", "closed_client", "physical"] },
+              "consumer": { "type": "string", "minLength": 1 },
+              "scenario": { "type": "string", "minLength": 1 }
+            },
+            "additionalProperties": false
+          }
+        }
       },
+      "allOf": [
+        {
+          "if": {
+            "required": ["profile"],
+            "properties": { "profile": { "enum": ["embedded", "camera"] } }
+          },
+          "then": { "required": ["baseline_ref"] }
+        }
+      ],
       "additionalProperties": false
     },
 
@@ -190,6 +233,13 @@
           "layer": { "enum": ["static", "unit", "build", "host", "deploy", "delivery", "consumption", "settings_preview", "operation_view", "closed_client", "physical", null] },
           "consumer": { "type": ["string", "null"] },
           "scenario": { "type": ["string", "null"] },
+          "profile": { "enum": ["generic", "embedded", "camera", null] },
+          "baseline_ref": { "type": ["string", "null"] },
+          "metrics": {
+            "type": ["object", "null"],
+            "propertyNames": { "pattern": "^[A-Za-z][A-Za-z0-9_.-]*$" },
+            "additionalProperties": { "type": "number" }
+          },
           "baseline": { "type": ["string", "null"] },
           "outcome": { "enum": ["pass", "fail", "inconclusive"] },
           "evidence": { "type": ["string", "null"] },

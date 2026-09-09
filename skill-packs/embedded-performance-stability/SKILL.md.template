@@ -1,0 +1,80 @@
+---
+name: embedded-performance-stability
+description: Use when an embedded or camera workload must meet latency, throughput, frame-rate, CPU, memory, thermal, I/O, drop-rate, long-run, restart, or fault-recovery targets on target hardware.
+---
+
+# Embedded Performance Stability
+
+## Purpose
+
+Turn “runs normally” into a reproducible performance and stability claim bound to target hardware, software, workload, measurable budgets, statistical samples, and long-run fault evidence.
+
+## Core rules
+
+- Freeze the device, artifact, configuration, power and thermal conditions, workload, and baseline before measuring. Use `embedded-runtime-provenance` when any runtime component identity is uncertain.
+- Every required metric needs a unit, comparison operator, threshold, layer, consumer, scenario, sampling method, and evidence pointer. A target without a measurement method is not a budget.
+- Record warmup separately from measured samples. Report sample count, window, min/max, mean, median, and relevant tail percentiles such as p95/p99; do not use an average to hide jitter, stalls, frame drops, or thermal degradation.
+- Correlate performance with CPU, memory, thermal, I/O, scheduling, queue or buffer pressure, drop/error counters, and throttling state on one monotonic timeline.
+- A short functional run is not soak evidence. A soak pass requires the stated duration or workload count, stable resource trends, no unresolved fault, and bounded recovery after injected or naturally occurring faults.
+- Missing target-hardware, baseline, percentile, duration, or fault evidence is `unobserved`, never pass.
+
+## Procedure
+
+### 1. Freeze scope and budgets
+
+Record device and software identity, scenario, workload rate and data shape, power mode, thermal ambient, CPU/GPU/NPU frequency policy, storage and network conditions, startup state, duration, and comparator baseline. Translate acceptance into numeric latency, FPS/throughput, drop/error, CPU, memory, temperature, I/O, startup, and recovery budgets. Mark irrelevant metrics `not_required` with a reason.
+
+### 2. Design representative measurements
+
+For each scenario define warmup, sample period, sample count or duration, repetitions, timestamp source, clock domain, aggregation, and raw-evidence location. Separate steady-state, burst, cold start, restart, degraded input, and resource-pressure cases. Preserve raw samples whenever aggregate results are reported.
+
+### 3. Capture a correlated resource timeline
+
+Measure the user-visible or consumer metric and system resources over the same interval: per-process/thread CPU, memory RSS/PSS and growth, allocator or leak indicators, temperature, frequency and throttling, storage/network bandwidth and latency, IRQ/scheduler pressure, queue depth, buffer occupancy, frame or packet drop, end-to-end latency, and device errors. If clocks differ, document alignment uncertainty.
+
+### 4. Run soak and fault scenarios
+
+Run for the contract duration or count, including applicable sensor disconnect/reconnect, input loss, I/O error, backpressure, memory pressure, thermal pressure, process restart, and repeated start/stop. Record fault time, symptom, recovery deadline, observed recovery, residual resource/state drift, and post-recovery budget results. Fault injection or device mutation requires explicit authorization; otherwise provide the exact safe plan and mark it blocked.
+
+### 5. Compare and decide
+
+Evaluate every metric against its operator and threshold per scenario and repetition. Compare early versus late windows and the bound baseline to expose drift or regression. One required fail, missing row, unexplained reset, leak trend, thermal throttle, or recovery miss prevents pass.
+
+## Required output contract
+
+### `performance_budget`
+
+| Metric | Unit | Operator/threshold | Layer | Consumer | Scenario | Baseline | Required |
+|---|---|---|---|---|---|---|---|
+
+### `measurement_matrix`
+
+| Scenario/run | Warmup | Sample window/count | Statistic | Result | Budget | Raw evidence | Status |
+|---|---|---|---|---|---|---|---|
+
+Include required latency, throughput/FPS, frame or packet drop, CPU, memory, thermal, I/O, startup, and recovery metrics, or an explicit `not_required` reason.
+
+### `resource_timeline`
+
+| Time/window | Workload/event | CPU | Memory | Thermal/frequency | I/O | Queue/drop/latency | Evidence |
+|---|---|---|---|---|---|---|---|
+
+State clock source and alignment uncertainty. Highlight drift, saturation, throttling, allocation growth, stalls, and resets.
+
+### `soak_faults`
+
+| Duration/count | Fault or pressure | Injection authorization | Expected recovery | Observed recovery | Residual drift | Post-recovery budgets | Status |
+|---|---|---|---|---|---|---|---|
+
+### `verdict`
+
+State `pass`, `fail`, `partially_verified`, or `blocked`; list passed profiles, failed or unobserved budgets, allowed claim, prohibited overclaim, regression against baseline, and next discriminating run.
+
+## Anti-patterns
+
+- Calling a few minutes, one image, or one restart a stability or soak pass.
+- Reporting only mean FPS or latency without sample count, distribution, p95/p99, and drops.
+- Benchmarking an unbound build, simulator, or host and applying the result to target hardware.
+- Sampling CPU, memory, temperature, and I/O in unrelated windows, then claiming causality.
+- Ignoring thermal throttling, memory growth, queue buildup, or post-fault degradation because output continued.
+- Averaging multiple scenarios or repetitions so one required failure disappears.

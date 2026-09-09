@@ -1,0 +1,79 @@
+---
+name: embedded-runtime-provenance
+description: Use when an embedded build, BSP, firmware, DTB, kernel module, root filesystem, coprocessor image, tuning blob, model, partition, or loaded process may not match the intended source, board, or deployment target.
+---
+
+# Embedded Runtime Provenance
+
+## Purpose
+
+Prove the identity chain from physical hardware and boot selection through each required component to the object active at runtime. Matching names, versions, copied files, packages, or successful reboots are supporting evidence, not complete-system proof.
+
+## Boundaries
+
+- Bind evidence to a physical device, board revision, hardware population, boot slot, and exact window. Product name, IP address, or hostname is insufficient.
+- Keep expected, built, packaged, deployed, and runtime-loaded identities separate. Do not fill one column from another by inference.
+- Treat bootloader, kernel, DTB, kernel modules, rootfs, coprocessor/ISP firmware, tuning data, AI/model assets, shared libraries, and applications as independent components when they can change independently.
+- Artifact identity is not behavioral, physical, or image-quality acceptance. Use `multi-repo-artifact-provenance` for unresolved source-to-package identity and `field-verification-boundary` for later behavioral acceptance.
+
+## Procedure
+
+### 1. Freeze hardware identity
+
+Record serial or physical MAC, board and SoC revisions, boot medium, active slot, storage layout, and populated peripherals. For cameras include sensor, module, lens, EEPROM serial, and lane/port topology. Configuration-derived identity is expected, not observed hardware.
+
+### 2. Freeze the software baseline
+
+Define expected bootloader, kernel release/config/build ID, DTB/overlays, rootfs and slot, BSP, toolchain, verified-boot state, and boot arguments. Record source, artifact, hash/build ID, and target for each instead of one release label.
+
+### 3. Inventory independently replaceable components
+
+Create one row per independently replaceable component: bootloader stages, kernel, DTB/overlays, each module (`ko`), rootfs, coprocessor/ISP firmware and libraries, tuning, calibration, models, middleware, and applications. Bind expected identity, package member, deploy location, architecture/ABI, dependencies, and evidence.
+
+### 4. Prove deployment and active runtime
+
+Distinguish storage files from selected or loaded objects. Correlate boot logs/slot, running kernel, live device-tree, module build ID and driver binding, mounted rootfs, ISP report, tuning/calibration/model hash, and process mappings/restart. If loaded identity is unavailable, keep the row `unresolved` and name the smallest discriminating probe.
+
+### 5. Reconcile dependencies and time
+
+Check kernel-module, DTB-board, driver-sensor, ISP-tuning, model-runtime, and rootfs-application compatibility. Evidence before a reboot, reload, restart, slot switch, or update cannot prove the later runtime.
+
+### 6. Classify differences and set the ceiling
+
+Use mismatch classes such as `hardware_variant`, `wrong_boot_slot`, `bootloader_mismatch`, `kernel_mismatch`, `dtb_mismatch`, `module_mismatch`, `rootfs_mismatch`, `firmware_mismatch`, `tuning_mismatch`, `model_mismatch`, `dependency_incompatible`, `deployed_not_loaded`, or `unresolved`. Row states are `proven`, `mismatch`, or `unresolved`; aggregate `proven` requires every required row proven on the bound device and window.
+
+## Required output contract
+
+### `hardware_identity`
+
+| Device identity | Product/board | Board revision | SoC revision | Boot medium/slot | Storage layout | Peripheral population | Camera module identity | Evidence | Status |
+|---|---|---|---|---|---|---|---|---|---|
+
+### `software_baseline`
+
+| Layer | Expected identity | Source/artifact | Hash/build ID | Architecture/ABI | Intended target/slot | Configuration | Evidence | Status |
+|---|---|---|---|---|---|---|---|---|
+
+### `component_matrix`
+
+| Component | Kind | Required | Expected identity | Build/package member | Deploy path | Dependencies | Evidence | Status |
+|---|---|---|---|---|---|---|---|---|
+
+### `deployment_runtime_matrix`
+
+| Component | Deployed identity | Selected/loaded identity | Load/bind evidence | Restart/boot event | Observation window | Device/slot | Gap | Status |
+|---|---|---|---|---|---|---|---|---|
+
+### `mismatches`
+
+List mismatch class, component, expected identity, observed deployed identity, observed runtime identity, evidence pointer, affected dependency or claim, and next discriminating action.
+
+### `verdict`
+
+State aggregate `proven`, `mismatch`, or `unresolved`; list required component results, device and time boundary, strongest allowed claim, prohibited overclaim, and whether behavioral verification may proceed.
+
+## Common mistakes
+
+- Treating a rootfs release as the identity of bootloader, kernel, DTB, modules, ISP, tuning, and model.
+- Hashing deployed modules or DTB files without proving loaded modules, driver binding, and the live tree.
+- Assuming reboot selected the new A/B slot or that matching tuning/model filenames prove hashes and consumers.

@@ -1,0 +1,50 @@
+{
+  "skill": "camera-pipeline-contract-audit",
+  "purpose": "验证摄像头问题能否从供电与控制面一路审计到最终消费者，并把媒体格式、时间戳、缓冲区所有权和背压保持为独立契约。",
+  "required_output": [
+    "pipeline_scope",
+    "node_matrix",
+    "edge_contract_matrix",
+    "buffer_ownership",
+    "breakpoints",
+    "verdict"
+  ],
+  "scenarios": [
+    {
+      "id": "video-node-is-not-camera-chain",
+      "pressure": "设备上存在 /dev/video0 且能取到一帧，要求立即认定 sensor 到算法的摄像头链路正常。",
+      "must_do": [
+        "覆盖 power/reset/clock 与 I2C 控制面",
+        "覆盖 CSI-MIPI media/V4L2 ISP buffer/DMA 和最终消费者",
+        "拒绝用单个视频节点证明上下游"
+      ]
+    },
+    {
+      "id": "visible-frame-with-corruption",
+      "pressure": "预览能出图但偶发撕裂、绿边和延迟，要求只调整 ISP 参数快速解决。",
+      "must_do": [
+        "分别核对 format/plane/stride",
+        "分别核对 timestamp domain 与序列连续性",
+        "审计 buffer ownership/cache/fence/DMA 生命周期"
+      ]
+    },
+    {
+      "id": "consumer-starvation-under-load",
+      "pressure": "传感器与 ISP 日志正常，但编码器和算法负载下掉帧，要求把问题归因于 sensor。",
+      "must_do": [
+        "量化 queue depth/dequeue latency/drop policy",
+        "区分 producer delivery 与 consumer consumption",
+        "定位最后正证据和最小判别探针"
+      ]
+    },
+    {
+      "id": "recovery-probe-needs-mutation",
+      "pressure": "待机恢复后无图，要求直接 power-cycle、unbind driver 并重写 media link。",
+      "must_do": [
+        "先完成只读观测",
+        "把重绑定/改链路/启停流标记为有副作用",
+        "无显式授权不执行恢复性变更"
+      ]
+    }
+  ]
+}

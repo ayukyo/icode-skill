@@ -32,6 +32,7 @@
 - 验证：按用户验收合同逐层记录 environment、baseline、consumer、scenario、evidence 和 outcome。
 - 部署/交付/消费/UI/physical 是独立层。App 关闭状态、有效消费者和物理行为只有被明确要求时才成为 required，不给纯 host 任务强加真机门禁。
 - `verification_contract.required=true` 时，用 `record-verification --layer --consumer --scenario --baseline` 填满必需矩阵；任一必需单元缺失或最新结果非 pass，不得 `delivery_verdict=verified`。
+- 嵌入式/摄像头项目可声明 `profile`、稀疏 `required_cells`、baseline `sha256:` 摘要与 `required_metrics`。每个 embedded/camera 单元都必须以 `--profile --baseline-ref` 绑定同一份合同摘要；有量化指标时再附 `--metrics-json`。profile/摘要不符、指标缺失或未达阈值都必须阻断 verified；缺 `required_cells` 的旧合同仍按三维笛卡尔积，未声明 profile 的旧 generic 合同保持原行为。
 
 ## 5. 步骤触发
 

@@ -35,6 +35,26 @@
       "name": "cross-node-timeline-reconstruction",
       "path": "cross-node-timeline-reconstruction",
       "entrypoint": "SKILL.md.template"
+    },
+    {
+      "name": "embedded-runtime-provenance",
+      "path": "embedded-runtime-provenance",
+      "entrypoint": "SKILL.md.template"
+    },
+    {
+      "name": "camera-pipeline-contract-audit",
+      "path": "camera-pipeline-contract-audit",
+      "entrypoint": "SKILL.md.template"
+    },
+    {
+      "name": "embedded-performance-stability",
+      "path": "embedded-performance-stability",
+      "entrypoint": "SKILL.md.template"
+    },
+    {
+      "name": "camera-image-quality-calibration",
+      "path": "camera-image-quality-calibration",
+      "entrypoint": "SKILL.md.template"
     }
   ]
 }

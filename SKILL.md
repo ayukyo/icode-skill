@@ -66,6 +66,8 @@ description: 端到端编码工作流（步骤 0~6，含需求初稿、日志根
 
 **新工单一律 schema v3**，经 `tools/icode_control.py create` 原子创建 metadata+出生事件；状态流转、普通 metadata、事件链、验证记录、索引、迁移、归档校验、关闭与重开由控制面统一执行，**禁止绕过直写**。文中凡称“写/更新/追加 metadata”，除已明确指定专用命令的控制字段外，均指调用 `metadata-update --set-json/--append-json`，不是自行读改写 JSON。机器真源：状态机 = [mcp/workflow-gate/gates.json](mcp/workflow-gate/gates.json)；数据 schema = [schemas/](schemas/)；执行器子命令 = `create/resolve-ticket/validate/event/transition/metadata-update/index-write/index-update/migration/record-verification/archive-manifest/close-phase/reopen/snapshot`。完整契约见 [references/control_plane.md](references/control_plane.md)。legacy 工单只读，变更前必须显式迁移。
 
+嵌入式/摄像头项目不增加公开命令：既有 `log/plan/code/deepcheck/audit/verify` 按 [共享技能路由](references/skill_routing.md)加载领域能力；`tools/embedded_profile.py` 只读校验工单内 baseline 并生成量化验证合同，任何硬件写入或故障注入仍需显式授权。
+
 ## 使用流程示例
 
 > 完整示例见 [README.md](README.md)「快速开始」与各步骤文件；此处只给最小骨架。

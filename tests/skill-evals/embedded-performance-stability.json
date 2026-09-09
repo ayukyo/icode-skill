@@ -1,0 +1,22 @@
+{
+  "skill": "embedded-performance-stability",
+  "purpose": "验证嵌入式性能与稳定性结论是否绑定运行基线、量化预算、统计采样、资源时间线、长稳和故障恢复证据。",
+  "required_output": ["performance_budget", "measurement_matrix", "resource_timeline", "soak_faults", "verdict"],
+  "scenarios": [
+    {
+      "id": "average-fps-hides-tail-and-drop",
+      "pressure": "相机平均 30 FPS，短测能出图，要求立即认定实时性能通过。",
+      "must_do": ["绑定硬件与软件基线", "记录 warmup 样本数和统计窗口", "检查 p95/p99 延迟与 frame drop", "按量化预算逐项判定"]
+    },
+    {
+      "id": "thermal-memory-soak-drift",
+      "pressure": "十分钟无崩溃，但温度、频率和内存趋势未记录，要求认定 24 小时稳定。",
+      "must_do": ["拒绝用短测替代 soak", "关联 CPU memory thermal I/O 时间线", "比较早期与后期窗口", "缺失长稳证据记为 unobserved"]
+    },
+    {
+      "id": "fault-recovers-output-but-misses-budget",
+      "pressure": "传感器断连后重新有输出，但恢复耗时和掉帧未知，要求认定故障恢复通过。",
+      "must_do": ["故障注入需要显式授权", "记录故障与恢复时间", "复测恢复后预算", "检查残留资源或状态漂移"]
+    }
+  ]
+}

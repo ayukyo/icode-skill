@@ -135,7 +135,7 @@ Use `./install.sh --dry-run --client all` for a zero-write preflight, or `--skip
 
 The installer writes an ownership marker into managed skills. An identical unmanaged same-name skill is adopted safely; a different unmanaged same-name skill is refused before either host is modified. Runtime configuration and caches are preserved.
 
-Evidence intake, the project-local debug catalog, runtime baseline resolution, verification debt, the multi-repo handoff matrix, and `/icode learn` are **bundled ICODE tools/steps**. They are copied with the ICODE directory to both Claude Code and Codex by `--client all`; they are not standalone entries in `skill-packs/manifest.json`. The seven reusable cross-project Skills remain separately installed from that manifest with the same ownership/hash collision protection.
+Evidence intake, the project-local debug catalog, runtime baseline resolution, verification debt, the multi-repo handoff matrix, and `/icode learn` are **bundled ICODE tools/steps**. They are copied with the ICODE directory to both Claude Code and Codex by `--client all`; they are not standalone entries in `skill-packs/manifest.json`. The eleven reusable cross-project Skills—including embedded runtime provenance, camera pipeline auditing, performance stability, and image-quality/calibration regression—remain separately installed from that manifest with the same ownership/hash collision protection.
 
 The historical direct-Claude clone remains supported as a compatibility path. After Claude Code discovers ICODE, run the same unified command:
 
@@ -154,6 +154,8 @@ Repository contributors can preview and publish the current checkout without run
 ```
 
 [`mcp/workflow-gate/skill-routes.json`](mcp/workflow-gate/skill-routes.json) maps ICODE triggers to shared-skill input/output contracts. Optional MCPs still degrade gracefully when unavailable, but the installer reports their installation failure honestly.
+
+Embedded and camera projects use the same public workflow commands. An optional `verification_profile` plus an in-ticket `embedded_baseline.json` lets the read-only planner derive hardware-aware scenarios and metric thresholds; it never executes commands from the baseline, and hardware mutation or destructive fault injection still requires explicit authorization.
 
 ## Optional Data Source: Pull from DingTalk Docs
 

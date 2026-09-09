@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import shlex
 import shutil
@@ -32,6 +33,13 @@ VERIFICATION_LAYERS = {
     "operation_view",
     "closed_client",
     "physical",
+}
+METRIC_OPERATORS = {
+    "lt": lambda actual, expected: actual < expected,
+    "lte": lambda actual, expected: actual <= expected,
+    "gt": lambda actual, expected: actual > expected,
+    "gte": lambda actual, expected: actual >= expected,
+    "eq": lambda actual, expected: actual == expected,
 }
 
 
@@ -316,7 +324,77 @@ def latest_matching_runs(metadata: Dict[str, Any]) -> Dict[Tuple[str, str, str],
     return latest
 
 
-def classify_unit(run: Optional[Dict[str, Any]]) -> str:
+def explicit_required_cells(
+    contract: Dict[str, Any],
+    dimensions: Tuple[List[str], List[str], List[str]],
+) -> Optional[List[Tuple[str, str, str]]]:
+    raw_cells = contract.get("required_cells")
+    if raw_cells is None:
+        return list(product(*dimensions))
+    if not isinstance(raw_cells, list) or not raw_cells:
+        return None
+    layers, consumers, scenarios = dimensions
+    cells: List[Tuple[str, str, str]] = []
+    for cell in raw_cells:
+        if not isinstance(cell, dict) or set(cell) != {"layer", "consumer", "scenario"}:
+            return None
+        key = (cell["layer"], cell["consumer"], cell["scenario"])
+        if any(not nonempty_string(value) for value in key) \
+                or key[0] not in layers or key[1] not in consumers or key[2] not in scenarios:
+            return None
+        cells.append(key)
+    if len(cells) != len(set(cells)):
+        return None
+    return cells
+
+
+def required_metric_settings(
+    contract: Dict[str, Any],
+    cells: List[Tuple[str, str, str]],
+) -> Optional[Tuple[str, Optional[str], List[Dict[str, Any]]]]:
+    profile = contract.get("profile", "generic")
+    if profile not in {"generic", "embedded", "camera"}:
+        return None
+    metrics = contract.get("required_metrics", [])
+    if not isinstance(metrics, list):
+        return None
+    cell_set = set(cells)
+    required = {"name", "unit", "operator", "value", "layer", "consumer", "scenario"}
+    seen = set()
+    for metric in metrics:
+        if not isinstance(metric, dict) or not required.issubset(metric):
+            return None
+        string_fields = ("name", "unit", "operator", "layer", "consumer", "scenario")
+        if any(not nonempty_string(metric[field]) for field in string_fields):
+            return None
+        key = (metric["layer"], metric["consumer"], metric["scenario"], metric["name"])
+        value = metric["value"]
+        if key in seen or metric["operator"] not in METRIC_OPERATORS \
+                or key[:3] not in cell_set \
+                or not nonempty_string(metric["name"]) \
+                or not nonempty_string(metric["unit"]) \
+                or isinstance(value, bool) or not isinstance(value, (int, float)) \
+                or not math.isfinite(value):
+            return None
+        seen.add(key)
+    baseline_ref = contract.get("baseline_ref")
+    identity_required = profile in {"embedded", "camera"} or baseline_ref is not None
+    if identity_required and (
+        not isinstance(baseline_ref, str)
+        or not baseline_ref.startswith("sha256:")
+        or len(baseline_ref) != 71
+        or any(char not in "0123456789abcdef" for char in baseline_ref[7:])
+    ):
+        return None
+    return profile, baseline_ref, metrics
+
+
+def classify_unit(
+    run: Optional[Dict[str, Any]],
+    profile: str,
+    required_metrics: List[Dict[str, Any]],
+    expected_baseline_ref: Optional[str],
+) -> str:
     if run is None:
         return "run_missing"
     outcome = run.get("outcome")
@@ -331,6 +409,29 @@ def classify_unit(run: Optional[Dict[str, Any]]) -> str:
         return "evidence_missing"
     if not baseline_present:
         return "baseline_missing"
+    identity_required = profile in {"embedded", "camera"} or expected_baseline_ref is not None
+    if identity_required:
+        if run.get("profile") != profile:
+            return "profile_mismatch"
+        if not nonempty_string(run.get("baseline_ref")):
+            return "baseline_ref_missing"
+        if run.get("baseline_ref") != expected_baseline_ref:
+            return "baseline_ref_mismatch"
+    if not required_metrics:
+        return "satisfied"
+    metrics = run.get("metrics")
+    if not isinstance(metrics, dict):
+        return "metrics_missing"
+    for required in required_metrics:
+        name = required["name"]
+        if name not in metrics:
+            return f"metric_missing:{name}"
+        actual = metrics[name]
+        if isinstance(actual, bool) or not isinstance(actual, (int, float)) \
+                or not math.isfinite(actual):
+            return f"metric_invalid:{name}"
+        if not METRIC_OPERATORS[required["operator"]](actual, required["value"]):
+            return f"metric_threshold_failed:{name}"
     return "satisfied"
 
 
@@ -339,8 +440,11 @@ def build_unit(
     consumer: str,
     scenario: str,
     run: Optional[Dict[str, Any]],
+    profile: str,
+    required_metrics: List[Dict[str, Any]],
+    expected_baseline_ref: Optional[str],
 ) -> Dict[str, Any]:
-    state = classify_unit(run)
+    state = classify_unit(run, profile, required_metrics, expected_baseline_ref)
     latest_run = None
     if run is not None:
         latest_run = {
@@ -350,6 +454,9 @@ def build_unit(
             "outcome": run.get("outcome"),
             "evidence_present": nonempty_string(run.get("evidence")),
             "baseline_present": nonempty_string(run.get("baseline")),
+            "profile": run.get("profile"),
+            "baseline_ref_present": nonempty_string(run.get("baseline_ref")),
+            "metrics": run.get("metrics"),
         }
     return {
         "layer": layer,
@@ -357,6 +464,9 @@ def build_unit(
         "scenario": scenario,
         "state": state,
         "blocking_verified": state != "satisfied",
+        "profile": profile,
+        "baseline_ref": expected_baseline_ref,
+        "required_metrics": required_metrics,
         "latest_run": latest_run,
     }
 
@@ -401,10 +511,32 @@ def analyze_ticket(metadata: Dict[str, Any], ticket_dir: Path) -> Dict[str, Any]
         base["tracking_status"] = "invalid_contract"
         return base
 
+    cells = explicit_required_cells(contract, dimensions)
+    if cells is None:
+        base["tracking_status"] = "invalid_contract"
+        return base
+    metric_settings = required_metric_settings(contract, cells)
+    if metric_settings is None:
+        base["tracking_status"] = "invalid_contract"
+        return base
+    profile, baseline_ref, required_metrics = metric_settings
+
     latest = latest_matching_runs(metadata)
     units = [
-        build_unit(layer, consumer, scenario, latest.get((layer, consumer, scenario)))
-        for layer, consumer, scenario in product(*dimensions)
+        build_unit(
+            layer,
+            consumer,
+            scenario,
+            latest.get((layer, consumer, scenario)),
+            profile,
+            [
+                metric for metric in required_metrics
+                if (metric["layer"], metric["consumer"], metric["scenario"])
+                == (layer, consumer, scenario)
+            ],
+            baseline_ref,
+        )
+        for layer, consumer, scenario in cells
     ]
     pending = sum(unit["blocking_verified"] for unit in units)
     base.update(
@@ -499,7 +631,7 @@ def suggested_kind(layer: str) -> str:
 
 def build_record_command(ticket_dir: str, unit: Dict[str, Any]) -> List[str]:
     kind = suggested_kind(unit["layer"])
-    return [
+    command = [
         "python3",
         "tools/icode_control.py",
         "record-verification",
@@ -520,13 +652,46 @@ def build_record_command(ticket_dir: str, unit: Dict[str, Any]) -> List[str]:
         "--evidence",
         "<observable evidence pointer>",
     ]
+    if unit["profile"] in {"embedded", "camera"} or unit["baseline_ref"] is not None:
+        command.extend([
+            "--profile", unit["profile"],
+            "--baseline-ref", unit["baseline_ref"],
+        ])
+    if unit["required_metrics"]:
+        command.extend([
+            "--metrics-json", "<JSON object with required metric values>",
+        ])
+    return command
 
 
-def build_plan(ticket_dir_value: str) -> Dict[str, Any]:
+def load_contract_overlay(ticket_dir: Path, contract_file_value: str) -> Tuple[Path, Dict[str, Any]]:
+    raw = Path(contract_file_value).expanduser()
+    if raw.is_symlink():
+        raise VerificationDebtError(f"contract-file 不得是符号链接: {raw}")
+    path = raw.resolve()
+    try:
+        path.relative_to(ticket_dir)
+    except ValueError as exc:
+        raise VerificationDebtError("contract-file 必须位于 ticket 目录内") from exc
+    if not path.is_file():
+        raise VerificationDebtError(f"contract-file 不是普通文件: {path}")
+    document = load_json(path, "verification contract overlay")
+    contract = document.get("verification_contract")
+    if not isinstance(contract, dict):
+        raise VerificationDebtError("contract-file 缺 verification_contract 对象")
+    return path, contract
+
+
+def build_plan(ticket_dir_value: str, contract_file_value: Optional[str] = None) -> Dict[str, Any]:
     ticket_dir = Path(ticket_dir_value).expanduser().resolve()
     if not ticket_dir.is_dir():
         raise VerificationDebtError(f"ticket-dir 目录不存在: {ticket_dir}")
     metadata = load_json(ticket_dir / METADATA_NAME, "ticket metadata")
+    contract_source = ticket_dir / METADATA_NAME
+    if contract_file_value:
+        contract_source, contract = load_contract_overlay(ticket_dir, contract_file_value)
+        metadata = dict(metadata)
+        metadata["verification_contract"] = contract
     ticket = analyze_ticket(metadata, ticket_dir)
     pending_units = [unit for unit in ticket["units"] if unit["blocking_verified"]]
     actions = []
@@ -542,6 +707,7 @@ def build_plan(ticket_dir_value: str) -> Dict[str, Any]:
                 f"可回指的 {unit['layer']}/{unit['consumer']}/{unit['scenario']} 观测证据"
             ),
             "required_baseline": "设备身份、制品身份及验证所用源码/构建基线",
+            "required_metrics": unit["required_metrics"],
             "record_command": build_record_command(str(ticket_dir), unit),
         }
         actions.append(action)
@@ -552,6 +718,7 @@ def build_plan(ticket_dir_value: str) -> Dict[str, Any]:
         "ticket_id": ticket["ticket_id"],
         "ticket_dir": str(ticket_dir),
         "read_only": True,
+        "contract_source": str(contract_source),
         "tracking_status": ticket["tracking_status"],
         "ticket_blocked": ticket["ticket_blocked"],
         "blocking_reason": ticket["blocking_reason"],
@@ -649,6 +816,7 @@ def markdown_plan(plan: Dict[str, Any]) -> str:
                 f"- 建议动作: `{action['suggested_kind']}`",
                 f"- 基线要求: {action['required_baseline']}",
                 f"- 证据要求: {action['required_evidence']}",
+                f"- 指标要求: `{json.dumps(action['required_metrics'], ensure_ascii=False)}`",
                 "- 记录命令（执行前替换占位符）：",
                 "",
                 "```bash",
@@ -825,6 +993,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     plan = subparsers.add_parser("plan", help="为单个 ticket 生成只读验证计划")
     plan.add_argument("--ticket-dir", required=True, help="包含 .ico_metadata.json 的工单目录")
+    plan.add_argument("--contract-file", help="工单内含 verification_contract 的只读 overlay")
     plan.add_argument("--output", required=True, help="JSON 计划路径")
     plan.add_argument("--markdown", required=True, help="Markdown 计划路径")
     return parser
@@ -851,10 +1020,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 protected_sources=protected_sources,
             )
         else:
-            report = build_plan(args.ticket_dir)
+            report = build_plan(args.ticket_dir, args.contract_file)
             allowed_root = Path(report["ticket_dir"])
             protected_sources = _control_sources(
-                allowed_root, (allowed_root / METADATA_NAME, INDEX_PATH)
+                allowed_root,
+                (allowed_root / METADATA_NAME, Path(report["contract_source"]), INDEX_PATH),
             )
             write_reports(
                 report,

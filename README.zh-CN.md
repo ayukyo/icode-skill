@@ -42,7 +42,7 @@ cd ~/icode-skill
 
 安装器通过所有权标记管理共享技能：内容一致的旧副本可以无损接管；内容不同的未托管的同名技能会在任何宿主写入前拒绝，不会静默覆盖。运行配置和缓存继续保留。
 
-证据摄取、项目内 debug catalog、三基线解析、验证债务、多仓 handoff 矩阵和 `/icode learn` 属于 **ICODE 内置工具/步骤**：`--client all` 会随 ICODE 本体同时复制到 Claude Code 与 Codex，不作为独立项写入 `skill-packs/manifest.json`。现有 7 个跨项目共享 Skill 仍由 manifest 独立安装，并继续使用 ownership/hash 冲突保护。
+证据摄取、项目内 debug catalog、三基线解析、验证债务、多仓 handoff 矩阵和 `/icode learn` 属于 **ICODE 内置工具/步骤**：`--client all` 会随 ICODE 本体同时复制到 Claude Code 与 Codex，不作为独立项写入 `skill-packs/manifest.json`。现有 11 个跨项目共享 Skill（含嵌入式运行溯源、摄像头链路审计、性能稳定性、图像质量与标定回归）仍由 manifest 独立安装，并继续使用 ownership/hash 冲突保护。
 
 历史上的 Claude skills 目录直装方式继续兼容。Claude Code 发现 ICODE 后，执行同一个统一命令：
 
@@ -61,6 +61,8 @@ git clone https://github.com/ayukyo/icode-skill ~/.claude/skills/icode
 ```
 
 [`mcp/workflow-gate/skill-routes.json`](mcp/workflow-gate/skill-routes.json) 继续声明 ICODE 到共享技能的触发条件与输入/输出合同。可选 MCP 不可用时工作流仍可显式降级，但安装失败不会伪报成功。
+
+嵌入式和摄像头工程继续使用同一组公开工作流命令。可选的 `verification_profile` 与工单内 `embedded_baseline.json` 可由只读计划工具转换为硬件场景和指标阈值；工具不会执行 baseline 中的字符串，硬件写入或破坏性故障注入仍须显式授权。
 
 ## 可选增强：图片/视频理解
 

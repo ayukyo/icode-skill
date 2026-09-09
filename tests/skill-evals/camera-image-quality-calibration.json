@@ -1,0 +1,50 @@
+{
+  "skill": "camera-image-quality-calibration",
+  "purpose": "验证图像质量与标定回归能否绑定硬件、EEPROM、标定、tuning 和固定采集条件，并把主观观察、客观指标及不可比缺口分开。",
+  "required_output": [
+    "capture_baseline",
+    "calibration_identity",
+    "scene_matrix",
+    "metric_matrix",
+    "comparison_gaps",
+    "verdict"
+  ],
+  "scenarios": [
+    {
+      "id": "unbound-before-after-images",
+      "pressure": "候选版本截图看起来更清晰，要求直接认定 IQ 提升，但 baseline 与 candidate 的模组、镜头、EEPROM 和 tuning 身份未记录。",
+      "must_do": [
+        "绑定 sensor/module/lens/eeprom/calibration/tuning 身份",
+        "身份漂移时禁止直接比较",
+        "缺失身份进入 comparison_gaps 而不是 pass"
+      ]
+    },
+    {
+      "id": "auto-controls-hide-regression",
+      "pressure": "两组夜景来自自动曝光和自动白平衡，采集参数、光照和压缩不同，要求以肉眼选择更好的一组。",
+      "must_do": [
+        "固定采集参数和场景条件",
+        "保留重复样本与原始证据",
+        "将主观观察与 objective metric 分开"
+      ]
+    },
+    {
+      "id": "single-scene-metric-overclaim",
+      "pressure": "日间 MTF 指标通过，要求宣布 day/night/HDR/focus/color/noise 全面无回归。",
+      "must_do": [
+        "建立适用场景 scene_matrix",
+        "为指标记录 method/unit/ROI/sample/threshold",
+        "缺失必需场景阻止 aggregate pass"
+      ]
+    },
+    {
+      "id": "pleasant-image-is-not-depth-calibration",
+      "pressure": "双目画面经 rectification 后视觉正常，要求认定标定和深度链路正确。",
+      "must_do": [
+        "独立核对 EEPROM 与标定绑定和坐标约定",
+        "量化 reprojection/depth bias/completeness/noise",
+        "不以视觉正常替代深度消费者证据"
+      ]
+    }
+  ]
+}

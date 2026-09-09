@@ -1,0 +1,89 @@
+---
+name: camera-pipeline-contract-audit
+description: Use when a camera is missing, unstable, corrupt, delayed, dropping frames, or claimed to work from a video node, preview, driver log, or other intermediate observation while the physical, media, memory, and consumer boundaries remain unproven.
+---
+
+# Camera Pipeline Contract Audit
+
+## Purpose
+
+Find the first failed or unknown edge from electrical bring-up to each effective frame consumer. Keep control, pixel, memory, and consumer paths separate: evidence from one never proves another.
+
+## Required path
+
+Audit every applicable layer in order:
+
+`power/reset/clock → I2C control → CSI/MIPI → media/V4L2 → ISP → buffer/DMA → encoder/algorithm/consumer`
+
+Include rails/sequencing/pinmux, sensor/EEPROM/SerDes identity, lanes/VC/data-type, media pads/links/sub-devices, negotiated mode, ISP ports, and actual consumers. Mark absent layers `not_applicable`.
+
+Route unresolved loaded-artifact identity to `embedded-runtime-provenance`; route matched contracts with rate/latency/memory/thermal/soak failures to `embedded-performance-stability`.
+
+## Procedure
+
+### 1. Freeze scope
+
+Record device/camera identity, requested mode, runtime artifacts, consumers, reproduction/window, and lifecycle: cold boot/restart/suspend-resume/repeated stream.
+
+### 2. Enumerate nodes
+
+List ordered nodes through every consumer. A device node, probe, link, dequeue, preview, or ISP log proves only that observation point.
+
+### 3. Prove edge contracts
+
+Compare expected versus observed per source→target edge:
+
+- format: bus-code/pixel-format/bit-depth/color, dimensions/crop/scale, planes/stride/offsets/size;
+- timing: FPS/sequence, timestamp point/domain/unit/monotonicity/offset/wrap/synchronization;
+- transport/state: lanes/VC/data-type/bandwidth, media-link/queue/IPC, enable/error/recovery/warm-restore.
+
+Never derive layout from width × height or compare clock domains without explicit conversion.
+
+### 4. Trace `buffer_ownership`
+
+Trace allocator/exporter/importer, owner transition, frame key, lifetime/refcount, map/unmap, DMA direction, cache maintenance, fences, queue/reuse/release, capacity/occupancy/wait/drop/starvation/backpressure. Correlate identity across transfers; delivery does not prove consumption.
+
+### 5. Localize safely
+
+Name last proven node, first failed/unknown edge, alternatives, and smallest probe. Default read-only. Power/reset/register, topology/format, bind/unbind, restart, or fault injection requires explicit authorization and rollback.
+
+## Required output contract
+
+### `pipeline_scope`
+
+Device/camera, scenario/window, requested/observed mode, path/consumers, provenance, safety.
+
+### `node_matrix`
+
+| Order | Layer/node | Input | Output/state | Runtime identity | Evidence | Status |
+|---|---|---|---|---|---|---|
+
+Status: `proven`, `failed`, `unknown`, `not_applicable`.
+
+### `edge_contract_matrix`
+
+| Source→target | Interface | Format/layout/stride | Timing/timestamp domain | Transport/state | Expected/observed | Evidence | Status |
+|---|---|---|---|---|---|---|---|
+
+Split rows hiding independent control, pixel, or consumer contracts.
+
+### `buffer_ownership`
+
+| Frame/buffer key | Allocator/exporter→importer/owner | Transition/lifetime | DMA/cache/fence | Queue/backpressure/drop | Evidence | Status |
+|---|---|---|---|---|---|---|
+
+### `breakpoints`
+
+Last proven node, first failed/unknown edge, negative evidence, alternatives, smallest read-only probe, authorized mutation/rollback.
+
+### `verdict`
+
+Per scenario/consumer: `supported`, `candidate`, `refuted`, or `unresolved`; include highest boundary, allowed/prohibited claims, missing evidence, owner. Aggregate preserves the weakest required path.
+
+## Anti-patterns
+
+- Treating `/dev/video*`, one dequeued frame, or ISP output as end-to-end proof.
+- Blaming sensor/ISP before checking format, planes, stride, size, and consumer input.
+- Mixing sensor counters, hardware, monotonic, and realtime clocks.
+- Ignoring ownership, cache coherency, fences, saturation, backpressure, or drops.
+- Mutating power, registers, topology, binding, or stream state merely to gather evidence.
