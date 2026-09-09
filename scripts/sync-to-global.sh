@@ -383,6 +383,26 @@ prepare_icode_stage() {
   fi
 }
 
+# Windows 实时防护(Defender/AV)可能短暂锁定刚写入的目录树，使目录 rename 偶发
+# "Permission denied"。对事务提交/回滚中的目录重命名做有界延时重试，避免把
+# 瞬时锁误判为事务失败而回滚；重试耗尽仍失败才真正报错。
+retry_move_dir() {
+  # Windows 上目录 rename 偶发 "Permission denied" 可持续到索引/防护扫描完成
+  # (实测最长约 30s)。用较长重试窗口(max*delay≈72s)兜底,仍失败才真正报错。
+  local src="$1" dst="$2" attempt=1 max=24 delay=3
+  while :; do
+    if mv -- "$src" "$dst" 2>/dev/null; then
+      return 0
+    fi
+    if [[ "$attempt" -ge "$max" ]]; then
+      echo "❌ 目录重命名重试 ${max} 次(约 $((max * delay))s)仍失败: $src -> $dst" >&2
+      return 1
+    fi
+    sleep "$delay"
+    attempt=$((attempt + 1))
+  done
+}
+
 commit_icode_stages() {
   local committed_targets=()
   local committed_backups=()
@@ -400,10 +420,10 @@ commit_icode_stages() {
         commit_failed=true
         break
       fi
-      if ! mv -- "$dst" "$backup"; then
+      if ! retry_move_dir "$dst" "$backup"; then
         echo "❌ 无法暂存原 ICODE 目标: $dst" >&2
         if [[ ! -e "$dst" && -e "$backup" ]]; then
-          mv -- "$backup" "$dst" || true
+          retry_move_dir "$backup" "$dst" || true
         fi
         commit_failed=true
         break
@@ -414,7 +434,7 @@ commit_icode_stages() {
     # by the same rollback path as earlier committed targets.
     committed_targets+=("$dst")
     committed_backups+=("$backup")
-    if ! mv -- "$stage" "$dst"; then
+    if ! retry_move_dir "$stage" "$dst"; then
       echo "❌ 无法提交 ICODE 暂存目录，开始回滚: $dst" >&2
       commit_failed=true
       break
@@ -426,7 +446,7 @@ commit_icode_stages() {
       remove_committed_target "${committed_targets[$rollback_index]}" || true
       if [[ -n "${committed_backups[$rollback_index]}" \
         && -e "${committed_backups[$rollback_index]}" ]]; then
-        mv -- "${committed_backups[$rollback_index]}" \
+        retry_move_dir "${committed_backups[$rollback_index]}" \
           "${committed_targets[$rollback_index]}" || true
       fi
     done
