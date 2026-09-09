@@ -52,10 +52,13 @@ fi
 
 BUNDLED_CAPABILITIES=(
   tools/evidence_intake.py
+  tools/document_intake.py
+  tools/media_router.py
   tools/debug_catalog.py
   tools/runtime_baseline.py
   tools/verification_debt.py
   tools/learn.py
+  templates/media_policy.json.template
   steps/learn.md
 )
 BUNDLED_OK="$ALL_INSTALLED"
@@ -69,6 +72,31 @@ if "$BUNDLED_OK"; then
   ok "all-client install includes every bundled evidence and learning capability"
 else
   bad "all-client install includes every bundled evidence and learning capability"
+fi
+
+LOCAL_MCP_SERVERS=(
+  icode-evidence
+  icode-workspace
+  icode-device-observe
+  icode-mcp-health
+  icode-mcp-policy
+  icode-local-index
+)
+LOCAL_MCP_OK="$ALL_INSTALLED"
+for name in "${LOCAL_MCP_SERVERS[@]}"; do
+  for relative in server.py install.sh uninstall.sh config.example.json tools_manifest.json; do
+    if [[ ! -f "$CLAUDE_ROOT/icode/mcp/$name/$relative" ]] \
+      || [[ ! -f "$AGENTS_ROOT/icode/mcp/$name/$relative" ]]; then
+      LOCAL_MCP_OK=false
+    fi
+  done
+done
+if "$LOCAL_MCP_OK" \
+  && [[ -f "$CLAUDE_ROOT/icode/mcp/_lib/local_mcp_common.py" ]] \
+  && [[ -f "$AGENTS_ROOT/icode/mcp/_lib/install_local_python_mcp.sh" ]]; then
+  ok "all-client install bundles six keyless local MCP services and shared runtime"
+else
+  bad "all-client install bundles six keyless local MCP services and shared runtime"
 fi
 
 COMMAND_CONTRACT_OK="$ALL_INSTALLED"

@@ -1,0 +1,6 @@
+{
+  "allowed_roots": ["$HOME"],
+  "max_repo_depth": 5,
+  "max_repos": 100,
+  "max_command_chars": 30000
+}

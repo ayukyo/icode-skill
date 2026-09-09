@@ -1,0 +1,11 @@
+{
+  "server": "icode-mcp-policy",
+  "api_key_required": false,
+  "purpose": "machine-readable per-step MCP routing and least-privilege checks",
+  "tools": [
+    {"name": "describe_capabilities", "read_only": true, "deterministic": true, "network": false},
+    {"name": "list_step_policy", "read_only": true, "deterministic": true, "network": false},
+    {"name": "evaluate_call", "read_only": true, "deterministic": true, "network": false},
+    {"name": "validate_policy", "read_only": true, "deterministic": true, "network": false}
+  ]
+}

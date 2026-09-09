@@ -165,6 +165,179 @@
       "diagnosis_only": false
     }
   },
+  "execution_model": {
+    "schema_version": 1,
+    "doc": "借鉴行为树的端口、Reactive 边界检查、节点轨迹、Retry/Fallback 与长动作回执，但不引入行为树运行时、XML、全局黑板或常驻 tick。工单事件链是唯一执行账本；只有已显式 step start 的新执行受 step finish 约束，历史工单保持 legacy-untracked 兼容。",
+    "boundaries": ["before_write", "after_wait", "before_side_effect", "before_transition"],
+    "input_kinds": ["metadata_pointer", "ticket_file", "ticket_glob", "metadata_files", "workspace_git_head"],
+    "output_kinds": ["metadata_pointer", "ticket_file", "ticket_glob", "metadata_files", "external_artifact"],
+    "step_outcomes": ["success", "failure", "degraded", "blocked", "skipped"],
+    "step_contracts": {
+      "init": {
+        "inputs": [
+          {"id": "requirement", "kind": "metadata_pointer", "value": "/requirement", "required": true, "protected": true}
+        ],
+        "outputs": [{"id": "initial_requirement", "kind": "ticket_file", "value": "00_init.md"}],
+        "required_checks": ["before_write"],
+        "drift_routes": {"requirement": "plan", "default": "plan"}
+      },
+      "log": {
+        "inputs": [
+          {"id": "requirement", "kind": "metadata_pointer", "value": "/requirement", "required": true, "protected": true},
+          {"id": "active_checkout", "kind": "metadata_pointer", "value": "/active_checkout", "required": false, "protected": true},
+          {"id": "workspace_head", "kind": "workspace_git_head", "value": ".", "required": false, "protected": true}
+        ],
+        "outputs": [
+          {"id": "log_analysis", "kind": "ticket_file", "value": "log_analysis.md"},
+          {"id": "initial_requirement", "kind": "ticket_file", "value": "00_init.md"}
+        ],
+        "required_checks": ["before_write", "before_transition"],
+        "drift_routes": {"requirement": "plan", "active_checkout": "worktree", "workspace_head": "review", "default": "review"}
+      },
+      "plan": {
+        "inputs": [
+          {"id": "requirement", "kind": "metadata_pointer", "value": "/requirement", "required": true, "protected": true},
+          {"id": "scope", "kind": "metadata_pointer", "value": "/scope_contract", "required": false, "protected": true},
+          {"id": "initial_requirement", "kind": "ticket_file", "value": "00_init.md", "required": false, "protected": true},
+          {"id": "log_analysis", "kind": "ticket_file", "value": "log_analysis.md", "required": false, "protected": true}
+        ],
+        "outputs": [{"id": "plan", "kind": "ticket_file", "value": "01_plan.md"}],
+        "required_checks": ["before_write", "before_transition"],
+        "drift_routes": {"requirement": "plan", "scope": "plan", "initial_requirement": "plan", "log_analysis": "plan", "default": "plan"}
+      },
+      "review": {
+        "inputs": [
+          {"id": "plan", "kind": "ticket_file", "value": "01_plan.md", "required": true, "protected": true},
+          {"id": "requirement", "kind": "metadata_pointer", "value": "/requirement", "required": true, "protected": true},
+          {"id": "scope", "kind": "metadata_pointer", "value": "/scope_contract", "required": false, "protected": true}
+        ],
+        "outputs": [
+          {"id": "review", "kind": "ticket_file", "value": "02_review.md"},
+          {"id": "review_rounds", "kind": "ticket_glob", "value": "review_round_*.json", "required": false}
+        ],
+        "required_checks": ["before_write", "after_wait", "before_transition"],
+        "drift_routes": {"plan": "review", "requirement": "plan", "scope": "plan", "default": "review"}
+      },
+      "merge": {
+        "inputs": [
+          {"id": "plan", "kind": "ticket_file", "value": "01_plan.md", "required": true, "protected": true},
+          {"id": "review", "kind": "ticket_file", "value": "02_review.md", "required": true, "protected": true},
+          {"id": "review_rounds", "kind": "ticket_glob", "value": "review_round_*.json", "required": false, "protected": true},
+          {"id": "deltas", "kind": "metadata_pointer", "value": "/requirement_deltas", "required": false, "protected": true}
+        ],
+        "outputs": [{"id": "final_plan", "kind": "ticket_file", "value": "03_plan_final.md"}],
+        "required_checks": ["before_write", "before_transition"],
+        "drift_routes": {"plan": "review", "review": "review", "review_rounds": "review", "deltas": "plan", "default": "review"}
+      },
+      "code": {
+        "inputs": [
+          {"id": "final_plan", "kind": "ticket_file", "value": "03_plan_final.md", "required": true, "protected": true},
+          {"id": "requirement", "kind": "metadata_pointer", "value": "/requirement", "required": true, "protected": true},
+          {"id": "scope", "kind": "metadata_pointer", "value": "/scope_contract", "required": false, "protected": true},
+          {"id": "deltas", "kind": "metadata_pointer", "value": "/requirement_deltas", "required": false, "protected": true},
+          {"id": "active_checkout", "kind": "metadata_pointer", "value": "/active_checkout", "required": false, "protected": true},
+          {"id": "workspace_head", "kind": "workspace_git_head", "value": ".", "required": false, "protected": true}
+        ],
+        "outputs": [
+          {"id": "code_files", "kind": "metadata_files", "value": "/code_files", "base": "workspace"},
+          {"id": "code_review", "kind": "ticket_file", "value": "04_code_review_fix.md"}
+        ],
+        "required_checks": ["before_write", "before_transition"],
+        "drift_routes": {"final_plan": "review", "requirement": "plan", "scope": "plan", "deltas": "plan", "active_checkout": "worktree", "workspace_head": "merge", "default": "review"}
+      },
+      "deepcheck": {
+        "inputs": [
+          {"id": "final_plan", "kind": "ticket_file", "value": "03_plan_final.md", "required": true, "protected": true},
+          {"id": "code_files", "kind": "metadata_files", "value": "/code_files", "base": "workspace", "required": true, "protected": true},
+          {"id": "active_checkout", "kind": "metadata_pointer", "value": "/active_checkout", "required": false, "protected": true},
+          {"id": "workspace_head", "kind": "workspace_git_head", "value": ".", "required": false, "protected": true}
+        ],
+        "outputs": [{"id": "deepcheck", "kind": "ticket_file", "value": "05_deepcheck.md"}],
+        "required_checks": ["before_write", "after_wait", "before_transition"],
+        "drift_routes": {"final_plan": "review", "code_files": "deepcheck", "active_checkout": "worktree", "workspace_head": "merge", "default": "deepcheck"}
+      },
+      "audit": {
+        "inputs": [
+          {"id": "final_plan", "kind": "ticket_file", "value": "03_plan_final.md", "required": true, "protected": true},
+          {"id": "code_files", "kind": "metadata_files", "value": "/code_files", "base": "workspace", "required": true, "protected": true},
+          {"id": "deepcheck", "kind": "ticket_file", "value": "05_deepcheck.md", "required": false, "protected": true},
+          {"id": "active_checkout", "kind": "metadata_pointer", "value": "/active_checkout", "required": false, "protected": true},
+          {"id": "workspace_head", "kind": "workspace_git_head", "value": ".", "required": false, "protected": true}
+        ],
+        "outputs": [{"id": "audit", "kind": "ticket_file", "value": "06_audit.md"}],
+        "required_checks": ["before_write", "after_wait", "before_transition"],
+        "drift_routes": {"final_plan": "review", "code_files": "deepcheck", "deepcheck": "deepcheck", "active_checkout": "worktree", "workspace_head": "merge", "default": "audit"}
+      },
+      "patch": {
+        "inputs": [
+          {"id": "final_plan", "kind": "ticket_file", "value": "03_plan_final.md", "required": false, "protected": true},
+          {"id": "code_files", "kind": "metadata_files", "value": "/code_files", "base": "workspace", "required": false, "protected": true},
+          {"id": "requirement", "kind": "metadata_pointer", "value": "/requirement", "required": true, "protected": true},
+          {"id": "deltas", "kind": "metadata_pointer", "value": "/requirement_deltas", "required": false, "protected": true}
+        ],
+        "outputs": [
+          {"id": "patch", "kind": "ticket_file", "value": "08_patch.md"},
+          {"id": "code_files", "kind": "metadata_files", "value": "/code_files", "base": "workspace"}
+        ],
+        "required_checks": ["before_write", "before_transition"],
+        "drift_routes": {"final_plan": "review", "code_files": "patch", "requirement": "plan", "deltas": "plan", "default": "patch"}
+      },
+      "verify": {
+        "inputs": [
+          {"id": "verification_contract", "kind": "metadata_pointer", "value": "/verification_contract", "required": false, "protected": true},
+          {"id": "code_files", "kind": "metadata_files", "value": "/code_files", "base": "workspace", "required": false, "protected": true},
+          {"id": "workspace_head", "kind": "workspace_git_head", "value": ".", "required": false, "protected": true}
+        ],
+        "outputs": [{"id": "verification_runs", "kind": "metadata_pointer", "value": "/verification_runs", "receipt_event": "verification_recorded"}],
+        "required_checks": ["before_side_effect", "after_wait"],
+        "drift_routes": {"verification_contract": "verify", "code_files": "deepcheck", "workspace_head": "merge", "default": "verify"}
+      },
+      "readme": {
+        "inputs": [
+          {"id": "final_plan", "kind": "ticket_file", "value": "03_plan_final.md", "required": true, "protected": true},
+          {"id": "audit", "kind": "ticket_file", "value": "06_audit.md", "required": true, "protected": true}
+        ],
+        "outputs": [
+          {"id": "readme", "kind": "ticket_file", "value": "07_readme.md"},
+          {"id": "brief", "kind": "ticket_file", "value": "_brief.md"}
+        ],
+        "required_checks": ["before_write"],
+        "drift_routes": {"final_plan": "review", "audit": "audit", "default": "readme"}
+      },
+      "worktree": {
+        "inputs": [
+          {"id": "active_checkout", "kind": "metadata_pointer", "value": "/active_checkout", "required": false, "protected": true},
+          {"id": "submission_contracts", "kind": "metadata_pointer", "value": "/submission_contracts", "required": false, "protected": true},
+          {"id": "workspace_head", "kind": "workspace_git_head", "value": ".", "required": false, "protected": true}
+        ],
+        "outputs": [
+          {"id": "active_checkout", "kind": "metadata_pointer", "value": "/active_checkout", "receipt_event": "metadata_updated"},
+          {"id": "checkout_history", "kind": "metadata_pointer", "value": "/checkout_history", "receipt_event": "metadata_updated"}
+        ],
+        "required_checks": ["before_side_effect", "after_wait"],
+        "drift_routes": {"active_checkout": "worktree", "submission_contracts": "worktree", "workspace_head": "merge", "default": "worktree"}
+      }
+    },
+    "operation_classes": {
+      "read_only": {"auto_retry": true, "requires_idempotency": false, "ambiguous_start_action": "retry"},
+      "managed_write": {"auto_retry": false, "requires_idempotency": true, "ambiguous_start_action": "verify_receipt"},
+      "external_side_effect": {"auto_retry": false, "requires_idempotency": true, "ambiguous_start_action": "verify_receipt"},
+      "destructive_hardware": {"auto_retry": false, "requires_idempotency": true, "ambiguous_start_action": "human_decision"}
+    },
+    "failure_policies": {
+      "retryable_transport": {"action": "retry", "max_attempts": 3, "backoff_seconds": [0, 1, 3], "conclusion_ceiling": "degraded"},
+      "capability_unavailable": {"action": "fallback", "max_attempts": 1, "backoff_seconds": [0], "conclusion_ceiling": "degraded"},
+      "deterministic_failure": {"action": "repair_then_retry", "max_attempts": 1, "backoff_seconds": [0], "conclusion_ceiling": "blocked"},
+      "policy_schema_security": {"action": "block", "max_attempts": 0, "backoff_seconds": [], "conclusion_ceiling": "blocked"},
+      "ambiguous_side_effect": {"action": "verify_receipt", "max_attempts": 0, "backoff_seconds": [], "conclusion_ceiling": "blocked"},
+      "destructive_risk": {"action": "human_decision", "max_attempts": 0, "backoff_seconds": [], "conclusion_ceiling": "blocked"}
+    },
+    "safety_overrides": {
+      "external_side_effect": "即使错误看似 retryable，也必须先核对远端/设备回执，禁止自动重放。",
+      "destructive_hardware": "任何失败均不自动重试，必须由人确认下一动作。",
+      "managed_write": "仅在幂等键和写后校验均存在时允许人工或上层编排重试。"
+    }
+  },
   "state_machine": {
     "doc": "vNext 工单（metadata.schema_version=3）状态机真源。tools/icode_control.py transition 按此判定合法性；steps/*.md 的状态写回必须经 `python3 tools/icode_control.py transition --dir <out_dir> --to <status>`，禁止绕过直写（validate 会校验 metadata.status 与最后一条 state_changed 事件一致性）。legacy 工单（metadata 无 schema_version）为只读适配对象，不走 transition（validate 报 legacy-untracked 不阻断只读审计）。",
     "states": ["log_in_progress","log_done","init_in_progress","plan_done","review_in_progress","review_done","plan_finalized","code_in_progress","code_done","deepcheck_in_progress","deepcheck_done","completed","debug_in_progress","debug_done"],

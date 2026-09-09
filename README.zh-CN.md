@@ -24,7 +24,7 @@ ICode 是一个 Claude Code 技能（Skill），将需求到交付拆解为严�
 - **决策锚点**：步骤间以精简决策摘要（`.decision_anchors.json`）传递上下文——省 token、保持推理连续性
 - **可选 TB 缺陷源**：`/icode log` 零散输入含 Teambition 项目 URL 或 `<LIB>-<NUM>` 时，可选拉取缺陷单的标题/描述/评论/日志附件作为分析输入（多项目文本配置，仅拉取分析、不回写 TB；无 TB 引用时走纯本地日志路径，行为不变）
 - **可选钉钉文档源**：入口（`/icode init` / `log` / `plan` / `start`）与 patch 阶段0 零散输入含钉钉分享链接（alidocs.dingtalk.com）时，可选拉取文档/钉盘文件作为需求与参考资料输入（仅拉取、不回写钉钉；原生格式需用户在钉钉 UI 导出；无钉钉引用时行为不变）
-- **可选视觉理解**（`mcp/vision-bridge`）：可装可不装的图片/视频理解 MCP——**不绑任何平台**，只要你的 provider 提供 OpenAI Chat Completions 兼容接口就能用（OpenAI / Claude / Gemini / 国内厂商 / 自建 / OpenRouter 全部支持）。装好后 SKILL 工作流走**双通道**：MCP 工具 `mcp__vision-bridge__analyze_media` 或本地 CLI（`<server.py 目录>/.venv/bin/python <server.py> --analyze-media <path>`，供 codex 等 MCP 工具未注入环境兜底），`config.json` 三件套配齐即可用；两通道均不可用时 session 模型按原生能力处理，由用户自负其责。**图片/视频绝不注入会话模型消息**。详见 [mcp/vision-bridge/README.md](mcp/vision-bridge/README.md) 与 [SKILL.md](SKILL.md) 的「可选增强」段
+- **能力感知视觉理解**：ICODE 先走确定性文本/结构提取，再按 `auto | native | bridge | dual | text_only` 路由视觉区域。宿主明确证明当前 GPT 等会话模型支持多模态时保留原生视觉；纯文本或能力未知时才由 `mcp/vision-bridge` 补盲；高风险证据可双通道独立复核，分歧保持未决。详见 [媒体路由真源](references/media_routing.md)。
 
 ## 安装
 
@@ -42,7 +42,7 @@ cd ~/icode-skill
 
 安装器通过所有权标记管理共享技能：内容一致的旧副本可以无损接管；内容不同的未托管的同名技能会在任何宿主写入前拒绝，不会静默覆盖。运行配置和缓存继续保留。
 
-证据摄取、项目内 debug catalog、三基线解析、验证债务、多仓 handoff 矩阵和 `/icode learn` 属于 **ICODE 内置工具/步骤**：`--client all` 会随 ICODE 本体同时复制到 Claude Code 与 Codex，不作为独立项写入 `skill-packs/manifest.json`。现有 11 个跨项目共享 Skill（含嵌入式运行溯源、摄像头链路审计、性能稳定性、图像质量与标定回归）仍由 manifest 独立安装，并继续使用 ownership/hash 冲突保护。
+证据摄取、技术文档文件接入（`tools/document_intake.py`）、媒体路由/证据记录（`tools/media_router.py`）、项目内 debug catalog、三基线解析、验证债务、多仓 handoff 矩阵和 `/icode learn` 属于 **ICODE 内置工具/步骤**：`--client all` 会随 ICODE 本体同时复制到 Claude Code 与 Codex，不作为独立项写入 `skill-packs/manifest.json`。现有 15 个跨项目共享 Skill（含 `technical-document-intake`、`hardware-spec-contract-audit`、`schematic-interface-audit`、`mcu-hardware-software-contract-audit` 及嵌入式/摄像头能力）仍由 manifest 独立安装，并继续使用 ownership/hash 冲突保护。
 
 历史上的 Claude skills 目录直装方式继续兼容。Claude Code 发现 ICODE 后，执行同一个统一命令：
 
@@ -62,11 +62,11 @@ git clone https://github.com/ayukyo/icode-skill ~/.claude/skills/icode
 
 [`mcp/workflow-gate/skill-routes.json`](mcp/workflow-gate/skill-routes.json) 继续声明 ICODE 到共享技能的触发条件与输入/输出合同。可选 MCP 不可用时工作流仍可显式降级，但安装失败不会伪报成功。
 
-嵌入式和摄像头工程继续使用同一组公开工作流命令。可选的 `verification_profile` 与工单内 `embedded_baseline.json` 可由只读计划工具转换为硬件场景和指标阈值；工具不会执行 baseline 中的字符串，硬件写入或破坏性故障注入仍须显式授权。
+嵌入式、摄像头、技术文档、原理图和 MCU 软硬件契约分析继续使用同一组公开工作流命令。可选的 `verification_profile` 与工单内 `embedded_baseline.json` 可由只读计划工具转换为硬件场景和指标阈值；本地 PDF/Office/图片/文本/7z 语料先由 `technical-document-intake` 验证真实类型、结构、归档风险、重复/变体和可读覆盖，再按需路由规格、原理图或 MCU 契约审计。工具不执行 baseline、文档、SDK 或工具包中的字符串/程序，受保护容器须授权导出，硬件写入、测量或破坏性故障注入仍须显式授权。
 
 ## 可选增强：图片/视频理解
 
-视觉理解是可选增强，**未装不影响主工作流**。装了后所有图片/视频处理通过**双通道**（MCP 工具 `mcp__vision-bridge__analyze_media` 或本地 CLI，codex 等 MCP 工具未注入环境走 CLI 兜底）完成，**图片/视频绝不注入会话模型消息**，不污染 session 模型。
+视觉理解是可选增强，**未装不影响主工作流**。ICODE 不再把“vision-bridge 已安装”当成优先级依据：GPT 等宿主明确证明原生多模态能力时使用原生视觉；纯文本/能力未知会话使用 bridge；两者均无时只做文本/OCR/元数据并明确视觉缺口。不要通过试传图片探测未知模型能力。
 
 ### 安装 vision-bridge
 
@@ -83,13 +83,15 @@ cd ~/.claude/skills/icode/mcp/vision-bridge
 
 ### 缺配置时怎么办？
 
-如果 vision-bridge 装了但 `config.json` 还没填三件套（`base_url` / `api_key` / `model`），`analyze_media` 工具会返回 fallback 提示字符串，session 模型按默认会话模型原生能力处理原图——**等同于未装 vision-bridge 的行为**。不报错、不阻塞。
+如果 vision-bridge 装了但 `config.json` 还没填三件套（`base_url` / `api_key` / `model`），路由器把 bridge 标为不可用；只有宿主已明确证明原生多模态时才走 native，否则降级 `text_only` 并记录未分析视觉区域。`declared_capabilities` 与 `quality_profile` 只填写实际评测过的能力，未知就留空。
 
 详见 [mcp/vision-bridge/README.md](mcp/vision-bridge/README.md)。
 
 ## 可选增强：便宜 LLM 推理（cheap-research）
 
 为降低主会话的 token 消耗，cheap-research 把"长上下文压缩 / 历史检索 / 模板填充 / 结构化提取"等子任务**转交便宜模型**（仍走 `mcp__cheap-research__*` 工具）。**不接管决策**：3 质疑者对抗 / 架构决策 / 终审裁决 / 修复方案一律不交给 cheap-research。
+
+当前共 15 个工具：6 个本地确定性工具、1 个不可信公网抓取工具、8 个可选 LLM 转换工具。会话先调用只读 `describe_capabilities` 获取不含密钥的能力画像，再按 capability 路由；技术文档、视觉页、原理图和硬件契约仍由 document-intake / media-router / 对应 SKILL 处理，cheap-research 只消费带来源回指的文本候选。
 
 **入选条件**（单闸门）：价值 ≥ 3 ★ + 低风险，且是**各步骤正文有真实调用点**的子任务（TB 评论预提取 / 远程 README 拉取 / dedup 分类找重复 / 审查输出压缩 / 跨轮汇总 / 差异摘要 / 仓库事实候选等，覆盖 log / doc / review / merge / deepcheck / audit / patch 步骤）；init / plan / code / status / readme 无正文执行点（走确定性机制），标 ⚪。完整清单见 [mcp/cheap-research/tools_manifest.json](mcp/cheap-research/tools_manifest.json)。
 
@@ -122,16 +124,22 @@ python3 tools/lint_mcp_coverage.py <out_dir> --step review --strict
 
 详见 [mcp/cheap-research/README.md](mcp/cheap-research/README.md)。
 
-### 其他 4 个 MCP（sequential-thinking / memory / context7 / playwright）
+### 其他 10 个 MCP（4 个通用 + 6 个 ICODE 本地服务）
 
-6 个 MCP 里剩下 4 个是工作流工具，`/icode install` 装好后各步骤直接使用，**无需单独配置**：
+除 vision-bridge / cheap-research 外，`/icode install` 还会安装 4 个通用工作流工具和 6 个免 Key 的 ICODE 本地服务：
 
 - **sequential-thinking**——分级思考 reasoning gate 的 L2/L3 载体：复杂修改/重构/重设计前结构化思考 3~5 步（L0/L1 步骤不调用；每步先列本步必调 MCP 再实际调用）
 - **memory**——跨工程知识图谱（`mcp__memory__read_graph`），历史检索/段零注入时唤起，跨会话回看过去工单与工程文档
 - **context7**——第三方库文档实时查询，init/plan/code 且需求涉及第三方库时调用
 - **playwright**——浏览器自动化，deepcheck/audit + 前端工程时调用
+- **icode-evidence**——文件 SHA-256、带行号回读、日志时间线和文档语料清单
+- **icode-workspace**——多 Git 根、worktree、构建输入和制品来源观测，不执行 merge/commit/push
+- **icode-device-observe**——命名 SSH/ADB/fixture profile 的固定只读设备检查，无任意命令或设备写操作
+- **icode-mcp-health**——安装/升级/CI 使用的 MCP manifest、入口与敏感字段健康检查
+- **icode-mcp-policy**——现有步骤到 server/tool/operation 的默认拒绝路由真源
+- **icode-local-index**——大型源码/日志/文档的可重建 SQLite 全文索引，命中仍须回读原文件
 
-每个 MCP 都有显式强证据触发条件 + 声明的优雅降级路径（详见 [SKILL.md「MCP 工具集」](SKILL.md)）；缺失任一都不阻断工作流。
+这 6 个本地服务不新增 `/icode` 公开命令，机器路由见 [mcp/icode-mcp-policy/policy.json](mcp/icode-mcp-policy/policy.json)。每个 MCP 都有显式强证据触发条件 + 声明的优雅降级路径（详见 [SKILL.md「MCP 工具集」](SKILL.md)）；缺失任一都不阻断工作流。
 
 ## 快速开始
 

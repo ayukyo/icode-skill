@@ -1,0 +1,5 @@
+{
+  "allowed_roots": ["$HOME"],
+  "max_read_bytes": 1048576,
+  "max_corpus_files": 2000
+}

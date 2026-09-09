@@ -1,6 +1,6 @@
 # MCP 工具集成与降级路径
 
-> icode 工作流可调用 6 个 MCP（`/icode install` 一键安装）。**用户可能不装全部**，每个 MCP 都是**可选 + 降级**的。
+> icode 工作流可调用 12 个 MCP（`/icode install` 一键安装）：6 个既有通用/模型辅助 MCP，加 6 个 ICODE 自建免 Key 本地 MCP。**用户可能不装全部**，每个 MCP 都是**可选 + 降级**的。
 >
 > 安装入口：`/icode install`（详见 [steps/install.md](../steps/install.md)）
 >
@@ -19,7 +19,7 @@
 
 ---
 
-## 6 个 MCP 的强证据 + 降级路径
+## 12 个 MCP 的强证据 + 降级路径
 
 ### ① sequential-thinking（**L2/L3 复杂推理依赖**）
 
@@ -32,12 +32,11 @@
 ### ② vision-bridge（**推荐装，需配三件套**）
 
 - **强证据**：`~/.claude.json` 的 `mcpServers.vision-bridge` 段存在 + `config.json` 三件套（base_url/api_key/model）已填
-- **强证据满足**：`mcp__vision-bridge__analyze_media(media_path, prompt)` 返回文本，**优先用 MCP 工具**
-- **降级**（没装 / 装了没填三件套）：AI 不替用户判断原生能力
-  - 原生支不支持图片/视频 **视具体 session 模型而定**（Opus/Sonnet 一般支持，Haiku 可能部分支持）
-  - **用户自己把握**原生能力是否够用；AI 不假装"可以原生处理"
-  - 不报错、不阻塞
-- **触发场景**：涉及图片/视频/UI 截图（用户主动提供时直接调）**或 TB 缺陷源拉取的附件含视频/图片**（`{ICODE_OUT_DIR}/tb_source/<ID>/` 下）—— vision-bridge 可用则主动调（视频先用 ffmpeg 本地提取关键帧省钱，详见 [steps/log.md](../steps/log.md)「附件分析（含本地路径 + TB 源）与 ffmpeg 抽帧」）；vision-bridge 不可用时仅提示附件清单不主动调（防纯文字模型报错）
+- **路由真源**：[media_routing.md](media_routing.md)。先调用 `tools/media_router.py route` 或按同一合同判定 session 原生能力、bridge 健康度/能力画像、任务类型和风险，不能仅凭 bridge 已安装就优先使用。
+- **宿主明确证明原生多模态**：普通视觉任务走 native，保留当前强模型能力；bridge 仅作失败兜底或显式/高风险双通道复核。
+- **纯文本或能力未知**：禁止试探性图片注入；bridge 健康则调 `analyze_media_evidence`（兼容旧调用可用 `analyze_media`），不可用则 `text_only` + 明确视觉缺口。
+- **能力画像**：`describe_capabilities` / CLI `--capabilities` 只返回 provider/model/已声明能力和 quality profile，不含 KEY。未评测能力为 `unknown`，bridge 输出只能作候选证据。
+- **触发场景**：涉及图片/视频/UI 截图、PDF 视觉区域或 TB/本地日志媒体附件时进入媒体路由；视频先用 ffmpeg 提取关键帧，密集图/原理图按页与重叠 tile 处理。
 - **当前状态**：已装（用户在 `config.json` 填三件套后可用）
 
 ### ③ memory（推荐）
@@ -64,17 +63,34 @@
 
 ### ⑥ cheap-research（**可选 · 降本场景**）
 
-- **强证据**：`~/.claude.json` 的 `mcpServers.cheap-research` 段存在 + `config.json` 三件套（base_url/api_key/model）已填
-- **强证据满足**：`mcp__cheap-research__summarize(text)` / `__retrieve_similar(query, candidates)` / `__fill_template(template, data)` / `__extract(text, schema)` / `__propose_repo_facts(repo_path)` 等 14 工具返回结构化 dict，**子代理优先用 MCP 工具**
-- **⚠️ 分能力闸门（v1.1）**：14 工具分三类 capability，**不能整体按三件套判定**——
-  - `local`（6 个，不依赖 LLM provider）：`scan_patterns` / `trace_refs` / `validate_migration_ops` / `parse_project_id` / `scan_modules`（`fetch_remote` 归 fetch）——**provider 未配置也照常可用**
+- **强证据**：`~/.claude.json` 的 `mcpServers.cheap-research` 段存在，且 `mcp__cheap-research__describe_capabilities()` 实际可调用；LLM capability 另要求画像为 `configured_unverified` 并以首次真实 LLM 调用确认，不能把“配置已填”当健康探测
+- **强证据满足**：先用 `mcp__cheap-research__describe_capabilities()` 获取不含密钥的会话级能力画像，再按 `summarize` / `retrieve_similar` / `fill_template` / `extract` / `propose_repo_facts` 等 15 工具的 capability 选择；工具均返回结构化 dict
+- **⚠️ 分能力闸门（v1.1）**：15 工具分三类 capability，**不能整体按三件套判定**——
+  - `local`（6 个，不依赖 LLM provider）：`describe_capabilities` / `scan_patterns` / `trace_refs` / `validate_migration_ops` / `parse_project_id` / `scan_modules`（`fetch_remote` 归 fetch）——**provider 未配置也照常可用**
+  - `fetch`（1 个，不依赖 LLM provider）：`fetch_remote`；只拉公网材料，结果始终是 `untrusted_remote/source_material_only`
   - `llm`（8 个，必须 provider 可用）：`summarize` / `retrieve_similar` / `fill_template` / `extract` / `propose_repo_facts` / `diff_summary` / `generate_filename` / `select_template`
   - 真源：[mcp/cheap-research/tools_manifest.json](../mcp/cheap-research/tools_manifest.json)
 - **降级**（没装 / 装了没填三件套）：主会话 / 子代理走 `Agent(model="haiku")` 兜底（方案 A），不阻塞主流程。**子代理兜底时按 [subagent_spawn_wait.md](subagent_spawn_wait.md) 通用契约等待**（后台 spawn + `TaskOutput` 阻塞等 + 20 分钟墙钟硬截止，禁止裸同步 spawn / 被动等通知 / 无限等待）
 - **触发场景**：以各步骤**正文执行点**为真源（推荐表仅声明、正文无调用的不算入选）——log 阶段2 TB 评论预提取（`extract`，评论 ≥ 8 条）、doc 远程模块 README 拉取（`fetch_remote`）、review dedup 分类/找重复（`extract`）+ 审查输出压缩（`summarize`）、merge 跨轮 review 汇总（`summarize`，>1 轮）、deepcheck Fixed 预扫（`scan_patterns`）+ dedup（`extract`）、audit 仓库事实候选预审（`propose_repo_facts`）+ 计划vs代码差异摘要（`diff_summary`）、patch 阶段工具映射（见 [steps/08_patch.md](../steps/08_patch.md) 338 行）。**init/plan/code/status/readme 无正文执行点**（历史检索/ADR 检索/现状盘点/文件名/模板选择均走确定性机制 Read/rg/规则，`--scan` 零 LLM），标 ⚪。完整清单见 [tools_manifest.json](../mcp/cheap-research/tools_manifest.json)
 - **不接管决策**：所有高风险子任务（3 质疑者对抗 / 架构决策 / 终审裁决 / 修复方案 / 用户对话）一律不交给 cheap-research
-- **触发场景详见**：[mcp_per_step.md](mcp_per_step.md) 强证据场景表 + 14 工具入参/出参 schema（见 [mcp/cheap-research/server.py](../mcp/cheap-research/server.py)）
-- **当前状态**：14 工具已在 dev_repo 完成，核心契约测试见 [mcp/cheap-research/tests/](../mcp/cheap-research/tests/)；**未同步到已安装目录**（等用户指令）。此前「43 个自检用例全过」声明已撤销（当时无仓库测试证据，以实际 tests/ 为准）
+- **新增能力分工边界**：技术文档/压缩包先走 `tools/document_intake.py`，视觉页/原理图先走 `tools/media_router.py` 选择 native/bridge/dual；cheap-research 只可消费其**带 source hash + 页/区域回指的文本化候选**做压缩或结构化提取。它不得自己解析图片/视频/7z，不得裁决管脚复用、电气兼容、时序、MCU/SDK 适配或原理图正确性；这些结论留给对应 SKILL + 主模型复检
+- **触发场景详见**：[mcp_per_step.md](mcp_per_step.md) 强证据场景表 + 15 工具入参/出参 schema（见 [mcp/cheap-research/server.py](../mcp/cheap-research/server.py)）
+- **当前状态**：15 工具已在 dev_repo 完成，核心契约测试见 [mcp/cheap-research/tests/](../mcp/cheap-research/tests/)；**未同步到已安装目录**（等用户指令）。历史自检数字不作承诺，以当前 tests/ 实跑为准
+
+### ICODE 自建免 Key 本地 MCP（⑦～⑫）
+
+这 6 个服务不增加公开 `/icode` 命令，只作为现有步骤的条件后端。路由、工具白名单和 operation 权限的机器真源是 [`mcp/icode-mcp-policy/policy.json`](../mcp/icode-mcp-policy/policy.json)；服务缺失或调用失败时退回 `Read/rg/git/file/readelf/ssh/adb/SQLite` 等当前机制，并显式记录降级，不阻断步骤。
+
+| MCP | 核心工具 | 主要步骤 | 硬边界 |
+|---|---|---|---|
+| `icode-evidence` | `inspect_file` / `read_evidence` / `verify_digest` / `build_timeline` / `inspect_corpus` | log/doc/deepcheck/audit/patch/verify | 源只读；每个结果保留路径、行号或 SHA-256 回指；不总结根因 |
+| `icode-workspace` | `inspect_workspace` / `inspect_repo_matrix` / `inspect_build_inputs` / `inspect_artifact` | plan/code/merge/deepcheck/audit/worktree/verify | 不 fetch/merge/checkout/commit/push |
+| `icode-device-observe` | `list_profiles` / `observe_device` / `collect_log_window` / `compare_artifact` | log/patch/verify，audit 只消费结果 | 仅命名 profile + 固定只读动作；无任意命令、部署、重启、刷写或 kill |
+| `icode-mcp-health` | `inventory_servers` / `validate_manifest` / `probe_python_server` / `scan_sensitive_payload` | install/升级复检/CI | 只诊断 MCP，不进入业务裁决 |
+| `icode-mcp-policy` | `list_step_policy` / `evaluate_call` / `validate_policy` | 新 MCP 调用前与 install | 只回答路由/权限，不代理正文 |
+| `icode-local-index` | `build_index` / `query_index` / `index_status` | init/log/plan/code/deepcheck/doc/learn/list（仅大语料或已有索引） | 源只读，只写受管 SQLite；命中后必须回读原文件，`rg` 始终保留 |
+
+`cheap-research` 不依赖也不代理这些服务；仅当其输出过长且原步骤已有 eligible 压缩 gate 时，才可消费保留 source refs 的副本做导航摘要，摘要不能改变事实层结论。
 
 ### ⑦ cheap-research 单跑：dedup 子阶段
 
@@ -120,7 +136,7 @@
 1. **本步骤开始前**：判定本步骤推荐的 MCP（见 [mcp_per_step.md](mcp_per_step.md)）是否可用
    - 查 `~/.claude.json` 的 `mcpServers`：用 `Read` 工具
    - 查当前会话工具列表：工具**直接可见**（按语义识别，含代理前缀形态）即视为可用；不可见再 ToolSearch 取 schema（见 [thinking_core.md](thinking_core.md) 第 0 判据）
-2. **如有强证据**：优先用 MCP 工具（省事且返回更结构化）
+2. **如有强证据**：除视觉任务须先按 media routing 选 native/bridge/dual 外，其余 MCP 优先用工具（省事且返回更结构化）
 3. **无强证据**：走降级路径（Bash / Read / Write / WebFetch 等原生工具）
 4. **不阻塞**：MCP 不可用不是错误，**降级操作完全是合规的**
 

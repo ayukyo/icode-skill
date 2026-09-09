@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "media_mode": "auto",
+  "native_capability": "unknown",
+  "bridge_state": "unknown",
+  "bridge_profile_path": null,
+  "default_task": "general",
+  "default_risk": "normal",
+  "high_risk_dual_review": true,
+  "text_first": true,
+  "pdf_render_dpi": 300,
+  "tile_size": 1536,
+  "tile_overlap": 128,
+  "evidence_profile_version": "v1"
+}

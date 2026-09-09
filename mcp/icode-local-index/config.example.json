@@ -1,0 +1,9 @@
+{
+  "allowed_roots": ["$HOME"],
+  "data_dir": "$HOME/.claude/icode_data/local-index",
+  "max_files": 5000,
+  "max_file_bytes": 524288,
+  "max_total_bytes": 104857600,
+  "extensions": [".c", ".cc", ".cpp", ".h", ".hpp", ".py", ".rs", ".go", ".java", ".js", ".ts", ".tsx", ".jsx", ".md", ".txt", ".json", ".yaml", ".yml", ".toml", ".cmake", ".sh", ".log"],
+  "exclude_dirs": [".git", ".venv", "node_modules", "build", "dist", "__pycache__", ".icode_output"]
+}

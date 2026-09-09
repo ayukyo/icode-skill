@@ -6,7 +6,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-Skill-8A2BE2.svg)](SKILL.md)
-[![Version](https://img.shields.io/badge/version-v2.18.0-blue.svg)](SKILL.md)
+[![Version](https://img.shields.io/badge/version-v2.21.0-blue.svg)](SKILL.md)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/ayukyo/icode-skill/issues)
 
 </div>
@@ -19,7 +19,7 @@ ICode is a Claude Code Skill that breaks the journey from requirement to deliver
 |---|---|---|
 | Process discipline | Depends on your prompt | Hard 6-step gates + L1–L4 blocking matrix |
 | Review quality | Single-perspective self-review | Independent skeptic sub-agents with adversarial verification (self-delegation forbidden) |
-| Laziness resistance | None | 33 hard anti-laziness rules + mandatory Read confirmation lines + file:line evidence |
+| Laziness resistance | None | 39 hard anti-laziness rules + mandatory Read confirmation lines + file:line evidence |
 | Reusing past decisions | Every ticket starts cold | Cross-project history retrieval with a global index + **verdict-based anti-misleading injection** (disproved tickets inject the trap, not the ADR) |
 | Project knowledge | None | `/icode doc` generates a global per-project/branch knowledge base, auto-injected at phase zero |
 | Crash recovery | Restart from scratch | `.ico_metadata.json` status + round counters enable resumable runs at any step |
@@ -135,7 +135,7 @@ Use `./install.sh --dry-run --client all` for a zero-write preflight, or `--skip
 
 The installer writes an ownership marker into managed skills. An identical unmanaged same-name skill is adopted safely; a different unmanaged same-name skill is refused before either host is modified. Runtime configuration and caches are preserved.
 
-Evidence intake, the project-local debug catalog, runtime baseline resolution, verification debt, the multi-repo handoff matrix, and `/icode learn` are **bundled ICODE tools/steps**. They are copied with the ICODE directory to both Claude Code and Codex by `--client all`; they are not standalone entries in `skill-packs/manifest.json`. The eleven reusable cross-project Skills—including embedded runtime provenance, camera pipeline auditing, performance stability, and image-quality/calibration regression—remain separately installed from that manifest with the same ownership/hash collision protection.
+Evidence intake, technical-document intake (`tools/document_intake.py`), media routing/evidence (`tools/media_router.py`), the project-local debug catalog, runtime baseline resolution, verification debt, the multi-repo handoff matrix, and `/icode learn` are **bundled ICODE tools/steps**. They are copied with the ICODE directory to both Claude Code and Codex by `--client all`; they are not standalone entries in `skill-packs/manifest.json`. The fifteen reusable cross-project Skills—including `technical-document-intake`, `hardware-spec-contract-audit`, `schematic-interface-audit`, `mcu-hardware-software-contract-audit`, and the embedded/camera capabilities—remain separately installed from that manifest with the same ownership/hash collision protection.
 
 The historical direct-Claude clone remains supported as a compatibility path. After Claude Code discovers ICODE, run the same unified command:
 
@@ -155,7 +155,7 @@ Repository contributors can preview and publish the current checkout without run
 
 [`mcp/workflow-gate/skill-routes.json`](mcp/workflow-gate/skill-routes.json) maps ICODE triggers to shared-skill input/output contracts. Optional MCPs still degrade gracefully when unavailable, but the installer reports their installation failure honestly.
 
-Embedded and camera projects use the same public workflow commands. An optional `verification_profile` plus an in-ticket `embedded_baseline.json` lets the read-only planner derive hardware-aware scenarios and metric thresholds; it never executes commands from the baseline, and hardware mutation or destructive fault injection still requires explicit authorization.
+Embedded, camera, technical-document, schematic, and MCU contract work uses the same public workflow commands. A local PDF/Office/image/text/7z corpus is first checked for real format, structure, archive risks, duplicates/variants, and extraction coverage, then routed to scoped spec, schematic, or MCU auditing. Baseline/document/SDK/package content is never executed; protected exports and hardware mutation, measurement, or destructive fault injection retain their authorization boundaries.
 
 ## Optional Data Source: Pull from DingTalk Docs
 
@@ -180,7 +180,7 @@ cd ~/.claude/skills/icode/mcp/vision-bridge
 # restart Claude Code to take effect
 ```
 
-All image/video handling flows through either the `mcp__vision-bridge__analyze_media` MCP tool or the local CLI channel (`<server.py 目录>/.venv/bin/python <server.py> --analyze-media <path>`) for clients that don't inject MCP tools (e.g. codex). Videos are pre-sampled locally with ffmpeg to save API quota. When both channels are unavailable, session models fall back to native capability — no error, no blocking. Image/video is never injected into session model messages.
+ICODE uses capability-aware routing rather than forcing every image through vision-bridge. Deterministic text/structure extraction runs first. A host-attested strong multimodal session uses native vision; a text-only or unknown session can use the MCP/CLI bridge; high-risk evidence can use independent dual review, where disagreements remain unresolved. Unknown native capability is never probed by trial image injection. See [`references/media_routing.md`](references/media_routing.md); bridge profiles may declare only capabilities actually evaluated locally.
 
 ### Cheap LLM Inference (cheap-research)
 
@@ -191,7 +191,7 @@ cd ~/.claude/skills/icode/mcp/cheap-research
 # restart Claude Code to take effect
 ```
 
-Offloads 23 low-risk sub-tasks (long-context compression / history retrieval / template filling / structured extraction / TB-comment pre-extraction / code-fact audit / pattern scanning / symbol tracing / diff summaries) to a cheap model. It **never takes over decisions** — 3-skeptic adversarial verification, architecture decisions, final audit, and fix proposals stay on the main session (zero gray area).
+Provides 15 low-risk tools (6 deterministic local tools, 1 untrusted remote fetcher, and 8 optional LLM transforms) for compression, navigation, extraction, and mechanical validation. It **never takes over decisions** — 3-skeptic adversarial verification, architecture decisions, final audit, and fix proposals stay on the main session (zero gray area).
 
 **Coverage check (execution gates)**: each cheap-research call site has a machine-readable gate (`mcp/cheap-research/gates.json`) and a per-ticket trace (`{ICODE_OUT_DIR}/.mcp_gate_trace.jsonl`). Run the validator to confirm every eligible gate was actually fulfilled (or legitimately skipped with structured evidence):
 
@@ -201,16 +201,22 @@ python3 tools/lint_mcp_coverage.py <out_dir> --json       # machine-readable rep
 python3 tools/lint_mcp_coverage.py <out_dir> --step review --strict
 ```
 
-### The Other 4 MCPs (sequential-thinking / memory / context7 / playwright)
+### The Other 10 MCPs (4 general + 6 ICODE-local services)
 
-The remaining 4 of the 6 MCPs are workflow utilities, installed by `/icode install` and used by the steps — no per-user config needed:
+Besides vision-bridge and cheap-research, `/icode install` installs 4 general workflow utilities and 6 API-key-free ICODE-local services:
 
 - **sequential-thinking** — the L2/L3 carrier of the tiered reasoning gate: structured 3~5-step thinking before complex / refactor / redesign tasks (L0/L1 steps do not call it; each step lists its required MCPs first, then calls them)
 - **memory** — cross-project knowledge graph (`mcp__memory__read_graph`), recalled during search/injection so past tickets and project docs resurface across sessions
 - **context7** — live library-doc lookup during init/plan/code when the requirement touches third-party libraries
 - **playwright** — browser automation during deepcheck/audit for front-end projects
+- **icode-evidence** — SHA-256 identity, line-addressable reads, log timelines, and document-corpus manifests
+- **icode-workspace** — multi-Git-root/worktree/build-input/artifact provenance observation; never merge/commit/push
+- **icode-device-observe** — fixed read-only checks through named SSH/ADB/fixture profiles; no arbitrary commands or device writes
+- **icode-mcp-health** — install/upgrade/CI checks for manifests, Python entrypoints, and sensitive fields
+- **icode-mcp-policy** — default-deny step-to-server/tool/operation routing source of truth
+- **icode-local-index** — rebuildable SQLite full-text index for large local corpora; every hit must be verified against the source file
 
-Each MCP has an explicit strong-evidence trigger and a declared graceful-downgrade path (see [SKILL.md「MCP 工具集」](SKILL.md)); none blocks the workflow when missing.
+The six local services add no public `/icode` commands; their machine-readable routing source is [`mcp/icode-mcp-policy/policy.json`](mcp/icode-mcp-policy/policy.json). Each MCP has an explicit strong-evidence trigger and a declared graceful-downgrade path (see [SKILL.md「MCP 工具集」](SKILL.md)); none blocks the workflow when missing.
 
 ## Commands
 

@@ -44,9 +44,21 @@ python3 tools/icode_control.py create --dir <out_dir> --ticket-id <id> \
 ## 4. 事件链（.ico_events.jsonl）
 
 - 每工单一本哈希链日志：`previous_event_hash` = 上一行 `event_hash`，首事件前驱为全 0；`event_hash` = sha256(去 hash 字段 canonical JSON)。validate 校验整链（断链/篡改报 `event_chain`）。
-- 事件类型（schema 枚举）：`ticket_created` / `step_started` / `artifact_written` / `gate_checked` / `state_changed` / `metadata_updated` / `verification_recorded` / `snapshot_written` / `close_phase` / `ticket_reopened` / `requirement_delta` / `agent_spawned` / `agent_result` / `doc_module_status` / `index_updated` / `migration_applied` / `idempotent_hit` / `external_note`。
-- 追加：`python3 tools/icode_control.py event --dir <out_dir> --type <type> [--payload '<json>'] [--request-id <key>]`。该通用入口只接受业务审计事实；`ticket_created/state_changed/metadata_updated/verification_recorded/snapshot_written/close_phase/ticket_reopened/index_updated/migration_applied/idempotent_hit` 为专用命令独占事件，通用 event 一律拒绝伪造。
+- 事件类型（schema 枚举）：`ticket_created` / `step_started` / `step_finished` / `artifact_written` / `gate_checked` / `operation_started` / `operation_finished` / `state_changed` / `metadata_updated` / `verification_recorded` / `snapshot_written` / `close_phase` / `ticket_reopened` / `requirement_delta` / `agent_spawned` / `agent_result` / `doc_module_status` / `index_updated` / `migration_applied` / `idempotent_hit` / `external_note`。
+- 追加：`python3 tools/icode_control.py event --dir <out_dir> --type <type> [--payload '<json>'] [--request-id <key>]`。该通用入口只接受业务审计事实；所有 step/gate/artifact/operation 事件及原有控制事件均由专用命令独占，通用 event 一律拒绝伪造。
 - 事件是**追加式审计事实**，不是状态本身；状态以 metadata.status + 最后一条 state_changed 事件为准。
+
+### 4.0 可恢复执行模型
+
+`gates.json.execution_model` 是步骤端口、Reactive 边界、动作类别和失败策略的机器真源；完整顺序、命令和降级边界见 [execution_model.md](execution_model.md)。受控入口：
+
+- `step`：开始时校验 inputs 并冻结 protected 摘要；边界 `check` 发现漂移即返回 route；成功 `finish` 强制 required checks + outputs。
+- `artifact`：只允许记录命中该 step outputs 合同的真实文件及 sha256。
+- `operation`：记录长动作 start/finish；有副作用动作缺终结回执时禁止再次 start 和推进完成态。
+- `policy`：只读计算 retry/fallback/block 决策；只有 read-only + retryable transport 可能 `auto_retry=true`。
+- `trace`：只读合成 step/gate/artifact/operation/state 时间线和开放 attempt。
+
+兼容规则：只有已显式 `step --phase start` 的新执行在完成态转换时强制终结回执；没有 execution_model 事件的历史工单不被追溯阻断。`close_state` 非空后仍冻结普通执行事件，关闭/重开只走专用生命周期事件。
 
 ### 4.1 普通 metadata 单一 writer
 
@@ -66,7 +78,7 @@ python3 tools/icode_control.py create --dir <out_dir> --ticket-id <id> \
 ## 6. 关闭分阶段（close_state）
 
 - 阶段序列（gates.json `state_machine.close_phases`）：`close_planned → archived → roots_verified → checkouts_removed → branches_removed → closed`。
-- 任一 `close_state` 非空后，普通 `transition`、通用 `event`、`record-verification` 和会追加事件的 `snapshot` 均冻结；只读 `snapshot --verify` 仍允许。不得在关闭流程中并行重开 review/code。关闭后修改必须先按 `/icode worktree --reopen` 建立新的活动 checkout。
+- 任一 `close_state` 非空后，普通 `transition`、通用 `event`、`step/artifact/operation`、`record-verification` 和会追加事件的 `snapshot` 均冻结；只读 `snapshot --verify`/`trace` 仍允许。不得在关闭流程中并行重开 review/code。关闭后修改必须先按 `/icode worktree --reopen` 建立新的活动 checkout。
 - 记录：`python3 tools/icode_control.py close-phase --dir <out_dir> --phase <phase>`；仅 `status=completed` 且事件链有完成证据时可用；每阶段**幂等**，**禁止跨阶段跳转**。
 - `archived` 前：先把必需小型控制产物复制到 `archive_path`，再运行 `archive-manifest --dir <out_dir> --archive-dir <archive_path> --write`。工具比对源/归档 hash，对顶层大文件留指针+hash，并复跑三类 linter；缺文件、hash 不同或门禁不等价时不生成 complete manifest，`close-phase --phase archived` 也会拒绝。
 - **控制根交接**：`close-phase --dir <source_out_dir> --phase archived` 成功后，工具把包含 archived 事件的最新 metadata/事件链同步到 `archive_path`，刷新 manifest hash，并返回 `control_root`。`roots_verified` 起必须以该归档根作 `--dir`；源 checkout 消失不再阻断关闭留痕。
@@ -78,7 +90,7 @@ Git checkout 和逐仓提交契约由 `steps/reopen.md` 先创建/校验；然�
 
 ## 7. 快照（ticket_snapshot.json）
 
-- 每个关键步骤收尾可生成：`python3 tools/icode_control.py snapshot --dir <out_dir>` → 写入 `<out_dir>/ticket_snapshot.json`（当前阶段 / 下一合法动作 / 基线计数 / 未决项 / 链尾 hash）。
+- 每个关键步骤收尾可生成：`python3 tools/icode_control.py snapshot --dir <out_dir>` → 写入 `<out_dir>/ticket_snapshot.json`（当前阶段 / 下一合法动作 / 基线计数 / 未决项 / 最近执行轨迹与开放 attempt / 链尾 hash）。
 - 校验：`snapshot --verify` 比对 snapshot 与 metadata 状态、链尾 hash 与事件链完整性（过期/篡改即 fail）。
 
 ## 8. 实机验证记录
@@ -102,6 +114,11 @@ Git checkout 和逐仓提交契约由 `steps/reopen.md` 先创建/校验；然�
 | validate | 工单整体校验 | `--dir`（`--skip-linters` 仅限夹具） |
 | transition | 状态流转 | `--dir --to [--delivery-verdict] [--request-id]` |
 | event | 追加事件 | `--dir --type [--payload] [--request-id]` |
+| step | 步骤端口/边界/终结回执 | `--dir --step --phase [--attempt --boundary --outcome]` |
+| artifact | 记录 outputs 合同内产物 | `--dir --step --attempt --path [--scope]` |
+| operation | 长动作开始/终结回执 | `--dir --phase [--name --opclass --attempt --outcome]` |
+| policy | 查询 Retry/Fallback 策略 | `--opclass --failure [--attempts]` |
+| trace | 统一执行轨迹（只读） | `--dir [--limit]` |
 | index-write | 索引单一 writer | `--ticket-dir` |
 | index-update | 更新索引独有字段 | `--ticket-id [--increment-hit] [--set-json]` |
 | migration | legacy→v3 迁移 | `--dir [--apply]` |

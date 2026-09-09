@@ -1,0 +1,12 @@
+{
+  "server": "icode-workspace",
+  "api_key_required": false,
+  "purpose": "multi-repository and artifact provenance observation",
+  "tools": [
+    {"name": "describe_capabilities", "read_only": true, "deterministic": true, "network": false},
+    {"name": "inspect_workspace", "read_only": true, "deterministic": true, "network": false},
+    {"name": "inspect_repo_matrix", "read_only": true, "deterministic": true, "network": false},
+    {"name": "inspect_build_inputs", "read_only": true, "deterministic": true, "network": false},
+    {"name": "inspect_artifact", "read_only": true, "deterministic": true, "network": false}
+  ]
+}

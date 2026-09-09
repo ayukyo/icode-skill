@@ -20,6 +20,10 @@ class LocalOcrProvider(MediaProvider):
 
     def __init__(self, config: dict):
         self.lang = config.get("lang", "chi_sim+eng")
+        self.model = f"tesseract:{self.lang}"
+        self.profile_version = config.get("profile_version")
+        self.declared_capabilities = ["ocr"]
+        self.quality_profile = config.get("quality_profile", {})
         if not shutil.which("tesseract"):
             raise RuntimeError(
                 "local_ocr 需要 tesseract CLI。"

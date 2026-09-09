@@ -35,9 +35,10 @@ class LocalOllamaProvider(LLMProvider):
     supports_schema = True
 
     def __init__(self, config: dict):
-        base_url = config.get("base_url", _LOCAL_OLLAMA_DEFAULT)
+        base_url = config.get("base_url") or _LOCAL_OLLAMA_DEFAULT
+        config = dict(config)
+        config["base_url"] = base_url
         if not config.get("api_key"):
-            config = dict(config)
             config["api_key"] = "ollama-dummy-key"
         self._impl = OpenAICompatProvider(config)
         self.base_url = base_url
@@ -52,8 +53,9 @@ class LocalOllamaProvider(LLMProvider):
     ) -> dict:
         # 先 ping 一下, 避免长时间 hang
         try:
-            async with httpx.AsyncClient(timeout=5) as client:
-                await client.get(f"{self.base_url.rstrip('/v1')}/api/tags")
+            tags_url = self.base_url.rstrip("/").removesuffix("/v1") + "/api/tags"
+            async with httpx.AsyncClient(timeout=5, trust_env=False) as client:
+                await client.get(tags_url)
         except httpx.RequestError as e:
             return _make_error(
                 "api_connection_error",
@@ -69,3 +71,7 @@ class LocalOllamaProvider(LLMProvider):
         if "cost_estimated" in result:
             result["cost_estimated"] = 0.0
         return result
+
+    async def aclose(self) -> None:
+        """转发关闭底层 OpenAI-compatible 连接池。"""
+        await self._impl.aclose()

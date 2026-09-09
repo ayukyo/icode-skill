@@ -430,17 +430,15 @@
 | memory | 🟢* | read_graph 查跨工单偏好--本工程有历史工单时 |
 | playwright | ⚪ | 本步骤不推荐 |
 
-**vision-bridge 触发与降级判定（init 专用）**：
+**媒体能力路由（init 专用，真源：[media_routing.md](../references/media_routing.md)）**：
 
 `🟢*` 标签需**显式判定**后才执行 ToolSearch——防止"用户文字描述截图"被误判为"已传图"而触发空调用报错（实测盲区，纯文本模型或 vision-bridge 未装时必现）。复用模式见用户级 skill `tb-attachment-default-hint` 的 Variant B 段。
 
 - **触发条件**：用户**实际传图**（系统消息含媒体附件 / 用户消息含本地图片路径 / 用户消息引用了前序消息中的图片）。**仅文字描述"截图/设计图"无实际附件 → 不触发**。
-- **⚠️ 防错硬约束（先于一切判定，所有环境强制）**：图片/视频**绝不作为附件/base64 注入当前会话模型消息**——session 模型可能是纯文本（如 codex 第三方模型 glm-5.3，catalog 声明支持 image 但服务端实际只收文本），注入即报 "Model only support text input" 且图片留在上下文导致后续 turn 一启动就崩。图片分析**只能**走下方任一通道（把**文本结果**写回 §2/§3）；两通道均不可用时仅记录"图片已传、未分析，待人工查看"，**禁止**把图片回灌给模型。
-- **可用性判定（双通道：MCP 工具 / 本地 CLI，config.json 三件套配齐即可用）**：
-  1. **MCP 通道**：Read `~/.claude.json` 的 `mcpServers.vision-bridge` 段存在 **且** 工具可在当前会话直接调用（工具列表直接可见 `mcp__vision-bridge__analyze_media` 或代理前缀形态，或 ToolSearch 可取 schema）**且** Read `~/.claude/skills/icode/mcp/vision-bridge/config.json` 三件套（`base_url` / `api_key` / `model`）已填 → 用 MCP 工具
-  2. **CLI 通道**（codex 等 MCP 工具未注入、但能执行本地命令的环境）：当前工具列表**无** `analyze_media` **且** 能执行本地命令 **且** 找到 `~/.claude/skills/icode/mcp/vision-bridge/server.py` **且** 同目录 `config.json` 三件套已填 → 用 `exec_command` 执行 `<server.py 目录>/.venv/bin/python <server.py> --analyze-media <图片路径> --prompt "<提取内容/时间点/错误提示>"`，读 stdout 文本
-- **可用** → MCP 通道调 `mcp__vision-bridge__analyze_media`；CLI 通道读 stdout → 识别结果**以文本**写入 §2 现状盘点或 §3 需求点（按内容归属）
-- **不可用**（两通道均不可用）→ 仅在思考块写 `vision-bridge 不可用(MCP/CLI 均不可用,<具体缺失项>)，用户图片未分析，待人工查看`，**不视为违规、不阻塞流程**
+- **先路由**：宿主明确证明当前 session 支持媒体输入 → `native`；明确纯文本或能力未知且 bridge 健康 → `bridge`；两者均无 → `text_only`。禁止用试传图片探测未知能力。可执行 `python3 tools/media_router.py route --mode auto --native <supported|unsupported|unknown> --bridge <available|unavailable|unknown> --task <general|diagram|schematic|...>` 留下决定。
+- **native**：直接由当前强多模态会话分析，结果绑定文件 hash、页/裁剪/DPI、session model 与 prompt profile；不得因为 bridge 已安装而降级替换。
+- **bridge/dual**：优先使用带来源的 `analyze_media_evidence`；旧 bridge 只能 `analyze_media` 时补写同等 evidence record。MCP 工具不可见但 CLI 可用时执行 `<server.py 目录>/.venv/bin/python <server.py> --analyze-evidence <图片路径> ...`。
+- **text_only**：仅记录已确定提取的文字/元数据和“视觉区域未分析”缺口，不假装看过原图。识别结果写入 §2 现状盘点或 §3 需求点。
 - **不触发**（最常见）：用户仅文字描述"截图/设计图"无实际附件 → 🟢* → ⚪，不评估不声明
 
 **强制约束**：🟢/🟢*/⚪ 语义 + 双保险机制（执行步骤内嵌 + thinking_core gate）详见 [SKILL.md「MCP 调用覆盖强制化」](../SKILL.md) + [references/mcp_per_step.md「双保险机制」](../references/mcp_per_step.md)；本步骤表内的 🟢/🟢* 标注按上方真源判定。

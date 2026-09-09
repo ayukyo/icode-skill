@@ -92,7 +92,7 @@ model:    <你加载的视觉模型>
 
 ## 工具签名
 
-只暴露一个工具：
+保留兼容文本接口，并增加能力画像和可复演证据接口：
 
 ```python
 async def analyze_media(
@@ -101,9 +101,24 @@ async def analyze_media(
     media_type: str = "auto",   # "image" | "video" | "auto"(按扩展名推断)
     max_tokens: int = 1024,
 ) -> str:                        # 文本描述
+
+async def describe_capabilities() -> str:  # 不含密钥的 provider/model/能力画像 JSON
+
+async def analyze_media_evidence(
+    media_path: str,
+    prompt: str = "",
+    media_type: str = "auto",
+    max_tokens: int = 1024,
+    prompt_profile: str = "general-v1",
+    profile_version: str = "v1",
+    page: int | None = None,
+    crop: str = "",
+    dpi: int | None = None,
+    tile_index: int | None = None,
+) -> str:                        # 带 hash/模型/页/裁剪/状态的 JSON
 ```
 
-session 模型只看到这个工具的文本返回，**永远不接触原图/原视频**。
+`analyze_media` 供旧调用兼容；新工作流优先 `analyze_media_evidence`。证据接口只接受可计算 SHA-256 的本地常规文件，返回顶层 `input_sha256/media_kind/channel/provider/model/prompt_profile/profile_version` 及页、裁剪、DPI、tile、限制和分歧字段；远程 URL 只能走旧接口并按候选信息处理。bridge 通道中的 session 只看到文本/JSON 返回，不接触原媒体；ICODE 是否使用当前会话模型的原生视觉由 [媒体能力路由](../../references/media_routing.md)决定。
 
 ---
 
@@ -122,12 +137,13 @@ VISION_BRIDGE_CONFIG=~/.claude/skills/icode/mcp/vision-bridge/config.json \
 # stdout 为文本描述; 退出码 0 成功, 非 0 看 stderr
 ```
 
-参数与 `analyze_media` 一一对应：`--analyze-media <path>`、`--prompt`、`--media-type (auto|image|video)`、`--max-tokens`。不传 `--analyze-media` 时仍走 MCP server（`mcp.run()`），行为完全不变。
+新工作流可用 `--analyze-evidence <path>` 返回证据 JSON，用 `--capabilities` 返回不含密钥的能力画像；页/裁剪参数为 `--page/--crop/--dpi/--tile-index`。不带 CLI 模式参数时仍走 MCP server，旧行为不变。
 
 ---
 
 ## SKILL 端约定（写在主 SKILL.md）
 
-- **vision-bridge 装好后**：禁止把图片作为附件直接传给 session 模型，必须走 `analyze_media`（MCP 工具）或本地 CLI 通道
-- **codex 等 MCP 工具未注入的环境**：AI 用本地 CLI 通道分析，**禁止**把图片/base64 注入会话模型消息（第三方纯文本模型注入即报 "Model only support text input"）
-- **未装 vision-bridge**：不做约定，session 模型按其原生多模态能力处理，由用户自负其责
+- vision-bridge 是纯文本/能力未知会话的补盲通道，不因安装成功自动取代 GPT 等宿主已证明的强原生视觉。
+- 宿主能力未知时禁止试传图片；先用 ICODE `tools/media_router.py route` 判定。selected mode 为 bridge/dual 才调用本服务。
+- `declared_capabilities` 和 `quality_profile` 只声明实际评测边界。未知能力的输出只能作候选证据；高风险双通道分歧保持未决。
+- Codex 等未注入 MCP 工具的环境可用本地 CLI；结果仍须记录输入 hash、provider/model、prompt profile、页/裁剪/DPI 和状态。

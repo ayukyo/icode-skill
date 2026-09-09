@@ -55,6 +55,26 @@
       "name": "camera-image-quality-calibration",
       "path": "camera-image-quality-calibration",
       "entrypoint": "SKILL.md.template"
+    },
+    {
+      "name": "technical-document-intake",
+      "path": "technical-document-intake",
+      "entrypoint": "SKILL.md.template"
+    },
+    {
+      "name": "hardware-spec-contract-audit",
+      "path": "hardware-spec-contract-audit",
+      "entrypoint": "SKILL.md.template"
+    },
+    {
+      "name": "schematic-interface-audit",
+      "path": "schematic-interface-audit",
+      "entrypoint": "SKILL.md.template"
+    },
+    {
+      "name": "mcu-hardware-software-contract-audit",
+      "path": "mcu-hardware-software-contract-audit",
+      "entrypoint": "SKILL.md.template"
     }
   ]
 }

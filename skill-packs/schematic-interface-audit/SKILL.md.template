@@ -1,0 +1,69 @@
+---
+name: schematic-interface-audit
+description: Use when a schematic, EDA source, netlist, PDF export, board interface, connector, power tree, reset, clock, synchronization signal, or hardware bus must be traced or checked for electrical and cross-sheet consistency.
+---
+
+# Schematic Interface Audit
+
+## Purpose
+
+Audit what a schematic proves about interfaces, power, sequence, and connectivity. A matching label does not prove electrical connection, compatible voltage, populated circuitry, PCB routing, or runtime behavior.
+
+## Boundaries
+
+- Establish file identity with `technical-document-intake`; bind board, assembly variant, revision/date, sheets, and population options.
+- Rank evidence per claim: `direct_eda_or_netlist` > `vector_searchable_pdf` > `raster_or_ocr`; all still require the correct revision and variant.
+- PDF/OCR proves only visible symbols, labels, and values. Connectivity stays `candidate` without EDA/netlist or an unambiguous drawn connection.
+- For dense PDF/raster schematics, use ICODE's capability-aware media route: strong attested native vision remains primary, pure-text sessions may use a qualified bridge, and high-risk dual-channel disagreements remain `unresolved`. Bind every rendered page/tile to hash, page, crop, DPI, channel, model, and prompt profile.
+- Read-only by default: no hardware mutation, powering, probing, register writes, continuity checks, or measurements without explicit authorization and safety controls.
+- Route product-value conflicts to `hardware-spec-contract-audit`; sensor-to-consumer behavior to `camera-pipeline-contract-audit`; software protocol semantics to `cross-layer-contract-audit`.
+
+## Procedure
+
+1. Freeze `schematic_scope`: board/assembly/DNP variant, schematic/PCB/BOM/netlist revisions, hashes, sheets, and audited boundary.
+2. Map sheet functions, hierarchical ports, off-page/cross-sheet labels, power symbols, aliases, and coordinates. Preserve active-low notation, differential polarity, and numbered rails. Render small-text sheets at adequate DPI and use overlapping tiles plus a whole-page cross-region pass; never infer coverage from a low-resolution overview.
+3. Trace connector/source to consumer. Record pin/net/refdes, direction, voltage domain/threshold, pull-up/pull-down, termination/filter, protection, isolation/level shifting, power state, and alias.
+4. Audit GPIO, I2C, SPI, UART, CAN, USB, Ethernet, MIPI, GMSL, FSYNC, PPS, interrupt, enable, reset, and clock contracts. Retain pair polarity, impedance, AC coupling, lane/channel, and sideband details.
+5. Audit power/reset/clock/sync: source, range, owner, dependency, order/stability, reset release, clock, sync direction, default bias, brownout/off-state, and back-power risk.
+6. Reconcile cross-sheet hierarchy and population-changing links such as muxes, jumpers, zero-ohm/DNP resistors, level shifters, test points, and connectors.
+7. Record ambiguities and the smallest discriminator: EDA query, netlist, BOM/assembly, PCB source, datasheet, or authorized check.
+
+## Required output contract
+
+### `schematic_scope`
+
+Board/assembly variant, revisions, source hashes, sheets, boundary, exclusions, and safety authorization.
+
+### `source_quality`
+
+| Source | Revision/variant | Evidence class | Search/visual coverage | Connectivity capability | Gaps | Status |
+|---|---|---|---|---|---|---|
+
+### `sheet_map`
+
+| Sheet | Function | Hierarchical ports | Cross-sheet nets/aliases | Power domains | Key refdes | Evidence page/sheet/coordinate/refdes |
+|---|---|---|---|---|---|---|
+
+### `interface_matrix`
+
+| Interface/signal | Source refdes/pin | Connector/net/aliases | Destination refdes/pin | Direction | Voltage domain/threshold | Pull-up/pull-down | Termination/filter | Protection/isolation/level shifting | Clock/reset/sync/timing | Variant/population | Evidence | Status |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+
+### `power_sequence`
+
+| Rail/event | Source/control owner | Nominal/range | Depends on | Order/delay/stable condition | Reset/clock/sync relation | Off/fault risk | Evidence | Status |
+|---|---|---|---|---|---|---|---|---|
+
+### `ambiguities`
+
+List claim, alternatives, evidence class/location, impact, discriminator or authorized check, and owner.
+
+### `verdict`
+
+State `aligned`, `conflicted`, or `unresolved` per interface/sequence with revision/variant boundary, last proven connection, claim ceiling, safety gaps, and next evidence.
+
+## Anti-patterns
+
+- Treating text hits as a netlist or ignoring DNP, pin numbers, polarity, aliases, or hierarchy.
+- Checking names without direction, voltage, bias, termination, protection, power state, or sequence.
+- Inferring PCB population, routing, SI, or behavior from a PDF alone.

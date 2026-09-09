@@ -1,0 +1,59 @@
+---
+name: hardware-spec-contract-audit
+description: Use when PRDs, datasheets, interface specifications, schematics, code, tests, measurements, or field behavior disagree about a hardware product value, capability, limit, variant, revision, or lifecycle status.
+---
+
+# Hardware Spec Contract Audit
+
+## Purpose
+
+Resolve apparent specification conflicts without mixing requirement, supplier claim, design intent, implementation, measurement, and field behavior. Authority is claim- and scope-specific: there is no global authority ordering that makes one document correct for every field.
+
+## Boundaries
+
+- Require a `technical-document-intake` identity and readable location for each document claim. Missing or protected regions remain unknown.
+- Consume duplicate/variant groups from intake. Exact copies do not count as independent corroboration, and a likely revision group still requires a scope-specific canonical-source decision.
+- Bind every fact to product/variant, hardware revision, document revision/date, lifecycle_status, source role, field scope, and exact page/section/table/cell.
+- Values from competitor comparisons, examples, targets, preliminary tables, TBD/TBC, planned work, actual measurements, and published limits are not interchangeable.
+- Route electrical connectivity to `schematic-interface-audit`, runtime-loaded identity to `embedded-runtime-provenance`, and software boundary mismatches to `cross-layer-contract-audit`.
+
+## Procedure
+
+1. Build a source register. Assign each source a role: `requirement`, `external_spec`, `implementation_design`, `code_runtime`, `test`, or `field`. Record which claims it may authoritatively define; never infer a global rank.
+2. Extract atomic facts. One row holds one field and one scope. Preserve raw value, unit, normalized value/unit, tolerance/range, modality (`required`, `planned`, `implemented`, `measured`, `unknown`), conditions, and evidence location.
+3. Normalize only reversible representations. Retain original dimensions/order, coordinate convention, temperature/range, nominal-versus-limit meaning, and rounding precision. Do not normalize away semantic differences.
+4. Compare rows sharing the same field and compatible scope. Classify each result as `consistent`, `true_contradiction`, `scope_or_variant_difference`, `lifecycle_drift`, `unit_or_rounding`, or `unresolved`.
+5. Trace required claims across: Requirement → Published spec → Schematic → Code → Test → Field. Use `not_applicable` where a layer genuinely has no representation; absence is not success.
+6. Resolve only with evidence from the authority for that exact field and scope. Otherwise keep alternatives, affected decisions, owner, and smallest discriminating action explicit.
+
+## Required output contract
+
+### `source_register`
+
+| Source ID/hash | Role | Product/variant | Revision/date | lifecycle_status | Authority scope | Readability | Location/evidence |
+|---|---|---|---|---|---|---|---|
+
+### `normalized_fact_matrix`
+
+| Field | Raw value | Unit | Normalized value/unit | Modality | Conditions/tolerance | Product/variant/revision | Source role | Page/section/table/cell | Status |
+|---|---|---|---|---|---|---|---|---|---|
+
+### `conflict_register`
+
+For each comparison record rows, field-scoped authority, classification, rationale, impact, missing evidence, owner, and next action.
+
+### `traceability_matrix`
+
+| Claim | Requirement | Published spec | Schematic | Code | Test | Field | Gaps | Result |
+|---|---|---|---|---|---|---|---|---|
+
+### `verdict`
+
+State `aligned`, `conflicted`, or `unresolved` per claim/scope; include resolved value only when supported, applicable variant/revision/status, allowed claim, prohibited overclaim, and unresolved owners.
+
+## Anti-patterns
+
+- Letting “latest”, “PRD”, or “datasheet” win every field without authority scope.
+- Comparing dimensions, FOV, precision, bandwidth, voltage, or timing without units, conditions, tolerance, axes, or lifecycle status.
+- Merging target, planned, implemented, measured, competitor, TBD, and preliminary values into one number.
+- Declaring a contradiction before excluding variant, revision, modality, or rounding differences.

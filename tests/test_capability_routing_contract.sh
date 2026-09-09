@@ -5,6 +5,8 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 for path in \
   tools/evidence_intake.py \
+  tools/document_intake.py \
+  tools/media_router.py \
   tools/debug_catalog.py \
   tools/runtime_baseline.py \
   tools/verification_debt.py \
@@ -34,9 +36,23 @@ rg -q 'verification_debt\.py plan' "$ROOT/steps/verify.md"
 rg -q 'evidence_intake\.py' "$ROOT/steps/log.md"
 rg -q 'debug_catalog\.py' "$ROOT/steps/log.md"
 rg -q 'runtime_baseline\.py' "$ROOT/steps/log.md"
+rg -q 'media_router\.py' "$ROOT/steps/log.md"
 rg -q 'submission_guard\.py handoff' "$ROOT/steps/worktree.md"
 rg -q '/icode worktree --merge' "$ROOT/steps/worktree.md"
 rg -q 'handoff_matrix\.json' "$ROOT/steps/07_readme.md"
+rg -q 'icode-mcp-policy/policy\.json' "$ROOT/references/thinking_core.md"
+rg -q 'ICODE 本地 MCP 步骤路由' "$ROOT/references/mcp_per_step.md"
+python3 - "$ROOT/mcp/icode-mcp-policy/policy.json" <<'PY'
+import json
+import sys
+
+policy = json.load(open(sys.argv[1], encoding="utf-8"))
+expected = {"icode-evidence", "icode-workspace", "icode-device-observe", "icode-mcp-health", "icode-mcp-policy", "icode-local-index"}
+assert set(policy["servers"]) == expected
+assert policy["default"] == "deny"
+assert any(route["server"] == "icode-mcp-health" for route in policy["steps"]["install"])
+assert any(route["server"] == "icode-workspace" for route in policy["steps"]["worktree"])
+PY
 
 for readme in README.md README.zh-CN.md; do
   rg -q '/icode learn' "$ROOT/$readme"
@@ -58,6 +74,8 @@ fi
 
 python3 -m py_compile \
   "$ROOT/tools/evidence_intake.py" \
+  "$ROOT/tools/document_intake.py" \
+  "$ROOT/tools/media_router.py" \
   "$ROOT/tools/debug_catalog.py" \
   "$ROOT/tools/runtime_baseline.py" \
   "$ROOT/tools/verification_debt.py" \

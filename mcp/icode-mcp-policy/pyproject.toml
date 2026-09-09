@@ -1,0 +1,5 @@
+[project]
+name = "icode-mcp-policy-mcp"
+version = "1.0.0"
+requires-python = ">=3.10"
+dependencies = ["mcp>=1.29,<2"]

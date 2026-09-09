@@ -17,10 +17,24 @@
 |-----|---------------------------|--------|
 | **sequential-thinking** | L2/L3 复杂推理/高风险对抗步骤（按 [thinking_core.md](thinking_core.md)「分级思考（reasoning gate）规则」分级；默认 L2：plan/review/code/patch/log/deepcheck/audit；升 L3 时另加对抗） | L0/L1（不进入可用性探测） |
 | **context7** | init/plan/code 步骤 **且** 需求或代码涉及第三方库（package.json/Cargo.toml/go.mod/requirements.txt/pom.xml/build.gradle 等声明依赖，且需求触及该库 API） | 其余步骤 / 不涉及第三方库 |
-| **vision-bridge** | 任意步骤 **且** (a) 用户主动提供图片/截图/视频（会话中含媒体附件/路径，直接调） **或** (b) TB 缺陷源拉取的附件含视频/图片（`{ICODE_OUT_DIR}/tb_source/<ID>/` 下，**vision-bridge 可用则主动调**：视频先用 ffmpeg 本地提取关键帧再传图片帧给 vision-bridge 省钱——见 [steps/log.md](../steps/log.md)「附件分析（含本地路径 + TB 源）与 ffmpeg 抽帧」段） **或** (c) `/icode log` 本地日志目录含视频/图片文件（`find <log_dir> -type f \( -name '*.mp4' -o -name '*.mov' -o -name '*.png' -o -name '*.jpg' -o -name '*.jpeg' \)`，**vision-bridge 可用则主动调**，行为同 (b) 的 ffmpeg 抽帧流程） | vision-bridge 未安装 / `~/.claude/skills/icode/mcp/vision-bridge/config.json` 三件套未配齐 → 仅提示不主动调（防纯文字模型报错）；ffmpeg 不可用时降级为直接传视频（需用户确认，可能耗 API 额度） |
+| **vision-bridge** | 任意步骤存在图片/视频/PDF 视觉区域，**且** [media_routing.md](media_routing.md) 选择 `bridge`/`dual`（纯文本或能力未知 session、高风险独立复核等）；TB/本地视频先抽关键帧，密集页按 tile | 路由选择 native → 保留 session 原生视觉；bridge 不可用且 native 未证明 → `text_only` + 视觉缺口；未知能力禁止试探性注图 |
 | **playwright** | deepcheck/audit 步骤 **且** 前端工程（含 .html/.jsx/.tsx/.vue 或 package.json 含 react/vue） | CLI/后端/嵌入式工程 |
 | **memory** | init/plan 步骤 **且** 本工程历史工单数 ≥ 1（`~/.claude/icode_data/index.json` 中本 project_path 工单数 ≥ 1） | 新工程首个工单 / demo |
 | **cheap-research** | log/doc/review/deepcheck/audit/patch 步骤 **且** 命中正文有执行点的候选子任务（TB 评论预提取 / 远程 README 拉取 / dedup 分类找重复 / 审查输出压缩 / Fixed 预扫 / 仓库事实候选 / 差异摘要 / patch 各阶段映射），**或** merge 步骤 **且** 多轮 review（跨轮 issue 合并汇总 summarize，见 [steps/03_merge.md](../steps/03_merge.md)「合并定稿」段；N=1 轮时跳过）——**实际以 [tools_manifest.json](../mcp/cheap-research/tools_manifest.json) 与各步骤正文执行点为真源，推荐表不与正文矛盾**（init/plan/code/status/readme 正文无 cheap-research 调用执行点：历史检索/ADR 检索/现状盘点/文件名/模板选择均走确定性机制 Read/rg/规则，`--scan` 零 LLM 信号词匹配，标 ⚪） | **不接管决策**：3 质疑者对抗 / 架构决策 / 终审裁决 / 修复方案 / 用户对话一律不走；推理敏感度中等的"灰区"也不走（零灰区原则）；install/list/bak 无入选子任务 |
+| **ICODE 本地 MCP 套件** | 先查 [`mcp/icode-mcp-policy/policy.json`](../mcp/icode-mcp-policy/policy.json) 对应 step；route 的 condition 成立且服务在当前宿主可调用时使用。`required=true` 表示条件成立后必须先实际调用，失败才能降级 | 未命中 condition 时不调用；缺失时回退当前确定性工具链并声明降级。`icode-mcp-health` 仅 install/CI，`icode-local-index` 仅大语料或已有索引，`icode-device-observe` 仅真机/fixture 观测 |
+
+### ICODE 本地 MCP 步骤路由（摘要）
+
+| 服务 | 主要步骤 | 降级 |
+|---|---|---|
+| `icode-evidence` | log/doc/deepcheck/audit/patch/verify；plan/review/readme/ppt 按证据条件 | `tools/evidence_intake.py` + Read/rg/hash |
+| `icode-workspace` | plan/code/merge/deepcheck/audit/worktree/verify | git/compile_commands/file/readelf/nm |
+| `icode-device-observe` | log/patch/verify；audit 只消费 | 现有设备脚本/ssh/adb，只读且显式记录命令 |
+| `icode-mcp-health` | install、MCP 升级复检、CI | shell 契约测试 + Inspector 手工复检 |
+| `icode-mcp-policy` | 新本地 MCP 调用前、install | 直接读取 policy.json；无策略则拒绝新增 MCP 调用 |
+| `icode-local-index` | init/log/plan/code/deepcheck/doc/learn/list 的大语料或已有索引 | `rg`；索引 stale 时先回读原文或重建 |
+
+完整 condition、required 和 tool/operation allowlist 只维护在 `policy.json`，本文不复制全部规则。
 
 **判定执行**：
 
@@ -109,7 +123,7 @@
 - **cheap-research**（⚪）：本步骤正文**无 cheap-research 调用执行点**——现状盘点走主会话 Read/rg（步骤 4「了解现有工程」），历史工单检索走确定性 Read `~/.claude/icode_data/index.json`（源1·历史工单检索）+ 定点读原文（见 [steps/00_init.md](../steps/00_init.md) 步骤 2）。`retrieve_similar`（确定性预筛后对历史候选排序）/ `summarize`（工程结构长文压缩索引）可作**可选增强**，非强证据场景不评估。**不接管决策**：需求点抽取 / 4 维度验证清单 / 链路图绘制走主会话（推理敏感）
 ### 0 log（日志根因分析）
 - **context7**：库 API 行为查证——仅涉及第三方库行为时
-- **vision-bridge**：TB 附件视频/图片主动分析 + 本地日志视频/图片分析——TB 拉取的附件含视频/图片时 **vision-bridge 可用则主动调**（视频先用 ffmpeg 本地提取关键帧再传图片帧省钱，详见 [steps/log.md](../steps/log.md)「附件分析（含本地路径 + TB 源）与 ffmpeg 抽帧」）；用户主动给截图时直接调；本地日志目录含视频/图片文件时扫目录后主动调。vision-bridge 不可用时仅提示附件清单不主动调（防纯文字模型报错）
+- **vision-bridge**：TB/本地日志含媒体时先按 [media_routing.md](media_routing.md) 判定。selected mode 为 bridge/dual 才调用；native 保留宿主强多模态；text_only 记录附件清单、关键帧和视觉缺口。视频先抽帧，所有分析结果绑定 hash/模型/提示/页或裁剪来源。
 
 - **cheap-research**（🟢*）：**阶段2 TB 评论预提取**（`extract`，评论 ≥ `tb_comment_extract_min`（gates.json 常量）时批量预提取要点，主会话回读高价值评论原文；详见 [steps/log.md](../steps/log.md)「TB 评论预提取」段）。**TB 缺陷源拉取走 `tb_pull.py`（非 fetch_remote）**；长上下文压缩（阶段 0/1/2）/ 8.6 memory 沉淀无正文执行点，可作可选增强。**不接管决策**：阶段 3 链路图分析 / 阶段 4 根因假设 / 阶段 6+7 对抗分析 / 阶段 8 修复建议 / 追问机制一律不走（高风险子任务）
 
@@ -210,7 +224,7 @@
 ## 降级路径
 
 - **context7 不可用**：WebFetch 官方文档兜底，标降级
-- **vision-bridge 不可用**：用户自负原生多模态能力，标降级
+- **vision-bridge 不可用**：按 [media_routing.md](media_routing.md) 处理；宿主已证明多模态则 native，未证明则 text_only 并标视觉缺口，禁止猜测或试探性注图
 - **playwright 不可用**：Bash + curl 兜底（无 JS 渲染），标降级
 - **memory 不可用**：本对话手动笔记兜底，标降级
 - **cheap-research 不可用**：主会话 / 子代理走 `Agent(model="haiku")` 兜底（Claude 家族最便宜模型）。整体 token 节省幅度下降，但工作流不阻塞。**子代理兜底时按 [subagent_spawn_wait.md](subagent_spawn_wait.md) 通用契约等待**（后台 spawn + `TaskOutput` 阻塞等 + 20 分钟墙钟硬截止，禁止裸同步 spawn / 被动等通知 / 无限等待）

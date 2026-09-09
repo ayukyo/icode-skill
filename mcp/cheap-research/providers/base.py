@@ -34,7 +34,7 @@ class LLMProvider(ABC):
             temperature: 生成温度 0~1
 
         Returns:
-            结构化 dict: {"answer": str, "confidence": float, "model": str, "cost": float}
+            结构化 dict: {"answer": str, "confidence": float | None, "model": str, "cost": float}
             失败时: {"error": str, "model": str}
 
         Raises:

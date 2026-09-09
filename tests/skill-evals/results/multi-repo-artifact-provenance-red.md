@@ -6,7 +6,7 @@
 
 ## 可复现缺口
 
-输出把 build、repo、artifact、deployment 混在一张自由表中，没有稳定拆出 `build_identity`、`repo_matrix`、`artifact_matrix`、`deployment_matrix`、`mismatches`、`verdict`；未统一表达 target、build root、package member、install slot、device identity 和 exact window，后续工具难以比较“期望、实际构建、包内、设备落盘、进程加载”五类身份。
+输出把 vendor package、toolchain、build、repo、artifact、deployment 混在一张自由表中，没有稳定拆出 `vendor_package_matrix`、`toolchain_compatibility`、`build_identity`、`repo_matrix`、`artifact_matrix`、`deployment_matrix`、`mismatches`、`verdict`；未统一表达包来源/hash、license、target、build root、package member、install slot、device identity 和 exact window，也把“SDK 在目录中”误当成“工程已采用且兼容”。
 
 ## RED 判定
 

@@ -23,7 +23,7 @@ routes = json.load(open(sys.argv[2], encoding="utf-8"))
 expected = set(sys.argv[3:])
 published = {item["name"] for item in manifest["skills"]}
 routed = {item["skill"] for item in routes["routes"]}
-assert len(manifest["skills"]) == 11
+assert len(manifest["skills"]) == 15
 assert expected <= published
 assert expected <= routed
 for route in routes["routes"]:

@@ -339,21 +339,21 @@
 | vision-bridge | 🟢* | 用户测试发现的问题带截图/视频证据（如 UI 异常图、设备视频），或 TB 缺陷源附件含媒体时 |
 | playwright | 🟢* | 前端工程且补丁需浏览器行为验证时 |
 | memory | 🟢* | 本工程历史工单数 ≥1 且新问题疑与历史工单/既有决策相关时 |
-| cheap-research | 🟢* | **降本 + 机械扫描**：14 个工具，按 patch 阶段按表选用；**不接管决策/对抗/架构**（核心约束） |
+| cheap-research | 🟢* | **降本 + 机械扫描**：15 个工具，按 patch 阶段按表选用；**不接管决策/对抗/架构**（核心约束） |
 
-**cheap-research patch 阶段工具映射（每个工具加 server.py 真源行号，方便审计）：**
+**cheap-research patch 阶段工具映射（以 server.py 函数名为稳定真源，避免行号随实现演进失效）：**
 
-> **分类约定**（参考 [mcp/cheap-research/README.md「14 工具」段](../mcp/cheap-research/README.md)）：标 `[核心]` = LLM 推理工具（用主代理上下文换效率）/ 标 `[增强]` = 纯机械或轻量工具（接近零 LLM 成本）。**同一工具在不同 patch 阶段可重复出现**（例如 `summarize` 既在阶段 1 重审长产物、又在 1.5 监听长 log，**focus 不同则语义不同**——不是表错，是合理的多场景映射）。
+> **分类约定**（参考 [mcp/cheap-research/README.md「15 工具」段](../mcp/cheap-research/README.md)）：标 `[核心]` = LLM 推理工具（用主代理上下文换效率）/ 标 `[增强]` = 纯机械或轻量工具（接近零 LLM 成本）。**同一工具在不同 patch 阶段可重复出现**（例如 `summarize` 既在阶段 1 重审长产物、又在 1.5 监听长 log，**focus 不同则语义不同**——不是表错，是合理的多场景映射）。
 
-| patch 阶段 | 工具 | 类型 | focus / 输入 | 真源 | 价值 |
+| patch 阶段 | 工具 | 类型 | focus / 输入 | 真源函数 | 价值 |
 |------------|------|------|------------|------|------|
-| **阶段 1 重新审视现状**：重审 `00_init.md` / `01_plan.md` / `03_plan_final.md` 长产物（**仅跨 session 快速回顾**，gate `patch.context_summary`） | `summarize` | [核心] | `focus="改动点/根因"` | [server.py:194](../mcp/cheap-research/server.py) | 跨 session 恢复时快速回顾；**首次进入必须 Read 全文，不得用 summarize 替代**（见下方阶段 1 约束） |
-| **阶段 1 重新审视现状**：从 `index.json` 候选中按本工单症状挑相似历史工单 | `retrieve_similar` | [核心] | `query=本工单症状, candidates=[{ticket_id, requirement_summary, keywords, ...}]` | [server.py:252](../mcp/cheap-research/server.py) | 50 条索引 → top-k 评分，主代理只看前几个 |
-| **阶段 2 增量计划 三链预扫 caller / import / test** | `trace_refs` | [增强] | `symbol=待改符号, scope_path="."` | [server.py:700](../mcp/cheap-research/server.py) | **纯机械、不调 LLM**——替代 3 次手 grep，自动出 caller 链 |
-| **阶段 2/4 长 diff 摘要**（PATCH vs BASE / 模板产物 vs 现状） | `diff_summary` | [核心] | `focus="接口变更/破坏面"` | [server.py:1298](../mcp/cheap-research/server.py) | 长 diff 索引化，主代理只看摘要 |
-| **阶段 4 复检**：编译输出 / 编译错误模式扫描 | `scan_patterns` | [增强] | `patterns=[regex,...]` | [server.py:597](../mcp/cheap-research/server.py) | **纯 grep，不调 LLM**——零 LLM 成本，机械扫描 |
-| **阶段 4 复检**：仓库关键文件事实候选（README / CLAUDE.md / 入口 / 依赖 / API），验证 patch 未引入外部接口回归 | `propose_repo_facts` | [核心] | `focus="对外 API / 依赖关系", max_files=10` | [server.py:527](../mcp/cheap-research/server.py) | LLM 生成候选事实（`candidate=true`）→ 主代理 Read/rg 实证后对照审查，防 patch 改了入口忘改 README |
-| **1.5 部署/监听 LOG**：本轮增量长 log 收口分析（gate `patch.listen_log_summary`） | `summarize` | [核心] | `focus="异常/fatal/失败"` | [server.py:194](../mcp/cheap-research/server.py) | 增量候选日志 ≥ `long_text_threshold_bytes`（gates.json 常量 =8192）时收口分析；**每轮只统计本轮增量窗口，避免旧日志反复触发** |
+| **阶段 1 重新审视现状**：重审 `00_init.md` / `01_plan.md` / `03_plan_final.md` 长产物（**仅跨 session 快速回顾**，gate `patch.context_summary`） | `summarize` | [核心] | `focus="改动点/根因"` | [`summarize`](../mcp/cheap-research/server.py) | 跨 session 恢复时快速回顾；**首次进入必须 Read 全文，不得用 summarize 替代**（见下方阶段 1 约束） |
+| **阶段 1 重新审视现状**：从 `index.json` 候选中按本工单症状挑相似历史工单 | `retrieve_similar` | [核心] | `query=本工单症状, candidates=[{ticket_id, requirement_summary, keywords, ...}]` | [`retrieve_similar`](../mcp/cheap-research/server.py) | 50 条索引 → top-k 评分，主代理只看前几个 |
+| **阶段 2 增量计划 三链预扫 caller / import / test** | `trace_refs` | [增强] | `symbol=待改符号, scope_path="."` | [`trace_refs`](../mcp/cheap-research/server.py) | **纯机械、不调 LLM**——替代 3 次手 grep，自动出 caller 链 |
+| **阶段 2/4 长 diff 摘要**（PATCH vs BASE / 模板产物 vs 现状） | `diff_summary` | [核心] | `focus="接口变更/破坏面"` | [`diff_summary`](../mcp/cheap-research/server.py) | 长 diff 索引化，主代理只看摘要 |
+| **阶段 4 复检**：编译输出 / 编译错误模式扫描 | `scan_patterns` | [增强] | `patterns=[regex,...]` | [`scan_patterns`](../mcp/cheap-research/server.py) | **纯 grep，不调 LLM**——零 LLM 成本，机械扫描 |
+| **阶段 4 复检**：仓库关键文件事实候选（README / CLAUDE.md / 入口 / 依赖 / API），验证 patch 未引入外部接口回归 | `propose_repo_facts` | [核心] | `focus="对外 API / 依赖关系", max_files=10` | [`propose_repo_facts`](../mcp/cheap-research/server.py) | LLM 生成候选事实（`candidate=true`）→ 主代理 Read/rg 实证后对照审查，防 patch 改了入口忘改 README |
+| **1.5 部署/监听 LOG**：本轮增量长 log 收口分析（gate `patch.listen_log_summary`） | `summarize` | [核心] | `focus="异常/fatal/失败"` | [`summarize`](../mcp/cheap-research/server.py) | 增量候选日志 ≥ `long_text_threshold_bytes`（gates.json 常量 =8192）时收口分析；**每轮只统计本轮增量窗口，避免旧日志反复触发** |
 
 **patch gate 与 trace（机器化，阈值只读 `mcp/cheap-research/gates.json`）**：
 
@@ -377,8 +377,8 @@
 
 **降级与边界**：
 - cheap-research **不接管**：①决策（该改哪、改不改） ②对抗（阶段 2.5 修复方案对抗的质疑者必须独立 spawn，与 `references/adversarial.md` 体系并存） ③架构/工程理解判断。主代理仍需在拿到工具产出后做最终判断 / 重读关键部分
-- 未列入主表的 8 个工具（`fill_template` / `extract` / `fetch_remote` / `validate_migration_ops` / `parse_project_id` / `scan_modules` / `generate_filename` / `select_template`）按通用场景使用，无 patch 专属映射；**清点**：14 工具 - 主表已列 6 个不同工具 = 未列 8 个（5 核心剩 fill_template+extract 共 2，9 增强剩 6 个）
-- cheap-research 的 5 核心 + 9 增强 分类与详细接口见 [README.md「5 核心工具」/「9 增强工具」段](../mcp/cheap-research/README.md)
+- 未列入主表的 9 个工具（`describe_capabilities` / `fill_template` / `extract` / `fetch_remote` / `validate_migration_ops` / `parse_project_id` / `scan_modules` / `generate_filename` / `select_template`）按通用场景使用，无 patch 专属映射；**清点**：15 工具 - 主表已列 6 个不同工具 = 未列 9 个（能力发现 1 + 5 核心剩 fill_template+extract 共 2 + 其余增强 6）
+- cheap-research 的 5 核心 + 10 增强 分类与详细接口见 [README.md「5 核心工具」/「10 增强工具」段](../mcp/cheap-research/README.md)
 
 **强制约束**：🟢/🟢*/⚪ 语义 + 双保险机制详见 [SKILL.md「MCP 调用覆盖强制化」](../SKILL.md) + [references/mcp_per_step.md](../references/mcp_per_step.md)。
 

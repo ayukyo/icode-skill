@@ -12,13 +12,14 @@ session 模型只通过 mcp 工具调用, 不直连 LLM API。
   - extract              结构化提取
   - propose_repo_facts   仓库事实候选（原 audit_facts，只产候选不做裁决）
 
-9 增强工具（含 6 工具型 + 3 LLM 摘要）：
+10 增强工具（含 7 工具型 + 3 LLM 摘要）：
+  - describe_capabilities
   - scan_patterns / trace_refs / diff_summary / validate_migration_ops
   - fetch_remote / generate_filename / select_template
   - parse_project_id / scan_modules
 
 工具分三类 capability（`tools_manifest.json` 为真源）：
-  - local: 纯本地确定性工具（scan_patterns/trace_refs/validate_migration_ops/parse_project_id/scan_modules）
+  - local: 纯本地确定性工具（describe_capabilities/scan_patterns/trace_refs/validate_migration_ops/parse_project_id/scan_modules）
   - fetch: 网络工具（fetch_remote）
   - llm:   依赖 LLM provider（summarize/retrieve_similar/fill_template/extract/propose_repo_facts/diff_summary/generate_filename/select_template）
   本地/网络工具不因 provider 未配置而整体降级；LLM 工具必须 provider 可用。
@@ -29,14 +30,19 @@ session 模型只通过 mcp 工具调用, 不直连 LLM API。
 数据出境闸门（v1.1）：LLM 类工具外发前必须 scan_sensitive，
 命中高危敏感模式（私钥/证书/AWS 密钥/键值型密钥）→ 阻断并提示脱敏。
 """
+import asyncio
+import hashlib
 import ipaddress
 import json
 import os
 import re
 import socket
 import sys
+from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
-from urllib.parse import urlparse
+from typing import Any, TypedDict
+from urllib.parse import urljoin, urlparse, urlunparse
 
 # 可选：jsonschema 严格校验（extract 工具用）
 try:
@@ -60,6 +66,7 @@ if str(_SERVER_DIR) not in sys.path:
     sys.path.insert(0, str(_SERVER_DIR))
 
 from mcp.server.fastmcp import FastMCP  # noqa: E402
+from mcp.types import ToolAnnotations  # noqa: E402
 
 from providers.base import UnconfiguredProvider  # noqa: E402
 from providers.local_ollama import LocalOllamaProvider  # noqa: E402
@@ -92,6 +99,43 @@ from providers._logger import log_call  # noqa: E402
 # fetch_remote 配置
 FETCH_MAX_BYTES = 5 * 1024 * 1024  # 5MB 响应上限
 FETCH_TIMEOUT_SECONDS = 10  # 10s 超时（防 30s 卡住会话）
+FETCH_MAX_REDIRECTS = 5
+SCHEMA_MAX_CHARS = 16000
+
+LOCAL_TOOL_ANNOTATIONS = ToolAnnotations(
+    readOnlyHint=True,
+    destructiveHint=False,
+    idempotentHint=True,
+    openWorldHint=False,
+)
+REMOTE_TOOL_ANNOTATIONS = ToolAnnotations(
+    readOnlyHint=True,
+    destructiveHint=False,
+    idempotentHint=True,
+    openWorldHint=True,
+)
+LLM_TOOL_ANNOTATIONS = ToolAnnotations(
+    readOnlyHint=True,
+    destructiveHint=False,
+    idempotentHint=False,
+    openWorldHint=True,
+)
+
+
+class ToolResponse(TypedDict, total=False):
+    """所有 MCP 工具共用的最小输出合同。具体 ``answer`` 由各工具定义。"""
+
+    answer: Any
+    error_code: str
+    error: str
+    model: str
+    confidence: float | None
+    tokens_used: int
+    cost_estimated: float
+    truncation: Any
+    candidates_truncated: bool
+    confidence_note: str
+    cost_note: str
 
 
 def _is_private_or_dangerous_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
@@ -115,8 +159,8 @@ def _is_private_or_dangerous_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Addres
     return False
 
 
-def _validate_url_safe(url: str) -> str | None:
-    """SSRF 防护：解析 URL、解析 host IP、拒绝内网/loopback/metadata。
+def _resolve_safe_target(url: str) -> tuple[list[str], str | None]:
+    """解析并校验 URL，返回本次请求必须使用的公网 IP 快照。
 
     拒绝：
     - loopback (127.0.0.0/8, ::1)
@@ -127,23 +171,31 @@ def _validate_url_safe(url: str) -> str | None:
 
     接受：公网 IP（防止内网探测 / 元数据读取）
 
-    Returns: error_msg 或 None (None 表示 URL 安全)
+    调用方必须直接连接返回的 IP，不能再次用 hostname 建连；否则会在
+    DNS 预检与实际连接之间留下 rebinding TOCTOU 窗口。
+
+    Returns: (可连接 IP 列表, error_msg)。error_msg 为 None 表示校验成功。
     """
     try:
         parsed = urlparse(url)
         if parsed.scheme not in ("http", "https"):
-            return f"仅允许 http/https, 实际 {parsed.scheme}"
+            return [], f"仅允许 http/https, 实际 {parsed.scheme}"
         hostname = parsed.hostname
         if not hostname:
-            return "URL 缺少 hostname"
-
-        # 解析 hostname → IP（防 DNS rebinding：解析时锁定）
+            return [], "URL 缺少 hostname"
+        if parsed.username is not None or parsed.password is not None:
+            return [], "URL 不允许内嵌用户名或密码"
         try:
-            infos = socket.getaddrinfo(hostname, parsed.port or 443, type=socket.SOCK_STREAM)
-        except socket.gaierror:
-            return f"DNS 解析失败: {hostname}"
+            port = parsed.port or (443 if parsed.scheme == "https" else 80)
+        except ValueError as exc:
+            return [], f"URL 端口无效: {exc}"
 
-        # 检查所有返回的 IP
+        try:
+            infos = socket.getaddrinfo(hostname, port, type=socket.SOCK_STREAM)
+        except socket.gaierror:
+            return [], f"DNS 解析失败: {hostname}"
+
+        safe_ips: list[str] = []
         for info in infos:
             sockaddr = info[4]
             ip_str = sockaddr[0]
@@ -152,18 +204,72 @@ def _validate_url_safe(url: str) -> str | None:
             except ValueError:
                 continue
             if _is_private_or_dangerous_ip(ip):
-                return f"URL 指向内网/危险 IP {ip_str}（{ip.__class__.__name__}），已拒绝（SSRF 防护）"
+                return [], (
+                    f"URL 指向内网/危险 IP {ip_str}（{ip.__class__.__name__}），"
+                    "已拒绝（SSRF 防护）"
+                )
+            normalized = str(ip)
+            if normalized not in safe_ips:
+                safe_ips.append(normalized)
 
-        return None
+        if not safe_ips:
+            return [], f"DNS 未返回可用 IP: {hostname}"
+        return safe_ips, None
     except Exception as e:
-        return f"URL 解析失败: {e}"
+        return [], f"URL 解析失败: {e}"
+
+
+def _validate_url_safe(url: str) -> str | None:
+    """兼容校验入口；真实 fetch 必须使用 ``_resolve_safe_target`` 的 IP。"""
+    _, error = _resolve_safe_target(url)
+    return error
+
+
+def _build_pinned_request(url: str, ip: str) -> tuple[str, dict[str, str], dict[str, Any]]:
+    """把原 URL 改写为已校验 IP，同时保留 HTTP Host 与 HTTPS SNI。"""
+    parsed = urlparse(url)
+    hostname = parsed.hostname or ""
+    ascii_hostname = hostname.encode("idna").decode("ascii")
+    port = parsed.port
+    ip_netloc = f"[{ip}]" if ":" in ip else ip
+    if port is not None:
+        ip_netloc = f"{ip_netloc}:{port}"
+    host_header = f"[{ascii_hostname}]" if ":" in ascii_hostname else ascii_hostname
+    if port is not None:
+        host_header = f"{host_header}:{port}"
+    pinned_url = urlunparse(
+        (parsed.scheme, ip_netloc, parsed.path or "/", parsed.params, parsed.query, "")
+    )
+    extensions: dict[str, Any] = {}
+    if parsed.scheme == "https":
+        extensions["sni_hostname"] = ascii_hostname
+    return pinned_url, {"Host": host_header, "User-Agent": "cheap-research/1.1"}, extensions
 
 PROVIDERS = {
     "openai_compat": OpenAICompatProvider,
     "local_ollama": LocalOllamaProvider,
 }
 
-mcp = FastMCP("cheap-research")
+_PROVIDER_CACHE_KEY: str | None = None
+_PROVIDER_CACHE_INSTANCE = None
+
+
+async def _close_provider(provider: Any) -> None:
+    close = getattr(provider, "aclose", None)
+    if callable(close):
+        await close()
+
+
+@asynccontextmanager
+async def _server_lifespan(_server: FastMCP):
+    """确保复用的 provider HTTP 连接池在 MCP 退出时关闭。"""
+    try:
+        yield {}
+    finally:
+        await _close_provider(_PROVIDER_CACHE_INSTANCE)
+
+
+mcp = FastMCP("cheap-research", lifespan=_server_lifespan)
 
 
 def load_config() -> dict:
@@ -183,30 +289,171 @@ def load_config() -> dict:
     return json.loads(p.read_text())
 
 
+def _configured_allowed_roots() -> tuple[list[Path], str | None]:
+    """读取可选本地目录白名单；未配置时保持既有的不限制行为。
+
+    环境变量 ``CHEAP_RESEARCH_ALLOWED_ROOTS`` 优先，使用 os.pathsep 分隔。
+    配置存在但格式非法时 fail closed，避免用户以为已启用边界而实际失效。
+    """
+    env_value = os.environ.get("CHEAP_RESEARCH_ALLOWED_ROOTS")
+    if env_value is not None:
+        raw_roots: object = [item for item in env_value.split(os.pathsep) if item]
+    else:
+        cfg_path = Path(os.environ.get(
+            "CHEAP_RESEARCH_CONFIG",
+            str(_SERVER_DIR / "config.json"),
+        ))
+        if not cfg_path.exists():
+            return [], None
+        try:
+            raw_roots = json.loads(cfg_path.read_text()).get("allowed_roots", [])
+        except (OSError, json.JSONDecodeError) as exc:
+            return [], f"读取 allowed_roots 失败: {exc}"
+
+    if not isinstance(raw_roots, list) or any(
+        not isinstance(item, str) or not item.strip() for item in raw_roots
+    ):
+        return [], "allowed_roots 必须是非空路径字符串列表"
+
+    roots: list[Path] = []
+    for item in raw_roots:
+        try:
+            root = Path(item).expanduser().resolve(strict=True)
+        except (OSError, RuntimeError) as exc:
+            return [], f"allowed_roots 路径不可用: {item}: {exc}"
+        if not root.is_dir():
+            return [], f"allowed_roots 只允许目录: {item}"
+        roots.append(root)
+    return roots, None
+
+
+def _validate_local_dir(value: str, field_name: str) -> Path | str:
+    """校验本地目录，并在配置白名单时限制到允许根目录。"""
+    result = validate_path_exists(value, field_name)
+    if isinstance(result, str):
+        return result
+    try:
+        resolved = result.resolve(strict=True)
+    except (OSError, RuntimeError) as exc:
+        return f"{field_name} 路径不可解析: {value}: {exc}"
+    if not resolved.is_dir():
+        return f"{field_name} 必须是目录: {value}"
+
+    roots, roots_error = _configured_allowed_roots()
+    if roots_error:
+        return roots_error
+    if roots and not any(resolved.is_relative_to(root) for root in roots):
+        return (
+            f"{field_name} 不在 allowed_roots 白名单内: {resolved}; "
+            f"允许范围: {[str(root) for root in roots]}"
+        )
+    return resolved
+
+
+def _provider_profile() -> dict:
+    """返回不含凭据、且不把“已配置”误报为“已验证可用”的 provider 画像。"""
+    cfg_path = Path(os.environ.get(
+        "CHEAP_RESEARCH_CONFIG",
+        str(_SERVER_DIR / "config.json"),
+    ))
+    if not cfg_path.exists():
+        return {
+            "provider": "unconfigured",
+            "model": "",
+            "configured": False,
+            "readiness": "unconfigured",
+            "runtime_probe_performed": False,
+        }
+    try:
+        cfg = json.loads(cfg_path.read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        return {
+            "provider": "invalid_config",
+            "model": "",
+            "configured": False,
+            "readiness": "invalid_config",
+            "runtime_probe_performed": False,
+            "error": str(exc),
+        }
+
+    name = str(cfg.get("provider", "openai_compat")).lower()
+    required = ["model"]
+    if name == "openai_compat":
+        required.extend(["base_url", "api_key"])
+    missing = [key for key in required if not cfg.get(key)]
+    known = name in PROVIDERS
+    configured = known and not missing
+    return {
+        "provider": name,
+        "model": str(cfg.get("model", "")),
+        "configured": configured,
+        "readiness": "configured_unverified" if configured else "unconfigured",
+        "runtime_probe_performed": False,
+        "missing_fields": missing,
+        "known_provider": known,
+    }
+
+
+def _replace_cached_provider(cache_key: str, provider: Any) -> None:
+    """替换 provider 缓存，并异步回收旧连接池。"""
+    global _PROVIDER_CACHE_KEY, _PROVIDER_CACHE_INSTANCE
+    old_provider = _PROVIDER_CACHE_INSTANCE
+    _PROVIDER_CACHE_KEY = cache_key
+    _PROVIDER_CACHE_INSTANCE = provider
+    if old_provider is None or old_provider is provider:
+        return
+    try:
+        asyncio.get_running_loop().create_task(_close_provider(old_provider))
+    except RuntimeError:
+        # 正常 MCP 工具调用总在事件循环内；同步导入/测试路径由 lifespan 兜底。
+        pass
+
+
 def get_provider():
     """返回 provider 实例。openai_compat 缺字段时返 UnconfiguredProvider (不抛错)。"""
-    cfg = load_config()
+    global _PROVIDER_CACHE_KEY, _PROVIDER_CACHE_INSTANCE
+    try:
+        cfg = load_config()
+    except FileNotFoundError:
+        return UnconfiguredProvider(missing=["config.json"])
+    except (OSError, json.JSONDecodeError) as exc:
+        return UnconfiguredProvider(missing=[f"有效 config.json ({exc})"])
     name = cfg.get("provider", "openai_compat").lower()
+    cache_payload = json.dumps(cfg, ensure_ascii=False, sort_keys=True)
+    cache_key = hashlib.sha256(cache_payload.encode("utf-8")).hexdigest()
+    if cache_key == _PROVIDER_CACHE_KEY and _PROVIDER_CACHE_INSTANCE is not None:
+        return _PROVIDER_CACHE_INSTANCE
+
     if name == "openai_compat":
         missing = [k for k in ("base_url", "api_key", "model") if not cfg.get(k)]
         if missing:
-            return UnconfiguredProvider(missing=missing)
+            provider = UnconfiguredProvider(missing=missing)
+            _replace_cached_provider(cache_key, provider)
+            return provider
+    elif name == "local_ollama" and not cfg.get("model"):
+        provider = UnconfiguredProvider(missing=["model"])
+        _replace_cached_provider(cache_key, provider)
+        return provider
     cls = PROVIDERS.get(name)
     if not cls:
-        raise ValueError(f"未知 provider='{name}', 可选: {list(PROVIDERS)}")
-    return cls(cfg)
+        return UnconfiguredProvider(
+            missing=[f"有效 provider（当前 {name!r}；可选 {list(PROVIDERS)}）"]
+        )
+    provider = cls(cfg)
+    _replace_cached_provider(cache_key, provider)
+    return provider
 
 
 # ===========================================================================
 # 5 核心工具
 # ===========================================================================
 
-@mcp.tool()
+@mcp.tool(annotations=LLM_TOOL_ANNOTATIONS, structured_output=True)
 async def summarize(
     text: str,
     max_tokens: int = 512,
     focus: str = "",
-) -> dict:
+) -> ToolResponse:
     """长上下文压缩。
 
     把传入的文本交给便宜 LLM 做摘要, 返回结构化结果。
@@ -227,7 +474,7 @@ async def summarize(
         return make_error_response(err)
 
     # 数据出境闸门：外发前扫描敏感内容
-    if sensitive := scan_sensitive(text):
+    if sensitive := scan_sensitive(text + focus):
         return make_error_response(
             f"[数据出境闸门] 输入命中高危敏感模式, 已拒绝外发: {sensitive[:3]}。"
             f"请先脱敏（排除密钥/令牌/私钥）后重试。"
@@ -237,6 +484,7 @@ async def summarize(
 
     # 文本截断（防 prompt 爆）+ 截断硬信号
     text_safe, trunc_meta = truncate_with_meta(text, max_chars=8000)
+    text_safe = sanitize_for_llm(text_safe, max_chars=8500)
 
     # 构造 schema 强制结构化输出
     schema = {
@@ -252,7 +500,8 @@ async def summarize(
         "required": ["summary", "key_points"],
     }
 
-    focus_part = f"重点关注: {focus}\n" if focus else ""
+    focus_safe = sanitize_for_llm(focus, max_chars=1000) if focus else ""
+    focus_part = f"重点关注: {focus_safe}\n" if focus_safe else ""
     prompt = (
         f"请对以下文本做摘要压缩。{focus_part}"
         f"输出要求: 1) summary (简洁摘要, 保留核心信息); "
@@ -270,12 +519,12 @@ async def summarize(
     return result
 
 
-@mcp.tool()
+@mcp.tool(annotations=LLM_TOOL_ANNOTATIONS, structured_output=True)
 async def retrieve_similar(
     query: str,
     candidates: list,
     k: int = 5,
-) -> dict:
+) -> ToolResponse:
     """历史工单相似度匹配。
 
     调用方提供候选列表 (从 ~/.claude/icode_data/index.json 之类数据源筛选),
@@ -349,11 +598,15 @@ async def retrieve_similar(
         "required": ["items"],
     }
 
-    candidates_str = json_dumps_safe(candidates_compact, max_chars=6000)
+    query_safe = sanitize_for_llm(query, max_chars=2000)
+    candidates_str = sanitize_for_llm(
+        json_dumps_safe(candidates_compact, max_chars=6000),
+        max_chars=6500,
+    )
     prompt = (
         f"请对以下候选工单按 query 评分 (0~1, 越高越相似), 并返回 top-{k}。\n"
         f"评分标准: 与 query 语义匹配度、关键词重合度。\n\n"
-        f"query: {query}\n\n"
+        f"query: {query_safe}\n\n"
         f"候选 ({len(candidates_compact)} 条"
         f"{', 已截断' if was_truncated else ''}):\n"
         f"{candidates_str}\n\n"
@@ -379,11 +632,11 @@ async def retrieve_similar(
     return result
 
 
-@mcp.tool()
+@mcp.tool(annotations=LLM_TOOL_ANNOTATIONS, structured_output=True)
 async def fill_template(
     template: str,
     data: dict,
-) -> dict:
+) -> ToolResponse:
     """模板填充。
 
     给 LLM 一个模板（如 changelog 模板、review 模板）和数据 dict,
@@ -405,7 +658,9 @@ async def fill_template(
         return make_error_response(err)
 
     # 数据出境闸门：外发前扫描模板与数据
-    if sensitive := scan_sensitive(template + json.dumps(data, ensure_ascii=False)):
+    if sensitive := scan_sensitive(
+        template + json_dumps_safe(data, max_chars=100000)
+    ):
         return make_error_response(
             f"[数据出境闸门] 模板/数据命中高危敏感模式, 已拒绝外发: {sensitive[:3]}。"
             f"请先脱敏（排除密钥/令牌/私钥）后重试。"
@@ -415,7 +670,11 @@ async def fill_template(
 
     # 模板截断（防 prompt 爆）+ 截断硬信号
     template_safe, trunc_meta = truncate_with_meta(template, max_chars=4000)
-    data_str = json_dumps_safe(data, max_chars=2000)
+    template_safe = sanitize_for_llm(template_safe, max_chars=4500)
+    data_str = sanitize_for_llm(
+        json_dumps_safe(data, max_chars=2000),
+        max_chars=2500,
+    )
 
     schema = {
         "type": "object",
@@ -447,12 +706,12 @@ async def fill_template(
     return result
 
 
-@mcp.tool()
+@mcp.tool(annotations=LLM_TOOL_ANNOTATIONS, structured_output=True)
 async def extract(
     text: str,
     schema: dict,
     instruction: str = "",
-) -> dict:
+) -> ToolResponse:
     """结构化提取。
 
     给 LLM 一段文本 + JSON schema, 让 LLM 按 schema 抽取字段。
@@ -472,9 +731,18 @@ async def extract(
         return make_error_response(err)
     if err := validate_dict(schema, "schema"):
         return make_error_response(err)
+    try:
+        schema_payload = json.dumps(schema, ensure_ascii=False)
+    except (TypeError, ValueError) as exc:
+        return make_error_response(f"schema 必须可 JSON 序列化: {exc}")
+    if len(schema_payload) > SCHEMA_MAX_CHARS:
+        return make_error_response(
+            f"schema 过大: {len(schema_payload)} 字符，最大 {SCHEMA_MAX_CHARS}"
+        )
 
     # 数据出境闸门：外发前扫描敏感内容
-    if sensitive := scan_sensitive(text):
+    outbound_contract = text + instruction + schema_payload
+    if sensitive := scan_sensitive(outbound_contract):
         return make_error_response(
             f"[数据出境闸门] 输入命中高危敏感模式, 已拒绝外发: {sensitive[:3]}。"
             f"请先脱敏（排除密钥/令牌/私钥）后重试。"
@@ -483,7 +751,9 @@ async def extract(
     provider = get_provider()
 
     text_safe, trunc_meta = truncate_with_meta(text, max_chars=8000)
-    instruction_part = f"\n附加指令: {instruction}" if instruction else ""
+    text_safe = sanitize_for_llm(text_safe, max_chars=8500)
+    instruction_safe = sanitize_for_llm(instruction, max_chars=1000) if instruction else ""
+    instruction_part = f"\n附加指令: {instruction_safe}" if instruction_safe else ""
 
     # 复用 openai_compat.py 的 schema 强约束逻辑
     prompt = (
@@ -523,12 +793,12 @@ async def extract(
     return result
 
 
-@mcp.tool()
+@mcp.tool(annotations=LLM_TOOL_ANNOTATIONS, structured_output=True)
 async def propose_repo_facts(
     repo_path: str,
     focus: str = "",
     max_files: int = 10,
-) -> dict:
+) -> ToolResponse:
     """仓库事实候选（不接管裁决）。
 
     扫描 repo_path 下的关键文件 (README / CLAUDE.md / pyproject.toml / package.json / 入口 main.*),
@@ -555,7 +825,7 @@ async def propose_repo_facts(
     if not isinstance(max_files, int) or max_files < 1 or max_files > 100:
         return make_error_response(f"max_files 必须是 1~100 的整数, 实际 {max_files}")
 
-    p = validate_path_exists(repo_path, "repo_path")
+    p = _validate_local_dir(repo_path, "repo_path")
     if isinstance(p, str):
         return make_error_response(p)
     repo_path = str(p)
@@ -573,7 +843,7 @@ async def propose_repo_facts(
     source_files = []
     for pattern in key_patterns:
         candidate = Path(repo_path) / pattern
-        if candidate.exists() and candidate.is_file():
+        if candidate.exists() and candidate.is_file() and not candidate.is_symlink():
             source_files.append(str(candidate))
             if len(source_files) >= max_files:
                 break
@@ -589,9 +859,8 @@ async def propose_repo_facts(
     file_contents = []
     file_truncations = []
     for f in source_files:
-        try:
-            content = Path(f).read_text(encoding="utf-8", errors="replace")
-        except Exception:
+        content = safe_read_text(Path(f), max_chars=100000, root_path=Path(repo_path))
+        if content is None:
             continue
         content_safe, f_meta = truncate_with_meta(content, max_chars=1500)
         file_contents.append(f"=== {f} ===\n{content_safe}")
@@ -602,12 +871,13 @@ async def propose_repo_facts(
 
     combined_raw = "\n\n".join(file_contents)
     # 数据出境闸门：外发前扫描全部已读源码片段
-    if sensitive := scan_sensitive(combined_raw):
+    if sensitive := scan_sensitive(combined_raw + focus):
         return make_error_response(
             f"[数据出境闸门] 仓库内容命中高危敏感模式, 已拒绝外发: {sensitive[:3]}。"
             f"请先脱敏（排除密钥/令牌/私钥）后重试。"
         )
     combined, trunc_meta = truncate_with_meta(combined_raw, max_chars=8000)  # v1.0 修复：原 15000 → 8000
+    combined = sanitize_for_llm(combined, max_chars=8500)
     trunc_meta["per_file"] = file_truncations
 
     provider = get_provider()
@@ -628,7 +898,8 @@ async def propose_repo_facts(
         "required": ["facts", "source_summary"],
     }
 
-    focus_part = f"审计重点: {focus}\n" if focus else ""
+    focus_safe = sanitize_for_llm(focus, max_chars=1000) if focus else ""
+    focus_part = f"审计重点: {focus_safe}\n" if focus_safe else ""
     prompt = (
         f"请审计以下代码仓库, 抽取关键事实。{focus_part}\n"
         f"输出: 1) source_summary (工程 1 句话总览); 2) facts (5-10 条关键事实, "
@@ -658,17 +929,67 @@ async def propose_repo_facts(
 
 
 # ===========================================================================
-# 9 增强工具
+# 10 增强工具
 # ===========================================================================
 
-@mcp.tool()
+@mcp.tool(annotations=LOCAL_TOOL_ANNOTATIONS, structured_output=True)
+async def describe_capabilities() -> ToolResponse:
+    """返回不含密钥的工具清单、能力边界和当前配置画像。
+
+    这是会话级发现接口，不执行 LLM 或网络探测。``configured`` 仅表示
+    配置字段齐全，真实可调用性仍以首次实际工具调用为准。
+    """
+    try:
+        manifest = json.loads((_SERVER_DIR / "tools_manifest.json").read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        return {
+            "error_code": "manifest_invalid",
+            "error": f"读取 tools_manifest.json 失败: {exc}",
+            "model": "describe_capabilities",
+        }
+
+    tools = manifest.get("tools", [])
+    counts = {
+        capability: sum(1 for item in tools if item.get("capability") == capability)
+        for capability in ("local", "fetch", "llm")
+    }
+    roots, roots_error = _configured_allowed_roots()
+    return {
+        "answer": {
+            "schema_version": 1,
+            "tool_count": len(tools),
+            "capability_counts": counts,
+            "tools": tools,
+            "provider": _provider_profile(),
+            "filesystem_boundary": {
+                "mode": "allowlist" if roots else "caller_selected",
+                "allowed_roots": [str(root) for root in roots],
+                "config_error": roots_error,
+                "symlink_files_rejected": True,
+            },
+            "network_boundary": {
+                "public_http_only": True,
+                "redirects_revalidated": True,
+                "max_redirects": FETCH_MAX_REDIRECTS,
+                "max_response_bytes": FETCH_MAX_BYTES,
+            },
+            "decision_boundary": (
+                "只做压缩、导航、提取、候选生成和机械校验；"
+                "不承担架构裁决、修复方案、视觉判断或硬件正确性结论"
+            ),
+        },
+        "model": "describe_capabilities",
+    }
+
+
+@mcp.tool(annotations=LOCAL_TOOL_ANNOTATIONS, structured_output=True)
 async def scan_patterns(
     patterns: list,
     scope_path: str = ".",
     exclude_dirs: list | None = None,
     max_files: int = 1000,
     max_matches: int = 200,
-) -> dict:
+) -> ToolResponse:
     """机械模式匹配（grep 风格）。
 
     用 re 扫描 scope_path 下的源码文件, 匹配 patterns 中的每个模式。
@@ -695,7 +1016,7 @@ async def scan_patterns(
     if err := validate_int_range(max_matches, "max_matches", 1, 10000):
         return make_error_response(err)
 
-    p = validate_path_exists(scope_path, "scope_path")
+    p = _validate_local_dir(scope_path, "scope_path")
     if isinstance(p, str):
         return make_error_response(p)
     scope = p
@@ -724,7 +1045,7 @@ async def scan_patterns(
     matches = []
     files_with_matches = set()
     for f in files:
-        content = safe_read_text(f, max_chars=100000)
+        content = safe_read_text(f, max_chars=100000, root_path=scope)
         if content is None:
             continue
         file_has_match = False
@@ -757,20 +1078,20 @@ async def scan_patterns(
             "matches": matches,
             "total_count": len(matches),
             "files_scanned": len(files),
-            "files_with_matches": files_with_matches,
+            "files_with_matches": len(files_with_matches),
             "truncated": False,
         },
         "model": "scan_patterns",
     }
 
 
-@mcp.tool()
+@mcp.tool(annotations=LOCAL_TOOL_ANNOTATIONS, structured_output=True)
 async def trace_refs(
     symbol: str,
     scope_path: str = ".",
     max_files: int = 500,
     max_refs: int = 100,
-) -> dict:
+) -> ToolResponse:
     """符号引用追溯。
 
     扫描 scope_path 下的源码文件, 找 symbol 的所有引用位置。
@@ -796,7 +1117,7 @@ async def trace_refs(
     if err := validate_int_range(max_refs, "max_refs", 1, 1000):
         return make_error_response(err)
 
-    p = validate_path_exists(scope_path, "scope_path")
+    p = _validate_local_dir(scope_path, "scope_path")
     if isinstance(p, str):
         return make_error_response(p)
     scope = p
@@ -813,7 +1134,7 @@ async def trace_refs(
 
     refs = []
     for f in files:
-        content = safe_read_text(f, max_chars=100000)
+        content = safe_read_text(f, max_chars=100000, root_path=scope)
         if content is None:
             continue
         # 按文件语言构建更精确的正则（v1.0 修复：避免 C++ 模板 `MyClass<T>::method` 误识别）
@@ -859,11 +1180,63 @@ async def trace_refs(
     }
 
 
-@mcp.tool()
+async def _fetch_pinned_hop(
+    url: str,
+    safe_ips: list[str],
+) -> tuple[int, dict[str, str], bytes, bool]:
+    """对一个 URL hop 使用已校验 IP 建连；hostname 只用于 Host/SNI。"""
+    import httpx
+
+    last_error: httpx.RequestError | None = None
+    for ip in safe_ips:
+        pinned_url, headers, extensions = _build_pinned_request(url, ip)
+        try:
+            # 每个 IP 使用独立连接池，避免不同 hostname 共用同一 IP 时复用错
+            # TLS 会话；禁用环境代理，防止请求绕过已固定的目标地址。
+            async with httpx.AsyncClient(
+                timeout=FETCH_TIMEOUT_SECONDS,
+                follow_redirects=False,
+                trust_env=False,
+            ) as client:
+                async with client.stream(
+                    "GET",
+                    pinned_url,
+                    headers=headers,
+                    extensions=extensions,
+                ) as response:
+                    if response.status_code not in {301, 302, 303, 307, 308}:
+                        response.raise_for_status()
+
+                    content_bytes = bytearray()
+                    truncated_by_size = False
+                    if response.status_code not in {301, 302, 303, 307, 308}:
+                        async for chunk in response.aiter_bytes(chunk_size=8192):
+                            remaining = FETCH_MAX_BYTES - len(content_bytes)
+                            if len(chunk) > remaining:
+                                content_bytes.extend(chunk[:remaining])
+                                truncated_by_size = True
+                                break
+                            content_bytes.extend(chunk)
+                    return (
+                        response.status_code,
+                        dict(response.headers),
+                        bytes(content_bytes),
+                        truncated_by_size,
+                    )
+        except httpx.RequestError as exc:
+            last_error = exc
+            continue
+
+    if last_error is not None:
+        raise last_error
+    raise httpx.ConnectError(f"没有可连接的已校验 IP: {url}")
+
+
+@mcp.tool(annotations=REMOTE_TOOL_ANNOTATIONS, structured_output=True)
 async def fetch_remote(
     url: str,
     max_chars: int = 5000,
-) -> dict:
+) -> ToolResponse:
     """远程 HTTP 拉取（不调 LLM）。
 
     通用 HTTP GET 工具, 适用于 TB 缺陷源 / 远程文档 / GitHub API 等。
@@ -887,8 +1260,9 @@ async def fetch_remote(
     if err := validate_int_range(max_chars, "max_chars", 100, 100000):
         return make_error_response(err)
 
-    # SSRF 防护
-    if ssrf_err := _validate_url_safe(url):
+    # SSRF 防护：解析结果同时作为实际连接目标，消除二次 DNS 解析窗口。
+    safe_ips, ssrf_err = _resolve_safe_target(url)
+    if ssrf_err:
         log_call("fetch_remote", "error", url=url, error="ssrf_blocked")
         return {
             "error_code": "ssrf_blocked",
@@ -898,26 +1272,45 @@ async def fetch_remote(
 
     import httpx
     try:
-        async with httpx.AsyncClient(
-            timeout=FETCH_TIMEOUT_SECONDS,
-            follow_redirects=True,
-        ) as client:
-            r = await client.get(
-                url,
-                headers={"User-Agent": "cheap-research/1.0"},
+        current_url = url
+        redirects: list[str] = []
+        current_ips = safe_ips
+        for redirect_count in range(FETCH_MAX_REDIRECTS + 1):
+            status_code, headers, content_bytes, truncated_by_size = (
+                await _fetch_pinned_hop(current_url, current_ips)
             )
-            r.raise_for_status()
+            if status_code in {301, 302, 303, 307, 308}:
+                location = headers.get("location")
+                if not location:
+                    return {
+                        "error_code": "redirect_invalid",
+                        "error": f"HTTP {status_code} 缺少 Location: {current_url}",
+                        "model": "fetch_remote",
+                    }
+                if redirect_count >= FETCH_MAX_REDIRECTS:
+                    return {
+                        "error_code": "redirect_limit",
+                        "error": f"重定向超过 {FETCH_MAX_REDIRECTS} 次: {url}",
+                        "model": "fetch_remote",
+                    }
+                next_url = urljoin(current_url, location)
+                next_ips, redirect_err = _resolve_safe_target(next_url)
+                if redirect_err:
+                    log_call(
+                        "fetch_remote", "error", url=next_url,
+                        error="redirect_ssrf_blocked",
+                    )
+                    return {
+                        "error_code": "ssrf_blocked",
+                        "error": f"重定向目标被拒绝: {redirect_err}",
+                        "model": "fetch_remote",
+                    }
+                redirects.append(next_url)
+                current_url = next_url
+                current_ips = next_ips
+                continue
 
-            # Size cap：实时累积
-            content_bytes = bytearray()
-            truncated_by_size = False
-            async for chunk in r.aiter_bytes(chunk_size=8192):
-                content_bytes.extend(chunk)
-                if len(content_bytes) > FETCH_MAX_BYTES:
-                    content_bytes = content_bytes[:FETCH_MAX_BYTES]
-                    truncated_by_size = True
-                    break
-
+            content_digest = hashlib.sha256(content_bytes).hexdigest()
             content = content_bytes.decode("utf-8", errors="replace")
             truncated_by_chars = False
             if len(content) > max_chars:
@@ -928,16 +1321,29 @@ async def fetch_remote(
                 "fetch_remote",
                 "success",
                 url=url,
-                status_code=r.status_code,
+                final_url=current_url,
+                status_code=status_code,
                 bytes=len(content_bytes),
+                redirect_count=len(redirects),
                 truncated_size=truncated_by_size,
                 truncated_chars=truncated_by_chars,
             )
             return {
                 "answer": {
                     "content": content,
-                    "status_code": r.status_code,
-                    "content_type": r.headers.get("content-type", ""),
+                    "status_code": status_code,
+                    "content_type": headers.get("content-type", ""),
+                    "content_length": headers.get("content-length", ""),
+                    "source_digest": f"sha256:{content_digest}",
+                    "digest_scope": (
+                        "downloaded_prefix" if truncated_by_size else "full_response"
+                    ),
+                    "requested_url": url,
+                    "final_url": current_url,
+                    "redirects": redirects,
+                    "etag": headers.get("etag", ""),
+                    "last_modified": headers.get("last-modified", ""),
+                    "fetched_at": datetime.now(timezone.utc).isoformat(),
                     "truncated": truncated_by_size or truncated_by_chars,
                     "truncated_by_size": truncated_by_size,
                     "truncated_by_chars": truncated_by_chars,
@@ -968,11 +1374,11 @@ async def fetch_remote(
         }
 
 
-@mcp.tool()
+@mcp.tool(annotations=LOCAL_TOOL_ANNOTATIONS, structured_output=True)
 async def validate_migration_ops(
     schema_diff: dict,
     repo_path: str = ".",
-) -> dict:
+) -> ToolResponse:
     """迁移 ops 校验与规范化（v1.1 改名自 apply_migration）。
 
     只校验并规范化**调用者已经给出**的 schema_diff, 转成 pending ops。
@@ -998,7 +1404,7 @@ async def validate_migration_ops(
     if err := validate_dict(schema_diff, "schema_diff"):
         return make_error_response(err)
 
-    p = validate_path_exists(repo_path, "repo_path")
+    p = _validate_local_dir(repo_path, "repo_path")
     if isinstance(p, str):
         return make_error_response(p)
     repo = p
@@ -1007,6 +1413,20 @@ async def validate_migration_ops(
     allowed_ops = {"add", "remove", "rename", "modify"}
     ops = []
     files_affected = set()
+    repo_resolved = repo.resolve()
+
+    def normalize_target(value: object, op_type: str, field: str) -> Path | str:
+        if not isinstance(value, str) or not value.strip():
+            return f"op '{op_type}' 缺少 {field} 字段"
+        try:
+            path = (repo_resolved / value).resolve()
+            if not path.is_relative_to(repo_resolved):
+                return f"op '{op_type}' {field} 路径逃逸（不在 repo 内）: {value}"
+            if path == repo_resolved:
+                return f"op '{op_type}' {field} 不能指向 repo 根: {value}"
+            return path
+        except (OSError, RuntimeError, TypeError, ValueError):
+            return f"op '{op_type}' {field} 路径无效: {value}"
 
     for op_type, items in schema_diff.items():
         if op_type not in allowed_ops:
@@ -1021,29 +1441,26 @@ async def validate_migration_ops(
             if not target:
                 return make_error_response(f"op '{op_type}' 缺少 path/target/src 字段")
 
-            # 路径安全性检查（防 ../ 逃逸，且必须 relative to repo）
-            try:
-                target_path = (repo / target).resolve()
-                repo_resolved = repo.resolve()
-                # 必须 relative to repo（严防逃逸到 repo 外或 root）
-                if not target_path.is_relative_to(repo_resolved):
-                    return make_error_response(
-                        f"op '{op_type}' 路径逃逸（不在 repo 内）: {target}"
-                    )
-                # 防止 root 路径
-                if target_path == repo_resolved:
-                    return make_error_response(
-                        f"op '{op_type}' 不能指向 repo 根: {target}"
-                    )
-            except Exception:
-                return make_error_response(f"op '{op_type}' 路径无效: {target}")
+            target_path = normalize_target(target, op_type, "target")
+            if isinstance(target_path, str):
+                return make_error_response(target_path)
 
-            ops.append({
+            normalized = {
                 "type": op_type,
                 "target": str(target_path),
-                "content": item.get("content") or item.get("changes") or "",
+                "content": item.get("content") or item.get("changes") or item.get("template") or "",
                 "status": "pending",
-            })
+            }
+            if op_type == "rename":
+                destination = item.get("destination") or item.get("dst") or item.get("to")
+                destination_path = normalize_target(destination, op_type, "destination")
+                if isinstance(destination_path, str):
+                    return make_error_response(destination_path)
+                if destination_path == target_path:
+                    return make_error_response("op 'rename' 的 target 与 destination 不能相同")
+                normalized["destination"] = str(destination_path)
+                files_affected.add(str(destination_path))
+            ops.append(normalized)
             files_affected.add(str(target_path))
 
     return {
@@ -1058,10 +1475,10 @@ async def validate_migration_ops(
     }
 
 
-@mcp.tool()
+@mcp.tool(annotations=LOCAL_TOOL_ANNOTATIONS, structured_output=True)
 async def parse_project_id(
     repo_path: str = ".",
-) -> dict:
+) -> ToolResponse:
     """解析 project_id（基于 git 仓库根 + basename）。
 
     强证据三件套: 仓库根 basename + 章节前 50 行内容 + KEYS + 摘要。
@@ -1080,7 +1497,7 @@ async def parse_project_id(
     if err := validate_non_empty_str(repo_path, "repo_path"):
         return make_error_response(err)
 
-    p = validate_path_exists(repo_path, "repo_path")
+    p = _validate_local_dir(repo_path, "repo_path")
     if isinstance(p, str):
         return make_error_response(p)
     repo = p
@@ -1107,20 +1524,29 @@ async def parse_project_id(
 
     # v1.0 修复：submodule 检测（之前只返 basename，submodule 路径错误）
     # 如果 repo_path 是 git submodule 内的目录，project_id 应反映 submodule 路径
-    repo_root_resolved = Path(repo_root).resolve()
     is_submodule = False
     submodule_path = None
     try:
+        allowed_roots, roots_error = _configured_allowed_roots()
+        if roots_error:
+            return make_error_response(roots_error)
         # 检查每个父目录是否有 .gitmodules
         current = repo.parent
         while current != current.parent:
+            if allowed_roots and not any(
+                current.is_relative_to(root) for root in allowed_roots
+            ):
+                break
             gitmodules = current / ".gitmodules"
             if gitmodules.exists():
                 # 找到 .gitmodules 上级目录（submodule 顶层）
                 rel_path = repo.resolve().relative_to(current.resolve())
                 # 检查 .gitmodules 是否包含此路径
                 try:
-                    gm_content = gitmodules.read_text(encoding="utf-8", errors="replace")
+                    gm_content = safe_read_text(gitmodules, max_chars=100000)
+                    if gm_content is None:
+                        current = current.parent
+                        continue
                     # 解析 [submodule "name"] 段 + path
                     for m in re.finditer(
                         r'\[submodule\s+"([^"]+)"\][^[]*?path\s*=\s*(\S+)',
@@ -1152,11 +1578,11 @@ async def parse_project_id(
     }
 
 
-@mcp.tool()
+@mcp.tool(annotations=LOCAL_TOOL_ANNOTATIONS, structured_output=True)
 async def scan_modules(
     repo_path: str = ".",
     max_files: int = 1000,
-) -> dict:
+) -> ToolResponse:
     """模块检测（6 级优先级）。
 
     按优先级扫描 repo_path 下的独立模块:
@@ -1183,7 +1609,7 @@ async def scan_modules(
     if err := validate_int_range(max_files, "max_files", 1, 10000):
         return make_error_response(err)
 
-    p = validate_path_exists(repo_path, "repo_path")
+    p = _validate_local_dir(repo_path, "repo_path")
     if isinstance(p, str):
         return make_error_response(p)
     repo = p
@@ -1194,7 +1620,9 @@ async def scan_modules(
     gitmodules = repo / ".gitmodules"
     if gitmodules.exists():
         try:
-            content = gitmodules.read_text(encoding="utf-8", errors="replace")
+            content = safe_read_text(gitmodules, max_chars=100000, root_path=repo)
+            if content is None:
+                content = ""
             # 解析 [submodule "name"] 段
             for match in re.finditer(r'\[submodule\s+"([^"]+)"\][^[]*?path\s*=\s*(\S+)', content, re.DOTALL):
                 modules.append({
@@ -1208,11 +1636,13 @@ async def scan_modules(
 
     # 优先级 2: repo 工具（Android）
     repo_dir = repo / ".repo"
-    if repo_dir.exists() and repo_dir.is_dir():
+    if repo_dir.exists() and repo_dir.is_dir() and not repo_dir.is_symlink():
         manifest = repo_dir / "manifest.xml"
         if manifest.exists():
             try:
-                content = manifest.read_text(encoding="utf-8", errors="replace")
+                content = safe_read_text(manifest, max_chars=100000, root_path=repo)
+                if content is None:
+                    content = ""
                 for match in re.finditer(r'<project\s+[^>]*path="([^"]+)"', content):
                     modules.append({
                         "path": match.group(1),
@@ -1226,14 +1656,14 @@ async def scan_modules(
     # 优先级 3: CMake FetchContent
     cmake_files = []
     for cm in repo.rglob("CMakeLists.txt"):
-        if "node_modules" in str(cm) or ".venv" in str(cm):
+        if cm.is_symlink() or "node_modules" in str(cm) or ".venv" in str(cm):
             continue
         if len(cmake_files) >= 10:
             break
         cmake_files.append(cm)
     for cf in cmake_files:
         try:
-            content = safe_read_text(cf, max_chars=20000)
+            content = safe_read_text(cf, max_chars=20000, root_path=repo)
             if not content:
                 continue
             # v1.0 修复：移除注释（避免 # 开头的模块名误识别）
@@ -1270,7 +1700,9 @@ async def scan_modules(
         ws_path = repo / ws_file
         if ws_path.exists():
             try:
-                content = ws_path.read_text(encoding="utf-8", errors="replace")
+                content = safe_read_text(ws_path, max_chars=100000, root_path=repo)
+                if content is None:
+                    continue
                 if ws_type == "lerna":
                     for m in re.finditer(r'"@?([^/"]+)/([^"]+)"', content):
                         modules.append({
@@ -1315,9 +1747,9 @@ async def scan_modules(
 
     # 优先级 5: vendor 目录
     vendor_dir = repo / "vendor"
-    if vendor_dir.exists() and vendor_dir.is_dir():
+    if vendor_dir.exists() and vendor_dir.is_dir() and not vendor_dir.is_symlink():
         for v in vendor_dir.iterdir():
-            if v.is_dir():
+            if v.is_dir() and not v.is_symlink():
                 modules.append({
                     "path": f"vendor/{v.name}",
                     "name": v.name,
@@ -1330,7 +1762,9 @@ async def scan_modules(
     user_config = repo / ".icode_modules.yaml"
     if user_config.exists():
         try:
-            content = user_config.read_text(encoding="utf-8", errors="replace")
+            content = safe_read_text(user_config, max_chars=100000, root_path=repo)
+            if content is None:
+                content = ""
             for m in re.finditer(r'-\s*path:\s*(\S+)', content):
                 modules.append({
                     "path": m.group(1),
@@ -1366,13 +1800,13 @@ async def scan_modules(
 # LLM 工具（diff_summary / generate_filename / select_template）
 # ===========================================================================
 
-@mcp.tool()
+@mcp.tool(annotations=LLM_TOOL_ANNOTATIONS, structured_output=True)
 async def diff_summary(
     text_a: str,
     text_b: str,
     focus: str = "",
     max_tokens: int = 1024,
-) -> dict:
+) -> ToolResponse:
     """差异摘要。
 
     调 LLM 摘要两段文本的差异, 适合"代码变更/long log diff"场景。
@@ -1396,7 +1830,7 @@ async def diff_summary(
         return make_error_response(err)
 
     # 数据出境闸门：外发前扫描两侧文本
-    if sensitive := scan_sensitive(text_a + text_b):
+    if sensitive := scan_sensitive(text_a + text_b + focus):
         return make_error_response(
             f"[数据出境闸门] 输入命中高危敏感模式, 已拒绝外发: {sensitive[:3]}。"
             f"请先脱敏（排除密钥/令牌/私钥）后重试。"
@@ -1405,6 +1839,8 @@ async def diff_summary(
     # 截断保护 + 截断硬信号
     text_a_safe, trunc_a = truncate_with_meta(text_a, max_chars=6000)
     text_b_safe, trunc_b = truncate_with_meta(text_b, max_chars=6000)
+    text_a_safe = sanitize_for_llm(text_a_safe, max_chars=6500)
+    text_b_safe = sanitize_for_llm(text_b_safe, max_chars=6500)
 
     provider = get_provider()
 
@@ -1421,7 +1857,8 @@ async def diff_summary(
         "required": ["summary", "key_changes"],
     }
 
-    focus_part = f"重点关注: {focus}\n" if focus else ""
+    focus_safe = sanitize_for_llm(focus, max_chars=1000) if focus else ""
+    focus_part = f"重点关注: {focus_safe}\n" if focus_safe else ""
     prompt = (
         f"请对比以下两段文本, 简洁摘要差异。{focus_part}\n"
         f"输出: 1) summary (1-2 句话); 2) key_changes (3-5 条关键变更, 每条 1 句话)。\n\n"
@@ -1439,12 +1876,12 @@ async def diff_summary(
     return result
 
 
-@mcp.tool()
+@mcp.tool(annotations=LLM_TOOL_ANNOTATIONS, structured_output=True)
 async def generate_filename(
     context: dict,
     prefix: str = "feature",
     max_tokens: int = 8192,
-) -> dict:
+) -> ToolResponse:
     """文件名生成（readme / 文档存储）。
 
     调 LLM 根据 context 生成 1-2 行文件名。
@@ -1467,7 +1904,9 @@ async def generate_filename(
         return make_error_response("context 不能为空 dict")
 
     # 数据出境闸门：外发前扫描 context
-    if sensitive := scan_sensitive(json_dumps_safe(context, max_chars=100000)):
+    if sensitive := scan_sensitive(
+        json_dumps_safe(context, max_chars=100000) + prefix
+    ):
         return make_error_response(
             f"[数据出境闸门] context 命中高危敏感模式, 已拒绝外发: {sensitive[:3]}。"
             f"请先脱敏后重试。"
@@ -1475,7 +1914,10 @@ async def generate_filename(
 
     provider = get_provider()
 
-    context_str = json_dumps_safe(context, max_chars=2000)
+    context_str = sanitize_for_llm(
+        json_dumps_safe(context, max_chars=2000),
+        max_chars=2500,
+    )
 
     schema = {
         "type": "object",
@@ -1486,10 +1928,11 @@ async def generate_filename(
         "required": ["filename"],
     }
 
+    prefix_safe = sanitize_for_llm(prefix, max_chars=200)
     prompt = (
         f"请根据 context 生成 1 个文件名（用于工程文档/交付报告存储）。\n"
         f"格式: <prefix>-<kebab-case-summary>-<YYYYMMDD>.md\n"
-        f"prefix: {prefix}\n"
+        f"prefix: {prefix_safe}\n"
         f"命名规则: 简短 (≤50 字符), kebab-case, 反映变更核心。\n\n"
         f"context:\n{context_str}"
     )
@@ -1501,12 +1944,12 @@ async def generate_filename(
     )
 
 
-@mcp.tool()
+@mcp.tool(annotations=LLM_TOOL_ANNOTATIONS, structured_output=True)
 async def select_template(
     context: dict,
     options: list | None = None,
     max_tokens: int = 8192,
-) -> dict:
+) -> ToolResponse:
     """模板选择（readme / 文档）。
 
     调 LLM 根据 context 从 options 中选最合适的模板。
@@ -1534,7 +1977,10 @@ async def select_template(
             return make_error_response("options 必须都是字符串")
 
     # 数据出境闸门：外发前扫描 context
-    if sensitive := scan_sensitive(json_dumps_safe(context, max_chars=100000)):
+    if sensitive := scan_sensitive(
+        json_dumps_safe(context, max_chars=100000)
+        + json_dumps_safe(options or [], max_chars=100000)
+    ):
         return make_error_response(
             f"[数据出境闸门] context 命中高危敏感模式, 已拒绝外发: {sensitive[:3]}。"
             f"请先脱敏后重试。"
@@ -1542,8 +1988,11 @@ async def select_template(
 
     provider = get_provider()
 
-    context_str = json_dumps_safe(context, max_chars=1500)
-    options_str = ", ".join(options)
+    context_str = sanitize_for_llm(
+        json_dumps_safe(context, max_chars=1500),
+        max_chars=2000,
+    )
+    options_str = sanitize_for_llm(", ".join(options), max_chars=2000)
 
     schema = {
         "type": "object",

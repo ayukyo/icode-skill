@@ -6,16 +6,19 @@
 > 历史参考小节（init/plan/log/start 检索命中时）按 verdict 分流标注在 [thinking_detail.md](thinking_detail.md)「历史参考小节」段。
 >
 > **分级思考治理（reasoning gate）**：本文件从「所有步骤固定调用 sequential-thinking ≥3 次」改为「按复杂度分级 L0～L3 选择思考载体」。分级判定机器真源 = `mcp/reasoning-gate/gates.json`（默认等级/升级触发器**只从这里读**）；运行痕迹 = `{ICODE_OUT_DIR}/.thinking_gate_trace.jsonl`（每 step 一条最终判定）；校验器 = `python3 tools/lint_thinking_gate.py <out_dir> [--step <step>] [--strict] [--json]`。分级规则完整定义以 `mcp/reasoning-gate/gates.json` 为准；历史出处见 [docs/adr/ADR-0001-optimization-proposal-provenance.md](../docs/adr/ADR-0001-optimization-proposal-provenance.md)。
+>
+> **工单执行模型（ticket-scoped step 必做）**：完整 Read [execution_model.md](execution_model.md)，按 `step start → 边界 check → artifact/operation 回执 → step finish → transition` 执行。输入漂移必须按机器返回 route 回流；有副作用动作禁止盲重试。无工单目录的 help/install/list 等纯辅助入口不创建伪执行事件。
 
 ## 强证据化总览
 
-本节为强证据化机制索引——列出 3 项机制 + 落地点，避免机制散落各 step 文件后无人能找全。各机制的真源仍在对应文件，本节只起导航作用。
+本节为强证据化机制索引——列出 4 项机制 + 落地点，避免机制散落各 step 文件后无人能找全。各机制的真源仍在对应文件，本节只起导航作用。
 
 | # | 机制 | 真源 | 落地点 |
 |---|---------|------|--------|
 | 1 | **跨层枚举对齐修复模式**（防"同值不同义"型根因遗漏） | cross-layer-enum-normalization-pattern（外部参考案例，不随仓库分发） | log.md §2.1 对照表生成 + §0 §2.2 占位 + §3.1 扫描字段 + 阶段3「上游语义追问」；01_plan.md §4 ADR 场景 + §4.5 维度 2 子项；02_review.md 维度 4 风险遗漏子项；04_code.md 优雅度6条第 7 条 + 维度 4 复检双值日志 |
 | 2 | **段零文档/姐妹工程/关联工程检索强证据化**（防"只看自己工程代码"） | [references/dir_and_metadata.md](dir_and_metadata.md)「段零·工程文档检索」段（含 3.5 反查父项目 + **3.6 关联工程源码路径定位三级兜底**）+ [references/anti_laziness.md](anti_laziness.md) 第 24 条 | log.md §2.0 自动发现姐妹工程 + 段零 3.6 关联工程源码路径（project_path + manifest + 兜底三级）+ §2.1 段零文档盘点 + 阶段3 对抗质疑者 prompt 喂入 |
 | 3 | **TB 附件视频/图片研读强制化**（防"分析错时间点"） | [references/anti_laziness.md](anti_laziness.md) 第 23 条 | log.md「附件分析（含本地路径 + TB 源）与 ffmpeg 抽帧」段 |
+| 4 | **可恢复执行模型**（端口/Reactive 边界/统一轨迹/副作用策略/回执） | [execution_model.md](execution_model.md) + `gates.json.execution_model` | ticket-scoped step 开始、写入/等待/副作用/转换边界与长动作终结 |
 
 ## 强制思考前置·统一契约（step 文件如何引用本文件）
 
@@ -110,17 +113,18 @@ N. **强制思考前置**（不可跳过，缺证据视为不合规；按 [refer
 1. **分级**：按 [mcp_per_step.md](mcp_per_step.md)「默认等级表」+ `mcp/reasoning-gate/gates.json` 升级触发器确定本步等级（L0～L3），把等级与触发原因写入 `{ICODE_OUT_DIR}/.thinking_gate_trace.jsonl`（每 step 最终一行；schema/词表见 [thinking_detail.md](thinking_detail.md)「thinking gate trace」段）。
 2. 输出 `ultrathink` 触发词（触发更长的内部推理 budget）——**L0/L1 可省略**（纯机器门禁/决策记录不依赖推理预算）。
 3. **显式 Read 本步骤引用的 references 文件**（每步必须重新 Read，同会话已读不豁免——显式Read是深度思考的前置仪式，凭记忆会降级思考质量），Read 后在回复中输出确认行 `📖 已 Read references/xxx.md` 作为合规证据。
-4. **MCP 调用 gate**（L2/L3 不可跳过）：在结构化思考开始前，先处理本步 🟢 MCP（按 [mcp_per_step.md](mcp_per_step.md)「强证据场景判定」）：
+4. **ICODE 本地 MCP 路由门（所有等级）**：读取 `mcp/icode-mcp-policy/policy.json` 当前 step 的 routes；若 `icode-mcp-policy.evaluate_call` 当前会话可见则用它复核目标 server/tool/operation，否则直接按同一 JSON 判定。只有 condition 被当前事实满足才调用目标服务；`required=true` 的命中项必须先实际调用，失败后才能按 [mcp_integration.md](mcp_integration.md) 的底层确定性工具降级。policy 缺失/损坏时默认拒绝新增 MCP 调用，不影响原有 Read/rg/git/ssh/adb 路径。不得为探测 MCP 而读取无关工程文件。
+5. **MCP 调用 gate**（L2/L3 不可跳过）：在结构化思考开始前，先处理本步 🟢 MCP（按 [mcp_per_step.md](mcp_per_step.md)「强证据场景判定」）：
    - 列出本步满足强证据场景的 🟢 MCP（**不含 sequential-thinking**，它由第 5 步承载；其余 🟢 MCP 由本 gate + 各 step 执行步骤内嵌点承载）
    - 对每个 🟢 MCP：**若该工具已在工具列表直接可见（完整 schema）则直接调用**，不可见才 ToolSearch 取 `mcp__<name>__<tool>` schema -> **实际调用一次** -> 把调用结果（成功/空/失败）写进思考块「MCP 调用」段
    - 调用失败/返回空 -> 思考块写明降级原因（MCP 不可用 / 无相关结果 / 不适用场景）才能跳过；**未经实际调用就标降级 = 反偷懒第 21 条违规**
    - ⚪ MCP（强证据场景不满足）无需评估无需声明
    - **本步若无 🟢 MCP**（全 ⚪）：gate 直接通过，思考块记"本步无 🟢 MCP（强证据场景均不满足）"
-5. **完成思考（按等级选载体）**：
+6. **完成思考（按等级选载体）**：
    - **L0**：只执行既有机器门禁（状态/文件/schema/安全），无思考块。
    - **L1**：写 `.decision_anchors.json` 决策摘要（`reasoning_gate` 对象，字段见 [decision_anchors.md](decision_anchors.md)「L1 决策记录契约」），列事实、风险和验证动作。
    - **L2/L3**：sequential-thinking MCP 优先（3～5 步，每步对应该步骤声明的子项之一；L3 另加独立对抗），不可用则降级文字块。
-6. 不得跳过思考直接产出——所有 Write/Edit 必须在思考证据之后（L0 为机器门禁通过后）。
+7. 不得跳过思考直接产出——所有 Write/Edit 必须在思考证据之后（L0 为机器门禁通过后）。
 
 ## reasoning gate 执行门（gate）流程
 
@@ -163,7 +167,7 @@ N. **强制思考前置**（不可跳过，缺证据视为不合规；按 [refer
 
 1. **加载 gate catalog**：Read `mcp/cheap-research/gates.json`，取本 step 相关 gate 与阈值（`tb_comment_extract_min` / `long_text_threshold_bytes` / `dedup_min_functions` / `merge_min_rounds` / `max_input_bytes_per_call`）。
 2. **确定性计算 eligibility 并立刻写 trace**：按 gates.json 的 condition + 事实文件（TB 评论数 / 候选日志字节 / 函数 catalog / review round 数 / mode）算出 `eligible`，先追加一行 trace（`decision` 暂填 `pending`，`at` 为当前 ISO-8601）；**不得用"我觉得没必要"当 skip 理由**。
-3. **eligible 时先查缓存**：Read `{ICODE_OUT_DIR}/.cheap_research_cache.json` 查 `tool + args_hash`（语义见 SKILL.md「cheap-research 14 工具会话内缓存」段）。
+3. **eligible 时先查缓存**：Read `{ICODE_OUT_DIR}/.cheap_research_cache.json` 查 `tool + args_hash`（语义见 SKILL.md「cheap-research 15 工具会话内缓存」段）。
 4. **有效缓存命中**：把 trace 行更新为 `decision=cache_hit`、`attempted=false`、`result=success`、`cache_key=<args_hash>`——**gate 直接 fulfilled，不再重复调用**。
 5. **未命中才实际调用**：调 `mcp__cheap-research__<tool>`（先可见性自检；不可见才 ToolSearch 取 schema）。调用成功/返回空/失败后**更新最终 trace**：
    - 成功 → `decision=called`、`attempted=true`、`result=success`、`source_files=[...]`

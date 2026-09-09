@@ -1,0 +1,12 @@
+{
+  "server": "icode-local-index",
+  "api_key_required": false,
+  "purpose": "rebuildable local full-text index",
+  "managed_writes": ["configured data_dir/*.sqlite3"],
+  "tools": [
+    {"name": "describe_capabilities", "read_only": true, "deterministic": true, "network": false},
+    {"name": "build_index", "read_only": false, "deterministic": true, "network": false},
+    {"name": "query_index", "read_only": true, "deterministic": true, "network": false},
+    {"name": "index_status", "read_only": true, "deterministic": true, "network": false}
+  ]
+}

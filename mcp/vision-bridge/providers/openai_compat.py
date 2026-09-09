@@ -44,11 +44,27 @@ class OpenAICompatProvider(MediaProvider):
     supports_video = True
 
     def __init__(self, config: dict):
+        for field in ("base_url", "api_key", "model"):
+            if not isinstance(config.get(field), str) or not config[field].strip():
+                raise ValueError(f"{field} 必须是非空字符串")
         self.base_url = config["base_url"].rstrip("/")
+        if not self.base_url.startswith(("http://", "https://")):
+            raise ValueError("base_url 必须是 http(s) URL")
         self.api_key = config["api_key"]
         self.model = config["model"]
-        self.timeout = int(config.get("timeout", 120))
-        self.video_frames = int(config.get("video_frames", 8))
+        try:
+            self.timeout = int(config.get("timeout", 120))
+            self.video_frames = int(config.get("video_frames", 8))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("timeout/video_frames 必须是整数") from exc
+        if not 1 <= self.timeout <= 3600:
+            raise ValueError("timeout 必须是 1..3600 秒")
+        if not 1 <= self.video_frames <= 120:
+            raise ValueError("video_frames 必须是 1..120")
+        self.supports_video = bool(shutil.which("ffmpeg") and shutil.which("ffprobe"))
+        self.profile_version = config.get("profile_version")
+        self.declared_capabilities = config.get("declared_capabilities", [])
+        self.quality_profile = config.get("quality_profile", {})
 
     # ---------- 辅助:本地文件转 data URL ----------
 
@@ -69,7 +85,7 @@ class OpenAICompatProvider(MediaProvider):
         """ffmpeg 均匀抽帧成临时图片,返回 [data_url, ...]。"""
         if not shutil.which("ffmpeg") or not shutil.which("ffprobe"):
             raise RuntimeError(
-                "video 需要 ffmpeg/ffmpeg。请先安装:sudo apt install ffmpeg"
+                "video 需要 ffmpeg/ffprobe。请先安装: sudo apt install ffmpeg"
             )
         frames = []
         with tempfile.TemporaryDirectory() as tmp:
@@ -141,7 +157,7 @@ class OpenAICompatProvider(MediaProvider):
     async def _chat(self, content: list, max_tokens: int) -> str:
         # 拼接完整 URL 供错误提示用（v2.1+：404 等错误时帮用户排查 base_url 路径）
         url = f"{self.base_url}/chat/completions"
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
+        async with httpx.AsyncClient(timeout=self.timeout, trust_env=False) as client:
             r = await client.post(
                 url,
                 headers={

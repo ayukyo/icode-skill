@@ -1,0 +1,12 @@
+{
+  "server": "icode-mcp-health",
+  "api_key_required": false,
+  "purpose": "MCP installation and schema health diagnostics",
+  "tools": [
+    {"name": "describe_capabilities", "read_only": true, "deterministic": true, "network": false},
+    {"name": "inventory_servers", "read_only": true, "deterministic": true, "network": false},
+    {"name": "validate_manifest", "read_only": true, "deterministic": true, "network": false},
+    {"name": "probe_python_server", "read_only": true, "deterministic": true, "network": false},
+    {"name": "scan_sensitive_payload", "read_only": true, "deterministic": true, "network": false}
+  ]
+}

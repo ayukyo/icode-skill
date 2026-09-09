@@ -85,7 +85,7 @@
    - **TB 缺陷源拉取（可选）**：零散输入含 TB 项目 URL（`tb.example.com/.../project/<pid>/...`）或 `<LIB>-<NUM>`（如 `DEMO-26`）时，按下方「TB 缺陷源拉取」段拉取缺陷单的日志/评论/附件作为分析输入；**无 TB 引用时跳过，走纯本地日志路径，行为与改前 100% 一致**
    - **证据清单编译（TB/本地均执行，先于根因判断）**：TB 拉取完成后优先读取自动生成的 `tb_source/<ID>/evidence_manifest.json`；纯本地日志用 `python3 tools/evidence_intake.py --root "<日志可信根>" --path "<日志文件或目录>" [--previous "<旧 manifest>"] --output "{ICODE_OUT_DIR}/evidence_manifest.json"` 生成清单。manifest 只做活动/附件/本地文件规范化、SHA256、重复表示、真实新增、派生关系与覆盖提示，不得把它当根因结论；远端未下载文件必须保留 `content_hash_pending=true`。复用时 `delta.duplicate_representation=true` 且 `new_semantic_evidence=false` 只刷新清单，不重跑完整因果分析；真实新增证据才进入增量对抗。工具输入必须位于显式可信根内，越界符号链接只记录失败、不读取内容
    - **debug 本地目录（仅 `--debug`）**：先运行 `python3 tools/debug_catalog.py rebuild --project "<工程根>"`，再以 `query --pid <pid> --lib <lib> --num <num> [--manifest <path>]` 查询。精确身份+同 fingerprint → 复用且不重分析；精确身份+新证据 → 在原孪生增量分析；相似命中只给候选并重新核对版本/时间窗/证据，禁止复用结论。catalog 固定写 `.icode_output/.debug/debug_catalog.json`，永不写全局 index
-   - **附件分析（本地日志目录 或 TB 缺陷源附件含视频/图片,vision-bridge 可用则主动调,防"分析错时间点"走弯路）**：**本地日志目录**或**TB 缺陷源附件**含视频/图片时,**先判定 vision-bridge 可用性(双通道:MCP 工具 或 本地 CLI,`config.json` 三件套配齐即可用)**。**可用→主动调**(视频先用 ffmpeg 本地提取关键帧再传图片帧省钱,本地路径扫目录下文件,TB 附件从 meta.json 取——见下方「附件分析（含本地路径 + TB 源）与 ffmpeg 抽帧」段);**两通道均不可用→仅提示附件清单+关键帧落盘待人工**(防纯文字模型场景报错)。**⚠️ 图片/视频绝不注入会话模型消息**(codex 第三方模型注入即报 "Model only support text input")。**触发范围**:TB 拉取后 + 本地日志目录含视频/图片文件时均触发,纯本地日志路径若有视频/图片也走分析流程
+   - **附件分析（本地日志目录或 TB 附件含视频/图片时）**：先按 [media_routing.md](../references/media_routing.md) 运行能力路由。宿主明确证明当前 session 支持视觉时保留 native；纯文本/能力未知时使用健康 bridge；高风险可 dual；均不可用则 text_only + 关键帧落盘待人工。视频先用 ffmpeg 抽帧，所有实质分析绑定 hash、时间点、页/裁剪/模型来源；禁止用试传图片探测未知模型能力。
    - **能推断的推断**(日志目录/时间点/症状按上表推断),推断的标注"推断"
    - **推断不了的才问**,且一次性集中问(不挤牙膏)
    - **姊妹工程清单(可选)**:仅当用户提及"姊妹产品 / 兄弟机型 / 共用固件 / 复用代码库"等关键词时触发,一次性集中问"姊妹工程路径清单(如 A、B、C 三个 repo 的根路径)",供阶段1 §2.0 代码库归属判定使用。**不触发时不问**,避免给单工程用户增加负担
@@ -187,7 +187,7 @@
      2. **去重、按时间排序，保留 `file:line` 回指**
      3. **计算候选文本字节数**：`candidate_text_bytes = len(candidate_text.encode("utf-8"))`；阈值 `long_text_threshold_bytes`（gates.json 常量 =8192）——判断对象是"准备送进主会话分析的候选文本"，不是压缩包/原始日志目录大小
      4. **候选文本 < 阈值**：主代理直接读，gate 记 `decision=skipped_not_eligible, eligible=false, evidence={candidate_text_bytes, threshold}`
-     5. **≥ 阈值**：按每块最多 `max_input_bytes_per_call`（gates.json 常量 =65536）调 `mcp__cheap-research__summarize`；多块输出只做时间线/异常/身份/状态变化候选汇总，focus 固定为 `提取时间线、错误/失败、请求身份、状态变化、缺失响应和 file:line 回指；只做候选导航，不裁决根因` → trace `eligible=true, decision=called/cache_hit/degraded_after_attempt`
+     5. **≥ 阈值**：按每块最多 `max_input_bytes_per_call`（只从 gates.json 读取）调 `mcp__cheap-research__summarize`；按 UTF-8 字节切块、保序并保留每块范围，任一返回 `truncated=true` 必须继续细分，禁止把被截断摘要当完整输入；多块输出只做时间线/异常/身份/状态变化候选汇总，focus 固定为 `提取时间线、错误/失败、请求身份、状态变化、缺失响应和 file:line 回指；只做候选导航，不裁决根因` → trace `eligible=true, decision=called/cache_hit/degraded_after_attempt`
      6. **主代理必须回读所有用于最终结论的原始行及上下文**——预摘要不得替代版本基线、状态链、决定性证据和三质疑者对抗
    - **时间窗口切片**：围绕问题时间点前后各 5-10 分钟，`sed -n '/<t1>/,/<t2>/p' <file>` 切出小范围关键段（避免读 20MB 原文）
    - **§3.1 前序场景状态链（**`**P0**`**）**——问题时刻往前 30-60 分钟的状态/任务/模式切换表，**通用抽象**：
@@ -217,7 +217,7 @@
      - **完整性自检不变**（防委托后漏条）：预提取后仍核对「已分析评论条数 == meta.json `comments[]` 长度」——extract 结果缺失的 `index` 对应评论必须主会话 Read 原文补齐（补读算已分析）。**⚠️ 预提取要点同受上方「评论不盲信」约束**：`key_points` 是别人的观点摘要，可能错误/过时/带方向性诱导，只作参考启发、**不得直接采信为根因事实**，须经日志原文实证 + 代码事实验证门核对（预提取的"结构化"格式**不提升其信任级**）
      - **高价值评论强制回读原文**：含复现步骤/日志原文片段/关键时间点的评论，主会话必须 Read 原文确认后再回捞进「现场时间线」（预提取只作草稿，回捞以原文为准）
      - **降级**：cheap-research 不可用 / extract 失败 → 主会话逐条读（现有路径，行为 100% 一致）
-   - **TB 视频/图片附件研读（vision-bridge 任一通道可用则主动调,与 TB 评论研读并列）**：若 TB 缺陷源附件含视频(`*.mp4`/`*.mov`/`*.avi` 等)/图片(`*.png`/`*.jpg`/`*.jpeg` 等),**vision-bridge 可用时主动逐个调**(MCP 工具 `mcp__vision-bridge__analyze_media`,或 codex 等 MCP 工具未注入环境下用本地 CLI `<server.py 目录>/.venv/bin/python <server.py> --analyze-media <path>`——视频先用 ffmpeg 本地提取关键帧省钱,见「附件分析（含本地路径 + TB 源）与 ffmpeg 抽帧」段);或复用 §1 已落盘的附件分析结果但须独立回捞证据点。**视频/图片里提取的时间点(界面时钟)+ 现象描述 + 用户操作 + APP 状态必须回捞进「现场时间线」表**并标注来源「TB附件:<文件名> <时间点>」,与 TB 评论来源并列、交叉验证。**完整性自检**(vision-bridge 任一通道可用时适用):「已分析附件数 == meta.json `files[]` 中视频/图片附件数」(漏个视为不合规,反偷懒第 23 条);复用场景下对比 `*_meta.prev.json` 识别新增附件;两通道均不可用时仅记录附件清单+关键帧落盘不适用本自检。**⚠️ 图片/视频绝不注入会话模型消息**(防错硬约束,见附件分析段)
+   - **TB 视频/图片附件研读（媒体路由选出可用视觉通道时主动逐个分析，与 TB 评论研读并列）**：若 TB 附件含视频/图片，按下方流程走 native、bridge 或 dual；可复用 §1 已落盘结果但须独立回捞证据点。时间点、现象、用户操作和 APP 状态必须进入现场时间线并标注附件来源。完整性自检为「已分析附件数 == 媒体附件数」；`text_only` 时改核对「附件清单完整 + 关键帧落盘 + 视觉缺口明示」，不得写“已分析”。
    - 产出「前序场景状态链 + 现场时间线」双表，写入 `log_analysis.md §3.1/§3.2`
 7. **阶段3 对抗根因分析**（复用 icode 步骤2 对抗模式：分析师+3质疑者+裁决优先级+诚实降级）：
    - **分析师提假设**：基于现场时间线+证据，提根因假设 H + 证据指针 E（具体日志行：节点+时间+原文）+ 置信度
@@ -257,7 +257,7 @@
      > - 子代理对抗失败（spawn 超时/截断，重试后仍失败）：本单部分判断性结论子代理未返回有效 verdict
      - 是什么 / 不是什么 / 根因 / 置信度（编号要点，4-6 行内）
 
-     ## 1. 输入要素 —— 五要素（日志目录/问题描述/问题时间点/前序场景状态链/附件清单（含 TB + 本地）与附件分析结果），标注推断来源（附件清单：视频/图片的文件名+大小+类型，**无条件记录**（无视频/图片时该小节不存在）；「附件分析结果」vision-bridge 任一通道可用时由「附件分析（含本地路径 + TB 源）与 ffmpeg 抽帧」段写入,含时间点+现象+关键帧路径；两通道均不可用时仅记"vision-bridge 不可用"降级声明于附件清单小节末尾）
+     ## 1. 输入要素 —— 五要素（日志目录/问题描述/问题时间点/前序场景状态链/附件清单（含 TB + 本地）与附件分析结果），标注推断来源（附件清单无条件记录文件名+大小+类型；有视觉通道时写路由模式、hash、时间点、现象、关键帧/页/裁剪和模型来源；`text_only` 时写“视觉区域未分析”及原因）
      ## 2. 基线检查
      - §2.0 代码库归属判定（实战补强）—— 设备型号 ≠ 代码库；提取日志独特字符串到姊妹工程 git grep 找出真正代码库
      - §2.0.1 现场运行版本基线（版本门，P0）—— 模块版本矩阵（运行节点/实现模块/仓库/现场 Hash/当前 HEAD/关系/证据来源）+ Hash 可解析状态 + 现场→当前 HEAD 演进对照 + 判定结论（见阶段1「现场运行版本基线门」；无版本证据时标注"现场运行版本未确定（unknown）"）
@@ -612,14 +612,14 @@ TB 附件已落盘后，若 `{ICODE_OUT_DIR}` 位于**网络挂载（SMB 等）*
 
 > **为什么必须等回复**：对于需工程团队深度分析的缺陷单，过早出报告等于把自己锁在没有完整信息的盒子里（实战教训：v1 报告因未等 TB 新评论，治本根因留空缺，后续被增量补全部分推翻）。
 
-## 附件分析（含本地路径 + TB 源）与 ffmpeg 抽帧（实战补强，vision-bridge 可用则主动调，防"分析错时间点"走弯路）
+## 附件分析（含本地路径 + TB 源）、能力路由与 ffmpeg 抽帧
 
-**核心原则**：**TB 缺陷源附件**或**本地日志目录**含视频/图片时，**先判定 vision-bridge 可用性（双通道：MCP 工具 / 本地 CLI，config.json 三件套配齐即可用）**。**可用→主动调**（视频先用 ffmpeg 本地提取关键帧省钱）；**两通道均不可用→仅提示附件清单**（防纯文字模型场景报错）。**无论哪条通道，图片/视频绝不注入当前会话模型消息**（见下「防错硬约束」）。
+**核心原则**：先枚举媒体并固定 hash，再按 [media_routing.md](../references/media_routing.md) 选择 native/bridge/dual/text_only。明确支持视觉的 GPT 等 session 不因 bridge 已安装而降级；纯文本或能力未知 session 禁止试探性注图，使用 bridge 或保留视觉缺口。视频先抽帧，密集图片按需分块。
 
-**为什么 vision-bridge 可用就要主动调**：
+**为什么必须先完成媒体路由**：
 
 1. **附件视频/图片是"零号病人"指引**——含明确时间点（界面时钟）和现象描述，先看附件再看日志可避免按错误时段跑多轮误判
-2. **用户装了 MCP + 填了 KEY = 有意愿用**——不主动调反而是浪费用户配置
+2. **通道能力不同**——bridge 已安装只说明可调用，不说明比当前 session 更强；路由必须保留强 native 并保护纯文本会话
 3. **ffmpeg 省钱**——视频不直接传 vision-bridge（费 API 额度），先用 ffmpeg 本地提取关键帧（免费），再传图片帧（省额度）
 
 **前置判定（两步）**：
@@ -628,13 +628,12 @@ TB 附件已落盘后，若 `{ICODE_OUT_DIR}` 位于**网络挂载（SMB 等）*
    - **TB 源模式**：Read `<ID>_meta.json` 的 `files[]` 字段筛出视频(`*.mp4`/`*.mov`/`*.avi` 等)/图片(`*.png`/`*.jpg`/`*.jpeg` 等)
    - **本地路径模式**：`ls` 日志目录及子目录下视频/图片文件（`find <log_dir> -type f \( -name '*.mp4' -o -name '*.mov' -o -name '*.avi' -o -name '*.png' -o -name '*.jpg' -o -name '*.jpeg' \)`），用户直接给视频/图片文件路径时直接分析该文件
    - **无条件记录附件清单**(文件名+大小+类型)到 `log_analysis.md §1`「附件清单」小节（可空章节，无视频/图片时该小节不存在）
-2. **判定 vision-bridge 可用性（双通道：MCP 工具 / 本地 CLI）**：
-   - **⚠️ 防错硬约束（先于一切判定，所有环境强制）**：图片/视频**绝不作为附件/base64 注入当前会话模型消息**——session 模型可能是纯文本（如 codex 的第三方模型 glm-5.3，声明支持 image 但服务端实际只收文本），注入即报 "Model only support text input" 且图片留在上下文导致后续 turn 一启动就崩、需人工清会话。图片/视频分析**只能**走下方任一通道；**两通道均不可用时**：**只**把关键帧落盘（`{ICODE_OUT_DIR}/frames_*.jpg`）+ 在附件清单注明"vision-bridge 不可用，关键帧已落盘待人工查看"，**禁止**原生注入图片。
-   - **MCP 通道**（Claude 等 MCP 工具可注入的环境）：Read `~/.claude.json` 的 `mcpServers.vision-bridge` 段存在 **且** 工具可在当前会话直接调用（工具列表直接可见 `mcp__vision-bridge__analyze_media` 或代理前缀形态，或 ToolSearch 可取 schema）**且** Read `~/.claude/skills/icode/mcp/vision-bridge/config.json` 三件套(`base_url`/`api_key`/`model`)已填 → 用 MCP 工具调 `analyze_media`
-   - **CLI 通道**（codex 等 MCP 工具未注入、但能执行本地命令的环境）：当前工具列表**无** `analyze_media`（只有 `list_mcp_resources`/`read_mcp_resource` 等资源类工具）**且** 能执行本地命令（exec_command / shell / Bash）**且** 找到 `~/.claude/skills/icode/mcp/vision-bridge/server.py`（dev_repo 对应 `<icode_repo>/mcp/vision-bridge/server.py`）**且** 同目录 `config.json` 三件套已填 → 用本地 CLI：`<server.py 目录>/.venv/bin/python <server.py> --analyze-media <path> --prompt "<提取时间点/界面显示/操作序列/错误提示>"`，纯文本 stdout 由会话模型读取（端到端已验证）
-   - **MCP 通道可用 → 优先走「分析流程」**；MCP 不可用但 CLI 可用 → 同样走「分析流程」（步骤 3 用 CLI 调用）；**两通道均不可用 → 仅记录附件清单**（写具体缺失项），**不主动调、不视为违规**
+2. **选择媒体通道**：
+   - 从宿主可靠能力信息判 `native=supported|unsupported|unknown`，不得按模型名称猜测或试传图片；检查 bridge MCP/CLI 与三件套，并用 `describe_capabilities`/`--capabilities` 取得不含密钥的能力画像。
+   - 执行 `python3 tools/media_router.py route --mode auto --native <state> --bridge <state> --task <general|small_text|video> --risk <normal|high>`；结果写入附件分析记录。
+   - `native` → 当前 session 直接分析；`bridge` → 优先 `analyze_media_evidence`/`--analyze-evidence`；`dual` → 两通道独立分析、分歧未决；`text_only` → 只落关键帧和视觉缺口。只有 selected mode 含 native 时才允许原生媒体输入。
 
-**分析流程**（vision-bridge 可用时自动走，在阶段0 内、附件枚举后、强制思考之前）：
+**分析流程**（路由选择 native/bridge/dual 时，在阶段0 内、附件枚举后、强制思考之前）：
 
 1. **视频抽关键帧**（ffmpeg 本地免费处理，省钱）：
    - 检查 ffmpeg 是否可用：`which ffmpeg` 或 `ffmpeg -version`
@@ -648,27 +647,24 @@ TB 附件已落盘后，若 `{ICODE_OUT_DIR}` 位于**网络挂载（SMB 等）*
        "<对应输出路径>/frames_<video_basename>_%03d.jpg"
      ```
 
-   - **ffmpeg 不可用**：降级为直接传视频给 vision-bridge（需提示用户「ffmpeg 不可用,直接分析视频可能消耗 API 额度」），或仅分析图片附件
+   - **ffmpeg 不可用**：只有 selected channel 明确支持视频且用户接受额度/体积风险时才直接分析视频；否则只处理图片附件并记录视频覆盖缺口
 2. **枚举关键帧**：`ls {LOCAL_TB_SRC}/frames_*.jpg`（TB 源）或 `{ICODE_OUT_DIR}/frames_*.jpg`（本地路径）列出所有关键帧文件
-3. **调 vision-bridge 分析图片帧**（视频经 ffmpeg 抽帧后传图片，不传视频——省 API 额度）：
-   - **MCP 通道**：工具已在列表直接可见则直接调 `mcp__vision-bridge__analyze_media`，不可见才 ToolSearch 取 schema
-   - **CLI 通道**（MCP 不可用但 CLI 可用时）：用 `exec_command` 执行 `<server.py 目录>/.venv/bin/python <server.py> --analyze-media <帧路径> --prompt "<提取时间点/界面显示/操作序列/错误提示>"`，从 stdout 读文本结果
-   - 对每个**图片附件**和每个**关键帧图片**实际调用一次，prompt 模板："提取图片中的时间点(界面时钟)、显示内容、用户操作序列、状态栏信息、错误提示" (针对 APP 录屏场景)；或 "提取图片中的错误提示/状态信息/界面元素/版本号" (针对错误截图场景)
+3. **按 selected mode 分析图片帧**：native 由当前 session 分析；bridge 调 `analyze_media_evidence` 或 CLI `--analyze-evidence`；dual 对同一 hash/帧独立执行两路并记录分歧。对每个图片附件和关键帧至少一次，统一提示模板提取界面时钟、显示内容、操作序列、状态栏和错误提示。
 4. **整理分析结果**(写入 `log_analysis.md §1`「附件分析结果」小节，可空章节允许留空)：
    - **时间点清单**：视频界面时钟时间(从关键帧图片读取) + 对应设备端日志时段推断(**视频时间点与设备端时间往往有偏移,需在阶段1 §2.1 状态链路图阶段估算**)
    - **现象描述**：视频/图片里直接可见的症状(界面显示/状态栏/错误提示/控件状态等)
    - **用户操作序列**：视频里观察到的用户操作(点击/输入/切换等),用于定位触发事件
    - **关键帧标注**：关键帧文件路径 + 对应时间点(供报告与代码事实验证门交叉引用)
-5. **降级明示**(vision-bridge 两通道均不可用时)：「附件清单 + vision-bridge 不可用(MCP/CLI 均不可用,<具体缺失项>),未分析;关键帧已落盘 `{ICODE_OUT_DIR}/frames_*.jpg`,请人工查看」——写入 §1「附件清单」小节末尾。**禁止**把图片/视频注入会话模型消息(防错硬约束)
+5. **降级明示**（selected mode=`text_only`）：写「附件清单 + native 能力未证明/不支持 + bridge 不可用或不合格，视觉区域未分析；关键帧已落盘 `<path>`，请人工查看」。禁止把“已抽帧/已 OCR”写成“已完成视觉分析”。
 
-**完整性自检**（**vision-bridge 任一通道可用时适用**）：
+**完整性自检**（selected mode 为 native/bridge/dual 时适用）：
 
 - **TB 源模式**：研读完成后立即核对「已分析附件数 == meta.json 中视频/图片附件数」（写报告前再兜底一次）
 - **本地路径模式**：研读完成后立即核对「已分析附件数 == 本地目录枚举的视频/图片文件数」（写报告前再兜底一次）
 - 漏个视为不合规（对应反偷懒第 23 条违规）
-- **vision-bridge 两通道均不可用时**：不适用本自检，只要求"附件清单 + 关键帧落盘"已记录
+- **text_only**：不适用“已分析数”断言，只要求附件清单、关键帧和视觉缺口完整记录
 
-> **与阶段2「TB 评论研读」的关系**：评论研读是逐条研读 `comments[].content.comment` 文本（**TB 源模式强制，必逐条不漏**；本地路径模式无 TB 评论则跳过）；**附件研读是逐个研读视频/图片二进制附件**——vision-bridge 可用时与评论并列主动调(视频经 ffmpeg 抽帧后传图片)；两者并列，缺一不可。本地路径模式下无 TB 评论，仅走附件研读。
+> **与阶段2「TB 评论研读」的关系**：评论文本逐条研读；媒体附件按路由逐个分析。selected mode 有视觉通道时两者并列、缺一不可；text_only 时附件必须清点并明确未分析边界。本地路径模式无 TB 评论，仅走附件研读。
 
 ## 同 TB 单复用流程（步骤1 检测到旧工单且用户选复用时）
 

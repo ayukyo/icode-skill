@@ -12,6 +12,9 @@
   create          原子创建 metadata + 出生事件（空目录所有权检查）
   validate        工单整体校验（metadata schema + 状态-事件一致性 + 事件链完整性 + 索引指针 + 三 linter）
   event           追加事件（哈希链；仅 vNext 工单）
+  step/artifact   步骤端口、Reactive 边界、产物与终结回执
+  operation       长动作回执（按副作用类别禁止盲重放）
+  policy/trace    只读执行策略与统一时间线
   transition      状态流转（fail-closed：合法性 → 门禁 linter → 原子写 + state_changed 事件）
   metadata-update 原子 set/append 已登记业务字段（控制字段由专用命令独占）
   record-claim    原子记录结构化 claim 与对应事件
@@ -33,6 +36,8 @@
 """
 import argparse
 import fcntl
+import fnmatch
+import glob as globlib
 import hashlib
 import json
 import math
@@ -60,8 +65,9 @@ TXN_NAME = ".icontrol_txn.json"
 GENESIS_HASH = "0" * 64
 DELIVERY_VERDICTS = ["verified", "verification_pending", "blocked", "not_applicable"]
 CONTROL_EVENT_TYPES = {
-    "ticket_created", "state_changed", "claim_recorded", "verification_recorded",
-    "skill_run_recorded", "snapshot_written",
+    "ticket_created", "step_started", "step_finished", "artifact_written", "gate_checked",
+    "operation_started", "operation_finished", "state_changed", "claim_recorded",
+    "verification_recorded", "skill_run_recorded", "snapshot_written",
     "close_phase", "ticket_reopened", "metadata_updated", "index_updated",
     "migration_applied", "idempotent_hit",
 }
@@ -310,6 +316,15 @@ def load_state_machine():
     if not sm:
         raise ControlError(f"gates.json 缺少 state_machine 段: {GATES_JSON}")
     return sm
+
+
+def load_execution_model():
+    gates = load_json(GATES_JSON, "gates.json")
+    model = gates.get("execution_model")
+    if not isinstance(model, dict):
+        raise ControlError(f"gates.json 缺少 execution_model 段: {GATES_JSON}",
+                           gate_id="execution_model_catalog")
+    return model
 
 
 def legal_transition(sm, from_status, to_status):
@@ -686,6 +701,8 @@ def validate_event_semantics(events, meta):
             f"事件序列最终 close_state={close_state!r} 与 metadata.close_state="
             f"{meta.get('close_state')!r} 不一致")
 
+    problems.extend(validate_execution_event_semantics(events))
+
     event_runs = [{key: value for key, value in (event.get("payload") or {}).items()
                    if key != "metadata_hash_after"}
                   for event in events
@@ -720,6 +737,118 @@ def validate_event_semantics(events, meta):
     return problems
 
 
+def validate_execution_event_semantics(events):
+    """校验 v1 执行事件配对；未标版本的旧 step 事件保持可读兼容。"""
+    problems = []
+    model = load_execution_model()
+    catalog_problems = validate_execution_catalog(model)
+    if catalog_problems:
+        return [f"execution_model catalog: {item}" for item in catalog_problems]
+    steps = {}
+    operations = {}
+    for line, event in enumerate(events, 1):
+        event_type = event.get("event_type")
+        payload = event.get("payload") or {}
+        if payload.get("execution_model_version") != model["schema_version"]:
+            continue
+        attempt = payload.get("attempt")
+        if not isinstance(attempt, str) or not attempt:
+            problems.append(f"第 {line} 行 {event_type} 缺非空 attempt")
+            continue
+        if event_type == "step_started":
+            step = payload.get("step")
+            if step not in model["step_contracts"]:
+                problems.append(f"第 {line} 行 step_started.step 非法: {step!r}")
+            if attempt in steps:
+                problems.append(f"第 {line} 行 step attempt 重复启动: {attempt!r}")
+            if re.fullmatch(r"[0-9a-f]{64}", payload.get("input_digest", "")) is None:
+                problems.append(f"第 {line} 行 step_started.input_digest 非法")
+            if re.fullmatch(r"[0-9a-f]{64}", payload.get("contract_digest", "")) is None:
+                problems.append(f"第 {line} 行 step_started.contract_digest 非法")
+            steps[attempt] = {"step": step, "finished": False, "line": line,
+                              "checks": set()}
+        elif event_type == "gate_checked":
+            state = steps.get(attempt)
+            if state is None:
+                problems.append(f"第 {line} 行 gate_checked 引用不存在的 step attempt: {attempt!r}")
+                continue
+            if state["finished"]:
+                problems.append(f"第 {line} 行 gate_checked 出现在 step_finished 之后")
+            if payload.get("step") != state["step"]:
+                problems.append(f"第 {line} 行 gate_checked.step 与启动事件不一致")
+            boundary = payload.get("boundary")
+            if boundary not in model["boundaries"]:
+                problems.append(f"第 {line} 行 gate_checked.boundary 非法: {boundary!r}")
+            else:
+                state["checks"].add(boundary)
+            if payload.get("result") not in {"pass", "blocked"}:
+                problems.append(f"第 {line} 行 gate_checked.result 非法")
+            for key in ("captured_digest", "current_digest"):
+                if re.fullmatch(r"[0-9a-f]{64}", payload.get(key, "")) is None:
+                    problems.append(f"第 {line} 行 gate_checked.{key} 非法")
+        elif event_type == "artifact_written":
+            state = steps.get(attempt)
+            if state is None:
+                problems.append(f"第 {line} 行 artifact_written 引用不存在的 step attempt")
+                continue
+            if state["finished"]:
+                problems.append(f"第 {line} 行 artifact_written 出现在 step_finished 之后")
+            if payload.get("step") != state["step"]:
+                problems.append(f"第 {line} 行 artifact_written.step 与启动事件不一致")
+            if not isinstance(payload.get("sha256"), str) \
+                    or re.fullmatch(r"[0-9a-f]{64}", payload.get("sha256", "")) is None:
+                problems.append(f"第 {line} 行 artifact_written.sha256 非法")
+        elif event_type == "step_finished":
+            state = steps.get(attempt)
+            if state is None:
+                problems.append(f"第 {line} 行 step_finished 引用不存在的 step attempt")
+                continue
+            if state["finished"]:
+                problems.append(f"第 {line} 行 step attempt 重复终结: {attempt!r}")
+            if payload.get("step") != state["step"]:
+                problems.append(f"第 {line} 行 step_finished.step 与启动事件不一致")
+            if payload.get("outcome") not in model["step_outcomes"]:
+                problems.append(f"第 {line} 行 step_finished.outcome 非法")
+            if not isinstance(payload.get("duration_ms"), int) or payload["duration_ms"] < 0:
+                problems.append(f"第 {line} 行 step_finished.duration_ms 非法")
+            state["finished"] = True
+        elif event_type == "operation_started":
+            op_class = payload.get("class")
+            if not isinstance(payload.get("name"), str) or not payload["name"]:
+                problems.append(f"第 {line} 行 operation_started.name 非法")
+            if op_class not in model["operation_classes"]:
+                problems.append(f"第 {line} 行 operation_started.class 非法: {op_class!r}")
+            if re.fullmatch(r"[0-9a-f]{64}", payload.get("input_digest", "")) is None:
+                problems.append(f"第 {line} 行 operation_started.input_digest 非法")
+            if not isinstance(payload.get("idempotency_provided"), bool):
+                problems.append(f"第 {line} 行 operation_started.idempotency_provided 非布尔")
+            if attempt in operations:
+                problems.append(f"第 {line} 行 operation attempt 重复启动: {attempt!r}")
+            operations[attempt] = {"name": payload.get("name"), "class": op_class,
+                                   "finished": False, "line": line}
+        elif event_type == "operation_finished":
+            state = operations.get(attempt)
+            if state is None:
+                problems.append(f"第 {line} 行 operation_finished 引用不存在的 attempt")
+                continue
+            if state["finished"]:
+                problems.append(f"第 {line} 行 operation attempt 重复终结: {attempt!r}")
+            if payload.get("name") != state["name"] or payload.get("class") != state["class"]:
+                problems.append(f"第 {line} 行 operation_finished 与启动事件身份不一致")
+            if payload.get("outcome") not in model["step_outcomes"]:
+                problems.append(f"第 {line} 行 operation_finished.outcome 非法")
+            if not isinstance(payload.get("duration_ms"), int) or payload["duration_ms"] < 0:
+                problems.append(f"第 {line} 行 operation_finished.duration_ms 非法")
+            if not isinstance(payload.get("evidence"), str) or not payload["evidence"].strip():
+                problems.append(f"第 {line} 行 operation_finished 缺 evidence")
+            if not isinstance(payload.get("after_check"), str) or not payload["after_check"].strip():
+                problems.append(f"第 {line} 行 operation_finished 缺 after_check")
+            if not isinstance(payload.get("decision"), dict):
+                problems.append(f"第 {line} 行 operation_finished 缺 decision 对象")
+            state["finished"] = True
+    return problems
+
+
 def metadata_hash(meta):
     raw = json.dumps(meta, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
@@ -731,6 +860,317 @@ def file_sha256(path):
         for chunk in iter(lambda: source.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def canonical_digest(value):
+    raw = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def parse_event_time(value):
+    try:
+        return datetime.fromisoformat(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def elapsed_ms(start, end=None):
+    start_at = parse_event_time(start)
+    end_at = parse_event_time(end or now_iso())
+    if start_at is None or end_at is None:
+        return None
+    return max(0, int((end_at - start_at).total_seconds() * 1000))
+
+
+def json_pointer_get(document, pointer):
+    """返回 (存在, 值)；仅实现 execution_model 使用的 RFC6901 对象/数组读取。"""
+    if pointer == "":
+        return True, document
+    if not isinstance(pointer, str) or not pointer.startswith("/"):
+        return False, None
+    current = document
+    for raw in pointer[1:].split("/"):
+        token = raw.replace("~1", "/").replace("~0", "~")
+        if isinstance(current, dict) and token in current:
+            current = current[token]
+        elif isinstance(current, list) and token.isdigit() and int(token) < len(current):
+            current = current[int(token)]
+        else:
+            return False, None
+    return True, current
+
+
+def execution_workspace(out_dir, meta):
+    active = meta.get("active_checkout")
+    if isinstance(active, dict):
+        active_path = active.get("path") or active.get("worktree_path")
+        if isinstance(active_path, str) and active_path.strip():
+            return Path(active_path).expanduser().resolve()
+    raw = meta.get("project_path")
+    if isinstance(raw, str) and raw.strip():
+        return Path(raw).expanduser().resolve()
+    return containing_workspace(out_dir)
+
+
+def port_path(base, raw):
+    candidate = Path(raw).expanduser()
+    return candidate.resolve() if candidate.is_absolute() else (base / candidate).resolve()
+
+
+def file_fact(path, label=None):
+    path = Path(path)
+    fact = {"path": label or str(path), "exists": path.is_file()}
+    if fact["exists"]:
+        fact["sha256"] = file_sha256(path)
+        fact["size"] = path.stat().st_size
+    return fact
+
+
+def resolve_port(out_dir, meta, port):
+    """把静态端口解析为不含正文的事实摘要，供漂移比较和输出校验。"""
+    kind = port.get("kind")
+    value = port.get("value")
+    workspace = execution_workspace(out_dir, meta)
+    result = {"id": port.get("id"), "kind": kind, "exists": False}
+    if kind == "metadata_pointer":
+        exists, current = json_pointer_get(meta, value)
+        result.update({"pointer": value, "exists": exists and current is not None})
+        if exists:
+            result["digest"] = canonical_digest(current)
+        return result
+    if kind == "ticket_file":
+        path = port_path(Path(out_dir), value)
+        return {"id": port.get("id"), "kind": kind,
+                **file_fact(path, str(Path(value)))}
+    if kind == "ticket_glob":
+        paths = sorted(
+            path for path in Path(out_dir).glob(value)
+            if path.is_file()
+        )
+        items = [file_fact(path, str(path.relative_to(Path(out_dir)))) for path in paths]
+        result.update({"pattern": value, "exists": bool(items), "items": items,
+                       "digest": canonical_digest(items)})
+        return result
+    if kind == "metadata_files":
+        pointer_exists, raw_paths = json_pointer_get(meta, value)
+        base = workspace if port.get("base", "ticket") == "workspace" else Path(out_dir)
+        valid_list = pointer_exists and isinstance(raw_paths, list) and bool(raw_paths)
+        items = []
+        if isinstance(raw_paths, list):
+            for raw_path in raw_paths:
+                if not isinstance(raw_path, str) or not raw_path.strip():
+                    items.append({"path": repr(raw_path), "exists": False})
+                    continue
+                path = port_path(base, raw_path)
+                label = str(path.relative_to(base)) if path.is_relative_to(base) else str(path)
+                items.append(file_fact(path, label))
+        all_present = valid_list and all(item["exists"] for item in items)
+        result.update({"pointer": value, "base": port.get("base", "ticket"),
+                       "exists": all_present, "items": items,
+                       "digest": canonical_digest(items)})
+        return result
+    if kind == "workspace_git_head":
+        candidates = [port_path(workspace, value or ".")]
+        for item in meta.get("sub_worktrees") or []:
+            if isinstance(item, dict):
+                raw = item.get("worktree_path") or item.get("path")
+                if isinstance(raw, str) and raw.strip():
+                    candidates.append(Path(raw).expanduser().resolve())
+        for item in meta.get("submission_contracts") or []:
+            if isinstance(item, dict):
+                raw = item.get("repo_path") or item.get("worktree_path")
+                if isinstance(raw, str) and raw.strip():
+                    candidates.append(Path(raw).expanduser().resolve())
+        roots = {}
+        for target in candidates:
+            try:
+                root_proc = subprocess.run(
+                    ["git", "-C", str(target), "rev-parse", "--show-toplevel"],
+                    capture_output=True, text=True, timeout=10)
+                head_proc = subprocess.run(
+                    ["git", "-C", str(target), "rev-parse", "HEAD"],
+                    capture_output=True, text=True, timeout=10)
+            except (OSError, subprocess.TimeoutExpired):
+                continue
+            if root_proc.returncode == 0 and head_proc.returncode == 0:
+                roots[root_proc.stdout.strip()] = head_proc.stdout.strip()
+        facts = [{"root": root, "head": roots[root]} for root in sorted(roots)]
+        if facts:
+            result.update({"exists": True, "roots": facts,
+                           "digest": canonical_digest(facts)})
+        return result
+    if kind == "external_artifact":
+        rendered = str(value).replace("<workspace>", str(workspace))
+        rendered = str(Path(rendered).expanduser())
+        matches = sorted(Path(path).resolve() for path in globlib.glob(rendered))
+        facts = []
+        for path in matches:
+            if path.is_file():
+                facts.append(file_fact(path))
+            elif path.is_dir():
+                facts.append({"path": str(path), "exists": True, "type": "directory"})
+        result.update({"pattern": rendered, "exists": bool(facts), "items": facts,
+                       "digest": canonical_digest(facts)})
+        return result
+    raise ControlError(f"execution_model 端口 kind 非法: {kind!r}", exit_code=1,
+                       gate_id="execution_model_catalog")
+
+
+def validate_execution_catalog(model):
+    problems = []
+    if model.get("schema_version") != 1:
+        problems.append("execution_model.schema_version 必须为 1")
+    boundaries = model.get("boundaries")
+    if not isinstance(boundaries, list) or not boundaries or len(boundaries) != len(set(boundaries)):
+        problems.append("execution_model.boundaries 必须是非空无重复数组")
+        boundaries = []
+    input_kinds = set(model.get("input_kinds") or [])
+    output_kinds = set(model.get("output_kinds") or [])
+    contracts = model.get("step_contracts")
+    if not isinstance(contracts, dict) or not contracts:
+        problems.append("execution_model.step_contracts 必须是非空对象")
+        contracts = {}
+    for step, contract in contracts.items():
+        prefix = f"execution_model.step_contracts.{step}"
+        if not isinstance(contract, dict):
+            problems.append(f"{prefix} 非对象")
+            continue
+        for field, allowed in (("inputs", input_kinds), ("outputs", output_kinds)):
+            ports = contract.get(field)
+            if not isinstance(ports, list):
+                problems.append(f"{prefix}.{field} 非数组")
+                continue
+            ids = []
+            for index, port in enumerate(ports):
+                if not isinstance(port, dict):
+                    problems.append(f"{prefix}.{field}[{index}] 非对象")
+                    continue
+                port_id = port.get("id")
+                if not isinstance(port_id, str) or not port_id:
+                    problems.append(f"{prefix}.{field}[{index}].id 必须是非空字符串")
+                else:
+                    ids.append(port_id)
+                if port.get("kind") not in allowed:
+                    problems.append(f"{prefix}.{field}[{index}].kind 非法: {port.get('kind')!r}")
+                if not isinstance(port.get("value"), str) or not port.get("value"):
+                    problems.append(f"{prefix}.{field}[{index}].value 必须是非空字符串")
+                if field == "outputs" and port.get("kind") == "metadata_pointer" \
+                        and not isinstance(port.get("receipt_event"), str):
+                    problems.append(
+                        f"{prefix}.{field}[{index}] metadata_pointer 缺 receipt_event")
+            if len(ids) != len(set(ids)):
+                problems.append(f"{prefix}.{field} id 重复")
+        checks = contract.get("required_checks")
+        if not isinstance(checks, list) or any(item not in boundaries for item in checks):
+            problems.append(f"{prefix}.required_checks 含未知边界")
+        routes = contract.get("drift_routes")
+        input_ids = {item.get("id") for item in contract.get("inputs", [])
+                     if isinstance(item, dict)}
+        if not isinstance(routes, dict) or "default" not in routes:
+            problems.append(f"{prefix}.drift_routes 缺 default")
+        elif any(key != "default" and key not in input_ids for key in routes):
+            problems.append(f"{prefix}.drift_routes 引用了未知输入")
+    classes = model.get("operation_classes")
+    failures = model.get("failure_policies")
+    if not isinstance(classes, dict) or not classes:
+        problems.append("execution_model.operation_classes 必须是非空对象")
+    if not isinstance(failures, dict) or not failures:
+        problems.append("execution_model.failure_policies 必须是非空对象")
+    return problems
+
+
+def step_contract(model, step):
+    problems = validate_execution_catalog(model)
+    if problems:
+        raise ControlError("execution_model 机器契约无效", exit_code=1,
+                           gate_id="execution_model_catalog", violations=problems)
+    contract = model["step_contracts"].get(step)
+    if contract is None:
+        raise ControlError(f"未知 step {step!r}，允许: {sorted(model['step_contracts'])}",
+                           exit_code=2, gate_id="step_contract")
+    return contract
+
+
+def capture_step_inputs(out_dir, meta, model, step):
+    contract = step_contract(model, step)
+    facts = [resolve_port(out_dir, meta, port) for port in contract["inputs"]]
+    by_id = {fact["id"]: fact for fact in facts}
+    missing = [port["id"] for port in contract["inputs"]
+               if port.get("required", False) and not by_id[port["id"]]["exists"]]
+    protected_ids = [port["id"] for port in contract["inputs"]
+                     if port.get("protected", False)]
+    protected = {port_id: by_id[port_id] for port_id in protected_ids}
+    contract_digest = canonical_digest(contract)
+    return {
+        "contract_digest": contract_digest,
+        "inputs": facts,
+        "protected": protected,
+        "input_digest": canonical_digest(protected),
+    }, missing
+
+
+def validate_step_outputs(out_dir, meta, model, step):
+    contract = step_contract(model, step)
+    facts = [resolve_port(out_dir, meta, port) for port in contract["outputs"]]
+    by_id = {fact["id"]: fact for fact in facts}
+    missing = [port["id"] for port in contract["outputs"]
+               if port.get("required", True) and not by_id[port["id"]]["exists"]]
+    return facts, missing
+
+
+def output_port_targets(out_dir, meta, port):
+    workspace = execution_workspace(out_dir, meta)
+    kind = port["kind"]
+    value = port["value"]
+    if kind == "ticket_file":
+        return [port_path(Path(out_dir), value)]
+    if kind == "ticket_glob":
+        return sorted(path.resolve() for path in Path(out_dir).glob(value) if path.is_file())
+    if kind == "metadata_files":
+        exists, raw_paths = json_pointer_get(meta, value)
+        base = workspace if port.get("base", "ticket") == "workspace" else Path(out_dir)
+        if not exists or not isinstance(raw_paths, list):
+            return []
+        return [port_path(base, raw) for raw in raw_paths
+                if isinstance(raw, str) and raw.strip()]
+    if kind == "external_artifact":
+        rendered = str(value).replace("<workspace>", str(workspace))
+        return sorted(Path(path).resolve() for path in globlib.glob(
+            str(Path(rendered).expanduser())) if Path(path).is_file())
+    return []
+
+
+def missing_output_receipts(out_dir, meta, contract, events, start):
+    start_index = next(index for index, event in enumerate(events)
+                       if event.get("event_id") == start.get("event_id"))
+    later = events[start_index + 1:]
+    attempt = (start.get("payload") or {}).get("attempt")
+    artifacts = [event.get("payload") or {} for event in later
+                 if event.get("event_type") == "artifact_written"
+                 and (event.get("payload") or {}).get("attempt") == attempt]
+    missing = []
+    for port in contract["outputs"]:
+        if not port.get("required", True):
+            continue
+        if port["kind"] == "metadata_pointer":
+            receipt_event = port.get("receipt_event")
+            if not any(event.get("event_type") == receipt_event for event in later):
+                missing.append(f"{port['id']}:event={receipt_event}")
+            continue
+        targets = output_port_targets(out_dir, meta, port)
+        for target in targets:
+            expected_hash = file_sha256(target) if target.is_file() else None
+            if not any(item.get("output") == port["id"]
+                       and item.get("path") == str(target.resolve())
+                       and item.get("sha256") == expected_hash
+                       for item in artifacts):
+                missing.append(f"{port['id']}:{target}")
+    return missing
+
+
+def attempt_events(events, attempt):
+    return [event for event in events
+            if (event.get("payload") or {}).get("attempt") == attempt]
 
 
 def find_idempotent_event(events, request_id, event_type, payload, actor=None,
@@ -1275,6 +1715,39 @@ def cmd_transition(args):
                               "at": prior["timestamp"], "event_id": prior["event_id"]},
                              ensure_ascii=False, indent=2))
             return 0
+
+        # 渐进接入：只有该步骤已经显式 start，完成态流转才要求终结回执；
+        # 无 execution_model 事件的既有工单保持 legacy-untracked 兼容。
+        tracked_step = sm["gate_policy"].get("step_by_target", {}).get(to_status)
+        if tracked_step:
+            starts = [event for event in events
+                      if event.get("event_type") == "step_started"
+                      and (event.get("payload") or {}).get("execution_model_version") == 1
+                      and (event.get("payload") or {}).get("step") == tracked_step]
+            if starts:
+                attempt = starts[-1]["payload"]["attempt"]
+                finish = step_attempt_finished(events, attempt)
+                outcome = (finish.get("payload") or {}).get("outcome") if finish else None
+                if outcome not in {"success", "degraded"}:
+                    raise ControlError(
+                        f"步骤 {tracked_step!r} 已接入 execution_model，但最新 attempt 未形成可推进回执",
+                        exit_code=1, gate_id="step_receipt", attempt=attempt,
+                        outcome=outcome, expected=["success", "degraded"])
+        open_side_effects = []
+        for event in events:
+            if event.get("event_type") != "operation_started":
+                continue
+            payload = event.get("payload") or {}
+            if payload.get("execution_model_version") != 1 or payload.get("class") == "read_only":
+                continue
+            if operation_finished(events, payload.get("attempt")) is None:
+                open_side_effects.append({"name": payload.get("name"),
+                                          "attempt": payload.get("attempt"),
+                                          "class": payload.get("class")})
+        if open_side_effects:
+            raise ControlError(
+                "存在无终结回执的有副作用长动作，禁止推进完成态", exit_code=1,
+                gate_id="operation_receipt", open_operations=open_side_effects)
 
     if trans is None:
         allowed = next_transitions(sm, current)
@@ -2682,6 +3155,590 @@ def cmd_close_phase(args):
     return 0
 
 
+def ensure_execution_writable(meta):
+    if meta.get("close_state") is not None:
+        raise ControlError(
+            "工单已进入关闭流程，禁止追加执行轨迹；关闭阶段继续使用 close-phase/reopen 专用事件",
+            exit_code=1, gate_id="closed_ticket_mutation_frozen")
+
+
+def find_step_start(events, attempt):
+    starts = [event for event in events
+              if event.get("event_type") == "step_started"
+              and (event.get("payload") or {}).get("execution_model_version") == 1
+              and (event.get("payload") or {}).get("attempt") == attempt]
+    if len(starts) != 1:
+        raise ControlError(f"step attempt={attempt!r} 未唯一启动", exit_code=1,
+                           gate_id="step_attempt", matches=len(starts))
+    return starts[0]
+
+
+def step_attempt_finished(events, attempt):
+    return next((event for event in events
+                 if event.get("event_type") == "step_finished"
+                 and (event.get("payload") or {}).get("execution_model_version") == 1
+                 and (event.get("payload") or {}).get("attempt") == attempt), None)
+
+
+def derived_attempt(prefix, request_id):
+    """有幂等键时稳定派生 attempt；无幂等键才使用随机 ID。"""
+    if request_id:
+        digest = hashlib.sha256(request_id.encode("utf-8")).hexdigest()[:24]
+        return f"{prefix}-req-{digest}"
+    return str(uuid.uuid4())
+
+
+def cmd_step(args):
+    """步骤端口快照、Reactive 边界复检和终结回执。"""
+    out_dir = Path(args.dir).resolve()
+    model = load_execution_model()
+    contract = step_contract(model, args.step)
+    with DirLock(out_dir):
+        recover_pending_transaction(out_dir)
+        meta = load_metadata(out_dir)
+        require_vnext(meta, out_dir)
+        require_valid_metadata(meta)
+        ensure_execution_writable(meta)
+        events, problems = verify_event_chain(out_dir, meta)
+        if problems:
+            raise ControlError("现有事件链不完整，拒绝记录步骤", exit_code=1,
+                               gate_id="event_chain", violations=problems)
+
+        if args.phase == "start":
+            attempt = args.attempt or derived_attempt("step", args.request)
+            snapshot, missing = capture_step_inputs(out_dir, meta, model, args.step)
+            if missing:
+                raise ControlError(
+                    f"步骤 {args.step!r} 必填输入端口缺失: {missing}", exit_code=1,
+                    gate_id="step_ports", step=args.step, missing=missing,
+                    hint="先补齐上游产物/metadata，再重新 start；不得用空占位跳过。")
+            payload = {
+                "execution_model_version": model["schema_version"],
+                "step": args.step,
+                "attempt": attempt,
+                "contract_digest": snapshot["contract_digest"],
+                "input_digest": snapshot["input_digest"],
+                "inputs": snapshot["inputs"],
+                "protected": snapshot["protected"],
+            }
+            prior = find_idempotent_event(events, args.request, "step_started", payload)
+            if prior:
+                result = {"ok": True, "already_applied": True, "step": args.step,
+                          "attempt": attempt, "event_id": prior["event_id"],
+                          "input_digest": payload["input_digest"]}
+                print(json.dumps(result, ensure_ascii=False, indent=2))
+                return 0
+            open_same_step = []
+            for event in events:
+                payload0 = event.get("payload") or {}
+                if event.get("event_type") == "step_started" \
+                        and payload0.get("execution_model_version") == 1 \
+                        and payload0.get("step") == args.step \
+                        and step_attempt_finished(events, payload0.get("attempt")) is None:
+                    open_same_step.append(payload0.get("attempt"))
+            if open_same_step:
+                raise ControlError(
+                    f"步骤 {args.step!r} 已有未终结 attempt，禁止并行重入", exit_code=1,
+                    gate_id="step_attempt_open", open_attempts=open_same_step,
+                    hint="先 check 并 finish 旧 attempt；输入漂移时以 blocked 终结后再 start。")
+            if any((event.get("payload") or {}).get("attempt") == attempt
+                   for event in events):
+                raise ControlError(f"attempt={attempt!r} 已被使用", exit_code=1,
+                                   gate_id="attempt_conflict")
+            event = append_event(out_dir, meta, "step_started", payload,
+                                 request_id=args.request)
+            print(json.dumps({"ok": True, "step": args.step, "phase": "start",
+                              "attempt": attempt, "event_id": event["event_id"],
+                              "input_digest": payload["input_digest"],
+                              "required_checks": contract["required_checks"]},
+                             ensure_ascii=False, indent=2))
+            return 0
+
+        if not args.attempt:
+            raise ControlError(f"step --phase {args.phase} 必须提供 --attempt", exit_code=2)
+        start = find_step_start(events, args.attempt)
+        start_payload = start["payload"]
+        if start_payload.get("step") != args.step:
+            raise ControlError("--step 与 attempt 的启动步骤不一致", exit_code=1,
+                               gate_id="step_attempt", expected=start_payload.get("step"),
+                               actual=args.step)
+        finished = step_attempt_finished(events, args.attempt)
+        if args.phase == "check":
+            if finished:
+                raise ControlError("已终结 step attempt 禁止继续 gate check", exit_code=1,
+                                   gate_id="step_attempt_finished")
+            if args.boundary not in model["boundaries"]:
+                raise ControlError(f"--boundary 非法: {args.boundary!r}", exit_code=2,
+                                   allowed=model["boundaries"])
+            current, missing = capture_step_inputs(out_dir, meta, model, args.step)
+            old_protected = start_payload.get("protected") or {}
+            changed = sorted(
+                key for key in set(old_protected) | set(current["protected"])
+                if old_protected.get(key) != current["protected"].get(key)
+            )
+            if start_payload.get("contract_digest") != current["contract_digest"]:
+                changed.insert(0, "$contract")
+            routes = contract["drift_routes"]
+            route = next((routes[item] for item in changed if item in routes),
+                         routes["default"])
+            result_name = "blocked" if changed or missing else "pass"
+            payload = {
+                "execution_model_version": model["schema_version"],
+                "step": args.step,
+                "attempt": args.attempt,
+                "boundary": args.boundary,
+                "result": result_name,
+                "changed_inputs": changed,
+                "missing_inputs": missing,
+                "captured_digest": start_payload.get("input_digest"),
+                "current_digest": current["input_digest"],
+                "route": route if result_name == "blocked" else "continue",
+                "elapsed_ms": elapsed_ms(start.get("timestamp")),
+            }
+            prior = find_idempotent_event(
+                events, args.request, "gate_checked", payload,
+                payload_keys=["step", "attempt", "boundary", "result", "changed_inputs",
+                              "missing_inputs", "captured_digest", "current_digest", "route"])
+            event = prior or append_event(out_dir, meta, "gate_checked", payload,
+                                          request_id=args.request)
+            result = {"ok": result_name == "pass", "step": args.step,
+                      "phase": "check", "attempt": args.attempt,
+                      "boundary": args.boundary, "result": result_name,
+                      "changed_inputs": changed, "missing_inputs": missing,
+                      "route": payload["route"], "event_id": event["event_id"],
+                      "already_applied": bool(prior)}
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            return 0 if result["ok"] else 1
+
+        if args.phase != "finish":
+            raise ControlError(f"未知 step phase: {args.phase!r}", exit_code=2)
+        if args.outcome not in model["step_outcomes"]:
+            raise ControlError("step --phase finish 必须提供合法 --outcome", exit_code=2,
+                               allowed=model["step_outcomes"])
+        if finished:
+            expected = finished.get("payload") or {}
+            if args.request and finished.get("request_id") == args.request \
+                    and expected.get("outcome") == args.outcome \
+                    and expected.get("evidence") == args.evidence:
+                print(json.dumps({"ok": True, "already_applied": True,
+                                  "step": args.step, "attempt": args.attempt,
+                                  "outcome": expected.get("outcome"),
+                                  "event_id": finished["event_id"]},
+                                 ensure_ascii=False, indent=2))
+                return 0
+            if args.request and finished.get("request_id") == args.request:
+                raise ControlError(
+                    "相同 request 的 step finish payload 不一致", exit_code=1,
+                    gate_id="idempotency_conflict", existing=expected,
+                    attempted={"outcome": args.outcome, "evidence": args.evidence})
+            raise ControlError("step attempt 已终结，拒绝第二个终结结果", exit_code=1,
+                               gate_id="step_attempt_finished",
+                               existing=finished.get("payload"))
+        gate_events = [event for event in attempt_events(events, args.attempt)
+                       if event.get("event_type") == "gate_checked"]
+        latest_checks = {}
+        for gate_event in gate_events:
+            gate_payload = gate_event.get("payload") or {}
+            latest_checks[gate_payload.get("boundary")] = gate_payload.get("result")
+        missing_checks = [boundary for boundary in contract["required_checks"]
+                          if latest_checks.get(boundary) != "pass"]
+        outputs, missing_outputs = validate_step_outputs(out_dir, meta, model, args.step)
+        missing_receipts = missing_output_receipts(
+            out_dir, meta, contract, events, start)
+        if not args.evidence:
+            raise ControlError("step finish 必须至少提供一个 --evidence 简短引用", exit_code=2,
+                               gate_id="step_receipt")
+        if args.outcome in {"success", "degraded"} and missing_checks:
+            raise ControlError(
+                "步骤可推进回执缺必需边界检查", exit_code=1, gate_id="step_receipt",
+                missing_checks=missing_checks)
+        if args.outcome == "success" and (missing_outputs or missing_receipts):
+            raise ControlError(
+                "步骤成功回执条件不完整", exit_code=1, gate_id="step_receipt",
+                missing_checks=missing_checks, missing_outputs=missing_outputs,
+                missing_output_receipts=missing_receipts,
+                hint="补齐边界 check 与输出产物后再 finish；若确实无法完成，显式记录 blocked/degraded。")
+        payload = {
+            "execution_model_version": model["schema_version"],
+            "step": args.step,
+            "attempt": args.attempt,
+            "outcome": args.outcome,
+            "duration_ms": elapsed_ms(start.get("timestamp")),
+            "checks": latest_checks,
+            "outputs": outputs,
+            "evidence": args.evidence,
+        }
+        prior = find_idempotent_event(
+            events, args.request, "step_finished", payload,
+            payload_keys=["step", "attempt", "outcome", "checks", "outputs", "evidence"])
+        event = prior or append_event(out_dir, meta, "step_finished", payload,
+                                      request_id=args.request)
+        print(json.dumps({"ok": True, "step": args.step, "phase": "finish",
+                          "attempt": args.attempt, "outcome": args.outcome,
+                          "duration_ms": payload["duration_ms"],
+                          "event_id": event["event_id"],
+                          "already_applied": bool(prior)}, ensure_ascii=False, indent=2))
+        return 0
+
+
+def declared_output_path(out_dir, meta, contract, target):
+    workspace = execution_workspace(out_dir, meta)
+    target = Path(target).resolve()
+    for port in contract["outputs"]:
+        kind = port["kind"]
+        value = port["value"]
+        if kind == "ticket_file" and port_path(Path(out_dir), value) == target:
+            return port["id"]
+        if kind == "ticket_glob":
+            try:
+                relative = str(target.relative_to(Path(out_dir)))
+            except ValueError:
+                continue
+            if fnmatch.fnmatch(relative, value):
+                return port["id"]
+        if kind == "metadata_files":
+            exists, raw_paths = json_pointer_get(meta, value)
+            base = workspace if port.get("base", "ticket") == "workspace" else Path(out_dir)
+            if exists and isinstance(raw_paths, list) and any(
+                    isinstance(raw, str) and port_path(base, raw) == target
+                    for raw in raw_paths):
+                return port["id"]
+        if kind == "external_artifact":
+            rendered = str(value).replace("<workspace>", str(workspace))
+            rendered = str(Path(rendered).expanduser())
+            if any(Path(path).resolve() == target for path in globlib.glob(rendered)):
+                return port["id"]
+    return None
+
+
+def cmd_artifact(args):
+    out_dir = Path(args.dir).resolve()
+    model = load_execution_model()
+    contract = step_contract(model, args.step)
+    with DirLock(out_dir):
+        recover_pending_transaction(out_dir)
+        meta = load_metadata(out_dir)
+        require_vnext(meta, out_dir)
+        require_valid_metadata(meta)
+        ensure_execution_writable(meta)
+        events, problems = verify_event_chain(out_dir, meta)
+        if problems:
+            raise ControlError("事件链不完整，拒绝记录产物", exit_code=1,
+                               gate_id="event_chain", violations=problems)
+        start = find_step_start(events, args.attempt)
+        if start["payload"].get("step") != args.step or step_attempt_finished(events, args.attempt):
+            raise ControlError("产物必须关联同一步骤的未终结 attempt", exit_code=1,
+                               gate_id="artifact_attempt")
+        base = Path(out_dir) if args.scope == "ticket" else execution_workspace(out_dir, meta)
+        target = port_path(base, args.path)
+        if args.scope != "external" and not target.is_relative_to(base.resolve()):
+            raise ControlError("产物路径逃逸出声明 scope", exit_code=1,
+                               gate_id="artifact_scope", path=str(target))
+        if not target.is_file():
+            raise ControlError(f"产物不存在或不是普通文件: {target}", exit_code=1,
+                               gate_id="artifact_exists")
+        output_id = declared_output_path(out_dir, meta, contract, target)
+        if output_id is None:
+            raise ControlError("产物不在该步骤 outputs 端口合同内", exit_code=1,
+                               gate_id="step_ports", step=args.step, path=str(target))
+        payload = {
+            "execution_model_version": model["schema_version"],
+            "step": args.step,
+            "attempt": args.attempt,
+            "output": output_id,
+            "scope": args.scope,
+            "path": str(target),
+            "sha256": file_sha256(target),
+            "size": target.stat().st_size,
+        }
+        prior = find_idempotent_event(events, args.request, "artifact_written", payload)
+        event = prior or append_event(out_dir, meta, "artifact_written", payload,
+                                      request_id=args.request)
+    print(json.dumps({"ok": True, "step": args.step, "attempt": args.attempt,
+                      "output": output_id, "path": str(target),
+                      "sha256": payload["sha256"], "event_id": event["event_id"],
+                      "already_applied": bool(prior)}, ensure_ascii=False, indent=2))
+    return 0
+
+
+def evaluate_execution_policy(model, op_class, failure, attempts):
+    if op_class not in model["operation_classes"]:
+        raise ControlError(f"未知 operation class: {op_class!r}", exit_code=2,
+                           allowed=sorted(model["operation_classes"]))
+    if failure not in model["failure_policies"]:
+        raise ControlError(f"未知 failure class: {failure!r}", exit_code=2,
+                           allowed=sorted(model["failure_policies"]))
+    if attempts < 0:
+        raise ControlError("--attempts 不能小于 0", exit_code=2)
+    policy = dict(model["failure_policies"][failure])
+    action = policy["action"]
+    reason = "failure_policy"
+    if op_class == "destructive_hardware":
+        action, reason = "human_decision", "destructive_hardware_never_auto_retry"
+    elif op_class == "external_side_effect" and action == "retry":
+        action, reason = "verify_receipt", "external_side_effect_no_blind_retry"
+    elif op_class == "managed_write" and action == "retry":
+        action, reason = "verify_receipt", "managed_write_requires_idempotency_and_after_check"
+    max_attempts = policy["max_attempts"]
+    if action == "retry" and attempts >= max_attempts:
+        action, reason = "block", "retry_budget_exhausted"
+    backoff = None
+    schedule = policy.get("backoff_seconds") or []
+    if action == "retry" and schedule:
+        backoff = schedule[min(attempts, len(schedule) - 1)]
+    return {
+        "operation_class": op_class,
+        "failure_class": failure,
+        "attempts": attempts,
+        "action": action,
+        "reason": reason,
+        "max_attempts": max_attempts,
+        "backoff_seconds": backoff,
+        "conclusion_ceiling": policy["conclusion_ceiling"],
+        "auto_retry": action == "retry" and model["operation_classes"][op_class]["auto_retry"],
+    }
+
+
+def cmd_policy(args):
+    model = load_execution_model()
+    problems = validate_execution_catalog(model)
+    if problems:
+        raise ControlError("execution_model 机器契约无效", exit_code=1,
+                           gate_id="execution_model_catalog", violations=problems)
+    result = evaluate_execution_policy(model, args.opclass, args.failure, args.attempts)
+    print(json.dumps({"ok": True, **result}, ensure_ascii=False, indent=2))
+    return 0
+
+
+def find_operation_start(events, attempt):
+    starts = [event for event in events
+              if event.get("event_type") == "operation_started"
+              and (event.get("payload") or {}).get("execution_model_version") == 1
+              and (event.get("payload") or {}).get("attempt") == attempt]
+    if len(starts) != 1:
+        raise ControlError(f"operation attempt={attempt!r} 未唯一启动", exit_code=1,
+                           gate_id="operation_attempt", matches=len(starts))
+    return starts[0]
+
+
+def operation_finished(events, attempt):
+    return next((event for event in events
+                 if event.get("event_type") == "operation_finished"
+                 and (event.get("payload") or {}).get("execution_model_version") == 1
+                 and (event.get("payload") or {}).get("attempt") == attempt), None)
+
+
+def cmd_operation(args):
+    out_dir = Path(args.dir).resolve()
+    model = load_execution_model()
+    problems = validate_execution_catalog(model)
+    if problems:
+        raise ControlError("execution_model 机器契约无效", exit_code=1,
+                           gate_id="execution_model_catalog", violations=problems)
+    with DirLock(out_dir):
+        recover_pending_transaction(out_dir)
+        meta = load_metadata(out_dir)
+        require_vnext(meta, out_dir)
+        require_valid_metadata(meta)
+        ensure_execution_writable(meta)
+        events, chain_problems = verify_event_chain(out_dir, meta)
+        if chain_problems:
+            raise ControlError("事件链不完整，拒绝记录长动作", exit_code=1,
+                               gate_id="event_chain", violations=chain_problems)
+        if args.phase == "start":
+            if not isinstance(args.name, str) or not args.name.strip():
+                raise ControlError("operation --phase start 必须提供非空 --name", exit_code=2)
+            if args.opclass is None:
+                raise ControlError("operation --phase start 必须提供 --opclass", exit_code=2)
+            if args.opclass not in model["operation_classes"]:
+                raise ControlError(f"--opclass 非法: {args.opclass!r}", exit_code=2,
+                                   allowed=sorted(model["operation_classes"]))
+            class_cfg = model["operation_classes"][args.opclass]
+            if class_cfg.get("requires_idempotency") and not args.request:
+                raise ControlError(
+                    f"{args.opclass} 长动作必须提供 --request 幂等键", exit_code=1,
+                    gate_id="operation_idempotency")
+            attempt = args.attempt or derived_attempt("operation", args.request)
+            open_same_name = []
+            for event in events:
+                if event.get("event_type") != "operation_started":
+                    continue
+                payload = event.get("payload") or {}
+                prior_attempt = payload.get("attempt")
+                if payload.get("execution_model_version") == 1 \
+                        and payload.get("name") == args.name \
+                        and operation_finished(events, prior_attempt) is None:
+                    open_same_name.append(prior_attempt)
+            payload = {
+                "execution_model_version": model["schema_version"],
+                "name": args.name,
+                "class": args.opclass,
+                "attempt": attempt,
+                "input_digest": canonical_digest(args.input or ""),
+                "idempotency_provided": bool(args.request),
+            }
+            prior = find_idempotent_event(events, args.request, "operation_started", payload)
+            if prior:
+                print(json.dumps({"ok": True, "already_applied": True,
+                                  "name": args.name, "attempt": attempt,
+                                  "event_id": prior["event_id"]},
+                                 ensure_ascii=False, indent=2))
+                return 0
+            if any((event.get("payload") or {}).get("attempt") == attempt for event in events):
+                raise ControlError(f"attempt={attempt!r} 已被使用", exit_code=1,
+                                   gate_id="attempt_conflict")
+            if open_same_name and args.opclass != "read_only":
+                action = class_cfg["ambiguous_start_action"]
+                raise ControlError(
+                    "同名有副作用长动作存在无终结回执，禁止盲目重放", exit_code=1,
+                    gate_id="ambiguous_side_effect", operation=args.name,
+                    open_attempts=open_same_name, action=action,
+                    hint="先核对远端/设备/文件写后状态，再用原 attempt finish 记录真实结果。")
+            event = append_event(out_dir, meta, "operation_started", payload,
+                                 request_id=args.request)
+            print(json.dumps({"ok": True, "phase": "start", "name": args.name,
+                              "class": args.opclass, "attempt": attempt,
+                              "event_id": event["event_id"]}, ensure_ascii=False, indent=2))
+            return 0
+
+        if not args.attempt:
+            raise ControlError("operation --phase finish 必须提供 --attempt", exit_code=2)
+        start = find_operation_start(events, args.attempt)
+        start_payload = start.get("payload") or {}
+        finished = operation_finished(events, args.attempt)
+        if finished:
+            finish_payload = finished.get("payload") or {}
+            if args.request and finished.get("request_id") == args.request \
+                    and finish_payload.get("outcome") == args.outcome \
+                    and finish_payload.get("failure") == args.failure \
+                    and finish_payload.get("evidence") == args.evidence \
+                    and finish_payload.get("after_check") == args.check:
+                print(json.dumps({"ok": True, "already_applied": True,
+                                  "name": finish_payload.get("name"),
+                                  "attempt": args.attempt,
+                                  "outcome": finish_payload.get("outcome"),
+                                  "event_id": finished["event_id"]},
+                                 ensure_ascii=False, indent=2))
+                return 0
+            if args.request and finished.get("request_id") == args.request:
+                raise ControlError(
+                    "相同 request 的 operation finish payload 不一致", exit_code=1,
+                    gate_id="idempotency_conflict", existing=finish_payload,
+                    attempted={"outcome": args.outcome, "failure": args.failure,
+                               "evidence": args.evidence, "after_check": args.check})
+            raise ControlError("operation attempt 已终结，拒绝第二个结果", exit_code=1,
+                               gate_id="operation_attempt_finished")
+        if args.outcome not in model["step_outcomes"]:
+            raise ControlError("finish 必须提供合法 --outcome", exit_code=2,
+                               allowed=model["step_outcomes"])
+        if not args.evidence or not args.check:
+            raise ControlError("长动作 finish 必须提供 --evidence 与 --check", exit_code=2,
+                               gate_id="operation_receipt")
+        if len(args.evidence) > 2048 or len(args.check) > 2048:
+            raise ControlError("长动作回执只接受简短证据引用（每项 <= 2048 字符）", exit_code=2)
+        if args.outcome == "success":
+            if args.failure:
+                raise ControlError("success 回执禁止携带 --failure", exit_code=2)
+            decision = {"action": "complete", "reason": "operation_succeeded",
+                        "conclusion_ceiling": "verified", "auto_retry": False}
+        else:
+            if not args.failure:
+                raise ControlError("非 success 回执必须分类 --failure", exit_code=2)
+            prior_attempts = 0
+            for event in events:
+                finish0 = event.get("payload") or {}
+                if event.get("event_type") != "operation_finished" \
+                        or finish0.get("name") != start_payload.get("name") \
+                        or finish0.get("class") != start_payload.get("class") \
+                        or finish0.get("failure") != args.failure:
+                    continue
+                prior_start = next((candidate for candidate in events
+                                    if candidate.get("event_type") == "operation_started"
+                                    and (candidate.get("payload") or {}).get("attempt")
+                                    == finish0.get("attempt")), None)
+                if prior_start and (prior_start.get("payload") or {}).get("input_digest") \
+                        == start_payload.get("input_digest"):
+                    prior_attempts += 1
+            decision = evaluate_execution_policy(
+                model, start_payload.get("class"), args.failure, prior_attempts + 1)
+        payload = {
+            "execution_model_version": model["schema_version"],
+            "name": start_payload.get("name"),
+            "class": start_payload.get("class"),
+            "attempt": args.attempt,
+            "outcome": args.outcome,
+            "failure": args.failure,
+            "duration_ms": elapsed_ms(start.get("timestamp")),
+            "evidence": args.evidence,
+            "after_check": args.check,
+            "decision": decision,
+        }
+        prior = find_idempotent_event(
+            events, args.request, "operation_finished", payload,
+            payload_keys=["name", "class", "attempt", "outcome", "failure",
+                          "evidence", "after_check", "decision"])
+        event = prior or append_event(out_dir, meta, "operation_finished", payload,
+                                      request_id=args.request)
+    print(json.dumps({"ok": True, "phase": "finish", "name": payload["name"],
+                      "class": payload["class"], "attempt": args.attempt,
+                      "outcome": args.outcome, "duration_ms": payload["duration_ms"],
+                      "decision": decision, "event_id": event["event_id"],
+                      "already_applied": bool(prior)}, ensure_ascii=False, indent=2))
+    return 0
+
+
+def execution_trace(events, limit=None):
+    tracked = {"step_started", "gate_checked", "artifact_written", "step_finished",
+               "operation_started", "operation_finished", "state_changed"}
+    records = []
+    open_steps = {}
+    open_operations = {}
+    for event in events:
+        if event.get("event_type") not in tracked:
+            continue
+        payload = event.get("payload") or {}
+        record = {"at": event.get("timestamp"), "type": event.get("event_type"),
+                  "event_id": event.get("event_id"), "request_id": event.get("request_id")}
+        for key in ("step", "attempt", "boundary", "result", "route", "outcome",
+                    "name", "class", "duration_ms", "path", "sha256", "from", "to"):
+            if key in payload:
+                record[key] = payload[key]
+        records.append(record)
+        attempt = payload.get("attempt")
+        if event.get("event_type") == "step_started":
+            open_steps[attempt] = {"step": payload.get("step"), "started_at": event.get("timestamp")}
+        elif event.get("event_type") == "step_finished":
+            open_steps.pop(attempt, None)
+        elif event.get("event_type") == "operation_started":
+            open_operations[attempt] = {"name": payload.get("name"),
+                                        "class": payload.get("class"),
+                                        "started_at": event.get("timestamp")}
+        elif event.get("event_type") == "operation_finished":
+            open_operations.pop(attempt, None)
+    if limit is not None:
+        records = records[-limit:]
+    return {"events": records, "open_steps": open_steps,
+            "open_operations": open_operations}
+
+
+def cmd_trace(args):
+    out_dir = Path(args.dir).resolve()
+    if args.limit <= 0:
+        raise ControlError("trace --limit 必须大于 0", exit_code=2)
+    meta = load_metadata(out_dir)
+    require_vnext(meta, out_dir)
+    require_valid_metadata(meta)
+    events, problems = verify_event_chain(out_dir, meta)
+    if problems:
+        raise ControlError("事件链不完整，拒绝生成可信轨迹", exit_code=1,
+                           gate_id="event_chain", violations=problems)
+    trace = execution_trace(events, args.limit)
+    print(json.dumps({"ok": True, "ticket_id": meta.get("ticket_id"),
+                      "status": meta.get("status"), "event_count": len(events),
+                      **trace}, ensure_ascii=False, indent=2))
+    return 0
+
+
 def cmd_snapshot(args):
     out_dir = Path(args.dir).resolve()
     sm = load_state_machine()
@@ -2747,6 +3804,7 @@ def cmd_snapshot(args):
                 "pending_verification": meta.get("pending_verification") or [],
                 "unresolved_issues_at_cap": meta.get("unresolved_issues_at_cap"),
             },
+            "execution": execution_trace(events, 10),
             "event_count": len(events) + 1,
             "last_event_hash": event["event_hash"],
             "metadata_hash": metadata_hash(meta),
@@ -2819,6 +3877,52 @@ def build_parser():
     p.add_argument("--request-id", help="幂等键")
     p.add_argument("--actor", default="icode", choices=["icode", "user", "watch", "system"])
     p.set_defaults(func=cmd_event)
+
+    p = sub.add_parser("step", help="步骤端口快照、Reactive 边界复检与终结回执")
+    p.add_argument("--dir", required=True)
+    p.add_argument("--step", required=True)
+    p.add_argument("--phase", required=True, choices=["start", "check", "finish"])
+    p.add_argument("--boundary", help="check 边界（真源见 gates.json execution_model.boundaries）")
+    p.add_argument("--attempt", help="执行尝试 ID；start 可省略并自动生成")
+    p.add_argument("--outcome", help="finish 结果")
+    p.add_argument("--evidence", action="append", default=[], help="finish 的简短证据引用，可重复")
+    p.add_argument("--request", help="本条执行事件的幂等键")
+    p.set_defaults(func=cmd_step)
+
+    p = sub.add_parser("artifact", help="记录与 step outputs 合同匹配的产物 hash")
+    p.add_argument("--dir", required=True)
+    p.add_argument("--step", required=True)
+    p.add_argument("--attempt", required=True)
+    p.add_argument("--path", required=True)
+    p.add_argument("--scope", default="ticket", choices=["ticket", "workspace", "external"])
+    p.add_argument("--request", help="幂等键")
+    p.set_defaults(func=cmd_artifact)
+
+    p = sub.add_parser("operation", help="长动作开始/终结回执（禁止盲目重放副作用）")
+    p.add_argument("--dir", required=True)
+    p.add_argument("--phase", required=True, choices=["start", "finish"])
+    p.add_argument("--name", help="start 时的稳定动作名")
+    p.add_argument("--opclass", choices=["read_only", "managed_write", "external_side_effect",
+                                         "destructive_hardware"])
+    p.add_argument("--attempt", help="动作尝试 ID；start 可省略并自动生成")
+    p.add_argument("--input", help="输入身份描述；仅保存其 sha256")
+    p.add_argument("--outcome", help="finish 结果")
+    p.add_argument("--failure", help="非 success 的失败分类")
+    p.add_argument("--evidence", help="finish 的简短证据引用")
+    p.add_argument("--check", help="finish 的写后/远端/设备核对结果")
+    p.add_argument("--request", help="本条动作事件幂等键；有副作用动作必填")
+    p.set_defaults(func=cmd_operation)
+
+    p = sub.add_parser("policy", help="查询 side-effect-aware Retry/Fallback 决策")
+    p.add_argument("--opclass", required=True)
+    p.add_argument("--failure", required=True)
+    p.add_argument("--attempts", type=int, default=0)
+    p.set_defaults(func=cmd_policy)
+
+    p = sub.add_parser("trace", help="只读输出统一 step/gate/operation/state 轨迹")
+    p.add_argument("--dir", required=True)
+    p.add_argument("--limit", type=int, default=50)
+    p.set_defaults(func=cmd_trace)
 
     p = sub.add_parser("transition", help="状态流转（fail-closed + 门禁 linter + 事件）")
     p.add_argument("--dir", required=True)

@@ -1,0 +1,73 @@
+---
+name: mcu-hardware-software-contract-audit
+description: Use when an MCU board signal, package pin, alternate function, clock, reset, register, SDK API, interrupt, DMA path, firmware build, programmer setting, or runtime behavior must be proven across datasheet, schematic, SDK, code, and hardware evidence.
+---
+
+# MCU Hardware-Software Contract Audit
+
+## Purpose
+
+Prove the complete MCU contract from board net and physical package pin through alternate-function/remap, clock/power/reset, register or vendor SDK, ISR/DMA ownership, firmware build, programmed image, and observed board behavior. A matching symbol or successful compile does not prove the configured peripheral reaches the intended pin or runtime.
+
+## Boundaries
+
+- Fix MCU family/part/package, silicon revision, board/assembly revision, schematic revision, datasheet/manual/errata/difference-note revisions, SDK/tool package identity, compiler flags, and programmed firmware identity before comparing facts.
+- Route document identity/integrity to `technical-document-intake`, electrical connectivity to `schematic-interface-audit`, vendor package/build/runtime identity to `multi-repo-artifact-provenance`, and generic software field crossings to `cross-layer-contract-audit`.
+- Datasheet pin tables, user-manual register semantics, sibling-family difference notes, SDK headers, and example projects have different authority scopes. Similar names across MCU families do not prove register, AF, interrupt, DMA, or package compatibility.
+- Read-only analysis is the default. Flashing, register writes, pin toggling, power changes, probing, continuity checks, or fault injection require explicit authorization and board-safe limits.
+
+## Procedure
+
+1. Freeze `mcu_scope`: exact part/family/package/revision, board variant, relevant rails/clocks, source hashes/revisions, SDK/toolchain identity, build target, binary hash, device identity, and verification time window.
+2. Trace each board signal: source/destination refdes and net → MCU package pin → GPIO port/pin → AF/remap/mux selection → peripheral instance/channel. Preserve active-low, differential polarity, voltage domain, pulls, level shifting, DNP/zero-ohm options, and boot/debug multiplexing.
+3. Trace enable conditions: supply domain, oscillator/PLL and bus clocks, reset source/release, peripheral clock gate, pin mode/speed/drive, AF register, peripheral enable, and required sequencing. Absence at any stage is a gap, not an implicit default.
+4. Trace semantics from user manual/register definition → device header/SVD → vendor driver API → project wrapper/config → initialization call order → ISR/vector/NVIC → DMA request/channel/buffer ownership → consumer/task/state machine.
+5. Compare family/revision differences and errata before borrowing code. Classify every reuse as `compatible`, `requires_adaptation`, `incompatible`, or `unresolved`; record field-level register/pin/clock/IRQ/DMA evidence.
+6. Bind source package to build and programmed runtime. Prove which startup file, linker script, CMSIS/device header, vendor library, compile definitions, programmer target, binary, board instance, and runtime-loaded firmware identity were actually used.
+7. Build a safe verification plan: static compile/link/map checks first, then authorized read-only register/log/logic evidence, and only then explicitly approved active measurement. Define expected observation, tolerance, rollback, stop condition, and unverified boundary.
+
+## Required output contract
+
+### `mcu_scope`
+
+Exact MCU/part/package/silicon, board/assembly revision, document/SDK/toolchain/build/programmed-image identities, device/time boundary, and safety authorization.
+
+### `pin_signal_matrix`
+
+| Signal/net | Source/destination | Package pin | GPIO | AF/remap/mux | Peripheral/channel | Direction/polarity | Voltage/bias/protection | Population variant | Evidence | Status |
+|---|---|---|---|---|---|---|---|---|---|---|
+
+### `clock_power_reset_matrix`
+
+| Peripheral/signal | Power domain | Clock source/tree/gate | Reset source/release | Init order/stable condition | Register/API evidence | Gap/risk | Status |
+|---|---|---|---|---|---|---|---|
+
+### `register_sdk_code_trace`
+
+| Function | Manual register/field | Header/SVD symbol | SDK API | Project wrapper/config | Init order | Compile/link evidence | Status |
+|---|---|---|---|---|---|---|---|
+
+### `interrupt_dma_runtime_matrix`
+
+| Peripheral event | IRQ/vector/NVIC | DMA request/channel | Buffer owner/lifetime | ISR/callback/task consumer | Runtime evidence | Status |
+|---|---|---|---|---|---|---|
+
+### `variant_compatibility`
+
+Record source/target family, package, silicon and SDK versions; changed pin/register/clock/IRQ/DMA semantics; classification; required adaptation; evidence and unresolved errata.
+
+### `verification_plan`
+
+List static, build, programmed-image, read-only runtime, and explicitly authorized physical checks with expected result, tolerance, safety boundary, rollback/stop condition, evidence pointer, and status.
+
+### `verdict`
+
+State `proven`, `mismatch`, or `unresolved` per signal/peripheral and aggregate. Include the last proven boundary, allowed claim, prohibited overclaim, and smallest discriminating action.
+
+## Anti-patterns
+
+- Stopping at a schematic net label, pin macro, SDK call, successful build, programmer success, or log string.
+- Copying an E50x/E51x or sibling-family example without field-level pin/register/clock/IRQ/DMA comparison.
+- Verifying GPIO AF but not the clock gate, reset, vector table, DMA request, buffer lifetime, or programmed image.
+- Treating a debugger/programmer package name as proof of supported target, host platform, license, or the actual flashed binary.
+- Performing active board measurements or writes without explicit authorization and electrical safety limits.

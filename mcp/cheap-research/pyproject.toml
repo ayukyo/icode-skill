@@ -4,7 +4,7 @@ version = "0.9.0"
 description = "cheap-research MCP server — 可选便宜 LLM 推理增强 for icode-skill"
 requires-python = ">=3.10"
 dependencies = [
-    "mcp>=1.0.0",
+    "mcp>=1.29.0,<2.0.0",
     "httpx>=0.25.0",
 ]
 

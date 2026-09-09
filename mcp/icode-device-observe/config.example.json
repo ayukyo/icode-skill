@@ -1,0 +1,12 @@
+{
+  "allowed_roots": ["$HOME"],
+  "timeout_seconds": 10,
+  "max_output_chars": 30000,
+  "profiles": {
+    "demo-fixture": {
+      "transport": "fixture",
+      "root": "$HOME/.claude/icode_data/device-fixtures/demo",
+      "allowed_remote_roots": ["/logs", "/artifacts"]
+    }
+  }
+}

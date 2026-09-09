@@ -4,7 +4,7 @@
 
 > cheap-research **不锁任何平台**，**不推荐任何 provider**。vision-bridge 模式的镜像版:填三件就能跑。
 
-14 个工具：5 核心 + 9 增强。
+15 个工具：5 核心 + 10 增强。
 
 ---
 
@@ -77,7 +77,7 @@ model:    qwen2.5:7b
 | provider | 必填 | KEY | 模型要求 | 性能 |
 |----------|------|-----|----------|------|
 | `openai_compat` | base_url + api_key + model | 是 | 任意 OpenAI Chat Completions 兼容模型 | 取决于平台 |
-| `local_ollama` | base_url + model（api_key 任意） | 否 | 已加载的本地模型 | 取决于本地资源 |
+| `local_ollama` | model（base_url 可选，默认 `http://localhost:11434/v1`；api_key 可省） | 否 | 已加载的本地模型 | 取决于本地资源 |
 
 切换：在 `config.json` 改 `"provider": "local_ollama"`，重启 Claude Code。
 
@@ -92,7 +92,7 @@ model:    qwen2.5:7b
 
 ---
 
-## 工具签名（14 工具）
+## 工具签名（15 工具）
 
 详细见 [server.py](server.py)。简要：
 
@@ -103,7 +103,8 @@ model:    qwen2.5:7b
 - `extract(text, schema, instruction)` — 结构化提取
 - `propose_repo_facts(repo_path, focus, max_files)` — 仓库事实候选（不接管裁决）
 
-**9 增强工具**（含 6 工具型 + 3 LLM 摘要）：
+**10 增强工具**（含 7 工具型 + 3 LLM 摘要）：
+- `describe_capabilities()` — 会话级能力发现（工具清单/provider 配置态/目录与网络边界；不返回密钥、不做网络探测）
 - `scan_patterns(patterns, scope_path, exclude_dirs, max_files, max_matches)` — 机械模式匹配
 - `trace_refs(symbol, scope_path, max_files, max_refs)` — 符号引用追溯
 - `fetch_remote(url, max_chars)` — HTTP 拉取
@@ -114,11 +115,28 @@ model:    qwen2.5:7b
 - `generate_filename(context, prefix, max_tokens)` — 文件名生成
 - `select_template(context, options, max_tokens)` — 模板选择
 
-**分能力闸门（v1.1）**：14 工具分三类 capability（真源 [tools_manifest.json](tools_manifest.json)）——
-`local`（scan_patterns/trace_refs/validate_migration_ops/parse_project_id/scan_modules）、`fetch`（fetch_remote）、
+**分能力闸门（v1.1）**：15 工具分三类 capability（真源 [tools_manifest.json](tools_manifest.json)）——
+`local`（describe_capabilities/scan_patterns/trace_refs/validate_migration_ops/parse_project_id/scan_modules）、`fetch`（fetch_remote）、
 `llm`（8 个，需 provider 可用）。本地/网络工具**不因 provider 未配置而整体降级**。
 
+会话首次需要 cheap-research 时先调一次 `describe_capabilities` 并缓存结果；其中
+`configured` 只表示配置字段齐全，`configured_unverified` 仍需以首次真实调用结果确认。
+该发现调用不属于业务产物转换，不写 per-step gate trace。
+
+### 安全与运行边界
+
+- 所有工具提供含 `answer/error_code/error/model` 的 MCP `outputSchema`，并声明 `readOnlyHint` / `destructiveHint` / `openWorldHint`；测试会拒绝退化成无字段约束的空壳 schema。
+- Python MCP SDK 锁定在已验证的 `>=1.29,<2`；2.x API 迁移须单独评估，安装时不静默跨大版本。
+- `fetch_remote` 使用流式读取（5 MiB 上限），最多跟随 5 次重定向且逐跳解析公网 IP；实际连接固定到该 IP，并保留原 Host/HTTPS SNI，关闭环境代理，从而阻断 DNS 预检与建连之间的 rebinding。返回 requested/final URL、重定向链、SHA-256、ETag、Last-Modified 与抓取时间。远端正文始终标 `trust_level=untrusted`。
+- 本地扫描拒绝 symlink 文件及范围逃逸。团队/生产环境建议在 `config.json` 填 `allowed_roots`（或 `CHEAP_RESEARCH_ALLOWED_ROOTS`）；空列表为了兼容旧安装，仍由调用者选择路径。
+- LLM provider 在 server 生命周期内复用连接池，默认并发上限为 3，配置热替换和 server 退出时显式关闭；外发提示统一把网页、日志、代码和文档视为不可信数据。
+- 模型没有校准数据时 `confidence=null`，禁止用固定伪置信度冒充证据。
+
 session 模型只看工具返回的结构化 dict，**不直接调用 cheap-research 配置的 LLM provider**——但 provider 调用确实发生在本 MCP server 进程内（`config.json` 配置的 base_url/api_key/model），数据出境闸门（`scan_sensitive`）与 `truncation`/`source_digest` 元数据即用于审计该外发路径。
+
+### 与 ICODE 本地 MCP 的职责边界
+
+`cheap-research` 只负责低成本压缩、候选提取、草稿生成和不可信公网材料抓取。文件身份/时间线、Git/构建来源、设备观测、MCP 健康、步骤路由和持久本地索引分别由 `icode-evidence`、`icode-workspace`、`icode-device-observe`、`icode-mcp-health`、`icode-mcp-policy`、`icode-local-index` 负责。cheap-research 可以压缩它们带来源回指的长输出，但不得代理其工具、去掉回指或把模型摘要升级为证据结论。机器边界见 [tools_manifest.json](tools_manifest.json) 的 `responsibility_boundary`。
 
 > **输入纯净度建议**：`llm` 类工具依赖 LLM 输出能严格按 schema 输出 JSON。server.py 的 _parse_response 有 4 道容错闸门：剥离 think 标签 → 提取 json 代码块 → brace-matching 提取最外层 {...} → 修复数组元素间缺逗号。**实测在 prompt 里加一句"只输出 JSON，不要前后缀文本"显著降低容错失败率**——容错是 last resort，不是默认行为。
 
@@ -137,7 +155,7 @@ cheap-research 的强证据执行点由三层机器机制承载，文档只解�
 
 | 层 | 载体 | 作用 |
 |----|------|------|
-| **gate 真源** | `mcp/cheap-research/gates.json` | 11 个 gate 的 eligibility condition + 阈值常量（`long_text_threshold_bytes=8192` / `dedup_min_functions=50` / `tb_comment_extract_min=8` / `merge_min_rounds=2` / `max_input_bytes_per_call=65536`）。**阈值只从这里读**，禁止在 step 文档/脚本写死 |
+| **gate 真源** | `mcp/cheap-research/gates.json` | 11 个 gate 的 eligibility condition + 阈值常量（`long_text_threshold_bytes=8192` / `dedup_min_functions=50` / `tb_comment_extract_min=8` / `merge_min_rounds=2` / `max_input_bytes_per_call=8000`）。单块上限与 `summarize` 消费上限对齐，超长输入先按字节切块并保序汇总，禁止把 `truncated=true` 当完整结果。**阈值只从这里读**，禁止在 step 文档/脚本写死 |
 | **trace 轨迹** | `{ICODE_OUT_DIR}/.mcp_gate_trace.jsonl` | 每 gate 一条最终判定（`gate_id`/`eligible`/`evidence`/`decision`/`attempted`/`result`/`at`）。`decision` 词表 = `called`/`cache_hit`/`skipped_not_eligible`/`skipped_stage_not_reached`/`degraded_after_attempt`；eligible=true 只允许 `called` / `cache_hit` / `degraded_after_attempt`（`degraded_after_attempt` 须 `attempted=true` 且 `result=error\|empty\|timeout`），`skipped_*` 仅用于 eligible=false。**不保存**工具完整结果/日志正文/API key/Cookie/设备凭据 |
 | **cache 去重** | `{ICODE_OUT_DIR}/.cheap_research_cache.json` | 有效命中（`tool + args_hash`，source mtime 校验）→ gate 记 `decision=cache_hit`，**不重复调用**，等价履行 |
 | **运行时校验器** | `python3 tools/lint_mcp_coverage.py <out_dir> [--step <step>] [--strict] [--json]` | step 转换前跑：eligible 未履行 / missing gate / degraded-without-attempt / trace schema error / 敏感数据 → 退出码 1 阻断 |

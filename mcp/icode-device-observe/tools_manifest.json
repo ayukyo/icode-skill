@@ -1,0 +1,13 @@
+{
+  "server": "icode-device-observe",
+  "api_key_required": false,
+  "purpose": "named-profile read-only embedded device observation",
+  "forbidden": ["arbitrary_command", "deploy", "flash", "reboot", "kill", "write"],
+  "tools": [
+    {"name": "describe_capabilities", "read_only": true, "deterministic": true, "network": false},
+    {"name": "list_profiles", "read_only": true, "deterministic": true, "network": false},
+    {"name": "observe_device", "read_only": true, "deterministic": false, "network": true},
+    {"name": "collect_log_window", "read_only": true, "deterministic": false, "network": true},
+    {"name": "compare_artifact", "read_only": true, "deterministic": false, "network": true}
+  ]
+}

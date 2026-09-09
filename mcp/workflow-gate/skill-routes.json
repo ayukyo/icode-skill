@@ -87,7 +87,8 @@
         "multi_git_root_build",
         "mixed_package_risk",
         "deployment_identity_claim",
-        "wrong_target_or_slot_risk"
+        "wrong_target_or_slot_risk",
+        "vendor_sdk_programmer_or_toolchain_provenance"
       ],
       "steps": [
         "plan",
@@ -99,9 +100,11 @@
       "input_contract": [
         "build invocation product architecture root and manifest revision",
         "required repositories modules packages and target device",
-        "artifact package deploy and runtime evidence locations"
+        "artifact package deploy and runtime evidence locations",
+        "vendor package acquisition hash checksum license platform product family toolchain and project adoption evidence"
       ],
       "output_contract": [
+        "vendor_package_matrix and toolchain_compatibility",
         "build_identity and repo_matrix",
         "artifact_matrix and deployment_matrix",
         "mismatches and verdict"
@@ -266,6 +269,108 @@
         "comparison_gaps and verdict"
       ],
       "fallback": "If capture settings, hardware, calibration, tuning, scene, or reference identity drifted, invalidate direct comparison, preserve observations, and request a matched recapture."
+    },
+    {
+      "skill": "technical-document-intake",
+      "triggers": [
+        "mixed_local_technical_document_corpus",
+        "pdf_office_image_or_text_intake",
+        "extension_magic_or_parser_mismatch",
+        "protected_encrypted_or_unreadable_document",
+        "archive_sdk_tool_package_or_truncated_container",
+        "duplicate_or_revision_variant_corpus"
+      ],
+      "steps": ["log", "plan", "deepcheck", "audit", "verify"],
+      "input_contract": [
+        "corpus root acquisition source and intended document scope",
+        "source files with preserved relative paths and owner-provided revision context",
+        "available parser renderer OCR archive adapter and media-route capability information"
+      ],
+      "output_contract": [
+        "document_manifest",
+        "corpus_groups",
+        "archive_risk_register",
+        "readability_gaps",
+        "extraction_plan",
+        "verdict"
+      ],
+      "fallback": "If a file is protected, encrypted, unsupported, corrupt, or only partially extractable, preserve its identity and coverage gap, request an authorized supported export when applicable, and cap analysis before the unreadable region."
+    },
+    {
+      "skill": "hardware-spec-contract-audit",
+      "triggers": [
+        "prd_datasheet_schematic_code_or_test_conflict",
+        "hardware_value_capability_or_limit_mismatch",
+        "variant_revision_or_lifecycle_status_ambiguity",
+        "requirement_to_field_traceability_gap"
+      ],
+      "steps": ["plan", "code", "deepcheck", "audit", "verify"],
+      "input_contract": [
+        "document identities roles readability and exact claim locations",
+        "product variant revision lifecycle status and field scope",
+        "raw values units conditions tolerances and available implementation test or field evidence"
+      ],
+      "output_contract": [
+        "source_register",
+        "normalized_fact_matrix",
+        "conflict_register",
+        "traceability_matrix",
+        "verdict"
+      ],
+      "fallback": "If a source region, variant, revision, lifecycle status, measurement condition, or field authority is unknown, preserve the competing atomic facts, classify the comparison unresolved, and prohibit selecting a canonical value."
+    },
+    {
+      "skill": "schematic-interface-audit",
+      "triggers": [
+        "schematic_eda_netlist_or_pdf_interface_review",
+        "connector_bus_power_reset_clock_or_sync_trace",
+        "cross_sheet_net_or_population_option_ambiguity",
+        "electrical_contract_or_sequence_mismatch"
+      ],
+      "steps": ["log", "plan", "code", "deepcheck", "audit", "verify"],
+      "input_contract": [
+        "board assembly variant schematic PCB BOM and netlist revision identities",
+        "source quality sheet set and exact interface or sequence boundary",
+        "connectors nets refdes pins electrical conditions population options and evidence locations",
+        "attested native and bridge capabilities plus page tile and visual evidence provenance"
+      ],
+      "output_contract": [
+        "schematic_scope",
+        "source_quality",
+        "sheet_map",
+        "interface_matrix",
+        "power_sequence",
+        "ambiguities",
+        "verdict"
+      ],
+      "fallback": "If only partial PDF or OCR evidence exists, record visible labels and components as candidates, keep unproven connectivity and electrical conditions open, and request the smallest correct-revision EDA netlist BOM or explicitly authorized check."
+    },
+    {
+      "skill": "mcu-hardware-software-contract-audit",
+      "triggers": [
+        "mcu_pin_af_remap_or_peripheral_configuration",
+        "mcu_clock_reset_register_irq_or_dma_chain",
+        "mcu_family_package_revision_or_sdk_compatibility",
+        "firmware_programmer_success_without_runtime_proof"
+      ],
+      "steps": ["log", "plan", "code", "deepcheck", "audit", "verify"],
+      "input_contract": [
+        "exact MCU part package silicon board assembly and document revisions",
+        "schematic nets pins AF remap clock reset register SDK IRQ DMA and buffer evidence",
+        "vendor SDK toolchain build binary programmer device and runtime identities",
+        "safe verification scope and explicit authorization for any active hardware operation"
+      ],
+      "output_contract": [
+        "mcu_scope",
+        "pin_signal_matrix",
+        "clock_power_reset_matrix",
+        "register_sdk_code_trace",
+        "interrupt_dma_runtime_matrix",
+        "variant_compatibility",
+        "verification_plan",
+        "verdict"
+      ],
+      "fallback": "If part/package/revision, AF/remap, clock/reset, register/IRQ/DMA, build/programmed image, or board runtime evidence is missing, stop at the last proven boundary, keep the peripheral unresolved, and propose the smallest read-only or explicitly authorized discriminator."
     }
   ]
 }

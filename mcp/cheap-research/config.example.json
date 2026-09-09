@@ -15,6 +15,12 @@
   "_model_doc": "你平台提供的便宜/快速/轻量模型名。建议: GPT-4o-mini / Gemini-Flash / qwen2.5:7b / Claude Haiku 等。",
   "model": "",
 
+  "_allowed_roots_doc": "可选: 限制 local/仓库扫描工具只能读取这些目录。空列表保持兼容，由调用者选择路径；生产/团队环境建议填绝对目录白名单。也可用 CHEAP_RESEARCH_ALLOWED_ROOTS 覆盖（Linux 用冒号分隔）。",
+  "allowed_roots": [],
+
+  "_max_concurrency_doc": "可选: LLM provider 最大并发数, 默认 3, 范围 1~16。",
+  "max_concurrency": 3,
+
   "_timeout_doc": "可选: HTTP 超时秒, 默认 60。",
   "timeout": 60
 }

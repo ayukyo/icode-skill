@@ -6,8 +6,10 @@ session 模型只收文本, 不接触原图/原视频。
 启动: python -m mcp (stdin/stdout)
 """
 import json
+import hashlib
 import os
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 # 强制 stdout/stderr 用 UTF-8,兼容 Windows 默认 GBK 控制台。
@@ -50,21 +52,22 @@ def load_config() -> dict:
         "VISION_BRIDGE_CONFIG",
         str(_SERVER_DIR / "config.json"),
     )
-    p = Path(cfg_path)
+    p = Path(os.path.expandvars(os.path.expanduser(cfg_path)))
     if not p.exists():
-        raise FileNotFoundError(
-            f"未找到配置文件 {cfg_path}。\n"
-            f"首次安装请: cp config.example.json config.json, "
-            f"然后填 base_url / api_key / model。\n"
-            f"详见 README.md。"
-        )
-    return json.loads(p.read_text())
+        return {}
+    config = json.loads(p.read_text(encoding="utf-8"))
+    if not isinstance(config, dict):
+        raise ValueError(f"配置顶层必须是 JSON object: {p}")
+    return config
 
 
 def get_provider():
     """返回 provider 实例。openai_compat 缺字段时返 UnconfiguredProvider (不抛错)。"""
     cfg = load_config()
-    name = cfg.get("provider", "openai_compat").lower()
+    raw_name = cfg.get("provider", "openai_compat")
+    if not isinstance(raw_name, str) or not raw_name.strip():
+        raise ValueError("provider 必须是非空字符串")
+    name = raw_name.strip().lower()
     if name == "openai_compat":
         missing = [k for k in ("base_url", "api_key", "model") if not cfg.get(k)]
         if missing:
@@ -78,6 +81,41 @@ def get_provider():
     return cls(cfg)
 
 
+def _input_identity(media_path: str) -> dict:
+    if media_path.startswith(("http://", "https://")):
+        raise ValueError(
+            "evidence mode requires a local immutable file so input_sha256 can be verified")
+    unresolved = Path(media_path).expanduser()
+    if unresolved.is_symlink():
+        raise ValueError("media_path must be a regular non-symlink file")
+    path = unresolved.resolve(strict=True)
+    if not path.is_file():
+        raise ValueError("media_path must be a regular non-symlink file")
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return {
+        "source_path": str(path),
+        "input_sha256": "sha256:" + digest.hexdigest(),
+        "size_bytes": path.stat().st_size,
+    }
+
+
+def capability_profile() -> dict:
+    """Return a non-secret profile; configuration keys are never echoed wholesale."""
+    provider = get_provider()
+    profile = provider.capability_profile()
+    profile.setdefault("configured", provider.name != "unconfigured")
+    return profile
+
+
+@mcp.tool()
+async def describe_capabilities() -> str:
+    """返回不含密钥的 bridge provider/model/已验证能力画像。"""
+    return json.dumps(capability_profile(), ensure_ascii=False, indent=2)
+
+
 def detect_media_type(path: str) -> str:
     if path.startswith(("http://", "https://")):
         # URL 不根据扩展名假定, 让 provider 自己处理
@@ -87,6 +125,13 @@ def detect_media_type(path: str) -> str:
     if ext in VIDEO_EXTS:
         return "video"
     return "image"
+
+
+def _validate_analysis_request(media_type: str, max_tokens: int) -> None:
+    if media_type not in {"auto", "image", "video"}:
+        raise ValueError("media_type 必须是 auto/image/video")
+    if isinstance(max_tokens, bool) or not isinstance(max_tokens, int) or not 1 <= max_tokens <= 1_000_000:
+        raise ValueError("max_tokens 必须是 1..1000000 的整数")
 
 
 @mcp.tool()
@@ -107,6 +152,7 @@ async def analyze_media(
     Returns:
         文本描述 (或错误信息 string)
     """
+    _validate_analysis_request(media_type, max_tokens)
     provider = get_provider()
     if media_type == "auto":
         media_type = detect_media_type(media_path)
@@ -116,6 +162,106 @@ async def analyze_media(
             f"请切到 openai_compat (需装 ffmpeg) 或改传图片。"
         )
     return await provider.analyze(media_path, prompt, media_type, max_tokens)
+
+
+async def _analyze_media_evidence(
+    media_path: str,
+    prompt: str = "",
+    media_type: str = "auto",
+    max_tokens: int = 1024,
+    prompt_profile: str = "general-v1",
+    profile_version: str = "v1",
+    page: int | None = None,
+    crop: str = "",
+    dpi: int | None = None,
+    tile_index: int | None = None,
+) -> str:
+    """分析媒体并返回带 hash、模型和页/裁剪来源的 JSON 证据包。"""
+    _validate_analysis_request(media_type, max_tokens)
+    if not isinstance(prompt_profile, str) or not prompt_profile.strip():
+        raise ValueError("prompt_profile must be a non-empty string")
+    if not isinstance(profile_version, str) or not profile_version.strip():
+        raise ValueError("profile_version must be a non-empty string")
+    provider = get_provider()
+    effective_type = detect_media_type(media_path) if media_type == "auto" else media_type
+    identity = _input_identity(media_path)
+    crop_value = _parse_crop(crop)
+    if page is not None and page <= 0:
+        raise ValueError("page must be positive")
+    if dpi is not None and dpi <= 0:
+        raise ValueError("dpi must be positive")
+    if tile_index is not None and tile_index < 0:
+        raise ValueError("tile_index must be non-negative")
+    provider_profile = provider.capability_profile()
+    result = {
+        "schema_version": 1,
+        **identity,
+        "media_kind": effective_type,
+        "media_type": effective_type,
+        "page": page,
+        "crop": crop_value,
+        "dpi": dpi,
+        "tile_index": tile_index,
+        "channel": "bridge",
+        "provider": provider_profile.get("provider", "unknown"),
+        "model": provider_profile.get("model", "unknown"),
+        "provider_profile": provider_profile,
+        "prompt_profile": prompt_profile,
+        "profile_version": profile_version,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "status": "success",
+        "confidence": None,
+        "output_pointer": None,
+        "limitations": [],
+        "disagreement": None,
+        "result": None,
+    }
+    if provider.name == "unconfigured":
+        result["status"] = "failed"
+        result["limitations"].append("bridge_unconfigured")
+        return json.dumps(result, ensure_ascii=False, indent=2)
+    if effective_type == "video" and not provider.supports_video:
+        result["status"] = "failed"
+        result["limitations"].append("provider_does_not_support_video")
+        return json.dumps(result, ensure_ascii=False, indent=2)
+    try:
+        result["result"] = await provider.analyze(
+            media_path, prompt, effective_type, max_tokens)
+    except Exception as exc:
+        result["status"] = "failed"
+        result["limitations"].append(f"{type(exc).__name__}: {exc}")
+    return json.dumps(result, ensure_ascii=False, indent=2)
+
+
+def _parse_crop(value: str) -> list[int] | None:
+    if not value:
+        return None
+    parts = value.split(",")
+    if len(parts) != 4 or not all(item.isdigit() for item in parts):
+        raise ValueError("crop must be x,y,width,height")
+    parsed = [int(item) for item in parts]
+    if parsed[2] <= 0 or parsed[3] <= 0:
+        raise ValueError("crop width and height must be positive")
+    return parsed
+
+
+@mcp.tool()
+async def analyze_media_evidence(
+    media_path: str,
+    prompt: str = "",
+    media_type: str = "auto",
+    max_tokens: int = 1024,
+    prompt_profile: str = "general-v1",
+    profile_version: str = "v1",
+    page: int | None = None,
+    crop: str = "",
+    dpi: int | None = None,
+    tile_index: int | None = None,
+) -> str:
+    """分析媒体并返回带 hash、模型和页/裁剪来源的 JSON 证据包。"""
+    return await _analyze_media_evidence(
+        media_path, prompt, media_type, max_tokens, prompt_profile,
+        profile_version, page, crop, dpi, tile_index)
 
 
 def _run_cli_analyze(argv: list[str]) -> int:
@@ -134,26 +280,60 @@ def _run_cli_analyze(argv: list[str]) -> int:
         prog="vision-bridge-cli",
         description="vision-bridge 本地 CLI 调用通道(等价 analyze_media 工具)",
     )
-    ap.add_argument("--analyze-media", required=True, metavar="PATH", help="本地文件路径或 http(s) URL")
+    mode = ap.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--analyze-media", metavar="PATH", help="本地文件路径或 http(s) URL")
+    mode.add_argument("--analyze-evidence", metavar="PATH", help="返回带来源的 JSON 证据包")
+    mode.add_argument("--capabilities", action="store_true", help="输出不含密钥的能力画像")
     ap.add_argument("--prompt", default="", help="可选附加指令")
     ap.add_argument("--media-type", default="auto", choices=["auto", "image", "video"])
     ap.add_argument("--max-tokens", type=int, default=1024)
+    ap.add_argument("--prompt-profile", default="general-v1")
+    ap.add_argument("--profile-version", default="v1")
+    ap.add_argument("--page", type=int)
+    ap.add_argument("--crop", default="")
+    ap.add_argument("--dpi", type=int)
+    ap.add_argument("--tile-index", type=int)
     args = ap.parse_args(argv)
 
+    if args.capabilities:
+        try:
+            print(json.dumps(capability_profile(), ensure_ascii=False, indent=2))
+            return 0
+        except Exception as exc:
+            print(f"[错误] {type(exc).__name__}: {exc}", file=sys.stderr)
+            return 1
+
+    media_path = args.analyze_evidence or args.analyze_media
+
     async def _run() -> str:
+        _validate_analysis_request(args.media_type, args.max_tokens)
         provider = get_provider()
         mt = args.media_type
         if mt == "auto":
-            mt = detect_media_type(args.analyze_media)
+            mt = detect_media_type(media_path)
         if mt == "video" and not provider.supports_video:
             return (
                 f"[错误] 当前 provider '{provider.name}' 不支持视频。"
                 f"请切到 openai_compat (需装 ffmpeg) 或改传图片。"
             )
-        return await provider.analyze(args.analyze_media, args.prompt, mt, args.max_tokens)
+        return await provider.analyze(media_path, args.prompt, mt, args.max_tokens)
+
+    async def _run_evidence() -> str:
+        return await _analyze_media_evidence(
+            media_path=media_path,
+            prompt=args.prompt,
+            media_type=args.media_type,
+            max_tokens=args.max_tokens,
+            prompt_profile=args.prompt_profile,
+            profile_version=args.profile_version,
+            page=args.page,
+            crop=args.crop,
+            dpi=args.dpi,
+            tile_index=args.tile_index,
+        )
 
     try:
-        result = asyncio.run(_run())
+        result = asyncio.run(_run_evidence() if args.analyze_evidence else _run())
     except FileNotFoundError as e:
         print(str(e), file=sys.stderr)
         return 2
@@ -165,6 +345,7 @@ def _run_cli_analyze(argv: list[str]) -> int:
 
 
 if __name__ == "__main__":
-    if len(sys.argv) > 1 and sys.argv[1] in ("--analyze-media", "-h", "--help"):
+    if len(sys.argv) > 1 and sys.argv[1] in (
+            "--analyze-media", "--analyze-evidence", "--capabilities", "-h", "--help"):
         sys.exit(_run_cli_analyze(sys.argv[1:]))
     mcp.run()

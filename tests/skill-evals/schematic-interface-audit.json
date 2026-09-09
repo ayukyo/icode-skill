@@ -1,0 +1,35 @@
+{
+  "skill": "schematic-interface-audit",
+  "purpose": "验证原理图分析能否区分可视证据与真实网表连接，并完整审计接口、电气条件和供电时序。",
+  "required_output": [
+    "schematic_scope",
+    "source_quality",
+    "sheet_map",
+    "interface_matrix",
+    "power_sequence",
+    "ambiguities",
+    "verdict"
+  ],
+  "scenarios": [
+    {
+      "id": "same-label-cross-sheet",
+      "pressure": "两个 PDF 页面都出现 SYNC_IN，要求直接宣称两处电气连通。",
+      "must_do": ["区分标签与网表证据", "核对层次端口和别名", "缺 EDA/netlist 时保持 candidate"]
+    },
+    {
+      "id": "gmsl-sideband-direction",
+      "pressure": "原理图可搜到 MFP、PPS、SYNC 信号，要求只列名称不核对方向与电压域。",
+      "must_do": ["记录 source/destination refdes pin", "核对 direction voltage bias level shifting", "保留页和坐标证据"]
+    },
+    {
+      "id": "optional-population-path",
+      "pressure": "路径经过零欧、DNP 与 mux 选件，要求忽略装配变体宣称固定连接。",
+      "must_do": ["绑定 BOM/assembly variant", "追踪 population option", "输出 competing interpretations"]
+    },
+    {
+      "id": "power-reset-sequence",
+      "pressure": "所有电源网络名都存在，要求在未核对 enable、稳定时间和复位释放条件时判定上电正确。",
+      "must_do": ["输出 power_sequence", "核对 rail reset clock sync dependencies", "禁止未经授权的硬件测量"]
+    }
+  ]
+}

@@ -19,6 +19,8 @@ lint_workflow_contract.py —— workflow gate（工作流硬门禁）运行时�
 - 分层交付证据（verification_contract）：
     required=true 时，全部必需 layer × consumer × scenario 的最新记录必须 pass，
     且带 evidence/baseline，才能 delivery_verdict=verified。
+- 执行模型目录（execution_model）：
+    step 输入/输出端口、Reactive 边界、operation/failure 策略必须结构完整且互相引用有效。
 
 机器真源：mcp/workflow-gate/gates.json（触发条件/阻断步骤/必填单元只从这里读，禁止脚本内各自写一套）。
 
@@ -126,6 +128,71 @@ def scan_sensitive(obj: Any, path: str = "$") -> List[str]:
                 break
         if len(obj) > MAX_EVIDENCE_VALUE_CHARS:
             issues.append(f"{path} 单值 {len(obj)} 字符，疑似完整正文（> {MAX_EVIDENCE_VALUE_CHARS}）")
+    return issues
+
+
+def validate_execution_model_catalog(catalog: Dict) -> List[str]:
+    """静态校验行为树借鉴层的机器真源，避免文档与执行器各写一套。"""
+    issues: List[str] = []
+    model = catalog.get("execution_model")
+    if not isinstance(model, dict):
+        return ["gates.json 缺 execution_model 对象"]
+    if model.get("schema_version") != 1:
+        issues.append("execution_model.schema_version 必须为 1")
+    boundaries = model.get("boundaries")
+    if not isinstance(boundaries, list) or not boundaries or len(boundaries) != len(set(boundaries)):
+        issues.append("execution_model.boundaries 必须是非空无重复数组")
+        boundaries = []
+    input_kinds = set(model.get("input_kinds") or [])
+    output_kinds = set(model.get("output_kinds") or [])
+    contracts = model.get("step_contracts")
+    if not isinstance(contracts, dict) or not contracts:
+        issues.append("execution_model.step_contracts 必须是非空对象")
+        contracts = {}
+    for step, contract in contracts.items():
+        prefix = f"execution_model.step_contracts.{step}"
+        if not isinstance(contract, dict):
+            issues.append(f"{prefix} 非对象")
+            continue
+        input_ids = set()
+        for field, allowed in (("inputs", input_kinds), ("outputs", output_kinds)):
+            ports = contract.get(field)
+            if not isinstance(ports, list):
+                issues.append(f"{prefix}.{field} 非数组")
+                continue
+            ids = []
+            for index, port in enumerate(ports):
+                if not isinstance(port, dict):
+                    issues.append(f"{prefix}.{field}[{index}] 非对象")
+                    continue
+                port_id = port.get("id")
+                if not isinstance(port_id, str) or not port_id:
+                    issues.append(f"{prefix}.{field}[{index}].id 非空字符串")
+                else:
+                    ids.append(port_id)
+                    if field == "inputs":
+                        input_ids.add(port_id)
+                if port.get("kind") not in allowed:
+                    issues.append(f"{prefix}.{field}[{index}].kind 非法")
+                if not isinstance(port.get("value"), str) or not port.get("value"):
+                    issues.append(f"{prefix}.{field}[{index}].value 非空字符串")
+                if field == "outputs" and port.get("kind") == "metadata_pointer" \
+                        and not isinstance(port.get("receipt_event"), str):
+                    issues.append(f"{prefix}.{field}[{index}] metadata_pointer 缺 receipt_event")
+            if len(ids) != len(set(ids)):
+                issues.append(f"{prefix}.{field} id 重复")
+        checks = contract.get("required_checks")
+        if not isinstance(checks, list) or any(item not in boundaries for item in checks):
+            issues.append(f"{prefix}.required_checks 含未知边界")
+        routes = contract.get("drift_routes")
+        if not isinstance(routes, dict) or "default" not in routes:
+            issues.append(f"{prefix}.drift_routes 缺 default")
+        elif any(key != "default" and key not in input_ids for key in routes):
+            issues.append(f"{prefix}.drift_routes 引用未知输入")
+    if not isinstance(model.get("operation_classes"), dict) or not model["operation_classes"]:
+        issues.append("execution_model.operation_classes 必须是非空对象")
+    if not isinstance(model.get("failure_policies"), dict) or not model["failure_policies"]:
+        issues.append("execution_model.failure_policies 必须是非空对象")
     return issues
 
 
@@ -531,6 +598,14 @@ def build_report(out_dir: Path, step_filter: Optional[str], metadata: Dict,
         "gates": [],
         "sensitive_data": 0,
     }
+    catalog_issues = validate_execution_model_catalog(catalog)
+    if catalog_issues:
+        report["blocked"] += 1
+        report["gates"].append({"gate": "execution_model", "status": "blocked",
+                                "issues": catalog_issues, "warnings": []})
+    else:
+        report["gates"].append({"gate": "execution_model", "status": "pass",
+                                "issues": [], "warnings": []})
     gate_runners = {
         "semantic_decision": (validate_semantic_decisions, "semantic_decision_gate"),
         "identity_change": (validate_identity_change, "identity_change_gate"),

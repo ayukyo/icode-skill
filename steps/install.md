@@ -9,9 +9,9 @@
 
 `/icode install` 是开源用户的统一安装入口：先安装或更新 ICODE 本体，再按 `skill-packs/manifest.json` 安装全部顶层共享技能，最后安装所选 MCP。新 clone、本机升级、新机器和 CI 初始化均使用同一入口；`mcp/install.sh` 只保留为 MCP 专项维护入口。
 
-**内置能力与独立 Skill 的安装边界**：`tools/evidence_intake.py`、`debug_catalog.py`、`runtime_baseline.py`、`verification_debt.py`、`learn.py`、`scripts/submission_guard.py handoff` 及 `steps/learn.md` 都属于 ICODE 本体，随 ICODE 目录一次复制到所选宿主，**不**写入 `skill-packs/manifest.json`。manifest 只声明需要在技能根顶层独立发现的跨项目共享 Skill；`--client all` 会同时安装 ICODE 本体和这些共享 Skill 到 Claude Code、Codex。
+**内置能力与独立 Skill 的安装边界**：`tools/evidence_intake.py`、`tools/document_intake.py`、`tools/media_router.py`、`debug_catalog.py`、`runtime_baseline.py`、`verification_debt.py`、`learn.py`、`scripts/submission_guard.py handoff` 及 `steps/learn.md` 都属于 ICODE 本体，随 ICODE 目录一次复制到所选宿主，**不**写入 `skill-packs/manifest.json`。manifest 声明当前 15 个需要在技能根顶层独立发现的跨项目共享 Skill（含 MCU 软硬件契约审计）；`--client all` 会同时安装 ICODE 本体和全部共享 Skill 到 Claude Code、Codex。
 
-**当前 6 个声明的 MCP**：
+**当前 12 个声明的 MCP**：
 
 | MCP | 形态 | 对 icode 工作流的增益 | KEY |
 |---|---|---|---|
@@ -21,8 +21,14 @@
 | **context7** | npm | 库文档实时查询，步骤 0/1/4 | ❌ |
 | **playwright** ⚠️ | npm | 浏览器自动化，步骤 5/6（**仅前端项目**） | ❌ |
 | **cheap-research** | Python venv | 便宜 LLM 推理降本（各步骤正文执行点的候选/压缩/结构化提取子任务），未装走 Agent(model="haiku") 兜底 | ✅ 推荐装（LLM 类工具需配三件套；本地/网络类工具不依赖） |
+| **icode-evidence** | Python venv | 文件 hash/行号回指、日志时间线、文档语料清单 | ❌ |
+| **icode-workspace** | Python venv | 多 Git 根、worktree、构建输入和制品来源观测 | ❌ |
+| **icode-device-observe** | Python venv | 命名 profile 的 SSH/ADB/fixture 只读设备观测 | ❌ |
+| **icode-mcp-health** | Python venv | 安装后 manifest、入口、工具 schema 和敏感字段健康检查 | ❌ |
+| **icode-mcp-policy** | Python venv | step→server/tool 路由与最小权限机器真源 | ❌ |
+| **icode-local-index** | Python venv | 大型源码/日志/文档的可重建 SQLite FTS 索引 | ❌ |
 
-> 完整说明见各 `mcp/<name>/README.md`。**vision-bridge 需配 KEY（三件套）才能用**；cheap-research 分三类 capability——`local` 6 个（scan_patterns / trace_refs / validate_migration_ops / parse_project_id / scan_modules）+ `fetch` 1 个（fetch_remote）**不依赖 LLM provider，未配 KEY 也照常可用**，仅 `llm` 8 个（summarize / retrieve_similar / fill_template / extract / propose_repo_facts / diff_summary / generate_filename / select_template）需配三件套。其余无需 KEY 即可安装。
+> 完整说明见各 `mcp/<name>/README.md`。**vision-bridge 需配 KEY（三件套）才能用**；cheap-research 分三类 capability——`local` 6 个（describe_capabilities / scan_patterns / trace_refs / validate_migration_ops / parse_project_id / scan_modules）+ `fetch` 1 个（fetch_remote）**不依赖 LLM provider，未配 KEY 也照常可用**，仅 `llm` 8 个（summarize / retrieve_similar / fill_template / extract / propose_repo_facts / diff_summary / generate_filename / select_template）需配三件套。其余无需 KEY 即可安装。
 >
 > **⚠️ playwright 警告**：24 个工具 schema 永久加载到 system prompt，**非前端项目 token 性价比低**。建议：前端项目保留，全部项目通用时不装。
 
@@ -30,7 +36,7 @@
 
 | 命令 | 行为 |
 |---|---|
-| `/icode install` | 安装 ICODE、全部共享技能和 6 个 MCP；默认只面向 Claude Code |
+| `/icode install` | 安装 ICODE、全部共享技能和 12 个 MCP；默认只面向 Claude Code |
 | `/icode install <name>` | 安装 ICODE、全部共享技能，但只安装指定 MCP |
 | `/icode install --client codex` | 安装到 Codex skills 根，并为 Codex 注册 MCP；MCP entry 仍先生成 Claude 真源 |
 | `/icode install --client all` | Claude Code + Codex 双端安装 ICODE、共享技能和 MCP |
@@ -40,7 +46,7 @@
 **对称卸载**（虽然不是 `/icode` 命令，但同样属于本步骤的核心操作）：
 
 ```bash
-./mcp/uninstall.sh                     # 一键卸载所有 6 个 mcp（默认只清 Claude Code）
+./mcp/uninstall.sh                     # 一键卸载所有 12 个 mcp（默认只清 Claude Code）
 ./mcp/uninstall.sh <name>              # 只卸载指定 mcp
 ./mcp/uninstall.sh --client codex      # 卸载 + 同时清 Codex 注册
 ./mcp/uninstall.sh --client all        # Claude Code + Codex 双清理
@@ -56,7 +62,7 @@
    - 通过 `.icode-skill-owner.json` 区分受管技能；同内容旧副本可接管，不同内容的未托管同名技能会在任何写入前拒绝
    - 安装后校验发布 hash，并确保 ICODE 内没有可发现的嵌套技能入口
 4. 未指定公开 `--basic`（即内部未传 `--skip-mcp`）时，根安装器再调用已安装 ICODE 内的 `mcp/install.sh`；该脚本会：
-   - 扫描 `mcp/*/install.sh`（含 6 个声明的子工程，**新加 mcp 自动被识别**）
+   - 扫描 `mcp/*/install.sh`（含 12 个声明的子工程，**新加 mcp 自动被识别**）
    - 逐个 `bash <子工程>/install.sh`，每个子工程 install.sh 自带：
      - 环境探测（Python/Node/npx/uv 等）
      - **缺啥补啥**（如 vision-bridge 建 venv；npm 类懒加载）
@@ -96,7 +102,7 @@
 - **vision-bridge 未配置时 fallback 提示**
   - **症状**：vision-bridge 装完没填 config.json 时，工具调用返回 fallback 字符串，AI 不会自动处理图片/视频
   - **解决**：编辑 `~/.claude/skills/icode/mcp/vision-bridge/config.json` 填三件套
-  - **降级**：AI 按 session 模型原生能力处理（user 自负其责）
+  - **降级**：按 `references/media_routing.md` 路由；仅宿主已证明多模态时走 native，否则降级 `text_only` 并记录视觉缺口
 
 ## 验收标准
 
@@ -131,13 +137,15 @@
 
 ## 卸载时机
 
-卸载 6 个 mcp 用 `mcp/uninstall.sh`（顶层脚本）。**注意**：
+卸载 12 个 mcp 用 `mcp/uninstall.sh`（顶层脚本）。**注意**：
 - 移除 `~/.claude.json` 注册项（经共享模块 `claude_registry.unregister`，同时清理 `~/.claude/icode_data/mcp_entries/<name>.json` 导出）
 - `--client codex|all` 时同时 `codex mcp remove <name>`（未注册幂等跳过）
-- vision-bridge 不删 `.venv`（要彻底清用 `--purge`，待 vision-bridge 升级时支持）
+- vision-bridge 默认不删安装目录与 `.venv`；要彻底清理安装 target 使用其 `uninstall.sh --purge`（源码仓不删）
 - npm/uv 缓存系统级保留（不删，下次装仍可用）
 ## MCP 推荐
 
-本步骤为 **L0（确定性执行，不强制思考）**（见 [references/mcp_per_step.md](../references/mcp_per_step.md)「通用前置·分级思考」段）：安装脚本 + 配置校验，无 LLM 分析子任务，不调用 sequential-thinking。其他 5 个 MCP 本步骤不推荐。
+本步骤为 **L0（确定性执行，不强制思考）**（见 [references/mcp_per_step.md](../references/mcp_per_step.md)「通用前置·分级思考」段）：安装脚本 + 配置校验，无 LLM 分析子任务，不调用 sequential-thinking。除下述健康/策略复检外，其余 MCP 本步骤不调用。
+
+`icode-mcp-health` 与 `icode-mcp-policy` 是本步骤的条件后端：安装完成后的新会话可用前者做 manifest/入口复检、用后者校验路由真源；当前安装进程仍以 shell 契约测试和 JSON/语法检查完成首次验收，不能反向依赖“刚注册但尚未热加载”的 MCP。
 
 **强制约束**：🟢/🟢*/⚪ 语义 + 双保险机制（执行步骤内嵌 + thinking_core gate）详见 [SKILL.md「MCP 调用覆盖强制化」](../SKILL.md) + [references/mcp_per_step.md「双保险机制」](../references/mcp_per_step.md)；本步骤表内的 🟢/🟢* 标注按上方真源判定。

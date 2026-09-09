@@ -18,7 +18,8 @@
 
 1. 执行目录管理中的「检测最新目录」逻辑，确定 `ICODE_OUT_DIR`
 2. 读取 `.ico_metadata.json`
-3. 输出状态摘要：
+3. 运行 `python3 tools/icode_control.py trace --dir {ICODE_OUT_DIR} --limit 10`；成功时把开放 step/operation 与最近轨迹并入摘要，失败时明确标「执行轨迹不可验证」，不得用猜测补齐。
+4. 输出状态摘要：
 
 ```
 最新工单: .icode_output_N (ticket_id)
@@ -34,6 +35,7 @@ worktree: {worktree_path 字段读取方式：读 metadata.active_checkout（缺
 已完成: {completed_steps 链路，如 log -> 1 -> 2 -> 3 -> 4}
 下一步: {根据续跑判定规则推断，如 "/icode deepcheck (步骤5复检)"}
 代码文件: {code_files 列表，无则"未编码"}
+执行轨迹: {open_steps/open_operations；最近 step/gate/operation/state 事件与 duration/result/route 摘要；均空显示"尚未接入执行回执（legacy-untracked）"}
 索引工单: {全局索引 tickets 数} 条（stale: {stale=true 条数} 条 / disproved: {verdict=disproved 条数} 条）（用 `json.load` 全量解析 `~/.claude/icode_data/index.json` 的 `tickets` 数组取长度并统计 stale=true / verdict=disproved 数，禁止按行截断--「前 50 行」仅适用于 project_docs 章节）
 ```
 
@@ -50,8 +52,8 @@ worktree: {worktree_path 字段读取方式：读 metadata.active_checkout（缺
 | `deepcheck_in_progress` / `deepcheck_done` | 步骤5 复检中 / 完成 |
 | `completed` | 步骤6 终审完成（终态） |
 
-4. 若无 `.icode_output_N` 目录，输出提示："未找到工单目录，请先运行 /icode start/init/log"
-5. **debug 工单隔离**（详 [references/debug_mode.md](../references/debug_mode.md)）：本模式默认**只看正常工单**——`ls .icode_output/.icode_output_*` 仅匹配正常目录，天然排除 `.icode_output/.debug/.icode_output_*`。**debug 工单不入本模式的查询范围**。如需查 debug 工单，手动 `ls .icode_output/.debug/` 或直接 `cd .icode_output/.debug/.icode_output_N/` + Read `.ico_metadata.json`
+5. 若无 `.icode_output_N` 目录，输出提示："未找到工单目录，请先运行 /icode start/init/log"
+6. **debug 工单隔离**（详 [references/debug_mode.md](../references/debug_mode.md)）：本模式默认**只看正常工单**——`ls .icode_output/.icode_output_*` 仅匹配正常目录，天然排除 `.icode_output/.debug/.icode_output_*`。**debug 工单不入本模式的查询范围**。如需查 debug 工单，手动 `ls .icode_output/.debug/` 或直接 `cd .icode_output/.debug/.icode_output_N/` + Read `.ico_metadata.json`
 
 ## 模式二：verdict 手动标注（`/icode status --verdict ...`）
 
@@ -203,6 +205,6 @@ python3 tools/verification_debt.py pending \
 默认只读模式、`--scan`、`--validate` 与 `--pending` 为 **L0（确定性执行，不强制思考）**。`--verdict` 标注模式是结构化字段写入（非思考/审查/编码），同样为 **L0**，但须遵守本文件「反偷懒」约束。
 ## MCP 推荐
 
-默认只读模式不调用 sequential-thinking；`--scan` 批量扫描是**零 LLM** 信号词匹配（见上方「模式三」步骤 3，不调 cheap-research `extract`）；`--validate` 纯机器校验；其余 5 个 MCP 不推荐。
+默认只读模式不调用 sequential-thinking；`--scan` 批量扫描是**零 LLM** 信号词匹配（见上方「模式三」步骤 3，不调 cheap-research `extract`）；`--validate` 纯机器校验；其余 MCP 按路由真源判定，不默认调用。
 
 **强制约束**：🟢/🟢*/⚪ 语义 + 双保险机制（执行步骤内嵌 + thinking_core gate）详见 [SKILL.md「MCP 调用覆盖强制化」](../SKILL.md) + [references/mcp_per_step.md「双保险机制」](../references/mcp_per_step.md)；本步骤表内的 🟢/🟢* 标注按上方真源判定。

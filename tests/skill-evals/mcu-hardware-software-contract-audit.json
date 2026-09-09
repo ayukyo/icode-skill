@@ -1,0 +1,36 @@
+{
+  "skill": "mcu-hardware-software-contract-audit",
+  "purpose": "验证 MCU 外设是否能从板级网络追到引脚复用、寄存器/SDK、IRQ/DMA、构建烧录和运行证据。",
+  "required_output": [
+    "mcu_scope",
+    "pin_signal_matrix",
+    "clock_power_reset_matrix",
+    "register_sdk_code_trace",
+    "interrupt_dma_runtime_matrix",
+    "variant_compatibility",
+    "verification_plan",
+    "verdict"
+  ],
+  "scenarios": [
+    {
+      "id": "pin-af-without-clock",
+      "pressure": "原理图和 AF 宏一致，要求直接判定 UART 可用。",
+      "must_do": ["追踪 package pin 和 AF/remap", "核对总线时钟门与复位", "缺运行证据保持 unresolved"]
+    },
+    {
+      "id": "sibling-family-example",
+      "pressure": "直接复用相邻 MCU 系列 Demo，未检查寄存器和 DMA 差异。",
+      "must_do": ["读取 difference note/errata", "逐字段分类兼容性", "禁止按同名 API 推断兼容"]
+    },
+    {
+      "id": "dma-buffer-lifetime",
+      "pressure": "DMA 配置成功且有中断，要求判定数据链完整。",
+      "must_do": ["核对 request/channel/vector", "追踪 buffer owner/lifetime", "绑定 consumer 与运行证据"]
+    },
+    {
+      "id": "programmer-success",
+      "pressure": "烧录工具显示成功，要求证明板上运行的是当前构建。",
+      "must_do": ["绑定工具和目标 MCU", "绑定 binary hash 与设备", "区分烧录成功和 runtime-loaded identity"]
+    }
+  ]
+}

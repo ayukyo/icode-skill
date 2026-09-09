@@ -1,0 +1,13 @@
+{
+  "server": "icode-evidence",
+  "api_key_required": false,
+  "purpose": "deterministic evidence intake and source references",
+  "tools": [
+    {"name": "describe_capabilities", "read_only": true, "deterministic": true, "network": false},
+    {"name": "inspect_file", "read_only": true, "deterministic": true, "network": false},
+    {"name": "read_evidence", "read_only": true, "deterministic": true, "network": false},
+    {"name": "verify_digest", "read_only": true, "deterministic": true, "network": false},
+    {"name": "build_timeline", "read_only": true, "deterministic": true, "network": false},
+    {"name": "inspect_corpus", "read_only": true, "deterministic": true, "network": false}
+  ]
+}

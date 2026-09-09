@@ -15,6 +15,16 @@
   "_model_doc": "你平台提供的视觉模型名 (从你平台文档『支持图片/视频理解的模型』列表里挑)。",
   "model": "",
 
+  "_capabilities_doc": "只填写已经用本地 eval 验证的能力；未知就保持空数组，不按模型名猜测。可选值: ocr/small_text/table/diagram/schematic/spatial_reasoning/multi_image/video。",
+  "profile_version": "unverified",
+  "declared_capabilities": [],
+  "quality_profile": {
+    "evaluation_status": "unverified",
+    "max_images": null,
+    "max_pixels": null,
+    "notes": ""
+  },
+
   "_timeout_doc": "可选: HTTP 超时秒, 默认 120",
   "timeout": 120,
 

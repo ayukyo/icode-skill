@@ -3,7 +3,7 @@
   "doc": "cheap-research gate 机器真源。文档只解释语义，阈值一律从本文件读取，禁止在 step 文档/脚本中各自写一套常量。condition 字段供人审与测试锚点；第一版验证器用显式分支计算 eligibility，不引入通用表达式解释器。",
   "constants": {
     "long_text_threshold_bytes": 8192,
-    "max_input_bytes_per_call": 65536,
+    "max_input_bytes_per_call": 8000,
     "dedup_min_functions": 50,
     "tb_comment_extract_min": 8,
     "merge_min_rounds": 2

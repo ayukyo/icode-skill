@@ -109,7 +109,7 @@ echo ""
 if command -v ffmpeg >/dev/null 2>&1; then
   echo "✅ ffmpeg 已安装 ($(ffmpeg -version 2>&1 | head -1))"
 else
-  echo "⚠️ ffmpeg 未安装。视频分析将无法本地提取关键帧（会直接传视频给 vision-bridge 耗费 API 额度）"
+  echo "⚠️ ffmpeg 未安装。视频分析不可用；vision-bridge 不会绕过本地抽帧直接上传视频。"
   echo "   安装方法:"
   echo "     • sudo apt install ffmpeg          # Debian/Ubuntu"
   echo "     • brew install ffmpeg              # macOS"

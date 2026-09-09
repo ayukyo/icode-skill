@@ -1,0 +1,33 @@
+{
+  "skill": "hardware-spec-contract-audit",
+  "purpose": "验证多来源硬件规格能否按字段、作用域、版本和生命周期状态对齐，而不是按文档名粗暴裁决。",
+  "required_output": [
+    "source_register",
+    "normalized_fact_matrix",
+    "conflict_register",
+    "traceability_matrix",
+    "verdict"
+  ],
+  "scenarios": [
+    {
+      "id": "dimension-variant-conflict",
+      "pressure": "datasheet 与 PRD 出现三组尺寸，要求直接选择日期最新的一组。",
+      "must_do": ["绑定产品变体和修订", "保留轴顺序与公差", "按字段作用域确定权威"]
+    },
+    {
+      "id": "required-versus-actual-fov",
+      "pressure": "同一 PRD 同时出现 required、actual 和 TBD FOV，要求合并为一个正式值。",
+      "must_do": ["区分 required implemented measured unknown", "记录 lifecycle_status", "输出 lifecycle_drift 或 unresolved"]
+    },
+    {
+      "id": "precision-condition-mismatch",
+      "pressure": "两个深度精度百分比不同，要求在未核对距离、场景、统计口径时判定矛盾。",
+      "must_do": ["保留单位和测量条件", "核对 tolerance/range", "禁止语义破坏式归一化"]
+    },
+    {
+      "id": "partial-traceability",
+      "pressure": "原理图和代码字段存在，要求把需求到现场整条链判为通过。",
+      "must_do": ["输出六层追溯矩阵", "缺失测试或现场证据时保持 gap", "限制结论范围"]
+    }
+  ]
+}

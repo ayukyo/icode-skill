@@ -3,7 +3,7 @@ name: icode
 description: 端到端编码工作流（步骤 0~6，含需求初稿、日志根因、验证与学习入口），支持：/icode help, install [--basic|--preview], init, log, start, fast, plan, review, merge, code, deepcheck, audit, patch, verify [--plan|--deploy|--listen|--test|--reuse], doc, limit, readme, ppt, learn [--project|--ticket|--since], status [--pending|--scan|--verdict], list [--all|--plain], bak, worktree --update/--close/--reopen/--merge。新建工单入口支持 --worktree opt-in
 ---
 
-**版本**: v2.20.0
+**版本**: v2.21.0
 
 # ICode 全流程编码工作流（步骤 0 + 1~6）
 
@@ -64,9 +64,9 @@ description: 端到端编码工作流（步骤 0~6，含需求初稿、日志根
 
 ## 控制面（工单 schema v3，vNext）
 
-**新工单一律 schema v3**，经 `tools/icode_control.py create` 原子创建 metadata+出生事件；状态流转、普通 metadata、事件链、验证记录、索引、迁移、归档校验、关闭与重开由控制面统一执行，**禁止绕过直写**。文中凡称“写/更新/追加 metadata”，除已明确指定专用命令的控制字段外，均指调用 `metadata-update --set-json/--append-json`，不是自行读改写 JSON。机器真源：状态机 = [mcp/workflow-gate/gates.json](mcp/workflow-gate/gates.json)；数据 schema = [schemas/](schemas/)；执行器子命令 = `create/resolve-ticket/validate/event/transition/metadata-update/index-write/index-update/migration/record-verification/archive-manifest/close-phase/reopen/snapshot`。完整契约见 [references/control_plane.md](references/control_plane.md)。legacy 工单只读，变更前必须显式迁移。
+**新工单一律 schema v3**，经 `tools/icode_control.py create` 原子创建 metadata+出生事件；状态、metadata、事件、步骤端口/边界回检/回执、验证、索引与关闭均由控制面执行，**禁止绕过直写**。文中凡称“写/更新/追加 metadata”，除专用控制字段外，均指 `metadata-update`。机器真源：[mcp/workflow-gate/gates.json](mcp/workflow-gate/gates.json) + [schemas/](schemas/)；执行器含 `step/artifact/operation/policy/trace` 等子命令。完整契约见 [references/control_plane.md](references/control_plane.md) 与 [references/execution_model.md](references/execution_model.md)。legacy 工单只读，变更前须迁移。
 
-嵌入式/摄像头项目不增加公开命令：既有 `log/plan/code/deepcheck/audit/verify` 按 [共享技能路由](references/skill_routing.md)加载领域能力；`tools/embedded_profile.py` 只读校验工单内 baseline 并生成量化验证合同，任何硬件写入或故障注入仍需显式授权。
+嵌入式、摄像头、技术文档、原理图与 MCU 项目不增加公开命令：既有 `log/plan/code/deepcheck/audit/verify` 按 [共享技能路由](references/skill_routing.md)加载领域能力；`tools/embedded_profile.py` 只读生成量化验证合同，`tools/document_intake.py` 只读检查异构文档/归档的真实类型、结构、hash、风险和覆盖，`tools/media_router.py` 根据宿主证明选择 `native/bridge/dual/text_only` 并生成视觉证据来源。受保护资料不会被绕过，SDK/工具不会因摄取而执行，任何硬件写入、故障注入或测量仍需显式授权。
 
 ## 使用流程示例
 
@@ -250,9 +250,9 @@ test -f "{ICODE_OUT_DIR}/03_plan_final.md" && python3 -c "import json,sys; d=jso
 
 ## MCP 调用覆盖强制化（锚点保留，内容已迁移）
 
-> MCP 分级语义（🟢/🟢*/⚪）、双保险机制、每步骤推荐表、分级思考 L0-L3、cheap-research 覆盖门 全部收敛到 [references/mcp_per_step.md](references/mcp_per_step.md) + [references/mcp_integration.md](references/mcp_integration.md) + [references/thinking_core.md](references/thinking_core.md)（真源）。标题保留为锚点。
+> MCP 分级语义（🟢/🟢*/⚪）、双保险机制、每步骤推荐表、分级思考 L0-L3、cheap-research 覆盖门 全部收敛到 [references/mcp_per_step.md](references/mcp_per_step.md) + [references/mcp_integration.md](references/mcp_integration.md) + [references/thinking_core.md](references/thinking_core.md)（真源）。6 个 ICODE 本地 MCP 的 step→server/tool/operation 机器真源为 [mcp/icode-mcp-policy/policy.json](mcp/icode-mcp-policy/policy.json)，不新增公开 `/icode` 命令。标题保留为锚点。
 
-> 锚点保留小节：`MCP 调用覆盖强制化` / `MCP 工具集` / `cheap-research 14 工具会话内缓存` / `降级标签格式规范` / `工具调用模式规范`
+> 锚点保留小节：`MCP 调用覆盖强制化` / `MCP 工具集` / `cheap-research 15 工具会话内缓存` / `降级标签格式规范` / `工具调用模式规范`
 
 ---
 
@@ -310,8 +310,9 @@ test -f "{ICODE_OUT_DIR}/03_plan_final.md" && python3 -c "import json,sys; d=jso
 | [references/adversarial.md](references/adversarial.md) | 对抗分析模式（3质疑者/裁决优先级/诚实降级/证据回指） | 02_review / log |
 | [references/skill_routing.md](references/skill_routing.md) | **共享 SKILL 懒路由**：按机器路由表判触发、准备输入合同、消费输出合同；无命中不加载 | log / plan / code / deepcheck / audit / verify / learn |
 | [references/evidence_and_verification.md](references/evidence_and_verification.md) | **证据与验证习惯真源**：现场事实、主代理复核、无日志反查、多 Git 根、诊断/实现/验证分层 | log / plan / deepcheck / audit / verify |
+| [references/media_routing.md](references/media_routing.md) | **媒体能力路由真源**：文本优先、宿主能力证明、native/bridge/dual/text_only、分块与视觉证据来源 | init / log / plan / deepcheck / audit / verify（存在图片/视频/PDF 视觉区域时） |
 | [references/host_adapters.md](references/host_adapters.md) | Claude Code / Codex 宿主工具适配；共享技能正文禁止绑定具体工具语法 | 共享 SKILL 被路由时 |
-| [references/control_plane.md](references/control_plane.md) | **工单控制面（schema v3）**：状态机/事件链/索引单一 writer/迁移/关闭分阶段/降级路径；执行器 `tools/icode_control.py`，真源 `mcp/workflow-gate/gates.json`「state_machine」 | 所有 step（状态写回点 / index-write / close / verify） |
+| [references/control_plane.md](references/control_plane.md) + [references/execution_model.md](references/execution_model.md) | **工单控制面 + 可恢复执行**：状态机/事件链/端口/边界回检/轨迹/副作用策略/回执/关闭 | 所有 ticket-scoped step |
 | [references/dir_and_metadata.md](references/dir_and_metadata.md) | 目录管理（创建新目录含**硬熔断①②**：建前 test -d + 建后 ls -A 验证 + **硬熔断③工作区根校验**，禁手写目录号/echo 伪确认）+ ticket_id 生成 + 全局索引写入（含LRU淘汰） + metadata 模板 + **过时校验（含 worktree 归档工单**：archive_path 有效→archived 活跃态读档历史参考，正常续期；**含 `/icode bak` 备份工单**：backup_path 有效→backup 活跃态读档历史参考，工程优先→备份兜底） + **注入缓存机制（防重复注入，两源共用）** + **project_docs 工程文档库 + 段零检索** | init / log / plan / start / fast / doc / bak |
 | [references/doc_template.md](references/doc_template.md) | icode doc 章节模板：前 50 行四块结构（项目元信息/KEYS/简要说明/目录）+ 十位桶编号 + 自适应 grep 关键词表 + 99 章审计策略 + **v2.0.0 双视角必含元素清单（14 项）+ 业务流独立成章 + 英文首次中文备注 + 链路中文说明 + 质量审视检查清单 + 模板版本自举迁移** | doc |
 | [references/necessity_check.md](references/necessity_check.md) | **现有功能覆盖度检查（防重复实现机制）**：触发时机 + 执行命令（全工程检索 + Read 命中处行为链）+ 三类判定（已覆盖/部分/未覆盖）+ 各步骤落点（init §2.X/预筛列、plan 前置/断言/ADR/对抗、review 维度7、deepcheck Reverse 对比、audit 视角 C） | init / plan / review / deepcheck / audit |

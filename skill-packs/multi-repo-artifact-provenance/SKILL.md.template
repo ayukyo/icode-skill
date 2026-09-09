@@ -1,6 +1,6 @@
 ---
 name: multi-repo-artifact-provenance
-description: Use when software is built from multiple Git roots, manifests, worktrees, modules, packages, architectures, devices, or A/B slots and a build, copy, version string, or clean parent repository is being used to claim the deployed runtime is correct.
+description: Use when software, firmware, vendor SDKs, programmer packages, toolchains, Git roots, manifests, worktrees, modules, architectures, devices, or A/B slots must be bound to the exact build and runtime rather than trusted from a package name or version string.
 ---
 
 # Multi-Repo Artifact Provenance
@@ -16,38 +16,57 @@ Prove, for every required module, the identity chain from repository commit thro
 - A package-level version cannot identify each module in a mixed package.
 - A successful copy proves transfer completion, not target architecture, slot, install path, restart, or runtime loading.
 - Source modification time and embedded strings are hints; prefer commit, cryptographic hash, build ID, package manifest, and runtime load evidence.
+- A vendor archive, download filename, checksum sidecar, or bundled executable is acquisition evidence, not proof of license compatibility, supported MCU/board family, host platform, compiler ABI, project adoption, or runtime use.
 
 ## Procedure
 
-### 1. Fix build identity
+### 1. Fix source-package identity
+
+For each vendor SDK/tool package record acquisition source, archive hash, checksum/signature sidecar and verification result, package version, release date, license location/status, supported product family, host platform/architecture, required IDE/compiler/debugger/programmer, nested package identity, and intake risk status. Do not execute discovered tools during provenance intake.
+
+### 2. Fix build identity
 
 Record build invocation, product or target, architecture, toolchain, absolute build root, working directory, timestamp, manifest or superproject revision, cache policy, and expected module set. Verify compile or build metadata points to the intended checkout.
 
-### 2. Resolve every Git root
+### 3. Resolve every Git root
 
 For every required repository record absolute path, expected manifest pin, actual commit, branch or detached state, dirty state, remote, and relationship to runtime, analysis, and verification baselines. Do not collapse modules that share a package.
 
-### 3. Bind source to artifacts
+### 4. Bind source to artifacts
 
 For every module record build input root, output path, filename, format, architecture, hash, build ID, debug/version metadata, and build-log evidence. Verify packaging consumes this exact output rather than a historical staging path.
 
-### 4. Inspect package members
+### 5. Inspect package members
 
 Record package name and hash, member path, member hash/build ID, expected module and destination. A matching outer package name or version does not override a mismatched member.
 
-### 5. Bind deployment and runtime
+### 6. Bind deployment and runtime
 
 Resolve physical-device identity, exact deploy and verification time window, target path, symlink, slot, permissions, device-side hash/build ID, process restart, and actual runtime-loaded executable/library. Where possible inspect the running process, loader map, startup manifest, or module self-report.
 
-### 6. Classify mismatches
+### 7. Prove project adoption and compatibility
 
-Classify each difference as `repo_mismatch`, `wrong_build_root`, `stale_artifact`, `package_member_mismatch`, `wrong_architecture`, `wrong_target`, `wrong_slot`, `device_file_mismatch`, `runtime_not_reloaded`, or `unresolved`.
+Trace which vendor package files, startup code, linker scripts, CMSIS/device headers, libraries, programmer configuration, and generated sources the project actually consumes. Record compiler/IDE version, ABI/options, target MCU/package, board revision, local modifications, patch provenance, license constraints, and the smallest build/runtime discriminator. Merely storing or unpacking an SDK is not adoption.
 
-### 7. Set verdict per module and aggregate
+### 8. Classify mismatches
+
+Classify each difference as `vendor_package_mismatch`, `checksum_mismatch`, `unsupported_product_family`, `toolchain_or_abi_mismatch`, `license_unresolved`, `package_not_adopted`, `repo_mismatch`, `wrong_build_root`, `stale_artifact`, `package_member_mismatch`, `wrong_architecture`, `wrong_target`, `wrong_slot`, `device_file_mismatch`, `runtime_not_reloaded`, or `unresolved`.
+
+### 9. Set verdict per module and aggregate
 
 Allowed module states are `proven`, `mismatch`, and `unresolved`. The aggregate can be `proven` only when every required module is proven. One mismatched or unresolved required module prevents a deployment-correct verdict.
 
 ## Required output contract
+
+### `vendor_package_matrix`
+
+| Package/tool | Acquisition source | Archive hash | Checksum/signature | Version/date | License | Product family | Host/toolchain compatibility | Intake risks | Status |
+|---|---|---|---|---|---|---|---|---|---|
+
+### `toolchain_compatibility`
+
+| Component | Required IDE/compiler/debugger/programmer | Observed version/platform/ABI | Project-consumed files/config | Local modifications | Evidence | Status |
+|---|---|---|---|---|---|---|
 
 ### `build_identity`
 
@@ -84,3 +103,4 @@ State aggregate `proven`, `mismatch`, or `unresolved`; list per-module results, 
 - Comparing device files without checking architecture, install slot, symlinks, and the loaded process.
 - Treating compile success, scp success, or a startup string as deployment proof.
 - Rebuilding from a different worktree and assuming the artifact still represents the analyzed code.
+- Treating a vendor SDK archive as adopted because it exists locally, or running an installer to discover what it supports.

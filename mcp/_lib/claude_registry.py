@@ -1,6 +1,6 @@
 """Claude Code MCP 注册共享模块（原子写 + 损坏保护 + 回读校验 + entry 导出）。
 
-6 个子工程的 register_mcp.py 共用，消除「各自直接读写 ~/.claude.json」的重复与隐患：
+各 MCP 子工程的注册脚本共用，消除「各自直接读写 ~/.claude.json」的重复与隐患：
 - 原子写：写 .tmp 后 os.replace，中途崩溃不损坏原文件；
 - 损坏保护：~/.claude.json 解析失败/非对象时备份原文件、停止并报错，绝不覆盖；
 - 回读校验：写后重读比对 command/args/env/cwd，不一致即报错（防静默写坏）；

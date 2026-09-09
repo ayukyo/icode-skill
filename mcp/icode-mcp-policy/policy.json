@@ -1,0 +1,100 @@
+{
+  "version": 1,
+  "default": "deny",
+  "servers": {
+    "icode-evidence": {
+      "operations": ["read"],
+      "tools": ["describe_capabilities", "inspect_file", "read_evidence", "verify_digest", "build_timeline", "inspect_corpus"]
+    },
+    "icode-workspace": {
+      "operations": ["read"],
+      "tools": ["describe_capabilities", "inspect_workspace", "inspect_repo_matrix", "inspect_build_inputs", "inspect_artifact"]
+    },
+    "icode-device-observe": {
+      "operations": ["read"],
+      "tools": ["describe_capabilities", "list_profiles", "observe_device", "collect_log_window", "compare_artifact"]
+    },
+    "icode-mcp-health": {
+      "operations": ["read"],
+      "tools": ["describe_capabilities", "inventory_servers", "validate_manifest", "probe_python_server", "scan_sensitive_payload"]
+    },
+    "icode-mcp-policy": {
+      "operations": ["read"],
+      "tools": ["describe_capabilities", "list_step_policy", "evaluate_call", "validate_policy"]
+    },
+    "icode-local-index": {
+      "operations": ["read", "managed_index_write"],
+      "tools": ["describe_capabilities", "build_index", "query_index", "index_status"]
+    }
+  },
+  "steps": {
+    "init": [
+      {"server": "icode-local-index", "condition": "已有索引或仓库超过 500 个文本文件", "required": false},
+      {"server": "icode-workspace", "condition": "多 Git 根或来源不明", "required": false}
+    ],
+    "log": [
+      {"server": "icode-evidence", "condition": "存在日志或附件证据", "required": true},
+      {"server": "icode-device-observe", "condition": "需要读取设备现状或日志", "required": false},
+      {"server": "icode-local-index", "condition": "日志或源码集合较大", "required": false}
+    ],
+    "plan": [
+      {"server": "icode-workspace", "condition": "需确认仓库/分支/构建来源", "required": true},
+      {"server": "icode-evidence", "condition": "计划引用外部事实或附件", "required": false},
+      {"server": "icode-local-index", "condition": "大型仓库检索", "required": false}
+    ],
+    "review": [
+      {"server": "icode-evidence", "condition": "审查结论引用日志/文档", "required": false},
+      {"server": "icode-workspace", "condition": "审查跨 Git 根或制品", "required": false}
+    ],
+    "merge": [
+      {"server": "icode-workspace", "condition": "合并前检查多仓库状态", "required": true}
+    ],
+    "code": [
+      {"server": "icode-workspace", "condition": "修改跨仓库/构建根", "required": true},
+      {"server": "icode-local-index", "condition": "大型仓库符号候选检索", "required": false}
+    ],
+    "deepcheck": [
+      {"server": "icode-evidence", "condition": "复核证据链", "required": true},
+      {"server": "icode-workspace", "condition": "复核源码/制品来源", "required": true},
+      {"server": "icode-local-index", "condition": "全仓检索超过常规 rg 范围", "required": false}
+    ],
+    "audit": [
+      {"server": "icode-evidence", "condition": "审计结论需要可回指证据", "required": true},
+      {"server": "icode-workspace", "condition": "审计提交/构建/制品来源", "required": true},
+      {"server": "icode-device-observe", "condition": "设备结果进入验收边界", "required": false}
+    ],
+    "readme": [
+      {"server": "icode-evidence", "condition": "README 引用文档或制品事实", "required": false}
+    ],
+    "doc": [
+      {"server": "icode-evidence", "condition": "文档语料入库与 hash 回指", "required": true},
+      {"server": "icode-local-index", "condition": "文档语料超过 50 个文件", "required": false}
+    ],
+    "ppt": [
+      {"server": "icode-evidence", "condition": "幻灯片引用日志/文档/图片来源", "required": false}
+    ],
+    "patch": [
+      {"server": "icode-evidence", "condition": "补丁由新增证据触发", "required": true},
+      {"server": "icode-workspace", "condition": "补丁涉及构建/仓库来源", "required": true},
+      {"server": "icode-device-observe", "condition": "监听或设备复验", "required": false}
+    ],
+    "verify": [
+      {"server": "icode-evidence", "condition": "验证输出需 hash/回指", "required": true},
+      {"server": "icode-workspace", "condition": "验证源码与制品一致性", "required": true},
+      {"server": "icode-device-observe", "condition": "真机验收", "required": false}
+    ],
+    "worktree": [
+      {"server": "icode-workspace", "condition": "任何 worktree 生命周期操作", "required": true}
+    ],
+    "install": [
+      {"server": "icode-mcp-health", "condition": "MCP 安装或升级后", "required": true},
+      {"server": "icode-mcp-policy", "condition": "路由策略安装或升级后", "required": true}
+    ],
+    "learn": [
+      {"server": "icode-local-index", "condition": "仅查询已有索引，不联网补历史", "required": false}
+    ],
+    "list": [
+      {"server": "icode-local-index", "condition": "查询已有本地索引", "required": false}
+    ]
+  }
+}

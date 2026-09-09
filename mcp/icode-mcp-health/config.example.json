@@ -1,0 +1,6 @@
+{
+  "allowed_roots": ["$HOME"],
+  "trusted_server_roots": ["$HOME/.claude/skills/icode/mcp"],
+  "max_servers": 100,
+  "probe_timeout_seconds": 10
+}

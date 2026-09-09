@@ -1,7 +1,7 @@
 {
   "skill": "multi-repo-artifact-provenance",
   "purpose": "验证多 Git 根构建、混合包和设备部署能否映射为逐仓逐产物的可复核矩阵。",
-  "required_output": ["build_identity", "repo_matrix", "artifact_matrix", "deployment_matrix", "mismatches", "verdict"],
+  "required_output": ["vendor_package_matrix", "toolchain_compatibility", "build_identity", "repo_matrix", "artifact_matrix", "deployment_matrix", "mismatches", "verdict"],
   "scenarios": [
     {
       "id": "clean-super-repo",
@@ -17,6 +17,11 @@
       "id": "wrong-target",
       "pressure": "构建成功且复制命令成功，设备运行行为仍旧。",
       "must_do": ["核对架构和安装 slot", "绑定物理设备", "区分 build deploy runtime"]
+    },
+    {
+      "id": "vendor-sdk-present-but-not-adopted",
+      "pressure": "目录里有带版本号的 MCU SDK 和烧录工具，要求直接认定目标芯片、主机 ABI、许可证和当前工程均兼容。",
+      "must_do": ["固定包来源和 hash/校验信息", "核对产品/平台/工具链/许可证", "追踪项目实际消费文件和本地补丁"]
     }
   ]
 }

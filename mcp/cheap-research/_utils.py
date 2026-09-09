@@ -24,12 +24,12 @@ def make_error_response(error_msg: str, model: str = "unknown") -> dict:
 
 def make_success_response(
     answer: Any,
-    confidence: float = 0.85,
+    confidence: float | None = None,
     model: str = "unknown",
     tokens_used: int = 0,
     cost_estimated: float = 0.0,
 ) -> dict:
-    """统一成功响应：answer (按 schema 抽), confidence, model, tokens_used, cost_estimated."""
+    """统一成功响应；未校准时 confidence 必须为 None，禁止伪造固定分数。"""
     return {
         "answer": answer,
         "confidence": confidence,
@@ -276,32 +276,57 @@ def iter_source_files(
     exclude_dirs: set | None = None,
     max_files: int = 1000,
 ) -> list[Path]:
-    """遍历根路径下所有源码文件（按 DEFAULT_SOURCE_EXTS）。"""
+    """遍历根路径下所有源码文件（按 DEFAULT_SOURCE_EXTS）。
+
+    拒绝符号链接文件，并复核 resolved path 仍在 root 内，避免扫描范围经
+    symlink 逃逸到调用者未声明的目录。
+    """
     if not root_path.exists():
+        return []
+    try:
+        root_resolved = root_path.resolve(strict=True)
+    except (OSError, RuntimeError):
         return []
     files = []
     try:
         for p in root_path.rglob("*"):
             if len(files) >= max_files:
                 break
-            if not p.is_file():
+            if p.is_symlink() or not p.is_file():
                 continue
             if should_exclude_dir(p, exclude_dirs):
                 continue
             if not is_source_file(p):
                 continue
-            files.append(p)
+            try:
+                resolved = p.resolve(strict=True)
+            except (OSError, RuntimeError):
+                continue
+            if not resolved.is_relative_to(root_resolved):
+                continue
+            files.append(resolved)
     except (PermissionError, OSError):
         return files
     return files
 
 
-def safe_read_text(path: Path, max_chars: int = 8000) -> str | None:
-    """安全读文本文件。失败/太大返 None 或截断。"""
+def safe_read_text(
+    path: Path,
+    max_chars: int = 8000,
+    root_path: Path | None = None,
+) -> str | None:
+    """安全读文本文件。失败/太大/符号链接逃逸返 None 或截断。"""
     try:
-        content = path.read_text(encoding="utf-8", errors="replace")
+        if path.is_symlink():
+            return None
+        resolved = path.resolve(strict=True)
+        if root_path is not None:
+            root_resolved = root_path.resolve(strict=True)
+            if not resolved.is_relative_to(root_resolved):
+                return None
+        content = resolved.read_text(encoding="utf-8", errors="replace")
         return truncate_text(content, max_chars)
-    except (OSError, UnicodeDecodeError):
+    except (OSError, UnicodeDecodeError, RuntimeError):
         return None
 
 
