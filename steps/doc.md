@@ -7,6 +7,8 @@
 
 > **核心设计哲学**（必须先 Read [references/dir_and_metadata.md](../references/dir_and_metadata.md)「project_docs 工程文档库」段 + [references/doc_template.md](../references/doc_template.md)）：**零配置/零状态/零索引文件**——只有章节 .md，前 50 行四块自带身份证，文件系统即数据库。
 
+> **共享技能路由**：语料接入前读取 [references/skill_routing.md](../references/skill_routing.md)，只加载命中当前资料类型的技能；邮件正文、线程、表格、图片或附件先走 `email-evidence-intake`，再复用文档/媒体/表格/证据/原理图能力。
+
 ## ⚠️ 多分支设计 · 反偷懒强约束（必读，防止误判"覆盖"）
 
 > **本段是 icode-skill doc 步骤对"多分支机制"的统一设计语义说明**——任何 AI 在执行 `/icode doc` 或解释用户"被覆盖"反馈前，**必须先 Read 本段全文**；只读概要不算。后续正文会把每个机制在某一行展开，本段只做**总览 + 索引**。

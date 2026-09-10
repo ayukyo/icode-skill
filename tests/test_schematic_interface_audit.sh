@@ -17,7 +17,7 @@ import json, sys
 manifest = json.load(open(sys.argv[1], encoding="utf-8"))
 routes = json.load(open(sys.argv[2], encoding="utf-8"))
 name = sys.argv[3]
-assert len(manifest["skills"]) == 15
+assert len(manifest["skills"]) == 16
 assert name in {item["name"] for item in manifest["skills"]}
 route = next(item for item in routes["routes"] if item["skill"] == name)
 assert {"log", "plan", "code", "deepcheck", "audit", "verify"} <= set(route["steps"])

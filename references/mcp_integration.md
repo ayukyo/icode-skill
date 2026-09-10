@@ -1,6 +1,6 @@
 # MCP 工具集成与降级路径
 
-> icode 工作流可调用 12 个 MCP（`/icode install` 一键安装）：6 个既有通用/模型辅助 MCP，加 6 个 ICODE 自建免 Key 本地 MCP。**用户可能不装全部**，每个 MCP 都是**可选 + 降级**的。
+> icode 工作流可调用 13 个 MCP（`/icode install` 一键安装）：6 个既有通用/模型辅助 MCP，加 7 个 ICODE 自建免 Key 本地 MCP。**用户可能不装全部**，每个 MCP 都是**可选 + 降级**的。
 >
 > 安装入口：`/icode install`（详见 [steps/install.md](../steps/install.md)）
 >
@@ -19,7 +19,7 @@
 
 ---
 
-## 12 个 MCP 的强证据 + 降级路径
+## 13 个 MCP 的强证据 + 降级路径
 
 ### ① sequential-thinking（**L2/L3 复杂推理依赖**）
 
@@ -74,12 +74,13 @@
 - **触发场景**：以各步骤**正文执行点**为真源（推荐表仅声明、正文无调用的不算入选）——log 阶段2 TB 评论预提取（`extract`，评论 ≥ 8 条）、doc 远程模块 README 拉取（`fetch_remote`）、review dedup 分类/找重复（`extract`）+ 审查输出压缩（`summarize`）、merge 跨轮 review 汇总（`summarize`，>1 轮）、deepcheck Fixed 预扫（`scan_patterns`）+ dedup（`extract`）、audit 仓库事实候选预审（`propose_repo_facts`）+ 计划vs代码差异摘要（`diff_summary`）、patch 阶段工具映射（见 [steps/08_patch.md](../steps/08_patch.md) 338 行）。**init/plan/code/status/readme 无正文执行点**（历史检索/ADR 检索/现状盘点/文件名/模板选择均走确定性机制 Read/rg/规则，`--scan` 零 LLM），标 ⚪。完整清单见 [tools_manifest.json](../mcp/cheap-research/tools_manifest.json)
 - **不接管决策**：所有高风险子任务（3 质疑者对抗 / 架构决策 / 终审裁决 / 修复方案 / 用户对话）一律不交给 cheap-research
 - **新增能力分工边界**：技术文档/压缩包先走 `tools/document_intake.py`，视觉页/原理图先走 `tools/media_router.py` 选择 native/bridge/dual；cheap-research 只可消费其**带 source hash + 页/区域回指的文本化候选**做压缩或结构化提取。它不得自己解析图片/视频/7z，不得裁决管脚复用、电气兼容、时序、MCU/SDK 适配或原理图正确性；这些结论留给对应 SKILL + 主模型复检
+- **邮件隐私边界**：企业邮件正文、地址、HTML、表格、图片、附件、日志及其派生摘要默认不得进入 `cheap-research` 的 `llm` 或 `fetch` 能力。`local` 的确定性工具可处理已经落在授权证据根内且不向外发送的数据；远程研究只能使用与邮件内容分离的公开主题。外发邮件派生内容必须另有明确 provider 与披露范围授权
 - **触发场景详见**：[mcp_per_step.md](mcp_per_step.md) 强证据场景表 + 15 工具入参/出参 schema（见 [mcp/cheap-research/server.py](../mcp/cheap-research/server.py)）
 - **当前状态**：15 工具已在 dev_repo 完成，核心契约测试见 [mcp/cheap-research/tests/](../mcp/cheap-research/tests/)；**未同步到已安装目录**（等用户指令）。历史自检数字不作承诺，以当前 tests/ 实跑为准
 
-### ICODE 自建免 Key 本地 MCP（⑦～⑫）
+### ICODE 自建免 Key 本地 MCP（⑦～⑬）
 
-这 6 个服务不增加公开 `/icode` 命令，只作为现有步骤的条件后端。路由、工具白名单和 operation 权限的机器真源是 [`mcp/icode-mcp-policy/policy.json`](../mcp/icode-mcp-policy/policy.json)；服务缺失或调用失败时退回 `Read/rg/git/file/readelf/ssh/adb/SQLite` 等当前机制，并显式记录降级，不阻断步骤。
+这 7 个服务不增加公开 `/icode` 命令，只作为现有步骤的条件后端。路由、工具白名单和 operation 权限的机器真源是 [`mcp/icode-mcp-policy/policy.json`](../mcp/icode-mcp-policy/policy.json)；服务缺失或调用失败时退回 `Read/rg/git/file/readelf/ssh/adb/SQLite`、已登录网页邮箱或 `.eml/.msg` 离线接入等当前机制，并显式记录降级，不阻断步骤。
 
 | MCP | 核心工具 | 主要步骤 | 硬边界 |
 |---|---|---|---|
@@ -89,6 +90,7 @@
 | `icode-mcp-health` | `inventory_servers` / `validate_manifest` / `probe_python_server` / `scan_sensitive_payload` | install/升级复检/CI | 只诊断 MCP，不进入业务裁决 |
 | `icode-mcp-policy` | `list_step_policy` / `evaluate_call` / `validate_policy` | 新 MCP 调用前与 install | 只回答路由/权限，不代理正文 |
 | `icode-local-index` | `build_index` / `query_index` / `index_status` | init/log/plan/code/deepcheck/doc/learn/list（仅大语料或已有索引） | 源只读，只写受管 SQLite；命中后必须回读原文件，`rg` 始终保留 |
+| `icode-mail-observe` | `list_mailboxes` / `search_messages` / `get_message` / `get_thread` / `save_attachment` | init/log/plan/doc/deepcheck/audit/verify（仅无人值守、邮箱范围搜索或显式 IMAP） | 可选 IMAP 增强：只读选择 + `BODY.PEEK`；显式网页邮件链接默认复用已登录浏览器；无发送/回复/删除/移动/标记/原始命令；唯一写入是受管根内单附件保存 |
 
 `cheap-research` 不依赖也不代理这些服务；仅当其输出过长且原步骤已有 eligible 压缩 gate 时，才可消费保留 source refs 的副本做导航摘要，摘要不能改变事实层结论。
 

@@ -1,0 +1,13 @@
+{
+  "host": "imap.example.com",
+  "port": 993,
+  "username": "user@example.com",
+  "credential_file": "$HOME/.config/icode/mail-observe.secret",
+  "mailbox_allowlist": ["INBOX"],
+  "download_root": "$HOME/.claude/icode_data/mail_attachments",
+  "max_messages": 50,
+  "max_parts": 1000,
+  "max_message_bytes": 26214400,
+  "max_attachment_bytes": 52428800,
+  "timeout_seconds": 15
+}

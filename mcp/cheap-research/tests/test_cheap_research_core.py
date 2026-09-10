@@ -98,6 +98,12 @@ class TestToolRegistry(unittest.TestCase):
         serialized = str(result)
         self.assertNotIn("must-not-leak-secret", serialized)
         self.assertIn("configured", result["answer"]["provider"])
+        boundary = result["answer"]["data_scope_boundary"]
+        self.assertEqual(boundary["corporate_email_remote_default"], "deny")
+        self.assertEqual(
+            boundary["override_requirement"],
+            "explicit_provider_and_disclosure_scope",
+        )
 
     def test_mcp_metadata_present(self):
         for name, tool in server.mcp._tool_manager._tools.items():

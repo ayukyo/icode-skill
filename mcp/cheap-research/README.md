@@ -134,6 +134,8 @@ model:    qwen2.5:7b
 
 session 模型只看工具返回的结构化 dict，**不直接调用 cheap-research 配置的 LLM provider**——但 provider 调用确实发生在本 MCP server 进程内（`config.json` 配置的 base_url/api_key/model），数据出境闸门（`scan_sensitive`）与 `truncation`/`source_digest` 元数据即用于审计该外发路径。
 
+企业邮件正文、地址、HTML、表格、图片、附件、日志及其派生摘要默认不进入 `llm` 或 `fetch` 能力。显式网页邮件链接先由 `email-evidence-intake` 复用已登录浏览器并限定目标阅读窗，再由 `tools/email_intake.py` 固定邮件身份、MIME 覆盖和附件证据；`icode-mail-observe` 只补充无人值守、邮箱范围搜索或显式 IMAP 场景。已经落入授权证据根的数据只能由本 MCP 的确定性 `local` 工具处理。只有与邮件内容分离的公开主题可直接研究；外发邮件派生内容需要用户明确确认 provider 与披露范围。`describe_capabilities` 会返回这一 `data_scope_boundary`，供 ICODE 路由层在调用前检查。
+
 ### 与 ICODE 本地 MCP 的职责边界
 
 `cheap-research` 只负责低成本压缩、候选提取、草稿生成和不可信公网材料抓取。文件身份/时间线、Git/构建来源、设备观测、MCP 健康、步骤路由和持久本地索引分别由 `icode-evidence`、`icode-workspace`、`icode-device-observe`、`icode-mcp-health`、`icode-mcp-policy`、`icode-local-index` 负责。cheap-research 可以压缩它们带来源回指的长输出，但不得代理其工具、去掉回指或把模型摘要升级为证据结论。机器边界见 [tools_manifest.json](tools_manifest.json) 的 `responsibility_boundary`。

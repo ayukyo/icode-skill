@@ -21,7 +21,7 @@
 | **playwright** | deepcheck/audit 步骤 **且** 前端工程（含 .html/.jsx/.tsx/.vue 或 package.json 含 react/vue） | CLI/后端/嵌入式工程 |
 | **memory** | init/plan 步骤 **且** 本工程历史工单数 ≥ 1（`~/.claude/icode_data/index.json` 中本 project_path 工单数 ≥ 1） | 新工程首个工单 / demo |
 | **cheap-research** | log/doc/review/deepcheck/audit/patch 步骤 **且** 命中正文有执行点的候选子任务（TB 评论预提取 / 远程 README 拉取 / dedup 分类找重复 / 审查输出压缩 / Fixed 预扫 / 仓库事实候选 / 差异摘要 / patch 各阶段映射），**或** merge 步骤 **且** 多轮 review（跨轮 issue 合并汇总 summarize，见 [steps/03_merge.md](../steps/03_merge.md)「合并定稿」段；N=1 轮时跳过）——**实际以 [tools_manifest.json](../mcp/cheap-research/tools_manifest.json) 与各步骤正文执行点为真源，推荐表不与正文矛盾**（init/plan/code/status/readme 正文无 cheap-research 调用执行点：历史检索/ADR 检索/现状盘点/文件名/模板选择均走确定性机制 Read/rg/规则，`--scan` 零 LLM 信号词匹配，标 ⚪） | **不接管决策**：3 质疑者对抗 / 架构决策 / 终审裁决 / 修复方案 / 用户对话一律不走；推理敏感度中等的"灰区"也不走（零灰区原则）；install/list/bak 无入选子任务 |
-| **ICODE 本地 MCP 套件** | 先查 [`mcp/icode-mcp-policy/policy.json`](../mcp/icode-mcp-policy/policy.json) 对应 step；route 的 condition 成立且服务在当前宿主可调用时使用。`required=true` 表示条件成立后必须先实际调用，失败才能降级 | 未命中 condition 时不调用；缺失时回退当前确定性工具链并声明降级。`icode-mcp-health` 仅 install/CI，`icode-local-index` 仅大语料或已有索引，`icode-device-observe` 仅真机/fixture 观测 |
+| **ICODE 本地 MCP 套件** | 先查 [`mcp/icode-mcp-policy/policy.json`](../mcp/icode-mcp-policy/policy.json) 对应 step；route 的 condition 成立且服务在当前宿主可调用时使用。`required=true` 表示条件成立后必须先实际调用，失败才能降级 | 未命中 condition 时不调用；缺失时回退当前确定性工具链并声明降级。`icode-mcp-health` 仅 install/CI，`icode-local-index` 仅大语料或已有索引，`icode-device-observe` 仅真机/fixture 观测；普通显式网页邮件链接使用已登录浏览器，`icode-mail-observe` 仅用于无人值守、邮箱范围搜索或用户显式选择 IMAP |
 
 ### ICODE 本地 MCP 步骤路由（摘要）
 
@@ -33,8 +33,11 @@
 | `icode-mcp-health` | install、MCP 升级复检、CI | shell 契约测试 + Inspector 手工复检 |
 | `icode-mcp-policy` | 新本地 MCP 调用前、install | 直接读取 policy.json；无策略则拒绝新增 MCP 调用 |
 | `icode-local-index` | init/log/plan/code/deepcheck/doc/learn/list 的大语料或已有索引 | `rg`；索引 stale 时先回读原文或重建 |
+| `icode-mail-observe` | 仅无人值守、邮箱范围搜索或用户显式选择 IMAP；普通显式网页链接不触发 | 已登录网页邮箱优先，或 `tools/email_intake.py` 解析 `.eml/.msg`；保持缺失线程/附件为 gap |
 
 完整 condition、required 和 tool/operation allowlist 只维护在 `policy.json`，本文不复制全部规则。
+
+邮件正文、地址、HTML、表格、图片、附件、日志及派生摘要默认不得进入 `cheap-research` 的远程 `llm`/`fetch` 能力；其确定性 `local` 工具只可处理授权证据根内的数据。只研究与邮件内容分离的公开主题不受此限制；外发邮件派生内容必须另有明确 provider 与披露范围授权。
 
 **判定执行**：
 

@@ -5,6 +5,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 for path in \
   tools/evidence_intake.py \
+  tools/email_intake.py \
   tools/document_intake.py \
   tools/media_router.py \
   tools/debug_catalog.py \
@@ -47,7 +48,7 @@ import json
 import sys
 
 policy = json.load(open(sys.argv[1], encoding="utf-8"))
-expected = {"icode-evidence", "icode-workspace", "icode-device-observe", "icode-mcp-health", "icode-mcp-policy", "icode-local-index"}
+expected = {"icode-evidence", "icode-workspace", "icode-device-observe", "icode-mail-observe", "icode-mcp-health", "icode-mcp-policy", "icode-local-index"}
 assert set(policy["servers"]) == expected
 assert policy["default"] == "deny"
 assert any(route["server"] == "icode-mcp-health" for route in policy["steps"]["install"])
@@ -74,6 +75,7 @@ fi
 
 python3 -m py_compile \
   "$ROOT/tools/evidence_intake.py" \
+  "$ROOT/tools/email_intake.py" \
   "$ROOT/tools/document_intake.py" \
   "$ROOT/tools/media_router.py" \
   "$ROOT/tools/debug_catalog.py" \

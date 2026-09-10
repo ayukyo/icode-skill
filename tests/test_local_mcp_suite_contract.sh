@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-SERVERS=(icode-evidence icode-workspace icode-device-observe icode-mcp-health icode-mcp-policy icode-local-index)
+SERVERS=(icode-evidence icode-workspace icode-device-observe icode-mail-observe icode-mcp-health icode-mcp-policy icode-local-index)
 
 for name in "${SERVERS[@]}"; do
   dir="$ROOT/mcp/$name"
@@ -20,7 +20,7 @@ import sys
 from pathlib import Path
 
 root = Path(sys.argv[1])
-names = {"icode-evidence", "icode-workspace", "icode-device-observe", "icode-mcp-health", "icode-mcp-policy", "icode-local-index"}
+names = {"icode-evidence", "icode-workspace", "icode-device-observe", "icode-mail-observe", "icode-mcp-health", "icode-mcp-policy", "icode-local-index"}
 for name in names:
     manifest = json.loads((root / "mcp" / name / "tools_manifest.json").read_text())
     assert manifest["server"] == name
@@ -34,5 +34,8 @@ assert {"init", "log", "plan", "code", "deepcheck", "audit", "patch", "verify", 
 device = (root / "mcp" / "icode-device-observe" / "tools_manifest.json").read_text()
 for forbidden in ("arbitrary_command", "deploy", "flash", "reboot", "kill", "write"):
     assert forbidden in device
+mail = (root / "mcp" / "icode-mail-observe" / "tools_manifest.json").read_text()
+for forbidden in ("send_email", "reply", "delete", "move", "copy", "store", "raw_command", "mark_read"):
+    assert forbidden in mail
 print("local MCP suite contract: pass")
 PY

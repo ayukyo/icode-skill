@@ -75,6 +75,11 @@
       "name": "mcu-hardware-software-contract-audit",
       "path": "mcu-hardware-software-contract-audit",
       "entrypoint": "SKILL.md.template"
+    },
+    {
+      "name": "email-evidence-intake",
+      "path": "email-evidence-intake",
+      "entrypoint": "SKILL.md.template"
     }
   ]
 }

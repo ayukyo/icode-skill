@@ -1,0 +1,8 @@
+[project]
+name = "icode-mail-observe-mcp"
+version = "1.0.0"
+requires-python = ">=3.10"
+dependencies = ["mcp>=1.29,<2"]
+
+[project.optional-dependencies]
+outlook-msg = ["extract-msg>=0.56.1,<0.57"]

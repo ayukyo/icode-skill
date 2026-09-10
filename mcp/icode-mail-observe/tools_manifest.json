@@ -1,0 +1,14 @@
+{
+  "server": "icode-mail-observe",
+  "api_key_required": false,
+  "purpose": "read-only IMAP email, thread, and attachment evidence intake",
+  "responsibility_boundary": "Mailbox access is read-only. BODY.PEEK is required. SMTP, EXPUNGE, APPEND, send_email, reply, delete, move, copy, store, raw_command, and mark_read are forbidden.",
+  "tools": [
+    {"name": "describe_capabilities", "read_only": true, "deterministic": true, "network": true},
+    {"name": "list_mailboxes", "read_only": true, "deterministic": false, "network": true},
+    {"name": "search_messages", "read_only": true, "deterministic": false, "network": true},
+    {"name": "get_message", "read_only": true, "deterministic": false, "network": true},
+    {"name": "get_thread", "read_only": true, "deterministic": false, "network": true},
+    {"name": "save_attachment", "read_only": false, "deterministic": false, "network": true, "managed_write": true}
+  ]
+}

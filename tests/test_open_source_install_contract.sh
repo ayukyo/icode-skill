@@ -53,6 +53,7 @@ fi
 BUNDLED_CAPABILITIES=(
   tools/evidence_intake.py
   tools/document_intake.py
+  tools/email_intake.py
   tools/media_router.py
   tools/debug_catalog.py
   tools/runtime_baseline.py
@@ -78,6 +79,7 @@ LOCAL_MCP_SERVERS=(
   icode-evidence
   icode-workspace
   icode-device-observe
+  icode-mail-observe
   icode-mcp-health
   icode-mcp-policy
   icode-local-index
@@ -94,9 +96,9 @@ done
 if "$LOCAL_MCP_OK" \
   && [[ -f "$CLAUDE_ROOT/icode/mcp/_lib/local_mcp_common.py" ]] \
   && [[ -f "$AGENTS_ROOT/icode/mcp/_lib/install_local_python_mcp.sh" ]]; then
-  ok "all-client install bundles six keyless local MCP services and shared runtime"
+  ok "all-client install bundles seven keyless local MCP services and shared runtime"
 else
-  bad "all-client install bundles six keyless local MCP services and shared runtime"
+  bad "all-client install bundles seven keyless local MCP services and shared runtime"
 fi
 
 COMMAND_CONTRACT_OK="$ALL_INSTALLED"

@@ -16,6 +16,7 @@ SERVERS = [
     "icode-evidence",
     "icode-workspace",
     "icode-device-observe",
+    "icode-mail-observe",
     "icode-mcp-health",
     "icode-mcp-policy",
     "icode-local-index",
@@ -45,6 +46,8 @@ class LocalMcpSuiteTest(unittest.TestCase):
             "ICODE_EVIDENCE_CONFIG",
             "ICODE_WORKSPACE_CONFIG",
             "ICODE_DEVICE_OBSERVE_CONFIG",
+            "ICODE_MAIL_OBSERVE_CONFIG",
+            "ICODE_MAIL_OBSERVE_SECRET",
             "ICODE_MCP_HEALTH_CONFIG",
             "ICODE_MCP_POLICY_CONFIG",
             "ICODE_LOCAL_INDEX_CONFIG",
@@ -191,6 +194,10 @@ class LocalMcpSuiteTest(unittest.TestCase):
             if name == "icode-local-index":
                 indexed = {tool["name"]: tool["annotations"] for tool in probe["protocol_tools"]}
                 self.assertFalse(indexed["build_index"]["readOnlyHint"])
+            if name == "icode-mail-observe":
+                mail = {tool["name"]: tool["annotations"] for tool in probe["protocol_tools"]}
+                self.assertFalse(mail["save_attachment"]["readOnlyHint"])
+                self.assertTrue(mail["save_attachment"]["openWorldHint"])
         self.assertFalse(module.scan_sensitive_payload({"api_key": "secret-value"})["answer"]["safe"])
         self.assertTrue(module.scan_sensitive_payload({"api_key": "<redacted>"})["answer"]["safe"])
 
@@ -212,6 +219,10 @@ class LocalMcpSuiteTest(unittest.TestCase):
         self.assertTrue(module.validate_policy()["answer"]["valid"])
         self.assertTrue(module.evaluate_call("log", "icode-evidence", "build_timeline")["answer"]["allowed"])
         self.assertFalse(module.evaluate_call("list", "icode-device-observe", "observe_device")["answer"]["allowed"])
+        self.assertTrue(module.evaluate_call("plan", "icode-mail-observe", "get_message", "read")["answer"]["allowed"])
+        self.assertTrue(module.evaluate_call("plan", "icode-mail-observe", "save_attachment", "managed_evidence_write")["answer"]["allowed"])
+        self.assertFalse(module.evaluate_call("plan", "icode-mail-observe", "get_message", "managed_evidence_write")["answer"]["allowed"])
+        self.assertFalse(module.evaluate_call("plan", "icode-mail-observe", "save_attachment", "read")["answer"]["allowed"])
 
     def test_policy_rejects_malformed_permissions_and_routes(self):
         module = self.modules["icode-mcp-policy"]

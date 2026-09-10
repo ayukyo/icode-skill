@@ -1,0 +1,3 @@
+mcp>=1.29,<2
+# Outlook .msg parsing is optional and is deliberately not forced on MIT users:
+# install "extract-msg>=0.56.1,<0.57" in the chosen offline-intake interpreter.

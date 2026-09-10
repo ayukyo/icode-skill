@@ -42,7 +42,7 @@ cd ~/icode-skill
 
 安装器通过所有权标记管理共享技能：内容一致的旧副本可以无损接管；内容不同的未托管的同名技能会在任何宿主写入前拒绝，不会静默覆盖。运行配置和缓存继续保留。
 
-证据摄取、技术文档文件接入（`tools/document_intake.py`）、媒体路由/证据记录（`tools/media_router.py`）、项目内 debug catalog、三基线解析、验证债务、多仓 handoff 矩阵和 `/icode learn` 属于 **ICODE 内置工具/步骤**：`--client all` 会随 ICODE 本体同时复制到 Claude Code 与 Codex，不作为独立项写入 `skill-packs/manifest.json`。现有 15 个跨项目共享 Skill（含 `technical-document-intake`、`hardware-spec-contract-audit`、`schematic-interface-audit`、`mcu-hardware-software-contract-audit` 及嵌入式/摄像头能力）仍由 manifest 独立安装，并继续使用 ownership/hash 冲突保护。
+证据摄取、邮件导出接入（`tools/email_intake.py`）、技术文档文件接入（`tools/document_intake.py`）、媒体路由/证据记录（`tools/media_router.py`）、项目内 debug catalog、三基线解析、验证债务、多仓 handoff 矩阵和 `/icode learn` 属于 **ICODE 内置工具/步骤**：`--client all` 会随 ICODE 本体同时复制到 Claude Code 与 Codex，不作为独立项写入 `skill-packs/manifest.json`。现有 16 个跨项目共享 Skill（含 `email-evidence-intake`、`technical-document-intake`、`hardware-spec-contract-audit`、`schematic-interface-audit`、`mcu-hardware-software-contract-audit` 及嵌入式/摄像头能力）仍由 manifest 独立安装，并继续使用 ownership/hash 冲突保护。
 
 历史上的 Claude skills 目录直装方式继续兼容。Claude Code 发现 ICODE 后，执行同一个统一命令：
 
@@ -62,7 +62,13 @@ git clone https://github.com/ayukyo/icode-skill ~/.claude/skills/icode
 
 [`mcp/workflow-gate/skill-routes.json`](mcp/workflow-gate/skill-routes.json) 继续声明 ICODE 到共享技能的触发条件与输入/输出合同。可选 MCP 不可用时工作流仍可显式降级，但安装失败不会伪报成功。
 
-嵌入式、摄像头、技术文档、原理图和 MCU 软硬件契约分析继续使用同一组公开工作流命令。可选的 `verification_profile` 与工单内 `embedded_baseline.json` 可由只读计划工具转换为硬件场景和指标阈值；本地 PDF/Office/图片/文本/7z 语料先由 `technical-document-intake` 验证真实类型、结构、归档风险、重复/变体和可读覆盖，再按需路由规格、原理图或 MCU 契约审计。工具不执行 baseline、文档、SDK 或工具包中的字符串/程序，受保护容器须授权导出，硬件写入、测量或破坏性故障注入仍须显式授权。
+嵌入式、摄像头、邮件、技术文档、原理图和 MCU 软硬件契约分析继续使用同一组公开工作流命令。可选的 `verification_profile` 与工单内 `embedded_baseline.json` 可由只读计划工具转换为硬件场景和指标阈值；本地 PDF/Office/图片/文本/7z 语料先由 `technical-document-intake` 验证真实类型、结构、归档风险、重复/变体和可读覆盖，再按需路由规格、原理图或 MCU 契约审计。工具不执行 baseline、邮件、文档、SDK 或工具包中的字符串/程序，受保护容器须授权导出，硬件写入、测量或破坏性故障注入仍须显式授权。
+
+## 可选数据源：只读邮件证据
+
+现有 `init`、`log`、`plan`、`doc`、`deepcheck`、`audit` 或 `verify` 请求包含限定范围的网页邮件链接、线程、`.eml` 或 `.msg` 时，`email-evidence-intake` 先完成批量采集、消息/线程身份、转发引用分段、资源预检、附件路由、分析和完整性门禁，再复用已有媒体、表格、技术文档、日志/时间线、原理图、跨层、来源和现场验证能力；不新增公开命令。显式网页邮件链接默认复用已经登录的浏览器：用户只需登录一次并提供精确链接，ICODE 严格限定到目标邮件阅读窗，通过网页已有入口把邮件原文和所需附件下载到受控证据根，不要求 IMAP 配置。
+
+可选的 `icode-mail-observe` 仅用于无人值守、邮箱范围搜索或没有浏览器的服务器环境，不是普通网页邮件分析的前置条件。其 IMAP 路径只以 `readonly=True` 打开 allowlist 目录，以 `BODY.PEEK[]` 取信，不提供发送、回复、删除、移动、复制、标记已读或原始命令。唯一受管写入是把一个明确选中的附件保存到配置的证据根，并检查路径、大小、hash 和可执行文件。没有可用浏览器时可导出 `.eml`/`.msg`，由 `tools/email_intake.py` 确定性离线接入；用户未选择安装 `extract-msg` 时，Outlook `.msg` 会明确返回可选解析器缺口。接入阶段不加载远程图片/链接；企业邮件及派生内容默认不发给 `cheap-research` 的远程能力。
 
 ## 可选增强：图片/视频理解
 
@@ -91,7 +97,7 @@ cd ~/.claude/skills/icode/mcp/vision-bridge
 
 为降低主会话的 token 消耗，cheap-research 把"长上下文压缩 / 历史检索 / 模板填充 / 结构化提取"等子任务**转交便宜模型**（仍走 `mcp__cheap-research__*` 工具）。**不接管决策**：3 质疑者对抗 / 架构决策 / 终审裁决 / 修复方案一律不交给 cheap-research。
 
-当前共 15 个工具：6 个本地确定性工具、1 个不可信公网抓取工具、8 个可选 LLM 转换工具。会话先调用只读 `describe_capabilities` 获取不含密钥的能力画像，再按 capability 路由；技术文档、视觉页、原理图和硬件契约仍由 document-intake / media-router / 对应 SKILL 处理，cheap-research 只消费带来源回指的文本候选。
+当前共 15 个工具：6 个本地确定性工具、1 个不可信公网抓取工具、8 个可选 LLM 转换工具。会话先调用只读 `describe_capabilities` 获取不含密钥的能力画像，再按 capability 路由；技术文档、视觉页、原理图和硬件契约仍由 document-intake / media-router / 对应 SKILL 处理，cheap-research 只消费带来源回指的文本候选。企业邮件正文、地址、表格、图片、附件、日志及派生摘要默认不得进入远程 `fetch`/`llm` 能力；没有明确 provider 与披露范围授权时，只能研究与邮件内容分离的公开主题。
 
 **入选条件**（单闸门）：价值 ≥ 3 ★ + 低风险，且是**各步骤正文有真实调用点**的子任务（TB 评论预提取 / 远程 README 拉取 / dedup 分类找重复 / 审查输出压缩 / 跨轮汇总 / 差异摘要 / 仓库事实候选等，覆盖 log / doc / review / merge / deepcheck / audit / patch 步骤）；init / plan / code / status / readme 无正文执行点（走确定性机制），标 ⚪。完整清单见 [mcp/cheap-research/tools_manifest.json](mcp/cheap-research/tools_manifest.json)。
 
@@ -124,9 +130,9 @@ python3 tools/lint_mcp_coverage.py <out_dir> --step review --strict
 
 详见 [mcp/cheap-research/README.md](mcp/cheap-research/README.md)。
 
-### 其他 10 个 MCP（4 个通用 + 6 个 ICODE 本地服务）
+### 其他 11 个 MCP（4 个通用 + 7 个 ICODE 本地服务）
 
-除 vision-bridge / cheap-research 外，`/icode install` 还会安装 4 个通用工作流工具和 6 个免 Key 的 ICODE 本地服务：
+除 vision-bridge / cheap-research 外，`/icode install` 还会安装 4 个通用工作流工具和 7 个免 Key 的 ICODE 本地服务：
 
 - **sequential-thinking**——分级思考 reasoning gate 的 L2/L3 载体：复杂修改/重构/重设计前结构化思考 3~5 步（L0/L1 步骤不调用；每步先列本步必调 MCP 再实际调用）
 - **memory**——跨工程知识图谱（`mcp__memory__read_graph`），历史检索/段零注入时唤起，跨会话回看过去工单与工程文档
@@ -138,8 +144,9 @@ python3 tools/lint_mcp_coverage.py <out_dir> --step review --strict
 - **icode-mcp-health**——安装/升级/CI 使用的 MCP manifest、入口与敏感字段健康检查
 - **icode-mcp-policy**——现有步骤到 server/tool/operation 的默认拒绝路由真源
 - **icode-local-index**——大型源码/日志/文档的可重建 SQLite 全文索引，命中仍须回读原文件
+- **icode-mail-observe**——可选的无人值守只读 IMAP 邮件/线程接入；普通网页邮件链接默认使用已登录浏览器
 
-这 6 个本地服务不新增 `/icode` 公开命令，机器路由见 [mcp/icode-mcp-policy/policy.json](mcp/icode-mcp-policy/policy.json)。每个 MCP 都有显式强证据触发条件 + 声明的优雅降级路径（详见 [SKILL.md「MCP 工具集」](SKILL.md)）；缺失任一都不阻断工作流。
+这 7 个本地服务不新增 `/icode` 公开命令，机器路由见 [mcp/icode-mcp-policy/policy.json](mcp/icode-mcp-policy/policy.json)。每个 MCP 都有显式强证据触发条件 + 声明的优雅降级路径（详见 [SKILL.md「MCP 工具集」](SKILL.md)）；缺失任一都不阻断工作流。
 
 ## 快速开始
 

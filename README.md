@@ -6,7 +6,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-Skill-8A2BE2.svg)](SKILL.md)
-[![Version](https://img.shields.io/badge/version-v2.21.0-blue.svg)](SKILL.md)
+[![Version](https://img.shields.io/badge/version-v2.22.0-blue.svg)](SKILL.md)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/ayukyo/icode-skill/issues)
 
 </div>
@@ -135,7 +135,7 @@ Use `./install.sh --dry-run --client all` for a zero-write preflight, or `--skip
 
 The installer writes an ownership marker into managed skills. An identical unmanaged same-name skill is adopted safely; a different unmanaged same-name skill is refused before either host is modified. Runtime configuration and caches are preserved.
 
-Evidence intake, technical-document intake (`tools/document_intake.py`), media routing/evidence (`tools/media_router.py`), the project-local debug catalog, runtime baseline resolution, verification debt, the multi-repo handoff matrix, and `/icode learn` are **bundled ICODE tools/steps**. They are copied with the ICODE directory to both Claude Code and Codex by `--client all`; they are not standalone entries in `skill-packs/manifest.json`. The fifteen reusable cross-project Skills—including `technical-document-intake`, `hardware-spec-contract-audit`, `schematic-interface-audit`, `mcu-hardware-software-contract-audit`, and the embedded/camera capabilities—remain separately installed from that manifest with the same ownership/hash collision protection.
+Evidence intake, email export intake (`tools/email_intake.py`), technical-document intake (`tools/document_intake.py`), media routing/evidence (`tools/media_router.py`), the project-local debug catalog, runtime baseline resolution, verification debt, the multi-repo handoff matrix, and `/icode learn` are **bundled ICODE tools/steps**. They are copied with the ICODE directory to both Claude Code and Codex by `--client all`; they are not standalone entries in `skill-packs/manifest.json`. The sixteen reusable cross-project Skills—including `email-evidence-intake`, `technical-document-intake`, `hardware-spec-contract-audit`, `schematic-interface-audit`, `mcu-hardware-software-contract-audit`, and the embedded/camera capabilities—remain separately installed from that manifest with the same ownership/hash collision protection.
 
 The historical direct-Claude clone remains supported as a compatibility path. After Claude Code discovers ICODE, run the same unified command:
 
@@ -155,7 +155,13 @@ Repository contributors can preview and publish the current checkout without run
 
 [`mcp/workflow-gate/skill-routes.json`](mcp/workflow-gate/skill-routes.json) maps ICODE triggers to shared-skill input/output contracts. Optional MCPs still degrade gracefully when unavailable, but the installer reports their installation failure honestly.
 
-Embedded, camera, technical-document, schematic, and MCU contract work uses the same public workflow commands. A local PDF/Office/image/text/7z corpus is first checked for real format, structure, archive risks, duplicates/variants, and extraction coverage, then routed to scoped spec, schematic, or MCU auditing. Baseline/document/SDK/package content is never executed; protected exports and hardware mutation, measurement, or destructive fault injection retain their authorization boundaries.
+Embedded, camera, email, technical-document, schematic, and MCU contract work uses the same public workflow commands. A local PDF/Office/image/text/7z corpus is first checked for real format, structure, archive risks, duplicates/variants, and extraction coverage, then routed to scoped spec, schematic, or MCU auditing. Baseline/document/email/SDK/package content is never executed; protected exports and hardware mutation, measurement, or destructive fault injection retain their authorization boundaries.
+
+## Optional Data Source: Read-only Email Evidence
+
+When an existing `init`, `log`, `plan`, `doc`, `deepcheck`, `audit`, or `verify` request includes bounded webmail links, a thread, `.eml`, or `.msg`, `email-evidence-intake` builds batch acquisition, message/thread identity, quoted-history coverage, resource preflight, attachment routes, analysis, and a bounded verdict. Explicit webmail links use an already logged-in browser by default: log in once, provide the exact links, and ICODE scopes capture to each target mail reading pane, downloads the original message and requested attachments into a managed evidence root, then reuses the existing media, spreadsheet, technical-document, evidence/timeline, schematic, cross-layer, provenance, and field-verification capabilities. No extra public command or IMAP configuration is required.
+
+`icode-mail-observe` is an optional unattended mailbox adapter for server-side search or runs without a browser; it is not the prerequisite for normal webmail-link analysis. Its IMAP surface selects only allowlisted folders with `readonly=True`, fetches with `BODY.PEEK[]`, and has no send/reply/delete/move/copy/mark/read/raw-command surface. Its sole managed write saves one selected attachment under the configured evidence root after path, size, hash, and executable checks. If no logged-in browser is available, export `.eml`/`.msg`; `tools/email_intake.py` handles deterministic offline intake, with Outlook `.msg` reporting an honest optional-parser boundary when `extract-msg` is not user-installed. Remote images and links are never fetched during intake. Corporate email and derived content are not sent to `cheap-research` remote capabilities by default.
 
 ## Optional Data Source: Pull from DingTalk Docs
 
@@ -191,7 +197,7 @@ cd ~/.claude/skills/icode/mcp/cheap-research
 # restart Claude Code to take effect
 ```
 
-Provides 15 low-risk tools (6 deterministic local tools, 1 untrusted remote fetcher, and 8 optional LLM transforms) for compression, navigation, extraction, and mechanical validation. It **never takes over decisions** — 3-skeptic adversarial verification, architecture decisions, final audit, and fix proposals stay on the main session (zero gray area).
+Provides 15 low-risk tools (6 deterministic local tools, 1 untrusted remote fetcher, and 8 optional LLM transforms) for compression, navigation, extraction, and mechanical validation. It **never takes over decisions** — 3-skeptic adversarial verification, architecture decisions, final audit, and fix proposals stay on the main session (zero gray area). Corporate email text, addresses, images, tables, attachments, logs, and derived summaries are excluded from its remote fetch/LLM capabilities by default; only a separately stated public topic may be researched without explicit provider-and-disclosure approval.
 
 **Coverage check (execution gates)**: each cheap-research call site has a machine-readable gate (`mcp/cheap-research/gates.json`) and a per-ticket trace (`{ICODE_OUT_DIR}/.mcp_gate_trace.jsonl`). Run the validator to confirm every eligible gate was actually fulfilled (or legitimately skipped with structured evidence):
 
@@ -201,9 +207,9 @@ python3 tools/lint_mcp_coverage.py <out_dir> --json       # machine-readable rep
 python3 tools/lint_mcp_coverage.py <out_dir> --step review --strict
 ```
 
-### The Other 10 MCPs (4 general + 6 ICODE-local services)
+### The Other 11 MCPs (4 general + 7 ICODE-local services)
 
-Besides vision-bridge and cheap-research, `/icode install` installs 4 general workflow utilities and 6 API-key-free ICODE-local services:
+Besides vision-bridge and cheap-research, `/icode install` installs 4 general workflow utilities and 7 API-key-free ICODE-local services:
 
 - **sequential-thinking** — the L2/L3 carrier of the tiered reasoning gate: structured 3~5-step thinking before complex / refactor / redesign tasks (L0/L1 steps do not call it; each step lists its required MCPs first, then calls them)
 - **memory** — cross-project knowledge graph (`mcp__memory__read_graph`), recalled during search/injection so past tickets and project docs resurface across sessions
@@ -215,8 +221,9 @@ Besides vision-bridge and cheap-research, `/icode install` installs 4 general wo
 - **icode-mcp-health** — install/upgrade/CI checks for manifests, Python entrypoints, and sensitive fields
 - **icode-mcp-policy** — default-deny step-to-server/tool/operation routing source of truth
 - **icode-local-index** — rebuildable SQLite full-text index for large local corpora; every hit must be verified against the source file
+- **icode-mail-observe** — optional unattended read-only IMAP message/thread intake; ordinary explicit webmail links use the already logged-in browser instead
 
-The six local services add no public `/icode` commands; their machine-readable routing source is [`mcp/icode-mcp-policy/policy.json`](mcp/icode-mcp-policy/policy.json). Each MCP has an explicit strong-evidence trigger and a declared graceful-downgrade path (see [SKILL.md「MCP 工具集」](SKILL.md)); none blocks the workflow when missing.
+The seven local services add no public `/icode` commands; their machine-readable routing source is [`mcp/icode-mcp-policy/policy.json`](mcp/icode-mcp-policy/policy.json). Each MCP has an explicit strong-evidence trigger and a declared graceful-downgrade path (see [SKILL.md「MCP 工具集」](SKILL.md)); none blocks the workflow when missing.
 
 ## Commands
 

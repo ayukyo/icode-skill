@@ -6,11 +6,19 @@
       "icode-evidence": ["file_identity", "source_hash", "timeline", "source_reference"],
       "icode-workspace": ["git_state", "worktree_state", "build_input", "artifact_provenance"],
       "icode-device-observe": ["device_state", "device_log", "device_artifact_hash"],
+      "email-evidence-intake": ["browser_scoped_acquisition", "mail_identity", "mime_coverage", "attachment_evidence"],
+      "icode-mail-observe": ["unattended_mailbox_search", "explicit_imap_acquisition"],
       "icode-mcp-health": ["mcp_schema_health", "sensitive_payload_check"],
       "icode-mcp-policy": ["step_routing", "tool_permission"],
       "icode-local-index": ["persistent_local_search", "index_freshness"]
     },
     "rule": "cheap-research may compress referenced outputs but cannot replace, proxy, or upgrade their evidence conclusions"
+  },
+  "data_scope_boundary": {
+    "corporate_email_remote_default": "deny",
+    "corporate_email_local_deterministic": "allowed_under_authorized_root",
+    "public_topic_separated_from_email": "allowed",
+    "override_requirement": "explicit_provider_and_disclosure_scope"
   },
   "tools": [
     {"name": "describe_capabilities", "capability": "local", "deterministic": true, "outbound": false, "network": false, "truncation_limit": null, "default_max_tokens": null, "role": "capability_discovery", "trust_level": "local_contract", "conclusion_ceiling": "routing_only"},

@@ -9,9 +9,9 @@
 
 `/icode install` 是开源用户的统一安装入口：先安装或更新 ICODE 本体，再按 `skill-packs/manifest.json` 安装全部顶层共享技能，最后安装所选 MCP。新 clone、本机升级、新机器和 CI 初始化均使用同一入口；`mcp/install.sh` 只保留为 MCP 专项维护入口。
 
-**内置能力与独立 Skill 的安装边界**：`tools/evidence_intake.py`、`tools/document_intake.py`、`tools/media_router.py`、`debug_catalog.py`、`runtime_baseline.py`、`verification_debt.py`、`learn.py`、`scripts/submission_guard.py handoff` 及 `steps/learn.md` 都属于 ICODE 本体，随 ICODE 目录一次复制到所选宿主，**不**写入 `skill-packs/manifest.json`。manifest 声明当前 15 个需要在技能根顶层独立发现的跨项目共享 Skill（含 MCU 软硬件契约审计）；`--client all` 会同时安装 ICODE 本体和全部共享 Skill 到 Claude Code、Codex。
+**内置能力与独立 Skill 的安装边界**：`tools/evidence_intake.py`、`tools/email_intake.py`、`tools/document_intake.py`、`tools/media_router.py`、`debug_catalog.py`、`runtime_baseline.py`、`verification_debt.py`、`learn.py`、`scripts/submission_guard.py handoff` 及 `steps/learn.md` 都属于 ICODE 本体，随 ICODE 目录一次复制到所选宿主，**不**写入 `skill-packs/manifest.json`。manifest 声明当前 16 个需要在技能根顶层独立发现的跨项目共享 Skill（含邮件证据与 MCU 软硬件契约审计）；`--client all` 会同时安装 ICODE 本体和全部共享 Skill 到 Claude Code、Codex。
 
-**当前 12 个声明的 MCP**：
+**当前 13 个声明的 MCP**：
 
 | MCP | 形态 | 对 icode 工作流的增益 | KEY |
 |---|---|---|---|
@@ -27,6 +27,7 @@
 | **icode-mcp-health** | Python venv | 安装后 manifest、入口、工具 schema 和敏感字段健康检查 | ❌ |
 | **icode-mcp-policy** | Python venv | step→server/tool 路由与最小权限机器真源 | ❌ |
 | **icode-local-index** | Python venv | 大型源码/日志/文档的可重建 SQLite FTS 索引 | ❌ |
+| **icode-mail-observe** | Python venv | 可选的无人值守/邮箱范围搜索 IMAP 适配器；普通网页链接直接复用已登录浏览器 | ❌（仅启用 IMAP 时需自行配置邮箱凭据） |
 
 > 完整说明见各 `mcp/<name>/README.md`。**vision-bridge 需配 KEY（三件套）才能用**；cheap-research 分三类 capability——`local` 6 个（describe_capabilities / scan_patterns / trace_refs / validate_migration_ops / parse_project_id / scan_modules）+ `fetch` 1 个（fetch_remote）**不依赖 LLM provider，未配 KEY 也照常可用**，仅 `llm` 8 个（summarize / retrieve_similar / fill_template / extract / propose_repo_facts / diff_summary / generate_filename / select_template）需配三件套。其余无需 KEY 即可安装。
 >
@@ -36,7 +37,7 @@
 
 | 命令 | 行为 |
 |---|---|
-| `/icode install` | 安装 ICODE、全部共享技能和 12 个 MCP；默认只面向 Claude Code |
+| `/icode install` | 安装 ICODE、全部共享技能和 13 个 MCP；默认只面向 Claude Code |
 | `/icode install <name>` | 安装 ICODE、全部共享技能，但只安装指定 MCP |
 | `/icode install --client codex` | 安装到 Codex skills 根，并为 Codex 注册 MCP；MCP entry 仍先生成 Claude 真源 |
 | `/icode install --client all` | Claude Code + Codex 双端安装 ICODE、共享技能和 MCP |
@@ -46,7 +47,7 @@
 **对称卸载**（虽然不是 `/icode` 命令，但同样属于本步骤的核心操作）：
 
 ```bash
-./mcp/uninstall.sh                     # 一键卸载所有 12 个 mcp（默认只清 Claude Code）
+./mcp/uninstall.sh                     # 一键卸载所有 13 个 mcp（默认只清 Claude Code）
 ./mcp/uninstall.sh <name>              # 只卸载指定 mcp
 ./mcp/uninstall.sh --client codex      # 卸载 + 同时清 Codex 注册
 ./mcp/uninstall.sh --client all        # Claude Code + Codex 双清理
@@ -62,7 +63,7 @@
    - 通过 `.icode-skill-owner.json` 区分受管技能；同内容旧副本可接管，不同内容的未托管同名技能会在任何写入前拒绝
    - 安装后校验发布 hash，并确保 ICODE 内没有可发现的嵌套技能入口
 4. 未指定公开 `--basic`（即内部未传 `--skip-mcp`）时，根安装器再调用已安装 ICODE 内的 `mcp/install.sh`；该脚本会：
-   - 扫描 `mcp/*/install.sh`（含 12 个声明的子工程，**新加 mcp 自动被识别**）
+   - 扫描 `mcp/*/install.sh`（含 13 个声明的子工程，**新加 mcp 自动被识别**）
    - 逐个 `bash <子工程>/install.sh`，每个子工程 install.sh 自带：
      - 环境探测（Python/Node/npx/uv 等）
      - **缺啥补啥**（如 vision-bridge 建 venv；npm 类懒加载）
@@ -78,6 +79,7 @@
 
 - 本步骤**不接触任何 KEY**：vision-bridge 等需要 KEY 的 MCP，**只引导 `config.json` 模板**，不读取、不修改、不上传任何 KEY
 - 任何 mcp 的 KEY（如 vision-bridge 的 base_url/api_key/model）**由用户自行设置环境变量**，由 install.sh 写到 `~/.claude.json` 的 `env` 段（**仅写路径占位，不写真值**）
+- 普通网页邮件分析不要求配置 `icode-mail-observe`。只有用户选择无人值守/邮箱范围 IMAP 时，密码或授权码才由用户自行设置为 `ICODE_MAIL_OBSERVE_SECRET`，或放入配置指向且权限为 `0600` 的 `credential_file`；安装器只注册配置路径，不读取、不复制、不回显凭据
 - 严格按子工程 `install.sh` 的设计边界执行，不绕开子工程的探测逻辑
 
 ## 异常处理
@@ -137,7 +139,7 @@
 
 ## 卸载时机
 
-卸载 12 个 mcp 用 `mcp/uninstall.sh`（顶层脚本）。**注意**：
+卸载 13 个 mcp 用 `mcp/uninstall.sh`（顶层脚本）。**注意**：
 - 移除 `~/.claude.json` 注册项（经共享模块 `claude_registry.unregister`，同时清理 `~/.claude/icode_data/mcp_entries/<name>.json` 导出）
 - `--client codex|all` 时同时 `codex mcp remove <name>`（未注册幂等跳过）
 - vision-bridge 默认不删安装目录与 `.venv`；要彻底清理安装 target 使用其 `uninstall.sh --purge`（源码仓不删）

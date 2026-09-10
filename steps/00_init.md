@@ -5,6 +5,8 @@
 **会话**: 主会话
 **与后续步骤的关系**: **独立步骤，不自动串联到步骤1**。完成后用户须显式运行 `/icode start`（全流程）/ `/icode fast`（精简全流程）/ `/icode plan`（仅步骤1）才进入步骤1。复用规则详见 SKILL.md「调用命令」段的目录复用规则说明。
 
+> **共享技能路由**：输入收敛前读取 [references/skill_routing.md](../references/skill_routing.md)，只加载命中当前需求证据的技能；邮件、线程或附件输入走 `email-evidence-intake`，宿主差异见 `host_adapters.md`。
+
 ## 关键约定（必读）
 
 - **`/icode init` 即"新开一次需求初稿讨论"**：每次调用 `/icode init` 都**创建一个全新的 `.icode_output/.icode_output_N/` 目录**，**不复用**之前任何 `init_in_progress` 状态的目录、**不续聊**之前的讨论。如果用户想继续上一次讨论，就直接对话，**不要再敲 `/icode init`**。

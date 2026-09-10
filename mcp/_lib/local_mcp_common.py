@@ -38,6 +38,12 @@ MANAGED_WRITE_ANNOTATIONS = ToolAnnotations(
     idempotentHint=True,
     openWorldHint=False,
 )
+REMOTE_MANAGED_WRITE_ANNOTATIONS = ToolAnnotations(
+    readOnlyHint=False,
+    destructiveHint=False,
+    idempotentHint=True,
+    openWorldHint=True,
+)
 
 
 def ok(answer: Any, *, confidence: float | None = 1.0, **extra: Any) -> ToolResponse:

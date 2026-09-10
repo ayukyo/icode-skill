@@ -973,6 +973,7 @@ async def describe_capabilities() -> ToolResponse:
                 "max_redirects": FETCH_MAX_REDIRECTS,
                 "max_response_bytes": FETCH_MAX_BYTES,
             },
+            "data_scope_boundary": manifest.get("data_scope_boundary", {}),
             "decision_boundary": (
                 "只做压缩、导航、提取、候选生成和机械校验；"
                 "不承担架构裁决、修复方案、视觉判断或硬件正确性结论"

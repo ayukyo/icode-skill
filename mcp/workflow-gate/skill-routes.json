@@ -371,6 +371,32 @@
         "verdict"
       ],
       "fallback": "If part/package/revision, AF/remap, clock/reset, register/IRQ/DMA, build/programmed image, or board runtime evidence is missing, stop at the last proven boundary, keep the peripheral unresolved, and propose the smallest read-only or explicitly authorized discriminator."
+    },
+    {
+      "skill": "email-evidence-intake",
+      "triggers": [
+        "email_webmail_imap_eml_or_msg_analysis",
+        "mail_thread_requirement_approval_or_incident_evidence",
+        "mail_table_image_attachment_or_schematic_analysis",
+        "mail_identity_coverage_or_prompt_injection_risk"
+      ],
+      "steps": ["init", "log", "plan", "doc", "deepcheck", "audit", "verify"],
+      "input_contract": [
+        "ordered exact webmail URLs local exports or explicit mailbox-observer scope",
+        "message or thread anchor time window and attachment inclusion boundary",
+        "already logged-in browser state managed evidence root and available document media spreadsheet evidence and schematic capabilities"
+      ],
+      "output_contract": [
+        "batch_acquisition",
+        "mail_manifest",
+        "content_coverage",
+        "quoted_sections",
+        "attachment_routes",
+        "resource_preflight",
+        "mail_analysis",
+        "verdict"
+      ],
+      "fallback": "For explicit webmail URLs, use the already logged-in browser first and never require IMAP credentials. If login expired, ask only for browser re-login; if no browser is available, request a bounded EML/MSG export. Use the mailbox observer only for unattended access or explicit IMAP scope; preserve missing thread regions and unsaved attachments as gaps, never fetch remote resources or treat message claims as implementation proof."
     }
   ]
 }

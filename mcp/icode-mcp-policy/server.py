@@ -71,6 +71,22 @@ def _policy_errors(data: dict[str, Any]) -> list[str]:
             errors.append(f"servers.{server}.operations 必须是非空字符串数组")
         elif len(operations) != len(set(operations)):
             errors.append(f"servers.{server}.operations 重复")
+        tool_operations = spec.get("tool_operations")
+        if tool_operations is not None:
+            if not isinstance(tool_operations, dict):
+                errors.append(f"servers.{server}.tool_operations 必须是 object")
+            elif isinstance(tools, list) and set(tool_operations) != set(tools):
+                errors.append(f"servers.{server}.tool_operations 必须逐工具完整声明")
+            else:
+                declared_operations = set(operations) if isinstance(operations, list) else set()
+                for tool, allowed in tool_operations.items():
+                    if not isinstance(allowed, list) or not allowed or any(
+                            not isinstance(operation, str) or not operation for operation in allowed):
+                        errors.append(f"servers.{server}.tool_operations.{tool} 必须是非空字符串数组")
+                    elif len(allowed) != len(set(allowed)):
+                        errors.append(f"servers.{server}.tool_operations.{tool} 重复")
+                    elif not set(allowed) <= declared_operations:
+                        errors.append(f"servers.{server}.tool_operations.{tool} 含未声明 operation")
     for step, routes in steps.items():
         if not isinstance(routes, list):
             errors.append(f"steps.{step} 必须是数组")
@@ -133,7 +149,11 @@ def evaluate_call(step: str, server: str, tool: str, operation: str = "read") ->
             return ok({"allowed": False, "reason": "unknown_server", "step": step, "server": server, "tool": tool, "policy": str(path)})
         if tool not in server_spec["tools"]:
             return ok({"allowed": False, "reason": "unknown_tool", "step": step, "server": server, "tool": tool, "policy": str(path)})
-        if operation not in server_spec.get("operations", ["read"]):
+        allowed_operations = server_spec.get("tool_operations", {}).get(
+            tool,
+            server_spec.get("operations", ["read"]),
+        )
+        if operation not in allowed_operations:
             return ok({"allowed": False, "reason": "operation_denied", "step": step, "server": server, "tool": tool, "policy": str(path)})
         route = next((item for item in data["steps"].get(step, []) if item.get("server") == server), None)
         if route is None:

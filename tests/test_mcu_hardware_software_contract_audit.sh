@@ -15,7 +15,7 @@ import json, sys
 name=sys.argv[1]
 manifest=json.load(open("skill-packs/manifest.json", encoding="utf-8"))
 routes=json.load(open("mcp/workflow-gate/skill-routes.json", encoding="utf-8"))
-assert len(manifest["skills"]) == 15
+assert len(manifest["skills"]) == 16
 assert name in {item["name"] for item in manifest["skills"]}
 route=next(item for item in routes["routes"] if item["skill"] == name)
 assert {"plan", "code", "deepcheck", "audit", "verify"} <= set(route["steps"])
@@ -26,7 +26,7 @@ assert set(route["output_contract"]) >= {
 }
 assert route["triggers"] and route["input_contract"] and route["fallback"]
 PY
-then ok "MCU 能力已作为第十五个共享技能发布并路由"; else bad "MCU manifest/routes 合同缺失"; fi
+then ok "MCU 能力已作为共享技能发布并路由"; else bad "MCU manifest/routes 合同缺失"; fi
 
 TOKENS=(
   mcu_scope pin_signal_matrix clock_power_reset_matrix register_sdk_code_trace
