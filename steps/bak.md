@@ -1,5 +1,7 @@
 # 步骤 bak — 工程工单手动备份（独立步骤，不参与 1~6 流程推进）
 
+> **工程接入门**：读取 [references/project_intake.md](../references/project_intake.md) 后解析备份源。唯一嵌套仓只备份实际 Git 根下的 `.icode_output/`；不得把容器目录和子仓各备一份或靠 mtime 选源。
+
 **命令**: `/icode bak [--project <path>]`
 **产出**: `~/.claude/icode_data/project_backup/<project_id>/bak_<时间戳>/`（工程 `.icode_output/` 全量快照：工单 `.icode_output_N/` + `.debug/` 调试孪生 + `limit.local` + `ppt`）+ 快照内 `MANIFEST.json` + `<project_id>/latest` 符号链接（指向最新快照）+ 全局索引 `backup_path` 字段更新
 **会话**: 主会话
@@ -18,7 +20,7 @@
 ## 1. 参数解析与源工程定位
 
 - `--project <path>`：指定要备份的工程根（绝对路径或 `~` 展开）；不传 → 用当前目录所在 git 仓库根
-- 源工程根：`git rev-parse --show-toplevel`（cwd 场景；非 git 仓库 → cwd 本身）
+- 源工程根：先按 `project_intake.md` 解析；`current_git`/`unique_nested_git` 使用实际 Git 根，明确 non-git 场景才使用 cwd 本身
 - `project_id` = 源工程根 basename（仅备份目录组织用；索引 `backup_path` 按 `ticket_id` 匹配，不依赖 project_id 解析）
 
 ## 2. 执行备份

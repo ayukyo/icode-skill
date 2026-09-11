@@ -6,6 +6,7 @@
 
 > **共享技能路由**：现状调研前读取 [references/skill_routing.md](../references/skill_routing.md)，按风险事实加载命中技能；技能结论须由主代理复核后进入 ADR。
 > **证据习惯真源**：证据缺口、完整链路、状态生命周期和验收分层统一执行 [references/evidence_and_verification.md](../references/evidence_and_verification.md)。
+> **工程接入门**：读取 [references/project_intake.md](../references/project_intake.md)，先解析实际工程根；大型/超大型 SDK 仓先做静态画像并限定扫描范围，多根或发现预算截断时 L1 阻断。
 
 ## 本步骤 L1/L2 检查项声明
 

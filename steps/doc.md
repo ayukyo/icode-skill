@@ -8,6 +8,7 @@
 > **核心设计哲学**（必须先 Read [references/dir_and_metadata.md](../references/dir_and_metadata.md)「project_docs 工程文档库」段 + [references/doc_template.md](../references/doc_template.md)）：**零配置/零状态/零索引文件**——只有章节 .md，前 50 行四块自带身份证，文件系统即数据库。
 
 > **共享技能路由**：语料接入前读取 [references/skill_routing.md](../references/skill_routing.md)，只加载命中当前资料类型的技能；邮件正文、线程、表格、图片或附件先走 `email-evidence-intake`，再复用文档/媒体/表格/证据/原理图能力。
+> **工程接入门**：读取 [references/project_intake.md](../references/project_intake.md)。唯一嵌套仓的知识库绑定实际 Git 根；large/huge 仓先按 tracked paths、活动构建配置和目标模块建立 worklist，禁止默认全树内容扫描。
 
 ## ⚠️ 多分支设计 · 反偷懒强约束（必读，防止误判"覆盖"）
 
@@ -86,8 +87,9 @@
 
 ## 前置校验
 
-1. cwd 必须在 git 仓库或 `repo` 管理的项目内：
+1. 请求路径必须先经 `project_intake.md` 解析；解析后的 cwd 必须在 git 仓库或 `repo` 管理的项目内：
    - `git rev-parse --show-toplevel` 成功 → git-root 模式
+   - 请求路径自身不在 Git 仓、但深度 2 内仅一个 Git 根 → 切到该根后进入 git-root 模式
    - 否则从 cwd 向上逐级 `test -d $d/.repo`，首个命中 → repo-root 模式（Google `repo` 工具管理的多仓库项目如独立子仓库组成的超级项目）
    - 都失败 → 报错"请在 git 仓库或 `repo` 管理的项目内运行 /icode doc"
 2. 全局目录 `~/.claude/icode_data/project_docs/` 和 `~/.claude/icode_data/module_docs/`（首次自动创建）
@@ -95,6 +97,7 @@
 ## project_id 解析
 
 ```bash
+# 前置：已按 project_intake.md 把 cwd/workdir 切到解析后的实际工程根
 # git-root 模式（cwd 在 git 仓库内）
 GIT_ROOT=$(git rev-parse --show-toplevel 2>/dev/null)
 PROJECT_TYPE="git-root"
@@ -117,7 +120,7 @@ if [ -z "$GIT_ROOT" ]; then
     echo "   1. 检查当前目录：pwd（确认你在工程根目录）"
     echo "   2. 如果不在 git 仓库：cd 到 git 仓库根目录"
     echo "   3. 如果不在 repo 管理项目：使用 Google repo 工具管理（或 cd 到 .repo/ 所在目录）"
-    echo "   4. 如果工程根不在 cwd：cd <工程根> 后再跑 /icode doc"
+    echo "   4. 如果给的是容器目录：按 project_intake.md 解析唯一嵌套根；多根时显式选择后重试"
     exit 1
   fi
 fi

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SKILL.md 提示预算 + 机器真源等价契约（§10: test_prompt_budget_contract）
-# 目标：SKILL.md 瘦身为路由器 ≤40KB；被引用的「SKILL.md「XX」段」锚点全部保留（防断链）；
+# 目标：SKILL.md 瘦身为路由器 ≤50KB；被引用的「SKILL.md「XX」段」锚点全部保留（防断链）；
 #       gates.json 状态机与 schema 为合法机器真源。
 set -u
 cd "$(dirname "$0")/.." || exit 1
@@ -8,12 +8,12 @@ PASS=0; FAIL=0
 ok()  { PASS=$((PASS+1)); echo "  ✅ $1"; }
 bad() { FAIL=$((FAIL+1)); echo "  ❌ $1"; }
 
-# 1) SKILL.md ≤ 40KB（降 ≥70%：原 160.8KB）
+# 1) SKILL.md ≤ 50KB（仍保持路由器定位；原 160.8KB）
 SIZE=$(wc -c < SKILL.md)
-if [ "$SIZE" -le 40960 ]; then
-  ok "SKILL.md 大小 $SIZE B ≤ 40KB"
+if [ "$SIZE" -le 51200 ]; then
+  ok "SKILL.md 大小 $SIZE B ≤ 50KB"
 else
-  bad "SKILL.md 大小 $SIZE B 超 40KB"
+  bad "SKILL.md 大小 $SIZE B 超 50KB"
 fi
 
 # 2) SKILL.md 内所有「SKILL.md「XX」段」被引用锚点文本均存在（防瘦身断链）

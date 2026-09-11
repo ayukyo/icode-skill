@@ -7,6 +7,7 @@
 
 > **共享技能路由**：阶段 1 建立基线前读取 [references/skill_routing.md](../references/skill_routing.md)，只加载命中当前证据场景的技能；宿主调用差异见 `host_adapters.md`。
 > **证据习惯真源**：基线、claim 分类、无日志反查与结论边界统一执行 [references/evidence_and_verification.md](../references/evidence_and_verification.md)，本步骤不自建副本。
+> **工程接入门**：读取 [references/project_intake.md](../references/project_intake.md)，先解析实际工程根并按规模选择扫描策略；构建脚本、帮助命令和厂商工具一律只做静态阅读，不作为探测命令执行。
 
 ## 设计借鉴（方法论，非绑定具体技能）
 

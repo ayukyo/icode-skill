@@ -2,5 +2,11 @@
   "allowed_roots": ["$HOME"],
   "max_repo_depth": 5,
   "max_repos": 100,
-  "max_command_chars": 30000
+  "max_scan_dirs": 5000,
+  "max_command_chars": 30000,
+  "max_profile_paths": 300000,
+  "max_build_entrypoints": 32,
+  "max_build_file_bytes": 262144,
+  "large_repo_files": 50000,
+  "huge_repo_files": 150000
 }

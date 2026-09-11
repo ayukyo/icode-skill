@@ -1,6 +1,6 @@
 # 目录管理 + ticket_id + 索引写入 + metadata 模板（共享规则）
 
-> 本文件汇集 icode "创建工单目录 / 生成 ticket_id / 写全局索引 / metadata 模板" 的共享规则。入口命令（init/log）和步骤1在创建工单时引用本文件，不重复定义。
+> 本文件汇集 icode "创建工单目录 / 生成 ticket_id / 写全局索引 / metadata 模板" 的共享规则。入口命令（init/log）和步骤1在创建工单时引用本文件，不重复定义。进入本文件前必须先按 [project_intake.md](project_intake.md) 解析实际工程根；下文所有 `cwd`/`WORKSPACE_ROOT`/`GIT_ROOT` 示例均假定已在该根执行，禁止在只包裹一个子仓的容器目录落工单。
 
 ## 目录管理
 
@@ -652,6 +652,7 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
 ### project_id 与 branch 语义
 
 - **git-root 模式**（cwd 在 git 仓库内）：`project_id` = `basename($(git rev-parse --show-toplevel))`，不区分子目录。**worktree 归一化（F1）**：worktree 内 `git rev-parse --show-toplevel` 返回 **worktree 自身根**（如 `<repo>-wt-<ticket-slug>`），直接 basename 会导致 project_id 漂移 → limit 主存 / project_docs / device_config 全部读不到主仓数据。**`.git` 为普通文件（内容以 `gitdir:` 开头）= git worktree 成员**，此时 `project_id` 归一到**主仓根**（`git worktree list --porcelain` 首行 `worktree <path>`），而「当前 checkout 根」（代码实际所在）仍为 worktree 根——两概念分离：**project_id 归主仓（跨 checkout 共享依据），checkout 根留当前（代码实证依据）**
+- **unique-nested-git 模式**（请求路径不在 Git 仓但深度 2 内只有一个 Git 根）：先按 [project_intake.md](project_intake.md) 切到该实际根，再完全按 git-root 模式处理；请求路径只作入口证据，不得成为 `project_path` 或 `.icode_output` 落点。
 - **`repo` 根模式**（cwd 不在 git 仓库但有 `.repo/manifest.xml`，如 Google `repo` 管理的多仓库项目）：`project_id` = `basename(从 cwd 向上找第一个含 .repo/ 的目录)`
 - **branch 感知**：DOC_DIR = `~/.claude/icode_data/project_docs/<project_id>/<branch>/`，**按分支分目录存**（key 设计见下文「DOC_DIR 分支隔离」段）
   - 同工程不同分支（如 `myproject/main/` vs `myproject/feature/`）→ 天然隔离互不覆盖

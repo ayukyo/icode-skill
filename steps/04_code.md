@@ -185,7 +185,7 @@
    - 含"禁 commit/push" → 任何阶段禁止 `git commit`/`git push`，收尾只输出改动清单
    - 含"禁宣称已修复" → 所有产物结论用词统一降级为"**已完成代码修改，待实机验证**"，禁止"已修复"表述
    - 日志红线（boot/daily）→ 见 [log.md](log.md) 日志分析段 boot/daily 禁混看
-   - **编译命令真源优先（条件判断，防用 `--help`/试探性 CLI 替代文档真源）**：按序查——①工程 LIMIT 文档（`~/.claude/icode_data/limits/<project_id>.md`）含「编译命令规范」红线（有则按红线准确命令，含基础库 + 多模块同编等工程专属约束）→ ②工程根 `README.md`（有则按 README）→ ③本步骤探测兜底；真源都不存在才允许试探，且须在产物标注"编译命令为试探得出，未经文档验证"。LIMIT/README 均无编译指令时按③探测（**不强制**读 LIMIT）
+   - **编译命令真源优先（条件判断，防用 `--help`/试探性 CLI 替代文档真源）**：按序查——①工程 LIMIT 文档（`~/.claude/icode_data/limits/<project_id>.md`）含「编译命令规范」红线（有则按红线准确命令，含基础库 + 多模块同编等工程专属约束）→ ②工程根 `README.md`（有则按 README）→ ③静态读取构建入口与活动配置。真源都不存在才允许提出试探计划，且须在产物标注"编译命令为试探得出，未经文档验证"；实际执行前先按 [project_intake.md](../references/project_intake.md) 登记副作用。**禁止执行仓内 `--help`/`--version` 来探测**：构建入口可能在参数解析前复制配置、创建链接或清理目录。LIMIT/README 均无编译指令时按③静态探测（**不强制**读 LIMIT）
    - **编译 3 次仍失败**：输出 `⚠️ 编译失败兜底` 警告，设 `code_in_progress` + `code_compile_failed = true`。代码文件仍写入磁盘，`code_files` 仍记录
    - 步骤 5 入口检测到 `code_compile_failed` 时输出警告，但仍继续
    - **测试命令探测**（编译通过后，自动识别工程测试命令，写入 `metadata.test_cmd`，用户可在 metadata 手动覆盖）：

@@ -10,7 +10,7 @@
 - `learning_report.md`：人读摘要；
 - `skill_candidate_<slug>.md`：可执行候选说明，明确标注“不是 SKILL.md”。
 
-本步骤必须先完整读取 [references/thinking_core.md](../references/thinking_core.md)、[references/anti_laziness.md](../references/anti_laziness.md)、[references/skill_routing.md](../references/skill_routing.md) 和 [references/control_plane.md](../references/control_plane.md)。
+本步骤必须先完整读取 [references/thinking_core.md](../references/thinking_core.md)、[references/anti_laziness.md](../references/anti_laziness.md)、[references/skill_routing.md](../references/skill_routing.md)、[references/project_intake.md](../references/project_intake.md) 和 [references/control_plane.md](../references/control_plane.md)。
 
 ## 思考分级
 
@@ -18,7 +18,7 @@
 
 ## 输入门禁
 
-1. `--project` 缺省为当前工程根；解析后必须是已存在的非文件系统根目录。
+1. `--project` 缺省为当前工程根；先按 `project_intake.md` 解析唯一嵌套仓，解析后必须是已存在的非文件系统根目录，多根拒绝猜测。
 2. 只扫描该 project 下的 `.ico_metadata.json`；`--ticket` 进一步限定 ticket id/目录，`--since` 只接受 ISO 8601。
 3. 不默认读取宿主私有会话、浏览器记录、工程外目录、TB 在线内容或全局历史索引。
 4. 数据源以 `extensions.skills.runs` 为主，claims、requirement delta、patch/deviation 只作为相关观测计数和证据引用，不能替代三次独立实例门槛。

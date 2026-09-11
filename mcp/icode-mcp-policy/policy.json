@@ -8,7 +8,7 @@
     },
     "icode-workspace": {
       "operations": ["read"],
-      "tools": ["describe_capabilities", "inspect_workspace", "inspect_repo_matrix", "inspect_build_inputs", "inspect_artifact"]
+      "tools": ["describe_capabilities", "resolve_project", "inspect_project_profile", "inspect_workspace", "inspect_repo_matrix", "inspect_build_inputs", "inspect_artifact"]
     },
     "icode-device-observe": {
       "operations": ["read"],

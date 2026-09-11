@@ -7,6 +7,8 @@
 **会话**: 主会话
 **定位**: **项目约束红线生成与维护，独立步骤**。不创建 `.icode_output_N/`、不写 `.ico_metadata.json`、不更新工单 `completed_steps`/`status`。产物供 `/icode plan`/`start`/`fast` 启动时**作为硬基线引用**（plan 步骤1「前置 limit 硬基线」读取，统一覆盖 init/start/fast 三入口；plan §3 架构设计/§4 ADR/§6 异常处理须呼应 limit 条目，**读留痕落盘 `{ICODE_OUT_DIR}/limit_checkpoint.md`「阶段块：plan前置硬基线」**）；**亦供 `/icode log` 根因分析时作为对照清单**（log 前置 limit 红线检查点读取——在 log 步骤2 历史检索/段零文档注入**之前**，逐条对照根因假设是否违反约定红线，**读留痕落盘 `limit_checkpoint.md`「阶段块：log前置检查点」**，引用红线经 log 步骤 9.5 机器自检留痕）。
 
+> **工程接入门**：读取 [references/project_intake.md](../references/project_intake.md)，先解析实际工程根；唯一嵌套仓把 limit 绑定实际根，多根必须让用户明确选择。
+
 > **核心设计哲学**：
 > - **约定 vs 事实分离** —— limit 是"代码应该这样写"的约定（团队私有，不上传），doc 是"代码长这样"的事实快照（独立于仓库全局可索引）。两者职责严格分离。
 > - **全局共享 + 单 checkout 覆盖** —— 主存全局共享（同一 project_id 所有 clone 共享），local 覆盖单 checkout 私有（自动 gitignore）。local 完全覆盖 main（同字段 local 优先）。
@@ -28,8 +30,9 @@
 
 ## 前置校验
 
-1. cwd 必须在 git 仓库或 `repo` 管理的项目内（**与 `/icode doc` 一致**）：
+1. 请求路径必须先经 `project_intake.md` 解析；解析后的 cwd 必须在 git 仓库或 `repo` 管理的项目内（**与 `/icode doc` 一致**）：
    - `git rev-parse --show-toplevel` 成功 → git-root 模式
+   - 请求路径自身不在 Git 仓、但深度 2 内仅一个 Git 根 → 切到该根后进入 git-root 模式
    - 否则从 cwd 向上逐级 `test -d $d/.repo`，首个命中 → repo-root 模式
    - 都失败 → 报错"请在 git 仓库或 `repo` 管理的项目内运行 /icode limit"
 2. 全局目录 `~/.claude/icode_data/limits/`（首次自动创建）
@@ -37,6 +40,7 @@
 ## project_id 解析
 
 ```bash
+# 前置：已按 project_intake.md 把 cwd/workdir 切到解析后的实际工程根
 GIT_ROOT=$(git rev-parse --show-toplevel 2>/dev/null)
 PROJECT_TYPE="git-root"
 if [ -z "$GIT_ROOT" ]; then
@@ -57,7 +61,7 @@ if [ -z "$GIT_ROOT" ]; then
     echo "   1. 检查当前目录：pwd（确认你在工程根目录）"
     echo "   2. 如果不在 git 仓库：cd 到 git 仓库根目录"
     echo "   3. 如果不在 repo 管理项目：使用 Google repo 工具管理（或 cd 到 .repo/ 所在目录）"
-    echo "   4. 如果工程根不在 cwd：cd <工程根> 后再跑 /icode limit"
+    echo "   4. 如果给的是容器目录：按 project_intake.md 解析唯一嵌套根；多根时显式选择后重试"
     exit 1
   fi
 fi

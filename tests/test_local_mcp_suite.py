@@ -126,7 +126,10 @@ class LocalMcpSuiteTest(unittest.TestCase):
         snapshot = module.inspect_workspace(str(repo))["answer"]
         self.assertTrue(snapshot["is_git"])
         self.assertEqual(len(snapshot["head"]), 40)
-        self.assertEqual(module.inspect_repo_matrix(str(self.root))["answer"]["count"], 1)
+        matrix = module.inspect_repo_matrix(str(self.root))["answer"]
+        self.assertEqual(matrix["count"], 1)
+        self.assertFalse(matrix["scan"]["truncated"])
+        self.assertGreaterEqual(matrix["scan"]["scanned_dirs"], 1)
         self.assertEqual(module.inspect_build_inputs(str(repo))["answer"]["source_count"], 1)
         self.assertIn("sha256", module.inspect_artifact(str(source))["answer"])
 
@@ -145,6 +148,63 @@ class LocalMcpSuiteTest(unittest.TestCase):
         result = module.inspect_workspace(str(child))
         self.assertEqual(result["error_code"], "workspace_failed")
         self.assertIn("allowed_roots", result["error"])
+
+    def test_workspace_resolves_nested_project_and_profiles_without_execution(self):
+        module = self.modules["icode-workspace"]
+        container = self.root / "container"
+        repo = container / "platform"
+        (repo / "sdk" / "kernel").mkdir(parents=True)
+        (repo / "rtos").mkdir()
+        subprocess.run(["git", "init", "-q", str(repo)], check=True)
+        build = repo / "build.sh"
+        sentinel = repo / "must-not-exist"
+        build.write_text(
+            "#!/bin/sh\n"
+            f"touch {sentinel}\n"
+            "sed -i 's/a/b/' .config\n"
+            "fastboot flash boot boot.img\n",
+            encoding="utf-8",
+        )
+        (repo / "linked-build.sh").symlink_to("build.sh")
+        for relative in (
+            "sdk/kernel/main.c", "rtos/task.c", "one.c", "two.c", "three.c",
+        ):
+            target = repo / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text("int value;\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(repo), "add", "."], check=True)
+        self.write_config("ICODE_WORKSPACE_CONFIG", {
+            "allowed_roots": [str(self.root)],
+            "max_repo_depth": 2,
+            "max_repos": 10,
+            "max_scan_dirs": 100,
+            "max_command_chars": 10000,
+            "large_repo_files": 4,
+            "huge_repo_files": 6,
+        })
+
+        resolved = module.resolve_project(str(container))["answer"]
+        self.assertEqual(resolved["mode"], "unique_nested_git")
+        self.assertEqual(resolved["project_root"], str(repo.resolve()))
+        profile = module.inspect_project_profile(str(container))["answer"]
+        self.assertEqual(profile["scale"]["class"], "huge")
+        self.assertEqual(profile["platform_layer_hints"]["kernel"], ["sdk/kernel"])
+        self.assertEqual(profile["platform_layer_hints"]["rtos"], ["rtos"])
+        self.assertFalse(profile["probe_policy"]["execute_build_entrypoint_for_discovery"])
+        risks = profile["build_entrypoints"][0]["risk_categories"]
+        self.assertIn("source_or_config_mutation", risks)
+        self.assertIn("device_or_flash_mutation", risks)
+        linked = next(item for item in profile["build_entrypoints"] if item["path"] == "linked-build.sh")
+        self.assertTrue(linked["symlink"])
+        self.assertEqual(linked["resolved_path"], "build.sh")
+        self.assertIn("device_or_flash_mutation", linked["risk_categories"])
+        self.assertFalse(sentinel.exists())
+
+        second = container / "second"
+        subprocess.run(["git", "init", "-q", str(second)], check=True)
+        ambiguous = module.resolve_project(str(container))
+        self.assertEqual(ambiguous["error_code"], "project_resolution_failed")
+        self.assertIn("多个 Git 根", ambiguous["error"])
 
     def test_device_fixture_is_profile_bound_and_read_only(self):
         module = self.modules["icode-device-observe"]

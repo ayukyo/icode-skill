@@ -6,7 +6,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-Skill-8A2BE2.svg)](SKILL.md)
-[![Version](https://img.shields.io/badge/version-v2.23.0-blue.svg)](SKILL.md)
+[![Version](https://img.shields.io/badge/version-v2.24.0-blue.svg)](SKILL.md)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/ayukyo/icode-skill/issues)
 
 </div>
@@ -224,7 +224,7 @@ Besides vision-bridge and cheap-research, `/icode install` installs 4 general wo
 - **context7** — live library-doc lookup during init/plan/code when the requirement touches third-party libraries
 - **playwright** — browser automation during deepcheck/audit for front-end projects
 - **icode-evidence** — SHA-256 identity, line-addressable reads, log timelines, and document-corpus manifests
-- **icode-workspace** — multi-Git-root/worktree/build-input/artifact provenance observation; never merge/commit/push
+- **icode-workspace** — safe unique nested-root resolution, bounded large-repository profiling, static build-entry risk hints, plus multi-Git-root/worktree/build-input/artifact provenance; never executes project build scripts or merge/commit/push
 - **icode-device-observe** — fixed read-only checks through named SSH/ADB/fixture profiles; no arbitrary commands or device writes
 - **icode-mcp-health** — install/upgrade/CI checks for manifests, Python entrypoints, and sensitive fields
 - **icode-mcp-policy** — default-deny step-to-server/tool/operation routing source of truth

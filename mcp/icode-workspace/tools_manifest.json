@@ -4,6 +4,8 @@
   "purpose": "multi-repository and artifact provenance observation",
   "tools": [
     {"name": "describe_capabilities", "read_only": true, "deterministic": true, "network": false},
+    {"name": "resolve_project", "read_only": true, "deterministic": true, "network": false},
+    {"name": "inspect_project_profile", "read_only": true, "deterministic": true, "network": false},
     {"name": "inspect_workspace", "read_only": true, "deterministic": true, "network": false},
     {"name": "inspect_repo_matrix", "read_only": true, "deterministic": true, "network": false},
     {"name": "inspect_build_inputs", "read_only": true, "deterministic": true, "network": false},

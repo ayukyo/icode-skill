@@ -6,6 +6,7 @@
 **定位**: **独立交付步骤**——用自然语言把 icode 的既有产物/知识库转成真实 `.pptx`。**不创建工单目录、不写 `.ico_metadata.json`、不更新 `completed_steps`/`status`、不参与步骤1~6推进**。4 类场景：**项目 / 模块 / 本次功能开发 / 本次BUG修复**。
 
 > **本质**：本步骤是「内容组织 + 模板替换」两步。内容**必须**来自 icode 已有产物/知识库（先收集再组织），模板**只替换文字不破坏排版**（内置 16 套模板，见 [tools/ppt/](../tools/ppt/README.md)）。
+> **工程接入门**：读取 [references/project_intake.md](../references/project_intake.md)，项目/模块场景绑定实际工程根；large/huge 仓只抽取 worklist 命中的知识库、README 和目标源码，不为做 PPT 扫完整 SDK。
 
 ## 0. 前置校验
 

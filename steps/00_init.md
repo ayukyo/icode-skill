@@ -6,6 +6,7 @@
 **与后续步骤的关系**: **独立步骤，不自动串联到步骤1**。完成后用户须显式运行 `/icode start`（全流程）/ `/icode fast`（精简全流程）/ `/icode plan`（仅步骤1）才进入步骤1。复用规则详见 SKILL.md「调用命令」段的目录复用规则说明。
 
 > **共享技能路由**：输入收敛前读取 [references/skill_routing.md](../references/skill_routing.md)，只加载命中当前需求证据的技能；邮件、线程或附件输入走 `email-evidence-intake`，宿主差异见 `host_adapters.md`。
+> **工程接入门**：创建/复用工单前完整读取 [references/project_intake.md](../references/project_intake.md)，从用户路径解析实际工程根；唯一嵌套仓可自动进入，多根或扫描截断必须阻断，禁止在容器目录落 `.icode_output/`。
 
 ## 关键约定（必读）
 
@@ -25,7 +26,7 @@
 命令位置出现独立 token `--guide` 时，只执行本分支，完成后直接返回，**禁止继续执行下方“首次调用”新建流程**。
 
 1. **参数边界**：`--guide` 不得与 `--debug` 或 `--worktree` 同时使用；组合出现时 L1 报错，提示移除冲突 flag 后重试。`--guide=true`、`-guide`、正文/代码块里的字样均不触发。其后的自然语言只作为读者、范围、篇幅、排除词和呈现方式约束，不写回原需求。
-2. **锚定当前工作区和 skill 根**：`WORKSPACE_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd)`；把本次已读取 `SKILL.md` 所在绝对目录记为 `ICODE_SKILL_ROOT`。只允许从工作区根下的正常工单域选择，排除 `.debug/`、归档和其他工程。
+2. **锚定当前工作区和 skill 根**：先按 `project_intake.md` 得到实际工程根，再在该根执行 `WORKSPACE_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd)`；把本次已读取 `SKILL.md` 所在绝对目录记为 `ICODE_SKILL_ROOT`。只允许从工作区根下的正常工单域选择，排除 `.debug/`、归档和其他工程。
 3. **解析最新合格 init 工单**：
 
    ```bash
