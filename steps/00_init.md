@@ -1,7 +1,7 @@
 # 步骤 0 — 需求初稿对话（可选前置步骤）
 
-**命令**: `/icode init [--debug] [<粗略需求>]`（`--debug` = 独立孪生不入索引，详见 [references/debug_mode.md](../references/debug_mode.md)）
-**产出**: `{ICODE_OUT_DIR}/00_init.md`
+**命令**: `/icode init [--debug] [<粗略需求>]` 或 `/icode init --guide [补充要求]`（`--debug` = 独立孪生不入索引；`--guide` = 从最近一次已完成的 init 分析派生新人指南）
+**产出**: 常规模式 `{ICODE_OUT_DIR}/00_init.md`；`--guide` 模式 `{ICODE_OUT_DIR}/deliverables/guide.md` + `guide.audit.json`
 **会话**: 主会话
 **与后续步骤的关系**: **独立步骤，不自动串联到步骤1**。完成后用户须显式运行 `/icode start`（全流程）/ `/icode fast`（精简全流程）/ `/icode plan`（仅步骤1）才进入步骤1。复用规则详见 SKILL.md「调用命令」段的目录复用规则说明。
 
@@ -9,7 +9,8 @@
 
 ## 关键约定（必读）
 
-- **`/icode init` 即"新开一次需求初稿讨论"**：每次调用 `/icode init` 都**创建一个全新的 `.icode_output/.icode_output_N/` 目录**，**不复用**之前任何 `init_in_progress` 状态的目录、**不续聊**之前的讨论。如果用户想继续上一次讨论，就直接对话，**不要再敲 `/icode init`**。
+- **常规 `/icode init` 即"新开一次需求初稿讨论"**：不带 `--guide` 时，每次调用都**创建一个全新的 `.icode_output/.icode_output_N/` 目录**，**不复用**之前任何 `init_in_progress` 状态的目录、**不续聊**之前的讨论。如果用户想继续上一次讨论，就直接对话，**不要再敲常规 `/icode init`**。
+- **`/icode init --guide` 是显式派生覆盖**：它在任何新建逻辑之前分流，复用当前工作区最新且合格的 init 分析，刷新固定指南文件，**不创建新工单**、不把 `--guide` 当需求文字，也不推进主流程。
 - **后续讨论由 AI 自主识别并增量更新**：`/icode init` 之后，用户在同一会话里继续提问/补充需求，AI 必须自主判断"这是对当前 `00_init.md` 的补充"，并按"后续每轮对话"流程处理（先 Read，再讨论，最后 Write 更新文档）。无需用户每轮都敲命令。
 - **每轮都更新文档**：每轮对话结束前都必须 Write 一次 `00_init.md`，文档始终保持完整结构、内容到当前为止最新。
 
@@ -18,6 +19,30 @@
 为开放式需求讨论提供一个落档载体。允许用户跟 AI 多轮迭代讨论需求，**每轮对话后 AI 都增量更新 `00_init.md`**，文档始终保持"格式完整、内容到当前为止最新"的状态。用户随时停止，文档都可直接作为步骤1的输入。
 
 ## 执行步骤
+
+### `--guide` 显式派生分支（优先于首次调用）
+
+命令位置出现独立 token `--guide` 时，只执行本分支，完成后直接返回，**禁止继续执行下方“首次调用”新建流程**。
+
+1. **参数边界**：`--guide` 不得与 `--debug` 或 `--worktree` 同时使用；组合出现时 L1 报错，提示移除冲突 flag 后重试。`--guide=true`、`-guide`、正文/代码块里的字样均不触发。其后的自然语言只作为读者、范围、篇幅、排除词和呈现方式约束，不写回原需求。
+2. **锚定当前工作区和 skill 根**：`WORKSPACE_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd)`；把本次已读取 `SKILL.md` 所在绝对目录记为 `ICODE_SKILL_ROOT`。只允许从工作区根下的正常工单域选择，排除 `.debug/`、归档和其他工程。
+3. **解析最新合格 init 工单**：
+
+   ```bash
+   python3 "${ICODE_SKILL_ROOT}/tools/icode_control.py" resolve-ticket --latest \
+     --workspace "$WORKSPACE_ROOT" \
+     --require-status init_in_progress \
+     --require-artifact 00_init.md \
+     --require-init-ready
+   ```
+
+   使用返回的绝对 `out_dir` 作为 `ICODE_OUT_DIR`。`--require-init-ready` 同时检查步骤 0 标记、7 个必需章节及各章实质内容；筛选发生在“取最新”之前，因此较新的 completed/空壳工单不能遮住较早但合格的 init 工单。没有合格项就 fail-closed，提示用户先运行并完成一次常规 `/icode init`；不得猜测目录或改用历史索引结果。
+4. **保护原工单**：记录生成前的 `.ico_metadata.json`、`00_init.md` 与事件日志摘要。只允许创建/刷新 `deliverables/guide.md` 和 `deliverables/guide.audit.json`；不得修改 metadata、status、completed_steps、index、事件链、原始分析或其他主流程产物。
+5. **加载完整契约**：必须完整 Read [references/guide_contract.md](../references/guide_contract.md)，再回读 `00_init.md` 所引用的当前源码、脚本、配置、测试和本地证据。来源不足的内容标为历史/建议/未验证，禁止脑补成现行流程。
+6. **生成指南与证据账本**：正文固定写 `deliverables/guide.md`，内部事实/数字/工具审计固定写 `deliverables/guide.audit.json`。工具必须覆盖源码/安装路径、运行命令、工作目录、前置条件、配置、输出位置、覆盖/追加行为、硬编码限制与 static/runtime 验证等级；数字必须区分正式阈值、观测结果、缺陷率和工具默认值。
+7. **执行两轮清洁审计**：第一轮查来源、数字和工具可执行性；第二轮查新人可读性、图文一致、端到端例子、事实/建议边界和内部信息泄漏。每轮发现问题先修正文与账本；禁止手写 `clean_rounds` 冒充通过。
+8. **机器校验两次**：每轮修正后分别运行 `${ICODE_SKILL_ROOT}/tools/lint_guide_contract.py ... --record-round 1` 和 `--record-round 2`，由工具原子写入正文/账本 hash 回执；用户要求“不提 X”时两次都追加 `--forbid-term X`。任一次非零退出都继续修正，不能宣称完成。第二次通过后复核第 4 步三个原文件摘要未变化。
+9. **交付**：用中文给出 `guide.md` 与 `guide.audit.json` 的绝对路径，说明“复用了哪个工单、未创建新工单、哪些结论仍待验证”。不要在面向新人的 `guide.md` 中写内部生成过程。
 
 ### 首次调用（即每次 `/icode init`）
 

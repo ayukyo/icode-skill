@@ -187,6 +187,7 @@ python3 tools/lint_mcp_coverage.py <out_dir> --step review --strict
 # 需求不明确时，先讨论再进入流程
 /icode init 实现数据录制功能              # 步骤0：起一稿，进入对话
 # ... 多轮对话补充需求，文档 00_init.md 每轮都被增量更新 ...
+/icode init --guide                       # 复用最新合格初稿，刷新 deliverables/guide.md，不创建新工单
 /icode start                             # 无参→检测到 init 入口态，询问"复用/新建"，选复用则把 00_init.md 作需求输入，进入步骤1→6
 
 # 任意入口 opt-in 用 worktree 隔离（与其它参数/flag 共存；不传则默认原地，不弹问）
@@ -228,7 +229,7 @@ python3 tools/lint_mcp_coverage.py <out_dir> --step review --strict
 | ---- | ---- |
 | `/icode help` | 帮助：输出使用流程示例 |
 | `/icode log [零散信息...]` | 可选入口：确定性证据清单 + debug 本地复用 + 逐仓现场基线 → 日志根因分析 → 修复需求 `00_init.md` |
-| `/icode init [<粗略需求>]` | 可选步骤 0：多轮对话产出需求初稿 `00_init.md` |
+| `/icode init [--guide] [<粗略需求或指南约束>]` | 常规：新建步骤 0 工单并多轮形成初稿；`--guide`：复用最新合格 init，刷新 `deliverables/guide.md` 与内部证据审计，不新建工单 |
 | `/icode start <需求>` | 全流程：创建/复用目录 → 步骤 1→6 |
 | `/icode fast <需求>` | 精简全流程：plan→review(1轮无对抗)→merge→code→deepcheck(Reverse)→audit（耗时约 65%） |
 | `/icode plan <需求>` | 仅步骤 1：拟定项目计划 |

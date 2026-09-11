@@ -110,7 +110,7 @@ Git checkout 和逐仓提交契约由 `steps/reopen.md` 先创建/校验；然�
 | 子命令 | 用途 | 关键参数 |
 |---|---|---|
 | create | 原子创建工单+出生事件 | `--dir --ticket-id --requirement --birth [--metadata-json]` |
-| resolve-ticket | 身份解析（多义即拒绝） | `--ticket` / `--dir` / `--latest` + `--workspace` |
+| resolve-ticket | 身份解析（多义即拒绝；可筛状态/产物/init 完整度） | `--ticket` / `--dir` / `--latest` + `--workspace [--require-status ...] [--require-artifact ...] [--require-init-ready]` |
 | validate | 工单整体校验 | `--dir`（`--skip-linters` 仅限夹具） |
 | transition | 状态流转 | `--dir --to [--delivery-verdict] [--request-id]` |
 | event | 追加事件 | `--dir --type [--payload] [--request-id]` |

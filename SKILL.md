@@ -1,15 +1,15 @@
 ---
 name: icode
-description: 端到端编码工作流（步骤 0~6，含需求初稿、日志根因、验证与学习入口），支持：/icode help, install [--basic|--preview], init, log, start, fast, plan, review, merge, code, deepcheck, audit, patch, verify [--plan|--deploy|--listen|--test|--reuse], doc, limit, readme, ppt, learn [--project|--ticket|--since], status [--pending|--scan|--verdict], list [--all|--plain], bak, worktree --update/--close/--reopen/--merge。新建工单入口支持 --worktree opt-in
+description: 端到端编码工作流（步骤 0~6，含需求初稿、日志根因、验证与学习入口），支持：/icode help, install [--basic|--preview], init [--guide], log, start, fast, plan, review, merge, code, deepcheck, audit, patch, verify [--plan|--deploy|--listen|--test|--reuse], doc, limit, readme, ppt, learn [--project|--ticket|--since], status [--pending|--scan|--verdict], list [--all|--plain], bak, worktree --update/--close/--reopen/--merge。新建工单入口支持 --worktree opt-in
 ---
 
-**版本**: v2.22.0
+**版本**: v2.23.0
 
 # ICode 全流程编码工作流（步骤 0 + 1~6）
 
 端到端编码工作流，将需求到交付拆解为严格步骤，每步可单独调用，方便你自行切换模型。**本文档是路由器**：内核规则内联，详细规则一律放 `steps/*.md` 与 `references/*.md`，需要时按路由表 Read（懒加载，省 token）。
 
-- **步骤 0（可选）**：需求初稿对话，多轮迭代后落档为 `00_init.md`（含链路图：修改前/后链路 + 改动点），独立步骤、不自动串联到步骤1
+- **步骤 0（可选）**：需求初稿对话，落档为 `00_init.md`；`init --guide` 派生新人指南
 - **步骤 1~6**：拟定计划 → 审查 → 定稿 → 编码 → 复检 → 终审
 
 > **主流程步骤真源（防误用，唯一真源 = `steps/` 目录，启动强制 Read）**：步骤编号 / 产物文件名 / `completed_steps` 合法值**一律以 `steps/*.md` 实时清单为准**（`ls steps/*.md` 完整列出，含主流程与辅助入口 log / doc / limit / status / install / list / bak / verify / learn，及精简全流程入口 fast）——**本块仅示意，steps/ 演进后以目录为准，勿依赖写死**。`/icode start` / `/icode fast` / `/icode plan` 进入第一步**先 `ls steps/*.md`** 核对，不按"编码→测试→部署"直觉推断
@@ -32,7 +32,7 @@ description: 端到端编码工作流（步骤 0~6，含需求初稿、日志根
 | `[辅助]` `/icode help` | 输出使用流程示例与命令一览 | 否 |
 | `[辅助]` `/icode install [--client codex\|all] [--basic\|--preview]` | MCP 环境检查+一键安装；`--basic` 跳过 MCP，`--preview` 零写入预览 | 否 |
 | `[入口]` `/icode log [零散信息...]` | 日志根因分析→转修复需求；版本基线门；TB 复用/批量/`--debug`/`--worktree`；对外简报 | ✅ 每次都新建（同 TB 单复用除外） |
-| `[入口]` `/icode init [<粗略需求>]` | 步骤0：多轮对话产出 `00_init.md`；`--worktree`/`--debug` | ✅ 每次都新建 |
+| `[入口]` `/icode init [--guide] [<需求或指南约束>]` | 常规：新建并产出 `00_init.md`；`--guide`：复用最新合格 init，刷新新人指南+审计 | 常规 ✅；guide 否 |
 | `[流程]` `/icode start <需求>` | 全流程：创建/复用目录 → 步骤1~6 串联；`--worktree` | ✅ 创建 / 复用 |
 | `[流程]` `/icode fast <需求>` | 精简全流程：plan→review(1轮无对抗)→merge→code→deepcheck(Reverse)→audit；`--worktree` | ✅ 创建 / 复用 |
 | `[流程]` `/icode plan <需求>` | 仅步骤1：拟定计划；`--worktree` | ✅ 创建 / 复用 |
@@ -58,9 +58,11 @@ description: 端到端编码工作流（步骤 0~6，含需求初稿、日志根
 
 > **目录复用规则**（start/plan/fast 启动时）：检查最新 `.icode_output/.icode_output_N/`——入口态（`init_in_progress`/`log_done`）**有歧义一律问用户**（带参可能是补充旧需求也可能是新需求）；非入口态带参 → 直接新建；无参且无入口态可复用 → 报错提示。完整脚本与 `REUSE=2/0` 语义见 [references/dir_and_metadata.md](references/dir_and_metadata.md)「复用 / 创建新目录决策」。
 
+> **`init --guide` 显式覆盖**：复用当前工作区最新合格初稿，不询问、不新建、不改状态，刷新 `deliverables/guide.md` 与审计；详见 [guide_contract.md](references/guide_contract.md)。
+
 > **init/log 入口状态转换时机**：新工单先生成非空 ID 并经 `create` 原子出生；`init` 为 `init_in_progress`+`["0"]`，`log` 为 `log_in_progress`+`[]`，收尾经 `transition` 到 `log_done` 并追加 `"log"`；plan 产物/合同完成后经 `transition` 到 `plan_done` 并追加 `"1"`。禁止直写完成态。
 
-> **公共选项**（所有新建工单入口 `init/log/start/plan/fast`）：`--worktree` 用 git worktree 隔离（独立分支+目录，opt-in）；`--debug`（仅 init/log）独立孪生对照（目录建 `.icode_output/.debug/`、不入全局索引）。
+> **公共选项**：`--worktree` 隔离；`--debug`（init/log）建孪生；`--guide`（仅 init，互斥）派生指南。
 
 ## 控制面（工单 schema v3，vNext）
 
@@ -74,6 +76,7 @@ description: 端到端编码工作流（步骤 0~6，含需求初稿、日志根
 
 ```text
 /icode init 粗略需求 → /icode start 需求        # 全流程（步骤0 可选 + 1~6 串联）
+/icode init 粗略需求 → 继续讨论 → /icode init --guide   # 复用最新初稿，生成新人指南
 /icode plan → review → merge → code → deepcheck → audit   # 分步手动
 /icode readme / patch / verify --listen          # 交付报告 / 追加修改 / 纯实机验证
 /icode status --pending                          # 跨工单验证债务
@@ -103,6 +106,8 @@ description: 端到端编码工作流（步骤 0~6，含需求初稿、日志根
 | 5 | `05_deepcheck.md` | 三阶段复检 |
 | 6 | `06_audit.md` | 终审报告（含修复日志段） |
 | 0/log | `00_init.md` / `log_analysis.md` | 入口产物 |
+
+**步骤 0 派生例外**：`init --guide` 两个 `deliverables/` 产物由 [guide_contract.md](references/guide_contract.md) 约束，不写步骤号、不改 status。
 
 **status 词表**（写回 metadata 前逐字对照，禁止自定义）：正常流 `log_in_progress` / `log_done` → `init_in_progress` → `plan_done` → `review_in_progress` / `review_done` → `plan_finalized` → `code_in_progress` / `code_done` → `deepcheck_in_progress` / `deepcheck_done` → `completed`（终态）；debug 隔离流 `debug_in_progress` → `debug_done`。
 

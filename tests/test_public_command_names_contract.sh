@@ -44,6 +44,7 @@ require_text steps/list.md '--all' 'stale inclusion uses all'
 require_text steps/list.md '--plain' 'plain output flag is canonical'
 require_text steps/install.md '/icode install --basic' 'basic install flag is canonical'
 require_text steps/install.md '/icode install --preview' 'install preview flag is canonical'
+require_text SKILL.md '/icode init [--guide]' 'init guide flag is canonical'
 
 reject_public '--submit-check' 'old submit-check public flag is absent'
 reject_public '--verification-pending' 'old verification-pending public flag is absent'

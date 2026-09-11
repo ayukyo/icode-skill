@@ -8,7 +8,7 @@
 - 使用契约（何时用哪个子命令、降级路径、legacy 适配）：references/control_plane.md
 
 子命令：
-  resolve-ticket  工单身份解析（--dir / --ticket / --latest）；--ticket 多义即拒绝（exit 4）
+  resolve-ticket  工单身份解析（--dir / --ticket / --latest）；可按状态/产物过滤，--ticket 多义即拒绝（exit 4）
   create          原子创建 metadata + 出生事件（空目录所有权检查）
   validate        工单整体校验（metadata schema + 状态-事件一致性 + 事件链完整性 + 索引指针 + 三 linter）
   event           追加事件（哈希链；仅 vNext 工单）
@@ -63,6 +63,15 @@ SNAPSHOT_NAME = "ticket_snapshot.json"
 ARCHIVE_MANIFEST_NAME = "archive_manifest.json"
 TXN_NAME = ".icontrol_txn.json"
 GENESIS_HASH = "0" * 64
+INIT_GUIDE_REQUIRED_HEADINGS = (
+    "1. 背景与目标",
+    "2. 现状盘点",
+    "3. 新增需求点",
+    "4. 影响面与关联模块",
+    "5. 关键问题与待决策项",
+    "6. 链路图",
+    "7. 4 维度验证清单",
+)
 DELIVERY_VERDICTS = ["verified", "verification_pending", "blocked", "not_applicable"]
 CONTROL_EVENT_TYPES = {
     "ticket_created", "step_started", "step_finished", "artifact_written", "gate_checked",
@@ -395,12 +404,96 @@ def classify_ticket_dir(out_dir):
     return workspace, debug
 
 
+def resolution_filter_failures(out_dir, meta, args):
+    """返回 resolve-ticket 可选过滤条件的不满足项；状态为任一匹配，产物为全部存在。"""
+    if not isinstance(meta, dict):
+        raise ControlError("metadata 顶层必须是 JSON 对象", exit_code=1,
+                           gate_id="metadata_shape")
+    failures = []
+    required_statuses = list(getattr(args, "require_status", None) or [])
+    required_artifacts = list(getattr(args, "require_artifact", None) or [])
+    if required_statuses and meta.get("status") not in required_statuses:
+        failures.append(
+            f"status={meta.get('status')!r} 不在要求集合 {required_statuses!r}")
+    for raw in required_artifacts:
+        artifact = Path(raw)
+        ticket_root = Path(out_dir).resolve()
+        candidate = (ticket_root / artifact).resolve()
+        try:
+            candidate.relative_to(ticket_root)
+        except ValueError:
+            raise ControlError(
+                f"--require-artifact 经符号链接逃出工单目录: {raw!r}",
+                exit_code=2, gate_id="resolve_artifact_path")
+        if not candidate.is_file():
+            failures.append(f"缺少必需产物 {raw!r}")
+    if getattr(args, "require_init_ready", False):
+        failures.extend(init_guide_source_failures(out_dir, meta))
+    return failures
+
+
+def init_guide_source_failures(out_dir, meta):
+    """检查 init 分析是否具备派生指南所需的最小结构与实质内容。"""
+    failures = []
+    if meta.get("status") != "init_in_progress":
+        failures.append("init guide 源的 status 必须为 init_in_progress")
+    completed_steps = meta.get("completed_steps")
+    if not isinstance(completed_steps, list) or "0" not in completed_steps:
+        failures.append("init guide 源的 completed_steps 必须包含 '0'")
+    source = Path(out_dir) / "00_init.md"
+    try:
+        text = source.read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as exc:
+        failures.append(f"00_init.md 不可读或不是 UTF-8: {exc}")
+        return failures
+    if not text.strip():
+        failures.append("00_init.md 为空")
+        return failures
+    for heading in INIT_GUIDE_REQUIRED_HEADINGS:
+        match = re.search(rf"^##\s+{re.escape(heading)}(?:\s|（|\(|$)", text, re.MULTILINE)
+        if match is None:
+            failures.append(f"00_init.md 缺少完整结构章节: {heading}")
+            continue
+        next_heading = re.search(r"^##\s+", text[match.end():], re.MULTILINE)
+        end = match.end() + next_heading.start() if next_heading else len(text)
+        body = text[match.end():end].strip()
+        plain = re.sub(r"[`#>*_{}|\[\]()-]", "", body).strip()
+        if (not plain or re.fullmatch(r"(?is)(待补|todo|tbd|n/?a|\.\.\.)[：:].*", plain)
+                or plain.casefold() in {"待补", "todo", "tbd", "n/a", "na", "..."}):
+            failures.append(f"00_init.md 章节无实质内容: {heading}")
+    return failures
+
+
+def validate_resolution_args(args):
+    for status in list(getattr(args, "require_status", None) or []):
+        if not isinstance(status, str) or not status.strip():
+            raise ControlError("--require-status 不得为空", exit_code=2,
+                               gate_id="resolve_status_filter")
+    for raw in list(getattr(args, "require_artifact", None) or []):
+        artifact = Path(raw)
+        if artifact.is_absolute() or not artifact.parts or ".." in artifact.parts:
+            raise ControlError(
+                f"--require-artifact 只接受工单目录内的安全相对路径: {raw!r}",
+                exit_code=2, gate_id="resolve_artifact_path")
+
+
+def require_resolution_filters(out_dir, meta, args):
+    failures = resolution_filter_failures(out_dir, meta, args)
+    if failures:
+        raise ControlError(
+            f"工单 {Path(out_dir).resolve()} 不满足解析过滤条件",
+            exit_code=1, gate_id="resolve_ticket_filter", failures=failures,
+            hint="核对 --require-status/--require-artifact，或先完成对应入口分析")
+
+
 def resolve_dir(args) -> dict:
     """工单身份解析。优先级：--dir 显式 > --ticket 扫描+索引兜底 > --latest（只读便利）。"""
+    validate_resolution_args(args)
     workspace = Path(args.workspace).resolve() if args.workspace else None
     if args.dir:
         out_dir = Path(args.dir).resolve()
         meta = load_metadata(out_dir)
+        require_resolution_filters(out_dir, meta, args)
         return {"resolved": True, "source": "dir", "out_dir": str(out_dir),
                 "ticket_id": meta.get("ticket_id"), "status": meta.get("status"),
                 "schema_version": meta.get("schema_version", None), "warnings": []}
@@ -433,6 +526,7 @@ def resolve_dir(args) -> dict:
         if candidates:
             out_dir = candidates[0].resolve()
             meta = load_metadata(out_dir)
+            require_resolution_filters(out_dir, meta, args)
             return {"resolved": True, "source": "scan", "out_dir": str(out_dir),
                     "ticket_id": meta.get("ticket_id"), "status": meta.get("status"),
                     "schema_version": meta.get("schema_version", None), "warnings": []}
@@ -479,6 +573,7 @@ def resolve_dir(args) -> dict:
                         mismatches=mismatches,
                         hint="用 /icode list 核对保留位置；不要把复用路径中的其他工单当成目标")
                 cand = chosen
+                require_resolution_filters(cand, meta, args)
                 return {"resolved": True, "source": "index", "out_dir": str(cand),
                         "ticket_id": args.ticket, "status": meta.get("status"),
                         "schema_version": meta.get("schema_version", None),
@@ -492,14 +587,43 @@ def resolve_dir(args) -> dict:
             raise ControlError("--latest 需 --workspace <工程根>", exit_code=2)
         root = Path(workspace) / ".icode_output"
         numbered = []
+        rejected = []
+        filters_enabled = bool(getattr(args, "require_status", None) or
+                               getattr(args, "require_artifact", None) or
+                               getattr(args, "require_init_ready", False))
         for sub in root.glob(".icode_output_*"):
             suffix = sub.name.removeprefix(".icode_output_")
             if suffix.isdigit() and (sub / METADATA_NAME).is_file():
-                numbered.append((int(suffix), sub))
-        best = max(numbered, default=(None, None), key=lambda item: item[0])[1]
-        if best is None:
-            raise ControlError(f"{root} 下无含 metadata 的工单目录", exit_code=1)
-        meta = load_json(best / METADATA_NAME, "metadata")
+                if not filters_enabled:
+                    numbered.append((int(suffix), sub, None))
+                    continue
+                if sub.resolve().parent != root.resolve():
+                    rejected.append({"out_dir": str(sub),
+                                     "failures": ["工单目录符号链接逃出当前工作区"]})
+                    continue
+                try:
+                    meta = load_json(sub / METADATA_NAME, "metadata")
+                    failures = resolution_filter_failures(sub, meta, args)
+                except ControlError as exc:
+                    rejected.append({"out_dir": str(sub), "reason": str(exc)})
+                    continue
+                if failures:
+                    rejected.append({"out_dir": str(sub), "failures": failures})
+                    continue
+                numbered.append((int(suffix), sub, meta))
+        best_entry = max(numbered, default=None, key=lambda item: item[0])
+        if best_entry is None:
+            qualifier = "且满足过滤条件" if (getattr(args, "require_status", None) or
+                                               getattr(args, "require_artifact", None)) else ""
+            extra = {"rejected": rejected}
+            if qualifier:
+                extra["gate_id"] = "resolve_ticket_filter"
+            raise ControlError(
+                f"{root} 下无含 metadata {qualifier}的工单目录", exit_code=1,
+                **extra)
+        _, best, meta = best_entry
+        if meta is None:  # 无过滤器时保留旧行为：选最新后再解析，损坏 metadata 必须报错。
+            meta = load_json(best / METADATA_NAME, "metadata")
         return {"resolved": True, "source": "latest", "out_dir": str(best.resolve()),
                 "ticket_id": meta.get("ticket_id"), "status": meta.get("status"),
                 "schema_version": meta.get("schema_version", None),
@@ -3845,12 +3969,18 @@ def build_parser():
                                  description="icode 工单控制面（vNext schema v3）")
     sub = ap.add_subparsers(dest="cmd")
 
-    p = sub.add_parser("resolve-ticket", help="工单身份解析（--dir/--ticket/--latest）")
+    p = sub.add_parser("resolve-ticket", help="工单身份解析（--dir/--ticket/--latest，可按状态/产物过滤）")
     selector = p.add_mutually_exclusive_group(required=True)
     selector.add_argument("--dir")
     selector.add_argument("--ticket")
     selector.add_argument("--latest", action="store_true")
     p.add_argument("--workspace", help="工程根（--ticket/--latest 扫描范围）")
+    p.add_argument("--require-status", action="append", default=[],
+                   help="只接受指定 status；可重复，多个值按任一匹配")
+    p.add_argument("--require-artifact", action="append", default=[],
+                   help="只接受含指定工单内相对路径的目录；可重复，多个产物须全部存在")
+    p.add_argument("--require-init-ready", action="store_true",
+                   help="只接受结构完整且各必需章节有实质内容的 init 分析源")
     p.set_defaults(func=cmd_resolve_ticket)
 
     p = sub.add_parser("create", help="原子创建 vNext metadata + ticket_created 出生事件")

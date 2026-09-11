@@ -4,7 +4,9 @@
 
 ## 目录管理
 
-### 创建新目录（用于 init / log，以及 start / plan 在不满足复用条件时）
+### 创建新目录（用于常规 init / log，以及 start / plan 在不满足复用条件时）
+
+> `/icode init --guide` 是派生产物例外：它在进入本节前即分流，用 `resolve-ticket --latest --require-status init_in_progress --require-artifact 00_init.md --require-init-ready` 选择最新结构完整的正常工单，**绝不执行创建或 REUSE=2 询问逻辑**。详见 [guide_contract.md](guide_contract.md)。
 
 ```bash
 # ——工作区根锚定（建前必做，L1 致命，阻塞流程）——

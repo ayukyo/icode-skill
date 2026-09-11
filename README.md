@@ -6,7 +6,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-Skill-8A2BE2.svg)](SKILL.md)
-[![Version](https://img.shields.io/badge/version-v2.22.0-blue.svg)](SKILL.md)
+[![Version](https://img.shields.io/badge/version-v2.23.0-blue.svg)](SKILL.md)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/ayukyo/icode-skill/issues)
 
 </div>
@@ -59,6 +59,8 @@ Other entry points:
 
 # Requirement unclear? Draft it in conversation first
 /icode init Record sensor data re-bag                # Step 0: kick-off draft + dialogue
+# After the init analysis and discussion, turn the latest eligible draft into a beginner-facing guide
+/icode init --guide                                  # Refreshes deliverables/guide.md; does not create another ticket
 
 # From a bug log: analyze root cause first, then fix
 /icode log ~/work/log/service-anomaly "no response after startup"   # Entry: log root-cause analysis → fix requirement
@@ -231,7 +233,7 @@ The seven local services add no public `/icode` commands; their machine-readable
 | --- | --- |
 | `/icode help` | Help: show usage examples |
 | `/icode log [scattered info...]` | Optional entry: deterministic evidence manifest + project-local debug reuse + per-repo runtime baseline → root-cause analysis → fix requirement `00_init.md`; auto-generates a bounded cross-audience brief |
-| `/icode init [<rough req>]` | Optional Step 0: multi-turn dialogue → `00_init.md` |
+| `/icode init [--guide] [<rough req or guide constraints>]` | Normal: new Step 0 ticket and multi-turn draft; `--guide`: reuse the latest eligible init and refresh `deliverables/guide.md` plus its internal evidence audit |
 | `/icode start <req>` | Full flow: create/reuse dir → steps 1–6 |
 | `/icode fast <req>` | Trimmed full flow: plan→review(1 round, no adversarial)→merge→code→deepcheck(Reverse only)→audit (~65% cost) |
 | `/icode plan <req>` | Step 1 only: draft project plan |
