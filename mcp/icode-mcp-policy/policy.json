@@ -88,6 +88,10 @@
       {"server": "icode-local-index", "condition": "文档语料超过 50 个文件", "required": false},
       {"server": "icode-mail-observe", "condition": "无已登录浏览器且用户显式选择 IMAP 邮箱观察器取得文档输入", "required": false}
     ],
+    "docx": [
+      {"server": "icode-evidence", "condition": "P1 交付引用工单、知识库、日志、附件或外部文档，需 hash 回指", "required": false},
+      {"server": "icode-local-index", "condition": "P1 文档语料超过常规 rg 范围", "required": false}
+    ],
     "ppt": [
       {"server": "icode-evidence", "condition": "幻灯片引用日志/文档/图片来源", "required": false}
     ],

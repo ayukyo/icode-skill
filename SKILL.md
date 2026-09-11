@@ -1,6 +1,6 @@
 ---
 name: icode
-description: 端到端编码工作流（步骤 0~6，含需求初稿、日志根因、验证与学习入口），支持：/icode help, install [--basic|--preview], init [--guide], log, start, fast, plan, review, merge, code, deepcheck, audit, patch, verify [--plan|--deploy|--listen|--test|--reuse], doc, limit, readme, ppt, learn [--project|--ticket|--since], status [--pending|--scan|--verdict], list [--all|--plain], bak, worktree --update/--close/--reopen/--merge。新建工单入口支持 --worktree opt-in
+description: 端到端编码工作流（步骤 0~6，含需求初稿、日志根因、验证与学习入口），支持：/icode help, install [--basic|--preview], init [--guide], log, start, fast, plan, review, merge, code, deepcheck, audit, patch, verify [--plan|--deploy|--listen|--test|--reuse], doc, docx, limit, readme, ppt, learn [--project|--ticket|--since], status [--pending|--scan|--verdict], list [--all|--plain], bak, worktree --update/--close/--reopen/--merge。新建工单入口支持 --worktree opt-in
 ---
 
 **版本**: v2.23.0
@@ -12,9 +12,9 @@ description: 端到端编码工作流（步骤 0~6，含需求初稿、日志根
 - **步骤 0（可选）**：需求初稿对话，落档为 `00_init.md`；`init --guide` 派生新人指南
 - **步骤 1~6**：拟定计划 → 审查 → 定稿 → 编码 → 复检 → 终审
 
-> **主流程步骤真源（防误用，唯一真源 = `steps/` 目录，启动强制 Read）**：步骤编号 / 产物文件名 / `completed_steps` 合法值**一律以 `steps/*.md` 实时清单为准**（`ls steps/*.md` 完整列出，含主流程与辅助入口 log / doc / limit / status / install / list / bak / verify / learn，及精简全流程入口 fast）——**本块仅示意，steps/ 演进后以目录为准，勿依赖写死**。`/icode start` / `/icode fast` / `/icode plan` 进入第一步**先 `ls steps/*.md`** 核对，不按"编码→测试→部署"直觉推断
+> **主流程步骤真源（防误用，唯一真源 = `steps/` 目录，启动强制 Read）**：步骤编号 / 产物文件名 / `completed_steps` 合法值**一律以 `steps/*.md` 实时清单为准**（`ls steps/*.md` 完整列出，含主流程与辅助入口 log / doc / docx / limit / status / install / list / bak / verify / learn，及精简全流程入口 fast）——**本块仅示意，steps/ 演进后以目录为准，勿依赖写死**。`/icode start` / `/icode fast` / `/icode plan` 进入第一步**先 `ls steps/*.md`** 核对，不按"编码→测试→部署"直觉推断
 > - 当前主流程示意（以 `ls steps/*.md` 为准）：`00_init → 01_plan → 02_review → 03_merge → 04_code → 05_deepcheck → 06_audit → 07_readme → 08_patch`；**不存在 `03_code` / `04_test` / `05_deploy`**（测试验证在 04_code 子段，部署/回归归 07_readme / 08_patch / verify）
-> - 辅助独立步骤（doc / log / limit / status / install / list / bak / verify / learn）不参与 1~6 推进；**fast 为精简全流程（非辅助独立步骤）**——参与 1~6 但各步缩略（见命令表 fast 行）
+> - 辅助独立步骤（doc / docx / log / limit / status / install / list / bak / verify / learn）不参与 1~6 推进；**fast 为精简全流程（非辅助独立步骤）**——参与 1~6 但各步缩略（见命令表 fast 行）
 > - **强制**：产物命名 + `completed_steps` 写号**对照 `ls steps/*.md` 实时结果**（如入口含 `log` → 可写 `"log"`），不在清单 → 停下核对，禁止自造产物占位；steps/ 目录与本文档不一致时**以 steps/ 目录为准**
 
 ## 通用约定（对话语言）
@@ -46,6 +46,7 @@ description: 端到端编码工作流（步骤 0~6，含需求初稿、日志根
 | `[独立]` `/icode verify [--deploy\|--listen\|--test <target>] [--reuse <artifact>]` / `/icode verify --plan [--ticket <id>]` | **实机验证/只读验证计划**：执行结果记 `verification_runs`；`--plan` 只生成剩余验证单元，不自动升级 delivery_verdict（[steps/verify.md](steps/verify.md)） | 否（执行模式写 metadata；plan 只写派生报告） |
 | `[学习]` `/icode learn [--project <path>] [--ticket <id>] [--since <ISO-8601>]` | 从项目内观测生成复用/组合/增强/新建/工具化/no-action 建议，不直接创建或发布 Skill（[steps/learn.md](steps/learn.md)） | 否（写 `.icode_output/learn/` 派生报告） |
 | `[工程]` `/icode doc [自然语言]` | 工程级知识库生成/维护（`project_docs/`+`module_docs/`）；doc_worklist 防中断丢进度 | 否（写全局） |
+| `[交付]` `/icode docx [自然语言]` | DOCX 交付：明确 Markdown 忠实转换，或将已有工单/知识库组织为交付 Word；自管运行时、结构验收、兼容 renderer 视觉验收 | 否（P0 同级；P1 写 `<工程根>/.icode_output/docx/`） |
 | `[配置]` `/icode limit [自然语言]` | 项目约束红线（主存+单 checkout 覆盖）；plan/log 前置硬基线 + `limit_checkpoint.md` 读留痕 | 否（写全局 limits/ + 工程根 limit.local/） |
 | `[交付]` `/icode ppt [自然语言]` | PPT 生成（4 类场景），16 套模板只换文字 | 否（写 `<工程根>/.icode_output/ppt/`） |
 | `[查询]` `/icode status` | 只读查状态；`--pending` 汇总验证债务；`--verdict` 可配 `--replacement`/`--dependency` 标注方向结论；`--scan` 批量扫证伪信号；`--validate` 产物集机器校验 | 否（仅 `--verdict` 写 metadata+索引；债务报告为派生产物） |
@@ -84,7 +85,7 @@ description: 端到端编码工作流（步骤 0~6，含需求初稿、日志根
 ```
 
 - 日志根因分析入口：`/icode log 设备日志+症状` → 根因报告 + `00_init.md` → `/icode start` 衔接
-- 全流程精简：`/icode fast 需求`；工程知识库：`/icode doc`；约束红线：`/icode limit`
+- 全流程精简：`/icode fast 需求`；工程知识库：`/icode doc`；Word 交付：`/icode docx`；约束红线：`/icode limit`
 - **中断/跨会话恢复**：按 `completed_steps` 中 1~6 范围内最大已完成步骤续跑（见「全流程串联规则」）；重新执行某步骤可覆盖该步骤输出
 
 > **锚点保留：方式 D2 / D3 / H**——`/icode log` 的 TB 缺陷单拉取（方式 D2：单 `LIB-NUM` 复用+增量对抗；方式 D3：批量"打开/未完成"分析）——锚点兼容写法「方式H」/「方式 H」等价；钉钉文档拉取（方式 H）详见 [steps/log.md](steps/log.md)「TB 缺陷源拉取」+「批量 TB 分析」 / `tools/dingtalk/README.md`。
@@ -284,6 +285,7 @@ test -f "{ICODE_OUT_DIR}/03_plan_final.md" && python3 -c "import json,sys; d=jso
 | verify | `verify` | [steps/verify.md](steps/verify.md)（独立实机验证，不改代码；结果记 `verification_runs`，不自动升级 delivery_verdict） |
 | learn | `learn` | [steps/learn.md](steps/learn.md)（独立学习报告；不直接创建、安装或同步 Skill） |
 | doc | `doc` | [steps/doc.md](steps/doc.md) |
+| docx | `docx` | [steps/docx.md](steps/docx.md)（独立交付步骤：P0 Markdown 忠实转换；P1 项目/模块/本次功能/本次BUG → .docx） |
 | limit | `limit` | [steps/limit.md](steps/limit.md)（独立步骤，不参与 1~6 流程推进；plan 步骤硬基线引用源） |
 | ppt | `ppt` | [steps/ppt.md](steps/ppt.md)（独立交付步骤：项目/模块/本次功能开发/本次BUG修复 → .pptx） |
 | - | `install` | [steps/install.md](steps/install.md)（开源统一安装步骤：ICODE + 共享技能 + MCP）|

@@ -12,11 +12,20 @@ for path in \
   tools/runtime_baseline.py \
   tools/verification_debt.py \
   tools/learn.py \
+  tools/docx/bootstrap_runtime.py \
+  tools/docx/build_docx.py \
+  tools/docx/inspect_docx.py \
+  tools/docx/render_docx.py \
+  tools/docx/resolve_renderer.py \
+  tools/docx/requirements.lock \
+  tools/docx/renderer_manifest.json \
+  steps/docx.md \
   steps/learn.md; do
   test -f "$ROOT/$path" || { printf 'missing bundled capability: %s\n' "$path" >&2; exit 1; }
 done
 
 rg -q '/icode learn' "$ROOT/SKILL.md"
+rg -q '/icode docx' "$ROOT/SKILL.md"
 rg -q 'steps/learn\.md' "$ROOT/SKILL.md"
 python3 - "$ROOT/mcp/reasoning-gate/gates.json" <<'PY'
 import json
@@ -53,6 +62,7 @@ assert set(policy["servers"]) == expected
 assert policy["default"] == "deny"
 assert any(route["server"] == "icode-mcp-health" for route in policy["steps"]["install"])
 assert any(route["server"] == "icode-workspace" for route in policy["steps"]["worktree"])
+assert {route["server"] for route in policy["steps"]["docx"]} == {"icode-evidence", "icode-local-index"}
 PY
 
 for readme in README.md README.zh-CN.md; do
@@ -82,6 +92,11 @@ python3 -m py_compile \
   "$ROOT/tools/runtime_baseline.py" \
   "$ROOT/tools/verification_debt.py" \
   "$ROOT/tools/learn.py" \
+  "$ROOT/tools/docx/bootstrap_runtime.py" \
+  "$ROOT/tools/docx/build_docx.py" \
+  "$ROOT/tools/docx/inspect_docx.py" \
+  "$ROOT/tools/docx/resolve_renderer.py" \
+  "$ROOT/tools/docx/render_docx.py" \
   "$ROOT/scripts/submission_guard.py"
 
 printf 'PASS: capability routing and bundling contract\n'

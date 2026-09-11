@@ -9,11 +9,12 @@ usage() {
   cat <<'EOF'
 Usage: ./install.sh [options] [mcp-name]
 
-Installs ICODE and all manifest-declared shared skills, then installs MCPs.
+Installs ICODE, its isolated DOCX runtime, all manifest-declared shared skills,
+then installs MCPs.
 
 Options:
   --client claude|codex|all Select target client (default: claude)
-  --skip-mcp                Install only ICODE and shared skills
+  --skip-mcp                Install ICODE, DOCX runtime and shared skills only
   --dry-run                 Report skill changes; do not write or install MCPs
   -h, --help                Show this help
 EOF
@@ -97,11 +98,7 @@ fi
 "$SYNC" "${SYNC_ARGS[@]}"
 
 if [[ "$DRY_RUN" == true ]]; then
-  echo "ℹ️ dry-run 不安装 MCP"
-  exit 0
-fi
-if [[ "$SKIP_MCP" == true ]]; then
-  echo "✅ ICODE 与共享技能安装完成；已按要求跳过 MCP"
+  echo "ℹ️ dry-run 不安装 DOCX runtime 或 MCP"
   exit 0
 fi
 
@@ -113,6 +110,24 @@ case "$CLIENT" in
   claude|all) ICODE_DIR="$CLAUDE_ICODE" ;;
   codex) ICODE_DIR="$CODEX_ICODE" ;;
 esac
+
+DOCX_BOOTSTRAP="$ICODE_DIR/tools/docx/bootstrap_runtime.py"
+if [[ ! -f "$DOCX_BOOTSTRAP" || ! -r "$DOCX_BOOTSTRAP" ]]; then
+  echo "❌ 已安装 ICODE 中缺少可读的 DOCX runtime 安装器: $DOCX_BOOTSTRAP" >&2
+  exit 1
+fi
+DOCX_PYTHON="${ICODE_PYTHON_BIN:-python3}"
+if ! command -v "$DOCX_PYTHON" >/dev/null 2>&1; then
+  echo "❌ 未找到 DOCX runtime 的 Python: $DOCX_PYTHON" >&2
+  exit 1
+fi
+"$DOCX_PYTHON" "$DOCX_BOOTSTRAP"
+
+if [[ "$SKIP_MCP" == true ]]; then
+  echo "✅ ICODE、自管 DOCX runtime 与共享技能安装完成；已按要求跳过 MCP"
+  exit 0
+fi
+
 MCP_INSTALLER="$ICODE_DIR/mcp/install.sh"
 if [[ ! -f "$MCP_INSTALLER" || ! -r "$MCP_INSTALLER" ]]; then
   echo "❌ 已安装 ICODE 中缺少可读的 MCP 入口: $MCP_INSTALLER" >&2

@@ -40,6 +40,7 @@ N. **强制思考前置**（不可跳过，缺证据视为不合规；按 [refer
 
 - `02_review.md` / `log.md`：+ Read [references/adversarial.md](../references/adversarial.md) 完整内容（对抗模式）
 - `doc.md`：+ Read [references/doc_template.md](../references/doc_template.md) 完整内容（doc 模板）
+- `docx.md`：+ Read [tools/docx/README.md](../tools/docx/README.md) 完整内容（自管运行时与视觉验收边界）
 
 ## 分级思考（reasoning gate）规则
 
@@ -50,7 +51,7 @@ N. **强制思考前置**（不可跳过，缺证据视为不合规；按 [refer
 | 等级 | 适用问题 | 必须动作 | sequential-thinking |
 |---|---|---|---|
 | **L0 确定性执行** | 输入明确、单一路径、结果可由脚本直接校验（status/list/help/install/bak/learn） | 执行现有状态/文件/schema/安全门禁；`mechanism=deterministic_checks` | 不调用 |
-| **L1 简短决策** | 有少量取舍但根因/方案已被直接证据确认（readme/ppt/close/reopen/worktree/init/doc/limit/merge） | 写简短决策记录（复用 `.decision_anchors.json`）；`mechanism=decision_record` | 不调用 |
+| **L1 简短决策** | 有少量取舍但根因/方案已被直接证据确认（readme/ppt/docx/close/reopen/worktree/init/doc/limit/merge） | 写简短决策记录（复用 `.decision_anchors.json`）；`mechanism=decision_record` | 不调用 |
 | **L2 复杂推理** | 多候选根因、多文件/多模块、并发/状态机、方案可修订（plan/review/code/patch/log/deepcheck/audit） | sequential-thinking 3～5 步并回写决策摘要；`mechanism=sequential-thinking` | **必须调用**；不可用时结构化降级 |
 | **L3 高风险对抗** | 架构变更、破坏性影响、高不确定性、证据矛盾、跨职责边界 | L2 + 独立对抗审查或等价反证验证；`mechanism=sequential-thinking+adversarial` | **必须调用**，但不能充当对抗者 |
 

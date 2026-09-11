@@ -28,6 +28,7 @@ run_install() {
   HOME="$fake_home" \
   CLAUDE_SKILLS_ROOT="$claude_root" \
   AGENTS_SKILLS_ROOT="$agents_root" \
+  ICODE_DOCX_RUNTIME_ROOT="$TMP/docx-runtime" \
     "$INSTALL" "$@"
 }
 
@@ -59,8 +60,16 @@ BUNDLED_CAPABILITIES=(
   tools/runtime_baseline.py
   tools/verification_debt.py
   tools/learn.py
+  tools/docx/bootstrap_runtime.py
+  tools/docx/build_docx.py
+  tools/docx/inspect_docx.py
+  tools/docx/render_docx.py
+  tools/docx/resolve_renderer.py
+  tools/docx/requirements.lock
+  tools/docx/renderer_manifest.json
   templates/media_policy.json.template
   steps/learn.md
+  steps/docx.md
 )
 BUNDLED_OK="$ALL_INSTALLED"
 for relative in "${BUNDLED_CAPABILITIES[@]}"; do
@@ -105,6 +114,7 @@ COMMAND_CONTRACT_OK="$ALL_INSTALLED"
 for installed_icode in "$CLAUDE_ROOT/icode" "$AGENTS_ROOT/icode"; do
   if ! rg -qF -- '/icode worktree --merge' "$installed_icode/SKILL.md" \
     || ! rg -qF -- '/icode status --pending' "$installed_icode/SKILL.md" \
+    || ! rg -qF -- '/icode docx' "$installed_icode/SKILL.md" \
     || ! rg -qF -- '--test' "$installed_icode/steps/verify.md" \
     || ! rg -qF -- '--basic' "$installed_icode/steps/install.md"; then
     COMMAND_CONTRACT_OK=false
@@ -153,10 +163,11 @@ if [[ -x "$INSTALL" ]] \
   && run_install "$DEFAULT_HOME" "$DEFAULT_CLAUDE" "$DEFAULT_AGENTS" \
        --skip-mcp >/dev/null 2>&1 \
   && [[ -f "$DEFAULT_CLAUDE/icode/SKILL.md" ]] \
+  && [[ "$(find "$TMP/docx-runtime" -mindepth 2 -maxdepth 2 -type f -name runtime_manifest.json | wc -l)" -ge 1 ]] \
   && [[ ! -e "$DEFAULT_AGENTS" ]]; then
-  ok "default public installation targets Claude only"
+  ok "default public installation targets Claude only and bootstraps DOCX runtime"
 else
-  bad "default public installation targets Claude only"
+  bad "default public installation targets Claude only and bootstraps DOCX runtime"
 fi
 
 DRY_HOME="$TMP/home-dry"
@@ -178,6 +189,7 @@ if [[ -x "$SELF_SOURCE/install.sh" ]] \
   && HOME="$SELF_HOME" \
      CLAUDE_SKILLS_ROOT="$SELF_HOME/.claude/skills" \
      AGENTS_SKILLS_ROOT="$SELF_HOME/.agents/skills" \
+     ICODE_DOCX_RUNTIME_ROOT="$TMP/docx-runtime" \
      "$SELF_SOURCE/install.sh" --client claude --skip-mcp >/dev/null 2>&1 \
   && [[ -f "$SELF_SOURCE/SKILL.md" ]] \
   && [[ -f "$SELF_HOME/.claude/skills/cross-layer-contract-audit/SKILL.md" ]]; then
@@ -216,6 +228,7 @@ MCP_CHILD_TRACE="$TMP/mcp-child-trace.txt"
 if HOME="$REAL_MCP_HOME" MCP_CHILD_TRACE="$MCP_CHILD_TRACE" \
      CLAUDE_SKILLS_ROOT="$REAL_MCP_HOME/.claude/skills" \
      AGENTS_SKILLS_ROOT="$REAL_MCP_HOME/.agents/skills" \
+     ICODE_DOCX_RUNTIME_ROOT="$TMP/docx-runtime" \
      "$REAL_MCP_SOURCE/install.sh" --client claude fixture-mcp \
        >/dev/null 2>&1 \
   && grep -qxF called "$MCP_CHILD_TRACE"; then
@@ -242,6 +255,7 @@ if [[ -x "$MCP_SOURCE/install.sh" ]] \
   && HOME="$MCP_HOME" MCP_TRACE="$MCP_TRACE" \
      CLAUDE_SKILLS_ROOT="$MCP_HOME/.claude/skills" \
      AGENTS_SKILLS_ROOT="$MCP_HOME/.agents/skills" \
+     ICODE_DOCX_RUNTIME_ROOT="$TMP/docx-runtime" \
      "$MCP_SOURCE/install.sh" --client all fixture-mcp >/dev/null 2>&1 \
   && [[ "$(sed -n '1p' "$MCP_TRACE")" == "--client" ]] \
   && [[ "$(sed -n '2p' "$MCP_TRACE")" == "all" ]] \

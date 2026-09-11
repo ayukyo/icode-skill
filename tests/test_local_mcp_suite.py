@@ -218,6 +218,8 @@ class LocalMcpSuiteTest(unittest.TestCase):
         self.write_config("ICODE_MCP_POLICY_CONFIG", {"policy_file": str(policy)})
         self.assertTrue(module.validate_policy()["answer"]["valid"])
         self.assertTrue(module.evaluate_call("log", "icode-evidence", "build_timeline")["answer"]["allowed"])
+        self.assertTrue(module.evaluate_call("docx", "icode-evidence", "inspect_file")["answer"]["allowed"])
+        self.assertTrue(module.evaluate_call("docx", "icode-local-index", "query_index")["answer"]["allowed"])
         self.assertFalse(module.evaluate_call("list", "icode-device-observe", "observe_device")["answer"]["allowed"])
         self.assertTrue(module.evaluate_call("plan", "icode-mail-observe", "get_message", "read")["answer"]["allowed"])
         self.assertTrue(module.evaluate_call("plan", "icode-mail-observe", "save_attachment", "managed_evidence_write")["answer"]["allowed"])

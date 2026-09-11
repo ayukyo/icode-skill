@@ -22,6 +22,7 @@ ICode is a Claude Code Skill that breaks the journey from requirement to deliver
 | Laziness resistance | None | 39 hard anti-laziness rules + mandatory Read confirmation lines + file:line evidence |
 | Reusing past decisions | Every ticket starts cold | Cross-project history retrieval with a global index + **verdict-based anti-misleading injection** (disproved tickets inject the trap, not the ADR) |
 | Project knowledge | None | `/icode doc` generates a global per-project/branch knowledge base, auto-injected at phase zero |
+| DOCX delivery | Manual conversion and host-dependent tools | `/icode docx` creates traceable Word deliverables using an ICODE-managed runtime and ABI-checked renderer contract |
 | Crash recovery | Restart from scratch | `.ico_metadata.json` status + round counters enable resumable runs at any step |
 | Cost control | Everything on the main model | `cheap-research` offloads low-risk candidate/compression/structured-extraction sub-tasks (the ones with real call sites in each step) to cheap models; `/icode fast` ≈ 65% of full-flow cost |
 | Model freedom | Manual | Every step is a separate command, so you can switch models between steps |
@@ -67,6 +68,10 @@ Other entry points:
 
 # Project-level knowledge base (standalone step, runs anytime)
 /icode doc myproject                                 # Generate/update this project's knowledge base chapters
+
+# DOCX delivery (standalone; preserves `/icode doc` knowledge-base semantics)
+/icode docx docs/release-guide.md                    # P0: faithful DOCX beside the Markdown source
+/icode docx current bug delivery Word                # P1: latest unique ICODE ticket → .icode_output/docx/
 
 # Backup all work orders before deleting a project (safety net — run BEFORE deleting)
 /icode bak                                           # Snapshot current project's entire .icode_output/ to ~/.claude/icode_data/project_backup/
@@ -114,6 +119,7 @@ Every step produces a real artifact in `.icode_output/.icode_output_N/` (plan �
 - **Anti-laziness quality gates**: triple-phase deepcheck (Reverse/Fixed/Free), plan assertion verification, ADR decision records, adversarial verification (independent skeptics — insufficient evidence is never confirmed, honest downgrade over fake consensus)
 - **Cross-project history retrieval**: init/log/plan/start auto-search similar past tickets and inject by command; references stay in-session, never pollute project artifacts. **Verdict-based injection** prevents disproved/superseded tickets from misleading new work
 - **Project-level knowledge base** (`/icode doc`): global per-project/per-branch knowledge base (module docs generated once and reused across projects), auto-retrieved and injected by phase-zero search
+- **DOCX delivery** (`/icode docx`): separate P0 Markdown conversion and P1 project/module/current-ticket delivery report. The installer creates a pinned, user-private DOCX runtime; every output includes hashes, source map, structural QA and an explicit visual-QA state. Visual rendering uses only an ICODE-owned OS/CPU/glibc-compatible bundle, never host LibreOffice.
 - **Project work-order backup** (`/icode bak`): snapshot the project's entire `.icode_output/` (tickets + debug twins + limit.local + ppt) to global `~/.claude/icode_data/project_backup/`, repeatable with hardlink dedup. Run it before deleting a project — once deleted, history retrieval still reads full work orders from the backup (project-first, backup fallback), and `/icode list` marks them `[path_gone→backup]`. For closed worktree tickets whose `project_path` is gone but whose `archive_path` is valid, `/icode list` marks them `[path_gone→archive]` (or `[path_gone→archive+backup]` when both archive and backup exist)
 - **Anti-duplicate injection**: history retrieval and project-doc retrieval share an injection cache, avoiding repeated injection within one dev chain
 - **Decision anchors**: steps pass concise decision summaries (`.decision_anchors.json`) downstream — saves tokens, keeps reasoning continuity
@@ -247,6 +253,7 @@ The seven local services add no public `/icode` commands; their machine-readable
 | `/icode verify [--deploy\|--listen\|--test\|--reuse]` / `/icode verify --plan [--ticket <id>]` | On-device verification or a read-only plan for remaining verification cells; plan mode writes no verification run and neither mode auto-upgrades `delivery_verdict` |
 | `/icode learn [--project <path>] [--ticket <id>] [--since <ISO-8601>]` | Project-scoped learning report from real skill-run observations; classifies reuse/composition/improvement/new-skill/tooling/no-action and never edits or publishes a Skill in this step |
 | `/icode doc [natural language]` | Project-level knowledge base (standalone step), auto-injected at phase zero |
+| `/icode docx [natural language]` | DOCX delivery (standalone): explicit Markdown → faithful Word beside the source, or existing ICODE project/module/current-ticket artifacts → `<project_root>/.icode_output/docx/`; isolated pinned runtime, source-map/hash manifest, structural QA and explicit renderer-compatible visual QA |
 | `/icode limit [natural language]` | Project constraint red lines (standalone step); hard baseline for the plan step |
 | `/icode ppt [natural language]` | PPT generation (standalone deliverable step): natural language → real `.pptx` for **project / module / current feature dev / current bug fix**; content sourced from icode artifacts & knowledge base (no fabrication), 16 built-in templates (`tools/ppt/templates/`, the AI shortlists 2-3 style-matched candidates and the user picks; user may also name a template directly), editable `edits.json` for re-run; outputs to `<project_root>/.icode_output/ppt/` (outside any ticket dir); needs `pip install python-pptx` (LibreOffice+poppler optional for PNG preview). Built-in templates are **non-commercial** (see `tools/ppt/NOTICE`) |
 | `/icode status [--pending]` | Query current ticket status or generate a read-only cross-ticket verification debt report (`--verdict` remains the explicit annotation mode) |

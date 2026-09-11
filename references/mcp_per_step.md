@@ -20,19 +20,19 @@
 | **vision-bridge** | 任意步骤存在图片/视频/PDF 视觉区域，**且** [media_routing.md](media_routing.md) 选择 `bridge`/`dual`（纯文本或能力未知 session、高风险独立复核等）；TB/本地视频先抽关键帧，密集页按 tile | 路由选择 native → 保留 session 原生视觉；bridge 不可用且 native 未证明 → `text_only` + 视觉缺口；未知能力禁止试探性注图 |
 | **playwright** | deepcheck/audit 步骤 **且** 前端工程（含 .html/.jsx/.tsx/.vue 或 package.json 含 react/vue） | CLI/后端/嵌入式工程 |
 | **memory** | init/plan 步骤 **且** 本工程历史工单数 ≥ 1（`~/.claude/icode_data/index.json` 中本 project_path 工单数 ≥ 1） | 新工程首个工单 / demo |
-| **cheap-research** | log/doc/review/deepcheck/audit/patch 步骤 **且** 命中正文有执行点的候选子任务（TB 评论预提取 / 远程 README 拉取 / dedup 分类找重复 / 审查输出压缩 / Fixed 预扫 / 仓库事实候选 / 差异摘要 / patch 各阶段映射），**或** merge 步骤 **且** 多轮 review（跨轮 issue 合并汇总 summarize，见 [steps/03_merge.md](../steps/03_merge.md)「合并定稿」段；N=1 轮时跳过）——**实际以 [tools_manifest.json](../mcp/cheap-research/tools_manifest.json) 与各步骤正文执行点为真源，推荐表不与正文矛盾**（init/plan/code/status/readme 正文无 cheap-research 调用执行点：历史检索/ADR 检索/现状盘点/文件名/模板选择均走确定性机制 Read/rg/规则，`--scan` 零 LLM 信号词匹配，标 ⚪） | **不接管决策**：3 质疑者对抗 / 架构决策 / 终审裁决 / 修复方案 / 用户对话一律不走；推理敏感度中等的"灰区"也不走（零灰区原则）；install/list/bak 无入选子任务 |
+| **cheap-research** | log/doc/review/deepcheck/audit/patch 步骤 **且** 命中正文有执行点的候选子任务（TB 评论预提取 / 远程 README 拉取 / dedup 分类找重复 / 审查输出压缩 / Fixed 预扫 / 仓库事实候选 / 差异摘要 / patch 各阶段映射），**或** merge 步骤 **且** 多轮 review（跨轮 issue 合并汇总 summarize，见 [steps/03_merge.md](../steps/03_merge.md)「合并定稿」段；N=1 轮时跳过）——**实际以 [tools_manifest.json](../mcp/cheap-research/tools_manifest.json) 与各步骤正文执行点为真源，推荐表不与正文矛盾**（init/plan/code/status/readme/docx 正文无 cheap-research 调用执行点：历史检索/ADR 检索/现状盘点/文件名/模板选择均走确定性机制 Read/rg/规则，`--scan` 零 LLM 信号词匹配，标 ⚪） | **不接管决策**：3 质疑者对抗 / 架构决策 / 终审裁决 / 修复方案 / 用户对话一律不走；推理敏感度中等的"灰区"也不走（零灰区原则）；install/list/bak 无入选子任务 |
 | **ICODE 本地 MCP 套件** | 先查 [`mcp/icode-mcp-policy/policy.json`](../mcp/icode-mcp-policy/policy.json) 对应 step；route 的 condition 成立且服务在当前宿主可调用时使用。`required=true` 表示条件成立后必须先实际调用，失败才能降级 | 未命中 condition 时不调用；缺失时回退当前确定性工具链并声明降级。`icode-mcp-health` 仅 install/CI，`icode-local-index` 仅大语料或已有索引，`icode-device-observe` 仅真机/fixture 观测；普通显式网页邮件链接使用已登录浏览器，`icode-mail-observe` 仅用于无人值守、邮箱范围搜索或用户显式选择 IMAP |
 
 ### ICODE 本地 MCP 步骤路由（摘要）
 
 | 服务 | 主要步骤 | 降级 |
 |---|---|---|
-| `icode-evidence` | log/doc/deepcheck/audit/patch/verify；plan/review/readme/ppt 按证据条件 | `tools/evidence_intake.py` + Read/rg/hash |
+| `icode-evidence` | log/doc/deepcheck/audit/patch/verify；plan/review/readme/ppt/docx 按证据条件 | `tools/evidence_intake.py` + Read/rg/hash |
 | `icode-workspace` | plan/code/merge/deepcheck/audit/worktree/verify | git/compile_commands/file/readelf/nm |
 | `icode-device-observe` | log/patch/verify；audit 只消费 | 现有设备脚本/ssh/adb，只读且显式记录命令 |
 | `icode-mcp-health` | install、MCP 升级复检、CI | shell 契约测试 + Inspector 手工复检 |
 | `icode-mcp-policy` | 新本地 MCP 调用前、install | 直接读取 policy.json；无策略则拒绝新增 MCP 调用 |
-| `icode-local-index` | init/log/plan/code/deepcheck/doc/learn/list 的大语料或已有索引 | `rg`；索引 stale 时先回读原文或重建 |
+| `icode-local-index` | init/log/plan/code/deepcheck/doc/docx/learn/list 的大语料或已有索引 | `rg`；索引 stale 时先回读原文或重建 |
 | `icode-mail-observe` | 仅无人值守、邮箱范围搜索或用户显式选择 IMAP；普通显式网页链接不触发 | 已登录网页邮箱优先，或 `tools/email_intake.py` 解析 `.eml/.msg`；保持缺失线程/附件为 gap |
 
 完整 condition、required 和 tool/operation allowlist 只维护在 `policy.json`，本文不复制全部规则。
@@ -67,7 +67,7 @@
 > **强制思考不再以「每步必调 sequential-thinking ≥3 次」承载**，改为 **reasoning gate 分级（L0～L3）** 选择思考载体：
 >
 > - **L0 确定性执行**（status/list/help/install/bak/learn）：不调用 sequential-thinking，只执行机器门禁（`mechanism=deterministic_checks`）。
-> - **L1 简短决策**（readme/ppt/close/reopen/worktree/init/doc/limit/merge）：写 `.decision_anchors.json` 决策摘要（`mechanism=decision_record`），不调用 sequential-thinking。
+> - **L1 简短决策**（readme/ppt/docx/close/reopen/worktree/init/doc/limit/merge）：写 `.decision_anchors.json` 决策摘要（`mechanism=decision_record`），不调用 sequential-thinking。
 > - **L2 复杂推理**（plan/review/code/patch/log/deepcheck/audit）：**必须调用** sequential-thinking 3～5 步（`mechanism=sequential-thinking`），不可用时结构化降级。
 > - **L3 高风险对抗**（任意步骤命中升级触发器）：L2 + 独立对抗验证（`mechanism=sequential-thinking+adversarial`）。
 >
@@ -80,7 +80,7 @@
 > | help / status / list | L0 | 纯查询和格式化，依赖 schema/索引校验 |
 > | install / bak | L0 | 依赖检测、路径校验、原子写和回读 |
 > | learn | L0 | 项目内只读观测分类；不在本步骤执行 Skill 晋升或发布 |
-> | readme / ppt | L1 | 交付内容取舍，通常不涉及新根因裁决 |
+> | readme / ppt / docx | L1 | 交付内容取舍，通常不涉及新根因裁决 |
 > | close / reopen / worktree | L1 | submission guard + 不可逆操作确认；多仓歧义升级 |
 > | init / doc / limit | L1 | 汇总需求和规则；范围冲突或多方案时升级 |
 > | merge | L1 | 审查结论一致时直接合并；冲突意见升级 L2 |
@@ -101,6 +101,7 @@
 | **0 init** | 🟢* | 🟢* | ⚪ | 🟢* | ⚪ |
 | **0 log** | 🟢* | 🟢* | ⚪ | 🟢* | 🟢* |
 | **doc** | ⚪ | 🟢* | ⚪ | ⚪ | 🟢* |
+| **docx** | ⚪ | ⚪ | ⚪ | ⚪ | ⚪ |
 | **learn** | ⚪ | ⚪ | ⚪ | ⚪ | ⚪ |
 | **1 plan** | 🟢* | 🟢* | ⚪ | 🟢* | ⚪ |
 | **2 review** | ⚪ | 🟢* | ⚪ | ⚪ | 🟢* |
@@ -133,6 +134,11 @@
 ### doc（工程知识库生成）
 - **vision-bridge**：截图分析——仅用户给图时
 - **cheap-research**（🟢*）：仓库事实候选（`propose_repo_facts`，输出 candidate 须实证）+ 章节模板填充（`fill_template`）+ 进度输出（`fill_template`）+ 6 级模块识别（`scan_modules`）+ 增量判定（`scan_patterns`/`diff_summary`）+ 远程依赖 README 拉取（`fetch_remote` 拉模块仓库 README 作为模块文档参考输入）。**不接管决策**：意图识别走主会话（推理敏感度中等），把控"该写哪章"的决策
+
+### docx（Word 交付）
+- **reasoning gate**：L1。记录 P0/P1 路由、来源、输出位置与视觉验收状态；不调用 sequential-thinking。
+- **ICODE 本地 MCP**：P0 单 Markdown 不调用。P1 引用工单、知识库、日志、附件或外部文档时按 `policy.json` 尝试 `icode-evidence` 做 hash 回指；大语料才用 `icode-local-index` 找候选，命中仍须 Read/rg 回读原文。
+- **其它 MCP**：均为 ⚪。DOCX 生成、OOXML 结构验收及 renderer ABI 选择均为 ICODE 自管本地工具，不新增 DOCX MCP，也不使用 PATH 的 LibreOffice。
 
 ### 1 plan（拟定计划）
 - **context7**：库 API 核对——仅涉及第三方库时

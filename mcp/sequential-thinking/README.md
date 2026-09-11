@@ -5,7 +5,7 @@
 > icode 工作流在 [SKILL.md](../../SKILL.md) 与 [references/thinking_core.md](../../references/thinking_core.md)
 > 中规定：**reasoning gate 分级（L0～L3）决定思考载体**。L2/L3（plan/review/code/patch/log/deepcheck/audit
 > 默认 L2；其余步骤命中升级触发器时）首选路径是调用本 MCP，不可用时降级为「### 结构化思考」文字块。
-> **L0/L1（status/list/help/install/bak/learn/readme/ppt/close/reopen/worktree/init/doc/limit/merge）不调用本 MCP**，
+> **L0/L1（status/list/help/install/bak/learn/readme/ppt/docx/close/reopen/worktree/init/doc/limit/merge）不调用本 MCP**，
 > 不进入可用性探测——避免简单步骤的仪式化调用、额外延迟与上下文噪声。
 
 ---

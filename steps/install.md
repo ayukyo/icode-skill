@@ -1,9 +1,9 @@
 # 步骤 install — ICODE / 共享技能 / MCP 一键安装（独立步骤）
 
 **命令**: `/icode install`
-**产出**: 所选宿主的 ICODE 与共享技能目录；可选 MCP 注册和运行环境
+**产出**: 所选宿主的 ICODE 与共享技能目录；ICODE 自管 DOCX Python runtime；可选 MCP 注册和运行环境
 **会话**: 主会话
-**定位**: **独立步骤**，不创建 `.icode_output_N/`、不写 `.ico_metadata.json`、不参与 1~6 流程推进。与 `doc` / `status` / `list` 并列。
+**定位**: **独立步骤**，不创建 `.icode_output_N/`、不写 `.ico_metadata.json`、不参与 1~6 流程推进。与 `doc` / `docx` / `status` / `list` 并列。
 
 ## 用途
 
@@ -131,9 +131,15 @@
 2. `bash mcp/<name>/install.sh --uninstall && bash mcp/<name>/install.sh`
 3. **重启 Claude Code**（启动时同步加载 mcpServers，中途修改不生效）
 
+## DOCX 自管运行时
+
+`./install.sh` 在 ICODE 同步成功后，自动运行已安装副本的 `tools/docx/bootstrap_runtime.py`。它在 `~/.local/share/icode/runtime/docx/<lock-hash>/` 创建独立 venv 并安装锁定依赖，不使用全局 pip、sudo、宿主 `python-docx` 或系统 LibreOffice。首次安装需要包索引网络（离线发行可随 `tools/docx/wheels/` 附带 wheels）；失败时 ICODE 同步结果保持有效，但安装命令以非零退出，不能把 DOCX 能力宣传为可用。
+
+DOCX 视觉验收只使用 ICODE 发行为当前 OS/CPU/glibc 打包且 SHA-256 校验通过的 renderer；无匹配 bundle 时生成和结构验收仍可用，manifest 必须标注 `visual_qa_pending`。禁止回退系统 `soffice`。
+
 ## 与其他步骤的关系
 
-- **与 `doc` / `status` / `list` 并列**：均为独立步骤，不参与 1~6 流程推进
+- **与 `doc` / `docx` / `status` / `list` 并列**：均为独立步骤，不参与 1~6 流程推进
 - **建议时机**：clone 仓库后立即跑一次；后续 install.sh 升级时再跑（增量更新）
 - **不写工单**：不创建 `00_init.md` / `.ico_metadata.json`，不更新 `~/.claude/icode_data/index.json`
 
