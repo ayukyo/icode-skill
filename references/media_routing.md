@@ -6,6 +6,8 @@
 
 先做确定性提取，再处理视觉区域：PDF/Office 的文本、元数据、表格结构与归档目录优先由本地只读适配器提取；只有布局、示意图、原理图、照片、波形、复杂表格和视频画面进入视觉路由。
 
+本合同也覆盖工具生成的预览图（例如 PPT 的 `preview/slide-N.png`）。文件已成功渲染不等于当前会话支持图片输入；任何预览图进入模型前仍须路由。纯文本/能力未知会话只做确定性结构检查并保留 `visual_status=unobserved`，禁止用 Read/open/attach 图片探测能力。
+
 `media_mode` 允许 `auto | native | bridge | dual | text_only`：
 
 - `auto`：宿主明确证明当前会话支持媒体输入时，普通任务用 `native`；未证明或明确为纯文本时，vision-bridge 健康则用 `bridge`，否则降级 `text_only` 并保留人工视觉缺口。高风险视觉证据在两通道均可用时用 `dual`。
@@ -56,6 +58,7 @@ bridge 配置可声明：
 - 超限时按原顺序串行分批，每批完成并落成文本结果后才能开始下一批；禁止并行媒体调用后让宿主把结果重新聚合进同一消息。
 - 所有批次完成后只聚合文本，不把原图片再次带入聚合消息。bridge 在 provider 内强制执行此规则；native/dual 由宿主适配层遵守路由输出。
 - 已经存在于会话历史中的超限用户消息无法由 ICODE 事后改写；若模型在 ICODE 执行前就拒绝该消息，需要宿主拆分附件或新建无污染会话。
+- 媒体注入返回“Model only support text input”或等价拒绝时，立即停止当前会话的 native 媒体重试；把 native 视为 unsupported，转 bridge 或 text_only。不能因 PNG 已在磁盘就重复 Read/attach。
 
 ## 页面渲染、裁剪与分块
 

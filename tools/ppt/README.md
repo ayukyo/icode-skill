@@ -9,6 +9,7 @@
 |------|------|
 | `scripts/build_pptx.py` | 按 `edits.json`（选页 + 文字替换）从模板生成 .pptx；带出框检测（默认只提示不阻断，`--strict` 时超框拒绝保存） |
 | `scripts/render_slides.py` | .pptx → PDF → 每页 PNG（LibreOffice + pdftoppm，渲染自检用，可选） |
+| `scripts/check_render_output.py` | 纯文本安全的确定性检查：PPTX 页数、逐页 PNG 完整性、签名和尺寸；不做排版语义判断 |
 | `scripts/compute_capacity.py` | 由 template.pptx 计算每个 slot 容量字段（数据准备/自建模用） |
 | `templates/INDEX.md` | 16 套内置模板索引（风格/主色/场景/页数） |
 | `templates/<slug>/` | 每套 4 文件：`template.pptx` / `intro.md` / `detail.json`（槽位寻址+容量+type_scale）/ `preview.png` |
@@ -50,7 +51,10 @@ python3 tools/ppt/scripts/build_pptx.py \
 
 # 渲染预览（可选）：每页一张 PNG 自检
 python3 tools/ppt/scripts/render_slides.py .icode_output/ppt/{名称}.pptx .icode_output/ppt/preview --dpi 144
+python3 tools/ppt/scripts/check_render_output.py .icode_output/ppt/{名称}.pptx .icode_output/ppt/preview
 ```
+
+渲染后必须先按 [media_routing.md](../../references/media_routing.md) 选择 `native/bridge/dual/text_only`，再决定是否把 PNG 交给视觉模型。纯文本或宿主视觉能力未知时禁止试传/Read PNG；`check_render_output.py` 通过只代表渲染结构完整，视觉排版仍标 `unobserved`。
 
 完整编辑规则（只改文字不破坏排版 / 占位必替换 / 禁省略号截断 / 同级字号一致 / 章节呼应）见 [steps/ppt.md](../../steps/ppt.md)「内容铁律」。
 

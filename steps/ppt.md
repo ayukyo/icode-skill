@@ -11,7 +11,7 @@
 ## 0. 前置校验
 
 1. **python-pptx 必需**：`python3 -c "import pptx"` 失败 → 提示 `pip install python-pptx`，缺则本步骤无法产出 .pptx。
-2. **渲染自检可选**：LibreOffice（`soffice --version`）+ poppler（`pdftoppm`）存在才做 PNG 预览自检；缺失则跳过渲染，**不阻断**（只出 .pptx，并提示无法自检）。
+2. **渲染自检可选**：LibreOffice（`soffice --version`）+ poppler（`pdftoppm`）存在才生成 PNG 预览；缺失则跳过渲染，**不阻断**（只出 .pptx，并提示无法自检）。渲染成功只证明 PPTX 可转成逐页 PNG，不等于视觉排版已经验证。
 3. **模板完整性**：`tools/ppt/templates/` 下应有 `INDEX.md` + ≥1 套模板（每套 4 文件：`template.pptx`/`intro.md`/`detail.json`/`preview.png`）。缺失 → 报错提示模板目录不完整。
 4. **中文字体**：模板用「微软雅黑」，机器无此字体时渲染预览会缺字；`fc-list | grep -i "yahei\|noto.*cjk\|wenquanyi"` 无命中 → 提示配 fontconfig alias（微软雅黑 → Noto Sans CJK SC），不阻断产出。
 
@@ -67,9 +67,29 @@ python3 tools/ppt/scripts/build_pptx.py \
     .icode_output/ppt/{场景关键词}_edits.json \
     .icode_output/ppt/{工程简名}_{场景关键词}.pptx \
     --detail tools/ppt/templates/$TPL/detail.json
-# 5) （可选）渲染自检：每页一张 PNG，肉眼过一遍排版/超框/占位残留
+# 5) （可选）渲染自检：每页一张 PNG（文件名可能为 slide-1.png 或 slide-01.png）
 python3 tools/ppt/scripts/render_slides.py .icode_output/ppt/{工程简名}_{场景关键词}.pptx .icode_output/ppt/preview --dpi 144
+# 6) 确定性渲染检查：页数、slide-N.png 完整性、PNG 签名与尺寸；不需要视觉模型
+python3 tools/ppt/scripts/check_render_output.py .icode_output/ppt/{工程简名}_{场景关键词}.pptx .icode_output/ppt/preview
 ```
+
+### 3.1 视觉抽验能力路由（渲染后、任何图片输入前强制执行）
+
+先完整读取 [references/media_routing.md](../references/media_routing.md)，再根据宿主的**可靠能力信号**执行 `tools/media_router.py route`。禁止按模型名称猜能力，也禁止用“试传/Read 一张图”探测：
+
+```bash
+python3 tools/media_router.py route \
+  --mode auto --native <supported|unsupported|unknown> \
+  --bridge <available|unavailable|unknown> --task diagram
+```
+
+- `selected_mode=native`：只有路由结果 `native_media_injection_allowed=true` 才能用宿主原生图片工具逐页抽验；遵守 `selected_max_images_per_message`，按顺序串行分批，先落文本结果再聚合。
+- `selected_mode=bridge`：把预览图交给健康的 vision-bridge，记录 hash、页码、provider/model、提示版本与限制；bridge 结果是二级证据，不伪装成当前模型亲眼确认。
+- `selected_mode=text_only`：**禁止调用 Read/view/open/attach 等方式把 `slide-*.png` 注入当前模型，尤其禁止 `Read slide-1.png`**。只运行 `check_render_output.py`、PPTX XML 占位检查和构建 lint；写 `visual_status=unobserved`，明确“PNG 已生成且结构检查通过，但排版/乱码/遮挡尚未视觉确认”，把预览目录交给用户人工查看。
+- `selected_mode=dual`：native 与 bridge 独立抽验后仅聚合文本；分歧保持 unresolved。
+- 若媒体调用返回 `400 Model only support text input` 或等价错误：立即判定 native 能力信号失效，**当前会话不再重试任何图片输入**；改走 bridge，bridge 不可用则走 text_only。必要时在无媒体历史的新会话继续，禁止重复发送同一 PNG。
+
+最终报告必须逐层输出同一行状态：`generation_status=<passed|failed> / render_status=<passed|skipped|failed> / visual_status=<native_verified|bridge_reviewed|unobserved|failed>`。当 `visual_status=unobserved` 时禁止声称“视觉抽验成功”“无乱码”或笼统的“PPT 全链路 OK”；只能报告生成和确定性渲染检查通过。
 
 **页面组织规则**：
 - 按 `detail.json` 的 `page_roles` 用角色页：`cover` 空 → 从第一张内容页开始；`agenda` 空 → 不强加目录；`ending` 空 → 以最后内容页收尾。**模板有什么角色就用什么角色，不硬造页面。**
@@ -87,7 +107,7 @@ python3 tools/ppt/scripts/render_slides.py .icode_output/ppt/{工程简名}_{场
 
 ## 5. 产出与收尾
 
-- 完成后输出：产物路径 + 用了哪套模板 + 页数 + 内容来源清单 + （若跳过渲染）未自检提示。
+- 完成后输出：产物路径 + 用了哪套模板 + 页数 + 内容来源清单 + `generation_status / render_status / visual_status` 三层状态；渲染或视觉抽验跳过时分别说明缺口。
 - **不写任何工单 metadata**，不创建 `.icode_output_N/` 目录（`ppt/` 子目录直接建在工程根的 `.icode_output/ppt/`）。
 - 若用户后续说「改 PPT」→ 直接改既有 `edits.json` 重跑构建，不重新收集。
 

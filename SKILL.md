@@ -3,7 +3,7 @@ name: icode
 description: 端到端编码工作流（步骤 0~6，含需求初稿、日志根因、验证与学习入口），支持：/icode help, install [--basic|--preview], init [--guide], log, start, fast, plan, review, merge, code, deepcheck, audit, patch, verify [--plan|--deploy|--listen|--test|--reuse], doc, docx, limit, readme, ppt, learn [--project|--ticket|--since], status [--pending|--scan|--verdict], list [--all|--plain], bak, worktree --update/--close/--reopen/--merge。新建工单入口支持 --worktree opt-in
 ---
 
-**版本**: v2.24.0
+**版本**: v2.24.1
 
 # ICode 全流程编码工作流（步骤 0 + 1~6）
 

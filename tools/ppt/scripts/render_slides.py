@@ -5,7 +5,7 @@ Usage:
     python3 render_slides.py <input.pptx> <out_dir> [--dpi 144]
 
 Output:
-    <out_dir>/slide-<N>.png  (1-indexed, zero-padded)
+    <out_dir>/slide-<N>.png  (1-indexed；pdftoppm 可能按总页数补零，如 slide-01.png)
 """
 from __future__ import annotations
 import argparse
