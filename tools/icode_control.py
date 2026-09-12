@@ -1418,23 +1418,30 @@ def commit_metadata_and_event(out_dir, before, after, event_type, payload,
 def run_gate_linters(out_dir, to_status=None, delivery_verdict=None, legacy=False):
     sm = load_state_machine()
     lint_cfg = sm["gate_policy"]["gate_linters"]
+    # step 真源 = gates.json state_machine.gate_policy.step_by_target（7 项全量：
+    # log/plan/review/merge/code/deepcheck/audit）。thinking_gate/mcp_coverage/
+    # workflow_contract 三个 linter 统一用此真源取值，禁止另维护硬编码映射
+    # （此前 review_done/deepcheck_done/log_done/completed 缺失 → 缺 --step →
+    # 全量扫描误伤条件门，见回归修复）。
     step = sm["gate_policy"].get("step_by_target", {}).get(to_status)
-    workflow_steps = {
-        "plan_done": "plan",
-        "plan_finalized": "merge",
-        "code_done": "code",
-    }
-    if to_status == "completed" and delivery_verdict == "verified":
-        workflow_steps[to_status] = "audit-verified"
+    # completed + delivery_verdict=verified → 用较严的 audit-verified 变体（含交付证据门）
+    if step == "audit" and delivery_verdict == "verified":
+        step = "audit-verified"
     results = []
     for gate_id, cmd in lint_cfg.items():
         full_cmd = list(cmd)
         if legacy:
             full_cmd = [arg for arg in full_cmd if arg != "--strict"]
-        if step and gate_id in ("thinking_gate", "mcp_coverage"):
-            full_cmd += ["--step", step]
-        if to_status in workflow_steps and gate_id == "workflow_contract":
-            full_cmd += ["--step", workflow_steps[to_status]]
+        # 按 linter 归一化 audit-verified：workflow_contract 的 STEP_GATES 有
+        # "audit-verified" 变体（含交付证据门）；而 cheap-research / reasoning-gate
+        # 两个 catalog 只有 "audit"（无 audit-verified key）。若把 audit-verified
+        # 原样传给它俩，total_in_scope=0 → audit MCP/思考门整体被跳过（verified
+        # 终态漏检）。因此仅这两个 linter 归一化回 audit，workflow_contract 保留。
+        linter_step = step
+        if gate_id in ("thinking_gate", "mcp_coverage") and linter_step == "audit-verified":
+            linter_step = "audit"
+        if linter_step and gate_id in ("thinking_gate", "mcp_coverage", "workflow_contract"):
+            full_cmd += ["--step", linter_step]
         full_cmd += [str(out_dir)]
         try:
             proc = subprocess.run(full_cmd, capture_output=True, text=True, timeout=180,

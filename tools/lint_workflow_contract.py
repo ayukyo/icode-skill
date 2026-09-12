@@ -66,11 +66,18 @@ FAST_RISK_TRIGGERS = [
     "real_env_verification", "unresolved_semantic_decision", "major_requirement_delta",
 ]
 # step → 需要检查的 gate 集合（gates.json blocked_steps 为真源；此处聚合便于一步判定）
+# 集合与 gates.json state_machine.gate_policy.step_by_target 一一对应：
+#   log/review/deepcheck/audit 为计划/质量阶段，identity_change 与 acceptance 只在
+#   code/deploy/audit-verified 生效（普通工单无身份变化/生命周期不得被这两个可选字段误杀）。
 STEP_GATES = {
+    "log": [],
     "plan": ["semantic_decision", "requirement_delta"],
-    "code": ["semantic_decision", "identity_change", "requirement_delta"],
-    "patch": ["semantic_decision", "requirement_delta"],
+    "review": ["requirement_delta"],
     "merge": ["requirement_delta"],
+    "code": ["semantic_decision", "identity_change", "requirement_delta"],
+    "deepcheck": ["requirement_delta"],
+    "audit": ["requirement_delta"],
+    "patch": ["semantic_decision", "requirement_delta"],
     "deploy": ["identity_change", "acceptance"],
     "audit-verified": ["identity_change", "acceptance", "delivery_evidence"],
     "fast": ["fast_risk"],
@@ -623,18 +630,18 @@ def build_report(out_dir: Path, step_filter: Optional[str], metadata: Dict,
             issues = fn(metadata, catalog, blocking_impl)
         else:
             issues = fn(metadata, catalog)
-        # legacy：缺对应字段（未列入 metadata）且非 strict → 警告不阻断
+        # legacy：缺对应字段（未列入 metadata）且非 strict → 警告不阻断。
+        # 仅登记结构字段（semantic_decisions/requirement_deltas/risk_profile）在
+        # strict 下缺失判 fail（vNext 流程步骤会登记，缺 = 未登记）。
+        # impact_contract/acceptance_contract 是可选条件字段：validator 已内置
+        # 「缺失 = 不涉及身份变化/生命周期 = pass」语义，缺失不应判 fail。
         missing_field = None
         if gate == "semantic_decision" and "semantic_decisions" not in metadata:
             missing_field = "semantic_decisions"
-        elif gate == "identity_change" and "impact_contract" not in metadata:
-            missing_field = "impact_contract"
         elif gate == "requirement_delta" and "requirement_deltas" not in metadata:
             missing_field = "requirement_deltas"
         elif gate == "fast_risk" and "risk_profile" not in metadata:
             missing_field = "risk_profile"
-        elif gate == "acceptance" and "acceptance_contract" not in metadata:
-            missing_field = "acceptance_contract"
         if missing_field is not None:
             if legacy and not strict:
                 report["warnings"] += 1

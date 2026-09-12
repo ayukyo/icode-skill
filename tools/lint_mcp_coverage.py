@@ -248,7 +248,11 @@ def build_report(out_dir: Path, step_filter: Optional[str], legacy: bool,
         gstep = gate.get("step", "")
         if step_filter and gstep != step_filter:
             continue
-        in_scope = step_in_scope(gstep, metadata, trace_rows)
+        # 显式 --step 时视为 in-scope（由调用方保证目标步骤已到达生命周期内；
+        # 例如 cmd_transition 在 push completed_steps 之前运行 linter，
+        # 若在此处复用 step_in_scope 会把本步骤 gate 判为 out-of-scope 而跳过——
+        # 与 lint_thinking_gate 的 `step_filter is not None or step_in_scope(...)` 对齐）
+        in_scope = step_filter is not None or step_in_scope(gstep, metadata, trace_rows)
         if not in_scope:
             continue
         report["total_gates_in_scope"] += 1
