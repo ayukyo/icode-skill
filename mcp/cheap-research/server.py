@@ -295,7 +295,7 @@ def load_config() -> dict:
             f"然后填 base_url / api_key / model。\n"
             f"详见 README.md。"
         )
-    return json.loads(p.read_text())
+    return json.loads(p.read_text(encoding="utf-8"))
 
 
 def _configured_allowed_roots() -> tuple[list[Path], str | None]:
@@ -315,7 +315,7 @@ def _configured_allowed_roots() -> tuple[list[Path], str | None]:
         if not cfg_path.exists():
             return [], None
         try:
-            raw_roots = json.loads(cfg_path.read_text()).get("allowed_roots", [])
+            raw_roots = json.loads(cfg_path.read_text(encoding="utf-8")).get("allowed_roots", [])
         except (OSError, json.JSONDecodeError) as exc:
             return [], f"读取 allowed_roots 失败: {exc}"
 
@@ -374,7 +374,7 @@ def _provider_profile() -> dict:
             "runtime_probe_performed": False,
         }
     try:
-        cfg = json.loads(cfg_path.read_text())
+        cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         return {
             "provider": "invalid_config",
@@ -949,7 +949,7 @@ async def describe_capabilities() -> ToolResponse:
     配置字段齐全，真实可调用性仍以首次实际工具调用为准。
     """
     try:
-        manifest = json.loads((_SERVER_DIR / "tools_manifest.json").read_text())
+        manifest = json.loads((_SERVER_DIR / "tools_manifest.json").read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         return {
             "error_code": "manifest_invalid",
