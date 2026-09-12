@@ -6,8 +6,9 @@
 #   ./mcp/install.sh                      # 扫描 + 全部安装(默认只注册 Claude Code)
 #   ./mcp/install.sh <name>               # 只装指定子工程(如 vision-bridge)
 #   ./mcp/install.sh --client codex       # 全部安装 + 注册到 Codex
-#   ./mcp/install.sh --client all <name>  # 指定子工程 + 注册到 Claude Code 和 Codex
-#   --client 取值: claude(默认)| codex | all
+#   ./mcp/install.sh --client codebuddy   # 全部安装 + 注册到 CodeBuddy(~/.codebuddy/mcp.json)
+#   ./mcp/install.sh --client all <name>  # 指定子工程 + 注册到 Claude Code/Codex/CodeBuddy
+#   --client 取值: claude(默认)| codex | codebuddy | all
 set -e
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -33,7 +34,7 @@ while [ $# -gt 0 ]; do
     --check)
       check_only=true; shift ;;
     --client)
-      if [ $# -lt 2 ]; then echo "❌ --client 需要参数: claude|codex|all"; exit 1; fi
+      if [ $# -lt 2 ]; then echo "❌ --client 需要参数: claude|codex|codebuddy|all"; exit 1; fi
       client="$2"; shift 2 ;;
     --client=*)
       client="${1#--client=}"; shift ;;
@@ -53,8 +54,8 @@ while [ $# -gt 0 ]; do
   esac
 done
 case "$client" in
-  claude|codex|all) ;;
-  *) echo "❌ --client 取值须为 claude|codex|all (当前: $client)"; exit 1 ;;
+  claude|codex|codebuddy|all) ;;
+  *) echo "❌ --client 取值须为 claude|codex|codebuddy|all (当前: $client)"; exit 1 ;;
 esac
 
 # 探测 Python 解释器(Codex 分支跑 client_registry.py 用; 与子工程 install 探测模式一致)
@@ -103,14 +104,14 @@ for installer in "${installers[@]}"; do
     exit 1
   fi
 done
-if [ "$client" = "codex" ] || [ "$client" = "all" ]; then
+if [ "$client" = "codex" ] || [ "$client" = "codebuddy" ] || [ "$client" = "all" ]; then
   if [ -z "$PYTHON_BIN" ]; then
-    echo "❌ Codex MCP 注册需要 python3/python" >&2
+    echo "❌ Codex/CodeBuddy MCP 注册需要 python3/python" >&2
     exit 1
   fi
   if [ ! -f "$HERE/_lib/client_registry.py" ] \
     || [ ! -r "$HERE/_lib/client_registry.py" ]; then
-    echo "❌ Codex MCP 注册入口不可读: $HERE/_lib/client_registry.py" >&2
+    echo "❌ MCP 跨客户端注册入口不可读: $HERE/_lib/client_registry.py" >&2
     exit 1
   fi
 fi
@@ -121,9 +122,10 @@ fi
 
 echo "📦 mcp 一键安装:扫描到 ${#installers[@]} 个子工程"
 case "$client" in
-  claude) echo "   客户端: claude (~/.claude.json, 默认)" ;;
-  codex)  echo "   客户端: codex (子工程注册 Claude + codex mcp 注册)" ;;
-  all)    echo "   客户端: all (Claude Code + Codex 双注册)" ;;
+  claude)    echo "   客户端: claude (~/.claude.json, 默认)" ;;
+  codex)     echo "   客户端: codex (子工程注册 Claude + codex mcp 注册)" ;;
+  codebuddy) echo "   客户端: codebuddy (子工程注册 Claude + 写入 ~/.codebuddy/mcp.json)" ;;
+  all)       echo "   客户端: all (Claude Code + Codex + CodeBuddy 三注册)" ;;
 esac
 echo ""
 
@@ -147,6 +149,19 @@ for installer in "${installers[@]}"; do
       else
         fail_count=$((fail_count + 1))
         failed+=("$name(codex)")
+      fi
+    fi
+    # CodeBuddy 分支: 同样依赖子工程导出的 entry，写入 ~/.codebuddy/mcp.json
+    if [ "$client" = "codebuddy" ] || [ "$client" = "all" ]; then
+      if [ -z "$PYTHON_BIN" ]; then
+        echo "   ⚠️ 未找到 python3/python，跳过 CodeBuddy 注册（client_registry.py 需 Python）"
+        fail_count=$((fail_count + 1))
+        failed+=("$name(codebuddy:no-python)")
+      elif "$PYTHON_BIN" "$HERE/_lib/client_registry.py" codebuddy-register "$name"; then
+        :
+      else
+        fail_count=$((fail_count + 1))
+        failed+=("$name(codebuddy)")
       fi
     fi
   else

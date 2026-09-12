@@ -30,10 +30,20 @@ CODEX_BIN = os.environ.get("ICODE_CODEX_BIN") or shutil.which("codex")
 
 
 def detect_clients() -> dict:
-    """返回 {claude: bool, codex: bool}。claude = ~/.claude.json 可访问（存在或可写）。"""
+    """返回 {claude, codex, codebuddy} 可用性证据。
+
+    - claude：~/.claude.json 可访问（存在或可写）
+    - codex：codex CLI 在 PATH
+    - codebuddy：~/.codebuddy 目录存在（CodeBuddy 与 Claude 共用 skills 目录，
+      仅 MCP 配置独立，故以其配置目录存在为判据）
+    """
     cfg = Path.home() / ".claude.json"
     claude_ok = cfg.exists() or cfg.parent.exists()
-    return {"claude": claude_ok, "codex": shutil.which("codex") is not None}
+    return {
+        "claude": claude_ok,
+        "codex": shutil.which("codex") is not None,
+        "codebuddy": CODEBUDDY_CFG.parent.exists(),
+    }
 
 
 def _read_entry(name: str) -> dict:
@@ -141,6 +151,105 @@ def codex_unregister(name: str) -> str:
     return f"已从 Codex 移除（{name}）" if after == "absent" else f"移除失败，请人工检查（{name}）"
 
 
+# ---------------------------------------------------------------------------
+# CodeBuddy 适配器
+#
+# CodeBuddy 没有官方 MCP CLI，其 MCP 配置为 ~/.codebuddy/mcp.json，结构与
+# Claude Code 的 mcpServers 同源：{"mcpServers": {name: {command, args, env}}}。
+# 因此注册实现为「读 entry 真源 → 合并进 mcpServers → 原子写回」。
+# 注意：CodeBuddy 与 Claude Code 共用 ~/.claude/skills，ICODE 目录无需重复安装，
+#      仅 MCP 注册目标不同。
+# ---------------------------------------------------------------------------
+
+CODEBUDDY_CFG = Path.home() / ".codebuddy" / "mcp.json"
+
+# 对比关键可执行字段（与 Codex 侧一致：不含 cwd，避免 venv 系 entry 误判）
+_COMPARE_KEYS = ("command", "args", "env")
+
+
+def _norm(value):
+    """env 空值容错：None / {} 视为等价。"""
+    if value in (None, {}, ""):
+        return None
+    return value
+
+
+def codebuddy_inspect(name: str) -> str:
+    """读 ~/.codebuddy/mcp.json 判定 absent | match | mismatch | error。"""
+    entry = _read_entry(name)
+    if not CODEBUDDY_CFG.exists():
+        return "absent"
+    try:
+        data = json.loads(CODEBUDDY_CFG.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return "error"
+    actual = (data.get("mcpServers") or {}).get(name)
+    if actual is None:
+        return "absent"
+    for key in _COMPARE_KEYS:
+        if _norm(actual.get(key)) != _norm(entry.get(key)):
+            return "mismatch"
+    return "match"
+
+
+def codebuddy_register(name: str) -> tuple[str, bool]:
+    """注册/同步 <name> 到 CodeBuddy。返回 (说明, 是否成功)。
+
+    同名已存在且内容不一致时不静默覆盖：返回失败并给出人工处理指引
+    （与 Codex 适配器一致的「不自动破坏性更新」策略）。
+    """
+    if not CODEBUDDY_CFG.parent.exists():
+        return f"未检测到 CodeBuddy 配置目录 {CODEBUDDY_CFG.parent}，跳过注册（{name}）", False
+    entry = _read_entry(name)
+    status = codebuddy_inspect(name)
+    if status == "match":
+        return f"已存在且内容一致，跳过（{name}）", True
+    if status == "error":
+        return f"{CODEBUDDY_CFG} 解析失败，跳过注册（{name}）", False
+    if status == "mismatch":
+        return (
+            f"CodeBuddy 已有同名 {name} 且内容不一致，未覆盖。"
+            f"请先手工移除 mcpServers.{name} 后重试，或人工核对两者差异。",
+            False,
+        )
+
+    data = json.loads(CODEBUDDY_CFG.read_text(encoding="utf-8")) if CODEBUDDY_CFG.exists() else {}
+    servers = data.get("mcpServers") or {}
+    servers[name] = {
+        key: entry[key] for key in ("command", "args", "env") if entry.get(key) is not None
+    }
+    data["mcpServers"] = servers
+    # 原子写：临时文件 + fsync + rename，避免中断留下半截 JSON
+    tmp = CODEBUDDY_CFG.with_suffix(".json.tmp")
+    with tmp.open("w", encoding="utf-8") as fh:
+        json.dump(data, fh, ensure_ascii=False, indent=2)
+        fh.flush()
+        os.fsync(fh.fileno())
+    os.replace(tmp, CODEBUDDY_CFG)
+
+    after = codebuddy_inspect(name)
+    if after == "match":
+        return f"已注册到 CodeBuddy（{name}）→ 重启会话后生效", True
+    return f"写入后校验未通过（{name}：{after}），请人工检查 {CODEBUDDY_CFG}", False
+
+
+def codebuddy_unregister(name: str) -> str:
+    """从 CodeBuddy 移除 <name>；未注册幂等返回说明。"""
+    if not CODEBUDDY_CFG.exists():
+        return f"未注册，跳过（{name}）"
+    if codebuddy_inspect(name) == "absent":
+        return f"未注册，跳过（{name}）"
+    data = json.loads(CODEBUDDY_CFG.read_text(encoding="utf-8"))
+    (data.get("mcpServers") or {}).pop(name, None)
+    tmp = CODEBUDDY_CFG.with_suffix(".json.tmp")
+    with tmp.open("w", encoding="utf-8") as fh:
+        json.dump(data, fh, ensure_ascii=False, indent=2)
+        fh.flush()
+        os.fsync(fh.fileno())
+    os.replace(tmp, CODEBUDDY_CFG)
+    return f"已从 CodeBuddy 移除（{name}）"
+
+
 def main() -> int:
     _configure_utf8_stdout()
     if len(sys.argv) < 2:
@@ -162,6 +271,14 @@ def main() -> int:
         print(codex_unregister(name))
     elif cmd == "codex-inspect":
         print(codex_inspect(name))
+    elif cmd == "codebuddy-register":
+        msg, ok = codebuddy_register(name)
+        print(msg)
+        return 0 if ok else 1
+    elif cmd == "codebuddy-unregister":
+        print(codebuddy_unregister(name))
+    elif cmd == "codebuddy-inspect":
+        print(codebuddy_inspect(name))
     else:
         print(f"未知命令: {cmd}")
         return 1

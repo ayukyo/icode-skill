@@ -192,6 +192,64 @@ int calc_isqrt(int x, int *result)
 }
 
 /*
+ * 阶乘 n!（0! = 1）
+ * 算法：从 i = 2 起累乘（i = 1 不改变结果，跳过），每步先用 mul_overflows 预判
+ * 溢出即提前返回，不做无符号回绕后再判断
+ * 边界：n = 0 与 n = 1 时循环不进入，acc 保持初值 1
+ */
+int calc_factorial(int n, int *result)
+{
+    int acc = 1;
+    int i;
+
+    if (result == NULL) {
+        return CALC_ERR_INVALID;
+    }
+    if (n < 0) {
+        return CALC_ERR_INVALID;  /* 负数无阶乘定义 */
+    }
+
+    for (i = 2; i <= n; ++i) {
+        if (mul_overflows(acc, i)) {
+            return CALC_ERR_OVERFLOW;  /* 累乘结果将超出 int 可表示范围 */
+        }
+        acc *= i;
+    }
+
+    *result = acc;
+    return CALC_OK;
+}
+
+/*
+ * 三角数 T(n) = 1 + 2 + ... + n
+ * 算法：从 i = 1 起累加，每步先用 add_overflows 预判，溢出即提前返回
+ * 边界：n = 0 时循环不进入，acc 保持初值 0（T(0) = 0 是正常结果）
+ *       首个溢出点为 T(65536)，T(65535) = 2147450880 仍在 int 内
+ */
+int calc_triangular(int n, int *result)
+{
+    int acc = 0;
+    int i;
+
+    if (result == NULL) {
+        return CALC_ERR_INVALID;
+    }
+    if (n < 0) {
+        return CALC_ERR_INVALID;  /* 负数无三角数定义 */
+    }
+
+    for (i = 1; i <= n; ++i) {
+        if (add_overflows(acc, i)) {
+            return CALC_ERR_OVERFLOW;  /* 累加结果将超出 int 可表示范围 */
+        }
+        acc += i;
+    }
+
+    *result = acc;
+    return CALC_OK;
+}
+
+/*
  * 整数最大公约数 gcd(a, b)（欧几里得算法）
  * 算法：gcd(a,b) = gcd(b, a%b)，终止条件 gcd(a, 0) = |a|
  * 负数先取绝对值（INT_MIN 特殊处理，避免 abs() 未定义行为）

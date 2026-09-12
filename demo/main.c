@@ -295,5 +295,43 @@ int main(void)
     rc = calc_fib(-1, &result);  /* 负数，应返回 INVALID */
     printf("fib(-1) rc=%d (expect %d)\n", rc, CALC_ERR_INVALID);
 
+    /* ---- 新增：calc_factorial 阶乘 ---- */
+    rc = calc_factorial(5, &result);
+    printf("5! = %d (rc=%d, expect 120)\n", result, rc);
+
+    rc = calc_factorial(0, &result);
+    printf("0! = %d (rc=%d, expect 1)\n", result, rc);
+
+    rc = calc_factorial(1, &result);
+    printf("1! = %d (rc=%d, expect 1)\n", result, rc);
+
+    rc = calc_factorial(12, &result);  /* 12! = 479001600，int 内可表示的最大阶乘 */
+    printf("12! = %d (rc=%d, expect 479001600)\n", result, rc);
+
+    rc = calc_factorial(13, &result);  /* 13! = 6227020800 > INT_MAX，应返 OVERFLOW */
+    printf("13! rc=%d (expect %d OVERFLOW)\n", rc, CALC_ERR_OVERFLOW);
+
+    rc = calc_factorial(-1, &result);  /* 负数，应返回 INVALID */
+    printf("(-1)! rc=%d (expect %d INVALID)\n", rc, CALC_ERR_INVALID);
+
+    /* ---- 新增：calc_triangular 三角数 T(n) = 1+2+...+n ---- */
+    rc = calc_triangular(0, &result);
+    printf("T(0) = %d (rc=%d, expect 0)\n", result, rc);
+
+    rc = calc_triangular(1, &result);
+    printf("T(1) = %d (rc=%d, expect 1)\n", result, rc);
+
+    rc = calc_triangular(100, &result);  /* 通用正常路径代表 */
+    printf("T(100) = %d (rc=%d, expect 5050)\n", result, rc);
+
+    rc = calc_triangular(65535, &result);  /* 紧邻首个溢出点，验证"恰好不溢出" */
+    printf("T(65535) = %d (rc=%d, expect 2147450880)\n", result, rc);
+
+    rc = calc_triangular(65536, &result);  /* T(65536)=2147516416 > INT_MAX，应返 OVERFLOW */
+    printf("T(65536) rc=%d (expect %d OVERFLOW)\n", rc, CALC_ERR_OVERFLOW);
+
+    rc = calc_triangular(-1, &result);  /* 负数，应返回 INVALID */
+    printf("T(-1) rc=%d (expect %d INVALID)\n", rc, CALC_ERR_INVALID);
+
     return 0;
 }

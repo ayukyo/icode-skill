@@ -1957,13 +1957,71 @@ def cmd_transition(args):
         event = commit_metadata_and_event(
             out_dir, before_meta, meta2, "state_changed", transition_payload,
             request_id=args.request_id)
+    # 状态已提交：同步全局索引中的 status，避免检索侧读到过期状态。
+    # 索引刷新失败只降级为提示，不回滚状态转换（索引可由 index-write 重建）。
+    index_refresh = "skipped"
+    if meta2.get("indexed") and not meta2.get("debug"):
+        try:
+            index_refresh = refresh_index_status(out_dir, meta2)
+        except Exception as exc:  # noqa: BLE001 - 索引刷新绝不影响状态流转
+            index_refresh = f"failed:{type(exc).__name__}"
     print(json.dumps({"ok": True, "from": current, "to": to_status,
                       "delivery_verdict": args.delivery_verdict,
                       "gates_skipped": gates_skipped,
                       "event_id": event["event_id"],
+                      "index_refresh": index_refresh,
                       "gates": [{g["gate_id"]: g["ok"]} for g in gate_reports]},
                      ensure_ascii=False, indent=2))
     return 0
+
+
+def refresh_index_status(out_dir, meta, index_path=None):
+    """状态流转成功后，把该工单在全局索引中的 status 同步为最新值。
+
+    背景：索引是检索侧真源之一，历史检索会按 status 过滤/展示。此前只有
+    `index-write` 会写索引，`transition` 之后的每次状态变更都不回流，导致
+    已完成工单在索引里长期停留在 `init_in_progress`（实测 demo-17）。
+
+    实现边界（刻意保守，避免与 index-write 的单一 writer 契约冲突）：
+    - 只更新 `status` / `delivery_verdict` / `updated_at` 三个派生字段；
+      身份三元组（ticket_id / project_path / out_dir）与其它已登记字段不动。
+    - 索引不存在 / 工单未入索引 / 值已一致 → 幂等跳过，不抛错。
+    - 复用 FileLock 串行化 + 临时文件 fsync + 原子 rename。
+    - 调用方必须容忍失败：索引可由 `index-write` 重建，绝不因索引刷新失败
+      回滚已经提交的状态转换。
+    """
+    ticket_id = meta.get("ticket_id")
+    path = Path(index_path) if index_path else INDEX_PATH
+    if not ticket_id or not path.is_file():
+        return "skipped"
+    with FileLock(path):
+        index = load_json(path, "全局索引")
+        tickets = index.get("tickets")
+        if not isinstance(tickets, list):
+            return "skipped"
+        target = None
+        for item in tickets:
+            if isinstance(item, dict) and item.get("ticket_id") == ticket_id:
+                target = item
+                break
+        if target is None:
+            return "not_indexed"
+        new_status = meta.get("status")
+        new_verdict = meta.get("delivery_verdict")
+        if (target.get("status") == new_status
+                and target.get("delivery_verdict") == new_verdict):
+            return "up_to_date"
+        target["status"] = new_status
+        if new_verdict:
+            target["delivery_verdict"] = new_verdict
+        index["updated_at"] = now_iso()
+        tmp = path.with_suffix(".json.tmp")
+        with tmp.open("w", encoding="utf-8") as handle:
+            json.dump(index, handle, ensure_ascii=False, indent=2)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp, path)
+        return "updated"
 
 
 def build_index_entry(out_dir, meta, identity=None):
@@ -4185,13 +4243,31 @@ def build_parser():
 
 
 def main():
+    import contextlib
+    import io
+
     ap = build_parser()
     args = ap.parse_args()
     if not getattr(args, "func", None):
         ap.print_help()
         return 2
     try:
-        return args.func(args)
+        # 捕获子命令输出：业务失败（ok=false）时子命令仍可能返回 0，
+        # 会让 shell 的 `&&` / `set -e` 误判为成功。此处统一纠正为退出码 1。
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            code = args.func(args)
+        out = buf.getvalue()
+        sys.stdout.write(out)
+        sys.stdout.flush()
+        if code == 0:
+            try:
+                payload = json.loads(out)
+            except (ValueError, TypeError):
+                payload = None
+            if isinstance(payload, dict) and payload.get("ok") is False:
+                return 1
+        return code
     except ControlError as exc:
         print(json.dumps(exc.report(), ensure_ascii=False, indent=2))
         return exc.exit_code

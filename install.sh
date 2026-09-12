@@ -13,7 +13,7 @@ Installs ICODE, its isolated DOCX runtime, all manifest-declared shared skills,
 then installs MCPs.
 
 Options:
-  --client claude|codex|all Select target client (default: claude)
+  --client claude|codex|codebuddy|all Select target client (default: claude)
   --skip-mcp                Install ICODE, DOCX runtime and shared skills only
   --dry-run                 Report skill changes; do not write or install MCPs
   -h, --help                Show this help
@@ -66,9 +66,9 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 case "$CLIENT" in
-  claude|codex|all) ;;
+  claude|codex|codebuddy|all) ;;
   *)
-    echo "❌ --client 取值须为 claude|codex|all (当前: $CLIENT)" >&2
+    echo "❌ --client 取值须为 claude|codex|codebuddy|all (当前: $CLIENT)" >&2
     exit 2
     ;;
 esac
@@ -107,7 +107,9 @@ CODEX_ROOT="${AGENTS_SKILLS_ROOT:-$HOME/.agents/skills}"
 CLAUDE_ICODE="${GLOBAL_DIR:-$CLAUDE_ROOT/icode}"
 CODEX_ICODE="${AGENTS_DIR:-$CODEX_ROOT/icode}"
 case "$CLIENT" in
-  claude|all) ICODE_DIR="$CLAUDE_ICODE" ;;
+  # CodeBuddy 与 Claude Code 共用 ~/.claude/skills，ICODE 目录同 claude；
+  # 两者差异仅在 MCP 注册目标（CodeBuddy 写 ~/.codebuddy/mcp.json），由 mcp/install.sh 处理。
+  claude|codebuddy|all) ICODE_DIR="$CLAUDE_ICODE" ;;
   codex) ICODE_DIR="$CODEX_ICODE" ;;
 esac
 

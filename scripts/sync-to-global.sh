@@ -315,6 +315,7 @@ sync_icode_payload() {
       --exclude='.claude/' --exclude='.worktrees/' \
       --exclude='demo/' --exclude='tests/' \
       --exclude='.icode-install-owner.json' \
+      --exclude='.venv' --exclude='mcp/*/config.json' \
       "$DEV_REPO/" "$dst/"
   else
     sync_with_cp "$dst" "$report_dst"

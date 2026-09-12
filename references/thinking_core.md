@@ -73,6 +73,8 @@ N. **强制思考前置**（不可跳过，缺证据视为不合规；按 [refer
 >
 > **第一步·直接 ToolSearch 验证**（仅当列表**不可见**时走此步；不依赖 AI 对 deferred 列表的文本解析）：
 >
+> **0.A 宿主无 ToolSearch 能力时跳过本步**（CodeBuddy 等未提供 ToolSearch 工具的宿主）：确认当前宿主工具集**不存在** ToolSearch 后，**直接跳到「配置读取判定」**——即按宿主配置路径读取 `mcpServers` 判定 server 是否注册：已注册但本会话工具列表不可见 → 按**解析失败组**降级；未注册 → 按**配置缺失组**降级。禁止因“无法 ToolSearch”而宣称判定不了或绕过降级声明。
+>
 > 1. **直接调用 ToolSearch**：`query="select:mcp__sequential-thinking__sequentialthinking"` 取 schema
 > 2. **ToolSearch 返回 schema** → 工具可用，进入「第二步·首选路径执行」
 > 3. **ToolSearch 返回空/无命中** → 再 Read `~/.claude.json` 确认是否配置了 `sequential-thinking` server：
@@ -99,8 +101,8 @@ N. **强制思考前置**（不可跳过，缺证据视为不合规；按 [refer
 >
 > | 组 | 必须同时满足 | 降级声明固定模板（原样输出，确认行格式与 steps/08_patch.md 一致） |
 > |----|------------|-------------------------------------|
-> | **配置缺失组** | ① ToolSearch 取 schema（精确 + 模糊各至少 1 次）→ 均无命中；② Read `~/.claude.json` 的 `mcpServers` **与** 项目根 `.mcp.json`（若有）→ **都**无 `sequential-thinking` server | `强制思考: 降级文字块（未配置 server：~/.claude.json 与 .mcp.json 均无 sequential-thinking，可运行 mcp/sequential-thinking/install.sh 安装）` |
-> | **解析失败组** | ① ToolSearch 取 schema（精确 + 模糊各至少 1 次）→ 均无命中；② Read 配置 → 至少**一处**有 `sequential-thinking` server | `强制思考: 降级文字块（ToolSearch 解析失败，配置有 server——本会话未连接/工具未暴露，请运行 /mcp 检查连接状态或重开会话；工具本身已装，思考按文字块照常完成）` |
+> | **配置缺失组** | ① ToolSearch 取 schema（精确 + 模糊各至少 1 次）→ 均无命中（**宿主无 ToolSearch 能力时跳过本条**，见 0.A）；② Read **宿主配置** 的 `mcpServers` **与** 项目根 `.mcp.json`（若有）→ **都**无 `sequential-thinking` server。宿主配置路径自适应：**CodeBuddy = `~/.codebuddy/mcp.json`** / Claude Code = `~/.claude.json` / Codex = `codex mcp list` | `强制思考: 降级文字块（未配置 server：<宿主配置路径> 与 .mcp.json 均无 sequential-thinking，可运行 mcp/sequential-thinking/install.sh 安装）` |
+> | **解析失败组** | ① ToolSearch 取 schema（精确 + 模糊各至少 1 次）→ 均无命中（**宿主无 ToolSearch 能力时跳过本条**）；② Read **宿主配置**（路径同配置缺失组，按宿主自适应）→ 至少**一处**有 `sequential-thinking` server | `强制思考: 降级文字块（配置有 server——本会话未连接/工具未暴露，请检查宿主 MCP 连接状态或重开会话；工具本身已装，思考按文字块照常完成）` |
 > | **调用失败组** | ① ToolSearch 取 schema ≥1 次 → **有命中**；② 实际调用工具 ≥1 次 → 返回错误/超时 | `强制思考: 降级文字块（ToolSearch 命中但调用失败：<具体错误>）` |
 >
 > > **解析失败组根因认知**：配置存在 ≠ 本会话已连接——MCP 连接是会话级快照，server 未连接/工具未暴露时 ToolSearch 恒空；部分会话经代理接入（如 litellm）时 MCP 工具以 `__<proxy>_<tool>` 前缀暴露、不在 ToolSearch deferred 池内，此时 ToolSearch 对**所有** MCP 工具恒空（含已装好可用的），属命名/连接差异、**不代表未安装**。此组降级合法，思考质量不受影响，无需反复怀疑配置缺失。

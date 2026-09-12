@@ -58,6 +58,24 @@ int calc_abs(int x, int *result);
 int calc_isqrt(int x, int *result);
 
 /*
+ * 阶乘 n!（0! = 1，1! = 1）
+ * result == NULL：返回 CALC_ERR_INVALID
+ * n < 0：返回 CALC_ERR_INVALID（负数无阶乘定义）
+ * 累乘溢出：返回 CALC_ERR_OVERFLOW（12! = 479001600 为 int 内最大值，13! 起溢出）
+ * 成功返回 CALC_OK，失败不写 *result
+ */
+int calc_factorial(int n, int *result);
+
+/*
+ * 三角数 T(n) = 1 + 2 + ... + n
+ * result == NULL：返回 CALC_ERR_INVALID
+ * n < 0：返回 CALC_ERR_INVALID（负数无三角数定义）
+ * 累加溢出：返回 CALC_ERR_OVERFLOW（T(65535) = 2147450880 为 int 内最大值，T(65536) 起溢出）
+ * 成功返回 CALC_OK，失败不写 *result；注意 T(0) = 0 是正常结果而非未写入
+ */
+int calc_triangular(int n, int *result);
+
+/*
  * 整数最大公约数 gcd(a, b)（欧几里得算法）
  * result == NULL：返回 CALC_ERR_INVALID
  * 正常：*result = gcd(|a|, |b|)，约定 gcd(0, 0) = 0
