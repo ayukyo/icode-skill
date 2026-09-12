@@ -431,6 +431,32 @@ def main() -> int:
     for terr in report.get("trace_errors", []):
         print(f"  ⚠️ trace 行错误: {terr}")
 
+    if report["missing"] > 0 or report["schema_errors"] > 0:
+        print("\n## 复写指引：缺 trace / trace 字段错的 step，直接复制对应示范行补一行")
+        print("（追加到 `.thinking_gate_trace.jsonl` 末尾；mechanism/tier/triggers 只按本行模板切换，")
+        print("   `at` 换成当前 ISO-8601 时间；L2 必须 attempted=true+mechanism=sequential-thinking；")
+        print("   L1 用 decision_record；L0 用 deterministic_checks）")
+        for s in report["steps"]:
+            if s["status"] not in ("missing", "invalid"):
+                continue
+            step = s["step"]
+            cfg = catalog.get("steps", {}).get(step, {})
+            dt = str(cfg.get("default_tier", "L1"))
+            t_strings = {
+                "L2": "sequential-thinking",
+                "L3": "sequential-thinking+adversarial",
+                "L1": "decision_record",
+                "L0": "deterministic_checks",
+            }
+            mech = t_strings.get(dt, "decision_record")
+            result = "blocked" if dt in ("L0", "L1") else "success"
+            attempted = "false" if dt in ("L0", "L1") else "true"
+            print(f"\n# {step}（default_tier={dt}{'，参考触发: multiple_candidates' if dt in ('L2','L3') else ''}）")
+            print('{"schema_version":1,"ticket_id":"%s","step":"%s","tier":"%s","default_tier":"%s",'
+                  % (report.get("ticket_id") or "", step, dt, dt)
+                + f'"triggers":[] ,"mechanism":"{mech}","attempted":{attempted},'
+                + f'"result":"{result}","degraded_reason":null,"over_invoked":false,"at":"<补 ISO-8601 时间>"}}')
+
     if legacy:
         return 1 if require else 0
     return 0 if passed else 1

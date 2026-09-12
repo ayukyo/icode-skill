@@ -269,5 +269,31 @@ int main(void)
     rc = calc_max(4, 4, &result);  printf("max(4,4)=%d rc=%d (expect 4,0)\n", result, rc);
     rc = calc_max(INT_MIN, INT_MAX, &result);  printf("max(INT_MIN,INT_MAX)=%d rc=%d (expect INT_MAX,0)\n", result, rc);
 
+    /* ---- 新增：calc_min 最小值测试 ---- */
+    rc = calc_min(3, 5, &result);  printf("min(3,5)=%d rc=%d (expect 3,0)\n", result, rc);
+    rc = calc_min(5, 3, &result);  printf("min(5,3)=%d rc=%d (expect 3,0)\n", result, rc);
+    rc = calc_min(4, 4, &result);  printf("min(4,4)=%d rc=%d (expect 4,0)\n", result, rc);
+    rc = calc_min(INT_MIN, INT_MAX, &result);  printf("min(INT_MIN,INT_MAX)=%d rc=%d (expect INT_MIN,0)\n", result, rc);
+    rc = calc_min(1, 2, NULL);  printf("min(1,2,NULL)=rc=%d (expect %d INVALID)\n", rc, CALC_ERR_INVALID);
+
+    /* ---- 新增：calc_fib 斐波那契数列（数学定义 fib(0)=0, fib(1)=1） ---- */
+    rc = calc_fib(0, &result);
+    printf("fib(0) = %d (rc=%d)\n", result, rc);  /* 0 */
+
+    rc = calc_fib(1, &result);
+    printf("fib(1) = %d (rc=%d)\n", result, rc);  /* 1 */
+
+    rc = calc_fib(10, &result);
+    printf("fib(10) = %d (rc=%d)\n", result, rc);  /* 55 */
+
+    rc = calc_fib(46, &result);  /* 数学定义下 int 可表示的最大项 */
+    printf("fib(46) = %d (rc=%d, expect 1836311903)\n", result, rc);
+
+    rc = calc_fib(47, &result);  /* fib(47)=2971215073>INT_MAX，应返 OVERFLOW */
+    printf("fib(47) rc=%d (expect %d OVERFLOW)\n", rc, CALC_ERR_OVERFLOW);
+
+    rc = calc_fib(-1, &result);  /* 负数，应返回 INVALID */
+    printf("fib(-1) rc=%d (expect %d)\n", rc, CALC_ERR_INVALID);
+
     return 0;
 }

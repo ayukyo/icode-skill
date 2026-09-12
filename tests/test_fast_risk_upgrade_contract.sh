@@ -104,6 +104,30 @@ else
   bad "E2 full 模式不应被 fast_risk gate 误伤"
 fi
 
+# 边界：mode 未声明（plan/log 入口）在全量 strict 扫描缺 risk_profile 不应被 fast_risk 误伤
+# （close/archive 走 ALL_GATES 全量 strict；risk_profile 仅 fast 专属，validate_fast_risk
+#   对 mode!=fast 直接放行，缺字段判定带 mode 守卫后 full/None 不再判 fail。
+#   --step fast 隔离 fast_risk gate，避免 vNext 通用登记字段 semantic_decisions/
+#   requirement_deltas 缺失的干扰）
+make_ticket "$TMP/e3_nomodestrict" '{
+  "ticket_id":"WF-FR-E3","workflow_gate_schema_version":1,"mode":"full"
+}'
+if $LINT "$TMP/e3_nomodestrict" --step fast --strict --json >/dev/null 2>&1; then
+  ok "E3 full 模式 strict 下缺 risk_profile → 放行"
+else
+  bad "E3 full 模式 strict 不应被 fast_risk 缺字段误伤"
+fi
+
+# 负向：fast 模式 strict 下缺 risk_profile 仍判 fail（vNext 应登记）
+make_ticket "$TMP/n2_faststrict" '{
+  "ticket_id":"WF-FR-N2","workflow_gate_schema_version":1,"mode":"fast"
+}'
+if $LINT "$TMP/n2_faststrict" --step fast --strict --json >/dev/null 2>&1; then
+  bad "N2 fast 模式 strict 缺 risk_profile 应判 fail"
+else
+  ok "N2 fast 模式 strict 缺 risk_profile → fail（vNext 应登记）"
+fi
+
 echo ""
 echo "结果: PASS=$PASS FAIL=$FAIL"
 [ "$FAIL" -eq 0 ]

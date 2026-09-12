@@ -84,6 +84,24 @@ int calc_lcm(int a, int b, int *result);
 int calc_max(int a, int b, int *result);
 
 /*
+ * 整数最小值 min(a, b)
+ * result == NULL：返回 CALC_ERR_INVALID，不写 *result
+ * 任意 int 都有较小值（含 INT_MIN/INT_MAX），比较无溢出，故无失败路径
+ * 语义对称于 calc_max（max(a,b) 的对偶）
+ */
+int calc_min(int a, int b, int *result);
+
+/*
+ * 斐波那契数列第 n 项（数学定义 fib(0)=0, fib(1)=1）
+ * n 为负数：返回 CALC_ERR_INVALID，不写 *result（对齐 calc_sqrt 的负数处理）
+ * result == NULL：返回 CALC_ERR_INVALID，不写 *result
+ * 累加溢出（n>=47，第 n 项超过 INT_MAX）：返回 CALC_ERR_OVERFLOW，不写 *result
+ * 成功：*result = 第 n 项，返回 CALC_OK
+ * 实现用 add_overflows 先判后赋，绝不在溢出状态执行加法
+ */
+int calc_fib(int n, int *result);
+
+/*
  * 字符串表达式求值器（递归下降 parser）
  * 支持：四则（+ - * /）+ 一元负号 + 括号 + 空格容忍
  * 长度限制：256 字符

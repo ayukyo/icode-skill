@@ -484,6 +484,47 @@ int calc_max(int a, int b, int *result) {
     return CALC_OK;
 }
 
+/* 整数最小值 min(a, b) - NULL 防御，比较无溢出（calc_max 的对称补齐） */
+int calc_min(int a, int b, int *result) {
+    if (result == NULL)
+        return CALC_ERR_INVALID;  /* 入口 NULL 防御，不写 *result（对齐 calc_fib 风格） */
+    *result = (a < b) ? a : b;    /* 纯比较，无算术故不可能溢出 */
+    return CALC_OK;
+}
+
+/*
+ * 斐波那契数列第 n 项（数学定义 fib(0)=0, fib(1)=1）
+ * n<0 / result==NULL：CALC_ERR_INVALID，不写 *result
+ * 累加溢出（n>=47）：CALC_ERR_OVERFLOW，不写 *result（用 add_overflows 先判后赋）
+ */
+int calc_fib(int n, int *result)
+{
+    if (result == NULL)
+        return CALC_ERR_INVALID;  /* 入口 NULL 防御，不写 *result */
+    if (n < 0)
+        return CALC_ERR_INVALID;  /* 负数无数学定义，不写 *result */
+
+    if (n == 0) {
+        *result = 0;
+        return CALC_OK;
+    }
+    if (n == 1) {
+        *result = 1;
+        return CALC_OK;
+    }
+
+    int prev = 0, curr = 1;
+    for (int k = 2; k <= n; k++) {
+        if (add_overflows(prev, curr))  /* 先判后赋，防有符号溢出 UB */
+            return CALC_ERR_OVERFLOW;   /* 溢出则中止，不写 *result */
+        int next = prev + curr;
+        prev = curr;
+        curr = next;
+    }
+    *result = curr;
+    return CALC_OK;
+}
+
 int calc_eval(const char *expr, int *result)
 {
     int final_value;

@@ -633,6 +633,10 @@ def build_report(out_dir: Path, step_filter: Optional[str], metadata: Dict,
         # legacy：缺对应字段（未列入 metadata）且非 strict → 警告不阻断。
         # 仅登记结构字段（semantic_decisions/requirement_deltas/risk_profile）在
         # strict 下缺失判 fail（vNext 流程步骤会登记，缺 = 未登记）。
+        # risk_profile 是 fast 模式专属字段（见 steps/fast.md「fast 入口写 risk_profile」，
+        # schema 允许 null）：full/未声明 mode 的工单缺失不受 fast_risk gate 约束
+        # （validate_fast_risk 对 mode!=fast 直接返回 []），故缺字段判定须带 mode 守卫，
+        # 否则 close/archive 全量 strict 扫描会误伤所有非 fast 工单。
         # impact_contract/acceptance_contract 是可选条件字段：validator 已内置
         # 「缺失 = 不涉及身份变化/生命周期 = pass」语义，缺失不应判 fail。
         missing_field = None
@@ -640,7 +644,8 @@ def build_report(out_dir: Path, step_filter: Optional[str], metadata: Dict,
             missing_field = "semantic_decisions"
         elif gate == "requirement_delta" and "requirement_deltas" not in metadata:
             missing_field = "requirement_deltas"
-        elif gate == "fast_risk" and "risk_profile" not in metadata:
+        elif gate == "fast_risk" and metadata.get("mode") == "fast" \
+                and "risk_profile" not in metadata:
             missing_field = "risk_profile"
         if missing_field is not None:
             if legacy and not strict:

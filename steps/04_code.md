@@ -105,7 +105,7 @@
 **0. 判定 `tdd.mode`**（Read `metadata.tdd`，缺失视为 `not_assessed`）：`required`/`contract`/`characterization` = 需先 RED；`device_split`/`blocked` = 允许在明确边界内继续准备代码但交付验证保持待完成；`exempt` = 纯文档/注释/无生产行为变化（须 Read `metadata.tdd.reason` 确认豁免理由，缺理由视为违规）。**分类缺失（`not_assessed`）且本工单含行为变更 → L2，先回步骤1/3 补测试契约**；不得静默默认 exempt。
 
 **1. RED 阶段（生产代码 Edit 前的硬门；`required`/`contract`/`characterization` 模式 L1 强制）**：
-   1. 记录活动 checkout + 生产文件哈希 + 现有 staged/unstaged/untracked 基线（沿用下方「强制操作·git 状态快照」三态判别）——**不得回滚用户已有修改**；若用户修改已实现目标导致测试通过，报告并重新确认剩余工作
+   1. 记录活动 checkout + 生产文件哈希 + 现有 staged/unstaged/untracked 基线（沿用下方「强制操作·git 状态快照」三态判别）——生产哈希补齐登记到 `metadata.tdd.baseline.production_hashes`（见下方 4. 落盘结构）；**不得回滚用户已有修改**；若用户修改已实现目标导致测试通过，报告并重新确认剩余工作
    2. 只新增/修改测试文件及其最小测试基础设施（**禁止此时 Edit 任何生产文件**）
    3. 运行计划中的最窄测试命令（`metadata.tdd.red.cmd` 或计划测试契约「测试命令」），捕获退出码与失败摘要
    4. **分类失败**（写入 `metadata.tdd.red.failure_class`）：
@@ -122,7 +122,7 @@
 
 **3. Regression 阶段（复用现有验证能力）**：GREEN 后继续执行下方「强制操作·编译验证 + 测试验证」——目标测试 + 受影响模块回归 + 工程构建 + Code Review Fix；`test_cmd`/`test_outcome`/`test_failures` 继续作为**最终回归摘要**，不用于覆盖 RED 历史证据（RED/GREEN 证据在 `metadata.tdd.red/green`）。GREEN 后构建/回归失败沿用现有 L3 降级，但 `delivery_verdict` 不得写已验证。
 
-**4. 落盘**：RED/GREEN/regression 证据写入 `metadata.tdd`（结构见 [SKILL.md](../SKILL.md) metadata 段）：`{mode, red: {cmd, exit_code, failure_class, expected, observed_excerpt, at}, green: {cmd, exit_code, at}, regression: {cmd, exit_code, at}, status}`。**O-6 用户自担验证（用户要求不跑测试）**：可完成代码修改，但 `tdd.status=blocked`（或确属豁免时 `exempt`）+ `delivery_verdict=verification_pending`，交付措辞"已完成代码修改，待实机验证/待用户验证"，不得写"已修复并验证"。
+**4. 落盘**：RED/GREEN/regression 证据写入 `metadata.tdd`（结构见 [SKILL.md](../SKILL.md) metadata 段）：`{mode, baseline: {production_hashes: {<file>: <sha256>, ...}}, red: {cmd, exit_code, failure_class, expected, observed_excerpt, at}, green: {cmd, exit_code, at}, regression: {cmd, exit_code, at}, status}`。`baseline.production_hashes` = RED 阶段第 1 步记录的生产文件哈希基线（供 05_deepcheck 核验 RED 证据确在生产修改前取得；无生产文件修改时记 `{}`）。**O-6 用户自担验证（用户要求不跑测试）**：可完成代码修改，但 `tdd.status=blocked`（或确属豁免时 `exempt`）+ `delivery_verdict=verification_pending`，交付措辞"已完成代码修改，待实机验证/待用户验证"，不得写"已修复并验证"。
 
 ### 编码实施
 

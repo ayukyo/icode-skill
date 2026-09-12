@@ -114,8 +114,10 @@ assert_contains "$AUDIT_DOC" "有效 RED" "06_audit 以有效 RED 为 verified �
 
 echo ""
 echo "=== 8. tdd metadata 字段与默认值（真源：steps/04_code.md TDD 准入门 + schemas）==="
-assert_contains "steps/04_code.md" "tdd" "04_code.md 定义 tdd metadata 对象"
-assert_contains "steps/04_code.md" "not_assessed" "04_code.md 定义 tdd.status 默认 not_assessed（旧工单兼容）"
+assert_contains "$CODE_DOC" "tdd" "04_code.md 定义 tdd metadata 对象"
+assert_contains "$CODE_DOC" "not_assessed" "04_code.md 定义 tdd.status 默认 not_assessed（旧工单兼容）"
+assert_contains "$CODE_DOC" "baseline" "04_code.md 定义 tdd.baseline（生产哈希基线落盘结构）"
+assert_contains "$CODE_DOC" "production_hashes" "04_code.md tdd.baseline.production_hashes（RED 前哈希）"
 
 echo ""
 echo "=== 9. 主流程编号 / completed_steps 合法值未增加 ==="

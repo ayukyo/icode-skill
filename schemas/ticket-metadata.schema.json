@@ -71,7 +71,15 @@
         "reason": { "type": ["string", "null"] },
         "red": { "type": ["object", "null"] },
         "green": { "type": ["object", "null"] },
-        "regression": { "type": ["object", "null"] }
+        "regression": { "type": ["object", "null"] },
+        "baseline": {
+          "description": "RED 前生产哈希基线（steps/04_code.md「TDD 准入门·RED 阶段」第1步记录）：{production_hashes: {<file>: <sha256>, ...}}，供 05_deepcheck 反向核验「RED 证据是否取自生产修改前」",
+          "type": ["object", "null"],
+          "properties": {
+            "production_hashes": { "type": ["object", "null"] }
+          },
+          "additionalProperties": false
+        }
       },
       "additionalProperties": false
     },
