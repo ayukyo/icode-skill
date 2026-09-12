@@ -88,8 +88,11 @@ esac
 PYTHON_BIN=""
 for candidate in python3 python; do
   if command -v "$candidate" >/dev/null 2>&1; then
-    PYTHON_BIN="$candidate"
-    break
+    _bin="$(command -v "$candidate")"
+    if [ -n "$("$_bin" --version 2>&1 | grep -i 'python')" ]; then
+      PYTHON_BIN="$_bin"
+      break
+    fi
   fi
 done
 if [[ -z "$PYTHON_BIN" ]]; then
