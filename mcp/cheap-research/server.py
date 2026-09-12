@@ -123,19 +123,28 @@ LLM_TOOL_ANNOTATIONS = ToolAnnotations(
 
 
 class ToolResponse(TypedDict, total=False):
-    """所有 MCP 工具共用的最小输出合同。具体 ``answer`` 由各工具定义。"""
+    """所有 MCP 工具共用的最小输出合同。具体 ``answer`` 由各工具定义。
+
+    ⚠️ 字段必须全部可接受 None（`str | None` / `int | None`…）：FastMCP
+    ``structured_output=True`` 时会从本 TypedDict 生成 outputSchema,并把
+    返回 dict 中缺失的字段补成 ``null`` 再做 jsonschema 校验——若某字段声明
+    为非空 `str`/`int`/`bool`,stdio 层会报
+    ``Output validation error: None is not of type '...'`` 且该工具全部调用失败
+    (2026-09-12 实机发现,c9b47f2 引入 structured_output 后 cheap-research
+    全工具在真实 stdio 下不可用)。缺省字段置 None 是预期行为,不表示错误。
+    """
 
     answer: Any
-    error_code: str
-    error: str
-    model: str
+    error_code: str | None
+    error: str | None
+    model: str | None
     confidence: float | None
-    tokens_used: int
-    cost_estimated: float
+    tokens_used: int | None
+    cost_estimated: float | None
     truncation: Any
-    candidates_truncated: bool
-    confidence_note: str
-    cost_note: str
+    candidates_truncated: bool | None
+    confidence_note: str | None
+    cost_note: str | None
 
 
 def _is_private_or_dangerous_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:

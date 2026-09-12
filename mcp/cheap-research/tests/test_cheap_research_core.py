@@ -468,5 +468,83 @@ class TestProviderRuntime(unittest.TestCase):
         self.assertIn('"role": "system"', provider_src)
 
 
+class TestRealStdioSmoke(unittest.TestCase):
+    """真实 stdio 服务层冒烟：防 structured_output 校验缺陷再次漏网。
+
+    根因回归（2026-09-12 实机发现）：mcp>=1.29.0 的 FastMCP 在真实 stdio
+    服务层（mcp/server/lowlevel/server.py）对 structured output 做
+    jsonschema 校验，把返回 dict 中缺失字段（error_code/tokens_used/...）补成
+    null 后与 outputSchema 比对。若 ToolResponse 字段声明非空类型
+    （`error_code: str`），校验会报 "Output validation error: None is not
+    of type '...'" 且**整个工具全部调用失败**。in-process
+    `_tool_manager.call_tool` 不走该低层校验，单测因此假通过。
+    本测试直接 spawn 真实 server 走 stdio，确保真实链路可用。
+    """
+
+    def _stdio_call(self, server_path, tool_name, arguments, timeout=30):
+        import json as _json
+        import select as _select
+        import subprocess as _sp
+        proc = _sp.Popen(
+            [sys.executable, "-u", server_path],
+            stdin=_sp.PIPE, stdout=_sp.PIPE, stderr=_sp.PIPE, text=True,
+        )
+        try:
+            proc.stdin.write(_json.dumps({
+                "jsonrpc": "2.0", "id": 1, "method": "initialize",
+                "params": {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": {},
+                    "clientInfo": {"name": "smoke", "version": "1"},
+                },
+            }) + "\n")
+            proc.stdin.write(_json.dumps({
+                "jsonrpc": "2.0", "method": "notifications/initialized",
+            }) + "\n")
+            proc.stdin.flush()
+
+            def _read_line(_timeout):
+                _r, _, _ = _select.select([proc.stdout], [], [], _timeout)
+                if _r:
+                    return proc.stdout.readline()
+                return None
+
+            # 吞掉 initialize 响应
+            for _ in range(3):
+                _read_line(5)
+            proc.stdin.write(_json.dumps({
+                "jsonrpc": "2.0", "id": 9, "method": "tools/call",
+                "params": {"name": tool_name, "arguments": arguments},
+            }) + "\n")
+            proc.stdin.flush()
+            for _ in range(3):
+                line = _read_line(timeout)
+                if line is None:
+                    continue
+                try:
+                    obj = _json.loads(line)
+                except (ValueError, TypeError):
+                    continue
+                if obj.get("id") == 9:
+                    return obj
+            self.fail("stdio 调用未收到响应（超时）")
+        finally:
+            proc.kill()
+            try:
+                proc.wait(timeout=5)
+            except Exception:
+                pass
+
+    def test_describe_capabilities_vanilla_stdlib_output(self):
+        # 纯本地工具,不依赖 provider/env,最稳定的回归探针
+        resp = self._stdio_call(str(SERVER_DIR / "server.py"), "describe_capabilities", {})
+        res = resp.get("result", {})
+        if "error" not in res and res.get("isError", False):
+            self.fail("describe_capabilities 真实 stdio 失败")
+        text = res.get("content", [{}])[0].get("text", "")
+        self.assertNotIn("Output validation error", text)
+        self.assertIn("tool_count", text)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
