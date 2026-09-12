@@ -53,7 +53,7 @@ for _py in python3 python; do
   if command -v "$_py" >/dev/null 2>&1; then
     _bin="$(command -v "$_py")"
     if [ -n "$("$_bin" --version 2>&1 | grep -i 'python')" ]; then
-      PYTHON_BIN="$_py"
+      PYTHON_BIN="$_bin"
       break
     fi
   fi
