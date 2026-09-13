@@ -52,8 +52,15 @@
           "expected_artifact": "预期返回产物（文件/JSON 片段/结论）",
           "evidence_boundary": "子代理可读的证据范围（禁止越界读/改）",
           "join_condition": "如何判定加入整合（结果 schema / 超时 / deadline 降级）",
+          "backend": "宿主或模型后端标识",
+          "model": "实际请求模型标识",
+          "capabilities": ["text"],
           "result": "joined | timed_out | stopped | failed",
-          "adopted": "主代理是否采纳其结果（yes / partial / no + 原因）"
+          "adopted": "yes | partial | no",
+          "adoption_reason": "主代理采纳或拒绝原因",
+          "result_at": "终结时刻",
+          "evidence_refs": ["短证据引用"],
+          "summary_digest": "结果正文 sha256"
         }
       ]
     }
@@ -62,8 +69,8 @@
 ```
 
 **强制规则**：
-1. **spawn 前必写**：`task_scope` / `expected_artifact` / `evidence_boundary` / `join_condition` 四项在发起前落盘（防"发出去了才想边界"）
-2. **收尾必补**：`result`（joined/timed_out/stopped/failed）+ `adopted`（采纳与否 + 原因）在整合后回填——**采纳记录防"子代理结果被静默丢弃或伪造采纳"**
-3. **并发上限（每工单软预算）**：同一工单并行 spawn 上限 3（超出排队串行）；估算总 token 超软预算时先问用户，不无限并行
+1. **spawn 前必写**：调用 `record-agent-spawn` 原子写入 `task_scope` / `expected_artifact` / `evidence_boundary` / `join_condition` / `backend` / `model` / `capabilities`（防"发出去了才想边界"）
+2. **收尾必补**：调用 `record-agent-result` 写 `result`（joined/timed_out/stopped/failed）+ `adopted`（yes/partial/no）+ `adoption_reason`；模型正文只存摘要——**采纳记录防"子代理结果被静默丢弃或伪造采纳"**
+3. **并发上限（每工单硬上限）**：控制面拒绝第四个开放 spawn；调用方排队串行。估算总 token 超软预算时先问用户，不无限并行
 4. **降级联动**：`deadline` 强制收敛 / `no_spawn_env` 代行时，对应 spawn 条记 `result=stopped|failed` + 注明触发原因，与 [adversarial.md](adversarial.md) 降级标签一致
-5. **校验入口**：`python3 tools/icode_control.py validate --dir <out_dir>` 对 extensions.agent 结构做轻量 shape 检查（缺四项字段报违例提示），真源 schema 见 [schemas/ticket-metadata.schema.json](../schemas/ticket-metadata.schema.json) `extensions`
+5. **校验入口**：`python3 tools/icode_control.py validate --dir <out_dir>` 严格校验 extensions.agent 结构、事件重建、终态配对与并发上限；真源 schema 见 [schemas/ticket-metadata.schema.json](../schemas/ticket-metadata.schema.json) `extensions`

@@ -1,0 +1,15 @@
+{
+  "schema_version": 3,
+  "ticket_id": "agent-runtime-1",
+  "requirement": "agent runtime test",
+  "created_at": "2026-09-13T13:12:02",
+  "status": "init_in_progress",
+  "completed_steps": [
+    "0"
+  ],
+  "indexed": false,
+  "project_path": "/home/orbbec/git/icode-skill/demo/.all_tests_final/test_text_only_request_rejects0",
+  "workflow_gate_schema_version": 1,
+  "thinking_gate_schema_version": 1,
+  "mcp_gate_schema_version": 1
+}

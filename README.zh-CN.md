@@ -65,6 +65,10 @@ git clone https://github.com/ayukyo/icode-skill ~/.claude/skills/icode
 
 嵌入式、摄像头、邮件、技术文档、原理图和 MCU 软硬件契约分析继续使用同一组公开工作流命令。可选的 `verification_profile` 与工单内 `embedded_baseline.json` 可由只读计划工具转换为硬件场景和指标阈值；本地 PDF/Office/图片/文本/7z 语料先由 `technical-document-intake` 验证真实类型、结构、归档风险、重复/变体和可读覆盖，再按需路由规格、原理图或 MCU 契约审计。工具不执行 baseline、邮件、文档、SDK 或工具包中的字符串/程序，受保护容器须授权导出，硬件写入、测量或破坏性故障注入仍须显式授权。
 
+## 可选 Agent Runtime 与本地 UI（v0.3）
+
+ICODE 可通过 `/icode ui`（等价高级命令：`python3 tools/icode_agent.py ui`）打开本地全局工作台。默认监听 `127.0.0.1:8765`，占用则自动选择空闲 loopback 端口并打开浏览器；无需填写工单目录。无参数重复调用会复用现有全局实例，不会反复创建随机端口。它可管理项目/工单、安全创建并登记新工单、显示控制面推荐下一步、手动刷新、以默认 30 秒（可设置 5 秒到 5 分钟）的间隔自动刷新、保存非秘密设置，并通过本机 Codex（优先）或 Claude Code CLI 直接执行受控步骤。Runtime 独立位于 [`agent_runtime/`](agent_runtime/README.md)，不替代两者当前主会话；所有执行仍经过 revision、事件链、Agent 前后回执和单工单独占门禁。UI 不采集 API Key，不接受任意路径/命令，不自动提交、部署、关闭或删除工作区。旧 `status/run` 及 `ui --dir <ticket_dir>` 保持兼容。
+
 ## 可选数据源：只读邮件证据
 
 现有 `init`、`log`、`plan`、`doc`、`deepcheck`、`audit` 或 `verify` 请求包含限定范围的网页邮件链接、线程、`.eml` 或 `.msg` 时，`email-evidence-intake` 先完成批量采集、消息/线程身份、转发引用分段、资源预检、附件路由、分析和完整性门禁，再复用已有媒体、表格、技术文档、日志/时间线、原理图、跨层、来源和现场验证能力；不新增公开命令。显式网页邮件链接默认复用已经登录的浏览器：用户只需登录一次并提供精确链接，ICODE 严格限定到目标邮件阅读窗，通过网页已有入口把邮件原文和所需附件下载到受控证据根，不要求 IMAP 配置。

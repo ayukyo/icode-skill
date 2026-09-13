@@ -1,0 +1,15 @@
+{
+  "schema_version": 3,
+  "ticket_id": "POLICY-1",
+  "requirement": "policy contract",
+  "created_at": "2026-09-13T13:12:22",
+  "status": "init_in_progress",
+  "completed_steps": [
+    "0"
+  ],
+  "indexed": false,
+  "project_path": "/home/orbbec/git/icode-skill/demo/.all_tests_final/test_closed_and_debug_tickets_0/project",
+  "workflow_gate_schema_version": 1,
+  "thinking_gate_schema_version": 1,
+  "mcp_gate_schema_version": 1
+}

@@ -19,6 +19,7 @@
   metadata-update 原子 set/append 已登记业务字段（控制字段由专用命令独占）
   record-claim    原子记录结构化 claim 与对应事件
   record-skill-run 原子记录共享技能路由观测与对应事件
+  record-agent-spawn/result 原子记录模型/子代理调用边界与终态（正文只存摘要）
   index-write     全局索引单一 writer（写前重读合并 → 整文件校验 → 原子写 → 写后唯一性验证）
   index-update    原子更新索引独有的命中/stale 字段
   migration       legacy → vNext 迁移（dry-run 三分类报告 / --apply 单工单幂等）
@@ -35,6 +36,7 @@
 降级：本脚本不可用时 fail-closed；vNext 状态、事件和索引禁止直写。
 """
 import argparse
+import contextlib
 import fcntl
 import fnmatch
 import glob as globlib
@@ -43,6 +45,7 @@ import json
 import math
 import os
 import re
+import io
 import subprocess
 import sys
 import tempfile
@@ -78,8 +81,12 @@ CONTROL_EVENT_TYPES = {
     "operation_started", "operation_finished", "state_changed", "claim_recorded",
     "verification_recorded", "skill_run_recorded", "snapshot_written",
     "close_phase", "ticket_reopened", "metadata_updated", "index_updated",
-    "migration_applied", "idempotent_hit",
+    "migration_applied", "idempotent_hit", "agent_spawned", "agent_result",
 }
+AGENT_CAPABILITIES = {"text", "image", "tools", "reasoning"}
+AGENT_RESULTS = {"joined", "timed_out", "stopped", "failed"}
+AGENT_ADOPTION = {"yes", "partial", "no"}
+MAX_OPEN_AGENT_SPAWNS = 3
 CONTROLLED_BIRTH_FIELDS = {
     "schema_version", "ticket_id", "requirement", "created_at", "status",
     "completed_steps", "indexed", "debug", "project_path", "close_state",
@@ -849,6 +856,12 @@ def validate_event_semantics(events, meta):
                             .get("runs")) or [])
     if event_skill_runs != metadata_skill_runs:
         problems.append("skill_run_recorded 事件与 metadata.extensions.skills.runs 不一致")
+    event_agent_spawns, agent_problems = reconstruct_agent_spawns(events)
+    problems.extend(agent_problems)
+    metadata_agent_spawns = ((((meta.get("extensions") or {}).get("agent") or {})
+                              .get("spawns")) or [])
+    if event_agent_spawns != metadata_agent_spawns:
+        problems.append("agent_spawned/agent_result 事件与 metadata.extensions.agent.spawns 不一致")
     hashed_events = [event for event in events
                      if isinstance(event.get("payload"), dict)
                      and event["payload"].get("metadata_hash_after")]
@@ -859,6 +872,73 @@ def validate_event_semantics(events, meta):
                 "metadata 与最后一条受控写事件的 metadata_hash_after 不一致，"
                 "疑似绕过 metadata-update/专用命令直写")
     return problems
+
+
+def reconstruct_agent_spawns(events):
+    """从专用事件重建 Agent 生命周期；metadata 只是该账本的物化视图。"""
+    problems = []
+    spawns = []
+    by_id = {}
+    required_spawn = {
+        "spawn_id", "at", "task_scope", "expected_artifact", "evidence_boundary",
+        "join_condition", "backend", "model", "capabilities",
+    }
+    required_result = {
+        "spawn_id", "result", "adopted", "adoption_reason", "result_at",
+        "evidence_refs", "summary_digest",
+    }
+    for line, event in enumerate(events, 1):
+        event_type = event.get("event_type")
+        if event_type not in {"agent_spawned", "agent_result"}:
+            continue
+        payload = dict(event.get("payload") or {})
+        payload.pop("metadata_hash_after", None)
+        if event_type == "agent_spawned":
+            missing = sorted(required_spawn - set(payload))
+            if missing:
+                problems.append(f"第 {line} 行 agent_spawned 缺字段: {missing}")
+                continue
+            spawn_id = payload.get("spawn_id")
+            if not isinstance(spawn_id, str) or not spawn_id:
+                problems.append(f"第 {line} 行 agent_spawned.spawn_id 非法")
+                continue
+            if spawn_id in by_id:
+                problems.append(f"第 {line} 行 agent spawn_id 重复: {spawn_id!r}")
+                continue
+            capabilities = payload.get("capabilities")
+            if not isinstance(capabilities, list) or not capabilities \
+                    or "text" not in capabilities \
+                    or any(item not in AGENT_CAPABILITIES for item in capabilities) \
+                    or len(set(capabilities)) != len(capabilities):
+                problems.append(f"第 {line} 行 agent_spawned.capabilities 非法")
+            record = payload
+            spawns.append(record)
+            by_id[spawn_id] = record
+            if sum(1 for item in spawns if "result" not in item) > MAX_OPEN_AGENT_SPAWNS:
+                problems.append(
+                    f"第 {line} 行开放 agent spawn 超过上限 {MAX_OPEN_AGENT_SPAWNS}")
+            continue
+
+        missing = sorted(required_result - set(payload))
+        if missing:
+            problems.append(f"第 {line} 行 agent_result 缺字段: {missing}")
+            continue
+        spawn_id = payload.get("spawn_id")
+        record = by_id.get(spawn_id)
+        if record is None:
+            problems.append(f"第 {line} 行 agent_result 引用未知 spawn_id: {spawn_id!r}")
+            continue
+        if "result" in record:
+            problems.append(f"第 {line} 行 agent spawn 重复终结: {spawn_id!r}")
+            continue
+        if payload.get("result") not in AGENT_RESULTS:
+            problems.append(f"第 {line} 行 agent_result.result 非法")
+        if payload.get("adopted") not in AGENT_ADOPTION:
+            problems.append(f"第 {line} 行 agent_result.adopted 非法")
+        if payload.get("result") != "joined" and payload.get("adopted") != "no":
+            problems.append(f"第 {line} 行失败 Agent 结果只能 adopted=no")
+        record.update({key: value for key, value in payload.items() if key != "spawn_id"})
+    return spawns, problems
 
 
 def validate_execution_event_semantics(events):
@@ -1034,6 +1114,62 @@ def execution_workspace(out_dir, meta):
     if isinstance(raw, str) and raw.strip():
         return Path(raw).expanduser().resolve()
     return containing_workspace(out_dir)
+
+
+def trusted_execution_workspace(out_dir, meta):
+    """为外部 Agent 返回经拓扑校验的执行根；拒绝直接信任任意 metadata 路径。"""
+    active = meta.get("active_checkout")
+    active_history = [item for item in (meta.get("checkout_history") or [])
+                      if isinstance(item, dict) and item.get("state") == "active"]
+    if active_history:
+        raise ControlError(
+            "checkout_history 与 active_checkout 出现双活动根",
+            exit_code=1, gate_id="execution_root_topology")
+
+    if isinstance(active, dict):
+        if active.get("state") != "active":
+            raise ControlError(
+                "active_checkout 尚未获得 active 状态，拒绝作为执行根",
+                exit_code=1, gate_id="execution_root_topology")
+        raw = active.get("path") or active.get("worktree_path")
+        if not isinstance(raw, str) or not raw.strip() or not Path(raw).is_absolute():
+            raise ControlError(
+                "active_checkout.path 必须是绝对路径",
+                exit_code=1, gate_id="execution_root_topology")
+        candidate = Path(raw).resolve()
+        if not candidate.is_dir():
+            raise ControlError(
+                "active_checkout.path 不存在或不是目录",
+                exit_code=1, gate_id="execution_root_topology")
+        root_proc = subprocess.run(
+            ["git", "-C", str(candidate), "rev-parse", "--show-toplevel"],
+            capture_output=True, text=True, timeout=10)
+        branch_proc = subprocess.run(
+            ["git", "-C", str(candidate), "rev-parse", "--abbrev-ref", "HEAD"],
+            capture_output=True, text=True, timeout=10)
+        if root_proc.returncode != 0 or Path(root_proc.stdout.strip()).resolve() != candidate:
+            raise ControlError(
+                "active_checkout.path 不是独立 Git checkout 根",
+                exit_code=1, gate_id="execution_root_topology")
+        expected_branch = active.get("branch")
+        if isinstance(expected_branch, str) and expected_branch.strip() \
+                and (branch_proc.returncode != 0
+                     or branch_proc.stdout.strip() != expected_branch):
+            raise ControlError(
+                "active_checkout.branch 与实际 Git 分支不一致",
+                exit_code=1, gate_id="execution_root_topology")
+        return candidate
+
+    raw_project = meta.get("project_path")
+    if isinstance(raw_project, str) and raw_project.strip():
+        workspace = Path(raw_project).expanduser().resolve()
+    else:
+        workspace = containing_workspace(out_dir)
+    if not workspace.is_dir():
+        raise ControlError(
+            "工单工程根不存在或不是目录",
+            exit_code=1, gate_id="execution_root_topology")
+    return workspace
 
 
 def port_path(base, raw):
@@ -1574,6 +1710,136 @@ def cmd_create(args):
     print(json.dumps({"ok": True, "ticket_id": args.ticket_id,
                       "status": status, "event_id": event["event_id"],
                       "out_dir": str(out_dir)}, ensure_ascii=False, indent=2))
+    return 0
+
+
+def _find_ui_create_request(output_root, request_id):
+    """查找 create-next 的可恢复出生记录；损坏目录不冒充幂等命中。"""
+    if not output_root.is_dir():
+        return None
+    matches = []
+    for item in output_root.iterdir():
+        if not item.is_dir() or re.fullmatch(r"\.icode_output_[0-9]+", item.name) is None:
+            continue
+        meta_path = item / METADATA_NAME
+        if not meta_path.is_file():
+            continue
+        try:
+            meta = load_json(meta_path, "UI 草稿 metadata")
+        except ControlError:
+            continue
+        ui_ext = (meta.get("extensions") or {}).get("ui") \
+            if isinstance(meta.get("extensions"), dict) else None
+        if isinstance(ui_ext, dict) and ui_ext.get("draft_request_id") == request_id:
+            matches.append((item.resolve(), meta))
+    if len(matches) > 1:
+        raise ControlError(
+            "同一 UI 创建幂等键命中多个工单，拒绝猜测",
+            exit_code=1, gate_id="create_next_request_ambiguous")
+    return matches[0] if matches else None
+
+
+def cmd_create_next(args):
+    """为 UI 原子分配普通工单编号，出生并写入全局索引。"""
+    workspace = Path(args.workspace).expanduser().resolve()
+    if not workspace.is_dir() or workspace == Path("/"):
+        raise ControlError(
+            "workspace 必须是已存在且非系统根目录的工程目录",
+            exit_code=2, gate_id="workspace_exists")
+    requirement = args.requirement.strip() if isinstance(args.requirement, str) else ""
+    if not requirement or len(requirement) > 8000:
+        raise ControlError(
+            "requirement 必须是 1..8000 字符的非空文本", exit_code=2,
+            gate_id="create_next_input")
+    if re.fullmatch(r"[A-Za-z0-9._:-]{1,160}", args.request_id or "") is None:
+        raise ControlError(
+            "request-id 格式非法", exit_code=2, gate_id="create_next_input")
+
+    index_path = Path(args.index).expanduser() if args.index else INDEX_PATH
+    index_path.parent.mkdir(parents=True, exist_ok=True)
+    output_root = workspace / ".icode_output"
+    output_root.mkdir(parents=True, exist_ok=True)
+
+    # 锁顺序固定为 index -> project sequence -> ticket，和 index-write 一致。
+    with FileLock(index_path):
+        with FileLock(output_root / ".create-next-sequence"):
+            index = (load_json(index_path, "全局索引") if index_path.is_file()
+                     else {"version": 1, "updated_at": now_iso(), "tickets": []})
+            violations = validate_index(index)
+            identity = index_identity_violations(index)
+            if violations or identity:
+                raise ControlError(
+                    "现有索引不合法，拒绝创建新工单",
+                    exit_code=1, gate_id="index_precheck",
+                    violations=violations + [
+                        {"gate_id": "index_identity", "detail": item}
+                        for item in identity
+                    ])
+
+            recovered = _find_ui_create_request(output_root, args.request_id)
+            if recovered is not None:
+                out_dir, meta = recovered
+                if meta.get("requirement") != requirement:
+                    raise ControlError(
+                        "相同 request-id 对应不同 requirement，拒绝重放",
+                        exit_code=1, gate_id="idempotency_conflict")
+                indexed_matches = [
+                    item for item in index.get("tickets", [])
+                    if item.get("ticket_id") == meta.get("ticket_id")
+                    and canonical_index_entry_path(item) == out_dir
+                ]
+                if meta.get("indexed") is not True or len(indexed_matches) != 1:
+                    with contextlib.redirect_stdout(io.StringIO()):
+                        cmd_index_write(argparse.Namespace(
+                            ticket_dir=str(out_dir), index=str(index_path),
+                            _index_lock_held=True))
+                current = load_metadata(out_dir)
+                print(json.dumps({
+                    "ok": True,
+                    "already_applied": True,
+                    "ticket_id": current.get("ticket_id"),
+                    "status": current.get("status"),
+                    "indexed": current.get("indexed") is True,
+                    "out_dir": str(out_dir),
+                }, ensure_ascii=False, indent=2))
+                return 0
+
+            numbers = []
+            for item in output_root.iterdir():
+                match = re.fullmatch(r"\.icode_output_([0-9]+)", item.name)
+                if match and item.is_dir():
+                    numbers.append(int(match.group(1)))
+            number = max(numbers, default=0) + 1
+            out_dir = output_root / f".icode_output_{number}"
+            ticket_id = f"{workspace.name}-{number}"
+            if any(item.get("ticket_id") == ticket_id
+                   and Path(str(item.get("project_path", ""))).expanduser().resolve() != workspace
+                   for item in index.get("tickets", []) if isinstance(item, dict)):
+                short_hash = hashlib.sha256(str(workspace).encode("utf-8")).hexdigest()[:4]
+                ticket_id = f"{ticket_id}-{short_hash}"
+
+            seed = {
+                "requirement_summary": requirement[:100],
+                "extensions": {"ui": {"draft_request_id": args.request_id}},
+            }
+            with contextlib.redirect_stdout(io.StringIO()):
+                cmd_create(argparse.Namespace(
+                    dir=str(out_dir), ticket_id=ticket_id,
+                    requirement=requirement, birth="plan",
+                    metadata_json=json.dumps(seed, ensure_ascii=False),
+                    request_id=f"{args.request_id}:birth"))
+                cmd_index_write(argparse.Namespace(
+                    ticket_dir=str(out_dir), index=str(index_path),
+                    _index_lock_held=True))
+            current = load_metadata(out_dir)
+            print(json.dumps({
+                "ok": True,
+                "already_applied": False,
+                "ticket_id": ticket_id,
+                "status": current.get("status"),
+                "indexed": current.get("indexed") is True,
+                "out_dir": str(out_dir),
+            }, ensure_ascii=False, indent=2))
     return 0
 
 
@@ -2152,7 +2418,9 @@ def cmd_index_write(args):
     out_dir = Path(args.ticket_dir).resolve()
     index_path = Path(args.index) if args.index else INDEX_PATH
     index_path.parent.mkdir(parents=True, exist_ok=True)
-    with FileLock(index_path):
+    index_lock = (contextlib.nullcontext() if getattr(args, "_index_lock_held", False)
+                  else FileLock(index_path))
+    with index_lock:
         with DirLock(out_dir):
             recover_pending_transaction(out_dir)
             meta = load_metadata(out_dir)
@@ -2780,6 +3048,15 @@ def cmd_metadata_update(args):
                 "extensions.skills.runs 由 record-skill-run 专用命令维护，"
                 "metadata-update 禁止改写",
                 exit_code=2, gate_id="metadata_update_protected")
+        current_agent_spawns = ((((meta.get("extensions") or {}).get("agent") or {})
+                                  .get("spawns")) or [])
+        updated_agent_spawns = ((((updated.get("extensions") or {}).get("agent") or {})
+                                  .get("spawns")) or [])
+        if updated_agent_spawns != current_agent_spawns:
+            raise ControlError(
+                "extensions.agent.spawns 由 record-agent-spawn/record-agent-result "
+                "专用命令维护，metadata-update 禁止改写",
+                exit_code=2, gate_id="metadata_update_protected")
         if updated == meta:
             print(json.dumps({"ok": True, "no_change": True,
                               "changed_fields": []}, ensure_ascii=False, indent=2))
@@ -3015,6 +3292,181 @@ def cmd_record_skill_run(args):
             out_dir, before_meta, meta, "skill_run_recorded", run,
             request_id=args.request_id, actor=args.actor)
     print(json.dumps({"ok": True, "run": run, "event_id": event["event_id"]},
+                     ensure_ascii=False, indent=2))
+    return 0
+
+
+def _agent_spawns(meta):
+    return list((((meta.get("extensions") or {}).get("agent") or {}).get("spawns")) or [])
+
+
+def _require_agent_text(value, option):
+    text = (value or "").strip()
+    if not text:
+        raise ControlError(f"{option} 必须是非空文本", exit_code=2,
+                           gate_id="agent_spawn_contract")
+    return text
+
+
+def cmd_record_agent_spawn(args):
+    """在调用模型/子代理前原子记录边界，避免事后补写或伪造。"""
+    out_dir = Path(args.dir).resolve()
+    capabilities = list(dict.fromkeys(args.capability or []))
+    invalid_capabilities = sorted(set(capabilities) - AGENT_CAPABILITIES)
+    if invalid_capabilities or "text" not in capabilities:
+        raise ControlError(
+            "Agent capabilities 必须包含 text，且只能使用 text/image/tools/reasoning",
+            exit_code=2, gate_id="agent_capability_contract",
+            invalid_capabilities=invalid_capabilities)
+    input_payload = {
+        "task_scope": _require_agent_text(args.task_scope, "--task-scope"),
+        "expected_artifact": _require_agent_text(
+            args.expected_artifact, "--expected-artifact"),
+        "evidence_boundary": _require_agent_text(
+            args.evidence_boundary, "--evidence-boundary"),
+        "join_condition": _require_agent_text(args.join_condition, "--join-condition"),
+        "backend": _require_agent_text(args.backend, "--backend"),
+        "model": _require_agent_text(args.model, "--model"),
+        "capabilities": capabilities,
+    }
+    exclusive_key = (args.exclusive_key or "").strip()
+    if exclusive_key:
+        if len(exclusive_key) > 80:
+            raise ControlError(
+                "--exclusive-key 最多 80 字符", exit_code=2,
+                gate_id="agent_spawn_contract")
+        input_payload["exclusive_key"] = exclusive_key
+    with DirLock(out_dir):
+        recover_pending_transaction(out_dir)
+        meta = load_metadata(out_dir)
+        require_vnext(meta, out_dir)
+        require_valid_metadata(meta)
+        if meta.get("close_state") is not None:
+            raise ControlError(
+                "工单已进入关闭流程，禁止 spawn Agent；需修改请先 reopen",
+                exit_code=1, gate_id="closed_ticket_mutation_frozen")
+        events, problems = verify_event_chain(out_dir, meta)
+        if problems:
+            raise ControlError("现有事件链不完整，拒绝 spawn Agent", exit_code=1,
+                               gate_id="event_chain", violations=problems)
+        prior = find_idempotent_event(
+            events, args.request_id, "agent_spawned", input_payload,
+            actor=args.actor, payload_keys=tuple(input_payload))
+        if prior:
+            prior_id = prior["payload"].get("spawn_id")
+            prior_spawn = next(
+                (item for item in _agent_spawns(meta) if item.get("spawn_id") == prior_id),
+                {key: value for key, value in prior["payload"].items()
+                 if key != "metadata_hash_after"})
+            print(json.dumps({"ok": True, "already_applied": True,
+                              "request_id": args.request_id, "spawn": prior_spawn,
+                              "event_id": prior["event_id"]},
+                             ensure_ascii=False, indent=2))
+            return 0
+        spawns = _agent_spawns(meta)
+        open_spawns = [item for item in spawns if "result" not in item]
+        if exclusive_key:
+            exclusive_open = [item for item in open_spawns
+                              if item.get("exclusive_key") == exclusive_key]
+            if exclusive_open:
+                raise ControlError(
+                    f"Agent 独占域 {exclusive_key!r} 已有开放调用",
+                    exit_code=1, gate_id="agent_exclusive_lock",
+                    open_spawn_ids=[item.get("spawn_id") for item in exclusive_open])
+        if len(open_spawns) >= MAX_OPEN_AGENT_SPAWNS:
+            raise ControlError(
+                f"同工单开放 Agent spawn 已达上限 {MAX_OPEN_AGENT_SPAWNS}",
+                exit_code=1, gate_id="agent_concurrency_limit",
+                open_spawn_ids=[item.get("spawn_id") for item in open_spawns])
+        spawn = {"spawn_id": str(uuid.uuid4()), "at": now_iso(), **input_payload}
+        before_meta = dict(meta)
+        extensions = dict(meta.get("extensions") or {})
+        agent_ns = dict(extensions.get("agent") or {})
+        agent_ns["spawns"] = spawns + [spawn]
+        extensions["agent"] = agent_ns
+        meta["extensions"] = extensions
+        event = commit_metadata_and_event(
+            out_dir, before_meta, meta, "agent_spawned", spawn,
+            request_id=args.request_id, actor=args.actor)
+    print(json.dumps({"ok": True, "spawn": spawn, "event_id": event["event_id"]},
+                     ensure_ascii=False, indent=2))
+    return 0
+
+
+def cmd_record_agent_result(args):
+    """终结一个已记录 Agent spawn；正文仅记摘要，避免事件链膨胀/泄密。"""
+    out_dir = Path(args.dir).resolve()
+    spawn_id = _require_agent_text(args.spawn_id, "--spawn-id")
+    adoption_reason = _require_agent_text(args.adoption_reason, "--adoption-reason")
+    summary = _require_agent_text(args.summary, "--summary")
+    evidence_refs = [item.strip() for item in (args.evidence_ref or []) if item.strip()]
+    if not evidence_refs:
+        raise ControlError("Agent result 至少需要一条 --evidence-ref", exit_code=2,
+                           gate_id="agent_result_evidence")
+    if args.result != "joined" and args.adopted != "no":
+        raise ControlError(
+            "timed_out/stopped/failed 只能 adopted=no",
+            exit_code=2, gate_id="agent_result_adoption")
+    input_payload = {
+        "spawn_id": spawn_id,
+        "result": args.result,
+        "adopted": args.adopted,
+        "adoption_reason": adoption_reason,
+        "evidence_refs": evidence_refs,
+        "summary_digest": hashlib.sha256(summary.encode("utf-8")).hexdigest(),
+    }
+    error_class = (args.error_class or "").strip()
+    if error_class:
+        input_payload["error_class"] = error_class
+    with DirLock(out_dir):
+        recover_pending_transaction(out_dir)
+        meta = load_metadata(out_dir)
+        require_vnext(meta, out_dir)
+        require_valid_metadata(meta)
+        if meta.get("close_state") is not None:
+            raise ControlError(
+                "工单已进入关闭流程，禁止终结 Agent；需修改请先 reopen",
+                exit_code=1, gate_id="closed_ticket_mutation_frozen")
+        events, problems = verify_event_chain(out_dir, meta)
+        if problems:
+            raise ControlError("现有事件链不完整，拒绝记录 Agent 结果", exit_code=1,
+                               gate_id="event_chain", violations=problems)
+        prior = find_idempotent_event(
+            events, args.request_id, "agent_result", input_payload,
+            actor=args.actor, payload_keys=tuple(input_payload))
+        if prior:
+            print(json.dumps({"ok": True, "already_applied": True,
+                              "request_id": args.request_id, "spawn_id": spawn_id,
+                              "event_id": prior["event_id"]},
+                             ensure_ascii=False, indent=2))
+            return 0
+        spawns = [dict(item) for item in _agent_spawns(meta)]
+        target = next((item for item in spawns if item.get("spawn_id") == spawn_id), None)
+        if target is None:
+            raise ControlError(
+                f"找不到 Agent spawn_id={spawn_id!r}", exit_code=1,
+                gate_id="agent_spawn_not_found")
+        if "result" in target:
+            raise ControlError(
+                f"Agent spawn_id={spawn_id!r} 已终结，拒绝不同请求重复改写",
+                exit_code=1, gate_id="agent_spawn_already_terminal",
+                existing_result=target.get("result"))
+        result_at = now_iso()
+        result_record = {key: value for key, value in input_payload.items()
+                         if key != "spawn_id"}
+        result_record["result_at"] = result_at
+        target.update(result_record)
+        before_meta = dict(meta)
+        extensions = dict(meta.get("extensions") or {})
+        agent_ns = dict(extensions.get("agent") or {})
+        agent_ns["spawns"] = spawns
+        extensions["agent"] = agent_ns
+        meta["extensions"] = extensions
+        event_payload = {"spawn_id": spawn_id, **result_record}
+        event = commit_metadata_and_event(
+            out_dir, before_meta, meta, "agent_result", event_payload,
+            request_id=args.request_id, actor=args.actor)
+    print(json.dumps({"ok": True, "spawn": target, "event_id": event["event_id"]},
                      ensure_ascii=False, indent=2))
     return 0
 
@@ -3878,10 +4330,12 @@ def cmd_operation(args):
 
 def execution_trace(events, limit=None):
     tracked = {"step_started", "gate_checked", "artifact_written", "step_finished",
-               "operation_started", "operation_finished", "state_changed"}
+               "operation_started", "operation_finished", "state_changed",
+               "agent_spawned", "agent_result"}
     records = []
     open_steps = {}
     open_operations = {}
+    open_agents = {}
     for event in events:
         if event.get("event_type") not in tracked:
             continue
@@ -3889,7 +4343,9 @@ def execution_trace(events, limit=None):
         record = {"at": event.get("timestamp"), "type": event.get("event_type"),
                   "event_id": event.get("event_id"), "request_id": event.get("request_id")}
         for key in ("step", "attempt", "boundary", "result", "route", "outcome",
-                    "name", "class", "duration_ms", "path", "sha256", "from", "to"):
+                    "name", "class", "duration_ms", "path", "sha256", "from", "to",
+                    "spawn_id", "task_scope", "backend", "model", "adopted",
+                    "error_class", "exclusive_key"):
             if key in payload:
                 record[key] = payload[key]
         records.append(record)
@@ -3904,10 +4360,20 @@ def execution_trace(events, limit=None):
                                         "started_at": event.get("timestamp")}
         elif event.get("event_type") == "operation_finished":
             open_operations.pop(attempt, None)
+        elif event.get("event_type") == "agent_spawned":
+            spawn_id = payload.get("spawn_id")
+            open_agents[spawn_id] = {
+                "task_scope": payload.get("task_scope"),
+                "backend": payload.get("backend"),
+                "model": payload.get("model"),
+                "started_at": event.get("timestamp"),
+            }
+        elif event.get("event_type") == "agent_result":
+            open_agents.pop(payload.get("spawn_id"), None)
     if limit is not None:
         records = records[-limit:]
     return {"events": records, "open_steps": open_steps,
-            "open_operations": open_operations}
+            "open_operations": open_operations, "open_agents": open_agents}
 
 
 def cmd_trace(args):
@@ -3924,7 +4390,114 @@ def cmd_trace(args):
     trace = execution_trace(events, args.limit)
     print(json.dumps({"ok": True, "ticket_id": meta.get("ticket_id"),
                       "status": meta.get("status"), "event_count": len(events),
+                      "agent_spawns": _agent_spawns(meta),
                       **trace}, ensure_ascii=False, indent=2))
+    return 0
+
+
+def cmd_action_policy(args):
+    """生成轻量、一致的 UI/Agent 动作投影，并用 revision 防止过期执行。"""
+    out_dir = Path(args.dir).resolve()
+    sm = load_state_machine()
+    policy = sm.get("action_policy")
+    if not isinstance(policy, dict) or policy.get("schema_version") != 1 \
+            or not isinstance(policy.get("actions"), dict):
+        raise ControlError(
+            "gates.json action_policy 机器契约无效",
+            exit_code=1, gate_id="action_policy_catalog")
+
+    meta = load_metadata(out_dir)
+    require_vnext(meta, out_dir)
+    require_valid_metadata(meta)
+    events, problems = verify_event_chain(out_dir, meta)
+    if problems:
+        raise ControlError(
+            "事件链不完整，拒绝生成动作策略",
+            exit_code=1, gate_id="event_chain", violations=problems)
+    execution = execution_trace(events)
+    last_event_hash = events[-1]["event_hash"] if events else GENESIS_HASH
+    meta_digest = metadata_hash(meta)
+    revision_base = {
+        "ticket_id": meta.get("ticket_id"),
+        "metadata_hash": meta_digest,
+        "last_event_hash": last_event_hash,
+        "event_count": len(events),
+    }
+    revision = {**revision_base, "token": canonical_digest(revision_base)}
+
+    if args.expected_revision and args.expected_revision != revision["token"]:
+        raise ControlError(
+            "工单状态已变化，拒绝基于过期 revision 执行动作",
+            exit_code=1, gate_id="revision_mismatch",
+            expected_revision=args.expected_revision,
+            actual_revision=revision["token"])
+
+    status = meta.get("status")
+    is_debug = bool(meta.get("debug"))
+    actions = policy["actions"]
+    read_only = set(policy.get("read_only_actions") or [])
+    allowed = []
+    for name, contract in actions.items():
+        if not isinstance(contract, dict) or status not in contract.get("statuses", []):
+            continue
+        debug_mode = contract.get("debug")
+        if is_debug and debug_mode not in {"debug", "both"}:
+            continue
+        if not is_debug and debug_mode not in {"main", "both"}:
+            continue
+        allowed.append(name)
+
+    blocked_reason = None
+    if meta.get("close_state") is not None:
+        allowed = [name for name in allowed if name in read_only]
+        blocked_reason = "closed_ticket"
+    elif execution["open_steps"] or execution["open_operations"] \
+            or execution["open_agents"]:
+        allowed = [name for name in allowed if name in read_only]
+        blocked_reason = "open_execution"
+    allowed = sorted(allowed)
+    recommended = (policy.get("recommended_by_status") or {}).get(status)
+    if recommended not in allowed:
+        recommended = None
+
+    if args.action:
+        if args.action not in actions:
+            raise ControlError(
+                f"未知 action {args.action!r}", exit_code=2,
+                gate_id="action_policy_catalog", allowed=sorted(actions))
+        if args.action not in allowed:
+            raise ControlError(
+                f"动作 {args.action!r} 在当前工单状态不可执行",
+                exit_code=1, gate_id="action_policy", status=status,
+                blocked_reason=blocked_reason, allowed_actions=allowed)
+        model = load_execution_model()
+        if args.action in model.get("step_contracts", {}):
+            _snapshot, missing = capture_step_inputs(
+                out_dir, meta, model, args.action)
+            if missing:
+                raise ControlError(
+                    f"动作 {args.action!r} 缺少必填输入",
+                    exit_code=1, gate_id="step_ports", missing=missing)
+
+    result = {
+        "ok": True,
+        "schema_version": 1,
+        "ticket_id": meta.get("ticket_id"),
+        "status": status,
+        "debug": is_debug,
+        "close_state": meta.get("close_state"),
+        "allowed_actions": allowed,
+        "recommended_action": recommended,
+        "blocked_reason": blocked_reason,
+        "revision": revision,
+        "execution_root": str(trusted_execution_workspace(out_dir, meta)),
+        "open_steps": execution["open_steps"],
+        "open_operations": execution["open_operations"],
+        "open_agents": execution["open_agents"],
+    }
+    if args.action:
+        result.update({"action": args.action, "action_allowed": True})
+    print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0
 
 
@@ -4058,6 +4631,13 @@ def build_parser():
     p.add_argument("--request-id", help="创建幂等键")
     p.set_defaults(func=cmd_create)
 
+    p = sub.add_parser("create-next", help="为 UI 原子分配编号、出生并写入索引")
+    p.add_argument("--workspace", required=True, help="服务端解析后的可信工程根")
+    p.add_argument("--requirement", required=True)
+    p.add_argument("--request-id", required=True, help="UI 创建工单幂等键")
+    p.add_argument("--index", help="索引路径覆盖（测试用）")
+    p.set_defaults(func=cmd_create_next)
+
     p = sub.add_parser("validate", help="工单整体校验（fail-closed 报告）")
     p.add_argument("--dir", required=True)
     p.add_argument("--index", help="索引路径覆盖（默认 ~/.claude/icode_data/index.json；测试/离线审计用）")
@@ -4118,6 +4698,14 @@ def build_parser():
     p.add_argument("--dir", required=True)
     p.add_argument("--limit", type=int, default=50)
     p.set_defaults(func=cmd_trace)
+
+    p = sub.add_parser("action-policy",
+                       help="只读生成允许动作、可信执行根与 revision")
+    p.add_argument("--dir", required=True)
+    p.add_argument("--action", help="可选：启动前复检指定动作")
+    p.add_argument("--expected-revision",
+                   help="可选：UI 刷新时取得的 revision token")
+    p.set_defaults(func=cmd_action_policy)
 
     p = sub.add_parser("transition", help="状态流转（fail-closed + 门禁 linter + 事件）")
     p.add_argument("--dir", required=True)
@@ -4212,6 +4800,37 @@ def build_parser():
     p.add_argument("--request-id", help="幂等键（同键同记录重放=已应用）")
     p.add_argument("--actor", default="icode", choices=["icode", "user", "watch", "system"])
     p.set_defaults(func=cmd_record_skill_run)
+
+    p = sub.add_parser("record-agent-spawn",
+                       help="模型/子代理调用前原子记录 extensions.agent.spawns + agent_spawned")
+    p.add_argument("--dir", required=True)
+    p.add_argument("--task-scope", required=True)
+    p.add_argument("--expected-artifact", required=True)
+    p.add_argument("--evidence-boundary", required=True)
+    p.add_argument("--join-condition", required=True)
+    p.add_argument("--backend", required=True)
+    p.add_argument("--model", required=True)
+    p.add_argument("--capability", action="append", required=True,
+                   choices=sorted(AGENT_CAPABILITIES))
+    p.add_argument("--request-id", required=True, help="调用前幂等键")
+    p.add_argument("--exclusive-key",
+                   help="可选跨进程独占域；同工单同 key 仅允许一个开放 spawn")
+    p.add_argument("--actor", default="icode", choices=["icode", "user", "watch", "system"])
+    p.set_defaults(func=cmd_record_agent_spawn)
+
+    p = sub.add_parser("record-agent-result",
+                       help="原子终结 Agent spawn + agent_result；正文只记录 sha256")
+    p.add_argument("--dir", required=True)
+    p.add_argument("--spawn-id", required=True)
+    p.add_argument("--result", required=True, choices=sorted(AGENT_RESULTS))
+    p.add_argument("--adopted", required=True, choices=sorted(AGENT_ADOPTION))
+    p.add_argument("--adoption-reason", required=True)
+    p.add_argument("--evidence-ref", action="append", required=True)
+    p.add_argument("--summary", required=True, help="仅计算 sha256，不写入事件链")
+    p.add_argument("--error-class")
+    p.add_argument("--request-id", required=True, help="终结幂等键")
+    p.add_argument("--actor", default="icode", choices=["icode", "user", "watch", "system"])
+    p.set_defaults(func=cmd_record_agent_result)
 
     p = sub.add_parser("archive-manifest",
                        help="生成/校验归档清单、hash 与门禁 roundtrip")

@@ -390,6 +390,46 @@
       },
       "completed_requires": "transition --to completed 必须携带 --delivery-verdict ∈ {verified,verification_pending,blocked,not_applicable}（交付分层契约：宿主验证通过不得自动映射为 verified）"
     },
+    "action_policy": {
+      "schema_version": 1,
+      "doc": "UI/Agent 宿主执行前的机器动作真源。action-policy 从本段、metadata 与事件链生成允许动作和 revision；前端推荐按钮不得自行维护第二套状态映射。project-scoped 的 init/start/fast 由可信 project catalog 单独路由，不伪装成既有 ticket action。",
+      "read_only_actions": ["status"],
+      "actions": {
+        "log": {"statuses": ["log_in_progress", "log_done", "debug_in_progress"], "debug": "both", "side_effect": "managed_write"},
+        "plan": {"statuses": ["init_in_progress", "log_done"], "debug": "main", "side_effect": "managed_write"},
+        "review": {"statuses": ["plan_done", "review_in_progress", "review_done", "completed"], "debug": "main", "side_effect": "managed_write"},
+        "merge": {"statuses": ["review_done"], "debug": "main", "side_effect": "managed_write"},
+        "code": {"statuses": ["plan_finalized", "code_in_progress", "code_done"], "debug": "main", "side_effect": "managed_write"},
+        "deepcheck": {"statuses": ["code_done", "deepcheck_in_progress", "deepcheck_done"], "debug": "main", "side_effect": "managed_write"},
+        "audit": {"statuses": ["deepcheck_done"], "debug": "main", "side_effect": "managed_write"},
+        "readme": {"statuses": ["completed"], "debug": "main", "side_effect": "managed_write"},
+        "patch": {"statuses": ["plan_finalized", "code_in_progress", "code_done", "deepcheck_in_progress", "deepcheck_done", "completed"], "debug": "main", "side_effect": "managed_write"},
+        "verify": {"statuses": ["code_done", "deepcheck_in_progress", "deepcheck_done", "completed"], "debug": "main", "side_effect": "external_side_effect"},
+        "doc": {"statuses": ["log_in_progress", "log_done", "init_in_progress", "plan_done", "review_in_progress", "review_done", "plan_finalized", "code_in_progress", "code_done", "deepcheck_in_progress", "deepcheck_done", "completed"], "debug": "main", "side_effect": "managed_write"},
+        "docx": {"statuses": ["log_in_progress", "log_done", "init_in_progress", "plan_done", "review_in_progress", "review_done", "plan_finalized", "code_in_progress", "code_done", "deepcheck_in_progress", "deepcheck_done", "completed"], "debug": "main", "side_effect": "managed_write"},
+        "ppt": {"statuses": ["log_in_progress", "log_done", "init_in_progress", "plan_done", "review_in_progress", "review_done", "plan_finalized", "code_in_progress", "code_done", "deepcheck_in_progress", "deepcheck_done", "completed"], "debug": "main", "side_effect": "managed_write"},
+        "limit": {"statuses": ["log_in_progress", "log_done", "init_in_progress", "plan_done", "review_in_progress", "review_done", "plan_finalized", "code_in_progress", "code_done", "deepcheck_in_progress", "deepcheck_done", "completed"], "debug": "main", "side_effect": "managed_write"},
+        "learn": {"statuses": ["log_in_progress", "log_done", "init_in_progress", "plan_done", "review_in_progress", "review_done", "plan_finalized", "code_in_progress", "code_done", "deepcheck_in_progress", "deepcheck_done", "completed"], "debug": "main", "side_effect": "managed_write"},
+        "bak": {"statuses": ["log_in_progress", "log_done", "init_in_progress", "plan_done", "review_in_progress", "review_done", "plan_finalized", "code_in_progress", "code_done", "deepcheck_in_progress", "deepcheck_done", "completed"], "debug": "main", "side_effect": "managed_write"},
+        "status": {"statuses": ["log_in_progress", "log_done", "init_in_progress", "plan_done", "review_in_progress", "review_done", "plan_finalized", "code_in_progress", "code_done", "deepcheck_in_progress", "deepcheck_done", "completed", "debug_in_progress", "debug_done"], "debug": "both", "side_effect": "read_only"}
+      },
+      "recommended_by_status": {
+        "log_in_progress": "log",
+        "log_done": "plan",
+        "init_in_progress": "plan",
+        "plan_done": "review",
+        "review_in_progress": "review",
+        "review_done": "merge",
+        "plan_finalized": "code",
+        "code_in_progress": "code",
+        "code_done": "deepcheck",
+        "deepcheck_in_progress": "deepcheck",
+        "deepcheck_done": "audit",
+        "completed": null,
+        "debug_in_progress": "log",
+        "debug_done": null
+      }
+    },
     "close_phases": ["close_planned","archived","roots_verified","checkouts_removed","branches_removed","closed"],
     "close_phase_doc": "关闭分阶段状态（metadata.close_state）。每阶段幂等（重放同阶段=已应用），禁止跨阶段跳转；用 tools/icode_control.py close-phase 记录。archived 成功后控制根从源 out_dir 交接到 archive_path，roots_verified 起必须在归档根续跑，保证源 checkout 删除后仍可留痕。closed 为终态，重复 close 对已 closed 工单只回放摘要不重复清理。"
   }

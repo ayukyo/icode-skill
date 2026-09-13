@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="icode-ui-token" content="{{ICODE_UI_TOKEN}}">
+  <title>ICODE 工作台</title>
+  <link rel="stylesheet" href="/assets/style.css">
+  <script src="/assets/app.js" defer></script>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" aria-label="项目与工单导航">
+      <div class="brand-row">
+        <div class="brand-mark">I</div>
+        <div>
+          <strong>ICODE</strong>
+          <span>本地工作台</span>
+        </div>
+      </div>
+
+      <label class="search-box" for="ticket-search">
+        <span aria-hidden="true">⌕</span>
+        <input id="ticket-search" type="search" placeholder="搜索工单或项目" autocomplete="off">
+      </label>
+
+      <div class="nav-heading">
+        <span>项目</span>
+        <span id="project-count" class="count">0</span>
+      </div>
+      <nav id="project-list" class="project-list" aria-label="项目列表"></nav>
+      <button id="new-ticket-button" class="sidebar-action" type="button">＋ 新建工单</button>
+
+      <div class="nav-heading ticket-heading">
+        <span>工单</span>
+        <span id="ticket-count" class="count">0</span>
+      </div>
+      <nav id="ticket-list" class="ticket-list" aria-label="工单列表"></nav>
+
+      <div class="sidebar-footer">
+        <span id="host-summary" class="host-dot">主机检测中</span>
+        <span>仅本机可访问</span>
+      </div>
+    </aside>
+
+    <main class="main-stage">
+      <header class="topbar">
+        <div class="crumbs">
+          <span id="current-project">全部项目</span>
+          <span aria-hidden="true">/</span>
+          <strong id="current-ticket">选择一个工单</strong>
+        </div>
+        <div class="top-actions">
+          <span id="connection-state" class="connection neutral">正在连接</span>
+          <span id="last-refresh" class="refresh-time">尚未刷新</span>
+          <button id="refresh-button" class="icon-button" type="button" title="立即刷新全部状态">
+            <span aria-hidden="true">↻</span><span>刷新</span>
+          </button>
+          <button id="settings-button" class="icon-button" type="button" aria-expanded="false" aria-controls="settings-drawer">
+            <span aria-hidden="true">⚙</span><span>设置</span>
+          </button>
+        </div>
+      </header>
+
+      <section id="welcome-view" class="welcome-view">
+        <div class="welcome-orb">I</div>
+        <p class="eyebrow">渐进驾驶舱</p>
+        <h1>从一个工单开始</h1>
+        <p>选择已有工单，或在当前项目中新建一张工单。ICODE 会告诉你当前进度和安全的下一步。</p>
+        <div class="welcome-actions">
+          <button id="welcome-new-ticket" class="primary-button" type="button">新建工单</button>
+          <button id="welcome-refresh" class="secondary-button" type="button">刷新工单列表</button>
+        </div>
+      </section>
+
+      <section id="ticket-view" class="ticket-view" hidden>
+        <div class="ticket-hero">
+          <div>
+            <p class="eyebrow">当前工单</p>
+            <div class="title-line">
+              <h1 id="ticket-title">—</h1>
+              <span id="ticket-status" class="status-pill">—</span>
+            </div>
+            <p id="ticket-summary" class="ticket-summary">—</p>
+          </div>
+          <div id="revision-badge" class="revision-badge">事件 0</div>
+        </div>
+
+        <div id="stale-banner" class="banner danger" hidden>
+          当前视图可能过期，已暂停所有写操作。请手动刷新后重试。
+        </div>
+        <div id="notice-banner" class="banner" role="status">工单已载入</div>
+
+        <div class="dashboard-grid">
+          <section class="conversation-panel">
+            <article id="next-card" class="next-card">
+              <div class="step-index">下一步</div>
+              <div class="next-copy">
+                <span>ICODE 建议</span>
+                <strong id="next-step">等待状态分析</strong>
+                <p id="next-reason">推荐动作来自控制面实时策略。</p>
+              </div>
+              <span class="pulse-dot" aria-hidden="true"></span>
+            </article>
+
+            <section class="composer" aria-label="运行 ICODE 步骤">
+              <div class="composer-row">
+                <label for="step-select">执行操作</label>
+                <select id="step-select"></select>
+              </div>
+              <textarea id="step-note" rows="4" maxlength="8000" placeholder="可选：补充目标、边界或你希望得到的结论"></textarea>
+              <div class="composer-footer">
+                <span id="execution-hint">执行前会再次校验工单 revision</span>
+                <button id="run-step-button" class="primary-button" type="button">执行下一步</button>
+              </div>
+            </section>
+
+            <section class="timeline-section">
+              <div class="section-title">
+                <div>
+                  <p class="eyebrow">Runtime</p>
+                  <h2>执行记录</h2>
+                </div>
+                <span id="job-count" class="count">0</span>
+              </div>
+              <div id="job-list" class="job-list"></div>
+            </section>
+          </section>
+
+          <aside class="inspector-panel">
+            <section class="inspector-card">
+              <p class="eyebrow">安全检查</p>
+              <h2>控制面状态</h2>
+              <dl class="facts">
+                <div><dt>结构校验</dt><dd id="validation-state">—</dd></div>
+                <div><dt>开放步骤</dt><dd id="open-steps">0</dd></div>
+                <div><dt>开放长动作</dt><dd id="open-operations">0</dd></div>
+                <div><dt>开放 Agent</dt><dd id="open-agents">0</dd></div>
+                <div><dt>代际</dt><dd id="ticket-generation">—</dd></div>
+              </dl>
+            </section>
+
+            <section class="inspector-card advanced-only">
+              <p class="eyebrow">允许动作</p>
+              <div id="allowed-actions" class="action-chips"></div>
+            </section>
+
+            <section class="inspector-card guard-card">
+              <p class="eyebrow">安全边界</p>
+              <p>UI 不接收文件路径或 API Key，不执行任意 shell。关闭工单和清理工作区不会由本页面自动触发。</p>
+            </section>
+          </aside>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div id="drawer-backdrop" class="drawer-backdrop" hidden></div>
+  <aside id="settings-drawer" class="settings-drawer" aria-label="ICODE UI 设置" hidden>
+    <div class="drawer-header">
+      <div>
+        <p class="eyebrow">偏好设置</p>
+        <h2>运行方式</h2>
+      </div>
+      <button id="settings-close" class="close-button" type="button" aria-label="关闭设置">×</button>
+    </div>
+    <form id="settings-form">
+      <label>Agent 主机
+        <select id="setting-host">
+          <option value="auto">自动（优先 Codex）</option>
+          <option value="codex">Codex</option>
+          <option value="claude">Claude Code</option>
+        </select>
+      </label>
+      <label>模型
+        <input id="setting-model" maxlength="160" placeholder="留空使用主机默认模型">
+      </label>
+      <label>界面模式
+        <select id="setting-mode">
+          <option value="simple">简单模式</option>
+          <option value="advanced">高级模式</option>
+        </select>
+      </label>
+      <label>首选端口
+        <input id="setting-port" type="number" min="0" max="65535" value="8765">
+      </label>
+      <label>自动刷新频率
+        <input id="setting-refresh-interval" type="number" min="5" max="300" step="1" value="30">
+        <span class="field-help">秒，允许 5–300；默认 30</span>
+      </label>
+      <label class="toggle-row">
+        <input id="setting-fallback" type="checkbox">
+        <span>首选主机不可用时自动回退</span>
+      </label>
+      <label class="toggle-row">
+        <input id="setting-next-step" type="checkbox">
+        <span>显示推荐下一步</span>
+      </label>
+      <label class="toggle-row locked">
+        <input type="checkbox" checked disabled>
+        <span>危险操作必须二次确认（不可关闭）</span>
+      </label>
+      <p class="settings-note">设置只保存非秘密偏好；刷新频率立即生效，端口变更在下次启动 UI 时生效。</p>
+      <button id="settings-save" class="primary-button full" type="submit">保存设置</button>
+    </form>
+  </aside>
+
+  <dialog id="new-ticket-dialog" class="new-ticket-dialog">
+    <form id="new-ticket-form">
+      <div class="dialog-header">
+        <div>
+          <p class="eyebrow">新手入口</p>
+          <h2>新建 ICODE 工单</h2>
+        </div>
+        <button id="new-ticket-close" class="close-button" type="button" aria-label="关闭">×</button>
+      </div>
+      <label>项目
+        <select id="new-ticket-project" required></select>
+      </label>
+      <label>你想完成什么？
+        <textarea id="new-ticket-requirement" rows="6" maxlength="8000" required placeholder="用一句话或几段话描述目标、问题和限制"></textarea>
+      </label>
+      <p class="settings-note">ICODE 会先安全创建并登记工单；创建后再由你启动推荐的 plan 步骤。</p>
+      <div class="dialog-actions">
+        <button id="new-ticket-cancel" class="secondary-button" type="button">取消</button>
+        <button id="new-ticket-submit" class="primary-button" type="submit">创建工单</button>
+      </div>
+    </form>
+  </dialog>
+</body>
+</html>

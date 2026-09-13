@@ -7,6 +7,8 @@ cd "$(dirname "$0")/.." || exit 1
 
 ROUNDS="${1:-20}"
 FAILED=0
+TEST_LOG="$(mktemp)"
+trap 'rm -f "$TEST_LOG"' EXIT
 # 只对相关源码做语法编译（排除 .venv / node_modules / __pycache__ / demo 产物）
 PY_FILES="$(find mcp tools scripts tests -name '*.py' -not -path '*/.venv/*' -not -path '*/node_modules/*' -not -path '*/__pycache__/*' | sort)"
 SH_FILES="$(find . -name '*.sh' -not -path '*/.venv/*' -not -path '*/node_modules/*' -not -path '*/.icode_output/*' | sort)"
@@ -57,7 +59,11 @@ PY
   fi
   # 4. 可运行/回归：全部测试套件
   for t in tests/test_*.sh; do
-    bash "$t" >/dev/null 2>&1 || { echo "  [r$r] 测试失败: $t"; err=1; }
+    if ! bash "$t" >"$TEST_LOG" 2>&1; then
+      echo "  [r$r] 测试失败: $t"
+      tail -n 40 "$TEST_LOG"
+      err=1
+    fi
   done
   # 5. 异常/边界：validator 对缺失目录返回受控退出码（0/1/2），--json 输出可解析
   $LINT /nonexistent_dir >/dev/null 2>&1; rc=$?

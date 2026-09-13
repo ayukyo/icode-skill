@@ -299,6 +299,49 @@
             }
           },
           "additionalProperties": false
+        },
+        "agent": {
+          "description": "Agent Runtime/子代理生命周期观测。spawns 只能由 record-agent-spawn/result 专用命令维护。",
+          "type": "object",
+          "required": ["spawns"],
+          "properties": {
+            "spawns": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["spawn_id", "at", "task_scope", "expected_artifact", "evidence_boundary", "join_condition", "backend", "model", "capabilities"],
+                "properties": {
+                  "spawn_id": { "type": "string", "minLength": 1 },
+                  "at": { "type": "string", "minLength": 1 },
+                  "task_scope": { "type": "string", "minLength": 1 },
+                  "expected_artifact": { "type": "string", "minLength": 1 },
+                  "evidence_boundary": { "type": "string", "minLength": 1 },
+                  "join_condition": { "type": "string", "minLength": 1 },
+                  "backend": { "type": "string", "minLength": 1 },
+                  "model": { "type": "string", "minLength": 1 },
+                  "capabilities": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": { "enum": ["text", "image", "tools", "reasoning"] }
+                  },
+                  "exclusive_key": { "type": "string", "minLength": 1, "maxLength": 80 },
+                  "result": { "enum": ["joined", "timed_out", "stopped", "failed"] },
+                  "adopted": { "enum": ["yes", "partial", "no"] },
+                  "adoption_reason": { "type": "string", "minLength": 1 },
+                  "result_at": { "type": "string", "minLength": 1 },
+                  "evidence_refs": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": { "type": "string", "minLength": 1 }
+                  },
+                  "summary_digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+                  "error_class": { "type": "string", "minLength": 1 }
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": true

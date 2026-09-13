@@ -104,7 +104,7 @@ python3 tools/icode_control.py policy --opclass <class> \
 python3 tools/icode_control.py trace --dir <out_dir> --limit 50
 ```
 
-输出统一的 step/gate/artifact/operation/state 时间线，以及 `open_steps / open_operations`。恢复会话时先看 trace：
+输出统一的 step/gate/artifact/operation/agent/state 时间线，以及 `open_steps / open_operations / open_agents / agent_spawns`。`agent_spawns` 是控制面在事件链校验后生成的一次性可信投影，UI/CLI 不得校验后再直读 metadata。恢复会话时先看 trace：
 
 - open step：从上一个已通过边界继续，先重新 check；输入漂移则回流。
 - open read-only operation：按 policy 决定是否重试。

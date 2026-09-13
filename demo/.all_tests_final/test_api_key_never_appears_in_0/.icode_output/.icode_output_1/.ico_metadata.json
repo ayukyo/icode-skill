@@ -1,0 +1,42 @@
+{
+  "schema_version": 3,
+  "ticket_id": "agent-runtime-1",
+  "requirement": "agent runtime test",
+  "created_at": "2026-09-13T13:12:04",
+  "status": "init_in_progress",
+  "completed_steps": [
+    "0"
+  ],
+  "indexed": false,
+  "project_path": "/home/orbbec/git/icode-skill/demo/.all_tests_final/test_api_key_never_appears_in_0",
+  "workflow_gate_schema_version": 1,
+  "thinking_gate_schema_version": 1,
+  "mcp_gate_schema_version": 1,
+  "extensions": {
+    "agent": {
+      "spawns": [
+        {
+          "spawn_id": "02f4f818-7737-4941-8179-e522da1e27c9",
+          "at": "2026-09-13T13:12:04",
+          "task_scope": "review bounded facts",
+          "expected_artifact": "structured answer",
+          "evidence_boundary": "ticket-only",
+          "join_condition": "non-empty model output",
+          "backend": "fake",
+          "model": "fake-v1",
+          "capabilities": [
+            "text"
+          ],
+          "result": "joined",
+          "adopted": "yes",
+          "adoption_reason": "Runtime returned a non-empty bounded model result",
+          "evidence_refs": [
+            "response:fake:turn-1"
+          ],
+          "summary_digest": "8b3369944dd2a3fab39e32d1aeb1f763946a458ae3e6368a46432adc8f3a0860",
+          "result_at": "2026-09-13T13:12:04"
+        }
+      ]
+    }
+  }
+}

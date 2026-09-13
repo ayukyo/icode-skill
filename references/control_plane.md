@@ -29,6 +29,8 @@ python3 tools/icode_control.py create --dir <out_dir> --ticket-id <id> \
 
 `create` 必须是新工单空目录中的第一项写操作，并校验标准目录形状、normal/debug 域匹配及目录所有权。`--metadata-json` 不得注入 identity/status/completed_steps/indexed/delivery/verification/close 等控制字段。`plan/log` 出生时分别记为 `init_in_progress/log_in_progress`，产物与门禁完成后再经 `transition` 到完成态；禁止把 `plan_done/log_done` 伪装成出生态跳过门禁。
 
+本地 UI 的“新建工单”走组合入口 `create-next --workspace <可信工程根> --requirement <需求> --request-id <幂等键>`。它在索引锁与工程序列锁内计算 `max(N)+1`，按工程名冲突规则生成 ticket ID，以 `birth=plan` 调用同一出生逻辑并立即通过 `index-write` 登记。浏览器只提交不透明 project ID；workspace 由服务端目录册解析。若出生后索引写入中断，相同 request ID 会找回该未完成出生并只补齐索引，不再分配第二张工单。
+
 ## 3. 状态流转（transition 强制）
 
 - **每个状态写回点必须经**：`python3 tools/icode_control.py transition --dir <out_dir> --to <status>`，**禁止绕过直写 metadata.status**。validate 会比对 `metadata.status` 与最后一条 `state_changed` 事件，不一致报 `status_event_consistency`。
@@ -48,7 +50,19 @@ python3 tools/icode_control.py create --dir <out_dir> --ticket-id <id> \
 - 追加：`python3 tools/icode_control.py event --dir <out_dir> --type <type> [--payload '<json>'] [--request-id <key>]`。该通用入口只接受业务审计事实；所有 step/gate/artifact/operation 事件及原有控制事件均由专用命令独占，通用 event 一律拒绝伪造。
 - 事件是**追加式审计事实**，不是状态本身；状态以 metadata.status + 最后一条 state_changed 事件为准。
 
-### 4.0 可恢复执行模型
+### 4.0 Agent 生命周期
+
+模型或子代理调用必须在发起前执行 `record-agent-spawn`，结束后执行 `record-agent-result`。两者原子维护 `extensions.agent.spawns` 与 `agent_spawned/agent_result` 事件；通用 `event` 和 `metadata-update` 均不得伪造或改写该字段。
+
+- spawn 前必填任务范围、预期产物、证据边界、加入条件、backend、model、capabilities 和 request id。
+- capabilities 只能使用 `text/image/tools/reasoning` 且必须包含 `text`；同一工单最多三个开放 spawn。
+- result 必须包含终态、采用结论、原因、证据引用和结果摘要；完整模型正文不进入事件链，只保存 SHA-256。
+- `timed_out/stopped/failed` 只能 `adopted=no`。
+- 同 request 同 payload 幂等；已存在 spawn 不能作为“模型尚未调用”的证明，Runtime 必须拒绝自动重放收费调用。
+- Agent Runtime 是可选执行层，见 [agent_runtime/README.md](../agent_runtime/README.md)。既有 Codex/Claude Code 主会话和 `icode_control.py` 不依赖模型 SDK。
+- 可选 UI 只经 Runtime 调用本命令，固定 loopback、启动时冻结 ticket 根；浏览器不得直接读取或写入 metadata/事件文件。
+
+### 4.1 可恢复执行模型
 
 `gates.json.execution_model` 是步骤端口、Reactive 边界、动作类别和失败策略的机器真源；完整顺序、命令和降级边界见 [execution_model.md](execution_model.md)。受控入口：
 
@@ -60,7 +74,7 @@ python3 tools/icode_control.py create --dir <out_dir> --ticket-id <id> \
 
 兼容规则：只有已显式 `step --phase start` 的新执行在完成态转换时强制终结回执；没有 execution_model 事件的历史工单不被追溯阻断。`close_state` 非空后仍冻结普通执行事件，关闭/重开只走专用生命周期事件。
 
-### 4.1 普通 metadata 单一 writer
+### 4.2 普通 metadata 单一 writer
 
 - 已登记业务字段统一调用 `python3 tools/icode_control.py metadata-update --dir <out_dir> [--set-json '<object>'] [--append-json '<field-to-array>'] [--request-id <key>]`；数组追加必须用 `--append-json`，避免读旧数组后覆盖并发增量。
 - `status/completed_steps/delivery_verdict`、`claims`、`verification_runs`、`close_state`、`indexed` 等控制字段分别由 `transition`、`record-claim`、`record-verification`、`close-phase`、`index-write` 独占，`metadata-update` 拒绝改写；未登记顶层字段拒绝，实验数据放 `extensions.<namespace>`。
@@ -110,6 +124,7 @@ Git checkout 和逐仓提交契约由 `steps/reopen.md` 先创建/校验；然�
 | 子命令 | 用途 | 关键参数 |
 |---|---|---|
 | create | 原子创建工单+出生事件 | `--dir --ticket-id --requirement --birth [--metadata-json]` |
+| create-next | UI 安全创建：原子分配编号、出生并写索引 | `--workspace --requirement --request-id [--index]` |
 | resolve-ticket | 身份解析（多义即拒绝；可筛状态/产物/init 完整度） | `--ticket` / `--dir` / `--latest` + `--workspace [--require-status ...] [--require-artifact ...] [--require-init-ready]` |
 | validate | 工单整体校验 | `--dir`（`--skip-linters` 仅限夹具） |
 | transition | 状态流转 | `--dir --to [--delivery-verdict] [--request-id]` |
@@ -124,6 +139,8 @@ Git checkout 和逐仓提交契约由 `steps/reopen.md` 先创建/校验；然�
 | migration | legacy→v3 迁移 | `--dir [--apply]` |
 | record-verification | 原子记录验证 | `--dir --kind --outcome --evidence [--layer --consumer --scenario --baseline --profile --baseline-ref --metrics-json]` |
 | record-claim | 原子记录证据结论 | `--dir --kind --statement --source --boundary [--evidence ...]` |
+| record-agent-spawn | 调用前原子记录 Agent 边界 | `--dir --task-scope --expected-artifact --evidence-boundary --join-condition --backend --model --capability --request-id` |
+| record-agent-result | 原子终结 Agent 调用 | `--dir --spawn-id --result --adopted --adoption-reason --evidence-ref --summary --request-id` |
 | archive-manifest | 生成/校验归档 hash 清单 | `--dir --archive-dir [--write]` |
 | close-phase | 关闭阶段记录 | `--dir --phase [--request-id]` |
 | reopen | 在归档控制根解冻 closed 工单 | `--dir --metadata-json --reason [--request-id]` |

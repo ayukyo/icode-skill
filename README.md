@@ -6,7 +6,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-Skill-8A2BE2.svg)](SKILL.md)
-[![Version](https://img.shields.io/badge/version-v2.24.1-blue.svg)](SKILL.md)
+[![Version](https://img.shields.io/badge/version-v2.27.0-blue.svg)](SKILL.md)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/ayukyo/icode-skill/issues)
 
 </div>
@@ -55,6 +55,9 @@ Or run step by step (switch models between steps anytime):
 Other entry points:
 
 ```bash
+# Local global ticket manager (defaults to 127.0.0.1:8765; auto-falls back if occupied)
+/icode ui
+
 # Trimmed full flow (fast mode: single-file/small changes; ~65% of full-flow cost)
 /icode fast "Add isqrt function to calc.c"          # plan→review(1 round, no adversarial)→merge→code→deepcheck(Reverse only)→audit
 
@@ -180,6 +183,10 @@ When an entry command (`/icode init` / `log` / `plan` / `start`) or the `patch` 
 When `/icode log` receives a Teambition project URL or a `<LIB>-<NUM>` ticket ref (e.g. `DEMO-26`) in its scattered input, it can optionally pull the ticket's title / description / comments / log attachments into `tb_source/<ID>/` as analysis input — replacing local logs when the ticket carries attachments. Pull-only for analysis, never writes back to Teambition; with no TB reference, `/icode log` falls back to the pure local-log path (behavior unchanged). Config (optional; multi-project shortcuts + cookie) and the cookie helper: see `~/.claude/skills/icode/tools/tb/README.md` and `tools/tb/scripts/tb_cookie.py --domain <domain>`. Re-running the same ticket (new comments/attachments on TB) prompts "reuse old ticket / create new" — reuse re-pulls the latest and re-runs incremental adversarial analysis. A batch mode also analyzes every "open / unfinished" ticket in a project (triggered by an "analyze all TB" intent; filtered by the real taskflow status name, not `isDone`) — see [SKILL.md「方式 D2 / D3」](SKILL.md).
 
 **Scheduled incremental monitoring** (`tools/tb/scripts/tb_watch.py`): periodically polls one or more projects' "open / unfinished" tickets (newest ticket number first), and when a ticket gains new comments/attachments/status changes it auto-launches a headless `claude` session for **full `/icode log --debug` deep analysis** (downloads & extracts TB log attachments; artifacts under `{project}/.icode_output/.debug/`, never touching the global index; first-run tickets are auto-baselined one per round). Config is a JSON file listing projects — the minimal entry is just the project URL; every round it writes a searchable "latest analysis status" report to `{project}/.icode_output/tb_watch_report.md`, and refreshes it immediately after each triggered analysis completes; `tb_watch_ctl.sh start` also brings up a **read-only web viewer** (config `web` section, default `:8000`, markdown rendered as HTML) so teammates can browse the report and per-ticket briefs over the LAN without SMB credentials. Config / start / stop / risks: see [tools/tb/README.md](tools/tb/README.md)「定时增量监控」section.
+
+## Optional Agent Runtime and Local UI (v0.3)
+
+Run `/icode ui` (advanced equivalent: `python3 tools/icode_agent.py ui`) to open the dependency-free local ICODE workbench. It prefers `127.0.0.1:8765`, falls back to another loopback port when the default is occupied, opens the browser, and requires no ticket path. Repeating the simple command reuses the live global instance instead of allocating more random ports. The v0.3 dashboard manages global projects/tickets, safely creates and indexes a new ticket before any model run, shows the control-plane recommended next action, offers manual refresh plus configurable automatic refresh (30 seconds by default, 5–300 seconds), stores only non-secret settings, and can invoke approved ICODE steps through the installed Codex or Claude Code CLI. It does not replace either host's normal chat workflow: every launch is guarded by a current event-chain revision, a control-plane action policy, a validated execution root, persistent Agent spawn/result receipts, and a cross-process per-ticket lock. It accepts no API key, arbitrary path, or shell command, and never automatically commits, deploys, closes tickets, or deletes workspaces. Existing `status`, `run`, and `ui --dir <ticket_dir>` modes remain compatible. See [`agent_runtime/`](agent_runtime/README.md).
 
 ## Optional Enhancements
 

@@ -1,0 +1,9 @@
+{
+  "host": "claude",
+  "model": "sonnet",
+  "mode": "advanced",
+  "fallback": false,
+  "show_next_step": false,
+  "preferred_port": 9012,
+  "refresh_interval_seconds": 60
+}
