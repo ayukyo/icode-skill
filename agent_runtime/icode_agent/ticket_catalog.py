@@ -164,6 +164,10 @@ class TicketCatalog:
                 "project_id": pid,
                 "project_name": project_path.name or "project",
                 "status": entry.get("status") if isinstance(entry.get("status"), str) else "unknown",
+                "delivery_verdict": entry.get("delivery_verdict")
+                if isinstance(entry.get("delivery_verdict"), str) else None,
+                "verdict": entry.get("verdict")
+                if isinstance(entry.get("verdict"), str) else None,
                 "summary": summary,
                 "updated_at": entry.get("updated_at") if isinstance(entry.get("updated_at"), str) else "",
                 "generation": generation,

@@ -67,10 +67,38 @@ fi
 
 if rg -q 'id="job-list"' agent_runtime/icode_agent/ui_assets/index.html \
   && rg -q '/cancel' agent_runtime/icode_agent/ui_assets/app.js \
-  && rg -q 'finalizing' agent_runtime/icode_agent/ui_assets/app.js; then
-  ok "任务进度、终态回执与取消入口已接线"
+  && rg -q 'globalThis.confirm' agent_runtime/icode_agent/ui_assets/app.js \
+  && rg -q '/api/v1/job-events' agent_runtime/icode_agent/ui_assets/app.js \
+  && rg -q 'outcome_unknown' agent_runtime/icode_agent/host_runner.py; then
+  ok "增量任务进度、重启未知态、终态回执与安全取消已接线"
 else
   bad "任务管理区域不完整"
+fi
+
+if rg -q 'id="ticket-status-filter"' agent_runtime/icode_agent/ui_assets/index.html \
+  && rg -q 'id="ticket-sort"' agent_runtime/icode_agent/ui_assets/index.html \
+  && rg -q 'STEP_LABELS' agent_runtime/icode_agent/ui_assets/app.js \
+  && rg -q '制定实施计划' agent_runtime/icode_agent/ui_assets/app.js; then
+  ok "工单筛选、排序与新手动作翻译已接线"
+else
+  bad "规模化导航或新手动作翻译缺失"
+fi
+
+if rg -q 'id="progress-steps"' agent_runtime/icode_agent/ui_assets/index.html \
+  && rg -q 'id="artifact-list"' agent_runtime/icode_agent/ui_assets/index.html \
+  && rg -q 'id="verification-summary"' agent_runtime/icode_agent/ui_assets/index.html \
+  && rg -q '_cockpit_projection' agent_runtime/icode_agent/ui_server.py; then
+  ok "控制面投影的工单驾驶舱已接线"
+else
+  bad "工单驾驶舱投影缺失"
+fi
+
+if rg -q 'ui_jobs.json' agent_runtime/icode_agent/ui_server.py \
+  && rg -q 'PERSISTED_JOB_FIELDS' agent_runtime/icode_agent/host_runner.py \
+  && ! rg -q '"output".*PERSISTED_JOB_FIELDS' agent_runtime/icode_agent/host_runner.py; then
+  ok "任务恢复投影不持久化原始输出"
+else
+  bad "任务恢复投影边界不完整"
 fi
 
 if rg -q '@media.*max-width' agent_runtime/icode_agent/ui_assets/style.css \

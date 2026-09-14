@@ -54,6 +54,42 @@ STEP_RUN_FIELDS = frozenset({
     "ticket_id", "step", "note", "request_id", "expected_revision",
 })
 CREATE_TICKET_FIELDS = frozenset({"project_id", "requirement", "request_id"})
+COCKPIT_ARTIFACTS = frozenset({
+    "00_init.md", "log_analysis.md", "01_plan.md", "02_review.md",
+    "03_plan_final.md", "04_code_review_fix.md", "05_deepcheck.md",
+    "06_audit.md", "07_readme.md", "08_patch.md", "ticket_snapshot.json",
+    "archive_manifest.json", "doc_worklist.json", "_brief.md",
+})
+PROGRESS_STEPS = (
+    ("0", "需求确认"),
+    ("1", "制定计划"),
+    ("2", "审查方案"),
+    ("3", "合并定稿"),
+    ("4", "编码实现"),
+    ("5", "深度复检"),
+    ("6", "最终验收"),
+)
+STATUS_CURRENT_STEP = {
+    "log_in_progress": "0", "log_done": "0", "init_in_progress": "0",
+    "plan_done": "2", "review_in_progress": "2", "review_done": "3",
+    "plan_finalized": "4", "code_in_progress": "4", "code_done": "5",
+    "deepcheck_in_progress": "5", "deepcheck_done": "6", "completed": None,
+    "debug_in_progress": "0", "debug_done": None,
+}
+HOST_ERROR_GUIDANCE = {
+    "ticket_busy": (
+        "这个工单已有任务在运行，请等待完成或先取消现有任务。", "wait"),
+    "global_busy": ("当前运行任务较多，请稍后再试。", "wait"),
+    "host_unavailable": (
+        "没有检测到可用的 Codex 或 Claude Code，请检查运行设置。", "settings"),
+    "invalid_host": ("Agent 主机设置无效，请重新选择运行方式。", "settings"),
+    "invalid_model": ("模型设置无效，请检查后重试。", "settings"),
+    "invalid_revision": ("工单版本已变化，请刷新后重新确认操作。", "refresh"),
+    "stale_revision": ("工单已被其他操作更新，请刷新后重试。", "refresh"),
+    "duplicate_request": ("这次操作已经提交过，不会重复执行。", "refresh"),
+    "ticket_read_only": ("该工单当前只读，请先查看阻断原因。", "inspect"),
+    "job_not_found": ("任务记录不存在，可能已在重启后清理。", "refresh"),
+}
 ASSET_ROOT = Path(__file__).resolve().parent / "ui_assets"
 STATIC_ASSETS = {
     "/assets/app.js": (ASSET_ROOT / "app.js", "text/javascript; charset=utf-8"),
@@ -217,7 +253,11 @@ class AgentUIService:
         self.settings_store = UISettingsStore(
             settings_path or (Path.home() / ".claude" / "icode_data" / "ui_settings.json"))
         self.lifecycle = ControlLifecycle(control_path)
-        self.host_runner = host_runner or HostJobRunner(lifecycle=self.lifecycle)
+        jobs_path = (Path(settings_path).expanduser().parent / "ui_jobs.json") \
+            if settings_path else (
+                Path.home() / ".claude" / "icode_data" / "ui_jobs.json")
+        self.host_runner = host_runner or HostJobRunner(
+            lifecycle=self.lifecycle, recovery_path=jobs_path)
         self.initial_ticket_id = initial_ticket_id
         self.initial_project_id = initial_project_id
         self.instance_id = instance_id or secrets.token_urlsafe(18)
@@ -288,6 +328,81 @@ class AgentUIService:
             "validation": {"ok": True, "mode": "lightweight"},
         }
 
+    @staticmethod
+    def _load_json_projection(path: Path) -> Dict:
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, TypeError):
+            return {}
+        return payload if isinstance(payload, dict) else {}
+
+    @staticmethod
+    def _progress_projection(metadata: Dict) -> list[Dict]:
+        completed = {str(item) for item in metadata.get("completed_steps") or []}
+        status = metadata.get("status")
+        current = STATUS_CURRENT_STEP.get(status, "0")
+        progress = []
+        for step_id, label in PROGRESS_STEPS:
+            if status in {"completed", "debug_done"}:
+                state = "done"
+            elif step_id == current:
+                state = "current"
+            elif step_id in completed:
+                state = "done"
+            else:
+                state = "pending"
+            progress.append({"id": step_id, "label": label, "state": state})
+        return progress
+
+    def _cockpit_projection(self, target: ResolvedTicket) -> Dict:
+        metadata = self._load_json_projection(target.out_dir / ".ico_metadata.json")
+        snapshot = self._load_json_projection(target.out_dir / "ticket_snapshot.json")
+        runs = metadata.get("verification_runs") or []
+        if not isinstance(runs, list):
+            runs = []
+        outcomes = {"pass": 0, "fail": 0, "blocked": 0, "other": 0}
+        for run in runs:
+            outcome = run.get("outcome") if isinstance(run, dict) else None
+            key = outcome if outcome in {"pass", "fail", "blocked"} else "other"
+            outcomes[key] += 1
+        open_items = snapshot.get("open_items") or {}
+        pending = open_items.get("pending_verification") or [] \
+            if isinstance(open_items, dict) else []
+        artifacts = []
+        try:
+            children = sorted(target.out_dir.iterdir(), key=lambda item: item.name)
+        except OSError:
+            children = []
+        for child in children:
+            if child.name not in COCKPIT_ARTIFACTS or not child.is_file() \
+                    or child.is_symlink():
+                continue
+            try:
+                size = child.stat().st_size
+            except OSError:
+                continue
+            role = "snapshot" if child.name == "ticket_snapshot.json" else (
+                "report" if child.suffix == ".md" else "control")
+            artifacts.append({"name": child.name, "role": role, "size": size})
+        verdict = metadata.get("delivery_verdict")
+        if verdict not in {
+                "verified", "verification_pending", "blocked", "not_applicable"}:
+            verdict = "unknown"
+        return {
+            "progress": self._progress_projection(metadata),
+            "delivery": {
+                "verdict": verdict,
+                "close_state": metadata.get("close_state"),
+            },
+            "verification": {
+                "total": len(runs),
+                **outcomes,
+                "pending": len(pending) if isinstance(pending, list) else 0,
+            },
+            "artifacts": artifacts,
+            "blockers": pending[:20] if isinstance(pending, list) else [],
+        }
+
     def ticket_detail(self, ticket_id: str) -> Dict:
         public = self.catalog.public_ticket(ticket_id)
         if public.get("generation") != "v3" or not public.get("executable"):
@@ -302,7 +417,11 @@ class AgentUIService:
             }
         target = self.catalog.resolve(ticket_id)
         policy = self.lifecycle.projection(target)
-        return {**public, **self._public_policy(policy)}
+        return {
+            **public,
+            **self._public_policy(policy),
+            "cockpit": self._cockpit_projection(target),
+        }
 
     def create_ticket(self, payload) -> Dict:
         normalized = normalize_create_ticket_payload(payload)
@@ -416,7 +535,7 @@ class AgentUIHTTPServer(ThreadingHTTPServer):
 
 
 class AgentUIRequestHandler(BaseHTTPRequestHandler):
-    server_version = "ICODEAgentUI/0.3.0"
+    server_version = "ICODEAgentUI/0.4.0"
     sys_version = ""
 
     def log_message(self, _format, *_args):
@@ -443,11 +562,13 @@ class AgentUIRequestHandler(BaseHTTPRequestHandler):
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         self._send_bytes(status, body, "application/json; charset=utf-8")
 
-    def _send_error_json(self, status: int, error_class: str, message: str):
+    def _send_error_json(self, status: int, error_class: str, message: str,
+                         **details):
         self._send_json(status, {
             "ok": False,
             "error_class": error_class,
             "error": message,
+            **details,
         })
 
     def _valid_host(self) -> bool:
@@ -504,7 +625,17 @@ class AgentUIRequestHandler(BaseHTTPRequestHandler):
         elif isinstance(exc, CatalogError):
             self._send_error_json(409, "CatalogError", str(exc))
         elif isinstance(exc, HostRunnerError):
-            self._send_error_json(409, "HostRunnerError", f"主机任务被拒绝（{exc.code}）")
+            message, recovery_action = HOST_ERROR_GUIDANCE.get(
+                exc.code,
+                ("任务暂时无法执行，请查看工单阻断原因。", "inspect"),
+            )
+            self._send_error_json(
+                409,
+                "HostRunnerError",
+                message,
+                error_code=exc.code,
+                recovery_action=recovery_action,
+            )
         elif isinstance(exc, ControlPlaneError):
             self._send_error_json(409, "ControlPlaneError", "控制面拒绝生成可信状态投影")
         else:
@@ -607,6 +738,18 @@ class AgentUIRequestHandler(BaseHTTPRequestHandler):
             if path == "/api/v1/jobs":
                 self._send_json(200, {
                     "ok": True, "jobs": self.server.service.host_runner.list()})
+                return
+            if path == "/api/v1/job-events":
+                query = parse_qs(parsed.query, keep_blank_values=False)
+                raw_after = (query.get("after") or ["0"])[0]
+                try:
+                    after = int(raw_after)
+                except (TypeError, ValueError) as exc:
+                    raise UIRequestError("after 必须是非负整数") from exc
+                ticket_id = (query.get("ticket_id") or [None])[0]
+                result = self.server.service.host_runner.events(
+                    after=after, ticket_id=ticket_id)
+                self._send_json(200, {"ok": True, **result})
                 return
             if path.startswith("/api/v1/jobs/"):
                 job_id = unquote(path[len("/api/v1/jobs/"):])

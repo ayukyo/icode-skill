@@ -3,6 +3,64 @@
 
   const token = document.querySelector('meta[name="icode-ui-token"]').content;
   const byId = (id) => document.getElementById(id);
+  const STEP_LABELS = {
+    init: "确认和整理需求",
+    start: "开始完整开发流程",
+    fast: "快速完成低风险修改",
+    log: "分析问题日志",
+    plan: "制定实施计划",
+    review: "审查实施方案",
+    merge: "合并意见并定稿",
+    code: "编码实现",
+    deepcheck: "深度复检",
+    audit: "最终验收",
+    readme: "生成交付说明",
+    patch: "追加修改",
+    verify: "执行验证",
+    status: "检查工单状态",
+    doc: "生成工程文档",
+    docx: "生成 Word 文档",
+    ppt: "生成演示文稿",
+    limit: "维护项目约束",
+    learn: "分析可复用经验",
+    bak: "备份工单",
+  };
+  const STATUS_LABELS = {
+    init_in_progress: "需求确认中",
+    log_in_progress: "日志分析中",
+    log_done: "日志分析完成",
+    plan_done: "计划已完成",
+    review_in_progress: "方案审查中",
+    review_done: "方案审查完成",
+    plan_finalized: "方案已定稿",
+    code_in_progress: "编码中",
+    code_done: "编码完成",
+    deepcheck_in_progress: "深度复检中",
+    deepcheck_done: "深度复检完成",
+    completed: "已完成",
+    debug_in_progress: "调试中",
+    debug_done: "调试完成",
+    disproved: "已证伪",
+    superseded: "已替代",
+    unknown: "状态未知",
+  };
+  const JOB_STATE_LABELS = {
+    running: "运行中",
+    finalizing: "写入回执中",
+    succeeded: "执行成功",
+    failed: "执行失败",
+    cancelled: "已取消",
+    outcome_unknown: "结果待核实",
+  };
+  const DELIVERY_LABELS = {
+    verified: "验证完成",
+    verification_pending: "等待验证",
+    blocked: "验证受阻",
+    not_applicable: "无需验证",
+    unknown: "尚未判定",
+  };
+  const stepLabel = (step) => STEP_LABELS[step] || `ICODE：${step}`;
+  const statusLabel = (status) => STATUS_LABELS[status] || status || "状态未知";
   const state = {
     projects: [],
     tickets: [],
@@ -15,7 +73,12 @@
     refreshing: false,
     stale: true,
     search: "",
+    statusFilter: "active",
+    sort: "updated_desc",
+    eventCursor: 0,
     timer: null,
+    eventTimer: null,
+    noticeAction: null,
   };
 
   const setText = (id, value) => {
@@ -40,7 +103,10 @@
       throw new Error(`HTTP ${response.status}：服务没有返回 JSON`);
     }
     if (!response.ok || !payload.ok) {
-      throw new Error(`${payload.error_class || "UIError"}：${payload.error || "请求失败"}`);
+      const error = new Error(payload.error || "请求失败");
+      error.code = payload.error_code || payload.error_class || "UIError";
+      error.recovery_action = payload.recovery_action || "inspect";
+      throw error;
     }
     return payload;
   };
@@ -56,14 +122,23 @@
     setText("connection-state", text);
   };
 
+  const showNotice = (message, kind = "", recoveryAction = null) => {
+    setText("notice-banner", message);
+    byId("notice-banner").className = `banner ${kind}`.trim();
+    state.noticeAction = recoveryAction;
+    const button = byId("notice-action");
+    const labels = { refresh: "立即刷新", settings: "打开设置", inspect: "查看工单", wait: "知道了" };
+    button.hidden = !recoveryAction;
+    if (recoveryAction) button.textContent = labels[recoveryAction] || "处理";
+  };
+
   const setStale = (stale, message = "") => {
     state.stale = stale;
     byId("stale-banner").hidden = !stale || !state.selectedTicketId;
     const run = byId("run-step-button");
     run.disabled = stale || !state.ticket || !state.ticket.revision || !selectedStep();
     if (message) {
-      setText("notice-banner", message);
-      byId("notice-banner").className = "banner danger";
+      showNotice(message, "danger", "refresh");
     }
   };
 
@@ -76,12 +151,29 @@
 
   const selectedStep = () => byId("step-select").value || "";
 
-  const filteredTickets = () => state.tickets.filter((ticket) => {
-    if (state.selectedProjectId && ticket.project_id !== state.selectedProjectId) return false;
-    if (!state.search) return true;
-    const haystack = `${ticket.ticket_id} ${ticket.project_name} ${ticket.summary}`.toLocaleLowerCase();
-    return haystack.includes(state.search.toLocaleLowerCase());
-  });
+  const ticketMatchesStatus = (ticket) => {
+    const filter = state.statusFilter;
+    if (filter === "all") return true;
+    if (filter === "completed") return ["completed", "debug_done"].includes(ticket.status);
+    if (filter === "verification_pending") return ticket.delivery_verdict === "verification_pending";
+    if (filter === "closed") return ["disproved", "superseded"].includes(ticket.verdict) || ["disproved", "superseded"].includes(ticket.status);
+    return !["completed", "debug_done", "disproved", "superseded"].includes(ticket.status);
+  };
+
+  const filteredTickets = () => {
+    const tickets = state.tickets.filter((ticket) => {
+      if (state.selectedProjectId && ticket.project_id !== state.selectedProjectId) return false;
+      if (!ticketMatchesStatus(ticket)) return false;
+      if (!state.search) return true;
+      const haystack = `${ticket.ticket_id} ${ticket.project_name} ${ticket.summary}`.toLocaleLowerCase();
+      return haystack.includes(state.search.toLocaleLowerCase());
+    });
+    return tickets.sort((left, right) => {
+      if (state.sort === "updated_asc") return left.updated_at.localeCompare(right.updated_at);
+      if (state.sort === "project") return left.project_name.localeCompare(right.project_name, "zh-CN") || right.updated_at.localeCompare(left.updated_at);
+      return right.updated_at.localeCompare(left.updated_at);
+    });
+  };
 
   const makeEmpty = (text) => {
     const item = document.createElement("p");
@@ -161,7 +253,7 @@
       row.append(id, dot);
       const summary = document.createElement("span");
       summary.className = "ticket-item-summary";
-      summary.textContent = ticket.summary || ticket.status;
+      summary.textContent = ticket.summary || statusLabel(ticket.status);
       button.append(row, summary);
       button.addEventListener("click", () => selectTicket(ticket.ticket_id));
       container.append(button);
@@ -178,7 +270,7 @@
     actions.forEach((action) => {
       const chip = document.createElement("span");
       chip.className = "action-chip";
-      chip.textContent = `/icode ${action}`;
+      chip.textContent = `${stepLabel(action)} · /icode ${action}`;
       container.append(chip);
     });
   };
@@ -191,7 +283,7 @@
     actions.forEach((action) => {
       const option = document.createElement("option");
       option.value = action;
-      option.textContent = `/icode ${action}`;
+      option.textContent = stepLabel(action);
       select.append(option);
     });
     if (ticket.next_step && actions.includes(ticket.next_step)) {
@@ -200,7 +292,7 @@
       select.value = prior;
     }
     const action = selectedStep();
-    byId("run-step-button").textContent = action ? `运行 /icode ${action}` : "当前不可执行";
+    byId("run-step-button").textContent = action ? `开始：${stepLabel(action)}` : "当前不可执行";
     byId("run-step-button").disabled = state.stale || !action || !ticket.revision;
   };
 
@@ -213,21 +305,60 @@
     setText("current-ticket", ticket.ticket_id);
     setText("ticket-title", ticket.ticket_id);
     setText("ticket-summary", ticket.summary || "暂无需求摘要");
-    setText("ticket-status", ticket.status);
+    setText("ticket-status", statusLabel(ticket.status));
     byId("ticket-status").className = `status-pill ${statusClass(ticket.status)}`;
     const revision = ticket.revision || {};
     setText("revision-badge", `事件 ${revision.event_count || 0}`);
     const showNext = !state.settings || state.settings.show_next_step;
     byId("next-card").hidden = !showNext;
-    setText("next-step", ticket.next_step ? `/icode ${ticket.next_step}` : "当前没有必做下一步");
+    setText("next-step", ticket.next_step ? stepLabel(ticket.next_step) : "当前没有必做下一步");
     setText("next-reason", ticket.blocked_reason ? `控制面阻断：${ticket.blocked_reason}` : "推荐动作来自控制面实时策略。");
     setText("validation-state", ticket.validation && ticket.validation.ok ? "通过" : "只读 / 需处理");
     setText("open-steps", ticket.open_execution ? ticket.open_execution.steps : 0);
     setText("open-operations", ticket.open_execution ? ticket.open_execution.operations : 0);
     setText("open-agents", ticket.open_execution ? ticket.open_execution.agents : 0);
     setText("ticket-generation", ticket.generation);
+    renderCockpit(ticket.cockpit);
     renderAllowedActions(ticket.allowed_actions || []);
     renderStepSelect(ticket);
+  };
+
+  const renderCockpit = (cockpit) => {
+    const progress = byId("progress-steps");
+    const artifacts = byId("artifact-list");
+    progress.replaceChildren();
+    artifacts.replaceChildren();
+    if (!cockpit) {
+      setText("delivery-verdict", "只读工单暂无驾驶舱数据");
+      setText("verification-summary", "暂无数据");
+      artifacts.append(makeEmpty("暂无可安全展示的产物"));
+      return;
+    }
+    (cockpit.progress || []).forEach((step) => {
+      const item = document.createElement("li");
+      item.className = step.state;
+      item.textContent = `${step.id} · ${step.label}`;
+      progress.append(item);
+    });
+    setText("delivery-verdict", DELIVERY_LABELS[cockpit.delivery.verdict] || cockpit.delivery.verdict);
+    const verification = cockpit.verification || {};
+    setText(
+      "verification-summary",
+      `${verification.total || 0} 次记录 · ${verification.pass || 0} 通过 · ${verification.pending || 0} 待办`,
+    );
+    if (!(cockpit.artifacts || []).length) {
+      artifacts.append(makeEmpty("尚未生成关键产物"));
+      return;
+    }
+    cockpit.artifacts.forEach((artifact) => {
+      const item = document.createElement("li");
+      const name = document.createElement("strong");
+      name.textContent = artifact.name;
+      const meta = document.createElement("span");
+      meta.textContent = `${artifact.role} · ${artifact.size} B`;
+      item.append(name, meta);
+      artifacts.append(item);
+    });
   };
 
   const renderJobs = () => {
@@ -245,20 +376,31 @@
       const heading = document.createElement("div");
       heading.className = "job-heading";
       const title = document.createElement("strong");
-      title.textContent = `/icode ${job.step}`;
+      title.textContent = stepLabel(job.step);
       const badge = document.createElement("span");
       badge.className = `job-state ${job.state}`;
-      badge.textContent = job.state === "finalizing" ? "写入回执中" : job.state;
+      badge.textContent = JOB_STATE_LABELS[job.state] || job.state;
       heading.append(title, badge);
       const meta = document.createElement("p");
       meta.textContent = `${job.host}${job.model ? ` · ${job.model}` : ""}`;
       card.append(heading, meta);
+      if (job.last_event_message) {
+        const progress = document.createElement("p");
+        progress.className = "job-progress";
+        progress.textContent = job.last_event_message;
+        card.append(progress);
+      }
       if (job.output) {
         const output = document.createElement("pre");
         output.textContent = job.output;
         card.append(output);
       }
-      if (["running", "finalizing"].includes(job.state)) {
+      if (job.cancel_requested && ["running", "finalizing"].includes(job.state)) {
+        const cancelling = document.createElement("p");
+        cancelling.textContent = "取消请求已发送，正在等待宿主结束…";
+        card.append(cancelling);
+      }
+      if (["running", "finalizing"].includes(job.state) && !job.cancel_requested) {
         const cancel = document.createElement("button");
         cancel.type = "button";
         cancel.className = "text-button danger-text";
@@ -307,7 +449,7 @@
     button.disabled = true;
     const original = "刷新";
     button.lastElementChild.textContent = "刷新中…";
-    if (manual) setText("notice-banner", "正在重新读取索引、工单、门禁和任务状态…");
+    if (manual) showNotice("正在重新读取索引、工单、门禁和任务状态…");
     try {
       const query = state.selectedTicketId ? `?ticket_id=${encodeURIComponent(state.selectedTicketId)}` : "";
       const payload = await api(`/api/v1/refresh${query}`);
@@ -319,12 +461,12 @@
       if (state.selectedTicketId && !state.ticket) state.selectedTicketId = null;
       setText("last-refresh", formatTime(payload.observed_at));
       setConnection("ok", "本地已连接");
-      byId("notice-banner").className = payload.ticket_error ? "banner warning" : "banner";
-      setText(
-        "notice-banner",
+      showNotice(
         payload.ticket_error
           ? payload.ticket_error.message
           : "状态已刷新，可安全操作",
+        payload.ticket_error ? "warning" : "",
+        payload.ticket_error ? "refresh" : null,
       );
       setStale(false);
       renderProjects();
@@ -348,7 +490,7 @@
     const step = selectedStep();
     if (state.stale || !ticket || !ticket.revision || !step) return;
     byId("run-step-button").disabled = true;
-    setText("notice-banner", `正在启动 /icode ${step}…`);
+    showNotice(`正在启动“${stepLabel(step)}”…`);
     try {
       await postJson("/api/v1/steps/run", {
         ticket_id: ticket.ticket_id,
@@ -361,16 +503,46 @@
       setStale(true);
       await refresh(true);
     } catch (error) {
-      setStale(true, error.message);
+      setStale(true);
+      showNotice(error.message, "danger", error.recovery_action || "inspect");
     }
   };
 
   const cancelJob = async (jobId) => {
+    if (!globalThis.confirm("确定取消这个任务吗？已产生的宿主修改不会自动回滚，终态仍会写入控制面。")) return;
     try {
       await postJson(`/api/v1/jobs/${encodeURIComponent(jobId)}/cancel`, {});
       await refresh(true);
     } catch (error) {
-      setStale(true, error.message);
+      setStale(true);
+      showNotice(error.message, "danger", error.recovery_action || "refresh");
+    }
+  };
+
+  const pollJobEvents = async () => {
+    if (state.eventTimer) globalThis.clearTimeout(state.eventTimer);
+    try {
+      const ticket = state.selectedTicketId
+        ? `&ticket_id=${encodeURIComponent(state.selectedTicketId)}`
+        : "";
+      const payload = await api(`/api/v1/job-events?after=${state.eventCursor}${ticket}`);
+      state.eventCursor = payload.cursor;
+      let terminalObserved = false;
+      payload.events.forEach((event) => {
+        const job = state.jobs.find((item) => item.job_id === event.job_id);
+        if (!job) return;
+        job.last_event_message = event.message;
+        job.state = event.state;
+        if (["succeeded", "failed", "cancelled", "outcome_unknown"].includes(event.state)) {
+          terminalObserved = true;
+        }
+      });
+      if (payload.events.length) renderJobs();
+      if (terminalObserved && !state.refreshing) await refresh(false);
+    } catch (_error) {
+      // 事件通道失败不覆盖主刷新错误；30 秒一致性刷新仍是安全兜底。
+    } finally {
+      state.eventTimer = globalThis.setTimeout(pollJobEvents, 1200);
     }
   };
 
@@ -409,9 +581,10 @@
       state.selectedTicketId = response.ticket.ticket_id;
       closeNewTicket();
       await refresh(true);
-      setText("notice-banner", "工单已创建。确认需求后，可运行推荐的 plan 步骤。");
+      showNotice("工单已创建。确认需求后，可运行推荐的“制定实施计划”。");
     } catch (error) {
-      setStale(true, error.message);
+      setStale(true);
+      showNotice(error.message, "danger", error.recovery_action || "inspect");
     } finally {
       submit.disabled = false;
       submit.textContent = "创建工单";
@@ -454,7 +627,8 @@
       scheduleRefresh();
       closeSettings();
     } catch (error) {
-      setStale(true, error.message);
+      setStale(true);
+      showNotice(error.message, "danger", error.recovery_action || "settings");
     }
   };
 
@@ -473,8 +647,16 @@
       state.hosts = payload.hosts;
       state.settings = payload.settings;
       state.selectedProjectId = payload.initial_project_id;
-      const preferredTicket = payload.tickets.find((ticket) => ticket.executable);
-      state.selectedTicketId = payload.initial_ticket_id || (preferredTicket && preferredTicket.ticket_id) || null;
+      const requestedTicket = payload.initial_ticket_id
+        ? payload.tickets.find((ticket) => ticket.ticket_id === payload.initial_ticket_id)
+        : null;
+      if (requestedTicket && !ticketMatchesStatus(requestedTicket)) {
+        state.statusFilter = "all";
+        byId("ticket-status-filter").value = "all";
+      }
+      const preferredTicket = requestedTicket || payload.tickets.find(
+        (ticket) => ticket.executable && ticketMatchesStatus(ticket));
+      state.selectedTicketId = (preferredTicket && preferredTicket.ticket_id) || null;
       applySettingsToForm();
       renderProjects();
       renderTickets();
@@ -488,16 +670,33 @@
         setStale(false);
         scheduleRefresh();
       }
+      pollJobEvents();
     } catch (error) {
       setConnection("error", "启动失败");
       setStale(true, error.message);
       scheduleRefresh();
+      pollJobEvents();
     }
   };
 
   byId("ticket-search").addEventListener("input", (event) => {
     state.search = event.target.value.trim();
     renderTickets();
+  });
+  byId("ticket-status-filter").addEventListener("change", (event) => {
+    state.statusFilter = event.target.value;
+    renderTickets();
+  });
+  byId("ticket-sort").addEventListener("change", (event) => {
+    state.sort = event.target.value;
+    renderTickets();
+  });
+  byId("notice-action").addEventListener("click", () => {
+    const action = state.noticeAction;
+    if (action === "refresh") refresh(true);
+    else if (action === "settings") openSettings();
+    else if (action === "inspect") byId("ticket-view").scrollIntoView({ behavior: "smooth" });
+    else showNotice("可等待当前任务完成，也可以在执行记录中取消它。");
   });
   byId("refresh-button").addEventListener("click", () => refresh(true));
   byId("welcome-refresh").addEventListener("click", () => refresh(true));

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ICODE Agent Runtime/UI v0.3 —— 无网络 20 轮七维自检。
+# ICODE Agent Runtime/UI v0.4 —— 无网络 20 轮七维自检。
 # 重型安装/全仓合同在进入本脚本前单独执行一次；本脚本避免把包索引波动误判为代码回归。
 set -u
 cd "$(dirname "$0")/.." || exit 1
@@ -30,6 +30,7 @@ PYTEST_FILES=(
   tests/test_agent_host_runner.py
   tests/test_ui_action_policy.py
   tests/test_agent_ui_dashboard.py
+  tests/test_agent_ui_manager_v2.py
 )
 CONTRACTS=(
   tests/test_agent_lifecycle_contract.sh

@@ -127,7 +127,7 @@ def test_index_assets_and_security_headers_are_local(tmp_path):
         assert '<link rel="stylesheet" href="/assets/style.css">' in html
         assert "http://" not in html and "https://" not in html
         assert headers["Cache-Control"] == "no-store"
-        assert headers["Server"].startswith("ICODEAgentUI/0.3.0")
+        assert headers["Server"].startswith("ICODEAgentUI/0.4.0")
         assert headers["X-Content-Type-Options"] == "nosniff"
         assert headers["X-Frame-Options"] == "DENY"
         assert headers["Referrer-Policy"] == "no-referrer"

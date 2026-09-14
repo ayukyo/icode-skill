@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import io
 import os
 import re
 import signal
@@ -12,6 +13,7 @@ import sys
 import threading
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Callable, Dict, List
 
 from .ticket_catalog import ResolvedTicket
@@ -25,7 +27,22 @@ ALLOWED_STEPS = frozenset({
 MAX_NOTE_CHARS = 8000
 DEFAULT_MAX_OUTPUT_BYTES = 512 * 1024
 REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9._:-]{1,160}$")
-TERMINAL_STATES = frozenset({"succeeded", "failed", "cancelled"})
+TERMINAL_STATES = frozenset({
+    "succeeded", "failed", "cancelled", "outcome_unknown",
+})
+RECOVERY_SCHEMA_VERSION = 1
+MAX_PUBLIC_EVENTS = 1000
+PERSISTED_JOB_FIELDS = frozenset({
+    "job_id", "request_id", "ticket_id", "step", "host", "model", "state",
+    "created_at", "finished_at", "returncode", "truncated",
+    "cancel_requested", "spawn_id", "recovery_reason", "last_event_message",
+    "event_count", "lifecycle_error",
+})
+SECRET_PATTERNS = (
+    re.compile(r"(?i)(authorization\s*:\s*bearer\s+)[^\s]+"),
+    re.compile(r"(?i)((?:api[_-]?key|token|secret)\s*[=:]\s*)[^\s,;]+"),
+    re.compile(r"\bsk-[A-Za-z0-9_-]{8,}\b"),
+)
 
 class HostRunnerError(RuntimeError):
     """主机选择、任务约束或进程生命周期错误。"""
@@ -149,7 +166,8 @@ class HostJobRunner:
                  process_factory: Callable | None = None,
                  max_concurrent: int = 3,
                  max_output_bytes: int = DEFAULT_MAX_OUTPUT_BYTES,
-                 max_jobs: int = 100):
+                 max_jobs: int = 100,
+                 recovery_path: Path | str | None = None):
         if max_concurrent < 1 or max_jobs < 1 or max_output_bytes < 1:
             raise ValueError("主机任务上限必须是正整数")
         self.executable_resolver = executable_resolver or shutil.which
@@ -158,9 +176,150 @@ class HostJobRunner:
         self.max_concurrent = max_concurrent
         self.max_output_bytes = max_output_bytes
         self.max_jobs = max_jobs
+        self.recovery_path = Path(recovery_path).expanduser() \
+            if recovery_path is not None else None
+        self.recovery_available = self.recovery_path is not None
         self._jobs: Dict[str, Dict] = {}
         self._request_ids: set[str] = set()
+        self._events: List[Dict] = []
+        self._event_seq = 0
         self._lock = threading.RLock()
+        self._load_recovery()
+
+    @staticmethod
+    def _redact(value: str, *, limit: int | None = 2000) -> str:
+        text = value.replace("\x00", "").strip()
+        for pattern in SECRET_PATTERNS:
+            if pattern.groups:
+                text = pattern.sub(r"\1[已隐藏]", text)
+            else:
+                text = pattern.sub("[已隐藏]", text)
+        return text if limit is None else text[:limit]
+
+    @classmethod
+    def _progress_message(cls, raw_line: str) -> str:
+        """把不同宿主的 JSONL 收敛为短文本，不向 UI 倒出原始对象。"""
+        line = raw_line.strip()
+        if not line:
+            return ""
+        try:
+            payload = json.loads(line)
+        except (TypeError, ValueError):
+            return cls._redact(line)
+
+        def find_text(value):
+            if isinstance(value, str) and value.strip():
+                return value
+            if isinstance(value, list):
+                for item in value:
+                    found = find_text(item)
+                    if found:
+                        return found
+            if isinstance(value, dict):
+                for key in ("text", "message", "summary", "result", "content"):
+                    if key in value:
+                        found = find_text(value[key])
+                        if found:
+                            return found
+            return None
+
+        message = find_text(payload)
+        if not message and isinstance(payload, dict):
+            message = payload.get("type")
+        return cls._redact(message or "宿主返回进度事件")
+
+    def _emit_locked(self, job: Dict, kind: str, message: str) -> None:
+        safe_message = self._redact(message)
+        if not safe_message:
+            return
+        self._event_seq += 1
+        event = {
+            "seq": self._event_seq,
+            "at": _now_iso(),
+            "job_id": job["job_id"],
+            "ticket_id": job["ticket_id"],
+            "kind": kind,
+            "message": safe_message,
+            "state": job["state"],
+        }
+        self._events.append(event)
+        if len(self._events) > MAX_PUBLIC_EVENTS:
+            del self._events[:-MAX_PUBLIC_EVENTS]
+        job["last_event_message"] = safe_message
+        job["event_count"] = int(job.get("event_count", 0)) + 1
+
+    def _persist_locked(self) -> None:
+        if self.recovery_path is None:
+            return
+        path = self.recovery_path
+        temp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            payload = {
+                "schema_version": RECOVERY_SCHEMA_VERSION,
+                "updated_at": _now_iso(),
+                "jobs": [
+                    {key: value for key, value in job.items()
+                     if key in PERSISTED_JOB_FIELDS}
+                    for job in sorted(
+                        self._jobs.values(), key=lambda item: item["created_at"],
+                        reverse=True)[:self.max_jobs]
+                ],
+            }
+            with temp.open("w", encoding="utf-8") as handle:
+                json.dump(payload, handle, ensure_ascii=False, indent=2)
+                handle.write("\n")
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.chmod(temp, 0o600)
+            os.replace(temp, path)
+            self.recovery_available = True
+        except OSError:
+            # 恢复投影是观测增强，失败不得把已经启动的宿主进程变成孤儿。
+            self.recovery_available = False
+            try:
+                if temp.is_file():
+                    temp.unlink()
+            except OSError:
+                pass
+
+    def _load_recovery(self) -> None:
+        if self.recovery_path is None or not self.recovery_path.is_file():
+            return
+        try:
+            payload = json.loads(self.recovery_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, TypeError):
+            return
+        if payload.get("schema_version") != RECOVERY_SCHEMA_VERSION \
+                or not isinstance(payload.get("jobs"), list):
+            return
+        changed = False
+        for candidate in payload["jobs"][:self.max_jobs]:
+            if not isinstance(candidate, dict):
+                continue
+            job_id = candidate.get("job_id")
+            request_id = candidate.get("request_id")
+            required_text = (job_id, request_id, candidate.get("ticket_id"),
+                             candidate.get("step"), candidate.get("host"),
+                             candidate.get("created_at"))
+            if any(not isinstance(value, str) or not value for value in required_text):
+                continue
+            job = {key: candidate[key] for key in PERSISTED_JOB_FIELDS
+                   if key in candidate}
+            job.pop("output", None)
+            if job.get("state") not in TERMINAL_STATES:
+                job["state"] = "outcome_unknown"
+                job["recovery_reason"] = "runtime_restarted"
+                job["finished_at"] = _now_iso()
+                job["returncode"] = None
+                job["cancel_requested"] = False
+                changed = True
+            self._jobs[job_id] = job
+            self._request_ids.add(request_id)
+            if job.get("recovery_reason") == "runtime_restarted":
+                self._emit_locked(job, "recovered", "Runtime 已重启，原任务结果待人工核实")
+        if changed:
+            self._persist_locked()
 
     def capabilities(self) -> Dict:
         return {
@@ -308,12 +467,16 @@ class HostJobRunner:
                 "truncated": False,
                 "cancel_requested": False,
                 "spawn_id": spawn_id,
+                "last_event_message": "任务已提交给宿主",
+                "event_count": 0,
                 "_process": process,
                 "_prompt": prompt,
                 "_ticket": ticket,
             }
             self._jobs[job_id] = job
             self._request_ids.add(request_id)
+            self._emit_locked(job, "started", "任务已提交给宿主")
+            self._persist_locked()
             thread = threading.Thread(
                 target=self._collect,
                 args=(job_id,),
@@ -324,7 +487,7 @@ class HostJobRunner:
             return self._public(job)
 
     def _bounded_output(self, value) -> tuple[str, bool]:
-        text = value if isinstance(value, str) else ""
+        text = self._redact(value, limit=None) if isinstance(value, str) else ""
         raw = text.encode("utf-8", errors="replace")
         if len(raw) <= self.max_output_bytes:
             return text, False
@@ -338,11 +501,50 @@ class HostJobRunner:
             ticket = job["_ticket"]
         collection_error = None
         try:
-            output, _ = process.communicate(input=prompt)
-            returncode = process.poll()
-            if returncode is None:
-                returncode = getattr(process, "returncode", 1)
-            bounded, truncated = self._bounded_output(output)
+            stdin = getattr(process, "stdin", None)
+            stdout = getattr(process, "stdout", None)
+            if stdin is not None and stdout is not None:
+                stdin.write(prompt)
+                stdin.flush()
+                # 真正的 Popen pipe 必须关闭 stdin 才能让宿主收到 EOF；
+                # StringIO 仅用于可重复读取的单测，不关闭。
+                if not isinstance(stdin, io.StringIO):
+                    stdin.close()
+                chunks = []
+                used = 0
+                truncated = False
+                while True:
+                    line = stdout.readline()
+                    if line == "":
+                        break
+                    message = self._progress_message(line)
+                    if message:
+                        with self._lock:
+                            current = self._jobs[job_id]
+                            self._emit_locked(current, "progress", message)
+                    raw = line.encode("utf-8", errors="replace")
+                    remaining = self.max_output_bytes - used
+                    if remaining > 0:
+                        part = raw[:remaining]
+                        chunks.append(part)
+                        used += len(part)
+                    if len(raw) > max(remaining, 0):
+                        truncated = True
+                returncode = process.wait()
+                collected = b"".join(chunks).decode("utf-8", errors="ignore")
+                bounded, redacted_truncated = self._bounded_output(collected)
+                truncated = truncated or redacted_truncated
+            else:
+                output, _ = process.communicate(input=prompt)
+                returncode = process.poll()
+                if returncode is None:
+                    returncode = getattr(process, "returncode", 1)
+                bounded, truncated = self._bounded_output(output)
+                message = self._progress_message(bounded)
+                if message:
+                    with self._lock:
+                        current = self._jobs[job_id]
+                        self._emit_locked(current, "progress", message)
         except Exception as exc:
             collection_error = type(exc).__name__
             bounded = f"主机输出收集失败（{collection_error}）"
@@ -362,9 +564,11 @@ class HostJobRunner:
                 terminal_state = "succeeded"
             # 只有控制面 agent_result 已持久化后，才向 UI 暴露终态。
             job["state"] = "finalizing"
+            self._emit_locked(job, "finalizing", "宿主已结束，正在写入控制面回执")
             job.pop("_prompt", None)
             spawn_id = job["spawn_id"]
             request_id = job["request_id"]
+            self._persist_locked()
 
         result = "joined" if terminal_state == "succeeded" else (
             "stopped" if terminal_state == "cancelled" else "failed")
@@ -386,6 +590,11 @@ class HostJobRunner:
                 job = self._jobs[job_id]
                 job["state"] = terminal_state
                 job["finished_at"] = _now_iso()
+                self._emit_locked(
+                    job, "terminal",
+                    "任务执行成功" if terminal_state == "succeeded" else (
+                        "任务已取消" if terminal_state == "cancelled" else "任务执行失败"))
+                self._persist_locked()
         except Exception:
             with self._lock:
                 job = self._jobs[job_id]
@@ -393,6 +602,8 @@ class HostJobRunner:
                 job["finished_at"] = _now_iso()
                 job["lifecycle_error"] = True
                 job["output"] = "主机已结束，但控制面终态回执失败；禁止重放。"
+                self._emit_locked(job, "terminal", "终态回执失败，禁止自动重放")
+                self._persist_locked()
 
     @staticmethod
     def _public(job: Dict) -> Dict:
@@ -411,6 +622,16 @@ class HostJobRunner:
                 self._jobs.values(), key=lambda job: job["created_at"], reverse=True)
             return [self._public(job) for job in jobs]
 
+    def events(self, *, after: int = 0,
+               ticket_id: str | None = None) -> Dict:
+        if isinstance(after, bool) or not isinstance(after, int) or after < 0:
+            raise HostRunnerError("事件游标非法", code="invalid_event_cursor")
+        with self._lock:
+            events = [dict(event) for event in self._events
+                      if event["seq"] > after
+                      and (ticket_id is None or event["ticket_id"] == ticket_id)]
+            return {"cursor": self._event_seq, "events": events}
+
     def cancel(self, job_id: str) -> Dict:
         with self._lock:
             job = self._jobs.get(job_id)
@@ -419,6 +640,8 @@ class HostJobRunner:
             if job["state"] in TERMINAL_STATES:
                 return self._public(job)
             job["cancel_requested"] = True
+            self._emit_locked(job, "cancelling", "正在请求宿主停止任务")
+            self._persist_locked()
             process = job["_process"]
         try:
             pid = getattr(process, "pid", None)

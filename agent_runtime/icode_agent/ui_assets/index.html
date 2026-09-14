@@ -23,6 +23,20 @@
         <span aria-hidden="true">⌕</span>
         <input id="ticket-search" type="search" placeholder="搜索工单或项目" autocomplete="off">
       </label>
+      <div class="ticket-tools" aria-label="工单筛选与排序">
+        <select id="ticket-status-filter" aria-label="按工单状态筛选">
+          <option value="active">进行中</option>
+          <option value="verification_pending">待验证</option>
+          <option value="completed">已完成</option>
+          <option value="all">全部状态</option>
+          <option value="closed">已证伪或替代</option>
+        </select>
+        <select id="ticket-sort" aria-label="工单排序">
+          <option value="updated_desc">最近更新</option>
+          <option value="updated_asc">最早更新</option>
+          <option value="project">按项目</option>
+        </select>
+      </div>
 
       <div class="nav-heading">
         <span>项目</span>
@@ -89,7 +103,10 @@
         <div id="stale-banner" class="banner danger" hidden>
           当前视图可能过期，已暂停所有写操作。请手动刷新后重试。
         </div>
-        <div id="notice-banner" class="banner" role="status">工单已载入</div>
+        <div class="notice-row">
+          <div id="notice-banner" class="banner" role="status">工单已载入</div>
+          <button id="notice-action" class="secondary-button" type="button" hidden>处理</button>
+        </div>
 
         <div class="dashboard-grid">
           <section class="conversation-panel">
@@ -124,6 +141,27 @@
                 <span id="job-count" class="count">0</span>
               </div>
               <div id="job-list" class="job-list"></div>
+            </section>
+
+            <section class="cockpit-section" aria-label="工单驾驶舱">
+              <div class="section-title">
+                <div><p class="eyebrow">Cockpit</p><h2>工单全景</h2></div>
+              </div>
+              <ol id="progress-steps" class="progress-steps"></ol>
+              <div class="cockpit-grid">
+                <article>
+                  <span>交付结论</span>
+                  <strong id="delivery-verdict">—</strong>
+                </article>
+                <article>
+                  <span>验证情况</span>
+                  <strong id="verification-summary">—</strong>
+                </article>
+              </div>
+              <div class="artifact-block">
+                <h3>关键产物</h3>
+                <ul id="artifact-list" class="artifact-list"></ul>
+              </div>
             </section>
           </section>
 

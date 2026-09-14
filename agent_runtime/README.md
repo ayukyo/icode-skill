@@ -1,4 +1,4 @@
-# ICODE Agent Runtime v0.3
+# ICODE Agent Runtime v0.4
 
 可选的本地 Agent 执行层。它通过系统终端进程运行，为一个 v3 工单执行一个有界模型回合；不替代 `tools/icode_control.py`，不自动推进工单状态，也不改变 Codex/Claude Code 的既有 `/icode` 用法。
 
@@ -16,7 +16,7 @@ Codex / Claude Code / CI / 手工终端
        tools/icode_control.py
 ```
 
-v0.3 把可选本地 Web UI 扩展为全局 ICODE 工作台。它不是常驻服务：只在显式执行 `ui` 子命令后监听 `127.0.0.1`，当前终端退出即停止。Codex/Claude Code 的聊天界面和原有 `status/run` 继续可用；UI 只通过真实宿主 CLI 执行已获控制面许可的 `/icode <step>`。
+v0.4 把可选本地 Web UI 扩展为 ICODE Manager 2.0。它不是常驻服务：只在显式执行 `ui` 子命令后监听 `127.0.0.1`，当前终端退出即停止。Codex/Claude Code 的聊天界面和原有 `status/run` 继续可用；UI 只通过真实宿主 CLI 执行已获控制面许可的 `/icode <step>`。
 
 ## 本地 Web UI
 
@@ -30,7 +30,7 @@ python3 tools/icode_agent.py ui
 python3 tools/icode_agent.py ui --no-browser
 ```
 
-UI 可以浏览全局项目/工单、创建并登记第一张工单、查看控制面推荐下一步、手动刷新、调整非秘密设置，并通过 Codex 或 Claude Code CLI 执行受控 ICODE 步骤。自动刷新默认 30 秒，可在设置中选择 5 秒到 5 分钟；保存后立即生效，手动刷新始终可用。新建工单不直接调用模型：控制面先原子分配编号并写索引，随后用户再运行推荐的 `plan`。安全边界：
+UI 可以浏览、筛选和排序全局项目/工单，创建并登记第一张工单，查看控制面推荐下一步、步骤进度、交付结论、验证记录和白名单关键产物，并通过 Codex 或 Claude Code CLI 执行受控 ICODE 步骤。简单模式显示“制定实施计划”“编码实现”等中文动作，高级模式保留 `/icode <step>` 身份。自动刷新默认 30 秒，可在设置中选择 5 秒到 5 分钟；约 1.2 秒一次的有界事件轮询只更新任务进度，手动刷新始终可用。新建工单不直接调用模型：控制面先原子分配编号并写索引，随后用户再运行推荐的计划步骤。安全边界：
 
 - 固定监听 `127.0.0.1`，不提供 `--host` 或远程访问。
 - 新增 API 必须携带页面会话令牌；写请求是 64 KiB 内的严格 JSON，并拒绝跨源 Origin、恶意 Host 和未知字段。
@@ -38,7 +38,8 @@ UI 可以浏览全局项目/工单、创建并登记第一张工单、查看控�
 - UI 不接收 API Key、ticket path、任意文件路径或任意 shell；浏览器只提交 ticket ID、动作枚举和 revision。
 - 推荐动作、debug/关闭隔离、事件链 revision 与可信执行根来自 `action-policy`，刷新失败即禁用写动作。
 - Host 启动前后由控制面记录 Agent spawn/result；同工单跨 UI 进程独占，结果不明确时不重放。
-- 模型正文只保存在当前 Runtime 内存并设总量上限；事件链只写摘要 digest 与短证据引用。
+- 模型正文只保存在当前 Runtime 内存并设总量上限；常见 token/API Key 形态在进入 UI 前脱敏，事件链只写摘要 digest 与短证据引用。
+- `ui_jobs.json` 只持久化任务身份、状态和脱敏短摘要，不保存 prompt 或原始输出；Runtime 重启后活动任务显示“结果待核实”，绝不自动重放。
 - 实例登记不保存 UI token；重复启动须同时匹配 `0600` 登记和当前 loopback 健康回执。过期登记只会被新实例原子覆盖。
 - 不自动 commit、push、deploy、关闭工单、删除工作区或操作硬件。
 
@@ -99,7 +100,7 @@ python3 tools/icode_agent.py status --dir <ticket_dir>
 
 返回 `schema_version/ticket_id/spawns/open_spawns`。同一个 `request-id` 已出现时，Runtime 不会重放模型调用：开放 spawn 表示上次调用结果未知，已终结 spawn 表示结果正文未缓存；两者都需要人工核对后使用新请求继续。
 
-## v0.3 边界
+## v0.4 边界
 
 - UI 本身不解释模型 tool call；真实 ICODE 工具使用由 Codex/Claude Code 及既有步骤规则约束。
 - UI 不成为 metadata/status 第二写入器；步骤仍通过现有 ICODE 控制面推进。

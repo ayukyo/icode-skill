@@ -27,8 +27,8 @@ from icode_agent.models import AgentRequest, CapabilityError
 CONTROL = ROOT / "tools" / "icode_control.py"
 
 
-def test_runtime_version_matches_v03_ui_contract():
-    assert icode_agent.__version__ == "0.3.0"
+def test_runtime_version_matches_v04_ui_contract():
+    assert icode_agent.__version__ == "0.4.0"
 
 
 def make_ticket(tmp_path: Path, name: str = "agent-runtime-1") -> Path:
