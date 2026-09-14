@@ -12,7 +12,7 @@
 
 按 [thinking_core.md](thinking_core.md) 的"强证据"逻辑（**注册 且 可调用 双条件同时满足才视为可用**；证据 A=注册为必要条件，证据 B=可调用为充分条件——B 成立必然 A 成立，但仅 A 成立（已注册未连接/未暴露）不算可用）：
 
-- **证据 A（强证据）**：MCP 在**当前宿主**注册——Claude Code = `~/.claude.json` 的 `mcpServers.<name>` 段存在；Codex = `codex mcp list` 含 `<name>`。跨宿主双注册已支持（`/icode install --client all`），**宿主不同注册证据互不替代**（当前宿主没注册 = 证据 A 不成立，即使另一宿主已注册）
+- **证据 A（强证据）**：MCP 在**当前宿主**注册——Claude Code = `~/.claude.json` 的 `mcpServers.<name>` 段存在；Codex = `codex mcp list` 含 `<name>`；CodeBuddy = `~/.codebuddy/mcp.json` 的 `mcpServers.<name>` 段存在。跨宿主注册已支持（显式 `--client codebuddy`，或 `/icode install --client all` 在已检测到 CodeBuddy 时追加），**宿主不同注册证据互不替代**（当前宿主没注册 = 证据 A 不成立，即使另一宿主已注册）。CodeBuddy 无 ToolSearch 时仅以当前会话直接可见工具作为证据 B
 - **证据 B（强证据）**：工具可在当前会话**直接调用**——工具列表直接可见（完整 schema，按语义识别：标准 `mcp__<name>__<tool>` 或代理前缀 `__<proxy>_<tool>` 形态）或 ToolSearch 可取 schema（不可见时按 [thinking_core.md](thinking_core.md) 第 0 判据）
 
 **强证据不存在 → 走降级路径**。**本文档路径：可装可降级，不阻塞流程。**

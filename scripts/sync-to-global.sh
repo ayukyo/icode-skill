@@ -1,10 +1,18 @@
 #!/usr/bin/env bash
-# Mirror the ICODE runtime and manifest-declared shared skills to host roots.
-# Developer default is a no-write dry-run for both Claude Code and Codex.
+# Mirror the ICODE runtime, manifest-declared shared skills, and host adapters.
+# Developer default is a no-write dry-run for detected/specified clients.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 DEV_REPO="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# Test/CI/custom deployments commonly override host roots. In that mode an
+# implicit probe of the caller's real HOME must not add an unrelated client.
+SYNC_TARGETS_OVERRIDDEN=false
+if [[ -n "${GLOBAL_DIR+x}" || -n "${CLAUDE_SKILLS_ROOT+x}" \
+  || -n "${AGENTS_DIR+x}" || -n "${AGENTS_SKILLS_ROOT+x}" ]]; then
+  SYNC_TARGETS_OVERRIDDEN=true
+fi
 
 if [[ -n "${GLOBAL_DIR+x}" ]]; then
   CLAUDE_SKILLS_ROOT="${CLAUDE_SKILLS_ROOT:-$(dirname "$GLOBAL_DIR")}"
@@ -23,6 +31,16 @@ SKILL_PACK_MANIFEST="${SKILL_PACK_MANIFEST:-$DEV_REPO/skill-packs/manifest.json}
 SKILL_PACK_VALIDATOR="$DEV_REPO/tools/validate_skill_pack.py"
 SKILL_PACK_INSTALLER="$DEV_REPO/tools/install_skill_pack.py"
 SKILL_ROUTES="${SKILL_ROUTES:-$DEV_REPO/mcp/workflow-gate/skill-routes.json}"
+CODEBUDDY_COMMAND_SOURCE="$DEV_REPO/integrations/codebuddy/commands/icode.md"
+CODEBUDDY_LEGACY_COMMANDS_DIR="$DEV_REPO/integrations/codebuddy/commands/legacy"
+if [[ -n "${CODEBUDDY_COMMANDS_DIR+x}" ]]; then
+  CODEBUDDY_COMMANDS_EXPLICIT=true
+else
+  CODEBUDDY_COMMANDS_EXPLICIT=false
+  CODEBUDDY_COMMANDS_DIR="$HOME/.codebuddy/commands"
+fi
+CODEBUDDY_COMMAND_TARGET="$CODEBUDDY_COMMANDS_DIR/icode.md"
+CODEBUDDY_COMMAND_MARKER="$CODEBUDDY_COMMAND_TARGET.icode-install-owner.json"
 
 usage() {
   cat <<'EOF'
@@ -31,7 +49,8 @@ Usage: ./scripts/sync-to-global.sh [options]
 Options:
   --dry-run                 Report changes without writing (default)
   --apply                   Apply the synchronization
-  --client claude|codex|all Select host roots (default: all)
+  --client claude|codex|codebuddy|all
+                            Select host roots/adapters (default: all)
   --no-delete               Preserve target-only managed payload files
   -h, --help                Show this help
 EOF
@@ -56,7 +75,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     --client)
       if [[ $# -lt 2 ]]; then
-        echo "❌ --client 需要参数: claude|codex|all" >&2
+        echo "❌ --client 需要参数: claude|codex|codebuddy|all" >&2
         exit 2
       fi
       CLIENT="$2"
@@ -78,9 +97,9 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 case "$CLIENT" in
-  claude|codex|all) ;;
+  claude|codex|codebuddy|all) ;;
   *)
-    echo "❌ --client 取值须为 claude|codex|all (当前: $CLIENT)" >&2
+    echo "❌ --client 取值须为 claude|codex|codebuddy|all (当前: $CLIENT)" >&2
     exit 2
     ;;
 esac
@@ -141,6 +160,7 @@ esac
 TARGET_ROOTS=()
 ICODE_DIRS=()
 TARGET_LABELS=()
+PUBLISH_CODEBUDDY_COMMAND=false
 case "$CLIENT" in
   claude)
     TARGET_ROOTS+=("$CLAUDE_SKILLS_ROOT")
@@ -152,10 +172,22 @@ case "$CLIENT" in
     ICODE_DIRS+=("$AGENTS_DIR")
     TARGET_LABELS+=("Codex")
     ;;
+  codebuddy)
+    # CodeBuddy scans the Claude-compatible skill root; only its command
+    # bridge is client-specific, so no third ICODE payload copy is created.
+    TARGET_ROOTS+=("$CLAUDE_SKILLS_ROOT")
+    ICODE_DIRS+=("$GLOBAL_DIR")
+    TARGET_LABELS+=("CodeBuddy (shared Claude skill root)")
+    PUBLISH_CODEBUDDY_COMMAND=true
+    ;;
   all)
     TARGET_ROOTS+=("$CLAUDE_SKILLS_ROOT" "$AGENTS_SKILLS_ROOT")
     ICODE_DIRS+=("$GLOBAL_DIR" "$AGENTS_DIR")
     TARGET_LABELS+=("Claude Code" "Codex")
+    if [[ "$CODEBUDDY_COMMANDS_EXPLICIT" == true \
+      || ( "$SYNC_TARGETS_OVERRIDDEN" == false && -d "$HOME/.codebuddy" ) ]]; then
+      PUBLISH_CODEBUDDY_COMMAND=true
+    fi
     ;;
 esac
 
@@ -196,6 +228,77 @@ raise SystemExit(0 if value == expected else 1)
 PY
 }
 
+has_valid_codebuddy_command_marker() {
+  local marker="$1"
+  [[ -f "$marker" && ! -L "$marker" ]] || return 1
+  "$PYTHON_BIN" - "$marker" <<'PY'
+import json
+import sys
+from pathlib import Path
+try:
+    value = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+except (OSError, UnicodeError, json.JSONDecodeError):
+    raise SystemExit(1)
+expected = {
+    "schema_version": 1,
+    "owner": "icode-skill",
+    "artifact": "codebuddy-command",
+    "name": "icode",
+}
+raise SystemExit(0 if value == expected else 1)
+PY
+}
+
+is_known_legacy_codebuddy_command() {
+  local target="$1" candidate
+  for candidate in "$CODEBUDDY_LEGACY_COMMANDS_DIR"/*.md; do
+    [[ -f "$candidate" && ! -L "$candidate" ]] || continue
+    if cmp -s "$candidate" "$target"; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+preflight_codebuddy_command() {
+  [[ "$PUBLISH_CODEBUDDY_COMMAND" == true ]] || return 0
+  if [[ -z "$CODEBUDDY_COMMANDS_DIR" || "$CODEBUDDY_COMMANDS_DIR" == "/" ]]; then
+    echo "❌ CodeBuddy 命令目录不安全: ${CODEBUDDY_COMMANDS_DIR:-<empty>}" >&2
+    return 1
+  fi
+  if [[ ! -f "$CODEBUDDY_COMMAND_SOURCE" || -L "$CODEBUDDY_COMMAND_SOURCE" ]]; then
+    echo "❌ CodeBuddy 命令模板不存在或不是普通文件: $CODEBUDDY_COMMAND_SOURCE" >&2
+    return 1
+  fi
+  if [[ -e "$CODEBUDDY_COMMAND_MARKER" ]] \
+    && ! has_valid_codebuddy_command_marker "$CODEBUDDY_COMMAND_MARKER"; then
+    echo "❌ CodeBuddy 命令所有权标记无效: $CODEBUDDY_COMMAND_MARKER" >&2
+    return 1
+  fi
+  if [[ ! -e "$CODEBUDDY_COMMAND_TARGET" ]]; then
+    if [[ -e "$CODEBUDDY_COMMAND_MARKER" ]]; then
+      echo "❌ CodeBuddy 命令缺失但所有权标记仍存在: $CODEBUDDY_COMMAND_MARKER" >&2
+      return 1
+    fi
+    return 0
+  fi
+  if [[ ! -f "$CODEBUDDY_COMMAND_TARGET" || -L "$CODEBUDDY_COMMAND_TARGET" ]]; then
+    echo "❌ CodeBuddy 命令目标不是普通文件: $CODEBUDDY_COMMAND_TARGET" >&2
+    return 1
+  fi
+  if [[ -e "$CODEBUDDY_COMMAND_MARKER" ]]; then
+    return 0
+  fi
+  if cmp -s "$CODEBUDDY_COMMAND_SOURCE" "$CODEBUDDY_COMMAND_TARGET"; then
+    return 0
+  fi
+  if is_known_legacy_codebuddy_command "$CODEBUDDY_COMMAND_TARGET"; then
+    return 0
+  fi
+  echo "❌ CodeBuddy 已存在未托管的 /icode 命令，拒绝覆盖: $CODEBUDDY_COMMAND_TARGET" >&2
+  return 1
+}
+
 preflight_icode_target() {
   local dst="$1"
   if same_path "$DEV_REPO" "$dst"; then
@@ -227,7 +330,8 @@ for root in "${TARGET_ROOTS[@]}"; do
   INSTALL_ROOT_ARGS+=(--target-root "$root")
 done
 
-# All target conflicts are checked before either ICODE root is modified.
+# All target conflicts are checked before any selected ICODE root is modified.
+preflight_codebuddy_command
 for dst in "${ICODE_DIRS[@]}"; do
   preflight_icode_target "$dst"
 done
@@ -245,6 +349,13 @@ fi
 for index in "${!ICODE_DIRS[@]}"; do
   echo "   ${TARGET_LABELS[$index]}: ${ICODE_DIRS[$index]}"
 done
+if [[ "$PUBLISH_CODEBUDDY_COMMAND" == true ]]; then
+  if [[ "$MODE" == "dry-run" ]]; then
+    echo "   CodeBuddy: (dry-run) would publish /icode -> $CODEBUDDY_COMMAND_TARGET"
+  else
+    echo "   CodeBuddy: publish /icode -> $CODEBUDDY_COMMAND_TARGET"
+  fi
+fi
 
 sync_with_cp() {
   local dst="$1"
@@ -300,6 +411,60 @@ write_icode_marker() {
   printf '%s\n' \
     '{"schema_version":1,"owner":"icode-skill","skill":"icode"}' \
     >"$dst/.icode-install-owner.json"
+}
+
+publish_codebuddy_command() {
+  [[ "$PUBLISH_CODEBUDDY_COMMAND" == true ]] || return 0
+  [[ "$MODE" == "apply" ]] || return 0
+  "$PYTHON_BIN" - "$CODEBUDDY_COMMAND_SOURCE" "$CODEBUDDY_COMMAND_TARGET" \
+    "$CODEBUDDY_COMMAND_MARKER" <<'PY'
+import json
+import os
+import sys
+import tempfile
+from pathlib import Path
+
+source = Path(sys.argv[1])
+target = Path(sys.argv[2])
+marker = Path(sys.argv[3])
+target.parent.mkdir(parents=True, exist_ok=True)
+marker_value = {
+    "schema_version": 1,
+    "owner": "icode-skill",
+    "artifact": "codebuddy-command",
+    "name": "icode",
+}
+
+def atomic_publish_bytes(path: Path, payload: bytes, mode: int) -> None:
+    fd, temporary = tempfile.mkstemp(
+        prefix=f".{path.name}.icode-stage-", dir=path.parent
+    )
+    try:
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(payload)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.chmod(temporary, mode)
+        os.replace(temporary, path)
+        directory_fd = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+    finally:
+        try:
+            os.unlink(temporary)
+        except FileNotFoundError:
+            pass
+
+atomic_publish_bytes(target, source.read_bytes(), 0o644)
+atomic_publish_bytes(
+    marker,
+    (json.dumps(marker_value, ensure_ascii=False, separators=(",", ":")) + "\n").encode(),
+    0o644,
+)
+PY
+  echo "   ✅ CodeBuddy /icode 命令桥已校验并发布"
 }
 
 RSYNC_DELETE_ARGS=(--delete)
@@ -519,6 +684,7 @@ if [[ "$MODE" == "apply" ]]; then
   done
   [[ "$NO_DELETE" == true ]] && VERIFY_ARGS+=(--allow-extra)
   "$PYTHON_BIN" "$SKILL_PACK_VALIDATOR" "${VERIFY_ARGS[@]}" >/dev/null
+  publish_codebuddy_command
   echo "✅ 同步完成：ICODE 与 manifest 共享技能均已校验"
 else
   echo "ℹ️ dry-run 未做任何修改；确认后使用 --apply"

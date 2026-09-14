@@ -13,12 +13,13 @@
 
 ## CodeBuddy 专项约定
 
-1. **命令入口**：CodeBuddy 不把 Skill 自动注册为斜杠命令。`/icode <子命令>` 依赖**自定义斜杠指令**（用户级 `~/.codebuddy/commands/icode.md`，或项目级 `<工程>/.codebuddy/commands/icode.md`）；指令正文负责加载 `icode` skill 并把 `$ARGUMENTS` 作为子命令与参数传入。
+1. **命令入口**：CodeBuddy 不把 Skill 自动注册为斜杠命令。`/icode <子命令>` 依赖**自定义斜杠指令**。仓库真源为 `integrations/codebuddy/commands/icode.md`；`scripts/sync-to-global.sh --apply --client codebuddy` 将其原子发布为用户级 `~/.codebuddy/commands/icode.md`。同内容旧文件可通过所有权标记接管，不同内容的未托管命令必须失败关闭；项目级 `<工程>/.codebuddy/commands/icode.md` 仍由项目自行管理。
 2. **MCP 配置位置**：宿主配置读 `~/.codebuddy/mcp.json`（**不是** `~/.claude.json`）；其 `mcpServers` 与 Claude Code 结构同源（`{mcpServers:{name:{command,args,env}}}`），可整段迁移。
 3. **无 ToolSearch**：MCP 可用性判定只能靠「工具列表直接可见」这一条路径，不得因 ToolSearch 缺失直接判“工具不存在”。
 4. **无 Hook 层**：`UserPromptSubmit` 等 Hook 不可用，强制思考前置仅由 Prompt 层 + 步骤文件保证。
 5. **推理预算控制**：`CLAUDE_CODE_EFFORT_LEVEL` / `model=opus` 对 CodeBuddy 无效，不依赖其调节思考深度。
-6. **Skill 目录**：CodeBuddy 会扫描 `~/.claude/skills/`（与 Claude Code 共用），也可放项目级 `.codebuddy/skills/`。
+6. **Skill 目录**：CodeBuddy 会扫描 `~/.claude/skills/`（与 Claude Code 共用），也可放项目级 `.codebuddy/skills/`。全局安装只维护共享根中的一份 ICODE，不复制到第三个全局技能目录。
+7. **同步边界**：普通 Skill 同步只发布 ICODE、共享 Skill 和命令桥，绝不改 `~/.codebuddy/mcp.json`；MCP 注册/卸载只走 `mcp/install.sh` / `mcp/uninstall.sh`。`--client all` 仅在检测到 `~/.codebuddy/` 时追加 CodeBuddy，保护原有 Claude+Codex 使用方式。
 
 ## 共同约束
 

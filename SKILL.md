@@ -3,7 +3,7 @@ name: icode
 description: 端到端编码工作流（步骤 0~6，含需求初稿、日志根因、验证、学习与本地管理 UI），支持：/icode help, ui, install [--basic|--preview], init [--guide], log, start, fast, plan, review, merge, code, deepcheck, audit, patch, verify [--plan|--deploy|--listen|--test|--reuse], doc, docx, limit, readme, ppt, learn [--project|--ticket|--since], status [--pending|--scan|--verdict], list [--all|--plain], bak, worktree --update/--close/--reopen/--merge。新建工单入口支持 --worktree opt-in
 ---
 
-**版本**: v2.27.0
+**版本**: v2.27.1
 
 # ICode 全流程编码工作流（步骤 0 + 1~6）
 
@@ -31,7 +31,7 @@ description: 端到端编码工作流（步骤 0~6，含需求初稿、日志根
 |------|------|-----------|
 | `[辅助]` `/icode help` | 输出使用流程示例与命令一览 | 否 |
 | `[管理]` `/icode ui` | 启动/复用本地 ICODE 工作台；全局项目/工单管理、手动/默认30秒自动刷新、设置和受控步骤执行 | 否 |
-| `[辅助]` `/icode install [--client codex\|all] [--basic\|--preview]` | MCP 环境检查+一键安装；`--basic` 跳过 MCP，`--preview` 零写入预览 | 否 |
+| `[辅助]` `/icode install [--client claude\|codex\|codebuddy\|all] [--basic\|--preview]` | ICODE、宿主命令桥与 MCP 一键安装；`--basic` 跳过 MCP，`--preview` 零写入预览 | 否 |
 | `[入口]` `/icode log [零散信息...]` | 日志根因分析→转修复需求；版本基线门；TB 复用/批量/`--debug`/`--worktree`；对外简报 | ✅ 每次都新建（同 TB 单复用除外） |
 | `[入口]` `/icode init [--guide] [<需求或指南约束>]` | 常规：新建并产出 `00_init.md`；`--guide`：复用最新合格 init，刷新新人指南+审计 | 常规 ✅；guide 否 |
 | `[流程]` `/icode start <需求>` | 全流程：创建/复用目录 → 步骤1~6 串联；`--worktree` | ✅ 创建 / 复用 |
@@ -324,7 +324,7 @@ test -f "{ICODE_OUT_DIR}/03_plan_final.md" && python3 -c "import json,sys; d=jso
 | [references/project_intake.md](references/project_intake.md) | **工程接入真源**：唯一嵌套 Git 根解析、歧义阻断、超大仓扫描预算、构建入口静态副作用画像 | 所有 workspace-scoped 入口 |
 | [references/evidence_and_verification.md](references/evidence_and_verification.md) | **证据与验证习惯真源**：现场事实、主代理复核、无日志反查、多 Git 根、诊断/实现/验证分层 | log / plan / deepcheck / audit / verify |
 | [references/media_routing.md](references/media_routing.md) | **媒体能力路由真源**：文本优先、宿主能力证明、native/bridge/dual/text_only、分块与视觉证据来源 | init / log / plan / deepcheck / audit / verify（存在图片/视频/PDF 视觉区域时） |
-| [references/host_adapters.md](references/host_adapters.md) | Claude Code / Codex 宿主工具适配；共享技能正文禁止绑定具体工具语法 | 共享 SKILL 被路由时 |
+| [references/host_adapters.md](references/host_adapters.md) | Claude Code / Codex / CodeBuddy 宿主工具适配；共享技能正文禁止绑定具体工具语法 | 共享 SKILL 被路由时 |
 | [references/control_plane.md](references/control_plane.md) + [references/execution_model.md](references/execution_model.md) | **工单控制面 + 可恢复执行**：状态机/事件链/端口/边界回检/轨迹/副作用策略/回执/关闭 | 所有 ticket-scoped step |
 | [references/dir_and_metadata.md](references/dir_and_metadata.md) | 目录硬熔断、ticket_id、索引/metadata、归档/备份过时校验、注入缓存、project_docs 段零检索 | init / log / plan / start / fast / doc / bak |
 | [references/doc_template.md](references/doc_template.md) | icode doc 章节模板：前 50 行四块结构（项目元信息/KEYS/简要说明/目录）+ 十位桶编号 + 自适应 grep 关键词表 + 99 章审计策略 + **v2.0.0 双视角必含元素清单（14 项）+ 业务流独立成章 + 英文首次中文备注 + 链路中文说明 + 质量审视检查清单 + 模板版本自举迁移** | doc |

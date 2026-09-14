@@ -28,7 +28,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --client)
       if [[ $# -lt 2 ]]; then
-        echo "❌ --client 需要参数: claude|codex|all" >&2
+        echo "❌ --client 需要参数: claude|codex|codebuddy|all" >&2
         exit 2
       fi
       CLIENT="$2"

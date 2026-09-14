@@ -1,12 +1,12 @@
 <div align="center">
 
-# ICode — End-to-End Coding Workflow for Claude Code
+# ICode — End-to-End Coding Workflow for AI Coding Hosts
 
 **6-step workflow: Plan → Review → Finalize → Code → Deep Check → Audit.** Run all at once, or step-by-step and switch models between steps.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-Skill-8A2BE2.svg)](SKILL.md)
-[![Version](https://img.shields.io/badge/version-v2.27.0-blue.svg)](SKILL.md)
+[![Version](https://img.shields.io/badge/version-v2.27.1-blue.svg)](SKILL.md)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/ayukyo/icode-skill/issues)
 
 </div>
@@ -134,7 +134,7 @@ Every step produces a real artifact in `.icode_output/.icode_output_N/` (plan �
 
 ### One public installer
 
-Clone the source into a neutral directory, then use the root installer. It installs ICODE, every shared skill declared by [`skill-packs/manifest.json`](skill-packs/manifest.json), and the MCP servers. The installer default is Claude (`--client` default: claude); use `--client all` for Claude Code and Codex together.
+Clone the source into a neutral directory, then use the root installer. It installs ICODE, every shared skill declared by [`skill-packs/manifest.json`](skill-packs/manifest.json), host command adapters, and the MCP servers. The installer keeps `default: claude` (`--client claude`); use `--client all` for Claude Code and Codex together. Use `--client codebuddy` for CodeBuddy. With `all`, CodeBuddy is added only when `~/.codebuddy/` is detected, preserving the historical two-host behavior.
 
 ```bash
 git clone https://github.com/ayukyo/icode-skill ~/icode-skill
@@ -144,9 +144,11 @@ cd ~/icode-skill
 
 Use `./install.sh --dry-run --client all` for a zero-write preflight, or `--skip-mcp` when only ICODE and the shared skills are required. ICODE is installed as `<skills-root>/icode/`; each shared skill is generated from its source template at `<skills-root>/<skill-name>/SKILL.md`. Source templates cannot be discovered as nested skills.
 
+CodeBuddy scans `~/.claude/skills/`, so it reuses that ICODE copy rather than creating a third one. The installer atomically publishes the versioned [`integrations/codebuddy/commands/icode.md`](integrations/codebuddy/commands/icode.md) template as `~/.codebuddy/commands/icode.md`, providing `/icode ...`; a separate ownership marker permits identical-file adoption and rejects conflicting unmanaged commands before any Skill root is changed. CodeBuddy MCP entries remain isolated in `~/.codebuddy/mcp.json`.
+
 The installer writes an ownership marker into managed skills. An identical unmanaged same-name skill is adopted safely; a different unmanaged same-name skill is refused before either host is modified. Runtime configuration and caches are preserved.
 
-Evidence intake, email export intake (`tools/email_intake.py`), technical-document intake (`tools/document_intake.py`), media routing/evidence (`tools/media_router.py`), the project-local debug catalog, runtime baseline resolution, verification debt, the multi-repo handoff matrix, and `/icode learn` are **bundled ICODE tools/steps**. They are copied with the ICODE directory to both Claude Code and Codex by `--client all`; they are not standalone entries in `skill-packs/manifest.json`. The sixteen reusable cross-project Skills—including `email-evidence-intake`, `technical-document-intake`, `hardware-spec-contract-audit`, `schematic-interface-audit`, `mcu-hardware-software-contract-audit`, and the embedded/camera capabilities—remain separately installed from that manifest with the same ownership/hash collision protection.
+Evidence intake, email export intake (`tools/email_intake.py`), technical-document intake (`tools/document_intake.py`), media routing/evidence (`tools/media_router.py`), the project-local debug catalog, runtime baseline resolution, verification debt, the multi-repo handoff matrix, and `/icode learn` are **bundled ICODE tools/steps**. They are copied with the ICODE directory to Claude Code and Codex by `--client all`; CodeBuddy reuses the Claude skill root. They are not standalone entries in `skill-packs/manifest.json`. The sixteen reusable cross-project Skills—including `email-evidence-intake`, `technical-document-intake`, `hardware-spec-contract-audit`, `schematic-interface-audit`, `mcu-hardware-software-contract-audit`, and the embedded/camera capabilities—remain separately installed from that manifest with the same ownership/hash collision protection.
 
 The historical direct-Claude clone remains supported as a compatibility path. After Claude Code discovers ICODE, run the same unified command:
 

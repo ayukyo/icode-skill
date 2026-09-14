@@ -2,7 +2,7 @@
 
 > English: [README.md](README.md) | 中文: 本文件
 
-ICode 是一个 Claude Code 技能（Skill），将需求到交付拆解为严格步骤，每步可单独调用，手动切换模型时操作更灵活。
+ICode 是可供 Claude Code、Codex 与 CodeBuddy 使用的工程工作流 Skill，将需求到交付拆解为严格步骤，每步可单独调用，手动切换模型时操作更灵活。
 
 - **入口命令（可选）**：`/icode log` 日志根因分析（领域无关）→ 转修复需求；`/icode init` 需求初稿对话
 - **步骤 0（可选）**：需求初稿对话，多轮迭代后落档为 `00_init.md`
@@ -31,7 +31,7 @@ ICode 是一个 Claude Code 技能（Skill），将需求到交付拆解为严�
 
 ### 开源统一安装入口
 
-把源码 clone 到普通目录，再运行仓库顶层安装器。它会一次性安装 ICODE、[`skill-packs/manifest.json`](skill-packs/manifest.json) 声明的全部共享技能和 MCP。默认只安装 Claude（`--client claude`）；Claude Code 与 Codex 双端使用 `--client all`。
+把源码 clone 到普通目录，再运行仓库顶层安装器。它会一次性安装 ICODE、[`skill-packs/manifest.json`](skill-packs/manifest.json) 声明的全部共享技能、宿主命令桥和 MCP。默认只安装 Claude（`--client claude`）；Claude Code 与 Codex 双端使用 `--client all`。CodeBuddy 单独使用 `--client codebuddy`；`all` 仅在检测到 `~/.codebuddy/` 时追加 CodeBuddy，避免原有双端安装凭空创建第三方配置。
 
 ```bash
 git clone https://github.com/ayukyo/icode-skill ~/icode-skill
@@ -41,9 +41,11 @@ cd ~/icode-skill
 
 `./install.sh --dry-run --client all` 可做零写入预检；`--skip-mcp` 只安装 ICODE 和共享技能。ICODE 本体发布到 `<skills-root>/icode/`，每个共享技能从不可发现的源模板生成到顶层 `<skills-root>/<skill-name>/SKILL.md`，不会再出现嵌套同名技能。
 
+CodeBuddy 复用 `~/.claude/skills/`，不会产生第三份 ICODE 副本；安装器会把版本化模板 [`integrations/codebuddy/commands/icode.md`](integrations/codebuddy/commands/icode.md) 原子发布为 `~/.codebuddy/commands/icode.md`，从而提供 `/icode ...`。命令桥使用独立所有权标记：同内容旧文件可接管，不同内容的未托管文件会在任何 Skill 写入前拒绝覆盖。其 MCP 独立注册到 `~/.codebuddy/mcp.json`。
+
 安装器通过所有权标记管理共享技能：内容一致的旧副本可以无损接管；内容不同的未托管的同名技能会在任何宿主写入前拒绝，不会静默覆盖。运行配置和缓存继续保留。
 
-证据摄取、邮件导出接入（`tools/email_intake.py`）、技术文档文件接入（`tools/document_intake.py`）、媒体路由/证据记录（`tools/media_router.py`）、项目内 debug catalog、三基线解析、验证债务、多仓 handoff 矩阵和 `/icode learn` 属于 **ICODE 内置工具/步骤**：`--client all` 会随 ICODE 本体同时复制到 Claude Code 与 Codex，不作为独立项写入 `skill-packs/manifest.json`。现有 16 个跨项目共享 Skill（含 `email-evidence-intake`、`technical-document-intake`、`hardware-spec-contract-audit`、`schematic-interface-audit`、`mcu-hardware-software-contract-audit` 及嵌入式/摄像头能力）仍由 manifest 独立安装，并继续使用 ownership/hash 冲突保护。
+证据摄取、邮件导出接入（`tools/email_intake.py`）、技术文档文件接入（`tools/document_intake.py`）、媒体路由/证据记录（`tools/media_router.py`）、项目内 debug catalog、三基线解析、验证债务、多仓 handoff 矩阵和 `/icode learn` 属于 **ICODE 内置工具/步骤**：`--client all` 会随 ICODE 本体同时复制到 Claude Code 与 Codex；CodeBuddy 复用 Claude 技能根，不作为独立项写入 `skill-packs/manifest.json`。现有 16 个跨项目共享 Skill（含 `email-evidence-intake`、`technical-document-intake`、`hardware-spec-contract-audit`、`schematic-interface-audit`、`mcu-hardware-software-contract-audit` 及嵌入式/摄像头能力）仍由 manifest 独立安装，并继续使用 ownership/hash 冲突保护。
 
 历史上的 Claude skills 目录直装方式继续兼容。Claude Code 发现 ICODE 后，执行同一个统一命令：
 

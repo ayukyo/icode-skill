@@ -15,7 +15,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 
 usage() {
   cat <<'EOF'
-Usage: ./mcp/install.sh [--check] [--client claude|codex|all] [mcp-name]
+Usage: ./mcp/install.sh [--check] [--client claude|codex|codebuddy|all] [mcp-name]
 
 Installs all MCP subprojects, or one named subproject. This is the MCP-only
 maintenance entry; use the repository root install.sh for a full installation.
@@ -57,6 +57,14 @@ case "$client" in
   claude|codex|codebuddy|all) ;;
   *) echo "❌ --client 取值须为 claude|codex|codebuddy|all (当前: $client)"; exit 1 ;;
 esac
+
+# `all` preserves the historical Claude+Codex path and adds CodeBuddy only
+# when that host is detected. Explicit `codebuddy` always selects it.
+codebuddy_enabled=false
+if [ "$client" = "codebuddy" ] \
+  || { [ "$client" = "all" ] && [ -d "$HOME/.codebuddy" ]; }; then
+  codebuddy_enabled=true
+fi
 
 # 探测 Python 解释器(Codex 分支跑 client_registry.py 用; 与子工程 install 探测模式一致)
 PYTHON_BIN=""
@@ -125,7 +133,13 @@ case "$client" in
   claude)    echo "   客户端: claude (~/.claude.json, 默认)" ;;
   codex)     echo "   客户端: codex (子工程注册 Claude + codex mcp 注册)" ;;
   codebuddy) echo "   客户端: codebuddy (子工程注册 Claude + 写入 ~/.codebuddy/mcp.json)" ;;
-  all)       echo "   客户端: all (Claude Code + Codex + CodeBuddy 三注册)" ;;
+  all)
+    if [ "$codebuddy_enabled" = true ]; then
+      echo "   客户端: all (Claude Code + Codex + 已检测到的 CodeBuddy)"
+    else
+      echo "   客户端: all (Claude Code + Codex；未检测到 CodeBuddy，保持不写)"
+    fi
+    ;;
 esac
 echo ""
 
@@ -152,7 +166,7 @@ for installer in "${installers[@]}"; do
       fi
     fi
     # CodeBuddy 分支: 同样依赖子工程导出的 entry，写入 ~/.codebuddy/mcp.json
-    if [ "$client" = "codebuddy" ] || [ "$client" = "all" ]; then
+    if [ "$codebuddy_enabled" = true ]; then
       if [ -z "$PYTHON_BIN" ]; then
         echo "   ⚠️ 未找到 python3/python，跳过 CodeBuddy 注册（client_registry.py 需 Python）"
         fail_count=$((fail_count + 1))
@@ -178,10 +192,23 @@ if [ $fail_count -gt 0 ]; then
   exit 1
 fi
 case "$client" in
-  codex|all)
+  all)
     echo "🎉 全部完成!"
     echo "   Claude Code: 重启 Claude Code 后生效"
     echo "   Codex:       新建或重开 Codex 任务后生效(当前任务不会热加载新 MCP)"
+    if [ "$codebuddy_enabled" = true ]; then
+      echo "   CodeBuddy:   新建或重开 CodeBuddy 会话后生效"
+    fi
+    ;;
+  codex)
+    echo "🎉 全部完成!"
+    echo "   Claude Code: 重启 Claude Code 后生效"
+    echo "   Codex:       新建或重开 Codex 任务后生效(当前任务不会热加载新 MCP)"
+    ;;
+  codebuddy)
+    echo "🎉 全部完成!"
+    echo "   Claude Code: 重启 Claude Code 后生效"
+    echo "   CodeBuddy:   新建或重开 CodeBuddy 会话后生效"
     ;;
   *)
     echo "🎉 全部完成!记得重启 Claude Code 让注册生效。"
