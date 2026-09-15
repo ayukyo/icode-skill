@@ -26,7 +26,19 @@
     "completed_steps": { "type": "array", "items": { "type": "string" } },
     "indexed": { "type": "boolean" },
     "ticket_id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$" },
-    "code_deviations": { "type": ["array", "null"] },
+    "code_deviations": {
+      "type": ["array", "null"],
+      "items": {
+        "type": "object",
+        "required": ["plan_said", "actual_done", "reason"],
+        "properties": {
+          "plan_said": {"type": "string", "minLength": 1},
+          "actual_done": {"type": "string", "minLength": 1},
+          "reason": {"type": "string", "minLength": 1}
+        },
+        "additionalProperties": true
+      }
+    },
     "total_rounds": { "type": ["integer", "null"] },
     "clean_rounds": { "type": ["integer", "null"] },
     "max_rounds": { "type": ["integer", "null"] },

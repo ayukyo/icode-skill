@@ -3,7 +3,7 @@ name: icode
 description: 端到端编码工作流（步骤 0~6，含需求初稿、日志根因、验证、独立复评、学习与本地管理 UI），支持：/icode help, ui, install [--basic|--preview], init [--guide], log, start, fast, plan, review, merge, code, deepcheck, audit, crosscheck, patch, verify [--build|--plan|--deploy|--listen|--test|--reuse], doc, docx, limit, readme, ppt, learn [--project|--ticket|--since], status [--pending|--scan|--verdict], list [--all|--plain], bak, worktree --update/--close/--reopen/--merge。新建工单入口支持 --worktree opt-in
 ---
 
-**版本**: v2.28.0
+**版本**: v2.29.0
 
 # ICode 全流程编码工作流（步骤 0 + 1~6）
 
@@ -69,7 +69,7 @@ description: 端到端编码工作流（步骤 0~6，含需求初稿、日志根
 
 ## 控制面（工单 schema v3，vNext）
 
-**新工单一律 schema v3**，经 `tools/icode_control.py create` 原子创建 metadata+出生事件；状态、metadata、事件、步骤端口/边界回检/回执、验证、索引与关闭均由控制面执行，**禁止绕过直写**。文中凡称“写/更新/追加 metadata”，除专用控制字段外，均指 `metadata-update`。机器真源：[mcp/workflow-gate/gates.json](mcp/workflow-gate/gates.json) + [schemas/](schemas/)；执行器含 `step/artifact/operation/policy/trace` 等子命令。完整契约见 [references/control_plane.md](references/control_plane.md) 与 [references/execution_model.md](references/execution_model.md)。legacy 工单只读，变更前须迁移。**`crosscheck` 是明确例外**：它不是工单，独立工具只读解析目标并仅写项目 `.crosscheck/`，不进入本控制面状态机。
+**新工单一律 schema v3**，经 `tools/icode_control.py create` 原子创建 metadata+出生事件；状态、metadata、事件、步骤端口/边界回检/回执、验证、索引与关闭均由控制面执行，**禁止绕过直写**。文中凡称“写/更新/追加 metadata”，除专用控制字段外，均指 `metadata-update`。机器真源：[mcp/workflow-gate/gates.json](mcp/workflow-gate/gates.json) + [schemas/](schemas/)；执行器含 `step/artifact/operation/policy/trace` 等子命令。完整契约见 [references/control_plane.md](references/control_plane.md) 与 [references/execution_model.md](references/execution_model.md)。 审查轮次与Read/Dedup声明按[inspection_evidence](references/inspection_evidence.md)；新trace v2，旧证据未跟踪不补造。legacy 工单只读，变更前须迁移。**`crosscheck` 是明确例外**：它不是工单，独立工具只读解析目标并仅写项目 `.crosscheck/`，不进入本控制面状态机。
 
 可选 Agent Runtime 位于 [agent_runtime/](agent_runtime/README.md)，只在用户显式调用 `/icode ui` 或 `python3 tools/icode_agent.py` 时工作；UI 默认监听 `127.0.0.1:8765`（占用则自动换空闲 loopback 端口），不要求 `--dir`。无参数重复调用复用已存活的全局实例；自动刷新默认 30 秒且可在设置中调整。它是 Codex/Claude Code CLI 的受控管理入口，不替代两者当前主会话；步骤合法性、revision、执行根和 Agent 前后回执仍由控制面决定。
 

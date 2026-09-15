@@ -51,6 +51,12 @@ MCP 不可用时可用只读 `git -C <path> rev-parse --show-toplevel` 与有界
 
 软预算不是“读够数量就宣布完成”。达到预算时输出 `truncated/unobserved`，再按当前问题缩小目录、文件类型、符号或提交范围；不得自动扩大到整个 vendor SDK。二进制、生成目录和历史文档只在有明确证据用途时读取，且采用 hash/manifest/抽样，不把字符串命中当实现支持。
 
+### 审查范围与完成语义
+
+review/deepcheck/audit统一使用 `review_scope`：受影响模块 + caller/import/provider + 有证据的等价实现候选；修改红线只约束写入，不自动排除外部依赖读取。normal仓可全仓；large/huge先有界路径枚举与内容预算，在明确范围内完成语义复核。Dedup函数阈值/报告分母取此范围；多仓gate的function_count为每仓范围内函数数的最大值（对应任一仓达阈值），每仓数与合计另记，不能把局部数冒充全Git仓数，也不能将固定23类别当所有工程都有的类别。
+
+`complete_within_scope`只表示已声明范围内无未观察项，不能写全SDK通过。范围内读取/分类/语义裁决任何环节预算耗尽或缺结果：`partial|degraded`并列unobserved/下一步；工作流可保留降级与债务结束，但禁止success合规回执。具体机器格式以[审查证据合同](inspection_evidence.md)为准。静态catalog、分类、逐家族语义裁决与主代理确认分别记录，单次extract或工具coverage100%不等于Dedup完成。
+
 ## 5. 嵌入式聚合仓的最小基线
 
 进入 plan/code/deepcheck/audit/verify 前至少固定：

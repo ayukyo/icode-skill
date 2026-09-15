@@ -414,13 +414,13 @@
      "schema_version": 3,
      "workflow_gate_schema_version": 1,
      "thinking_gate_schema_version": 1,
-     "mcp_gate_schema_version": 1
+     "mcp_gate_schema_version": 2
    }
    ```
 
    > `tb_source`（可选）：从 TB 拉取时填 `{lib,num,pid,label,url,meta_path}`（metadata 完整版，含本地路径），纯本地日志分析时为 `null`。**写入全局索引时只存摘要 `{lib,num,pid,label}`**（供同 TB 单检索复用，不含 url/meta_path）。
 
-   > **新建 metadata 增加 `"mcp_gate_schema_version": 1`**（见 [references/thinking_core.md](../references/thinking_core.md)「cheap-research 执行门（gate）流程」段）。
+   > **新建 metadata 增加 `"mcp_gate_schema_version": 2`**（见 [references/thinking_core.md](../references/thinking_core.md)「cheap-research 执行门（gate）流程」段）。
    > **log 完成前 gate 校验**：置 `log_done` 前运行
    > `python3 tools/lint_mcp_coverage.py {ICODE_OUT_DIR} --step log --strict`——`log.comments_extract` / `log.long_log_summary` 必须各有最终 trace 行（评论/候选日志未达阈值时记 `skipped_not_eligible`），eligible 未履行不得标流程合规。
    >

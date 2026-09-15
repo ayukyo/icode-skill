@@ -157,13 +157,15 @@
 > **受影响仓库函数数计算（§8.1，替代整仓 $PROJECT_ROOT 单扫）**：多仓工程下 `$PROJECT_ROOT` 可能漏扫被忽略的业务子仓——
 > 1. 从 `metadata.code_files` 与 `01_plan.md` 候选修改文件确定所属 Git 仓库（每个文件目录 `git -C <dir> rev-parse --show-toplevel`）
 > 2. 去重得 `affected_repo_roots`
-> 3. 在每个受影响仓库根运行下方函数 catalog 命令
-> 4. 记录每仓函数数与合计数；**任一受影响仓库 ≥ `dedup_min_functions` 时，对该仓运行 dedup**
+> 3. 按project_intake选择受影响模块、caller/import/provider及等价候选的review_scope，在每仓声明范围内运行函数catalog
+> 4. 记录每仓范围内函数数与合计数；gate evidence.function_count取每仓范围内函数数的最大值，**任一受影响仓库 ≥ `dedup_min_functions` 时，对该仓运行 dedup**
 > 5. review 时 `code_files` 尚空 → 从 `01_plan.md` 文件清单解析候选路径；仍无法解析 → 标 `degraded_after_attempt` 或 L2 流程问题，**不能默认为 <50**
 
 1. **函数目录抽取**（ripgrep 优先）：
 
-   **优先用 ripgrep**（快 10 倍，一次性抽所有函数）：
+   `REVIEW_SCOPE`为已按project_intake确定、解析为本执行根实际路径的Bash数组；只枚举声明范围。此示例head是有界候选预览，触及上限或预算截断须记录unobserved并缩小范围/分批补全，不得把截断候选数当完整分母。
+
+   **优先用 ripgrep**（一次性抽声明范围内候选函数）：
 
    ```bash
    # 通用模式：匹配函数定义（C/C++/Java/Go/Rust/Python/JS/TS 主流 10 种）
@@ -178,7 +180,7 @@
      -e '^(pub\s+)?fn\s+[a-zA-Z_][a-zA-Z0-9_]*\s*\(' \
      -e '^\s+(public|private|protected)?\s*(static\s+)?[a-zA-Z_][a-zA-Z0-9_*]+\s+[a-zA-Z_][a-zA-Z0-9_]*\s*\(' \
      --glob '!*.test.*' --glob '!*.spec.*' --glob '!**/__tests__/**' \
-     "$PROJECT_ROOT" | head -2000
+     "${REVIEW_SCOPE[@]}" | head -2000
    ```
 
    输出按行解析 → catalog.json 格式：`[{file, name, line, signature, context}, ...]`。context 取函数定义行 + 后 5 行（用 `rg -A 5` 重抽或 Read 补足）。
@@ -372,6 +374,9 @@
 
 
 **步骤 2.6 — 写入结果**：
+
+必须读取[审查证据合同](../references/inspection_evidence.md)。每个已完成轮次立即更新 `review_manifest.json` 并登记当前attempt的实际摘要回执；首轮始终写详细JSON，后续仅三类计数全部为0可省详细JSON。manifest记录真实 `origin_attempt`，计划修改导致blocked重入时保留原轮次来源，不把历史文件重登记为当时已写；新一轮完整review运行重置manifest运行边界。`total_rounds`可能是下一轮游标，manifest仅列已完成轮次。
+
 以 JSON 格式写入 `{ICODE_OUT_DIR}/review_round_1.json`，包含：independent_plan_summary、file_review（files_read + key_findings）、comparison_analysis、dimension_results、adversarial_verification（每个质疑者的裁决+依据+最终状态；**零待对抗 issue 即跳过对抗验证时为 `null`**）、has_new_issues、new_issues（仅含 `verification_status == confirmed` 的 issue，含步骤 2.4 实证 confirmed 与步骤 2.5.5 对抗 confirmed 两类来源，每条遵循下方 Issue 结构化模板）、refuted_issues（被对抗推翻的 issue + 推翻原因）、pending_verification（`needs_more_evidence` 的 issue，标 `[未验证-证据不足]`）、summary。
 
 再写入 `{ICODE_OUT_DIR}/02_review.md`（**人类可读摘要，不嵌套完整 JSON**），格式为：
@@ -405,7 +410,7 @@
 
 维度同首轮，但仅针对增量范围。**增量轮次同样必须执行步骤 2.5.5 对抗验证**（只对增量 issue），不得因"上一轮已审过"而跳过对抗。**增量轮的"断言验证跟进"若发现新的断言验证失败，同样适用步骤 2.4 实证快速通道**（直接标 `confirmed` 计入 `new_issues`，无需对抗），但必须填写 `evidence_pointer`。
 
-> **review_round_*.json 写入规则**（避免空文件噪音）：仅当本轮有 `new_issues` 或 `pending_verification` 或 `refuted_issues` 中任意一类非空时才写 `review_round_{total_rounds}.json`；clean 轮（无 issue）跳过写文件，仅在 02_review.md 中标注 "第 N 轮：clean"。避免 N 轮审查产生 N 个空 JSON 文件。
+> **review_round_*.json 写入规则**：首轮始终写 `review_round_1.json`；后续轮仅当 `new_issues` / `pending_verification` / `refuted_issues` 任一非空时写详细JSON。三类全空的后续clean轮只更新 `review_manifest.json` 与02摘要。`has_new_issues=false`不等于三类全空，pending/refuted仍必须有JSON。控制面finish success会核对计数、SHA256与真实来源回执，不能只靠02中写clean。
 
 写入 `review_round_{total_rounds}.json` 后追加写入 `02_review.md`（**人类可读摘要格式同首轮，不嵌套 JSON**）。
 

@@ -99,8 +99,8 @@
 - **复用 MCP**：⑥ cheap-research（`extract` 用 haiku 分类 + 高质量模型找重复）；函数抽取用 ripgrep（catalog.json）
 - **强证据**：02_review/05_deepcheck 步骤中 + cheap-research 🟢 + **函数数 ≥ 50**
 - **触发场景**：
-  - **02_review §2.5.7（轻量 top 5）**：ripgrep 抽所有函数 → `mcp__cheap-research__extract`(haiku) 分类（wrapper object schema）→ 后处理映射到 23 类 → 取 top 5 类别逐类调高质量模型找重复
-  - **05_deepcheck §9.4（完整全量）**：完整 5 阶段（抽取→分类→拆分→高质量模型逐类找重复→报告）。分别检测 catalog.json/categorized.json 是否已由 §2 生成 → 复用避免重跑
+  - **02_review §2.5.7（轻量 top 5）**：ripgrep 抽声明review_scope内全部候选函数 → `mcp__cheap-research__extract`(haiku) 分类（wrapper object schema）→ 后处理映射到 23 类 → 取 top 5 类别逐类调高质量模型找重复
+  - **05_deepcheck §9.4（声明范围内完整）**：完整 5 阶段（抽取→分类→拆分→高质量模型逐类找重复→报告）。分别检测 catalog.json/categorized.json 是否已由 §2 生成 → 复用避免重跑
 - **中间产物路径**：`{ICODE_OUT_DIR}/<ticket>/dedup/{catalog,categorized,duplicates/*.json}`
 - **最终报告**：进 step 产物 .md（02_review.md §2.5.7 / 05_deepcheck.md §9.4）的 `## 语义重复检测报告` 段（HIGH/MEDIUM/LOW 三段 + top 5 重复函数对）。**HIGH = 高优先级复核，不直接等于 confirmed**
 - **权限边界（v1.1 取消 dedup 对抗豁免）**：dedup 只产出**疑似重复候选对**。会导致代码删除/合并的候选**必须进入 §2.5.5 / §5 A6 对抗验证**，对抗通过才可标 `confirmed`、才可进入合并/删除；纯重复提示（无删除动作）可保持轻量。`trace_refs` 只作文本引用候选，不能证明动态调用/反射/链接关系
@@ -116,6 +116,7 @@
   - **cheap-research LLM 把 array-of-objects 退化为 single object**——多次确认，schema `{"type": "array", "items": {...}}` 时 LLM 仍返回单个 object。**必须用 wrapper object 模式** `{"results": [...]}` 规避
   - **cheap-research LLM 不严格遵守 23 类清单**——即使 prompt 强约束，LLM 仍返回"Number Parsing"/"Math"/"String Manipulation"等自由类别。**必须主代理在写入 categorized.json 前做后处理映射**（见 §2.5.7/§9.4 第 3 步映射表）
   - extract 返回 schema_validation_failed → 重试 1 次（自动改 instruction），仍失败标"分类降级"
+- **范围与复用**：按[审查证据合同](inspection_evidence.md)记录范围/未观察项；复用catalog、categorized及duplicates前核对scope/tool/参数和被读源码hash身份。23类是映射词表，覆盖分母为范围内实际出现类别，不能写全SDK或23类均已审。空数组仅在调用成功且覆盖完整时表示无重复，错误/空响应/预算截断仍保留债务。
 - **类别清单（共 23 类）**：
   - 通用类 20：file-ops / string-utils / validation / error-handling / http-api / date-time / data-transform / database / logging / config / async-utils / testing / ui-helpers / crypto / provider-impl / tool-impl / event-handling / session-management / compaction / other
   - iCode 扩展 3 类（嵌入式场景）：**hardware-abstraction**（硬件抽象：传感器/GPIO/中断）/ **protocol-impl**（通信协议：MQTT/Modbus/CAN/串口）/ **build-system**（构建脚本：CMake/Make/Bazel）

@@ -19,6 +19,8 @@
 
 **用户语义变更检测（O-4，同 [02_review.md](02_review.md) 前置校验）**：读 `metadata.scope_contract`（缺失视为 null＝未冻结，跳过，向后兼容旧工单）；若**用户本次输入**改变冻结契约语义（状态身份或生命周期 / 允许或拒绝条件 / 持久化一致性或回滚承诺 / 验收条件、调用方语义或真实环境验证场景）——先分类写入 `metadata.requirement_deltas`（追加，分类枚举与判定同 02_review 前置：`clarification_only` / `a_now_with_evidence` / `needs_user_confirm` / `needs_replan`），**未分流不得继续本步骤**（`needs_user_confirm` 未确认 / `needs_replan` 未重跑 plan → 停止定稿流程等待处理）。若用户输入仅澄清不改变契约，则无 delta，正常继续。
 
+新合同审查还须运行 `python3 tools/icode_control.py check-outputs --dir {ICODE_OUT_DIR} --step review`；失败回review补齐真实证据，禁止在merge事后生成回执冒充review已完成。旧合同历史记录按[审查证据合同](../references/inspection_evidence.md)标未跟踪。
+
 ## 执行步骤
 
 1. 执行目录管理中的「检测最新目录」逻辑，确定 `ICODE_OUT_DIR`

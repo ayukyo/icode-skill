@@ -58,7 +58,7 @@
   "schema_version": 3,
   "workflow_gate_schema_version": 1,
   "thinking_gate_schema_version": 1,
-  "mcp_gate_schema_version": 1
+  "mcp_gate_schema_version": 2
 }
 ```
 
@@ -166,3 +166,7 @@ fast 模式的"精简"不等于"偷懒"：
 | **cheap-research** | 🟢* | **降本增强**：review（dedup `review.dedup` extract + 审查输出压缩 `review.result_summary` summarize）+ audit（仓库事实候选 `audit.repo_facts` propose_repo_facts + 差异摘要 `audit.plan_diff` diff_summary）等**正文有执行点**的子任务。**fast deepcheck 只跑 Reverse，Fixed/Dedup 阶段不到达**：`deepcheck.fixed_scan` / `deepcheck.dedup` 必须记 `decision=skipped_stage_not_reached, evidence={mode:fast, phase:reverse}`，fast 的 dedup 责任由 review 承担（review gate 不因 fast 豁免）。plan/code 无正文执行点（标 ⚪），不做。未装走 Agent(model="haiku") 兜底，不阻塞。**不接管决策**：3 质疑者对抗/架构决策/终审裁决/修复方案一律不走（零灰区原则）。详见 [mcp_per_step.md](../references/mcp_per_step.md) |
 
 **强制约束**：🟢/🟢*/⚪ 语义 + 双保险机制（执行步骤内嵌 + thinking_core gate）详见 [SKILL.md「MCP 调用覆盖强制化」](../SKILL.md) + [references/mcp_per_step.md「双保险机制」](../references/mcp_per_step.md)；本步骤表内的 🟢/🟢* 标注按上方真源判定。
+
+## 条件证据合同
+
+fast单轮仍写review_round_1.json与review_manifest.json（后续clean详细JSON豁免不适用于首轮），counts三类及真实origin attempt按[审查证据合同](../references/inspection_evidence.md)。有效模式仍为fast时，deepcheck只填Reverse阶段Read声明与deepcheck_coverage.json；risk_profile.effective_mode=full时改为Reverse/Fixed/Free三阶段。Audit另填独立Audit覆盖声明，不能复用Reverse的Read当Audit。未进入Fixed/Dedup的trace必须mode=fast/phase=reverse。

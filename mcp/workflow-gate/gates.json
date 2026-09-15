@@ -213,6 +213,7 @@
         ],
         "outputs": [
           {"id": "review", "kind": "ticket_file", "value": "02_review.md"},
+          {"id": "review_manifest", "kind": "ticket_file", "value": "review_manifest.json"},
           {"id": "review_rounds", "kind": "ticket_glob", "value": "review_round_*.json", "required": false}
         ],
         "required_checks": ["before_write", "after_wait", "before_transition"],
@@ -222,12 +223,13 @@
         "inputs": [
           {"id": "plan", "kind": "ticket_file", "value": "01_plan.md", "required": true, "protected": true},
           {"id": "review", "kind": "ticket_file", "value": "02_review.md", "required": true, "protected": true},
+          {"id": "review_manifest", "kind": "ticket_file", "value": "review_manifest.json", "required": false, "protected": true},
           {"id": "review_rounds", "kind": "ticket_glob", "value": "review_round_*.json", "required": false, "protected": true},
           {"id": "deltas", "kind": "metadata_pointer", "value": "/requirement_deltas", "required": false, "protected": true}
         ],
         "outputs": [{"id": "final_plan", "kind": "ticket_file", "value": "03_plan_final.md"}],
         "required_checks": ["before_write", "before_transition"],
-        "drift_routes": {"plan": "review", "review": "review", "review_rounds": "review", "deltas": "plan", "default": "review"}
+        "drift_routes": {"plan": "review", "review": "review", "review_manifest": "review", "review_rounds": "review", "deltas": "plan", "default": "review"}
       },
       "code": {
         "inputs": [
@@ -252,7 +254,8 @@
           {"id": "active_checkout", "kind": "metadata_pointer", "value": "/active_checkout", "required": false, "protected": true},
           {"id": "workspace_head", "kind": "workspace_git_head", "value": ".", "required": false, "protected": true}
         ],
-        "outputs": [{"id": "deepcheck", "kind": "ticket_file", "value": "05_deepcheck.md"}],
+        "outputs": [{"id": "deepcheck", "kind": "ticket_file", "value": "05_deepcheck.md"},
+          {"id": "inspection_coverage", "kind": "ticket_file", "value": "deepcheck_coverage.json"}],
         "required_checks": ["before_write", "after_wait", "before_transition"],
         "drift_routes": {"final_plan": "review", "code_files": "deepcheck", "active_checkout": "worktree", "workspace_head": "merge", "default": "deepcheck"}
       },
@@ -264,7 +267,8 @@
           {"id": "active_checkout", "kind": "metadata_pointer", "value": "/active_checkout", "required": false, "protected": true},
           {"id": "workspace_head", "kind": "workspace_git_head", "value": ".", "required": false, "protected": true}
         ],
-        "outputs": [{"id": "audit", "kind": "ticket_file", "value": "06_audit.md"}],
+        "outputs": [{"id": "audit", "kind": "ticket_file", "value": "06_audit.md"},
+          {"id": "inspection_coverage", "kind": "ticket_file", "value": "audit_coverage.json"}],
         "required_checks": ["before_write", "after_wait", "before_transition"],
         "drift_routes": {"final_plan": "review", "code_files": "deepcheck", "deepcheck": "deepcheck", "active_checkout": "worktree", "workspace_head": "merge", "default": "audit"}
       },

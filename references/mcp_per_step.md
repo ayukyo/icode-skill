@@ -2,6 +2,8 @@
 
 > 每个 icode 步骤推荐使用的 MCP。推荐级别二元化，消除 🟡"应该调"模糊地带：🟢 必须调（强证据场景满足）/ ⚪ 不必调（不评估）。详见 [mcp_integration.md](mcp_integration.md)。代码符号/引用/调用点检索统一走 grep/Read/git grep 文本层（见 [anti_laziness.md](anti_laziness.md) 第 21 条）。
 
+审查范围、有效模式、条件轮次JSON、阶段Read/Dedup声明和v2门禁事实一致性按[审查证据合同](inspection_evidence.md)。工具履行不等于语义审查完成；缓存必须输入身份匹配，不因文件存在直接复用。
+
 ## 推荐级别语义
 
 | 级别 | 符号 | 语义 | 触发条件 | 未调用的合规处理 |
@@ -170,7 +172,7 @@
 
 
 - **cheap-research**（🟢*）：Fixed 预扫（`scan_patterns` 功能点×代码位置机械预扫，见 [steps/05_deepcheck.md](../steps/05_deepcheck.md) 步骤 5）+ dedup（`extract`，见 §9.4）。`diff_summary`（Reverse 阶段对比）/ `summarize`（阶段摘要压缩）可作可选增强，非强证据场景不评估。**不接管决策**：Fixed/Free 阶段 / 3 质疑者对抗（A6）走主会话（高风险）
-- **dedup 子阶段**：见 §9.4。**强证据** = cheap-research 🟢 + 函数数 ≥ `dedup_min_functions`（gates.json 常量）→ 全量 dedup（5 阶段：抽取→分类→拆分→高质量模型逐类找重复→报告）。**降级**：函数数 < 阈值 / ripgrep 不可用 / cheap-research 不可用 → 整个 §9.4 跳过。**复用**：检测 `categorized.json` 是否已由 §2 02_review 生成 → 复用避免重跑分类（中间产物路径 `{ICODE_OUT_DIR}/<ticket>/dedup/{catalog,categorized,duplicates/*.json}`，与 mcp_integration 一致）
+- **dedup 子阶段**：见 §9.4。**强证据** = cheap-research 🟢 + 声明review_scope内函数数 ≥ `dedup_min_functions`（gates.json 常量）→ 范围内完整dedup（5 阶段：抽取→分类→拆分→高质量模型逐类找重复→报告）。**降级**：函数数 < 阈值 / ripgrep 不可用 / cheap-research 不可用 → 整个 §9.4 跳过并声明未观测边界。**复用**：检测 `categorized.json` 是否已由 §2 02_review 生成且scope/tool/参数/源码hash身份匹配 → 复用避免重跑分类（中间产物路径 `{ICODE_OUT_DIR}/<ticket>/dedup/{catalog,categorized,duplicates/*.json}`，与 mcp_integration 一致）
 
 ### 6 audit（终审）
 - **playwright**：真实 UI 验证——仅前端工程时

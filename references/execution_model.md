@@ -120,3 +120,7 @@ python3 tools/icode_control.py trace --dir <out_dir> --limit 50
 - 新事件类型由专用命令独占，通用 `event` 不能伪造。
 - 端口/策略目录损坏时 linter 与执行器都 fail-closed。
 - 行为树只提供设计理念：可恢复顺序执行、边界重新判断、明确终态与回执；不把 ICODE 改造成持续运行的机器人控制器。
+
+## 条件审查与阶段覆盖
+
+review必需review_manifest.json，按每轮真实origin attempt保存轻量round digest回执；首轮和所有非clean轮要JSON，clean后续轮可省详细JSON。deepcheck/audit分别必需coverage JSON，缺Read阶段、旧hash或未观察项不能finish success；degraded也要真实声明回执和债务原因。终审只读产物检查统一调用 `icode_control.py check-outputs --dir <out> --step audit`。具体格式/历史合同兼容见[inspection_evidence](inspection_evidence.md)。

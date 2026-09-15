@@ -384,7 +384,7 @@
   "schema_version": 3,
   "workflow_gate_schema_version": 1,
   "thinking_gate_schema_version": 1,
-  "mcp_gate_schema_version": 1
+  "mcp_gate_schema_version": 2
 }
 ```
 

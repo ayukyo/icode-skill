@@ -58,7 +58,7 @@
    - `{ICODE_OUT_DIR}/.ico_metadata.json` —— 工单状态 + patch 历史计数
    - `{ICODE_OUT_DIR}/.decision_anchors.json` —— 关键决策摘要（缺失则跳过，见 [decision_anchors.md](../references/decision_anchors.md)）
    - `git status` + `git diff --stat` —— 当前代码现状（已改了什么）
-2. **需要细节才定点读**：Read 产物（`00_init.md` / `03_plan_final.md` / `06_audit.md` 等）**只读与本次修改点相关的章节**（按锚点/标题定位），**绝不全文重读**（00_init/01_plan 全文动辄 300+ 行）
+2. **需要细节才定点读**：Read 产物（`00_init.md` / `03_plan_final.md` / `06_audit.md` 等）**只读与本次修改点相关的章节**（按锚点/标题定位），**不重读无关全文**；相关完整章节必须实读，若问题跨章节或范围无法确定则完整Read所需原产物
 3. **新会话等价性**：每次 `/icode patch` 后本文件 + 锚点 + metadata 已落盘，即使你新开会话 / 切换模型，重跑 `/icode patch` 也能无损继续——**产物是唯一权威上下文**
 4. **禁止把历史对话当依据**：判定现状只认磁盘（产物 + 代码 + git diff），不认"之前会话里我说过什么"；若发现磁盘现状与会话记忆矛盾，**以磁盘为准**并提示刷新
 
@@ -312,6 +312,8 @@
 3. 复检不通过（新引入问题且当场无法修复）→ 标 `patch_history` 末条 `status="issues"` + L2 警告，流程继续（不阻断；你可再跑 `/icode patch` 处理）
 4. 复检通过 → `patch_history` 末条 `status="done"`
 
+实施后若before_transition检测计划内code_files漂移，按[execution_model](../references/execution_model.md)将原attempt以blocked终结，同Patch N新start冻结最终实现并复检；新attempt登记08及全部code_files真实摘要回执。不得强制接受新摘要、增加patch_count，或重复已由稳定source hashes核对通过的构建/打包副作用。
+
 ## 强制操作（完成后必须执行）
 
 1. **更新元信息**（`.ico_metadata.json`）：
@@ -347,7 +349,7 @@
 
 | patch 阶段 | 工具 | 类型 | focus / 输入 | 真源函数 | 价值 |
 |------------|------|------|------------|------|------|
-| **阶段 1 重新审视现状**：重审 `00_init.md` / `01_plan.md` / `03_plan_final.md` 长产物（**仅跨 session 快速回顾**，gate `patch.context_summary`） | `summarize` | [核心] | `focus="改动点/根因"` | [`summarize`](../mcp/cheap-research/server.py) | 跨 session 恢复时快速回顾；**首次进入必须 Read 全文，不得用 summarize 替代**（见下方阶段 1 约束） |
+| **阶段 1 重新审视现状**：重审 `00_init.md` / `01_plan.md` / `03_plan_final.md` 长产物（**仅跨 session 快速回顾**，gate `patch.context_summary`） | `summarize` | [核心] | `focus="改动点/根因"` | [`summarize`](../mcp/cheap-research/server.py) | 跨 session 恢复时快速回顾；**首次进入必须实读相关完整章节/必要代码上下文，不得用summarize替代**（见下方阶段 1 约束） |
 | **阶段 1 重新审视现状**：从 `index.json` 候选中按本工单症状挑相似历史工单 | `retrieve_similar` | [核心] | `query=本工单症状, candidates=[{ticket_id, requirement_summary, keywords, ...}]` | [`retrieve_similar`](../mcp/cheap-research/server.py) | 50 条索引 → top-k 评分，主代理只看前几个 |
 | **阶段 2 增量计划 三链预扫 caller / import / test** | `trace_refs` | [增强] | `symbol=待改符号, scope_path="."` | [`trace_refs`](../mcp/cheap-research/server.py) | **纯机械、不调 LLM**——替代 3 次手 grep，自动出 caller 链 |
 | **阶段 2/4 长 diff 摘要**（PATCH vs BASE / 模板产物 vs 现状） | `diff_summary` | [核心] | `focus="接口变更/破坏面"` | [`diff_summary`](../mcp/cheap-research/server.py) | 长 diff 索引化，主代理只看摘要 |
@@ -364,7 +366,7 @@
 
 **patch 阶段 1 重审的 cheap-research 约束（修复场景防降质）**：
 
-> patch 是"修复"场景——**主代理必须 Read 全文**看清根因、4 维度验证清单、决策推理、增量计划上下文，再做修复方案。**禁止用 `summarize` 替代全文 Read**——便宜模型摘要丢 20-40% 关键信息，**会导致修复方向误判**。
+> patch 是"修复"场景——**主代理必须 Read 与修复有关的完整章节及代码上下文（跨章节或范围不明时Read所需产物全文）**看清根因、4 维度验证清单、决策推理、增量计划上下文，再做修复方案。**禁止用 `summarize` 替代必要原文Read**——便宜模型摘要丢 20-40% 关键信息，**会导致修复方向误判**。
 >
 > | 工具 | 在 patch 阶段 1 的合法用法 | 在 patch 阶段 1 的**非法用法** |
 > |------|----------------------|------------------------|
@@ -373,7 +375,7 @@
 > | `trace_refs` | ✅ 直接用（纯机械，不影响判断） | — |
 > | `propose_repo_facts` | ✅ 阶段 4 用（详见阶段 4 行，候选须实证） | — |
 >
-> **判定时点**：阶段 1 启动时（如 `/icode patch` 命中、当前会话中 metadata 已读），主代理**必须 Read 全文 + grep 历史产物**；**之后**才可（条件性地）用 `summarize` 做回顾辅佐。**首次进入阶段 1 不得绕过全文**。
+> **判定时点**：阶段 1 启动时（如 `/icode patch` 命中、当前会话中 metadata 已读），主代理**必须实读相关完整章节/必要代码上下文 + grep历史产物**；**之后**才可（条件性地）用 `summarize` 做回顾辅佐。**首次进入阶段1不得绕过必要原文；跨章节或范围不明时完整Read所需产物**。
 
 **降级与边界**：
 - cheap-research **不接管**：①决策（该改哪、改不改） ②对抗（阶段 2.5 修复方案对抗的质疑者必须独立 spawn，与 `references/adversarial.md` 体系并存） ③架构/工程理解判断。主代理仍需在拿到工具产出后做最终判断 / 重读关键部分

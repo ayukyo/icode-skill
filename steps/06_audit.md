@@ -7,6 +7,13 @@
 > **共享技能路由**：终审证据收集前读取 [references/skill_routing.md](../references/skill_routing.md)，复核已命中技能的输出与实际代码/验证记录一致。
 > **证据习惯真源**：主代理决定性证据复核、claim ledger 和交付分层统一执行 [references/evidence_and_verification.md](../references/evidence_and_verification.md)。
 
+## 阶段覆盖与合规结束（强制）
+
+执行前读取[审查证据合同](../references/inspection_evidence.md)。只有实际完成本轮各阶段Read后，才写阶段覆盖声明及实际源hash：deepcheck写 `deepcheck_coverage.json`，audit写 `audit_coverage.json`，登记本attempt真实artifact回执。声明必须覆盖metadata.code_files全部文件；按risk_profile.effective_mode（未声明时按mode）：full为Reverse/Fixed/Free，实际fast仅Reverse，audit为独立Audit；fast升级full不可省阶段。已有hash/工具调用/历史确认行均不代替本轮Read。
+
+预算耗尽或有未观察项：写 `coverage_status=partial|degraded`、`unobserved`、`debt_reason`；finish用degraded而非success，报告不得称流程规范全部通过，验证债务保留。控制面success拒绝缺声明、缺阶段、过期hash或未完成Dedup；degraded也要求真实声明回执与原因。编译成功不消除审查债务。
+
+
 ## 本步骤 L1/L2 检查项声明
 
 按 SKILL.md「强制阻断边界矩阵」定义，本步骤触发的检查项：
@@ -326,26 +333,11 @@ du -sh <各 worktree 路径>                                  # 空间占用
 > **落点约束**：终检的代码/Git 证据必须在**本工单 `active_checkout.path`** 内取；普通 worktree 的产物也在该 checkout。**reopen 工单**则从 `.active_ticket.json` 取 `artifact_root/control_root`，产物终检和回写在归档根，代码终检在 active checkout；两根任一身份不符都不得交付。
 
 ```bash
-python3 -c "
-import json,sys,os
-d=os.path.join('{ICODE_OUT_DIR}')
-req=['01_plan.md','02_review.md','03_plan_final.md','04_code_review_fix.md','05_deepcheck.md','06_audit.md']
-missing=[f for f in req if not os.path.exists(os.path.join(d,f))]
-import glob
-json_cnt=len(glob.glob(os.path.join(d,'review_round_*.json')))
-m=json.load(open(os.path.join(d,'.ico_metadata.json')))
-valid={'init_in_progress','plan_done','review_in_progress','review_done','plan_finalized','code_in_progress','code_done','deepcheck_in_progress','deepcheck_done','completed','log_in_progress','log_done'}
-st=m.get('status')
-miss_txt='无' if not missing else ','.join(missing)
-status_txt='OK' if st in valid else '词表外:'+str(st)
-cf_ok='True' if (m.get('code_files') or []) else 'False'
-print(f'缺失产物: {miss_txt}; review_round JSON: {json_cnt}; status: {st} {status_txt}; code_files 非空: {cf_ok}')
-sys.exit(1 if (missing or (st not in valid) or not (m.get('code_files') or [])) else 0)
-"
+python3 tools/icode_control.py check-outputs --dir {ICODE_OUT_DIR} --step audit
 ```
 
-- **缺失产物 / `status` 词表外 / `code_files` 为空 → 退出码非 0**：逐项按 L2 记入 `06_audit.md` 问题清单，走 6.2 强制修复流程补齐后再出结论（`04_code_review_fix.md` 缺失 = 步骤4 未产出 1.5 复检，须回补；`review_round_*.json` 全缺 = 步骤2 审查无结构化记录，须回查）。**不得以"这些内容我在会话里讨论过"豁免文件缺失**——产物集是下游步骤与回读的唯一磁盘依据
-- `code_files` 为空（S8）：即使代码已写，也标 L2，回步骤4 补记 `code_files`（相对项目根路径数组），否则步骤5/6 的前置校验无代码证据对象
+该只读命令复用控制面步骤端口与[审查证据合同](../references/inspection_evidence.md)，检查主产物、code_files实际存在、新审查运行manifest、首轮及所有非clean轮详细JSON/计数/摘要/来源回执、覆盖声明。缺件或不一致退出非0，走6.2修复/真实复检；不得另写一套Python统计判断。历史已完成旧合同缺新增manifest/coverage端口时标 `historical_evidence_untracked`，仍需原首轮结构化JSON；缺基础JSON则终检失败，不补造当时回执；需要新合规结论则重新review/复检。机器检查通过不代表人工读懂代码或实机通过。
+
 
 ## 6.5 schema 状态汇总（自动写入，可缺省）
 

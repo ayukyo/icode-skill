@@ -191,6 +191,33 @@ else
   bad "source equal to ICODE destination is skipped safely"
 fi
 
+# Local host memory is development state, not an installed runtime payload.
+# Exercise both real publication engines against an isolated source repository.
+git init -q "$SELF_SOURCE"
+mkdir -p "$SELF_SOURCE/.codebuddy/memory"
+printf 'synthetic host-local memory\n' >"$SELF_SOURCE/.codebuddy/memory/MEMORY.md"
+for memory_engine in rsync cp; do
+  if [[ "$memory_engine" == rsync ]] && ! command -v rsync >/dev/null 2>&1; then
+    printf '  SKIP rsync memory regression: engine unavailable\n'
+    continue
+  fi
+  memory_root="$TMP/memory-$memory_engine"
+  if ICODE_SYNC_ENGINE="$memory_engine" \
+       CLAUDE_SKILLS_ROOT="$memory_root" \
+       AGENTS_SKILLS_ROOT="$TMP/memory-unused-$memory_engine" \
+       SKILL_PACK_MANIFEST="$PACKS/manifest.json" \
+       SKILL_ROUTES="$PACKS/routes.json" \
+       "$SELF_SOURCE/scripts/sync-to-global.sh" --apply --client claude >/dev/null 2>&1 \
+    && [[ ! -e "$memory_root/icode/.codebuddy" ]] \
+    && [[ -f "$SELF_SOURCE/.codebuddy/memory/MEMORY.md" ]] \
+    && cmp -s "$SELF_SOURCE/integrations/codebuddy/commands/icode.md" \
+         "$memory_root/icode/integrations/codebuddy/commands/icode.md"; then
+    ok "$memory_engine excludes host-local CodeBuddy state and retains the official bridge"
+  else
+    bad "$memory_engine excludes host-local CodeBuddy state and retains the official bridge"
+  fi
+done
+
 CP_CLAUDE="$TMP/cp-claude"
 CP_AGENTS="$TMP/cp-agents"
 mkdir -p "$CP_CLAUDE/icode/skill-packs/fixture-evidence-skill" \

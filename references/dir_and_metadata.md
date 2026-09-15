@@ -419,7 +419,7 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
   "schema_version": 3,
   "workflow_gate_schema_version": 1,
   "thinking_gate_schema_version": 1,
-  "mcp_gate_schema_version": 1
+  "mcp_gate_schema_version": 2
 }
 ```
 
@@ -446,7 +446,7 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
   "schema_version": 3,
   "workflow_gate_schema_version": 1,
   "thinking_gate_schema_version": 1,
-  "mcp_gate_schema_version": 1
+  "mcp_gate_schema_version": 2
 }
 ```
 
@@ -471,7 +471,7 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
   "schema_version": 3,
   "workflow_gate_schema_version": 1,
   "thinking_gate_schema_version": 1,
-  "mcp_gate_schema_version": 1
+  "mcp_gate_schema_version": 2
 }
 ```
 
@@ -498,7 +498,7 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
   "schema_version": 3,
   "workflow_gate_schema_version": 1,
   "thinking_gate_schema_version": 1,
-  "mcp_gate_schema_version": 1
+  "mcp_gate_schema_version": 2
 }
 ```
 

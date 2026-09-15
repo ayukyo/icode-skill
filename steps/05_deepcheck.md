@@ -7,6 +7,13 @@
 > **共享技能路由**：Reverse 前读取 [references/skill_routing.md](../references/skill_routing.md)，用命中技能的输出合同补充逆推与生命周期复检，不替代三阶段主检查。
 > **证据习惯真源**：消费者逆推、无日志上游 gate、跨轮残留和未观测边界统一执行 [references/evidence_and_verification.md](../references/evidence_and_verification.md)。
 
+## 阶段覆盖与合规结束（强制）
+
+执行前读取[审查证据合同](../references/inspection_evidence.md)。只有实际完成本轮各阶段Read后，才写阶段覆盖声明及实际源hash：deepcheck写 `deepcheck_coverage.json`，audit写 `audit_coverage.json`，登记本attempt真实artifact回执。声明必须覆盖metadata.code_files全部文件；按risk_profile.effective_mode（未声明时按mode）：full为Reverse/Fixed/Free，实际fast仅Reverse，audit为独立Audit；fast升级full不可省阶段。已有hash/工具调用/历史确认行均不代替本轮Read。
+
+预算耗尽或有未观察项：写 `coverage_status=partial|degraded`、`unobserved`、`debt_reason`；finish用degraded而非success，报告不得称流程规范全部通过，验证债务保留。控制面success拒绝缺声明、缺阶段、过期hash或未完成Dedup；degraded也要求真实声明回执与原因。编译成功不消除审查债务。
+
+
 ## 本步骤 L1/L2 检查项声明
 
 按 SKILL.md「强制阻断边界矩阵」定义，本步骤触发的检查项：
@@ -266,7 +273,7 @@ Free 阶段一次性完整覆盖全部 15 个角度。
 >
 > - cheap-research 🟢（`mcp__cheap-research__extract` 可用）
 > - **函数数 ≥ 50**（阈值取自 `mcp/cheap-research/gates.json` 常量 `dedup_min_functions`，禁止在正文写死）
-> - **gate 绑定**：本阶段 = gate `deepcheck.dedup`（tool=extract）。**full 模式进入 Dedup 且函数数 ≥ 阈值** → eligible=true 必须 called/cache_hit/degraded_after_attempt；**函数数 < 阈值** → eligible=false `skipped_not_eligible`（evidence 含 function_count/threshold）；**fast 模式不进入 Dedup** → eligible=false `skipped_stage_not_reached`（evidence 含 mode/phase）。**函数 catalog 按受影响 Git 仓库计算**：从 `metadata.code_files` 与 `01_plan.md` 候选文件解析所属仓库（`git -C <dir> rev-parse --show-toplevel` 去重）→ 每仓跑函数 catalog → 记录每仓函数数与合计数，任一受影响仓库 ≥ 阈值即对该仓运行 dedup
+> - **gate 绑定**：本阶段 = gate `deepcheck.dedup`（tool=extract）。**full 模式进入 Dedup 且函数数 ≥ 阈值** → eligible=true 必须 called/cache_hit/degraded_after_attempt；**函数数 < 阈值** → eligible=false `skipped_not_eligible`（evidence 含 function_count/threshold）；**fast 模式不进入 Dedup** → eligible=false `skipped_stage_not_reached`（evidence 含 mode/phase）。**函数 catalog 按受影响 Git 仓库定位、在声明review_scope内计算**：从 `metadata.code_files` 与 `01_plan.md` 候选文件解析所属仓库（`git -C <dir> rev-parse --show-toplevel` 去重）→ 按工程接入预算选择受影响模块+caller/import/provider/等价候选的review_scope → 每仓在该范围跑函数catalog → 记录每仓范围/函数数与合计数，gate evidence.function_count取每仓范围内函数数的最大值，任一受影响仓库 ≥ 阈值即对该仓运行 dedup
 >
 > **任一不满足 → 整个 §9.4 跳过**，在思考块 `MCP 调用` 段写明降级原因 + 写 trace（不写产物文件）。
 >
@@ -274,11 +281,15 @@ Free 阶段一次性完整覆盖全部 15 个角度。
 
 **执行步骤**（AI 直接照填）：
 
+缓存存在只表示候选可复用；第1步及第5步复用前必须核对scope/tool/参数/源码hash输入身份与当前一致，缺身份或漂移则对应阶段重跑，不能仅凭catalog/categorized/duplicates文件存在跳过。
+
 1. **复用检测**：Read `{ICODE_OUT_DIR}/<ticket>/dedup/` 目录，分别判定：
    - `catalog.json` 存在 → 跳过第 2 步
    - `categorized.json` 存在 → 跳过第 3 步
    - 否则按需重跑
 2. **抽取阶段**（如 catalog.json 不存在，ripgrep 优先）：
+
+   `REVIEW_SCOPE`为已按project_intake确定、解析为本执行根实际路径的Bash数组；只枚举声明范围。此示例head是有界候选预览，触及上限或预算截断须记录unobserved并缩小范围/分批补全，不得把截断候选数当完整分母。
 
    **优先用 ripgrep**（同 §2.5.7 第 1 步命令）：
 
@@ -294,7 +305,7 @@ Free 阶段一次性完整覆盖全部 15 个角度。
      -e '^(pub\s+)?fn\s+[a-zA-Z_][a-zA-Z0-9_]*\s*\(' \
      -e '^\s+(public|private|protected)?\s*(static\s+)?[a-zA-Z_][a-zA-Z0-9_*]+\s+[a-zA-Z_][a-zA-Z0-9_]*\s*\(' \
      --glob '!*.test.*' --glob '!*.spec.*' --glob '!**/__tests__/**' \
-     "$PROJECT_ROOT" | head -2000
+     "${REVIEW_SCOPE[@]}" | head -2000
    ```
 
    **ripgrep 不可用**（未装）：整个 §9.4 跳过
@@ -309,12 +320,12 @@ Free 阶段一次性完整覆盖全部 15 个角度。
    > **降级**（独立判断，与 `_review_summary.md` 无关）：`dedup/duplicates/` 目录**不存在**（§2.5.7 未跑）或**目录存在但无任何 `<子_category>.json` 文件**（§2.5.7 跑过但函数数 < 3 全跳过）→ 全部 ≥3 sub_category 重跑，写 `[降级-dedup-reuse §2.5.7 产物缺失]`（与 SKILL.md 降级标签规范一致）
    >
    > **JSON 损坏处理**：Read `duplicates/<sub_category>.json` 失败（parse 错）→ 视为"未生成"，该 sub_category 重跑；写 `▶ dedup-reuse 降级：{sub_category}.json 损坏，按未生成处理`
-6. **报告生成**：在 05_deepcheck.md 末尾追加 `## 语义重复检测报告（§9.4 完整全量）` 段，按 HIGH/MEDIUM/LOW 三段展示：
+6. **报告生成**：在 05_deepcheck.md 末尾追加 `## 语义重复检测报告（§9.4 声明范围内完整）` 段，按 HIGH/MEDIUM/LOW 三段展示：
 
    ```markdown
-   ## 语义重复检测报告（§9.4 完整全量）
+   ## 语义重复检测报告（§9.4 声明范围内完整）
 
-   **函数总数**：{N} | **扫描类别数**：{K}/23 | **生成时间**：{ISO timestamp}
+   **审查范围**：{review_scope} | **覆盖状态**：{coverage_status} | **范围内函数数**：{N} | **实际出现/已审类别数**：{K}/{范围内出现的类别数} | **生成时间**：{ISO timestamp}
    **复用**：categorized.json {复用/重跑} | **高质量模型复用（§2.5.7）**：{复用 X/Y 个 sub_category，新增 Z 个} | 见 `{ICODE_OUT_DIR}/<ticket>/dedup/dedup_reuse_log.json`
 
    ### HIGH 置信度重复（建议立即合并）

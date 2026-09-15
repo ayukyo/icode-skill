@@ -6,6 +6,7 @@
 
 # --- 1. 本地开发产物（demo/ 临时输出）---
 /.claude/
+/.codebuddy/
 /.icode_output/
 /.serena/
 /demo/.icode_output/

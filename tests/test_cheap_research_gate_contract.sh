@@ -33,14 +33,23 @@ write_trace() {  # $1=dir  $2..=jsonl 行
 # 生成一条合法 trace 行（evidence 用普通双引号 JSON，外层传参用单引号）
 trace_line() {  # $1=gate_id $2=tool $3=step $4=eligible $5=decision $6=evidence_json
   python3 - "$1" "$2" "$3" "$4" "$5" "$6" <<'PY'
-import json, sys, datetime
+import json, sys, datetime, hashlib
 gid, tool, step, elig, dec, ev = sys.argv[1:]
+evidence = json.loads(ev)
+# These are explicit synthetic fixture inputs, not production trace repair.
+if gid == "review.dedup":
+    evidence.setdefault("affected_repo_roots", ["/fixture/repo"])
+if gid in ("deepcheck.fixed_scan", "deepcheck.dedup"):
+    evidence.setdefault("mode", "full")
+    evidence.setdefault("phase", "fixed" if gid.endswith("fixed_scan") else "dedup")
+identity = hashlib.sha256(json.dumps([tool, evidence], sort_keys=True).encode()).hexdigest()
 print(json.dumps({
-  "schema_version": 1, "workflow_version": "2.x", "ticket_id": "demo-ticket",
+  "schema_version": 2, "workflow_version": "2.x", "ticket_id": "demo-ticket",
   "step": step, "gate_id": gid, "tool": tool,
-  "eligible": elig == "true", "evidence": json.loads(ev),
+  "eligible": elig == "true", "evidence": evidence,
   "decision": dec, "attempted": dec in ("called", "degraded_after_attempt"),
-  "result": "success", "cache_key": None, "source_files": [],
+  "result": "success", "cache_key": identity if dec == "cache_hit" else None,
+  "input_digest": identity if dec == "cache_hit" else None, "source_files": [],
   "error_class": None, "at": datetime.datetime.now(datetime.timezone.utc).isoformat()
 }, ensure_ascii=False))
 PY

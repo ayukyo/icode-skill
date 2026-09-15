@@ -153,6 +153,8 @@ N. **强制思考前置**（不可跳过，缺证据视为不合规；按 [refer
 - `mechanism`：`deterministic_checks` / `decision_record` / `sequential-thinking` / `sequential-thinking+adversarial`
 - `result`：`success` / `degraded` / `blocked`；`degraded` 必须 `attempted=true` 且 `degraded_reason` 非空
 - `triggers`：只允许 catalog 内稳定枚举，禁止随意自然语言扩张；`tier > default_tier` 时 `triggers` 必须非空
+- catalog的 `evidence_fields/evidence_types`是必需字段/类型合同；called必须attempted=true，cache_hit必须有效cache_key和input_digest；fast未进入阶段只需mode/phase且不得伪装为full跳过。真实调用结果的来源引用应保留，不能仅自报字符串证明调用。
+- 工具coverage只检查调用声明与形状，不能证明实际执行、输入覆盖、Read理解或Dedup语义裁决；阶段覆盖证据另按[审查证据合同](inspection_evidence.md)检查。历史不足不自动补造trace。
 - **trace 禁止保存**：thought 正文（`thought`/`thought_text`/`raw_thought` 等字段名）、密钥、Cookie、设备凭据、大段日志正文
 - 同一 step 重跑允许追加新行，校验器以最后一条为当前状态并保留历史
 - **L0/L1 出现 sequential-thinking 调用**：记录 `over_invoked=true`（灰度观察项，默认不阻断）；`--strict` 时升级为阻断
@@ -164,14 +166,14 @@ N. **强制思考前置**（不可跳过，缺证据视为不合规；按 [refer
 > gate 机器真源 = `mcp/cheap-research/gates.json`（阈值**只从这里读**，禁止在 step 文档/脚本各自写常量）；
 > 运行痕迹 = `{ICODE_OUT_DIR}/.mcp_gate_trace.jsonl`（每 gate 一条最终判定，JSON Lines）；
 > 校验器 = `python3 tools/lint_mcp_coverage.py <out_dir> [--step <step>] [--strict] [--json] [--require-trace]`。
-> 新建工单 metadata 必须含 `"mcp_gate_schema_version": 1`；旧工单缺失时校验器输出 legacy-untracked 兼容警告，不阻断。
+> 新建工单 metadata 必须含 `"mcp_gate_schema_version": 2`；旧工单缺失时校验器输出 legacy-untracked 兼容警告，不阻断。
 
 **gate 全流程（每步到对应执行点时执行）**：
 
 1. **加载 gate catalog**：Read `mcp/cheap-research/gates.json`，取本 step 相关 gate 与阈值（`tb_comment_extract_min` / `long_text_threshold_bytes` / `dedup_min_functions` / `merge_min_rounds` / `max_input_bytes_per_call`）。
 2. **确定性计算 eligibility 并立刻写 trace**：按 gates.json 的 condition + 事实文件（TB 评论数 / 候选日志字节 / 函数 catalog / review round 数 / mode）算出 `eligible`，先追加一行 trace（`decision` 暂填 `pending`，`at` 为当前 ISO-8601）；**不得用"我觉得没必要"当 skip 理由**。
 3. **eligible 时先查缓存**：Read `{ICODE_OUT_DIR}/.cheap_research_cache.json` 查 `tool + args_hash`（语义见 SKILL.md「cheap-research 15 工具会话内缓存」段）。
-4. **有效缓存命中**：把 trace 行更新为 `decision=cache_hit`、`attempted=false`、`result=success`、`cache_key=<args_hash>`——**gate 直接 fulfilled，不再重复调用**。
+4. **有效缓存命中**：把 trace 行更新为 `decision=cache_hit`、`attempted=false`、`result=success`、`cache_key=<args_hash>`、`input_digest=<包含tool/args及源码hash的64位sha256>`——**gate 直接 fulfilled，不再重复调用**。
 5. **未命中才实际调用**：调 `mcp__cheap-research__<tool>`（先可见性自检；不可见才 ToolSearch 取 schema）。调用成功/返回空/失败后**更新最终 trace**：
    - 成功 → `decision=called`、`attempted=true`、`result=success`、`source_files=[...]`
    - 空/错误/超时 → `decision=degraded_after_attempt`、`attempted=true`、`result=empty|error|timeout`、`error_class=<类名>`
@@ -184,6 +186,8 @@ N. **强制思考前置**（不可跳过，缺证据视为不合规；按 [refer
 - `decision` 词表：`called` / `cache_hit` / `skipped_not_eligible` / `skipped_stage_not_reached` / `degraded_after_attempt`
 - `eligible=true` 只允许 `called` / `cache_hit` / `degraded_after_attempt`；`degraded_after_attempt` 必须 `attempted=true` 且 `result=error|empty|timeout`
 - `eligible=false` 只允许 `skipped_not_eligible` / `skipped_stage_not_reached`，且必须有结构化 `evidence`（不能只写自然语言）
+- catalog的 `evidence_fields/evidence_types`是必需字段/类型合同；called必须attempted=true，cache_hit必须有效cache_key和input_digest；fast未进入阶段只需mode/phase且不得伪装为full跳过。真实调用结果的来源引用应保留，不能仅自报字符串证明调用。
+- 工具coverage只检查调用声明与形状，不能证明实际执行、输入覆盖、Read理解或Dedup语义裁决；阶段覆盖证据另按[审查证据合同](inspection_evidence.md)检查。历史不足不自动补造trace。
 - **trace 禁止保存**：工具完整结果、日志正文、API key、Cookie、远程 URL 查询参数、设备凭据
 - 同一 `step + gate_id` 重跑允许追加新行，校验器以最后一条为当前状态并保留历史
 

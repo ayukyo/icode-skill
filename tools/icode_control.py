@@ -1374,13 +1374,252 @@ def capture_step_inputs(out_dir, meta, model, step):
     }, missing
 
 
-def validate_step_outputs(out_dir, meta, model, step):
+def validate_step_outputs(out_dir, meta, model, step, allow_incomplete=False):
     contract = step_contract(model, step)
     facts = [resolve_port(out_dir, meta, port) for port in contract["outputs"]]
     by_id = {fact["id"]: fact for fact in facts}
     missing = [port["id"] for port in contract["outputs"]
                if port.get("required", True) and not by_id[port["id"]]["exists"]]
+    if step == "review" and by_id.get("review_manifest", {}).get("exists"):
+        missing.extend(review_evidence_issues(out_dir, meta))
+    if step in ("deepcheck", "audit") and by_id.get("inspection_coverage", {}).get("exists"):
+        missing.extend(inspection_coverage_issues(out_dir, meta, step, allow_incomplete=allow_incomplete))
     return facts, missing
+
+
+def review_evidence_issues(out_dir, meta, events=None, start=None, allow_legacy=False):
+    """Check round counts and original receipts; hashes do not prove review understanding."""
+    root = Path(out_dir).resolve()
+    path = root / "review_manifest.json"
+    if path.is_symlink():
+        return ["review_manifest:symlink"]
+    if not path.is_file():
+        if allow_legacy and (root / "review_round_1.json").is_file():
+            try:
+                detail = load_json(root / "review_round_1.json", "review round")
+                if isinstance(detail, dict) and all(isinstance(detail.get(k), list) for k in
+                        ("new_issues", "refuted_issues", "pending_verification")):
+                    return []
+            except (OSError, ValueError, ControlError):
+                pass
+        return ["review_manifest:missing"]
+    try:
+        manifest = load_json(path, "review manifest")
+    except (OSError, ValueError, ControlError) as exc:
+        return [f"review_manifest:invalid_json:{exc}"]
+    if not isinstance(manifest, dict) or type(manifest.get("schema_version")) is not int or manifest["schema_version"] != 1 \
+            or manifest.get("ticket_id") != meta.get("ticket_id"):
+        return ["review_manifest:identity"]
+    rounds = manifest.get("rounds")
+    if not isinstance(rounds, list) or not rounds:
+        return ["review_manifest:empty_rounds"]
+    issues = []
+    keys = ("new_issues", "refuted_issues", "pending_verification")
+    for number, row in enumerate(rounds, 1):
+        label = f"review_manifest:round={number}"
+        if not isinstance(row, dict) or type(row.get("round")) is not int or row["round"] != number:
+            issues.append(label + ":sequence")
+            continue
+        origin = row.get("origin_attempt")
+        if not isinstance(origin, str) or not origin.strip():
+            issues.append(label + ":origin_attempt")
+        if number == 1 and manifest.get("review_run") != origin:
+            issues.append(label + ":review_run")
+        if events is not None and not any(e.get("event_type") == "step_started" and
+                (e.get("payload") or {}).get("step") == "review" and
+                (e.get("payload") or {}).get("attempt") == origin for e in events):
+            issues.append(label + ":unknown_origin_attempt")
+        if events is not None and not any(e.get("event_type") == "artifact_written" and
+                (e.get("payload") or {}).get("attempt") == origin and
+                (e.get("payload") or {}).get("output") == "review_manifest" and
+                ((e.get("payload") or {}).get("round_digests") or {}).get(str(number)) == canonical_digest(row)
+                for e in events):
+            issues.append(label + ":missing_origin_round_receipt")
+        if not all(type(row.get(key)) is int and row[key] >= 0 for key in keys):
+            issues.append(label + ":counts")
+            continue
+        detail_path = row.get("detail_path")
+        required = number == 1 or any(row[key] for key in keys)
+        if detail_path is None:
+            if required or row.get("detail_sha256") is not None:
+                issues.append(label + ":missing_detail")
+            continue
+        if detail_path != f"review_round_{number}.json":
+            issues.append(label + ":detail_path")
+            continue
+        detail_file = root / detail_path
+        if detail_file.is_symlink() or not detail_file.is_file():
+            issues.append(label + ":missing_detail")
+            continue
+        if row.get("detail_sha256") != file_sha256(detail_file):
+            issues.append(label + ":detail_hash")
+            continue
+        try:
+            detail = load_json(detail_file, "review round")
+        except (OSError, ValueError, ControlError):
+            issues.append(label + ":invalid_detail_json")
+            continue
+        if not isinstance(detail, dict) or any(not isinstance(detail.get(key), list) or
+                len(detail[key]) != row[key] for key in keys):
+            issues.append(label + ":detail_counts")
+        if isinstance(detail, dict) and "has_new_issues" in detail and detail["has_new_issues"] is not bool(row["new_issues"]):
+            issues.append(label + ":has_new_issues")
+        if events is not None:
+            origins = [e for e in events if e.get("event_type") == "step_started" and
+                       (e.get("payload") or {}).get("step") == "review" and
+                       (e.get("payload") or {}).get("attempt") == origin]
+            receipts = [e for e in events if e.get("event_type") == "artifact_written" and
+                        (e.get("payload") or {}).get("attempt") == origin and
+                        (e.get("payload") or {}).get("path") == str(detail_file) and
+                        (e.get("payload") or {}).get("sha256") == row.get("detail_sha256")]
+            if len(origins) != 1 or not any(events.index(e) > events.index(origins[0]) for e in receipts):
+                issues.append(label + ":missing_origin_receipt")
+    if events is not None:
+        # A new state-machine entry starts a new review run. A blocked/restarted
+        # step within that entry keeps genuine earlier round receipts.
+        entries = [i for i, e in enumerate(events) if e.get("event_type") == "state_changed" and
+                   (e.get("payload") or {}).get("to") == "review_in_progress"]
+        first = [i for i, e in enumerate(events) if e.get("event_type") == "step_started" and
+                 (e.get("payload") or {}).get("attempt") == manifest.get("review_run")]
+        if len(first) != 1 or (entries and first[0] < entries[-1]):
+            issues.append("review_manifest:stale_review_run")
+        elif any(not any(i >= first[0] and e.get("event_type") == "step_started" and
+                 (e.get("payload") or {}).get("step") == "review" and
+                 (e.get("payload") or {}).get("attempt") == row.get("origin_attempt")
+                 for i, e in enumerate(events)) for row in rounds if isinstance(row, dict)):
+            issues.append("review_manifest:origin_outside_run")
+        if start is not None:
+            current = (start.get("payload") or {}).get("attempt")
+            if not any(e.get("event_type") == "artifact_written" and
+                       (e.get("payload") or {}).get("attempt") == current and
+                       (e.get("payload") or {}).get("path") == str(path) and
+                       (e.get("payload") or {}).get("sha256") == file_sha256(path)
+                       for e in events[events.index(start) + 1:]):
+                issues.append("review_manifest:missing_current_receipt")
+    return issues
+
+
+def inspection_coverage_issues(out_dir, meta, step, attempt=None, allow_incomplete=False):
+    """Validate declared reads against current source; never equate a hash with a Read."""
+    path = Path(out_dir) / f"{step}_coverage.json"
+    if path.is_symlink() or not path.is_file():
+        return [f"{step}_coverage:missing_or_symlink"]
+    try:
+        report = load_json(path, "inspection coverage")
+    except (OSError, ControlError, ValueError):
+        return [f"{step}_coverage:invalid_json"]
+    issues = []
+    if not isinstance(report, dict):
+        return [f"{step}_coverage:not_object"]
+    if type(report.get("schema_version")) is not int or report["schema_version"] != 1 or report.get("ticket_id") != meta.get("ticket_id"):
+        issues.append(f"{step}_coverage:identity")
+    if attempt is not None and report.get("attempt") != attempt:
+        issues.append(f"{step}_coverage:attempt")
+    scope = report.get("review_scope")
+    if not isinstance(scope, list) or not scope or any(not isinstance(p, str) or not p.strip() for p in scope):
+        issues.append(f"{step}_coverage:review_scope")
+    status = report.get("coverage_status")
+    incomplete = status in ("partial", "degraded")
+    if status not in ("complete_within_scope", "partial", "degraded"):
+        issues.append(f"{step}_coverage:coverage_status")
+    if any(not isinstance(report.get(key), list) or any(not isinstance(p, str) or not p.strip() for p in report[key])
+           for key in ("unobserved", "dedup_unobserved")):
+        issues.append(f"{step}_coverage:unobserved_type")
+    if incomplete and (not isinstance(report.get("debt_reason"), str) or not report["debt_reason"].strip()):
+        issues.append(f"{step}_coverage:debt_reason")
+    if incomplete and not (report.get("unobserved") or report.get("dedup_unobserved")):
+        issues.append(f"{step}_coverage:missing_debt_items")
+    if not (allow_incomplete and incomplete) and (status != "complete_within_scope" or report.get("unobserved") != []):
+        issues.append(f"{step}_coverage:incomplete")
+    dedup = report.get("dedup_status")
+    if dedup not in ("complete_within_scope", "not_eligible", "partial", "degraded"):
+        issues.append(f"{step}_coverage:dedup_status")
+    if not (allow_incomplete and incomplete) and (dedup not in ("complete_within_scope", "not_eligible") or report.get("dedup_unobserved") != []):
+        issues.append(f"{step}_coverage:dedup_incomplete")
+    if dedup == "not_eligible" and (not isinstance(report.get("dedup_reason"), str) or not report["dedup_reason"].strip()):
+        issues.append(f"{step}_coverage:dedup_reason")
+    profile = meta.get("risk_profile")
+    effective_mode = profile.get("effective_mode") if isinstance(profile, dict) else None
+    if effective_mode not in ("fast", "full"):
+        effective_mode = meta.get("mode")
+    phases = ["audit"] if step == "audit" else ["reverse"] if effective_mode == "fast" else ["reverse", "fixed", "free"]
+    reads = report.get("read_phases")
+    workspace = execution_workspace(out_dir, meta)
+    code_files = meta.get("code_files") or []
+    if not isinstance(code_files, list) or not code_files or any(not isinstance(p, str) or not p.strip() for p in code_files):
+        issues.append(f"{step}_coverage:empty_code_files")
+        return issues
+    if allow_incomplete and incomplete:
+        if not isinstance(reads, dict):
+            issues.append(f"{step}_coverage:read_phases_type")
+        return issues
+    for phase in phases:
+        files = reads.get(phase) if isinstance(reads, dict) else None
+        if not isinstance(files, dict):
+            issues.append(f"{step}_coverage:missing_phase={phase}")
+            continue
+        for relative in code_files:
+            source = port_path(workspace, relative)
+            if isinstance(scope, list) and all(isinstance(p, str) and p.strip() for p in scope) and not any(
+                    source.is_relative_to(port_path(workspace, p)) for p in scope):
+                issues.append(f"{step}_coverage:code_outside_scope={relative}")
+            if not source.is_file() or files.get(relative) != file_sha256(source):
+                issues.append(f"{step}_coverage:unconfirmed_read={phase}:{relative}")
+    return issues
+
+
+def cmd_check_outputs(args):
+    """Single read-only final product check; historical receipts are not invented."""
+    out_dir = Path(args.dir).resolve()
+    meta = load_metadata(out_dir)
+    require_vnext(meta, out_dir)
+    require_valid_metadata(meta)
+    events, problems = verify_event_chain(out_dir, meta)
+    model = load_execution_model()
+    steps = ["plan", "review", "merge", "code", "deepcheck", "audit"] if args.step == "audit" else [args.step]
+    warnings = []
+    for step in steps:
+        contract = step_contract(model, step)
+        starts = [e for e in events if e.get("event_type") == "step_started" and
+                  (e.get("payload") or {}).get("step") == step]
+        policy = load_state_machine()["gate_policy"]
+        completion = {policy["step_by_target"][target]: number for target, number in
+                      policy["completed_step_by_target"].items() if target in policy["step_by_target"]}
+        historical = (bool(starts) and (starts[-1].get("payload") or {}).get("contract_digest") != canonical_digest(contract)) or (
+                      not starts and completion.get(step) in (meta.get("completed_steps") or []))
+        latest_start = starts[-1] if starts else None
+        attempt = (latest_start.get("payload") or {}).get("attempt") if latest_start else None
+        finished = step_attempt_finished(events, attempt) if attempt is not None else None
+        degraded = bool(finished and (finished.get("payload") or {}).get("outcome") == "degraded")
+        facts, missing = validate_step_outputs(out_dir, meta, model, step, allow_incomplete=degraded)
+        # New evidence ports apply to new attempts, not completed old contracts.
+        if historical:
+            new_ports = {"review_manifest", "inspection_coverage"}
+            missing = [item for item in missing if item not in new_ports]
+            warnings.append(f"{step}:historical_evidence_untracked")
+        problems.extend(f"{step}:{item}" for item in missing)
+        if step == "review":
+            problems.extend(review_evidence_issues(out_dir, meta, None if historical else events,
+                                                   allow_legacy=historical))
+        if step in ("deepcheck", "audit"):
+            coverage_exists = any(f["id"] == "inspection_coverage" and f["exists"] for f in facts)
+            if not historical and coverage_exists:
+                problems.extend(inspection_coverage_issues(out_dir, meta, step, attempt, allow_incomplete=degraded))
+                if latest_start is None:
+                    problems.append(f"{step}:inspection_coverage:missing_step_start")
+                else:
+                    # Final checking uses the latest real attempt and the exact artifact hash.
+                    receipt_contract = dict(contract, outputs=[p for p in contract["outputs"]
+                                                               if p["id"] == "inspection_coverage"])
+                    problems.extend(f"{step}:receipt={item}" for item in missing_output_receipts(
+                        out_dir, meta, receipt_contract, events, latest_start))
+            if degraded:
+                warnings.append(f"{step}:verification_debt")
+            _, missing_inputs = capture_step_inputs(out_dir, meta, model, step)
+            problems.extend(f"{step}:input={item}" for item in missing_inputs)
+    result = dict(ok=not problems, step=args.step, read_only=True, violations=problems, warnings=warnings)
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    return 0 if result["ok"] else 1
 
 
 def output_port_targets(out_dir, meta, port):
@@ -1668,7 +1907,7 @@ def cmd_create(args):
         "project_path": str(workspace),
         "workflow_gate_schema_version": 1,
         "thinking_gate_schema_version": 1,
-        "mcp_gate_schema_version": 1,
+        "mcp_gate_schema_version": load_json(SKILL_ROOT / "mcp/cheap-research/gates.json", "cheap gate catalog")["trace_schema_version"],
     })
     if debug:
         meta["debug"] = True
@@ -4006,6 +4245,16 @@ def cmd_step(args):
         outputs, missing_outputs = validate_step_outputs(out_dir, meta, model, args.step)
         missing_receipts = missing_output_receipts(
             out_dir, meta, contract, events, start)
+        if args.step == "review":
+            missing_receipts.extend(review_evidence_issues(out_dir, meta, events, start))
+        if args.step in ("deepcheck", "audit"):
+            coverage_issues = inspection_coverage_issues(out_dir, meta, args.step, args.attempt,
+                                                         allow_incomplete=args.outcome == "degraded")
+            missing_receipts.extend(coverage_issues)
+            if args.outcome == "degraded" and (coverage_issues or any(
+                    item.startswith("inspection_coverage:") for item in missing_receipts)):
+                raise ControlError("降级复检必须有真实覆盖声明回执与未完成原因", exit_code=1,
+                                   gate_id="inspection_coverage", violations=missing_receipts)
         if not args.evidence:
             raise ControlError("step finish 必须至少提供一个 --evidence 简短引用", exit_code=2,
                                gate_id="step_receipt")
@@ -4112,6 +4361,15 @@ def cmd_artifact(args):
             "sha256": file_sha256(target),
             "size": target.stat().st_size,
         }
+        if output_id == "review_manifest":
+            issues = review_evidence_issues(out_dir, meta)
+            if issues:
+                raise ControlError("审查manifest不满足结构/计数合同", exit_code=1,
+                                   gate_id="review_manifest", violations=issues)
+            data = load_json(target, "review manifest")
+            # Preserve each completed round's identity in the original event,
+            # including clean rounds that have no separate detail file.
+            payload["round_digests"] = {str(row["round"]): canonical_digest(row) for row in data["rounds"]}
         prior = find_idempotent_event(events, args.request, "artifact_written", payload)
         event = prior or append_event(out_dir, meta, "artifact_written", payload,
                                       request_id=args.request)
@@ -4657,6 +4915,11 @@ def build_parser():
     p.add_argument("--request-id", required=True, help="UI 创建工单幂等键")
     p.add_argument("--index", help="索引路径覆盖（测试用）")
     p.set_defaults(func=cmd_create_next)
+
+    p = sub.add_parser("check-outputs", help="只读检查步骤产物与条件审查证据")
+    p.add_argument("--dir", required=True)
+    p.add_argument("--step", required=True, choices=["review", "audit"])
+    p.set_defaults(func=cmd_check_outputs)
 
     p = sub.add_parser("validate", help="工单整体校验（fail-closed 报告）")
     p.add_argument("--dir", required=True)

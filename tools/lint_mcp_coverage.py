@@ -171,6 +171,12 @@ def validate_row(row: Dict, catalog_gate: Optional[Dict], line_idx: int) -> List
         issues.append(f"{tag} eligible 非布尔（无法判定，build_report 计 schema 错误）")
     if not isinstance(row["evidence"], dict):
         issues.append(f"{tag} evidence 非对象")
+    if not isinstance(row["attempted"], bool):
+        issues.append(f"{tag} attempted 非布尔")
+    if type(row["schema_version"]) is not int or row["schema_version"] not in (1, 2):
+        issues.append(f"{tag} schema_version 非受支持版本")
+    if row.get("decision") in ("called", "cache_hit") and not row.get("evidence"):
+        issues.append(f"{tag} 履行声明必须带非空evidence")
     decision = str(row["decision"])
     vocab_ok = decision in DECISIONS_ELIGIBLE_TRUE | DECISIONS_ELIGIBLE_FALSE
     if not vocab_ok:
@@ -192,8 +198,39 @@ def validate_row(row: Dict, catalog_gate: Optional[Dict], line_idx: int) -> List
     if decision in ("called", "cache_hit"):
         if str(row.get("result")) != "success":
             issues.append(f"{tag} {decision} 但 result != success")
+    if decision == "called" and row.get("attempted") is not True:
+        issues.append(f"{tag} called 但 attempted != true")
+    if decision == "cache_hit":
+        for field in ("cache_key", "input_digest"):
+            if field == "input_digest" and row.get("schema_version") == 1 and field not in row:
+                continue  # historical cache identity is reported as untracked
+            if not isinstance(row.get(field), str) or re.fullmatch(r"[0-9a-f]{64}", row[field]) is None:
+                issues.append(f"{tag} cache_hit 缺有效 {field} 输入身份")
     # 与 catalog gate 的 tool / step 一致性
     if catalog_gate:
+        evidence = row.get("evidence")
+        if isinstance(evidence, dict):
+            fields = catalog_gate.get("evidence_fields", [])
+            # A phase that was never entered has no result counts to report.
+            if decision == "skipped_stage_not_reached":
+                fields = [field for field in fields if field in ("mode", "phase")]
+                if not fields or evidence.get("mode") != "fast" or evidence.get("phase") != "reverse":
+                    issues.append(f"{tag} skipped_stage_not_reached 缺 fast 阶段依据")
+            for field in fields:
+                if field not in evidence:
+                    if row.get("schema_version") == 2:
+                        issues.append(f"{tag} evidence 缺 catalog 字段 {field}")
+                    continue
+                value = evidence[field]
+                kind = catalog_gate.get("evidence_types", {}).get(field)
+                valid = {
+                    "boolean": lambda: isinstance(value, bool),
+                    "integer": lambda: type(value) is int and value >= 0,
+                    "string": lambda: isinstance(value, str) and bool(value.strip()),
+                    "paths": lambda: isinstance(value, list) and all(isinstance(p, str) and p.strip() for p in value),
+                }.get(kind)
+                if valid is not None and not valid():
+                    issues.append(f"{tag} evidence.{field} 类型/值不符合 {kind}")
         if str(row.get("tool")) != catalog_gate.get("tool"):
             issues.append(
                 f"{tag} tool={row.get('tool')} 与 gates.json 定义 {catalog_gate.get('tool')} 不一致"
@@ -205,6 +242,67 @@ def validate_row(row: Dict, catalog_gate: Optional[Dict], line_idx: int) -> List
     # 敏感数据
     issues.extend(scan_sensitive(row))
     return issues
+
+
+def eligibility_issues(row: Dict, gate: Dict, constants: Dict, metadata: Dict) -> Tuple[List[str], Optional[bool]]:
+    """Recompute v2 deterministic conditions from typed facts, not a self-reported skip."""
+    evidence = row["evidence"]
+    gid = gate["id"]
+    threshold_keys = {
+        "log.comments_extract": "tb_comment_extract_min",
+        "log.long_log_summary": "long_text_threshold_bytes",
+        "review.dedup": "dedup_min_functions",
+        "merge.cross_round_summary": "merge_min_rounds",
+        "deepcheck.dedup": "dedup_min_functions",
+        "patch.context_summary": "long_text_threshold_bytes",
+        "patch.listen_log_summary": "long_text_threshold_bytes",
+    }
+    issues = []
+    key = threshold_keys.get(gid)
+    if key and (type(constants.get(key)) is not int or constants[key] < 0):
+        return [f"{gid}: catalog 缺有效阈值 {key}"], None
+    if key and "threshold" in evidence and evidence["threshold"] != constants[key]:
+        issues.append(f"{gid}: evidence.threshold 与 catalog {key} 不一致")
+    profile = metadata.get("risk_profile")
+    effective = profile.get("effective_mode") if isinstance(profile, dict) else None
+    if effective not in ("fast", "full"):
+        effective = metadata.get("mode")
+    if "mode" in evidence and effective in ("fast", "full") and evidence["mode"] != effective:
+        issues.append(f"{gid}: evidence.mode 与有效模式 {effective} 不一致")
+    if "mode" in evidence and evidence["mode"] not in ("fast", "full"):
+        issues.append(f"{gid}: evidence.mode 非受支持模式")
+    expected_phase = {"deepcheck.fixed_scan": "fixed", "deepcheck.dedup": "dedup"}.get(gid)
+    if expected_phase and row["decision"] != "skipped_stage_not_reached" and evidence["phase"].lower() != expected_phase:
+        issues.append(f"{gid}: evidence.phase 与门禁阶段 {expected_phase} 不一致")
+    if row["decision"] == "skipped_stage_not_reached":
+        expected = False  # validate_row restricts this to an unentered fast phase.
+    elif gid == "log.comments_extract":
+        expected = evidence["cheap_available"] and evidence["tb_comments_count"] >= constants[key]
+    elif gid == "log.long_log_summary":
+        expected = evidence["cheap_available"] and evidence["candidate_text_bytes"] >= constants[key]
+    elif gid == "review.dedup":
+        expected = bool(evidence["affected_repo_roots"]) and evidence["rg_available"] and evidence["cheap_available"] and evidence["function_count"] >= constants[key]
+    elif gid == "review.result_summary":
+        expected = bool(evidence["result_source"]) and evidence["review_rounds"] > 0
+    elif gid == "merge.cross_round_summary":
+        expected = evidence["review_rounds"] >= constants[key]
+    elif gid == "deepcheck.fixed_scan":
+        expected = evidence["mode"] == "full" and evidence["phase"].lower() == "fixed" and evidence["function_points_count"] > 0
+    elif gid == "deepcheck.dedup":
+        expected = evidence["mode"] == "full" and evidence["phase"].lower() == "dedup" and evidence["function_count"] >= constants[key]
+    elif gid == "audit.repo_facts":
+        expected = bool(evidence["affected_repo_roots"])
+    elif gid == "audit.plan_diff":
+        expected = bool(evidence["plan_source"]) and bool(evidence["code_sources"])
+    elif gid == "patch.context_summary":
+        expected = evidence["cross_session"] and evidence["candidate_text_bytes"] >= constants[key]
+    elif gid == "patch.listen_log_summary":
+        expected = evidence["listen_mode"] and evidence["incremental_bytes"] >= constants[key]
+    else:
+        return issues + [f"{gid}: 未登记确定性 eligibility 条件"], None
+    if expected != row["eligible"]:
+        issues.append(f"{gid}: eligible 与结构化事实不一致（应为 {expected}）")
+    return issues, expected
 
 
 def build_report(out_dir: Path, step_filter: Optional[str], legacy: bool,
@@ -237,12 +335,17 @@ def build_report(out_dir: Path, step_filter: Optional[str], legacy: bool,
         "schema_errors": len(trace_errors),
         "sensitive_data": 0,
         "coverage": 1.0,
+        "evidence_untracked": 0,
         "trace_errors": trace_errors,
         "gates": [],
     }
 
     eligible_total = 0
     fulfilled_total = 0
+    version = metadata.get("mcp_gate_schema_version", 1)
+    if type(version) is not int or version not in (1, 2):
+        report["schema_errors"] += 1
+        report["trace_errors"].append("metadata mcp_gate_schema_version 非受支持版本")
     for gate in gates:
         gid = gate["id"]
         gstep = gate.get("step", "")
@@ -274,7 +377,21 @@ def build_report(out_dir: Path, step_filter: Optional[str], legacy: bool,
         row = last_by_gate[gid]
         gs["trace_row"] = row
         issues = validate_row(row, gate, 0)
-        eligible = row.get("eligible") if isinstance(row.get("eligible"), bool) else None
+        computed_eligible = None
+        if not issues and row.get("schema_version") == 2:
+            condition_issues, computed_eligible = eligibility_issues(row, gate, catalog.get("constants", {}), metadata)
+            issues.extend(condition_issues)
+        if type(version) is int and version >= 2 and row.get("schema_version") != 2:
+            issues.append("新v2工单禁止降级为v1 trace规避证据合同")
+        if row.get("ticket_id") != metadata.get("ticket_id", row.get("ticket_id")):
+            issues.append("trace ticket_id与工单不一致")
+        historical_evidence = row.get("evidence") if isinstance(row.get("evidence"), dict) else {}
+        if row.get("schema_version") == 1 and (any(field not in historical_evidence
+                for field in gate.get("evidence_fields", [])) or
+                (row.get("decision") == "cache_hit" and not row.get("input_digest"))):
+            report["evidence_untracked"] += 1
+            gs["evidence_status"] = "historical_evidence_untracked"
+        eligible = computed_eligible if computed_eligible is not None else row.get("eligible") if isinstance(row.get("eligible"), bool) else None
         decision = str(row.get("decision", ""))
         if eligible is True:
             report["eligible"] += 1
@@ -404,6 +521,7 @@ def main() -> int:
     print(f"in-scope gates: {report['total_gates_in_scope']}")
     print(f"eligible: {report['eligible']} | fulfilled: {report['fulfilled']} | coverage: {report['coverage']}")
     print(f"called: {report['called']} | cache_hit: {report['cache_hit']} | degraded_after_attempt: {report['degraded_after_attempt']}")
+    print(f"historical evidence_untracked: {report['evidence_untracked']}（工具coverage不等于语义审查覆盖）")
     print(f"skipped_not_eligible: {report['skipped_not_eligible']} | skipped_stage_not_reached: {report['skipped_stage_not_reached']}")
     print(f"missing_gate: {report['missing_gate']} | invalid_skip: {report['invalid_skip']} | schema_errors: {report['schema_errors']} | sensitive_data: {report['sensitive_data']}")
     for terr in report.get("trace_errors", []):
