@@ -123,4 +123,6 @@ python3 tools/icode_control.py trace --dir <out_dir> --limit 50
 
 ## 条件审查与阶段覆盖
 
+code/deepcheck/audit 的新执行还必需 `<step>_worklist.json` 及本 attempt 真实回执，按 [inspection_worklist.md](inspection_worklist.md)准备关联单元、逐阶段 Read、校验源码 findings 位置与版本。范围声明绑定回执，缺文件/缺 Read/源码漂移不能 success；degraded 不能绕过身份和版本错误。旧已完成合同不追溯补证据，进行中合同改变须 blocked 重入。
+
 review必需review_manifest.json，按每轮真实origin attempt保存轻量round digest回执；首轮和所有非clean轮要JSON，clean后续轮可省详细JSON。deepcheck/audit分别必需coverage JSON，缺Read阶段、旧hash或未观察项不能finish success；degraded也要真实声明回执和债务原因。终审只读产物检查统一调用 `icode_control.py check-outputs --dir <out> --step audit`。具体格式/历史合同兼容见[inspection_evidence](inspection_evidence.md)。

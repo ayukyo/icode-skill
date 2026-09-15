@@ -242,7 +242,8 @@
         ],
         "outputs": [
           {"id": "code_files", "kind": "metadata_files", "value": "/code_files", "base": "workspace"},
-          {"id": "code_review", "kind": "ticket_file", "value": "04_code_review_fix.md"}
+          {"id": "code_review", "kind": "ticket_file", "value": "04_code_review_fix.md"},
+          {"id": "inspection_worklist", "kind": "ticket_file", "value": "code_worklist.json"}
         ],
         "required_checks": ["before_write", "before_transition"],
         "drift_routes": {"final_plan": "review", "requirement": "plan", "scope": "plan", "deltas": "plan", "active_checkout": "worktree", "workspace_head": "merge", "default": "review"}
@@ -255,7 +256,8 @@
           {"id": "workspace_head", "kind": "workspace_git_head", "value": ".", "required": false, "protected": true}
         ],
         "outputs": [{"id": "deepcheck", "kind": "ticket_file", "value": "05_deepcheck.md"},
-          {"id": "inspection_coverage", "kind": "ticket_file", "value": "deepcheck_coverage.json"}],
+          {"id": "inspection_coverage", "kind": "ticket_file", "value": "deepcheck_coverage.json"},
+          {"id": "inspection_worklist", "kind": "ticket_file", "value": "deepcheck_worklist.json"}],
         "required_checks": ["before_write", "after_wait", "before_transition"],
         "drift_routes": {"final_plan": "review", "code_files": "deepcheck", "active_checkout": "worktree", "workspace_head": "merge", "default": "deepcheck"}
       },
@@ -268,7 +270,8 @@
           {"id": "workspace_head", "kind": "workspace_git_head", "value": ".", "required": false, "protected": true}
         ],
         "outputs": [{"id": "audit", "kind": "ticket_file", "value": "06_audit.md"},
-          {"id": "inspection_coverage", "kind": "ticket_file", "value": "audit_coverage.json"}],
+          {"id": "inspection_coverage", "kind": "ticket_file", "value": "audit_coverage.json"},
+          {"id": "inspection_worklist", "kind": "ticket_file", "value": "audit_worklist.json"}],
         "required_checks": ["before_write", "after_wait", "before_transition"],
         "drift_routes": {"final_plan": "review", "code_files": "deepcheck", "deepcheck": "deepcheck", "active_checkout": "worktree", "workspace_head": "merge", "default": "audit"}
       },

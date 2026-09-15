@@ -29,7 +29,23 @@
           "evidence": { "type": "array", "items": { "type": "string", "minLength": 1 } },
           "analysis": { "type": "string", "minLength": 1 },
           "recommendation": { "type": "string", "minLength": 1 },
-          "requires_change": { "type": "boolean" }
+          "requires_change": { "type": "boolean" },
+          "verification_status": { "enum": ["confirmed", "needs_more_evidence"] },
+          "evidence_boundary": { "type": "string", "minLength": 1 },
+          "locations": {
+            "type": "array",
+            "items": {
+              "type": "object", "additionalProperties": false,
+              "required": ["path", "start_line", "end_line", "source_sha256", "excerpt"],
+              "properties": {
+                "path": { "type": "string", "minLength": 1 },
+                "start_line": { "type": "integer", "minimum": 1 },
+                "end_line": { "type": "integer", "minimum": 1 },
+                "source_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+                "excerpt": { "type": "string" }
+              }
+            }
+          }
         }
       }
     }

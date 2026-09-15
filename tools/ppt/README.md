@@ -56,6 +56,8 @@ python3 tools/ppt/scripts/check_render_output.py .icode_output/ppt/{名称}.pptx
 
 渲染后必须先按 [media_routing.md](../../references/media_routing.md) 选择 `native/bridge/dual/text_only`，再决定是否把 PNG 交给视觉模型。纯文本或宿主视觉能力未知时禁止试传/Read PNG；`check_render_output.py` 通过只代表渲染结构完整，视觉排版仍标 `unobserved`。
 
+渲染工具缺失、宿主库版本不兼容、转换失败或没有 PNG 时，渲染命令返回非零并显示原因；保留已生成的 PPTX，记 `render_status=failed`、`visual_status=unobserved`，不得宣称全链路通过，也不自动安装或更换系统库。
+
 完整编辑规则（只改文字不破坏排版 / 占位必替换 / 禁省略号截断 / 同级字号一致 / 章节呼应）见 [steps/ppt.md](../../steps/ppt.md)「内容铁律」。
 
 ## 用自备模板（模式B，商用安全）

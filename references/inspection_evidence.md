@@ -2,6 +2,8 @@
 
 机器执行真源为 `tools/icode_control.py` 的 `review_evidence_issues`、`inspection_coverage_issues`、步骤端口及实际artifact摘要事件；本文解释数据格式，不维护第二套退出条件。不增加公开 `/icode` 命令。
 
+关联范围、必审单元、逐文件逐阶段阅读与 finding 源码定位统一执行 [inspection_worklist.md](inspection_worklist.md)。新执行的 worklist 与本文 coverage/Dedup 声明并行必需；哈希和声明不能证明实际阅读/语义正确，主代理仍复核决定性证据。
+
 ## 1. review轮次回执
 
 `review_manifest.json` 是review必填输出；每个已完成轮次当场更新manifest、登记真实artifact。首轮始终写 `review_round_1.json`，后续三类issue全空才可省详细JSON。`has_new_issues=false`、clean收敛次数与三类全部为空不同。

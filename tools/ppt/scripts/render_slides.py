@@ -62,7 +62,20 @@ def main() -> int:
     ap.add_argument("out_dir", type=Path)
     ap.add_argument("--dpi", type=int, default=144)
     args = ap.parse_args()
-    pngs = render(args.pptx, args.out_dir, args.dpi)
+    try:
+        pngs = render(args.pptx, args.out_dir, args.dpi)
+        if not pngs:
+            raise RuntimeError("renderer did not produce any slide PNGs")
+    except (OSError, subprocess.SubprocessError, RuntimeError) as exc:
+        # Host renderer incompatibility is a failed render, not a visual pass.
+        # Preserve tool diagnostics instead of hiding them behind a traceback.
+        detail = getattr(exc, "stderr", None)
+        if isinstance(detail, bytes):
+            detail = detail.decode("utf-8", errors="replace")
+        print(f"渲染失败：{exc}", file=sys.stderr)
+        if detail:
+            print(str(detail).strip(), file=sys.stderr)
+        return 1
     print(f"Rendered {len(pngs)} slides → {args.out_dir}")
     for p in pngs:
         print(f"  {p}")

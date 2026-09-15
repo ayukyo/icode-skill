@@ -135,6 +135,7 @@ Git checkout 和逐仓提交契约由 `steps/reopen.md` 先创建/校验；然�
 | event | 追加事件 | `--dir --type [--payload] [--request-id]` |
 | step | 步骤端口/边界/终结回执 | `--dir --step --phase [--attempt --boundary --outcome]` |
 | artifact | 记录 outputs 合同内产物 | `--dir --step --attempt --path [--scope]` |
+| inspection | 准备联审清单、登记实际 Read、只读校验 | `--dir --step --attempt --phase [--read-phase --path --related --scope --baselines-json]`；见 [inspection_worklist.md](inspection_worklist.md) |
 | operation | 长动作开始/终结回执 | `--dir --phase [--name --opclass --attempt --outcome]` |
 | policy | 查询 Retry/Fallback 策略 | `--opclass --failure [--attempts]` |
 | trace | 统一执行轨迹（只读） | `--dir [--limit]` |

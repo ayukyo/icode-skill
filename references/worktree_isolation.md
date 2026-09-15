@@ -500,6 +500,7 @@ git worktree remove --force ../<repo>-wt-<ticket-slug>   # --force 仅限改动�
 - **归档目标**：`~/.claude/icode_data/worktree_archive/<project_id>/<ticket_id>/`（与全局索引同层，天然不随 worktree 走；独立目录不污染 project_docs/module_docs；`ticket_id` 唯一防冲突）
 - **归档内容**：复制工单顶层所有不超过 2 MiB 的常规文件（metadata、事件链、三类 trace、decision anchors、各步骤报告、review JSON、snapshot 等）；控制面按 `completed_steps` 计算的必需文件缺一即失败。顶层超过 2 MiB 的大文件不复制，由 manifest 记录外部引用、大小和 SHA-256；子目录中的原始日志/附件不在当前 manifest 的递归归档范围，关键证据必须已回指到 `log_analysis.md`/终审报告，不得把未归档的原始目录声称为 manifest 已保存。临时文件、锁和未完成事务不得入档。
 - **归档命令**（示意；复制后必须由控制面复验，不能凭 `cp` 成功宣称归档完成）：
+  新执行已声明的 code/deepcheck/audit worklist 是关键控制证据，由真实回执确定必需性；即使源/归档文件被删也不能裁剪 manifest 蒙混通过，旧未跟踪工单不补造。清单保持轻量，不嵌入整份源码；超过复制上限须收敛证据体积，不能把清单降成随 checkout 消失的外部引用。
   ```bash
   ARCHIVE_DIR="$HOME/.claude/icode_data/worktree_archive/<project_id>/<ticket_id>"
   mkdir -p "$ARCHIVE_DIR"

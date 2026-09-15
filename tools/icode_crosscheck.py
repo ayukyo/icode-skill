@@ -10,6 +10,7 @@ import argparse
 import contextlib
 import fcntl
 import hashlib
+import importlib.util
 import json
 import os
 import re
@@ -432,9 +433,10 @@ def validate_round_payload(payload, ticket_id, round_no, fresh=False):
         "finding_id", "title", "severity", "status", "category", "evidence",
         "analysis", "recommendation", "requires_change",
     }
+    finding_optional = {"locations", "verification_status", "evidence_boundary"}
     seen = set()
     for finding in payload["findings"]:
-        if not isinstance(finding, dict) or set(finding) != finding_required:
+        if not isinstance(finding, dict) or not finding_required.issubset(finding) or set(finding) - finding_required - finding_optional:
             raise CrosscheckError("finding 字段不符合 schema", gate_id="crosscheck_round_schema")
         finding_id = finding["finding_id"]
         if not isinstance(finding_id, str) or not finding_id or finding_id in seen:
@@ -486,7 +488,7 @@ def validate_manifest(manifest, directory=None):
     }
     optional = {
         "finished_at", "fresh_sha256", "final_sha256", "round_markdown_sha256",
-        "verdict", "stale_snapshot_digest",
+        "verdict", "stale_snapshot_digest", "inspection_version", "worklist_file", "worklist_sha256", "inspection_declaration_hash",
     }
     for index, item in enumerate(rounds, 1):
         if not isinstance(item, dict) or not round_required.issubset(item) or set(item) - round_required - optional:
@@ -496,12 +498,17 @@ def validate_manifest(manifest, directory=None):
         if (item["fresh_file"] != f"crosscheck_round_{index}.fresh.json"
                 or item["final_file"] != f"crosscheck_round_{index}.json"):
             raise CrosscheckError("crosscheck round 文件名非法", gate_id="crosscheck_manifest_schema")
+        if "inspection_version" in item and (type(item["inspection_version"]) is not int or item["inspection_version"] != 1
+                or item.get("worklist_file") != f"crosscheck_round_{index}.worklist.json"):
+            raise CrosscheckError("crosscheck 工作清单身份非法", gate_id="inspection_worklist")
         for key in ("start_snapshot_digest", "fresh_sha256", "final_sha256",
-                    "round_markdown_sha256", "stale_snapshot_digest"):
+                    "round_markdown_sha256", "stale_snapshot_digest", "worklist_sha256", "inspection_declaration_hash"):
             if key in item and (not isinstance(item[key], str) or not SHA256_RE.fullmatch(item[key])):
                 raise CrosscheckError(f"crosscheck round {key} 非法", gate_id="crosscheck_manifest_schema")
         if item["state"] == "in_progress" and item["phase"] == "history_compare" and "fresh_sha256" not in item:
             raise CrosscheckError("history_compare 缺 fresh_sha256", gate_id="crosscheck_manifest_schema")
+        if item.get("inspection_version") and (item["phase"] == "history_compare" or item["state"] == "completed") and "worklist_sha256" not in item:
+            raise CrosscheckError("冻结/完成轮缺工作清单哈希", gate_id="inspection_worklist")
         if item["state"] in {"completed", "blocked", "stale_input"}:
             if item["phase"] != "finalized" or "finished_at" not in item:
                 raise CrosscheckError("终态 round 未 finalized", gate_id="crosscheck_manifest_schema")
@@ -561,6 +568,8 @@ def new_round(target, metadata, round_no):
         "start_snapshot_digest": object_digest(snapshot),
         "fresh_file": f"crosscheck_round_{round_no}.fresh.json",
         "final_file": f"crosscheck_round_{round_no}.json",
+        "inspection_version": 1,
+        "worklist_file": f"crosscheck_round_{round_no}.worklist.json",
     }
 
 
@@ -576,13 +585,34 @@ def cmd_start(args):
                 candidates=[str(item[0]) for item in matches],
             )
         resumed = False
+        requested_baselines = json.loads(args.baselines_json) if args.baselines_json else None
         if matches:
             directory, manifest = matches[0]
+            for old in manifest["rounds"]:
+                verify_frozen_worklist(directory, old)
             current = manifest["rounds"][-1]
+            if requested_baselines is None:
+                for old in reversed(manifest["rounds"]):
+                    old_path = directory / old.get("worklist_file", "unused.worklist.json")
+                    if old.get("inspection_version") and old_path.is_file():
+                        declaration = load_json(old_path, "crosscheck worklist")
+                        if old.get("inspection_declaration_hash") != inspection_declaration_hash(declaration):
+                            raise CrosscheckError("审查边界声明被修改", gate_id="inspection_worklist")
+                        requested_baselines = {k: declaration["resolved_baselines"][k] for k in declaration.get("baselines", {})}
+                        break
             if current["state"] == "in_progress":
                 current_snapshot = capture_target_snapshot(target, metadata)
                 if object_digest(current_snapshot) == current["start_snapshot_digest"]:
                     resumed = True
+                    worklist = directory / current.get("worklist_file", "unused.worklist.json")
+                    if current.get("inspection_version") and worklist.exists():
+                        try:
+                            check_inspection(directory, manifest, current, pending=True)
+                        except CrosscheckError as exc:
+                            if not inspection_source_drift(exc):
+                                raise
+                            current.update(state="stale_input", phase="finalized", finished_at=now_iso())
+                            resumed = False
                 else:
                     current.update({
                         "state": "stale_input", "phase": "finalized", "finished_at": now_iso(),
@@ -610,6 +640,32 @@ def cmd_start(args):
             }
             atomic_write_json(directory / MANIFEST_NAME, manifest)
         current = manifest["rounds"][-1]
+        if current.get("inspection_version"):
+            worklist = directory / current["worklist_file"]
+            if worklist.is_symlink():
+                raise CrosscheckError("工作清单不得为符号链接", gate_id="inspection_worklist")
+            if not worklist.exists():
+                if current.get("fresh_sha256"):
+                    raise CrosscheckError("已冻结轮缺工作清单，禁止重新生成", gate_id="inspection_worklist")
+                helper = inspection_module()
+                report = helper.build_worklist(code_root_for(metadata, Path(target["project_root"])),
+                    normalize_code_files(metadata), step="crosscheck", ticket_id=target["ticket_id"],
+                    attempt=f"crosscheck-{current['round']}", related=args.related, scopes=args.scope,
+                    baselines=requested_baselines)
+                atomic_write_json(worklist, report)
+            else:
+                report = load_json(worklist, "crosscheck worklist")
+                if any(value is not None and value != report.get(key) for key, value in
+                    (("related", sorted(set(args.related)) if args.related else None),
+                     ("scopes", sorted(set(args.scope)) if args.scope else None),
+                     ("baselines", json.loads(args.baselines_json) if args.baselines_json else None))):
+                    raise CrosscheckError("恢复轮不得改变审查范围", gate_id="inspection_worklist")
+            declaration = inspection_declaration_hash(report)
+            if current.get("inspection_declaration_hash") and current["inspection_declaration_hash"] != declaration:
+                raise CrosscheckError("审查边界声明被修改", gate_id="inspection_worklist")
+            if not current.get("inspection_declaration_hash"):
+                current["inspection_declaration_hash"] = declaration
+                atomic_write_json(directory / MANIFEST_NAME, manifest)
         return {
             "ok": True,
             "crosscheck_dir": str(directory),
@@ -619,6 +675,7 @@ def cmd_start(args):
             "phase": current["phase"],
             "resumed": resumed,
             "fresh_output": str(directory / current["fresh_file"]),
+            "inspection_worklist": str(directory / current["worklist_file"]) if current.get("inspection_version") else None,
             "instruction": "先独立评审并写 fresh_output；此阶段不要读取既往 crosscheck 结果",
         }
 
@@ -636,6 +693,76 @@ def previous_completed_round(directory, manifest, round_no):
     return None, None
 
 
+def inspection_module():
+    spec = importlib.util.spec_from_file_location("icode_inspection_worklist", SKILL_ROOT / "tools" / "inspection_worklist.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def check_inspection(directory, manifest, item, findings=None, *, allow_incomplete=False, pending=False):
+    if not item.get("inspection_version"):
+        raise CrosscheckError("历史轮不补写新工作清单；请开启新一轮", gate_id="inspection_worklist")
+    report = load_json(directory / item["worklist_file"], "crosscheck worklist")
+    if item.get("inspection_declaration_hash") != inspection_declaration_hash(report):
+        raise CrosscheckError("审查边界声明被修改", gate_id="inspection_worklist")
+    helper = inspection_module()
+    snapshot = item["start_snapshot"]
+    workspace = snapshot["code_root"]
+    seeds = [f["declared"] for f in snapshot["code_files"]]
+    candidate = dict(report, coverage_status="partial", debt_reason="pending Read") if pending else report
+    issues = helper.validate_worklist(candidate, workspace, code_files=seeds,
+        step="crosscheck", ticket_id=manifest["target"]["ticket_id"],
+        attempt=f"crosscheck-{item['round']}", allow_incomplete=allow_incomplete or pending)
+    if report.get("mode") != "full":
+        issues.append("crosscheck 必须完整独立审查")
+    if findings is not None:
+        issues += helper.validate_findings(findings, report, workspace)
+    if issues:
+        raise CrosscheckError("独立复评工作清单不满足合同", gate_id="inspection_worklist", violations=issues)
+    return report
+
+
+def cmd_inspection(args):
+    directory, manifest = load_manifest(args.dir)
+    if args.phase == "check":
+        item = get_round(manifest, args.round)
+        check_inspection(directory, manifest, item)
+        return {"ok": True, "read_only": True, "round": args.round}
+    with DirectoryLock(directory):
+        manifest = validate_manifest(load_json(directory / MANIFEST_NAME, "crosscheck manifest"), directory)
+        item = get_round(manifest, args.round)
+        if item["state"] != "in_progress" or item["phase"] != "fresh_review" or item.get("fresh_sha256"):
+            raise CrosscheckError("仅未冻结的本轮 fresh_review 可登记 Read", gate_id="inspection_worklist")
+        report = check_inspection(directory, manifest, item, pending=True)
+        selected = [f for unit in report["units"] for f in unit["files"] if f["path"] == args.path]
+        if len(selected) != 1:
+            raise CrosscheckError("Read 路径不在唯一自查单元中", gate_id="inspection_worklist")
+        selected[0]["reads"]["fresh"] = selected[0]["sha256"]
+        atomic_write_json(directory / item["worklist_file"], report)
+        return {"ok": True, "round": args.round, "path": args.path, "source_sha256": selected[0]["sha256"]}
+
+
+def inspection_declaration_hash(report):
+    keys = ("schema_version", "workspace", "step", "ticket_id", "attempt", "mode", "required_phases",
+            "code_files", "related", "scopes", "baselines", "resolved_baselines", "max_files", "max_bytes")
+    return object_digest({k: report.get(k) for k in keys})
+
+
+def inspection_source_drift(exc):
+    prefixes = ("file sha256 drift:", "file kind drift:", "file reason drift:",
+                "required files differ", "unit grouping/id drift", "identity/scope drift: resolved_baselines",
+                "invalid worklist: baseline unavailable")
+    return any(str(issue).startswith(prefixes) for issue in exc.extra.get("violations", []))
+
+
+def verify_frozen_worklist(directory, item):
+    if item.get("worklist_sha256"):
+        path = directory / item["worklist_file"]
+        if path.is_symlink() or not path.is_file() or file_digest(path) != item["worklist_sha256"]:
+            raise CrosscheckError("冻结工作清单被修改", gate_id="inspection_worklist")
+
+
 def cmd_freeze(args):
     directory, manifest = load_manifest(args.dir)
     with DirectoryLock(directory):
@@ -647,6 +774,17 @@ def cmd_freeze(args):
             manifest["target"]["ticket_id"], args.round, fresh=True,
         )
         digest = file_digest(fresh_path)
+        if item.get("inspection_version"):
+            worklist = directory / item["worklist_file"]
+            if worklist.is_symlink() or not worklist.is_file():
+                raise CrosscheckError("冻结清单必须为普通文件，不得为符号链接", gate_id="inspection_worklist")
+            if not item.get("fresh_sha256"):
+                check_inspection(directory, manifest, item, fresh["findings"],
+                                 allow_incomplete=fresh["verdict"] == "blocked")
+            worklist_digest = file_digest(directory / item["worklist_file"])
+            if item.get("worklist_sha256") and item["worklist_sha256"] != worklist_digest:
+                raise CrosscheckError("冻结工作清单被修改", gate_id="inspection_worklist")
+            item["worklist_sha256"] = worklist_digest
         if item.get("fresh_sha256"):
             if item["fresh_sha256"] != digest:
                 raise CrosscheckError("已冻结的 fresh 文件被修改", gate_id="fresh_immutable")
@@ -821,6 +959,10 @@ def cmd_finish(args):
         item = get_round(manifest, args.round)
         final_path = directory / item["final_file"]
         if item["state"] == "completed":
+            if item.get("inspection_version"):
+                path = directory / item["worklist_file"]
+                if path.is_symlink() or not path.is_file() or file_digest(path) != item.get("worklist_sha256"):
+                    raise CrosscheckError("已完成轮的工作清单被修改", gate_id="inspection_worklist")
             if not final_path.is_file() or file_digest(final_path) != item.get("final_sha256"):
                 raise CrosscheckError("已完成 round 的最终文件被修改", gate_id="final_immutable")
             final = validate_round_payload(
@@ -863,6 +1005,17 @@ def cmd_finish(args):
                 "目标工单或代码在本轮期间发生变化，本轮标记 stale_input；请重新运行 crosscheck",
                 current_digest,
             )
+        if item.get("inspection_version"):
+            worklist = directory / item["worklist_file"]
+            if worklist.is_symlink() or not worklist.is_file() or file_digest(worklist) != item.get("worklist_sha256"):
+                raise CrosscheckError("冻结工作清单被修改", gate_id="inspection_worklist")
+            try:
+                check_inspection(directory, manifest, item, final["findings"], allow_incomplete=final["verdict"] == "blocked")
+            except CrosscheckError as exc:
+                if not inspection_source_drift(exc):
+                    raise
+                mark_stale(directory, manifest, item, args.round, final_path,
+                           "关联源码/审查基线漂移，本轮标记 stale_input；请重新 crosscheck")
         markdown_path, markdown_digest = ensure_round_markdown(directory, item, final)
         item.update({
             "state": "completed", "phase": "finalized", "finished_at": now_iso(),
@@ -888,6 +1041,11 @@ def cmd_validate(args):
         raise CrosscheckError("crosscheck 容器不得含 .ico_metadata.json", gate_id="crosscheck_ticket_isolation")
     completed = 0
     for item in manifest["rounds"]:
+        # Historical rounds are immutable evidence, not claims about the latest source tree.
+        if item.get("worklist_sha256"):
+            worklist_path = directory / item["worklist_file"]
+            if worklist_path.is_symlink() or not worklist_path.is_file() or file_digest(worklist_path) != item["worklist_sha256"]:
+                raise CrosscheckError("历史工作清单哈希不一致", gate_id="inspection_worklist")
         fresh_path = directory / item["fresh_file"]
         if item.get("fresh_sha256"):
             if not fresh_path.is_file() or file_digest(fresh_path) != item["fresh_sha256"]:
@@ -941,6 +1099,9 @@ def build_parser():
     start.add_argument("--ticket", help="目标 ticket_id")
     start.add_argument("--workspace", help="当前工程根；用于 ticket/current 解析")
     start.add_argument("--crosscheck-root", help=argparse.SUPPRESS)
+    start.add_argument("--related", action="append", help="显式关联文件，项目根相对路径")
+    start.add_argument("--scope", action="append", help="明确 Git 审查目录边界")
+    start.add_argument("--baselines-json", help="逐仓真实基线ref对象")
     start.set_defaults(function=cmd_start)
 
     freeze = sub.add_parser("freeze", help="冻结 fresh 评审，之后才允许读取上一轮")
@@ -956,6 +1117,13 @@ def build_parser():
     validate = sub.add_parser("validate", help="只读校验 crosscheck 容器和不可变哈希")
     validate.add_argument("--dir", required=True, help="crosscheck 容器")
     validate.set_defaults(function=cmd_validate)
+
+    inspection = sub.add_parser("inspection", help="仅在crosscheck隔离目录登记真实Read或检查清单")
+    inspection.add_argument("--dir", required=True)
+    inspection.add_argument("--round", required=True, type=int)
+    inspection.add_argument("--phase", required=True, choices=["read", "check"])
+    inspection.add_argument("--path")
+    inspection.set_defaults(function=cmd_inspection)
     return parser
 
 
@@ -974,6 +1142,9 @@ def main():
         return exc.exit_code
     except OSError as exc:
         print(json.dumps({"ok": False, "error": f"文件系统操作失败: {exc}", "gate_id": "filesystem_io"}, ensure_ascii=False, indent=2))
+        return 1
+    except (ValueError, TypeError) as exc:
+        print(json.dumps({"ok": False, "error": str(exc), "gate_id": "inspection_worklist"}, ensure_ascii=False))
         return 1
 
 

@@ -43,6 +43,10 @@
           "fresh_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
           "final_file": { "type": "string", "pattern": "^crosscheck_round_[1-9][0-9]*\\.json$" },
           "final_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+          "inspection_version": { "const": 1 },
+          "inspection_declaration_hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+          "worklist_file": { "type": "string", "pattern": "^crosscheck_round_[1-9][0-9]*\\.worklist\\.json$" },
+          "worklist_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
           "round_markdown_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
           "verdict": { "enum": ["pass", "pass_with_suggestions", "changes_recommended", "blocked"] },
           "stale_snapshot_digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" }

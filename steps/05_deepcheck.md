@@ -1,13 +1,15 @@
 # 步骤 5 — 三阶段递进深度复检
 
 **命令**: `/icode deepcheck`
-**产出**: `{ICODE_OUT_DIR}/05_deepcheck.md`（合并三阶段产物，不再单独存 JSON）
+**产出**: `{ICODE_OUT_DIR}/05_deepcheck.md`（合并三阶段正文）+ `deepcheck_coverage.json` + `deepcheck_worklist.json`（机器证据 sidecar，非单阶段报告）
 **会话**: 主会话
 
 > **共享技能路由**：Reverse 前读取 [references/skill_routing.md](../references/skill_routing.md)，用命中技能的输出合同补充逆推与生命周期复检，不替代三阶段主检查。
 > **证据习惯真源**：消费者逆推、无日志上游 gate、跨轮残留和未观测边界统一执行 [references/evidence_and_verification.md](../references/evidence_and_verification.md)。
 
 ## 阶段覆盖与合规结束（强制）
+
+先执行 [审查清单合同](../references/inspection_worklist.md)：本轮 prepare 联审实现/头文件/调用方/测试；Reverse、Fixed、Free 各自实际重新 Read 后逐文件登记 phase（effective fast 仅 Reverse）。源码 findings 给校验后的行段/hash，遗漏保持债务，不可称全审完成。清单与原有 coverage 声明并行必需，修复改变源码后重新入轮审查。
 
 执行前读取[审查证据合同](../references/inspection_evidence.md)。只有实际完成本轮各阶段Read后，才写阶段覆盖声明及实际源hash：deepcheck写 `deepcheck_coverage.json`，audit写 `audit_coverage.json`，登记本attempt真实artifact回执。声明必须覆盖metadata.code_files全部文件；按risk_profile.effective_mode（未声明时按mode）：full为Reverse/Fixed/Free，实际fast仅Reverse，audit为独立Audit；fast升级full不可省阶段。已有hash/工具调用/历史确认行均不代替本轮Read。
 

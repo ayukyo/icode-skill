@@ -337,6 +337,10 @@ def tracked_quality(tmp_path, degraded=True, finish=True):
         (out / name).write_text("# actual fixture report\n")
     (tmp_path / "source.cpp").write_text("int value = 0;\n")
     cli(out, "metadata-update", "--set-json", json.dumps(dict(code_files=["source.cpp"])))
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    subprocess.run(["git", "-C", str(tmp_path), "add", "source.cpp"], check=True)
+    subprocess.run(["git", "-C", str(tmp_path), "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+                    "commit", "-qm", "inspection fixture baseline"], check=True)
     for step in ("deepcheck", "audit"):
         if step == "audit":
             cli(out, "transition", "--to", "deepcheck_done", "--skip-gates")
@@ -346,6 +350,14 @@ def tracked_quality(tmp_path, degraded=True, finish=True):
         meta = control.load_metadata(out)
         report = quality(out, meta, step)
         report["attempt"] = attempt
+        prepared = cli(out, "inspection", "--step", step, "--attempt", attempt, "--phase", "prepare")
+        worklist = json.loads(Path(prepared["path"]).read_text())
+        for unit in worklist["units"]:
+            for entry in unit["files"]:
+                (tmp_path / entry["path"]).read_text()
+                for phase in worklist["required_phases"]:
+                    cli(out, "inspection", "--step", step, "--attempt", attempt, "--phase", "read",
+                        "--read-phase", phase, "--path", entry["path"])
         if step == "deepcheck" and degraded:
             report.update(coverage_status="partial", read_phases={}, unobserved=["fixed/free"],
                           dedup_status="partial", dedup_unobserved=["groups"], debt_reason="budget")

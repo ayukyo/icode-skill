@@ -35,6 +35,8 @@ python3 tools/icode_crosscheck.py start --workspace <project_root> <ticket_path_
 
 ### 2. 首次独立评审（禁止先看旧 crosscheck）
 
+执行 [审查清单合同](../references/inspection_worklist.md)，保存 start 的 inspection_worklist。按本轮单元实际独立 Read 后，用 `icode_crosscheck.py inspection --dir <crosscheck_dir> --round <N> --phase read --path <file>` 登记 fresh 阅读，清单不替代设计评审。fresh findings 的 locations 绑定当前行段/hash；不能定位则 needs_more_evidence + evidence_boundary。freeze 同时冻结清单，缺阅读/错定位不可完整通过，原工单仍零回写。
+
 在写完 fresh 文件并执行 freeze 前，**不得读取既往 crosscheck 的 `crosscheck_round_*.json/.md`、`findings.json` 或 `crosscheck_report.md`**。可以且必须读取目标工单自己的需求、计划、审查、定稿、代码复检、deepcheck、audit、patch、verification 和证据账本。
 
 至少覆盖：

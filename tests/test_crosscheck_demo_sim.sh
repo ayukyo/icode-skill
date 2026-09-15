@@ -21,6 +21,13 @@ ticket = demo / ".icode_output/.icode_output_4"
 index = pathlib.Path(os.environ["HOME"]) / ".claude/icode_data/index.json"
 index.parent.mkdir(parents=True)
 index.write_text('{"schema_version":3,"tickets":[]}\n', encoding="utf-8")
+subprocess.run(["git", "init", "-q", str(demo)], check=True)
+(demo / ".gitignore").write_text(".icode_output/\n*.o\ncalc_demo\n.all_tests_final/\n.ui_runtime_sim*/\n*.tmp\n", encoding="utf-8")
+subprocess.run(["git", "-C", str(demo), "add", "calc.c", "calc.h", "main.c", "Makefile"], check=True)
+subprocess.run(["git", "-C", str(demo), "add", ".gitignore"], check=True)
+subprocess.run(["git", "-C", str(demo), "add", "log"], check=True)
+subprocess.run(["git", "-C", str(demo), "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+                "commit", "-qm", "isolated demo source baseline"], check=True)
 
 def digest_tree(path):
     digest = hashlib.sha256()
@@ -57,11 +64,21 @@ def payload(number, status="new"):
             "analysis": "边界可进一步显式化",
             "recommendation": "在后续 patch 中按需补充，不自动修改",
             "requires_change": False,
+            "locations": [],
+            "evidence_boundary": "仅设计文档建议，未声称源码存在确认缺陷",
         }],
     }
 
 target_before = digest_tree(ticket)
 index_before = index.read_bytes()
+
+def read_worklist(directory, number):
+    report = json.loads((directory / f"crosscheck_round_{number}.worklist.json").read_text())
+    for unit in report["units"]:
+        for entry in unit["files"]:
+            data = (demo / entry["path"]).read_bytes()
+            assert hashlib.sha256(data).hexdigest() == entry["sha256"]
+            run("inspection", "--dir", directory, "--round", number, "--phase", "read", "--path", entry["path"])
 
 # Round 1: legacy completed ticket, explicit artifact path, full success.
 started = run("start", "--workspace", demo, ticket / "03_plan_final.md")
@@ -70,6 +87,7 @@ assert directory.parent == demo / ".icode_output/.crosscheck"
 (directory / "crosscheck_round_1.fresh.json").write_text(
     json.dumps(payload(1), ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
 )
+read_worklist(directory, 1)
 run("freeze", "--dir", directory, "--round", 1)
 (directory / "crosscheck_round_1.json").write_text(
     json.dumps(payload(1), ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
@@ -83,6 +101,7 @@ run("start", "--workspace", demo, "--ticket", "demo-4")
 (directory / "crosscheck_round_2.fresh.json").write_text(
     json.dumps(payload(2), ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
 )
+read_worklist(directory, 2)
 run("freeze", "--dir", directory, "--round", 2)
 (directory / "crosscheck_round_2.json").write_text(
     json.dumps(payload(2, "still_present"), ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
@@ -102,6 +121,7 @@ assert third["round"] == 3
 (directory / "crosscheck_round_3.fresh.json").write_text(
     json.dumps(payload(3), ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
 )
+read_worklist(directory, 3)
 frozen = run("freeze", "--dir", directory, "--round", 3)
 assert frozen["previous_round"].endswith("crosscheck_round_1.json")
 (directory / "crosscheck_round_3.json").write_text(

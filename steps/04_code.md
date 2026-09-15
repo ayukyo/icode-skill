@@ -179,6 +179,8 @@
 
 ## 强制操作（完成后必须执行）
 
+**关联审查工作清单**：Code Review Fix 前先完整登记本轮 `code_files`，执行 [审查清单合同](../references/inspection_worklist.md)，用 `inspection --step code --phase prepare` 建立联审单元。实际 Read 后逐文件登记 code_review；修复导致源码变化则 blocked 重入、重建清单重审。`code_worklist.json` 与真实回执是新执行必需输出，编译成功不替代审查；源码 findings 的位置/版本必须校验。
+
 0. **git 状态快照（进工程后第一步，改动静止基线；O-2）**：改动报告前先建立"改动归属"基线，防止把"改动没被跟踪"误判为"改动丢失"：
    - 执行 `git -C <project_path> status --short`，并检查 `.git` 形态（`ls -ld <project_path>/.git`）做**三形态判别**：**目录**=普通 git 仓库 / **symlink**=repo 独立仓（`.git` 指向 repo 管理目录，父仓 `.gitignore` 忽略子仓，父仓根目录 `git diff` 恒为空）→ 标注「**repo 独立仓**」/ **普通文件**（内容以 `gitdir:` 开头）= **git worktree 成员** → 标注「**git worktree**」（`git status` 正常，勿误判为异常/独立仓损坏；`project_id` 归主仓见 [references/dir_and_metadata.md](../references/dir_and_metadata.md)「project_id 与 branch 语义」F1）
    - 记录三态：**已暂存（staged）**（本对话之前的改动）、**工作区未暂存（unstaged）**（本对话的改动）、**未跟踪（untracked）**；后续改动报告按此三态描述

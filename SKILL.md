@@ -3,7 +3,7 @@ name: icode
 description: 端到端编码工作流（步骤 0~6，含需求初稿、日志根因、验证、独立复评、学习与本地管理 UI），支持：/icode help, ui, install [--basic|--preview], init [--guide], log, start, fast, plan, review, merge, code, deepcheck, audit, crosscheck, patch, verify [--build|--plan|--deploy|--listen|--test|--reuse], doc, docx, limit, readme, ppt, learn [--project|--ticket|--since], status [--pending|--scan|--verdict], list [--all|--plain], bak, worktree --update/--close/--reopen/--merge。新建工单入口支持 --worktree opt-in
 ---
 
-**版本**: v2.29.0
+**版本**: v2.30.0
 
 # ICode 全流程编码工作流（步骤 0 + 1~6）
 
@@ -338,4 +338,5 @@ test -f "{ICODE_OUT_DIR}/03_plan_final.md" && python3 -c "import json,sys; d=jso
 | [references/worktree_isolation.md](references/worktree_isolation.md) | **git worktree 多需求隔离**：worktree 决策与创建（**opt-in 参数触发**：`--worktree` 才走创建，否则默认原地，不弹问；**预检/公示告知/失败降级**）+ cwd 契约 + metadata 字段族 + 回流指引（F2 二选一）+ **产物归档（自动，防 remove 丢档）** + 防误删护栏 + 空间自查 | 新建工单入口加 `--worktree` 时（init/log/start/plan/fast）/ 续跑与只读（review/code/deepcheck/audit/patch/status/readme） |
 | [references/debug_mode.md](references/debug_mode.md) | **debug 模式（独立孪生工单）**：`/icode init --debug` / `/icode log --debug` 产出对照工单，不入全局索引、不参与主流程（各主流程步骤 L1 阻断）；目录在 `.icode_output/.debug/` 下、N 独立递增；`debug: true` 元数据标志 + 独立状态名；忽略 `--worktree` | init / log（`--debug` 时） |
 | [references/crosscheck_mode.md](references/crosscheck_mode.md) | **独立复评真源**：目标解析、原工单零回写、fresh 冻结防偏、多轮生命周期、输入漂移与 finding 状态 | crosscheck |
+| [references/inspection_worklist.md](references/inspection_worklist.md) | **关联审查清单**：必审种子/真实差异、联审单元、逐阶段 Read 与版本、finding 行段原文校验、遗漏降级 | code / deepcheck / audit / crosscheck |
 | [mcp/workflow-gate/gates.json](mcp/workflow-gate/gates.json) + [tools/lint_workflow_contract.py](tools/lint_workflow_contract.py) | **workflow gate 工作流硬门禁（P0 四类 + P1 生命周期验收）**：语义决策 / 身份变化影响 / 需求增量强制升级 / 快速模式风险自动升级 / 生命周期验收矩阵；机器真源 + 运行时校验器（`--step plan/code/patch/merge/deploy/audit-verified/fast`，`--strict` 强制模式）；两阶段兼容迁移（legacy-untracked 提示 → 强制） | plan（写合同 + 7.5 自检）/ review（影响清单审查）/ merge（11.5 定稿硬校验）/ fast（risk_profile 自动升级）/ code（前置门禁 + 验收矩阵测试清单）/ deepcheck（生命周期一致性复检）/ audit（验收门）/ patch（2.7 重大增量回流） |

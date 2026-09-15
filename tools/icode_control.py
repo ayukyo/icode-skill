@@ -46,6 +46,7 @@ import math
 import os
 import re
 import io
+import importlib.util
 import subprocess
 import sys
 import tempfile
@@ -1384,7 +1385,54 @@ def validate_step_outputs(out_dir, meta, model, step, allow_incomplete=False):
         missing.extend(review_evidence_issues(out_dir, meta))
     if step in ("deepcheck", "audit") and by_id.get("inspection_coverage", {}).get("exists"):
         missing.extend(inspection_coverage_issues(out_dir, meta, step, allow_incomplete=allow_incomplete))
+    if by_id.get("inspection_worklist", {}).get("exists"):
+        missing.extend(inspection_worklist_issues(out_dir, meta, step, allow_incomplete=allow_incomplete))
     return facts, missing
+
+
+def inspection_module():
+    """Load the bundled stdlib helper without depending on the invocation cwd."""
+    spec = importlib.util.spec_from_file_location("icode_inspection_worklist", SKILL_ROOT / "tools/inspection_worklist.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def inspection_worklist_issues(out_dir, meta, step, attempt=None, allow_incomplete=False):
+    path = Path(out_dir) / f"{step}_worklist.json"
+    if path.is_symlink() or not path.is_file():
+        return ["inspection_worklist:missing_or_symlink"]
+    try:
+        report = load_json(path, "inspection worklist")
+        helper = inspection_module()
+        workspace = execution_workspace(out_dir, meta)
+        issues = helper.validate_worklist(report, workspace, code_files=meta.get("code_files") or [],
+            step=step, ticket_id=meta.get("ticket_id"), attempt=attempt, allow_incomplete=allow_incomplete)
+        profile = meta.get("risk_profile")
+        effective = profile.get("effective_mode") if isinstance(profile, dict) else None
+        effective = effective if effective in ("full", "fast") else meta.get("mode", "full")
+        if report.get("mode") != effective:
+            issues.append("effective_mode mismatch")
+        if attempt is not None:
+            events, chain_issues = verify_event_chain(out_dir, meta)
+            receipts = [e for e in events if e.get("event_type") == "artifact_written"
+                and (e.get("payload") or {}).get("attempt") == attempt
+                and (e.get("payload") or {}).get("output") == "inspection_worklist"
+                and (e.get("payload") or {}).get("inspection_declaration_hash")]
+            if chain_issues or not receipts or any(e["payload"]["inspection_declaration_hash"] != inspection_declaration_hash(report) for e in receipts):
+                issues.append("declaration/receipt drift")
+        findings = report.get("findings") if isinstance(report, dict) else None
+        issues.extend(helper.validate_findings(findings, report, workspace))
+        return ["inspection_worklist:" + str(item) for item in issues]
+    except (ControlError, ValueError, OSError, TypeError) as exc:
+        return [f"inspection_worklist:invalid={exc}"]
+
+
+def inspection_declaration_hash(report):
+    keys = ("schema_version", "workspace", "step", "ticket_id", "attempt", "mode", "required_phases",
+            "code_files", "related", "scopes", "baselines", "resolved_baselines", "max_files", "max_bytes")
+    return hashlib.sha256(json.dumps({k: report.get(k) for k in keys}, sort_keys=True,
+        ensure_ascii=False, separators=(",", ":")).encode("utf-8")).hexdigest()
 
 
 def review_evidence_issues(out_dir, meta, events=None, start=None, allow_legacy=False):
@@ -1585,22 +1633,36 @@ def cmd_check_outputs(args):
         policy = load_state_machine()["gate_policy"]
         completion = {policy["step_by_target"][target]: number for target, number in
                       policy["completed_step_by_target"].items() if target in policy["step_by_target"]}
-        historical = (bool(starts) and (starts[-1].get("payload") or {}).get("contract_digest") != canonical_digest(contract)) or (
-                      not starts and completion.get(step) in (meta.get("completed_steps") or []))
+        old_contract = bool(starts) and (starts[-1].get("payload") or {}).get("contract_digest") != canonical_digest(contract)
         latest_start = starts[-1] if starts else None
         attempt = (latest_start.get("payload") or {}).get("attempt") if latest_start else None
         finished = step_attempt_finished(events, attempt) if attempt is not None else None
+        historical = bool(old_contract and finished and (finished.get("payload") or {}).get("outcome") in ("success", "degraded")) or (
+                      not starts and completion.get(step) in (meta.get("completed_steps") or []))
+        if old_contract and not historical:
+            problems.append(f"{step}:contract_drift_reenter")
         degraded = bool(finished and (finished.get("payload") or {}).get("outcome") == "degraded")
         facts, missing = validate_step_outputs(out_dir, meta, model, step, allow_incomplete=degraded)
         # New evidence ports apply to new attempts, not completed old contracts.
         if historical:
-            new_ports = {"review_manifest", "inspection_coverage"}
-            missing = [item for item in missing if item not in new_ports]
+            new_ports = {"review_manifest", "inspection_coverage", "inspection_worklist"}
+            missing = [item for item in missing if item not in new_ports and not item.startswith("inspection_worklist:")]
             warnings.append(f"{step}:historical_evidence_untracked")
         problems.extend(f"{step}:{item}" for item in missing)
         if step == "review":
             problems.extend(review_evidence_issues(out_dir, meta, None if historical else events,
                                                    allow_legacy=historical))
+        if step in ("code", "deepcheck", "audit") and not historical:
+            problems.extend(inspection_worklist_issues(out_dir, meta, step, attempt, allow_incomplete=degraded))
+            if latest_start is None:
+                problems.append(f"{step}:inspection_worklist:missing_step_start")
+            else:
+                receipt_contract = dict(contract, outputs=[p for p in contract["outputs"]
+                                                           if p["id"] == "inspection_worklist"])
+                problems.extend(f"{step}:receipt={item}" for item in missing_output_receipts(
+                    out_dir, meta, receipt_contract, events, latest_start))
+            if degraded:
+                warnings.append(f"{step}:inspection_debt")
         if step in ("deepcheck", "audit"):
             coverage_exists = any(f["id"] == "inspection_coverage" and f["exists"] for f in facts)
             if not historical and coverage_exists:
@@ -2860,7 +2922,7 @@ def cmd_index_update(args):
     return 0
 
 
-def required_archive_files(meta):
+def required_archive_files(meta, events=()):
     required = {METADATA_NAME, EVENTS_NAME}
     step_files = {
         "0": ["00_init.md"],
@@ -2878,6 +2940,13 @@ def required_archive_files(meta):
         required.update({".thinking_gate_trace.jsonl", ".mcp_gate_trace.jsonl"})
     if meta.get("anchors_enabled"):
         required.add(".decision_anchors.json")
+    # Persist new execution evidence even if someone removed the sidecar before
+    # archive. Historical tickets without these receipts are not retrofitted.
+    for event in events:
+        payload = event.get("payload") or {}
+        if event.get("event_type") == "artifact_written" and payload.get("output") == "inspection_worklist" \
+                and payload.get("inspection_declaration_hash") and payload.get("step") in ("code", "deepcheck", "audit"):
+            required.add(payload["step"] + "_worklist.json")
     return required
 
 
@@ -2991,7 +3060,8 @@ def verify_archive_manifest(archive_dir, ticket_id, source_dir=None):
 
     expected = set()
     if archived_meta is not None:
-        expected.update(required_archive_files(archived_meta))
+        archived_events, _ = verify_event_chain(archive_dir, archived_meta)
+        expected.update(required_archive_files(archived_meta, archived_events))
     for root in [archive_dir] + ([Path(source_dir)] if source_dir is not None else []):
         if not root.is_dir():
             continue
@@ -3094,9 +3164,9 @@ def cmd_archive_manifest(args):
     if (source_dir / TXN_NAME).exists():
         raise ControlError("源工单存在未完成事务，禁止生成归档 manifest",
                            exit_code=1, gate_id="pending_transaction")
-    _, chain_problems = verify_event_chain(source_dir, source_meta)
+    source_events, chain_problems = verify_event_chain(source_dir, source_meta)
     problems = [f"源事件链: {item}" for item in chain_problems]
-    required = required_archive_files(source_meta)
+    required = required_archive_files(source_meta, source_events)
     small_files = {
         item.name for item in source_dir.iterdir()
         if item.is_file() and item.name not in {
@@ -4247,6 +4317,14 @@ def cmd_step(args):
             out_dir, meta, contract, events, start)
         if args.step == "review":
             missing_receipts.extend(review_evidence_issues(out_dir, meta, events, start))
+        if args.step in ("code", "deepcheck", "audit"):
+            worklist_issues = inspection_worklist_issues(out_dir, meta, args.step, args.attempt,
+                                                        allow_incomplete=args.outcome == "degraded")
+            missing_receipts.extend(worklist_issues)
+            if args.outcome == "degraded" and (worklist_issues or any(
+                    item.startswith("inspection_worklist:") for item in missing_receipts)):
+                raise ControlError("降级自查必须有真实工作清单回执与明确债务", gate_id="inspection_worklist",
+                                   violations=missing_receipts)
         if args.step in ("deepcheck", "audit"):
             coverage_issues = inspection_coverage_issues(out_dir, meta, args.step, args.attempt,
                                                          allow_incomplete=args.outcome == "degraded")
@@ -4289,6 +4367,126 @@ def cmd_step(args):
                           "event_id": event["event_id"],
                           "already_applied": bool(prior)}, ensure_ascii=False, indent=2))
         return 0
+
+
+def cmd_inspection(args):
+    """Prepare/reuse a bounded worklist; register reads only against its frozen version."""
+    out_dir = Path(args.dir).resolve()
+    model = load_execution_model()
+    contract = step_contract(model, args.step)
+    target = out_dir / f"{args.step}_worklist.json"
+    if target.is_symlink():
+        raise ControlError("工作清单不得是符号链接", gate_id="inspection_worklist")
+    if args.phase == "check":
+        meta = load_metadata(out_dir)
+        require_vnext(meta, out_dir)
+        require_valid_metadata(meta)
+        events, problems = verify_event_chain(out_dir, meta)
+        if problems:
+            raise ControlError("事件链不完整", gate_id="event_chain", violations=problems)
+        start = find_step_start(events, args.attempt)
+        if start["payload"].get("step") != args.step:
+            raise ControlError("工作清单与执行步骤不一致", gate_id="inspection_worklist")
+        issues = inspection_worklist_issues(out_dir, meta, args.step, args.attempt,
+                                            allow_incomplete=args.allow_incomplete)
+        print(json.dumps(dict(ok=not issues, read_only=True, path=str(target), violations=issues), ensure_ascii=False))
+        return 0 if not issues else 1
+    with DirLock(out_dir):
+        recover_pending_transaction(out_dir)
+        meta = load_metadata(out_dir)
+        require_vnext(meta, out_dir)
+        require_valid_metadata(meta)
+        ensure_execution_writable(meta)
+        events, problems = verify_event_chain(out_dir, meta)
+        if problems:
+            raise ControlError("事件链不完整", gate_id="event_chain", violations=problems)
+        start = find_step_start(events, args.attempt)
+        if start["payload"].get("step") != args.step or step_attempt_finished(events, args.attempt):
+            raise ControlError("工作清单须关联同一步骤的未终结 attempt", gate_id="inspection_worklist")
+        current, missing = capture_step_inputs(out_dir, meta, model, args.step)
+        if missing or current["protected"] != start["payload"].get("protected") or current["contract_digest"] != start["payload"].get("contract_digest"):
+            raise ControlError("执行合同或受保护输入漂移，先 blocked 重入", gate_id="inspection_worklist")
+        if not any(e.get("event_type") == "gate_checked" and (e.get("payload") or {}).get("attempt") == args.attempt
+                   and (e.get("payload") or {}).get("boundary") == "before_write"
+                   and (e.get("payload") or {}).get("result") == "pass" for e in events):
+            raise ControlError("写工作清单前须真实 before_write check", gate_id="inspection_worklist")
+        helper = inspection_module()
+        workspace = execution_workspace(out_dir, meta)
+        resumed = False
+        if target.exists():
+            existing = load_json(target, "inspection worklist")
+            if isinstance(existing, dict) and existing.get("attempt") == args.attempt:
+                report, resumed = existing, True
+            else:
+                report = None
+        else:
+            report = None
+        try:
+            if args.phase == "prepare" and not resumed:
+                baselines = strict_json_loads(args.baselines_json) if args.baselines_json else None
+                report = helper.build_worklist(workspace, meta.get("code_files") or [], step=args.step,
+                    ticket_id=meta["ticket_id"], attempt=args.attempt,
+                    mode=(meta.get("risk_profile") or {}).get("effective_mode") or meta.get("mode", "full"),
+                    related=args.related, scopes=args.scope, baselines=baselines)
+                report.setdefault("findings", [])
+            elif args.phase == "prepare" and resumed:
+                options = (("related", sorted(set(args.related)) if args.related else None),
+                           ("scopes", sorted(set(args.scope)) if args.scope else None),
+                           ("baselines", strict_json_loads(args.baselines_json) if args.baselines_json else None))
+                if any(value is not None and value != report.get(key) for key, value in options):
+                    raise ValueError("恢复轮不得改变审查范围；先 blocked 重入")
+            if report is None:
+                raise ValueError("先 prepare 本 attempt 的工作清单")
+            prior_declarations = [e["payload"]["inspection_declaration_hash"] for e in events
+                if e.get("event_type") == "artifact_written" and (e.get("payload") or {}).get("attempt") == args.attempt
+                and (e.get("payload") or {}).get("inspection_declaration_hash")]
+            if any(h != inspection_declaration_hash(report) for h in prior_declarations):
+                raise ValueError("审查边界声明变化，先 blocked 重入")
+            # Pending Read is expected during preparation. It must not relax source/identity checks.
+            pending = dict(report, coverage_status="partial", debt_reason="pending Read")
+            issues = helper.validate_worklist(pending, workspace, code_files=meta.get("code_files") or [],
+                step=args.step, ticket_id=meta["ticket_id"], attempt=args.attempt, allow_incomplete=True)
+            if issues:
+                raise ValueError(str(issues))
+            request_identity = dict(phase=args.phase,
+                read_phase=args.read_phase if args.phase == "read" else None,
+                source_path=args.path if args.phase == "read" else None,
+                related=sorted(set(args.related)) if args.related else None,
+                scopes=sorted(set(args.scope)) if args.scope else None,
+                baselines=strict_json_loads(args.baselines_json) if args.baselines_json else None)
+            stable_payload = dict(execution_model_version=model["schema_version"], step=args.step,
+                attempt=args.attempt, output="inspection_worklist", scope="ticket", path=str(target),
+                inspection_declaration_hash=inspection_declaration_hash(report), inspection_request=request_identity)
+            prior = find_idempotent_event(events, args.request, "artifact_written", stable_payload,
+                payload_keys=list(stable_payload))
+            if prior:
+                # A later Read may have expanded the artifact. Replaying this
+                # operation must return its original receipt, not erase progress.
+                print(json.dumps(dict(ok=True, output="inspection_worklist", path=str(target), resumed=True,
+                    event_id=prior["event_id"], sha256=prior["payload"]["sha256"],
+                    current_sha256=file_sha256(target), already_applied=True), ensure_ascii=False))
+                return 0
+            if args.phase == "read":
+                if args.read_phase not in report["required_phases"] or not args.path:
+                    raise ValueError("read 必须指定合法 --read-phase 和 --path")
+                selected = [f for unit in report["units"] for f in unit["files"] if f["path"] == args.path]
+                if len(selected) != 1:
+                    raise ValueError("路径不在唯一自查单元中")
+                selected[0]["reads"][args.read_phase] = selected[0]["sha256"]
+            if args.phase != "prepare" or not resumed:
+                # Reject a conflicting request before replacing any valid worklist.
+                encoded = (json.dumps(report, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+                prospective = dict(stable_payload, sha256=hashlib.sha256(encoded).hexdigest(), size=len(encoded))
+                find_idempotent_event(events, args.request, "artifact_written", prospective)
+                atomic_write_json(target, report)
+        except (ValueError, TypeError, OSError) as exc:
+            raise ControlError(f"工作清单准备/版本校验失败: {exc}", gate_id="inspection_worklist")
+        payload = dict(stable_payload, sha256=file_sha256(target), size=target.stat().st_size)
+        prior = find_idempotent_event(events, args.request, "artifact_written", payload)
+        event = prior or append_event(out_dir, meta, "artifact_written", payload, request_id=args.request)
+    print(json.dumps(dict(ok=True, output="inspection_worklist", path=str(target), resumed=resumed,
+                          event_id=event["event_id"], sha256=payload["sha256"], already_applied=bool(prior)), ensure_ascii=False))
+    return 0
 
 
 def declared_output_path(out_dir, meta, contract, target):
@@ -4918,7 +5116,7 @@ def build_parser():
 
     p = sub.add_parser("check-outputs", help="只读检查步骤产物与条件审查证据")
     p.add_argument("--dir", required=True)
-    p.add_argument("--step", required=True, choices=["review", "audit"])
+    p.add_argument("--step", required=True, choices=["review", "code", "deepcheck", "audit"])
     p.set_defaults(func=cmd_check_outputs)
 
     p = sub.add_parser("validate", help="工单整体校验（fail-closed 报告）")
@@ -4955,6 +5153,20 @@ def build_parser():
     p.add_argument("--scope", default="ticket", choices=["ticket", "workspace", "external"])
     p.add_argument("--request", help="幂等键")
     p.set_defaults(func=cmd_artifact)
+
+    p = sub.add_parser("inspection", help="原生自查清单：范围/关联单元/专项规则/源码定位（不调用模型）")
+    p.add_argument("--dir", required=True)
+    p.add_argument("--step", required=True, choices=["code", "deepcheck", "audit"])
+    p.add_argument("--attempt", required=True)
+    p.add_argument("--phase", required=True, choices=["prepare", "read", "check"])
+    p.add_argument("--scope", action="append", default=None, help="有证据的项目内范围，重复增补")
+    p.add_argument("--related", action="append", default=None, help="调用方/协议另一端/测试等关联路径")
+    p.add_argument("--baselines-json", help="受影响仓库相对根到真实Git基线的映射")
+    p.add_argument("--read-phase", help="真实Read之后登记对应阶段")
+    p.add_argument("--path", help="read登记的项目相对文件")
+    p.add_argument("--allow-incomplete", action="store_true", help="check明确债务，仍不允许身份/源码漂移")
+    p.add_argument("--request", help="artifact回执幂等键")
+    p.set_defaults(func=cmd_inspection)
 
     p = sub.add_parser("operation", help="长动作开始/终结回执（禁止盲目重放副作用）")
     p.add_argument("--dir", required=True)
