@@ -74,6 +74,8 @@ grep -qE '^[^#]*\.icode_output' "$WORKSPACE_ROOT/.gitignore" 2>/dev/null && echo
 - debug 工单 metadata 写 `debug: true` + 独立状态名（`debug_in_progress` / `debug_done`），详见 [debug_mode.md](debug_mode.md)
 - **空目录即出生（vNext 强制）**：硬熔断②确认目录为空后，下一项写操作必须是 `icode_control.py create`；正常入口用 `--birth init|plan|log`，debug 入口用 `--birth debug-init|debug-log`。`create` 自身会复验目录形状、normal/debug 域和空目录所有权；trace、checkpoint、附件或步骤报告均不得先于出生事件落盘。
 
+**Crosscheck 非工单变体**：`/icode crosscheck` 使用 `.icode_output/.crosscheck/.icode_output_N/`，编号只在 `.crosscheck` 内递增；它不创建 metadata、不进入正常/debug 创建与复用逻辑，也不进入全局索引。目录身份、多轮和原工单零回写规则见 [crosscheck_mode.md](crosscheck_mode.md)，实现只能调用 `tools/icode_crosscheck.py`。
+
 ### 复用 / 创建新目录决策（用于 start / plan / fast）
 
 ```bash

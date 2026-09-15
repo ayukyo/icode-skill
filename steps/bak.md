@@ -3,7 +3,7 @@
 > **工程接入门**：读取 [references/project_intake.md](../references/project_intake.md) 后解析备份源。唯一嵌套仓只备份实际 Git 根下的 `.icode_output/`；不得把容器目录和子仓各备一份或靠 mtime 选源。
 
 **命令**: `/icode bak [--project <path>]`
-**产出**: `~/.claude/icode_data/project_backup/<project_id>/bak_<时间戳>/`（工程 `.icode_output/` 全量快照：工单 `.icode_output_N/` + `.debug/` 调试孪生 + `limit.local` + `ppt`）+ 快照内 `MANIFEST.json` + `<project_id>/latest` 符号链接（指向最新快照）+ 全局索引 `backup_path` 字段更新
+**产出**: `~/.claude/icode_data/project_backup/<project_id>/bak_<时间戳>/`（工程 `.icode_output/` 全量快照：工单 `.icode_output_N/` + `.debug/` 调试孪生 + `.crosscheck/` 独立复评 + `limit.local` + `ppt`）+ 快照内 `MANIFEST.json` + `<project_id>/latest` 符号链接（指向最新快照）+ 全局索引 `backup_path` 字段更新
 **会话**: 主会话
 **定位**: **独立备份步骤**——把工程全部工单产物备份到全局 `~/.claude/icode_data/`，**可多次执行**（每次生成新时间戳快照，`rsync --link-dest` 硬链接去重未变文件）。**不创建工单目录、不写工单 metadata、不更新 `completed_steps`/`status`、不参与步骤1~6推进、不改工程内任何文件**。
 
@@ -67,6 +67,7 @@ manifest = {
     "ticket_count": len(ticket_dirs),
     "ticket_dirs": ticket_dirs,
     "has_debug": has(".debug"),
+    "has_crosscheck": has(".crosscheck"),
     "has_limit_local": has("limit.local"),
     "has_ppt": has("ppt"),
     "prev_snapshot": PREV,
@@ -119,7 +120,7 @@ else:
 PY
 ```
 
-> 索引回写只扫快照内顶层 `.icode_output_*/`；`ticket_id` 为空的目录（含 debug 孪生——快照内位于 `.debug/` 子路径、glob 扫不到）及无 `.ico_metadata.json` 的目录**文件照常备份**，仅不写 `backup_path`。
+> 索引回写只扫快照内顶层 `.icode_output_*/`；debug 位于 `.debug/`，crosscheck 位于 `.crosscheck/` 且无 `.ico_metadata.json`，两者都不会被 glob 当作正式工单。其文件照常备份，仅不写 `backup_path`。
 
 ## 6. 收尾报告
 
@@ -143,7 +144,7 @@ PY
 ## 反偷懒
 
 - **禁止硬编码快照名/时间**：`date` 运行时取（对齐「当前时间取值约定」）
-- **禁止只备份部分工单**：全量 `.icode_output/`（工单 + `.debug` + limit.local + ppt），不得挑拣
+- **禁止只备份部分工单**：全量 `.icode_output/`（工单 + `.debug` + `.crosscheck` + limit.local + ppt），不得挑拣
 - **禁止删/覆盖旧快照**：每次新建时间戳快照，保留历史（多次备份是特性）
 - **禁止 echo 伪确认**：用 `ls -A` 非空 + 工单目录计数验证磁盘状态
 - **禁止改工程内文件**：源工程只读，绝不写工程内任何文件

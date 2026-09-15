@@ -1,0 +1,37 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "crosscheck-round.schema.json",
+  "title": "ICODE crosscheck round v1",
+  "description": "一轮独立复评结论。fresh 阶段 finding status 只能是 new，历史对照后使用完整生命周期。",
+  "type": "object",
+  "required": ["schema_version", "target_ticket_id", "round", "reviewed_at", "verdict", "evidence_boundary", "summary", "findings"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "const": 1 },
+    "target_ticket_id": { "type": "string", "minLength": 1 },
+    "round": { "type": "integer", "minimum": 1 },
+    "reviewed_at": { "type": "string", "minLength": 1 },
+    "verdict": { "enum": ["pass", "pass_with_suggestions", "changes_recommended", "blocked"] },
+    "evidence_boundary": { "type": "string", "minLength": 1 },
+    "summary": { "type": "string", "minLength": 1 },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["finding_id", "title", "severity", "status", "category", "evidence", "analysis", "recommendation", "requires_change"],
+        "additionalProperties": false,
+        "properties": {
+          "finding_id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$" },
+          "title": { "type": "string", "minLength": 1 },
+          "severity": { "enum": ["blocker", "major", "minor", "suggestion"] },
+          "status": { "enum": ["new", "still_present", "resolved", "superseded", "regressed", "not_rechecked"] },
+          "category": { "type": "string", "minLength": 1 },
+          "evidence": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+          "analysis": { "type": "string", "minLength": 1 },
+          "recommendation": { "type": "string", "minLength": 1 },
+          "requires_change": { "type": "boolean" }
+        }
+      }
+    }
+  }
+}

@@ -33,6 +33,8 @@ python3 tools/icode_control.py create --dir <out_dir> --ticket-id <id> \
 
 ## 3. 状态流转（transition 强制）
 
+> **Crosscheck 例外**：`/icode crosscheck` 不是 ticket-scoped 状态步骤。它只用 `resolve-ticket` 做身份解析，随后由 `tools/icode_crosscheck.py` 写项目 `.icode_output/.crosscheck/`；不得调用 transition/event/index/metadata writer，也不创建 metadata。完整边界见 [crosscheck_mode.md](crosscheck_mode.md)。
+
 - **每个状态写回点必须经**：`python3 tools/icode_control.py transition --dir <out_dir> --to <status>`，**禁止绕过直写 metadata.status**。validate 会比对 `metadata.status` 与最后一条 `state_changed` 事件，不一致报 `status_event_consistency`。
 - 状态机真源见 gates.json `state_machine.transitions`（含重入：`*_done → 同步 *_in_progress` 允许，跨步跳跃拒绝）。
 - **fail-closed 门禁分级**：

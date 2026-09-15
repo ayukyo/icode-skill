@@ -1,9 +1,9 @@
 ---
 name: icode
-description: 端到端编码工作流（步骤 0~6，含需求初稿、日志根因、验证、学习与本地管理 UI），支持：/icode help, ui, install [--basic|--preview], init [--guide], log, start, fast, plan, review, merge, code, deepcheck, audit, patch, verify [--plan|--deploy|--listen|--test|--reuse], doc, docx, limit, readme, ppt, learn [--project|--ticket|--since], status [--pending|--scan|--verdict], list [--all|--plain], bak, worktree --update/--close/--reopen/--merge。新建工单入口支持 --worktree opt-in
+description: 端到端编码工作流（步骤 0~6，含需求初稿、日志根因、验证、独立复评、学习与本地管理 UI），支持：/icode help, ui, install [--basic|--preview], init [--guide], log, start, fast, plan, review, merge, code, deepcheck, audit, crosscheck, patch, verify [--plan|--deploy|--listen|--test|--reuse], doc, docx, limit, readme, ppt, learn [--project|--ticket|--since], status [--pending|--scan|--verdict], list [--all|--plain], bak, worktree --update/--close/--reopen/--merge。新建工单入口支持 --worktree opt-in
 ---
 
-**版本**: v2.27.1
+**版本**: v2.28.0
 
 # ICode 全流程编码工作流（步骤 0 + 1~6）
 
@@ -12,9 +12,9 @@ description: 端到端编码工作流（步骤 0~6，含需求初稿、日志根
 - **步骤 0（可选）**：需求初稿对话，落档为 `00_init.md`；`init --guide` 派生新人指南
 - **步骤 1~6**：拟定计划 → 审查 → 定稿 → 编码 → 复检 → 终审
 
-> **主流程步骤真源（防误用，唯一真源 = `steps/` 目录，启动强制 Read）**：步骤编号 / 产物文件名 / `completed_steps` 合法值**一律以 `steps/*.md` 实时清单为准**（`ls steps/*.md` 完整列出，含主流程与辅助入口 log / doc / docx / limit / status / install / list / bak / verify / learn，及精简全流程入口 fast）——**本块仅示意，steps/ 演进后以目录为准，勿依赖写死**。`/icode start` / `/icode fast` / `/icode plan` 进入第一步**先 `ls steps/*.md`** 核对，不按"编码→测试→部署"直觉推断
+> **主流程步骤真源（防误用，唯一真源 = `steps/` 目录，启动强制 Read）**：步骤编号 / 产物文件名 / `completed_steps` 合法值**一律以 `steps/*.md` 实时清单为准**（`ls steps/*.md` 完整列出，含主流程与辅助入口 log / doc / docx / limit / status / install / list / bak / verify / learn / crosscheck，及精简全流程入口 fast）——**本块仅示意，steps/ 演进后以目录为准，勿依赖写死**。`/icode start` / `/icode fast` / `/icode plan` 进入第一步**先 `ls steps/*.md`** 核对，不按"编码→测试→部署"直觉推断
 > - 当前主流程示意（以 `ls steps/*.md` 为准）：`00_init → 01_plan → 02_review → 03_merge → 04_code → 05_deepcheck → 06_audit → 07_readme → 08_patch`；**不存在 `03_code` / `04_test` / `05_deploy`**（测试验证在 04_code 子段，部署/回归归 07_readme / 08_patch / verify）
-> - 辅助独立步骤（doc / docx / log / limit / status / install / list / bak / verify / learn）不参与 1~6 推进；**fast 为精简全流程（非辅助独立步骤）**——参与 1~6 但各步缩略（见命令表 fast 行）
+> - 辅助独立步骤（doc / docx / log / limit / status / install / list / bak / verify / learn / crosscheck）不参与 1~6 推进；**fast 为精简全流程（非辅助独立步骤）**——参与 1~6 但各步缩略（见命令表 fast 行）
 > - **强制**：产物命名 + `completed_steps` 写号**对照 `ls steps/*.md` 实时结果**（如入口含 `log` → 可写 `"log"`），不在清单 → 停下核对，禁止自造产物占位；steps/ 目录与本文档不一致时**以 steps/ 目录为准**
 
 ## 通用约定（对话语言）
@@ -25,7 +25,7 @@ description: 端到端编码工作流（步骤 0~6，含需求初稿、日志根
 
 ## 调用命令
 
-所有输出保存在 `.icode_output/.icode_output_N/`（N 自动递增）目录下。**详细语义一律以 `steps/*.md` 为准，下表只给路由与关键 flag**：
+正式工单产物保存在 `.icode_output/.icode_output_N/`（N 自动递增）；非工单命令按各自行指定隔离目录。**详细语义一律以 `steps/*.md` 为准，下表只给路由与关键 flag**：
 
 | 命令 | 一句话用途 + 关键 flag | 创建目录？ |
 |------|------|-----------|
@@ -44,6 +44,7 @@ description: 端到端编码工作流（步骤 0~6，含需求初稿、日志根
 | `[流程]` `/icode audit` | 仅步骤6：终极终审 + 统一修复 | 用最新目录 |
 | `[可选步骤7]` `/icode readme` | 一次性生成交付报告（自己看）+ `_brief.md` 跨领域简报（给其它模块/测试/产品） | 用最新目录 |
 | `[独立]` `/icode patch [问题或新需求...]` | 追加修改：轻量四段式；不改变 status；`--listen` 可在修改后自动监听 | 用最新目录 |
+| `[独立复评]` `/icode crosscheck [--ticket <id>\|<工单路径>]` | 用户自行换 Agent/模型后完整复评 completed 工单；项目内隔离、多轮追加、原工单与代码零回写 | 否（写 `.icode_output/.crosscheck/`） |
 | `[独立]` `/icode verify [--deploy\|--listen\|--test <target>] [--reuse <artifact>]` / `/icode verify --plan [--ticket <id>]` | **实机验证/只读验证计划**：执行结果记 `verification_runs`；`--plan` 只生成剩余验证单元，不自动升级 delivery_verdict（[steps/verify.md](steps/verify.md)） | 否（执行模式写 metadata；plan 只写派生报告） |
 | `[学习]` `/icode learn [--project <path>] [--ticket <id>] [--since <ISO-8601>]` | 从项目内观测生成复用/组合/增强/新建/工具化/no-action 建议，不直接创建或发布 Skill（[steps/learn.md](steps/learn.md)） | 否（写 `.icode_output/learn/` 派生报告） |
 | `[工程]` `/icode doc [自然语言]` | 工程级知识库生成/维护（`project_docs/`+`module_docs/`）；doc_worklist 防中断丢进度 | 否（写全局） |
@@ -68,7 +69,7 @@ description: 端到端编码工作流（步骤 0~6，含需求初稿、日志根
 
 ## 控制面（工单 schema v3，vNext）
 
-**新工单一律 schema v3**，经 `tools/icode_control.py create` 原子创建 metadata+出生事件；状态、metadata、事件、步骤端口/边界回检/回执、验证、索引与关闭均由控制面执行，**禁止绕过直写**。文中凡称“写/更新/追加 metadata”，除专用控制字段外，均指 `metadata-update`。机器真源：[mcp/workflow-gate/gates.json](mcp/workflow-gate/gates.json) + [schemas/](schemas/)；执行器含 `step/artifact/operation/policy/trace` 等子命令。完整契约见 [references/control_plane.md](references/control_plane.md) 与 [references/execution_model.md](references/execution_model.md)。legacy 工单只读，变更前须迁移。
+**新工单一律 schema v3**，经 `tools/icode_control.py create` 原子创建 metadata+出生事件；状态、metadata、事件、步骤端口/边界回检/回执、验证、索引与关闭均由控制面执行，**禁止绕过直写**。文中凡称“写/更新/追加 metadata”，除专用控制字段外，均指 `metadata-update`。机器真源：[mcp/workflow-gate/gates.json](mcp/workflow-gate/gates.json) + [schemas/](schemas/)；执行器含 `step/artifact/operation/policy/trace` 等子命令。完整契约见 [references/control_plane.md](references/control_plane.md) 与 [references/execution_model.md](references/execution_model.md)。legacy 工单只读，变更前须迁移。**`crosscheck` 是明确例外**：它不是工单，独立工具只读解析目标并仅写项目 `.crosscheck/`，不进入本控制面状态机。
 
 可选 Agent Runtime 位于 [agent_runtime/](agent_runtime/README.md)，只在用户显式调用 `/icode ui` 或 `python3 tools/icode_agent.py` 时工作；UI 默认监听 `127.0.0.1:8765`（占用则自动换空闲 loopback 端口），不要求 `--dir`。无参数重复调用复用已存活的全局实例；自动刷新默认 30 秒且可在设置中调整。它是 Codex/Claude Code CLI 的受控管理入口，不替代两者当前主会话；步骤合法性、revision、执行根和 Agent 前后回执仍由控制面决定。
 
@@ -83,6 +84,7 @@ description: 端到端编码工作流（步骤 0~6，含需求初稿、日志根
 /icode init 粗略需求 → 继续讨论 → /icode init --guide   # 复用最新初稿，生成新人指南
 /icode plan → review → merge → code → deepcheck → audit   # 分步手动
 /icode readme / patch / verify --listen          # 交付报告 / 追加修改 / 纯实机验证
+/icode crosscheck --ticket <id>                  # 换 Agent/模型后的只读多轮复评
 /icode status --pending                          # 跨工单验证债务
 /icode learn --project .                          # 项目内使用观测的只读学习报告
 /icode ui                                         # 打开本地全局工单工作台
@@ -248,10 +250,11 @@ test -f "{ICODE_OUT_DIR}/03_plan_final.md" && python3 -c "import json,sys; d=jso
 - **`.icode_output/` 父目录及其下的 `.icode_output_N/` 目录无需用户确认**：该目录下创建/写入/修改 `.md`/`.json`/`.log` 文件均为安全操作
 - **工程污染防护**：`.icode_output/` 是 icode 产物目录，建议在工程 `.gitignore` 中加入 `.icode_output/`，避免产物误提交；icode 本身**不自动修改工程的 `.gitignore`**（工程配置由用户掌控）。历史检索的全局索引位于 `~/.claude/icode_data/`，不在任何工程内，无污染风险；`/icode doc` 的工程文档库位于 `~/.claude/icode_data/project_docs/`，同样不在任何工程内、不写工程内任何文件（用户工程内已有 `doc/workflows/` 等历史文档时，忽略不读取不迁移不删除，从零生成到全局）
 
-> **`.icode_output/` 父目录语义（本次新增，含 limit.local 子目录）**：
-> `.icode_output/` 父目录下含两类内容——
+> **`.icode_output/` 父目录语义**：
+> `.icode_output/` 父目录下含三类内容——
 > 1. `.icode_output/.icode_output_N/` 子目录 = 工单产物（每工单一目录，跟随工单生命周期，详见各步骤执行步骤）
 > 2. `.icode_output/limit.local/` 子目录 = **项目约束红线的单 checkout 覆盖**（`/icode limit` 步骤产物，团队私有约定，自动 gitignore。limit 主存始终在全局 `~/.claude/icode_data/limits/<project_id>.md`，跨 checkout 共享；local 完全覆盖 main。详见 [steps/limit.md](steps/limit.md)）
+> 3. `.icode_output/.crosscheck/.icode_output_N/` = **completed 工单的独立复评记录**；无 metadata、不入索引/状态机，详见 [references/crosscheck_mode.md](references/crosscheck_mode.md)
 >
 > `.icode_output/` 父目录默认 gitignore 不上传——这同时承担"产物容器 + 项目配置"两种角色，**与上方「工程污染防护」建议的 gitignore 策略一致，无需特殊白名单配置**
 - **跨会话恢复**：运行 `ls -d .icode_output/.icode_output_*` 确认目录后，直接调用对应步骤即可
@@ -286,6 +289,7 @@ test -f "{ICODE_OUT_DIR}/03_plan_final.md" && python3 -c "import json,sys; d=jso
 | 6 | `audit` | [steps/06_audit.md](steps/06_audit.md) |
 | 7 | `readme` | [steps/07_readme.md](steps/07_readme.md) |
 | patch | `patch` | [steps/08_patch.md](steps/08_patch.md)（独立步骤，主流程后/中途追加修改，不参与 1~6 推进） |
+| crosscheck | `crosscheck` | [steps/crosscheck.md](steps/crosscheck.md)（completed 工单外部只读复评；多轮追加，不写原工单/代码） |
 | verify | `verify` | [steps/verify.md](steps/verify.md)（独立实机验证，不改代码；结果记 `verification_runs`，不自动升级 delivery_verdict） |
 | learn | `learn` | [steps/learn.md](steps/learn.md)（独立学习报告；不直接创建、安装或同步 Skill） |
 | doc | `doc` | [steps/doc.md](steps/doc.md) |
@@ -332,4 +336,5 @@ test -f "{ICODE_OUT_DIR}/03_plan_final.md" && python3 -c "import json,sys; d=jso
 | [references/first_activation_path.md](references/first_activation_path.md) | **首次激活路径一致性检查**：静态分析盲区（"写了从没实机执行过"的死路径既有 bug）+ 触发条件 + 检测法（软信号、不阻断）+ 双侧校验一致性核对清单 + 部署后验证建议下游输出 | plan（断言⑤）/ deepcheck（Reverse）/ audit（部署后建议）/ patch（部署后验证发现） |
 | [references/worktree_isolation.md](references/worktree_isolation.md) | **git worktree 多需求隔离**：worktree 决策与创建（**opt-in 参数触发**：`--worktree` 才走创建，否则默认原地，不弹问；**预检/公示告知/失败降级**）+ cwd 契约 + metadata 字段族 + 回流指引（F2 二选一）+ **产物归档（自动，防 remove 丢档）** + 防误删护栏 + 空间自查 | 新建工单入口加 `--worktree` 时（init/log/start/plan/fast）/ 续跑与只读（review/code/deepcheck/audit/patch/status/readme） |
 | [references/debug_mode.md](references/debug_mode.md) | **debug 模式（独立孪生工单）**：`/icode init --debug` / `/icode log --debug` 产出对照工单，不入全局索引、不参与主流程（各主流程步骤 L1 阻断）；目录在 `.icode_output/.debug/` 下、N 独立递增；`debug: true` 元数据标志 + 独立状态名；忽略 `--worktree` | init / log（`--debug` 时） |
+| [references/crosscheck_mode.md](references/crosscheck_mode.md) | **独立复评真源**：目标解析、原工单零回写、fresh 冻结防偏、多轮生命周期、输入漂移与 finding 状态 | crosscheck |
 | [mcp/workflow-gate/gates.json](mcp/workflow-gate/gates.json) + [tools/lint_workflow_contract.py](tools/lint_workflow_contract.py) | **workflow gate 工作流硬门禁（P0 四类 + P1 生命周期验收）**：语义决策 / 身份变化影响 / 需求增量强制升级 / 快速模式风险自动升级 / 生命周期验收矩阵；机器真源 + 运行时校验器（`--step plan/code/patch/merge/deploy/audit-verified/fast`，`--strict` 强制模式）；两阶段兼容迁移（legacy-untracked 提示 → 强制） | plan（写合同 + 7.5 自检）/ review（影响清单审查）/ merge（11.5 定稿硬校验）/ fast（risk_profile 自动升级）/ code（前置门禁 + 验收矩阵测试清单）/ deepcheck（生命周期一致性复检）/ audit（验收门）/ patch（2.7 重大增量回流） |

@@ -6,7 +6,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-Skill-8A2BE2.svg)](SKILL.md)
-[![Version](https://img.shields.io/badge/version-v2.27.1-blue.svg)](SKILL.md)
+[![Version](https://img.shields.io/badge/version-v2.28.0-blue.svg)](SKILL.md)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/ayukyo/icode-skill/issues)
 
 </div>
@@ -19,6 +19,7 @@ ICode is a Claude Code Skill that breaks the journey from requirement to deliver
 |---|---|---|
 | Process discipline | Depends on your prompt | Hard 6-step gates + L1–L4 blocking matrix |
 | Review quality | Single-perspective self-review | Independent skeptic sub-agents with adversarial verification (self-delegation forbidden) |
+| Post-completion review | Ad-hoc review may alter ticket context | `/icode crosscheck` records isolated, repeatable review rounds without writing the ticket or code |
 | Laziness resistance | None | 39 hard anti-laziness rules + mandatory Read confirmation lines + file:line evidence |
 | Reusing past decisions | Every ticket starts cold | Cross-project history retrieval with a global index + **verdict-based anti-misleading injection** (disproved tickets inject the trap, not the ADR) |
 | Project knowledge | None | `/icode doc` generates a global per-project/branch knowledge base, auto-injected at phase zero |
@@ -113,7 +114,7 @@ Other entry points:
        /icode start = steps 1→6 chained  |  /icode fast = trimmed chain (~65% cost)
 ```
 
-Every step produces a real artifact in `.icode_output/.icode_output_N/` (plan → review → final plan → code → deep-check report → audit report), tracked by `.ico_metadata.json` for cross-session recovery and resumable runs.
+Every main ticket step produces a real artifact in `.icode_output/.icode_output_N/` (plan → review → final plan → code → deep-check report → audit report), tracked by `.ico_metadata.json` for cross-session recovery and resumable runs. Detached deliverables and crosscheck rounds use their documented sibling directories and do not pretend to be tickets.
 
 ## Features
 
@@ -123,7 +124,7 @@ Every step produces a real artifact in `.icode_output/.icode_output_N/` (plan �
 - **Cross-project history retrieval**: init/log/plan/start auto-search similar past tickets and inject by command; references stay in-session, never pollute project artifacts. **Verdict-based injection** prevents disproved/superseded tickets from misleading new work
 - **Project-level knowledge base** (`/icode doc`): global per-project/per-branch knowledge base (module docs generated once and reused across projects), auto-retrieved and injected by phase-zero search
 - **DOCX delivery** (`/icode docx`): separate P0 Markdown conversion and P1 project/module/current-ticket delivery report. The installer creates a pinned, user-private DOCX runtime; every output includes hashes, source map, structural QA and an explicit visual-QA state. Visual rendering uses only an ICODE-owned OS/CPU/glibc-compatible bundle, never host LibreOffice.
-- **Project work-order backup** (`/icode bak`): snapshot the project's entire `.icode_output/` (tickets + debug twins + limit.local + ppt) to global `~/.claude/icode_data/project_backup/`, repeatable with hardlink dedup. Run it before deleting a project — once deleted, history retrieval still reads full work orders from the backup (project-first, backup fallback), and `/icode list` marks them `[path_gone→backup]`. For closed worktree tickets whose `project_path` is gone but whose `archive_path` is valid, `/icode list` marks them `[path_gone→archive]` (or `[path_gone→archive+backup]` when both archive and backup exist)
+- **Project work-order backup** (`/icode bak`): snapshot the project's entire `.icode_output/` (tickets + debug twins + isolated crosscheck rounds + limit.local + ppt) to global `~/.claude/icode_data/project_backup/`, repeatable with hardlink dedup. Run it before deleting a project — once deleted, history retrieval still reads full work orders from the backup (project-first, backup fallback), and `/icode list` marks them `[path_gone→backup]`. For closed worktree tickets whose `project_path` is gone but whose `archive_path` is valid, `/icode list` marks them `[path_gone→archive]` (or `[path_gone→archive+backup]` when both archive and backup exist)
 - **Anti-duplicate injection**: history retrieval and project-doc retrieval share an injection cache, avoiding repeated injection within one dev chain
 - **Decision anchors**: steps pass concise decision summaries (`.decision_anchors.json`) downstream — saves tokens, keeps reasoning continuity
 - **Resumable runs**: `.ico_metadata.json` status + round counters support crash recovery at steps 2/4/5
@@ -259,6 +260,7 @@ The seven local services add no public `/icode` commands; their machine-readable
 | `/icode audit` | Step 6 only: final audit + fix (produces `06_audit.md`) |
 | `/icode readme` | Optional Step 7: one call, two docs — full report (for yourself) + `_brief.md` (concise, for other modules' dev/test/PM, key changed code included) |
 | `/icode patch [issue or new need]` | Follow-up modification (standalone step): keep modifying an existing ticket after/between main steps — test findings / new needs. Lightweight 4-phase (re-survey → incremental plan → minimal change → reverse re-check), context reloaded from disk artifacts (continuable across sessions), appended to `08_patch.md`; optional `--listen` auto-monitors an on-device deployment; configure `~/.claude/icode_data/device_config/<project_id>.json` (template `templates/device_config.json.template`, single-file multi-conn adb/ssh/serial) |
+| `/icode crosscheck [--ticket <id>\|<ticket path>]` | After switching Agent/model yourself, independently re-review a completed ticket. Appends project-local rounds under `.icode_output/.crosscheck/`; never writes the target ticket/code or auto-runs patch |
 | `/icode verify [--deploy\|--listen\|--test\|--reuse]` / `/icode verify --plan [--ticket <id>]` | On-device verification or a read-only plan for remaining verification cells; plan mode writes no verification run and neither mode auto-upgrades `delivery_verdict` |
 | `/icode learn [--project <path>] [--ticket <id>] [--since <ISO-8601>]` | Project-scoped learning report from real skill-run observations; classifies reuse/composition/improvement/new-skill/tooling/no-action and never edits or publishes a Skill in this step |
 | `/icode doc [natural language]` | Project-level knowledge base (standalone step), auto-injected at phase zero |
