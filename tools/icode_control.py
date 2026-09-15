@@ -23,7 +23,7 @@
   index-write     全局索引单一 writer（写前重读合并 → 整文件校验 → 原子写 → 写后唯一性验证）
   index-update    原子更新索引独有的命中/stale 字段
   migration       legacy → vNext 迁移（dry-run 三分类报告 / --apply 单工单幂等）
-  record-verification  原子记录实机验证与对应事件
+  record-verification  原子记录构建/实机验证与对应事件
   archive-manifest     生成/校验归档 hash 与 linter roundtrip
   close-phase     关闭分阶段状态（幂等重放 + 禁止跨阶段跳转 + closed 终态回放摘要）
   reopen          在归档控制根原子解冻已 closed 工单（保留历史链）
@@ -212,7 +212,7 @@ class FileLock:
 
 # ---------------------------------------------------------------- 轻量 JSON Schema 校验器
 # 支持子集：type/enum/const/required/properties/additionalProperties/items/minItems/maxItems/
-#           minimum/maximum/pattern/minLength/propertyNames(pattern)。schema 文件保持 draft-07 合法，
+#           minimum/maximum/pattern/minLength/propertyNames(pattern)/if/then/else。schema 文件保持 draft-07 合法，
 #           也可被外部 jsonschema 库消费；本内置实现保证零依赖环境下行为一致。
 
 def _check_type(value, types, path, errors):
@@ -236,6 +236,11 @@ def _check_type(value, types, path, errors):
 def check_schema(value, schema, path="$", errors=None):
     if errors is None:
         errors = []
+    if "if" in schema:
+        # 条件分支的试探错误不污染实际校验，保证零依赖校验与 draft-07 一致。
+        branch = "then" if not check_schema(value, schema["if"], path, []) else "else"
+        if branch in schema:
+            check_schema(value, schema[branch], path, errors)
     if "const" in schema and value != schema["const"]:
         errors.append(f"{path}: 必须为常量 {schema['const']!r}，实际 {value!r}")
     if "enum" in schema and value not in schema["enum"]:
@@ -3155,6 +3160,21 @@ def cmd_record_verification(args):
     if args.build_source == "reused" and not args.artifact_identity:
         raise ControlError("--build-source reused 必须提供 --artifact-identity 核对产物",
                            exit_code=2, gate_id="reused_artifact_identity")
+    if args.kind == "build":
+        # 构建不能借用 deploy/device_test 层级，也不能冒充复用产物后的重编。
+        if args.device is not None or args.layer not in {None, "build"} \
+                or args.build_source in {"reused", "existing"}:
+            raise ControlError(
+                "kind=build 只能记录 build 层级，不带 device，不复用既有构建",
+                exit_code=2, gate_id="build_verification_scope")
+        if args.outcome == "pass" and (
+                args.build_source != "fresh"
+                or not (args.artifact_identity or "").strip()
+                or not (args.baseline or "").strip()):
+            raise ControlError(
+                "构建 pass 必须提供 fresh 来源、产物身份及实际源码 baseline",
+                exit_code=2, gate_id="build_verification_identity")
+        args.layer = "build"
     metrics = None
     if args.metrics_json is not None:
         try:
@@ -4744,7 +4764,7 @@ def build_parser():
     p = sub.add_parser("record-verification",
                        help="原子记录 verification_runs + verification_recorded 事件")
     p.add_argument("--dir", required=True)
-    p.add_argument("--kind", required=True, choices=["deploy", "listen", "device_test"])
+    p.add_argument("--kind", required=True, choices=["deploy", "listen", "device_test", "build"])
     p.add_argument("--outcome", required=True, choices=["pass", "fail", "inconclusive"])
     p.add_argument("--build-source", default="unknown",
                    choices=["fresh", "reused", "existing", "unknown"])

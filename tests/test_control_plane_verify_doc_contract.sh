@@ -31,7 +31,7 @@ import json
 s=json.load(open("schemas/ticket-metadata.schema.json"))
 v=s["properties"]["verification_runs"]["items"]
 assert v["required"]==["run_id","at","kind","outcome"], v["required"]
-assert v["properties"]["kind"]["enum"]==["deploy","listen","device_test"]
+assert v["properties"]["kind"]["enum"]==["deploy","listen","device_test","build"]
 assert v["properties"]["build_source"]["enum"]==["fresh","reused","existing","unknown",None]
 assert v["properties"]["outcome"]["enum"]==["pass","fail","inconclusive"]
 print("ok")

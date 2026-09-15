@@ -129,6 +129,12 @@ def test_prompt_and_step_are_strictly_bounded():
     pinned = build_icode_prompt("plan", "", "T-1")
     assert 'ticket_id = "T-1"' in pinned
     assert "禁止改用 latest" in pinned
+    build = build_icode_prompt("verify", "--build 仅增量编译 module_a -j6", "T-1")
+    assert build.splitlines()[0] == "/icode verify --build"
+    assert 'ticket_id = "T-1"' in build
+    assert "仅增量编译 module_a -j6" in build
+    assert build_icode_prompt("verify", "--deploy").splitlines()[0] == "/icode verify"
+    assert build_icode_prompt("verify", "--builder").splitlines()[0] == "/icode verify"
     with pytest.raises(HostRunnerError, match="未登记步骤"):
         build_icode_prompt("shell", "rm -rf /tmp/x")
     with pytest.raises(HostRunnerError, match="过长"):

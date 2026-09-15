@@ -225,7 +225,7 @@
     },
 
     "verification_runs": {
-      "description": "实机验证运行记录：kind 记实际动作，build_source 单独记是否复用构建。与 patch_history 分离，由 record-verification 原子追加。",
+      "description": "构建/实机验证运行记录：kind 记实际动作，build_source 单独记是否复用构建。build 只证明构建层，与 patch_history 分离，由 record-verification 原子追加。",
       "type": ["array", "null"],
       "items": {
         "type": "object",
@@ -233,7 +233,7 @@
         "properties": {
           "run_id": { "type": "string" },
           "at": { "type": "string" },
-          "kind": { "enum": ["deploy", "listen", "device_test"] },
+          "kind": { "enum": ["deploy", "listen", "device_test", "build"] },
           "build_source": { "enum": ["fresh", "reused", "existing", "unknown", null] },
           "device": { "type": ["string", "null"] },
           "artifact_identity": { "type": ["string", "null"] },
@@ -252,6 +252,11 @@
           "outcome": { "enum": ["pass", "fail", "inconclusive"] },
           "evidence": { "type": ["string", "null"] },
           "note": { "type": ["string", "null"] }
+        },
+        "if": { "required": ["kind"], "properties": { "kind": { "const": "build" } } },
+        "then": {
+          "required": ["layer"],
+          "properties": { "layer": { "const": "build" }, "device": { "enum": [null] } }
         },
         "additionalProperties": false
       }

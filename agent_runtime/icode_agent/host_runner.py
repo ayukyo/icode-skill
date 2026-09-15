@@ -65,6 +65,9 @@ def build_icode_prompt(step: str, note: str = "", ticket_id: str | None = None) 
     if len(note) > MAX_NOTE_CHARS:
         raise HostRunnerError("步骤备注过长", code="note_too_long")
     prompt = f"/icode {step}"
+    if step == "verify" and re.match(r"^--build(?:\s|$)", note):
+        # UI 备注可选择独立构建，必须提升为主动作，防裸 verify 默认部署。
+        prompt += " --build"
     if ticket_id is not None:
         if not isinstance(ticket_id, str) or not ticket_id \
                 or len(ticket_id) > 240 or any(ord(char) < 32 for char in ticket_id):

@@ -254,7 +254,7 @@ python3 tools/lint_mcp_coverage.py <out_dir> --step review --strict
 | `/icode readme` | 可选步骤 7：一次生成两份——交付报告（给自己看，完整档案）+ 跨领域简报（`_brief.md`，给其它模块研发/测试/产品看，含必要代码，较简略；对外表达按统一契约） |
 | `/icode patch [问题或新需求]` | 追加修改（独立步骤）：主流程后/中途继续改——测试发现问题 / 新需求，在既有工单上打补丁。轻量四段式（重审现状→增量计划→最小实施→反向复检），靠磁盘产物重载上下文（换会话可继续），产出 `08_patch.md` 追加式；可选 `--listen` 自动进行实机部署监听；先配 `~/.claude/icode_data/device_config/<project_id>.json`，模板 `templates/device_config.json.template`，单文件多连接 adb/ssh/串口） |
 | `/icode crosscheck [--ticket <id>\|<工单路径>]` | 用户自行换 Agent/模型后独立复评 completed 工单；结果多轮追加到项目 `.icode_output/.crosscheck/`，不写原工单历史/代码，不自动 patch |
-| `/icode verify [--deploy\|--listen\|--test\|--reuse]` / `/icode verify --plan [--ticket <id>]` | 实机验证或只读生成剩余验证单元计划；plan 不记录 verification run，两种模式都不自动升级 delivery_verdict |
+| `/icode verify --build [自然语言]` / `/icode verify [--deploy\|--listen\|--test\|--reuse]` / `/icode verify --plan [--ticket <id>]` | build 读取存在的 LIMIT、检索工程编译入口并理解意图，只构建和核验产物，无需设备配置；执行结果记 verification_runs，plan 只写计划，均不自动升级 delivery_verdict |
 | `/icode learn [--project <path>] [--ticket <id>] [--since <ISO-8601>]` | 基于项目内真实 skill-run 观测生成学习报告，分类复用/组合/增强/新建/工具化/no-action；本步骤不直接创建或发布 Skill |
 | `/icode doc [自然语言]` | 工程级知识库生成（独立步骤）：扫描代码特征生成全局知识库章节，供段零自动检索注入 |
 | `/icode docx [自然语言]` | DOCX 交付（独立步骤）：指定 Markdown 忠实转换为同级 Word，或把已有项目/模块/本次工单真实材料组织到 `<工程根>/.icode_output/docx/`；ICODE 自管固定依赖、source map/hash manifest、结构验收与显式 renderer 视觉验收状态，不依赖系统 LibreOffice |
