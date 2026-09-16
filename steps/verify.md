@@ -9,7 +9,7 @@
 - `--reuse <artifact>`：构建来源修饰符，复用指定/最近产物并记 `build_source=reused` + `artifact_identity`，跳过重新构建
 - `--plan [--ticket <id>]`：只读展开指定/当前工单尚未满足的验证单元，生成验证计划；不部署、不记录 verification run
 - 互斥与组合：`--build`/`--plan`/`--deploy`/`--listen`/`--test` 主动作互斥；`--reuse` 只可与部署类动作组合，不能与 `--build`/`--plan` 组合。verify 选项放在自然语言之前；自然语言中的 `-j6`、`--module` 等属于构建意图。可用 `--` 显式分隔自然语言。
-**产出**: 执行模式向 metadata `verification_runs` 追加一条 + `verification_recorded` 事件；build 记 `kind=build, layer=build`。`--plan` 只写 `{ICODE_OUT_DIR}/verification_plan.json/.md` 派生计划。无工单的 build 只写工程 `.icode_output/build/<run_id>/` 报告，不新建工单。均**不创建 Patch N 段、不写 `patch_history`、不改变 status/completed_steps**。
+**产出**: 执行模式向 metadata `verification_runs` 追加一条 + `verification_recorded` 事件；build 记 `kind=build, layer=build`。`--plan` 只写 `{ICODE_OUT_DIR}/verification_plan.json` 派生计划，需要展示文件时再生成 Markdown。无工单的 build 只写工程 `.icode_output/build/<run_id>/` 报告，不新建工单。均**不创建 Patch N 段、不写 `patch_history`、不改变 status/completed_steps**。
 **会话**: 主会话
 
 > **共享技能路由**：部署/监听前读取 [references/skill_routing.md](../references/skill_routing.md)，按设备、产物、多仓和消费者场景加载验证类技能。
@@ -62,6 +62,8 @@
 
 ### `--plan` 只读分支
 
+本分支是派生查询，不启动 verify attempt，不生成 verification run 或完成回执；不能为满足执行模式的输出端口而补造验证记录。
+
 1. 用 `resolve-ticket --ticket <id> --workspace <工程根>`（省略 `--ticket` 时解析当前工单）得到 `ICODE_OUT_DIR`。
 2. 若 device_config 声明 `verification_profile`，或工单目录存在 `embedded_baseline.json`，先运行：
 
@@ -70,8 +72,7 @@
      --baseline "{BASELINE_MANIFEST}"
    python3 tools/embedded_profile.py plan \
      --baseline "{BASELINE_MANIFEST}" \
-     --output "{ICODE_OUT_DIR}/embedded_verification_plan.json" \
-     --markdown "{ICODE_OUT_DIR}/embedded_verification_plan.md"
+     --output "{ICODE_OUT_DIR}/embedded_verification_plan.json"
    ```
 
    profile 工具只解释数据并生成计划，不连接设备、执行输入字符串或自动注入故障。
@@ -82,8 +83,7 @@
    python3 tools/verification_debt.py plan \
      --ticket-dir "{ICODE_OUT_DIR}" \
      [--contract-file "{ICODE_OUT_DIR}/embedded_verification_plan.json"] \
-     --output "{ICODE_OUT_DIR}/verification_plan.json" \
-     --markdown "{ICODE_OUT_DIR}/verification_plan.md"
+     --output "{ICODE_OUT_DIR}/verification_plan.json"
    ```
 
 4. 展示尚未满足单元的显式 required cell、当前原因、所需设备/制品/源码 baseline 摘要、指标和证据格式，然后结束本步骤。不得自动执行计划，不得追加 `verification_runs`，不得升级 `delivery_verdict`；legacy 工单缺验证合同则标 `legacy_untracked`。
@@ -151,6 +151,8 @@
 
 ## MCP 推荐
 
-verify 为 **L1（短决策记录）**：结构化验证执行（判断+设备连接+日志分析），监听轮询的增量日志达到 `long_text_threshold_bytes` 时走 `patch.listen_log_summary` 规则（tool=summarize），见 [08_patch.md](08_patch.md) 与 [references/mcp_per_step.md](../references/mcp_per_step.md)。其余 MCP 不推荐。
+verify 为 **L1（短决策记录）**：结构化验证执行（判断+设备连接+日志分析），监听轮询的增量日志达到 `long_text_threshold_bytes` 时走 `verify.listen_log_summary` 规则（tool=summarize），见 [08_patch.md](08_patch.md) 与 [references/mcp_per_step.md](../references/mcp_per_step.md)。其它本地 MCP 按 `mcp/icode-mcp-policy/policy.json` 的 verify routes 按条件选用。非监听主动作也记录 `listen_mode=false/incremental_bytes=0` 的 not-eligible 判定；新工单 verify 的 finish 会校验本步骤 trace。无工单构建将等价决策记入 build_run，不创建工单。
 
 **强制约束**：🟢/🟢*/⚪ 语义 + 双保险机制（执行步骤内嵌 + thinking_core gate）详见 [SKILL.md「MCP 调用覆盖强制化」](../SKILL.md) + [references/mcp_per_step.md「双保险机制」](../references/mcp_per_step.md)。
+
+**派生报告按需生成**：`verification_debt.py` 默认只写 `--output` 指定的 JSON；需阅读或导出 Markdown 时再提供 `--markdown <路径>`。旧双文件调用仍兼容，不删除历史报告。

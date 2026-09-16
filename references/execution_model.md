@@ -16,6 +16,8 @@
 
 执行步骤前先读取本文件和对应 step 合同。`<attempt>`、`<request>` 都是本次真实值，不得字面照抄；每条事件使用独立 request 幂等键。
 
+`verify --plan` 是派生查询分支：只生成验证计划，不启动验证 attempt，不写 verification run，也不为了满足 verify 执行端口伪造 finish。无工单 build 同样不创建工单事件；有工单的真实 build/部署/监听/测试才进入以下执行顺序。
+
 ```bash
 python3 tools/icode_control.py step --dir <out_dir> --step <step> --phase start --request <request>
 ```
@@ -47,7 +49,7 @@ python3 tools/icode_control.py step --dir <out_dir> --step <step> --phase finish
   --evidence <short-ref> --request <request>
 ```
 
-若该步骤随后推进 metadata 状态，顺序必须是：`before_transition check → step finish → transition`。已 start 的步骤没有 `success/degraded` 回执时，完成态 transition 会阻断；从未接入执行事件的历史工单保持兼容。
+若该步骤随后推进 metadata 状态，顺序必须是：`before_transition check → step finish → transition`。新出生事件 `execution_contract_version=1` 的工单即使未 start 也会阻断完成态；成功回执的输出必须仍匹配登记 hash。无版本的历史工单只有已 start 后才要求回执。新工单的 patch/verify/readme 不走主流程 transition，故在 finish success/degraded 时执行三类步骤门禁。
 
 ## 3. 长动作与执行回执
 

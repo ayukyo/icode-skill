@@ -63,9 +63,9 @@ done
 if $CTL transition --dir "$D" --to completed --skip-gates 2>/dev/null | grep -q 'delivery-verdict'; then
   ok "completed 缺 delivery-verdict 被拒（delivery_evidence_layer）"; else bad "completed 缺 delivery-verdict 未拦截"; fi
 
-# 6) completed 带 delivery-verdict 但门禁失败（无 trace）→ fail-closed 状态不前移
+# 6) completed 带 delivery-verdict 但无执行回执/trace → 最早完成门拒绝
 if $CTL transition --dir "$D" --to completed --delivery-verdict verification_pending 2>/dev/null \
-    | grep -q '门禁未通过'; then
+    | grep -Eq 'step_receipt|门禁未通过'; then
   ok "completed 门禁未过 → fail-closed 状态不前移（completed_requires_all_gates）"
 else bad "completed 未跑门禁即通过"; fi
 if grep -q '"status": "completed"' "$D/.ico_metadata.json" 2>/dev/null; then

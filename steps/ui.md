@@ -60,3 +60,5 @@ python3 tools/icode_agent.py ui --dir <ticket_dir> --port 9010
 ## 5. 结束服务
 
 用户要求停止 UI 时，只终止本次启动的 UI 服务进程并报告端口已释放；正常退出仅清理由自身 instance ID 持有的登记。不得通过模糊进程名批量杀死其它 Python、Codex 或 Claude Code 进程。
+
+**verify 子动作**：步骤备注使用 `--build`、`--plan`、`--deploy`、`--listen` 或 `--test <target>`；复用 verify_request 解析，可在动作前写 `--ticket`。UI 锁定工单与参数冲突会在启动前拒绝。分析阶段可选择 verify，但只允许明确的 build/plan，裸 verify 仍受部署状态限制，关闭或有未完成执行时仍阻断。

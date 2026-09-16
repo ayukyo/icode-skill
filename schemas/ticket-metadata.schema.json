@@ -130,6 +130,14 @@
       "additionalProperties": true
     },
     "artifact_root": { "type": ["string", "null"] },
+    "delivery_files": {
+      "description": "交付报告角色到唯一工单内 Markdown 文件名；省略时兼容旧固定文件名。",
+      "type": "object", "required": ["report", "brief"], "additionalProperties": false,
+      "properties": {
+        "report": {"type": "string", "pattern": "^[^/\\\\]+\\.md$"},
+        "brief": {"type": "string", "pattern": "^[^/\\\\]+\\.md$"}
+      }
+    },
     "archive_path": { "type": ["string", "null"] },
     "backup_path": { "type": ["string", "null"] },
     "cross_project_refs": { "type": ["array", "null"] },

@@ -369,12 +369,16 @@ class AgentUIService:
         pending = open_items.get("pending_verification") or [] \
             if isinstance(open_items, dict) else []
         artifacts = []
+        delivery = metadata.get("delivery_files")
+        delivery_names = {value for value in delivery.values()
+                          if isinstance(value, str) and Path(value).name == value
+                          and value.endswith(".md")} if isinstance(delivery, dict) else set()
         try:
             children = sorted(target.out_dir.iterdir(), key=lambda item: item.name)
         except OSError:
             children = []
         for child in children:
-            if child.name not in COCKPIT_ARTIFACTS or not child.is_file() \
+            if child.name not in COCKPIT_ARTIFACTS | delivery_names or not child.is_file() \
                     or child.is_symlink():
                 continue
             try:

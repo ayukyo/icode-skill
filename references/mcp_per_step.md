@@ -55,7 +55,7 @@
 |---|------|------|---------|
 | 1 | **同一产物文件并发写** | 06_audit.md §6.7 三视角（A/B/C）写同一段 → 并发 3 spawn 同时改 §6.7 段内容 | **三 spawn 并发收集 facts**（仅 Read / 检索 / 评估，不写产物）→ **主代理顺序调和落地**（任一 spawn 返回 issue 也走顺序 §6.2 修复流程）；**等待按 [subagent_spawn_wait.md](subagent_spawn_wait.md) 通用契约**（后台 spawn + `TaskOutput` 阻塞等 + `INTEGRATION_WALL_CLOCK_DEADLINE_SECONDS=1200` 墙钟硬截止，禁止裸同步 spawn / 被动等通知 / 无限等待） |
 | 2 | **数据有依赖的后置调** | `retrieve_similar(query=从 summarize 提炼的症状, candidates=索引)` 依赖 `summarize(产物)` 的输出 → 把两者并发 | **串行**：先等 `summarize` 摘要出来，**再**触发 `retrieve_similar` |
-| 3 | **环境无 spawn 工具 / 无 MCP 工具时** | `ToolSearch(query="select:Agent")` 失败（no_spawn_env=true）时仍试图 spawn 3 质疑者 | **一律走 [references/adversarial.md](../references/adversarial.md)「环境无 spawn 工具」降级路径**：环境无 spawn → 主代理文字块自演 + 标 `[未验证-环境无spawn工具]`；环境无 MCP → 直接降为 ⚪，不评估 |
+| 3 | **环境无 spawn 工具 / 无 MCP 工具时** | `ToolSearch(query="select:Agent")` 失败（no_spawn_env=true）时仍试图 spawn 3 质疑者 | **一律走 [references/adversarial.md](../references/adversarial.md)「环境无 spawn 工具」降级路径**：环境无 spawn → 主代理文字块自演 + 标 `[未验证-环境无spawn工具]`；环境无 MCP → 对机器 gate 保留真实 eligibility，按 unavailable_before_call 记录发现依据；未命中业务条件的推荐项仍为 ⚪ |
 
 **反之允许并发**（**不写文档，引擎自动批处理**）：
 - 阶段内多个**独立 Read 文件**（无依赖关系）——引擎自动并行
@@ -172,7 +172,7 @@
 
 
 - **cheap-research**（🟢*）：Fixed 预扫（`scan_patterns` 功能点×代码位置机械预扫，见 [steps/05_deepcheck.md](../steps/05_deepcheck.md) 步骤 5）+ dedup（`extract`，见 §9.4）。`diff_summary`（Reverse 阶段对比）/ `summarize`（阶段摘要压缩）可作可选增强，非强证据场景不评估。**不接管决策**：Fixed/Free 阶段 / 3 质疑者对抗（A6）走主会话（高风险）
-- **dedup 子阶段**：见 §9.4。**强证据** = cheap-research 🟢 + 声明review_scope内函数数 ≥ `dedup_min_functions`（gates.json 常量）→ 范围内完整dedup（5 阶段：抽取→分类→拆分→高质量模型逐类找重复→报告）。**降级**：函数数 < 阈值 / ripgrep 不可用 / cheap-research 不可用 → 整个 §9.4 跳过并声明未观测边界。**复用**：检测 `categorized.json` 是否已由 §2 02_review 生成且scope/tool/参数/源码hash身份匹配 → 复用避免重跑分类（中间产物路径 `{ICODE_OUT_DIR}/<ticket>/dedup/{catalog,categorized,duplicates/*.json}`，与 mcp_integration 一致）
+- **dedup 子阶段**：见 §9.4。**强证据** = cheap-research 🟢 + 声明review_scope内函数数 ≥ `dedup_min_functions`（gates.json 常量）→ 范围内完整dedup（5 阶段：抽取→分类→拆分→高质量模型逐类找重复→报告）。**降级**：函数数 < 阈值 → not-eligible；进入 full Dedup 且函数数达阈值时，工具不可用也保持 eligible，按 unavailable_before_call 或 degraded_after_attempt 留痕并声明未观测边界，不伪造去重完成。**复用**：检测 `categorized.json` 是否已由 §2 02_review 生成且scope/tool/参数/源码hash身份匹配 → 复用避免重跑分类（中间产物路径 `{ICODE_OUT_DIR}/<ticket>/dedup/{catalog,categorized,duplicates/*.json}`，与 mcp_integration 一致）
 
 ### 6 audit（终审）
 - **playwright**：真实 UI 验证——仅前端工程时
@@ -211,13 +211,13 @@
 
 1. **产物文件不记录 MCP 调用信息**：MCP 调用结果只进思考块「MCP 调用」段，不写入 01_plan.md / 02_review.md / 03_plan_final.md / 04_code_review_fix.md / 05_deepcheck.md / 06_audit.md / log_analysis.md / 00_init.md 等产物
 2. **思考块每行**：MCP 名 + 实际调用结果（成功 / 降级 / 不适用）+ 证据
-3. **🟢 MCP 未实际调用**（含未先尝试调用就标降级）= 反偷懒第 21 条违规
+3. **可调用的 🟢 MCP 未实际调用**且无有效缓存 = 反偷懒第 21 条违规；工具未暴露必须有 unavailable_before_call 的发现与替代证据
 4. **⚪ MCP 无需记录**（强证据场景不满足，不评估不声明）
 5. **🟢 MCP 未在思考块留下调用/降级记录** = 反偷懒第 21 条违规（审计 grep 思考块核查）
 
 > **cheap-research 例外（机器化 gate）**：cheap-research 的强证据执行点由**独立运行痕迹**承载，不进正式产物——
-> - gate 真源：`mcp/cheap-research/gates.json`（阈值常量 + 11 个 gate 的 eligibility condition）
-> - 运行痕迹：`{ICODE_OUT_DIR}/.mcp_gate_trace.jsonl`（每 gate 一条最终判定，`decision` 词表 = `called` / `cache_hit` / `skipped_not_eligible` / `skipped_stage_not_reached` / `degraded_after_attempt`）
+> - gate 真源：`mcp/cheap-research/gates.json`（阈值常量 + catalog 内全部 gate 的 eligibility condition）
+> - 运行痕迹：`{ICODE_OUT_DIR}/.mcp_gate_trace.jsonl`（每 gate 一条最终判定，`decision` 词表 = `called` / `cache_hit` / `skipped_not_eligible` / `skipped_stage_not_reached` / `degraded_after_attempt` / `unavailable_before_call`）
 > - 校验器：`python3 tools/lint_mcp_coverage.py <out_dir> [--step <step>] [--strict] [--json]`（step 转换前运行；eligible 未履行 gate 不得标流程合规）
 > - 完整流程见 [thinking_core.md](thinking_core.md)「cheap-research 执行门（gate）流程」段
 
@@ -238,6 +238,6 @@
 - **vision-bridge 不可用**：按 [media_routing.md](media_routing.md) 处理；宿主已证明多模态则 native，未证明则 text_only 并标视觉缺口，禁止猜测或试探性注图
 - **playwright 不可用**：Bash + curl 兜底（无 JS 渲染），标降级
 - **memory 不可用**：本对话手动笔记兜底，标降级
-- **cheap-research 不可用**：主会话 / 子代理走 `Agent(model="haiku")` 兜底（Claude 家族最便宜模型）。整体 token 节省幅度下降，但工作流不阻塞。**子代理兜底时按 [subagent_spawn_wait.md](subagent_spawn_wait.md) 通用契约等待**（后台 spawn + `TaskOutput` 阻塞等 + 20 分钟墙钟硬截止，禁止裸同步 spawn / 被动等通知 / 无限等待）
+- **cheap-research 不可用**：主会话按原始证据兜底；只有宿主确实支持时才选用可用的低成本子代理，不绑定具体模型名。整体 token 节省幅度下降，但工作流不阻塞。**子代理兜底时按 [subagent_spawn_wait.md](subagent_spawn_wait.md) 通用契约等待**（后台 spawn + `TaskOutput` 阻塞等 + 20 分钟墙钟硬截止，禁止裸同步 spawn / 被动等通知 / 无限等待）
 
-**降级不是错误，但必须显式声明**（先实际调用一次，失败/空才能标降级）。
+**降级不是错误，但必须显式声明**：工具可调用时先实际尝试；工具未暴露时按 thinking_core 的 `unavailable_before_call` 记录发现依据、替代方法与结果引用，不伪造 attempted=true。

@@ -104,6 +104,15 @@ def _policy_errors(data: dict[str, Any]) -> list[str]:
                 errors.append(f"steps.{step}[{index}].condition 必须是非空字符串")
             if not isinstance(route.get("required"), bool):
                 errors.append(f"steps.{step}[{index}].required 必须是布尔值")
+            if "operations" in route:
+                allowed = route["operations"]
+                server_spec = servers[server]
+                declared = server_spec.get("operations", []) if isinstance(server_spec, dict) else []
+                if not isinstance(declared, list):
+                    declared = []
+                if not isinstance(allowed, list) or not allowed or any(
+                        not isinstance(op, str) or op not in declared for op in allowed):
+                    errors.append(f"steps.{step}[{index}].operations 必须是 server 操作的非空子集")
     return errors
 
 
@@ -158,6 +167,9 @@ def evaluate_call(step: str, server: str, tool: str, operation: str = "read") ->
         route = next((item for item in data["steps"].get(step, []) if item.get("server") == server), None)
         if route is None:
             return ok({"allowed": False, "reason": "not_routed_for_step", "step": step, "server": server, "tool": tool, "policy": str(path)})
+        if "operations" in route and operation not in route["operations"]:
+            return ok({"allowed": False, "reason": "step_operation_denied", "step": step,
+                       "server": server, "tool": tool, "policy": str(path)})
         return ok({"allowed": True, "reason": "routed", "step": step, "server": server, "tool": tool, "condition": route.get("condition", "always"), "required": bool(route.get("required", False)), "policy": str(path)})
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         return fail("evaluation_failed", str(exc))

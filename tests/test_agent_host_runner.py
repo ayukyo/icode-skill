@@ -85,8 +85,9 @@ class FakeLifecycle:
         self.calls = []
         self.already_applied = already_applied
 
-    def action_policy(self, target, action, expected_revision):
+    def action_policy(self, target, action, expected_revision, verify_action=None):
         self.calls.append(("policy", target.ticket_id, action, expected_revision))
+        self.verify_action = verify_action
         return {
             "action_allowed": True,
             "execution_root": str(target.project_path),
@@ -133,8 +134,9 @@ def test_prompt_and_step_are_strictly_bounded():
     assert build.splitlines()[0] == "/icode verify --build"
     assert 'ticket_id = "T-1"' in build
     assert "仅增量编译 module_a -j6" in build
-    assert build_icode_prompt("verify", "--deploy").splitlines()[0] == "/icode verify"
-    assert build_icode_prompt("verify", "--builder").splitlines()[0] == "/icode verify"
+    assert build_icode_prompt("verify", "--deploy").splitlines()[0] == "/icode verify --deploy"
+    with pytest.raises(HostRunnerError, match="未知 verify"):
+        build_icode_prompt("verify", "--builder")
     with pytest.raises(HostRunnerError, match="未登记步骤"):
         build_icode_prompt("shell", "rm -rf /tmp/x")
     with pytest.raises(HostRunnerError, match="过长"):
@@ -196,11 +198,38 @@ def test_claude_command_and_auto_selection(tmp_path):
     wait_terminal(runner, job["job_id"])
     argv, kwargs = factory.calls[0]
     assert argv == [
-        "/opt/claude", "-p", "--output-format", "stream-json",
+        "/opt/claude", "-p", "--verbose", "--output-format", "stream-json",
         "--input-format", "text", "--permission-mode", "acceptEdits",
         "--no-session-persistence",
     ]
     assert kwargs["shell"] is False
+
+
+@pytest.mark.parametrize("note,first", [
+    ("--ticket T-1 --build 增量编译", "/icode verify --build --ticket T-1"),
+    ("--plan", "/icode verify --plan"),
+    ("--listen --reuse build-1", "/icode verify --listen --reuse build-1"),
+    ("--test smoke", "/icode verify --test smoke"),
+])
+def test_verify_prompt_preserves_action_and_options(note, first):
+    assert build_icode_prompt("verify", note, "T-1").splitlines()[0] == first
+
+
+@pytest.mark.parametrize("note", ["--plan --deploy", "--ticket OTHER --build", "--build --reuse old"])
+def test_verify_conflicts_fail_before_host_spawn(note):
+    with pytest.raises(HostRunnerError):
+        build_icode_prompt("verify", note, "T-1")
+
+
+def test_verify_build_policy_receives_parsed_action(tmp_path):
+    lifecycle = FakeLifecycle()
+    runner = HostJobRunner(executable_resolver=lambda host: "/opt/codex",
+        process_factory=ProcessFactory([FakeProcess()]), lifecycle=lifecycle)
+    job = runner.start(ticket(tmp_path), step="verify", note="--ticket T-1 --build",
+        settings={"host":"codex","model":"","fallback":False},
+        request_id="verify-build-policy", expected_revision="a"*64)
+    wait_terminal(runner, job["job_id"])
+    assert lifecycle.verify_action == "build"
 
 
 def test_fallback_happens_only_before_spawn(tmp_path):

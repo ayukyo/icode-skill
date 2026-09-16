@@ -87,6 +87,6 @@ python3 tools/icode_control.py check-outputs --dir <out> --step review
 
 工具履行coverage与Read/去重语义覆盖分开；真实工具结果保留来源引用。字段/形状校验不能证明工具实际执行；原始syscall errno和策略reason分开，结果/计数日志逐分支对照真实条件。
 
-v2另按11个gate的明确分支复算确定性资格，阈值只读catalog constants；自报eligible或threshold与已声明事实冲突即失败。deepcheck阶段依据须符合有效模式，升级full不能借请求fast跳过。此一致性检查不替代对事实来源真实性的独立审查。
+v2另按catalog内全部gate的明确分支复算确定性资格，阈值只读catalog constants；自报eligible或threshold与已声明事实冲突即失败。deepcheck阶段依据须符合有效模式，升级full不能借请求fast跳过。此一致性检查不替代对事实来源真实性的独立审查。
 
 偏差先记metadata.code_deviations稳定id与plan_said/actual_done/reason/source refs，各报告引用同id；没有偏差才能[]。item schema约束结构，跨报告语义一致性仍由终审核对，不用关键词猜测。历史补记写真实事后时间和来源。

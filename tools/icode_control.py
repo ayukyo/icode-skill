@@ -298,6 +298,10 @@ def check_schema(value, schema, path="$", errors=None):
 def validate_against(value, schema_path, gate_id):
     schema = load_json(schema_path, f"schema {schema_path.name}")
     errors = check_schema(value, schema)
+    if schema_path == SCHEMA_METADATA and isinstance(value, dict):
+        delivery = value.get("delivery_files")
+        if isinstance(delivery, dict) and delivery.get("report") == delivery.get("brief"):
+            errors.append("$.delivery_files: 交付报告与简报必须是不同文件")
     return [{"gate_id": gate_id, "path": e.split(":")[0], "detail": e} for e in errors]
 
 
@@ -1192,10 +1196,48 @@ def file_fact(path, label=None):
     return fact
 
 
+def port_value(out_dir, meta, port):
+    """Resolve an explicit delivery path, retaining historical fixed names."""
+    value = port.get("value")
+    pointer = port.get("path_pointer")
+    if pointer:
+        exists, override = json_pointer_get(meta, pointer)
+        if exists:
+            if not isinstance(override, str) or not override.strip() or Path(override).is_absolute() \
+                    or not port_path(Path(out_dir), override).is_relative_to(Path(out_dir).resolve()):
+                raise ControlError("交付产物路径必须位于工单目录内", gate_id="step_ports")
+            value = override
+    return value
+
+
+def requires_execution_receipts(events):
+    return any(event.get("event_type") == "ticket_created" and
+               (event.get("payload") or {}).get("execution_contract_version") == 1
+               for event in events)
+
+
+def completion_receipt_issues(out_dir, meta, events, step):
+    starts = [e for e in events if e.get("event_type") == "step_started" and
+              (e.get("payload") or {}).get("step") == step]
+    if not starts:
+        return [f"{step}:missing_step_start"]
+    start = starts[-1]
+    finish = step_attempt_finished(events, start["payload"]["attempt"])
+    outcome = (finish.get("payload") or {}).get("outcome") if finish else None
+    if outcome not in {"success", "degraded"}:
+        return [f"{step}:missing_advancing_receipt"]
+    if outcome == "degraded":
+        return []  # Existing explicit debt contracts still govern degradation.
+    model = load_execution_model()
+    _, missing = validate_step_outputs(out_dir, meta, model, step)
+    missing += missing_output_receipts(out_dir, meta, step_contract(model, step), events, start)
+    return missing
+
+
 def resolve_port(out_dir, meta, port):
     """把静态端口解析为不含正文的事实摘要，供漂移比较和输出校验。"""
     kind = port.get("kind")
-    value = port.get("value")
+    value = port_value(out_dir, meta, port)
     workspace = execution_workspace(out_dir, meta)
     result = {"id": port.get("id"), "kind": kind, "exists": False}
     if kind == "metadata_pointer":
@@ -1296,6 +1338,10 @@ def validate_execution_catalog(model):
     if not isinstance(contracts, dict) or not contracts:
         problems.append("execution_model.step_contracts 必须是非空对象")
         contracts = {}
+    finish_steps = model.get("finish_gate_steps", [])
+    if not isinstance(finish_steps, list) or any(
+            not isinstance(step, str) or step not in contracts for step in finish_steps):
+        problems.append("execution_model.finish_gate_steps 必须只引用已登记步骤")
     for step, contract in contracts.items():
         prefix = f"execution_model.step_contracts.{step}"
         if not isinstance(contract, dict):
@@ -1320,6 +1366,10 @@ def validate_execution_catalog(model):
                     problems.append(f"{prefix}.{field}[{index}].kind 非法: {port.get('kind')!r}")
                 if not isinstance(port.get("value"), str) or not port.get("value"):
                     problems.append(f"{prefix}.{field}[{index}].value 必须是非空字符串")
+                if "path_pointer" in port and (
+                        port.get("kind") != "ticket_file" or not isinstance(port["path_pointer"], str)
+                        or not port["path_pointer"].startswith("/")):
+                    problems.append(f"{prefix}.{field}[{index}].path_pointer 必须是文件端口的 JSON pointer")
                 if field == "outputs" and port.get("kind") == "metadata_pointer" \
                         and not isinstance(port.get("receipt_event"), str):
                     problems.append(
@@ -1687,7 +1737,7 @@ def cmd_check_outputs(args):
 def output_port_targets(out_dir, meta, port):
     workspace = execution_workspace(out_dir, meta)
     kind = port["kind"]
-    value = port["value"]
+    value = port_value(out_dir, meta, port)
     if kind == "ticket_file":
         return [port_path(Path(out_dir), value)]
     if kind == "ticket_glob":
@@ -1857,7 +1907,7 @@ def commit_metadata_and_event(out_dir, before, after, event_type, payload,
 
 # ---------------------------------------------------------------- 门禁 linter（复用三现有 linter）
 
-def run_gate_linters(out_dir, to_status=None, delivery_verdict=None, legacy=False):
+def run_gate_linters(out_dir, to_status=None, delivery_verdict=None, legacy=False, step=None):
     sm = load_state_machine()
     lint_cfg = sm["gate_policy"]["gate_linters"]
     # step 真源 = gates.json state_machine.gate_policy.step_by_target（7 项全量：
@@ -1865,7 +1915,7 @@ def run_gate_linters(out_dir, to_status=None, delivery_verdict=None, legacy=Fals
     # workflow_contract 三个 linter 统一用此真源取值，禁止另维护硬编码映射
     # （此前 review_done/deepcheck_done/log_done/completed 缺失 → 缺 --step →
     # 全量扫描误伤条件门，见回归修复）。
-    step = sm["gate_policy"].get("step_by_target", {}).get(to_status)
+    step = step or sm["gate_policy"].get("step_by_target", {}).get(to_status)
     # completed + delivery_verdict=verified → 用较严的 audit-verified 变体（含交付证据门）
     if step == "audit" and delivery_verdict == "verified":
         step = "audit-verified"
@@ -1978,6 +2028,7 @@ def cmd_create(args):
                            gate_id="birth_kind_mismatch")
     require_valid_metadata(meta)
     payload = {"birth_kind": args.birth,
+               "execution_contract_version": 1,
                "requirement_summary": meta.get("requirement_summary") or args.requirement[:100]}
     with DirLock(out_dir):
         recover_pending_transaction(out_dir)
@@ -2263,6 +2314,15 @@ def cmd_validate(args):
                           f"{sorted(unsupported_steps)}",
             })
 
+    if not legacy and requires_execution_receipts(events):
+        step = load_state_machine()["gate_policy"]["step_by_target"].get(meta.get("status"))
+        state_events = [e for e in events if e.get("event_type") == "state_changed"]
+        test_fixture = (os.environ.get("ICODE_CONTROL_TEST_MODE") == "1" and state_events and
+                        state_events[-1].get("payload", {}).get("gates_skipped_for_test") is True)
+        if step and not test_fixture:
+            violations.extend({"gate_id": "step_receipt", "path": "$", "detail": issue}
+                              for issue in completion_receipt_issues(out_dir, meta, events, step))
+
     # 索引指针一致性。测试/离线审计可显式绑定索引，避免误读另一套全局状态。
     index_path = Path(args.index).expanduser() if args.index else INDEX_PATH
     if meta.get("indexed") and index_path.is_file():
@@ -2419,23 +2479,19 @@ def cmd_transition(args):
                              ensure_ascii=False, indent=2))
             return 0
 
-        # 渐进接入：只有该步骤已经显式 start，完成态流转才要求终结回执；
-        # 无 execution_model 事件的既有工单保持 legacy-untracked 兼容。
+        # Only historical births may be untracked. New births explicitly opt in
+        # through the immutable event, so omitting start cannot bypass receipts.
         tracked_step = sm["gate_policy"].get("step_by_target", {}).get(to_status)
         if tracked_step:
             starts = [event for event in events
                       if event.get("event_type") == "step_started"
                       and (event.get("payload") or {}).get("execution_model_version") == 1
                       and (event.get("payload") or {}).get("step") == tracked_step]
-            if starts:
-                attempt = starts[-1]["payload"]["attempt"]
-                finish = step_attempt_finished(events, attempt)
-                outcome = (finish.get("payload") or {}).get("outcome") if finish else None
-                if outcome not in {"success", "degraded"}:
-                    raise ControlError(
-                        f"步骤 {tracked_step!r} 已接入 execution_model，但最新 attempt 未形成可推进回执",
-                        exit_code=1, gate_id="step_receipt", attempt=attempt,
-                        outcome=outcome, expected=["success", "degraded"])
+            if starts or (requires_execution_receipts(events) and not args.skip_gates):
+                receipt_issues = completion_receipt_issues(out_dir, meta, events, tracked_step)
+                if receipt_issues:
+                    raise ControlError("步骤完成回执或当前产物不完整", exit_code=1,
+                                       gate_id="step_receipt", violations=receipt_issues)
         open_side_effects = []
         for event in events:
             if event.get("event_type") != "operation_started":
@@ -2465,6 +2521,8 @@ def cmd_transition(args):
         "delivery_verdict": args.delivery_verdict,
         "note": trans.get("note"),
     }
+    if args.skip_gates:
+        transition_payload["gates_skipped_for_test"] = True
 
     # 门禁：完成态跑三 linter（debug 孪生跳过）；completed 强制显式 delivery_verdict
     gate_reports = []
@@ -2503,6 +2561,11 @@ def cmd_transition(args):
         if problems:
             raise ControlError("现有事件链不完整，状态禁止前移", exit_code=1,
                                gate_id="event_chain", violations=problems)
+        if tracked_step and requires_execution_receipts(events2) and not args.skip_gates:
+            receipt_issues = completion_receipt_issues(out_dir, meta2, events2, tracked_step)
+            if receipt_issues:
+                raise ControlError("门禁执行期间产物身份变化", gate_id="step_receipt",
+                                   violations=receipt_issues)
         prior = find_idempotent_event(
             events2, args.request_id, "state_changed",
             {"to": to_status, "delivery_verdict": args.delivery_verdict},
@@ -4346,6 +4409,14 @@ def cmd_step(args):
                 missing_checks=missing_checks, missing_outputs=missing_outputs,
                 missing_output_receipts=missing_receipts,
                 hint="补齐边界 check 与输出产物后再 finish；若确实无法完成，显式记录 blocked/degraded。")
+        if args.outcome in {"success", "degraded"} and requires_execution_receipts(events) \
+                and args.step in model.get("finish_gate_steps", []):
+            # Standalone steps have no completed-state transition to run these
+            # checks. Keep one authoritative completion boundary for them too.
+            failed = [g for g in run_gate_linters(out_dir, step=args.step) if not g["ok"]]
+            if failed:
+                raise ControlError("独立步骤完成门禁未通过", gate_id="step_gates",
+                                   failed_gates=failed)
         payload = {
             "execution_model_version": model["schema_version"],
             "step": args.step,
@@ -4494,7 +4565,7 @@ def declared_output_path(out_dir, meta, contract, target):
     target = Path(target).resolve()
     for port in contract["outputs"]:
         kind = port["kind"]
-        value = port["value"]
+        value = port_value(out_dir, meta, port)
         if kind == "ticket_file" and port_path(Path(out_dir), value) == target:
             return port["id"]
         if kind == "ticket_glob":
@@ -4873,6 +4944,8 @@ def cmd_trace(args):
 
 def cmd_action_policy(args):
     """生成轻量、一致的 UI/Agent 动作投影，并用 revision 防止过期执行。"""
+    if getattr(args, "verify_action", None) and args.action != "verify":
+        raise ControlError("--verify-action 只能与 --action verify 一起使用", exit_code=2)
     out_dir = Path(args.dir).resolve()
     sm = load_state_machine()
     policy = sm.get("action_policy")
@@ -4914,7 +4987,12 @@ def cmd_action_policy(args):
     read_only = set(policy.get("read_only_actions") or [])
     allowed = []
     for name, contract in actions.items():
-        if not isinstance(contract, dict) or status not in contract.get("statuses", []):
+        if not isinstance(contract, dict):
+            continue
+        statuses = set(contract.get("statuses", []))
+        for variant in contract.get("variants", {}).values():
+            statuses.update(variant.get("statuses", []))
+        if status not in statuses:
             continue
         debug_mode = contract.get("debug")
         if is_debug and debug_mode not in {"debug", "both"}:
@@ -4946,6 +5024,12 @@ def cmd_action_policy(args):
                 f"动作 {args.action!r} 在当前工单状态不可执行",
                 exit_code=1, gate_id="action_policy", status=status,
                 blocked_reason=blocked_reason, allowed_actions=allowed)
+        if args.action == "verify":
+            variant = getattr(args, "verify_action", None) or "default"
+            contract = actions["verify"].get("variants", {}).get(variant, actions["verify"])
+            if status not in contract["statuses"]:
+                raise ControlError(f"verify {variant} 在当前状态不可执行；分析阶段只允许 --build/--plan",
+                                   gate_id="action_policy", status=status, verify_action=variant)
         model = load_execution_model()
         if args.action in model.get("step_contracts", {}):
             _snapshot, missing = capture_step_inputs(
@@ -4973,6 +5057,8 @@ def cmd_action_policy(args):
     }
     if args.action:
         result.update({"action": args.action, "action_allowed": True})
+        if args.action == "verify":
+            result.update(verify_action=variant, side_effect=contract["side_effect"])
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0
 
@@ -5198,6 +5284,8 @@ def build_parser():
                        help="只读生成允许动作、可信执行根与 revision")
     p.add_argument("--dir", required=True)
     p.add_argument("--action", help="可选：启动前复检指定动作")
+    p.add_argument("--verify-action", choices=["default", "build", "plan", "deploy", "listen", "device_test"],
+                   help="verify 子动作；默认仍按部署权限校验")
     p.add_argument("--expected-revision",
                    help="可选：UI 刷新时取得的 revision token")
     p.set_defaults(func=cmd_action_policy)

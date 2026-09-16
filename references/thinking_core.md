@@ -7,7 +7,7 @@
 >
 > **分级思考治理（reasoning gate）**：本文件从「所有步骤固定调用 sequential-thinking ≥3 次」改为「按复杂度分级 L0～L3 选择思考载体」。分级判定机器真源 = `mcp/reasoning-gate/gates.json`（默认等级/升级触发器**只从这里读**）；运行痕迹 = `{ICODE_OUT_DIR}/.thinking_gate_trace.jsonl`（每 step 一条最终判定）；校验器 = `python3 tools/lint_thinking_gate.py <out_dir> [--step <step>] [--strict] [--json]`。分级规则完整定义以 `mcp/reasoning-gate/gates.json` 为准；历史出处见 [docs/adr/ADR-0001-optimization-proposal-provenance.md](../docs/adr/ADR-0001-optimization-proposal-provenance.md)。
 >
-> **工单执行模型（ticket-scoped step 必做）**：完整 Read [execution_model.md](execution_model.md)，按 `step start → 边界 check → artifact/operation 回执 → step finish → transition` 执行。输入漂移必须按机器返回 route 回流；有副作用动作禁止盲重试。无工单目录的 help/install/list 等纯辅助入口不创建伪执行事件。
+> **工单执行模型（ticket-scoped 执行步骤必做）**：完整 Read [execution_model.md](execution_model.md)，按 `step start → 边界 check → artifact/operation 回执 → step finish → transition` 执行。输入漂移必须按机器返回 route 回流；有副作用动作禁止盲重试。无工单目录的 help/install/list 等纯辅助入口不创建伪执行事件；`verify --plan` 只生成派生计划，也不创建验证执行事件。
 
 ## 强证据化总览
 
@@ -116,11 +116,11 @@ N. **强制思考前置**（不可跳过，缺证据视为不合规；按 [refer
 1. **分级**：按 [mcp_per_step.md](mcp_per_step.md)「默认等级表」+ `mcp/reasoning-gate/gates.json` 升级触发器确定本步等级（L0～L3），把等级与触发原因写入 `{ICODE_OUT_DIR}/.thinking_gate_trace.jsonl`（每 step 最终一行；schema/词表见 [thinking_detail.md](thinking_detail.md)「thinking gate trace」段）。
 2. 输出 `ultrathink` 触发词（触发更长的内部推理 budget）——**L0/L1 可省略**（纯机器门禁/决策记录不依赖推理预算）。
 3. **显式 Read 本步骤引用的 references 文件**（每步必须重新 Read，同会话已读不豁免——显式Read是深度思考的前置仪式，凭记忆会降级思考质量），Read 后在回复中输出确认行 `📖 已 Read references/xxx.md` 作为合规证据。
-4. **ICODE 本地 MCP 路由门（所有等级）**：读取 `mcp/icode-mcp-policy/policy.json` 当前 step 的 routes；若 `icode-mcp-policy.evaluate_call` 当前会话可见则用它复核目标 server/tool/operation，否则直接按同一 JSON 判定。只有 condition 被当前事实满足才调用目标服务；`required=true` 的命中项必须先实际调用，失败后才能按 [mcp_integration.md](mcp_integration.md) 的底层确定性工具降级。policy 缺失/损坏时默认拒绝新增 MCP 调用，不影响原有 Read/rg/git/ssh/adb 路径。不得为探测 MCP 而读取无关工程文件。
+4. **ICODE 本地 MCP 路由门（所有等级）**：读取 `mcp/icode-mcp-policy/policy.json` 当前 step 的 routes；若 `icode-mcp-policy.evaluate_call` 当前会话可见则用它复核目标 server/tool/operation，否则直接按同一 JSON 判定。只有 condition 被当前事实满足才调用目标服务；`required=true` 的命中项在工具可见时必须先实际调用；工具未暴露时记录发现依据，随后按 [mcp_integration.md](mcp_integration.md) 的底层确定性工具降级。policy 缺失/损坏时默认拒绝新增 MCP 调用，不影响原有 Read/rg/git/ssh/adb 路径。不得为探测 MCP 而读取无关工程文件。
 5. **MCP 调用 gate**（L2/L3 不可跳过）：在结构化思考开始前，先处理本步 🟢 MCP（按 [mcp_per_step.md](mcp_per_step.md)「强证据场景判定」）：
    - 列出本步满足强证据场景的 🟢 MCP（**不含 sequential-thinking**，它由第 5 步承载；其余 🟢 MCP 由本 gate + 各 step 执行步骤内嵌点承载）
    - 对每个 🟢 MCP：**若该工具已在工具列表直接可见（完整 schema）则直接调用**，不可见才 ToolSearch 取 `mcp__<name>__<tool>` schema -> **实际调用一次** -> 把调用结果（成功/空/失败）写进思考块「MCP 调用」段
-   - 调用失败/返回空 -> 思考块写明降级原因（MCP 不可用 / 无相关结果 / 不适用场景）才能跳过；**未经实际调用就标降级 = 反偷懒第 21 条违规**
+   - 调用失败/返回空 -> 思考块写明降级原因（MCP 不可用 / 无相关结果 / 不适用场景）才能跳过；**工具可调用但未经实际调用就标降级 = 反偷懒第 21 条违规**；工具未暴露按下文 unavailable_before_call 合同记录，不伪造尝试
    - ⚪ MCP（强证据场景不满足）无需评估无需声明
    - **本步若无 🟢 MCP**（全 ⚪）：gate 直接通过，思考块记"本步无 🟢 MCP（强证据场景均不满足）"
 6. **完成思考（按等级选载体）**：
@@ -178,13 +178,14 @@ N. **强制思考前置**（不可跳过，缺证据视为不合规；按 [refer
    - 成功 → `decision=called`、`attempted=true`、`result=success`、`source_files=[...]`
    - 空/错误/超时 → `decision=degraded_after_attempt`、`attempted=true`、`result=empty|error|timeout`、`error_class=<类名>`
    - 并把结果写回缓存（atomic 写 `.tmp` + `mv`）
-6. **step 正文到达同一 gate 时读取最终 trace**：已 fulfilled（called/cache_hit/degraded_after_attempt 已记录）则复用，**避免 A/B 两层重复调用**；未 fulfilled 才执行上述流程。
+   - 工具未暴露且发现流程仍无法取得 schema → `decision=unavailable_before_call`、`attempted=false`、`result=unavailable`，并带 `availability={tool_visible:false,discovery_ref:<会话工具发现证据引用>,reason:not_exposed|discovery_failed,fallback:<替代方法>,evidence_ref:<替代结果引用>}`。工具直接可见不得用此分支，不伪造实际尝试；业务 eligibility 仍由事实计算。
+6. **step 正文到达同一 gate 时读取最终 trace**：已 fulfilled（called/cache_hit/degraded_after_attempt/unavailable_before_call 已记录）则复用，**避免 A/B 两层重复调用**；未 fulfilled 才执行上述流程。
 7. **step 转换前运行 validator**：`python3 tools/lint_mcp_coverage.py {ICODE_OUT_DIR} --step <step> --strict`——有 eligible 未履行 gate 时不得标记该步流程合规，先回补再转换。
 
 **trace 行约束**（校验器强制）：
 
-- `decision` 词表：`called` / `cache_hit` / `skipped_not_eligible` / `skipped_stage_not_reached` / `degraded_after_attempt`
-- `eligible=true` 只允许 `called` / `cache_hit` / `degraded_after_attempt`；`degraded_after_attempt` 必须 `attempted=true` 且 `result=error|empty|timeout`
+- `decision` 词表：`called` / `cache_hit` / `skipped_not_eligible` / `skipped_stage_not_reached` / `degraded_after_attempt` / `unavailable_before_call`
+- `eligible=true` 只允许 `called` / `cache_hit` / `degraded_after_attempt` / `unavailable_before_call`；`degraded_after_attempt` 必须 `attempted=true` 且 `result=error|empty|timeout`
 - `eligible=false` 只允许 `skipped_not_eligible` / `skipped_stage_not_reached`，且必须有结构化 `evidence`（不能只写自然语言）
 - catalog的 `evidence_fields/evidence_types`是必需字段/类型合同；called必须attempted=true，cache_hit必须有效cache_key和input_digest；fast未进入阶段只需mode/phase且不得伪装为full跳过。真实调用结果的来源引用应保留，不能仅自报字符串证明调用。
 - 工具coverage只检查调用声明与形状，不能证明实际执行、输入覆盖、Read理解或Dedup语义裁决；阶段覆盖证据另按[审查证据合同](inspection_evidence.md)检查。历史不足不自动补造trace。

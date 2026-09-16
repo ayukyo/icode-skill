@@ -192,8 +192,7 @@ sys.exit(1 if (missing or bad or empty_cf) else 0)
 PROJECT_ROOT="<--project 或当前工程根>"
 python3 tools/verification_debt.py pending \
   --project "$PROJECT_ROOT" \
-  --output "$PROJECT_ROOT/.icode_output/verification_debt.json" \
-  --markdown "$PROJECT_ROOT/.icode_output/verification_debt.md"
+  --output "$PROJECT_ROOT/.icode_output/verification_debt.json"
 ```
 
 判定合同：required 单元只有最新 run 为 `pass` 且 `evidence`、`baseline` 均非空才算满足；缺失、`fail`、`inconclusive`、证据空或 baseline 空都形成债务。合同缺失的旧工单只标 `legacy_untracked`，不得反推/虚构 required 维度；全局 index 的陈旧路径写入报告 `errors/status=partial`，不阻断项目内可读取工单的汇总。
@@ -208,3 +207,5 @@ python3 tools/verification_debt.py pending \
 默认只读模式不调用 sequential-thinking；`--scan` 批量扫描是**零 LLM** 信号词匹配（见上方「模式三」步骤 3，不调 cheap-research `extract`）；`--validate` 纯机器校验；其余 MCP 按路由真源判定，不默认调用。
 
 **强制约束**：🟢/🟢*/⚪ 语义 + 双保险机制（执行步骤内嵌 + thinking_core gate）详见 [SKILL.md「MCP 调用覆盖强制化」](../SKILL.md) + [references/mcp_per_step.md「双保险机制」](../references/mcp_per_step.md)；本步骤表内的 🟢/🟢* 标注按上方真源判定。
+
+**派生报告按需生成**：`verification_debt.py` 默认只写 `--output` 指定的 JSON；需阅读或导出 Markdown 时再提供 `--markdown <路径>`。旧双文件调用仍兼容，不删除历史报告。

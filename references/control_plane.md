@@ -74,7 +74,7 @@ python3 tools/icode_control.py create --dir <out_dir> --ticket-id <id> \
 - `policy`：只读计算 retry/fallback/block 决策；只有 read-only + retryable transport 可能 `auto_retry=true`。
 - `trace`：只读合成 step/gate/artifact/operation/state 时间线和开放 attempt。
 
-兼容规则：只有已显式 `step --phase start` 的新执行在完成态转换时强制终结回执；没有 execution_model 事件的历史工单不被追溯阻断。`close_state` 非空后仍冻结普通执行事件，关闭/重开只走专用生命周期事件。
+兼容规则：新建工单的 ticket_created 事件含 `execution_contract_version=1`，完成态强制 start/finish 与当前产物回执，不能以缺 start 进入兼容分支；版本写在不可变出生事件中。旧出生/迁移工单仅在已 start 后要求回执，不追溯补造历史。`close_state` 非空后仍冻结普通执行事件，关闭/重开只走专用生命周期事件。
 
 ### 4.2 普通 metadata 单一 writer
 

@@ -13,9 +13,10 @@ lint_mcp_coverage.py —— cheap-research gate 运行时校验器（v2 重构�
 判定模型：
 - 每个 gate 若属于本工单生命周期（按 completed_steps / mode / patch 标志确定 in-scope），
   则必须有最终 trace 行；没有 = missing_gate（违规）。
-- eligible=true  的 gate 只允许 decision ∈ {called, cache_hit, degraded_after_attempt}；
+- eligible=true  的 gate 只允许 decision ∈ {called, cache_hit, degraded_after_attempt, unavailable_before_call}；
   用了 skip 类 decision = invalid_skip（独立计数，进入 coverage 分母，违规）。
   degraded_after_attempt 必须 attempted=true 且 result ∈ {error, empty, timeout}。
+  unavailable_before_call 必须 attempted=false、result=unavailable，并提供工具发现与降级证据。
 - eligible=false 的 gate 只允许 decision ∈ {skipped_not_eligible, skipped_stage_not_reached}，
   且必须带结构化 evidence（不能只写自然语言"没必要"）。
 - invalid_skip / missing / schema 错误 / sensitive 均为失败条件；coverage = fulfilled / eligible，
@@ -42,7 +43,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
 
 # 合法 decision 词表（与优化方案 §7.2 一致）
-DECISIONS_ELIGIBLE_TRUE = {"called", "cache_hit", "degraded_after_attempt"}
+DECISIONS_ELIGIBLE_TRUE = {"called", "cache_hit", "degraded_after_attempt", "unavailable_before_call"}
 DECISIONS_ELIGIBLE_FALSE = {"skipped_not_eligible", "skipped_stage_not_reached"}
 DEGRADED_RESULTS = {"error", "empty", "timeout"}
 
@@ -115,6 +116,10 @@ def step_in_scope(step: str, metadata: Dict, trace_rows: List[Dict]) -> bool:
     if not isinstance(completed, list):
         completed = [str(completed)]
     completed = [str(x) for x in completed]
+    if step == "verify":
+        # Existing tickets did not track verify gates. New standalone attempts
+        # are checked explicitly by step finish, without inventing old traces.
+        return any(r.get("step") == "verify" for r in trace_rows)
     if step == "log":
         return "log" in completed
     if step == "review":
@@ -195,6 +200,18 @@ def validate_row(row: Dict, catalog_gate: Optional[Dict], line_idx: int) -> List
             issues.append(f"{tag} degraded_after_attempt 但 attempted != true")
         if str(row.get("result")) not in DEGRADED_RESULTS:
             issues.append(f"{tag} degraded_after_attempt 但 result 不在 {sorted(DEGRADED_RESULTS)}")
+    if decision == "unavailable_before_call":
+        availability = row.get("availability")
+        if row.get("attempted") is not False or row.get("result") != "unavailable":
+            issues.append(f"{tag} unavailable_before_call 必须 attempted=false/result=unavailable")
+        if not isinstance(availability, dict) or availability.get("tool_visible") is not False:
+            issues.append(f"{tag} unavailable_before_call 缺工具不可见证据")
+        else:
+            for field in ("discovery_ref", "reason", "fallback", "evidence_ref"):
+                if not isinstance(availability.get(field), str) or not availability[field].strip():
+                    issues.append(f"{tag} availability 缺 {field}")
+            if availability.get("reason") not in {"not_exposed", "discovery_failed"}:
+                issues.append(f"{tag} availability.reason 非法")
     if decision in ("called", "cache_hit"):
         if str(row.get("result")) != "success":
             issues.append(f"{tag} {decision} 但 result != success")
@@ -256,6 +273,7 @@ def eligibility_issues(row: Dict, gate: Dict, constants: Dict, metadata: Dict) -
         "deepcheck.dedup": "dedup_min_functions",
         "patch.context_summary": "long_text_threshold_bytes",
         "patch.listen_log_summary": "long_text_threshold_bytes",
+        "verify.listen_log_summary": "long_text_threshold_bytes",
     }
     issues = []
     key = threshold_keys.get(gid)
@@ -296,7 +314,7 @@ def eligibility_issues(row: Dict, gate: Dict, constants: Dict, metadata: Dict) -
         expected = bool(evidence["plan_source"]) and bool(evidence["code_sources"])
     elif gid == "patch.context_summary":
         expected = evidence["cross_session"] and evidence["candidate_text_bytes"] >= constants[key]
-    elif gid == "patch.listen_log_summary":
+    elif gid in ("patch.listen_log_summary", "verify.listen_log_summary"):
         expected = evidence["listen_mode"] and evidence["incremental_bytes"] >= constants[key]
     else:
         return issues + [f"{gid}: 未登记确定性 eligibility 条件"], None
@@ -329,6 +347,7 @@ def build_report(out_dir: Path, step_filter: Optional[str], legacy: bool,
         "called": 0,
         "cache_hit": 0,
         "degraded_after_attempt": 0,
+        "unavailable_before_call": 0,
         "invalid_skip": 0,
         "skipped_not_eligible": 0,
         "skipped_stage_not_reached": 0,
@@ -343,6 +362,10 @@ def build_report(out_dir: Path, step_filter: Optional[str], legacy: bool,
     eligible_total = 0
     fulfilled_total = 0
     version = metadata.get("mcp_gate_schema_version", 1)
+    known_steps = {g.get("step") for g in gates} | set(catalog.get("not_applicable_steps", []))
+    if step_filter and step_filter not in known_steps:
+        report["schema_errors"] += 1
+        report["trace_errors"].append(f"未知 step: {step_filter}")
     if type(version) is not int or version not in (1, 2):
         report["schema_errors"] += 1
         report["trace_errors"].append("metadata mcp_gate_schema_version 非受支持版本")
@@ -436,6 +459,7 @@ def build_report(out_dir: Path, step_filter: Optional[str], legacy: bool,
 
     if eligible_total:
         report["coverage"] = round(fulfilled_total / eligible_total, 4)
+    report["scope_status"] = "applicable" if report["total_gates_in_scope"] else "not_applicable"
     return report
 
 
@@ -485,6 +509,10 @@ def main() -> int:
     if catalog is None:
         print(f"❌ {catalog_err}", file=sys.stderr)
         return 2
+    known_steps = {g.get("step") for g in catalog.get("gates", [])} | set(catalog.get("not_applicable_steps", []))
+    if args.step and args.step not in known_steps:
+        print(json.dumps({"error": "unknown_step", "step": args.step}, ensure_ascii=False))
+        return 2
 
     report = build_report(out_dir, args.step, legacy, metadata, trace_rows, catalog, trace_errors)
 
@@ -520,7 +548,7 @@ def main() -> int:
     print("")
     print(f"in-scope gates: {report['total_gates_in_scope']}")
     print(f"eligible: {report['eligible']} | fulfilled: {report['fulfilled']} | coverage: {report['coverage']}")
-    print(f"called: {report['called']} | cache_hit: {report['cache_hit']} | degraded_after_attempt: {report['degraded_after_attempt']}")
+    print(f"called: {report['called']} | cache_hit: {report['cache_hit']} | degraded_after_attempt: {report['degraded_after_attempt']} | unavailable_before_call: {report['unavailable_before_call']}")
     print(f"historical evidence_untracked: {report['evidence_untracked']}（工具coverage不等于语义审查覆盖）")
     print(f"skipped_not_eligible: {report['skipped_not_eligible']} | skipped_stage_not_reached: {report['skipped_stage_not_reached']}")
     print(f"missing_gate: {report['missing_gate']} | invalid_skip: {report['invalid_skip']} | schema_errors: {report['schema_errors']} | sensitive_data: {report['sensitive_data']}")

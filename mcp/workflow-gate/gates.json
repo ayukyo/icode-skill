@@ -167,7 +167,8 @@
   },
   "execution_model": {
     "schema_version": 1,
-    "doc": "借鉴行为树的端口、Reactive 边界检查、节点轨迹、Retry/Fallback 与长动作回执，但不引入行为树运行时、XML、全局黑板或常驻 tick。工单事件链是唯一执行账本；只有已显式 step start 的新执行受 step finish 约束，历史工单保持 legacy-untracked 兼容。",
+    "finish_gate_steps": ["patch", "verify", "readme"],
+    "doc": "借鉴行为树的端口、Reactive 边界检查、节点轨迹、Retry/Fallback 与长动作回执，但不引入行为树运行时、XML、全局黑板或常驻 tick。工单事件链是唯一执行账本；新出生事件 execution_contract_version=1 强制完成回执；无版本的历史工单仅在已 start 后强制，保持历史兼容。",
     "boundaries": ["before_write", "after_wait", "before_side_effect", "before_transition"],
     "input_kinds": ["metadata_pointer", "ticket_file", "ticket_glob", "metadata_files", "workspace_git_head"],
     "output_kinds": ["metadata_pointer", "ticket_file", "ticket_glob", "metadata_files", "external_artifact"],
@@ -301,12 +302,13 @@
       },
       "readme": {
         "inputs": [
+          {"id": "delivery_files", "kind": "metadata_pointer", "value": "/delivery_files", "required": false, "protected": true},
           {"id": "final_plan", "kind": "ticket_file", "value": "03_plan_final.md", "required": true, "protected": true},
           {"id": "audit", "kind": "ticket_file", "value": "06_audit.md", "required": true, "protected": true}
         ],
         "outputs": [
-          {"id": "readme", "kind": "ticket_file", "value": "07_readme.md"},
-          {"id": "brief", "kind": "ticket_file", "value": "_brief.md"}
+          {"id": "readme", "kind": "ticket_file", "value": "07_readme.md", "path_pointer": "/delivery_files/report"},
+          {"id": "brief", "kind": "ticket_file", "value": "_brief.md", "path_pointer": "/delivery_files/brief"}
         ],
         "required_checks": ["before_write"],
         "drift_routes": {"final_plan": "review", "audit": "audit", "default": "readme"}
@@ -411,7 +413,10 @@
         "audit": {"statuses": ["deepcheck_done"], "debug": "main", "side_effect": "managed_write"},
         "readme": {"statuses": ["completed"], "debug": "main", "side_effect": "managed_write"},
         "patch": {"statuses": ["plan_finalized", "code_in_progress", "code_done", "deepcheck_in_progress", "deepcheck_done", "completed"], "debug": "main", "side_effect": "managed_write"},
-        "verify": {"statuses": ["code_done", "deepcheck_in_progress", "deepcheck_done", "completed"], "debug": "main", "side_effect": "external_side_effect"},
+        "verify": {"statuses": ["code_done", "deepcheck_in_progress", "deepcheck_done", "completed"], "debug": "main", "side_effect": "external_side_effect", "variants": {
+          "build": {"statuses": ["log_in_progress", "log_done", "init_in_progress", "plan_done", "review_in_progress", "review_done", "plan_finalized", "code_in_progress", "code_done", "deepcheck_in_progress", "deepcheck_done", "completed"], "side_effect": "managed_write"},
+          "plan": {"statuses": ["log_in_progress", "log_done", "init_in_progress", "plan_done", "review_in_progress", "review_done", "plan_finalized", "code_in_progress", "code_done", "deepcheck_in_progress", "deepcheck_done", "completed"], "side_effect": "managed_write"}
+        }},
         "doc": {"statuses": ["log_in_progress", "log_done", "init_in_progress", "plan_done", "review_in_progress", "review_done", "plan_finalized", "code_in_progress", "code_done", "deepcheck_in_progress", "deepcheck_done", "completed"], "debug": "main", "side_effect": "managed_write"},
         "docx": {"statuses": ["log_in_progress", "log_done", "init_in_progress", "plan_done", "review_in_progress", "review_done", "plan_finalized", "code_in_progress", "code_done", "deepcheck_in_progress", "deepcheck_done", "completed"], "debug": "main", "side_effect": "managed_write"},
         "ppt": {"statuses": ["log_in_progress", "log_done", "init_in_progress", "plan_done", "review_in_progress", "review_done", "plan_finalized", "code_in_progress", "code_done", "deepcheck_in_progress", "deepcheck_done", "completed"], "debug": "main", "side_effect": "managed_write"},

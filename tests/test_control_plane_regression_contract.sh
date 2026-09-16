@@ -144,6 +144,13 @@ then ok "事件追加失败时 metadata 回滚"; else bad "半写回滚契约失
 # 6b) linter 运行窗口内任何 metadata/事件变化都必须让旧门禁结果失效。
 DCON="$WS/.icode_output/.icode_output_12"
 $CTL create --dir "$DCON" --ticket-id reg-12 --requirement r --birth plan >/dev/null
+$CTL step --dir "$DCON" --step plan --phase start --attempt concurrency-plan >/dev/null
+for boundary in before_write before_transition; do
+  $CTL step --dir "$DCON" --step plan --phase check --attempt concurrency-plan --boundary "$boundary" >/dev/null
+done
+printf '# plan for concurrent gate probe\n' > "$DCON/01_plan.md"
+$CTL artifact --dir "$DCON" --step plan --attempt concurrency-plan --path 01_plan.md >/dev/null
+$CTL step --dir "$DCON" --step plan --phase finish --attempt concurrency-plan --outcome success --evidence 01_plan.md >/dev/null
 if python3 - "$DCON" <<'PY'
 import importlib.util,pathlib,sys,types
 spec=importlib.util.spec_from_file_location("ctl","tools/icode_control.py")

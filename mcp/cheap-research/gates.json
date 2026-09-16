@@ -191,7 +191,46 @@
         "incremental_bytes": "integer",
         "threshold": "integer"
       }
+    },
+    {
+      "id": "verify.listen_log_summary",
+      "step": "verify",
+      "tool": "summarize",
+      "required_when_eligible": true,
+      "condition": "--listen/--test 本轮增量候选日志字节数 >= long_text_threshold_bytes",
+      "evidence_fields": [
+        "listen_mode",
+        "incremental_bytes",
+        "threshold"
+      ],
+      "evidence_types": {
+        "listen_mode": "boolean",
+        "incremental_bytes": "integer",
+        "threshold": "integer"
+      }
     }
   ],
-  "trace_schema_version": 2
+  "trace_schema_version": 2,
+  "not_applicable_steps": [
+    "bak",
+    "close",
+    "code",
+    "doc",
+    "docx",
+    "fast",
+    "help",
+    "init",
+    "install",
+    "learn",
+    "limit",
+    "list",
+    "plan",
+    "ppt",
+    "readme",
+    "reopen",
+    "start",
+    "status",
+    "ui",
+    "worktree"
+  ]
 }

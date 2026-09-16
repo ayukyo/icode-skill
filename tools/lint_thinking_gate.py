@@ -140,6 +140,8 @@ def step_in_scope(step: str, metadata: Dict, trace_rows: List[Dict]) -> bool:
     if not isinstance(completed, list):
         completed = [str(completed)]
     completed = [str(x) for x in completed]
+    if step in ("verify", "docx"):
+        return any(r.get("step") == step for r in trace_rows)
     if step == "patch":
         if metadata.get("patch_scoped") is True:
             return True
@@ -304,6 +306,9 @@ def build_report(out_dir: Path, step_filter: Optional[str], legacy: bool,
         "steps": [],
         "trace_errors": trace_errors,
     }
+    if step_filter and step_filter not in steps:
+        report["schema_errors"] += 1
+        report["trace_errors"].append(f"未知 step: {step_filter}")
 
     for step, cfg in steps.items():
         if step_filter and step != step_filter:
@@ -351,6 +356,7 @@ def build_report(out_dir: Path, step_filter: Optional[str], legacy: bool,
         if any("敏感" in i or "疑似完整正文" in i or "禁止字段" in i for i in s.get("issues", [])):
             sens += 1
     report["sensitive_data"] = sens
+    report["scope_status"] = "applicable" if report["total_steps_in_scope"] else "not_applicable"
     return report
 
 
@@ -397,6 +403,9 @@ def main() -> int:
     catalog, catalog_err = find_gates_catalog()
     if catalog is None:
         print(f"❌ {catalog_err}", file=sys.stderr)
+        return 2
+    if args.step and args.step not in catalog.get("steps", {}):
+        print(json.dumps({"error": "unknown_step", "step": args.step}, ensure_ascii=False))
         return 2
 
     report = build_report(out_dir, args.step, legacy, metadata, trace_rows,

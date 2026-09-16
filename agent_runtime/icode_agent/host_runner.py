@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import json
+import importlib.util
 import io
 import os
 import re
 import signal
 import shutil
+import shlex
 import subprocess
 import sys
 import threading
@@ -17,6 +19,21 @@ from pathlib import Path
 from typing import Callable, Dict, List
 
 from .ticket_catalog import ResolvedTicket
+
+_verify_spec = importlib.util.spec_from_file_location(
+    "icode_verify_request", Path(__file__).resolve().parents[2] / "tools/verify_request.py")
+_verify_module = importlib.util.module_from_spec(_verify_spec)
+_verify_spec.loader.exec_module(_verify_module)
+
+
+def parse_verify_note(note, ticket_id=None):
+    try:
+        parsed = _verify_module.parse_request(note)
+    except ValueError as exc:
+        raise HostRunnerError(str(exc), code="invalid_verify_request") from exc
+    if ticket_id and parsed["ticket"] and parsed["ticket"] != ticket_id:
+        raise HostRunnerError("verify 参数工单与 UI 锁定工单不一致", code="ticket_mismatch")
+    return parsed
 
 
 ALLOWED_STEPS = frozenset({
@@ -65,9 +82,16 @@ def build_icode_prompt(step: str, note: str = "", ticket_id: str | None = None) 
     if len(note) > MAX_NOTE_CHARS:
         raise HostRunnerError("步骤备注过长", code="note_too_long")
     prompt = f"/icode {step}"
-    if step == "verify" and re.match(r"^--build(?:\s|$)", note):
-        # UI 备注可选择独立构建，必须提升为主动作，防裸 verify 默认部署。
-        prompt += " --build"
+    if step == "verify":
+        parsed = parse_verify_note(note, ticket_id)
+        action = parsed["action"]
+        if action != "default":
+            prompt += " --" + ("test" if action == "device_test" else action)
+            if action == "device_test":
+                prompt += " " + shlex.quote(parsed["target"])
+        for option in ("ticket", "reuse"):
+            if parsed[option]:
+                prompt += " --" + option + " " + shlex.quote(parsed[option])
     if ticket_id is not None:
         if not isinstance(ticket_id, str) or not ticket_id \
                 or len(ticket_id) > 240 or any(ord(char) < 32 for char in ticket_id):
@@ -112,12 +136,15 @@ class ControlLifecycle:
             "action-policy", "--dir", str(ticket.out_dir),
         ])
 
-    def action_policy(self, ticket, action, expected_revision):
-        return self._control([
+    def action_policy(self, ticket, action, expected_revision, verify_action=None):
+        args = [
             "action-policy", "--dir", str(ticket.out_dir),
             "--action", action,
             "--expected-revision", expected_revision,
-        ])
+        ]
+        if verify_action is not None:
+            args += ["--verify-action", verify_action]
+        return self._control(args)
 
     def record_spawn(self, ticket, *, step, host, model, request_id):
         return self._control([
@@ -359,7 +386,7 @@ class HostJobRunner:
                 argv += ["-m", model]
             return argv + ["-"]
         argv = [
-            executable, "-p", "--output-format", "stream-json",
+            executable, "-p", "--verbose", "--output-format", "stream-json",
             "--input-format", "text", "--permission-mode", "acceptEdits",
             "--no-session-persistence",
         ]
@@ -408,7 +435,9 @@ class HostJobRunner:
             if len(self._jobs) >= self.max_jobs:
                 raise HostRunnerError("任务历史已满且仍在运行", code="job_capacity")
             host, executable = self._choose_host(settings)
-            policy = self.lifecycle.action_policy(ticket, step, expected_revision)
+            policy_options = {"verify_action": parse_verify_note(note, ticket.ticket_id)["action"]} \
+                if step == "verify" else {}
+            policy = self.lifecycle.action_policy(ticket, step, expected_revision, **policy_options)
             execution_root = policy.get("execution_root")
             if not isinstance(execution_root, str) or not execution_root:
                 raise HostRunnerError(

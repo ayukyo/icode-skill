@@ -286,6 +286,15 @@ class LocalMcpSuiteTest(unittest.TestCase):
         self.assertFalse(module.evaluate_call("plan", "icode-mail-observe", "get_message", "managed_evidence_write")["answer"]["allowed"])
         self.assertFalse(module.evaluate_call("plan", "icode-mail-observe", "save_attachment", "read")["answer"]["allowed"])
 
+    def test_index_policy_separates_tool_effects_and_read_only_steps(self):
+        module = self.modules["icode-mcp-policy"]
+        for step in ("learn", "list"):
+            for operation in ("read", "managed_index_write"):
+                self.assertFalse(module.evaluate_call(step,"icode-local-index","build_index",operation)["answer"]["allowed"])
+            self.assertTrue(module.evaluate_call(step,"icode-local-index","query_index","read")["answer"]["allowed"])
+        self.assertTrue(module.evaluate_call("init","icode-local-index","build_index","managed_index_write")["answer"]["allowed"])
+        self.assertFalse(module.evaluate_call("init","icode-local-index","query_index","managed_index_write")["answer"]["allowed"])
+
     def test_policy_rejects_malformed_permissions_and_routes(self):
         module = self.modules["icode-mcp-policy"]
         invalid = self.root / "policy.json"
@@ -309,6 +318,15 @@ class LocalMcpSuiteTest(unittest.TestCase):
         for marker in ("default", "工具名", "operations", "condition", "required", "重复 server"):
             self.assertIn(marker, joined)
         self.assertEqual(module.list_step_policy("plan")["error_code"], "policy_invalid")
+
+    def test_route_operations_reject_malformed_server_without_crashing(self):
+        module = self.modules["icode-mcp-policy"]
+        for server_spec in (None, {"tools":["query"], "operations":None}):
+            errors = module._policy_errors({"version":1, "default":"deny",
+                "servers":{"bad":server_spec}, "steps":{"plan":[{
+                    "server":"bad", "condition":"always", "required":False,
+                    "operations":["read"]}]}})
+            self.assertTrue(errors)
 
     def test_local_index_build_query_and_staleness(self):
         module = self.modules["icode-local-index"]

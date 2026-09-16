@@ -387,7 +387,11 @@ def _simulate_merge(repo_path: Path, head_sha: str,
             if checkout.returncode != 0:
                 return False, (checkout.stderr or "temporary checkout failed").strip()
             merge = run_git(
-                clone, "-c", "core.hooksPath=/dev/null", "merge",
+                # A shared clone omits repository-local identity. This dry-run
+                # never commits; use a private identity without changing config.
+                clone, "-c", "core.hooksPath=/dev/null",
+                "-c", "user.name=ICODE merge preflight",
+                "-c", "user.email=icode-preflight@example.invalid", "merge",
                 "--no-commit", "--no-ff", target_sha, timeout=60,
             )
             unresolved = run_git(

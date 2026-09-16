@@ -302,6 +302,23 @@ def test_ticket_detail_contains_sanitized_cockpit_and_job_events(tmp_path):
         assert events == {"ok": True, "cursor": 7, "events": []}
 
 
+def test_cockpit_shows_registered_delivery_without_unlisted_or_symlink_files(tmp_path):
+    with dashboard(tmp_path) as server:
+        out = tmp_path / "project/.icode_output/.icode_output_1"
+        subprocess.run([sys.executable, str(CONTROL), "metadata-update", "--dir", str(out),
+            "--set-json", json.dumps({"delivery_files":{
+                "report":"feature.md", "brief":"feature_brief.md"}})],
+            check=True, capture_output=True, text=True)
+        (out / "feature.md").write_text("# Report")
+        (out / "private.md").write_text("Private material")
+        (out / "feature_brief.md").symlink_to(out / "private.md")
+        status, payload = request(server, "GET", "/api/v1/tickets/M2-UI-1")
+        assert status == 200
+        names = {item["name"] for item in payload["ticket"]["cockpit"]["artifacts"]}
+        assert "feature.md" in names
+        assert not {"private.md", "feature_brief.md"} & names
+
+
 def test_host_error_is_safe_and_has_beginner_recovery_action(tmp_path):
     with dashboard(tmp_path) as server:
         _, detail = request(server, "GET", "/api/v1/tickets/M2-UI-1")

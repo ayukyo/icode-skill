@@ -137,6 +137,22 @@ python3 "$CONTROL" record-verification --dir "$TICKET" --kind device_test \
   --outcome pass --evidence 'fixture:device-pass' --request verify-record-a >/dev/null
 python3 "$CONTROL" step --dir "$TICKET" --step verify --phase check \
   --attempt verify-a --boundary after_wait --request verify-check-wait >/dev/null
+if python3 "$CONTROL" step --dir "$TICKET" --step verify --phase finish \
+  --attempt verify-a --outcome success --evidence verification_recorded >/dev/null; then
+  fail 'standalone verify accepted missing thinking/MCP gate evidence'
+fi
+python3 - "$TICKET" <<'PY'
+import json,pathlib,sys
+p=pathlib.Path(sys.argv[1])
+with (p/'.thinking_gate_trace.jsonl').open('a') as f:
+    f.write(json.dumps(dict(schema_version=1,ticket_id='execution-1',step='verify',tier='L1',default_tier='L1',
+        triggers=[],mechanism='decision_record',attempted=False,result='success',degraded_reason=None,
+        over_invoked=False,at='2026-09-16T00:00:00Z'))+'\n')
+with (p/'.mcp_gate_trace.jsonl').open('a') as f:
+    f.write(json.dumps(dict(schema_version=2,ticket_id='execution-1',step='verify',gate_id='verify.listen_log_summary',
+        tool='summarize',eligible=False,evidence=dict(listen_mode=False,incremental_bytes=0,threshold=8192),
+        decision='skipped_not_eligible',attempted=False,result='not_applicable',at='2026-09-16T00:00:00Z'))+'\n')
+PY
 python3 "$CONTROL" step --dir "$TICKET" --step verify --phase finish \
   --attempt verify-a --outcome success --evidence verification_recorded \
   --request verify-finish-a \

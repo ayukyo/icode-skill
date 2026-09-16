@@ -24,7 +24,13 @@
     },
     "icode-local-index": {
       "operations": ["read", "managed_index_write"],
-      "tools": ["describe_capabilities", "build_index", "query_index", "index_status"]
+      "tools": ["describe_capabilities", "build_index", "query_index", "index_status"],
+      "tool_operations": {
+        "describe_capabilities": ["read"],
+        "build_index": ["managed_index_write"],
+        "query_index": ["read"],
+        "index_status": ["read"]
+      }
     },
     "icode-mail-observe": {
       "operations": ["read", "managed_evidence_write"],
@@ -114,10 +120,10 @@
       {"server": "icode-mcp-policy", "condition": "路由策略安装或升级后", "required": true}
     ],
     "learn": [
-      {"server": "icode-local-index", "condition": "仅查询已有索引，不联网补历史", "required": false}
+      {"server": "icode-local-index", "condition": "仅查询已有索引，不联网补历史", "required": false, "operations": ["read"]}
     ],
     "list": [
-      {"server": "icode-local-index", "condition": "查询已有本地索引", "required": false}
+      {"server": "icode-local-index", "condition": "查询已有本地索引", "required": false, "operations": ["read"]}
     ]
   }
 }

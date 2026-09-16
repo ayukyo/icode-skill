@@ -885,12 +885,12 @@ def _control_sources(root: Path, explicit: Iterable[Path]) -> List[Path]:
 
 def validate_report_paths(
     output: Path,
-    markdown: Path,
+    markdown: Optional[Path],
     *,
     allowed_root: Optional[Path] = None,
     protected_sources: Iterable[Path] = (),
-) -> Tuple[Path, Path]:
-    raw_paths = (output.expanduser(), markdown.expanduser())
+) -> Tuple[Path, Optional[Path]]:
+    raw_paths = (output.expanduser(),) + ((markdown.expanduser(),) if markdown is not None else ())
     if allowed_root is not None:
         raw_root = allowed_root.expanduser()
         if raw_root.is_symlink():
@@ -943,12 +943,13 @@ def validate_report_paths(
         _validate_parent_chain(raw_path)
         resolved_paths.append(path)
 
-    resolved_output, resolved_markdown = resolved_paths
-    if resolved_output == resolved_markdown:
+    resolved_output = resolved_paths[0]
+    resolved_markdown = resolved_paths[1] if markdown is not None else None
+    if resolved_markdown is not None and resolved_output == resolved_markdown:
         raise VerificationDebtError("--output 与 --markdown 必须是不同路径")
-    if _same_existing_file(resolved_output, resolved_markdown):
+    if resolved_markdown is not None and _same_existing_file(resolved_output, resolved_markdown):
         raise VerificationDebtError("--output 与 --markdown 不得是同一文件的别名")
-    for path in (resolved_output, resolved_markdown):
+    for path in resolved_paths:
         for source in protected_sources:
             if _same_existing_file(path, source):
                 raise VerificationDebtError(f"报告输出不得覆盖控制面真源别名: {path}")
@@ -958,7 +959,7 @@ def validate_report_paths(
 def write_reports(
     report: Dict[str, Any],
     output: str,
-    markdown: str,
+    markdown: Optional[str],
     renderer,
     *,
     allowed_root: Optional[Path] = None,
@@ -966,18 +967,18 @@ def write_reports(
 ) -> None:
     output_path, markdown_path = validate_report_paths(
         Path(output),
-        Path(markdown),
+        Path(markdown) if markdown is not None else None,
         allowed_root=allowed_root,
         protected_sources=protected_sources,
     )
     # 两个父目录全部预检后才允许创建、暂存，避免第二目标错误时先改第一份报告。
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    markdown_path.parent.mkdir(parents=True, exist_ok=True)
     json_content = json.dumps(report, ensure_ascii=False, indent=2) + "\n"
-    markdown_content = renderer(report)
-    atomic_write_pair(
-        ((output_path, json_content), (markdown_path, markdown_content))
-    )
+    reports = [(output_path, json_content)]
+    if markdown_path is not None:
+        markdown_path.parent.mkdir(parents=True, exist_ok=True)
+        reports.append((markdown_path, renderer(report)))
+    atomic_write_pair(reports)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -989,13 +990,13 @@ def build_parser() -> argparse.ArgumentParser:
     pending = subparsers.add_parser("pending", help="按 project 汇总跨工单验证债务")
     pending.add_argument("--project", required=True, help="仅扫描该项目根")
     pending.add_argument("--output", required=True, help="JSON 报告路径")
-    pending.add_argument("--markdown", required=True, help="Markdown 摘要路径")
+    pending.add_argument("--markdown", help="按需生成 Markdown 摘要；省略时只写 JSON")
 
     plan = subparsers.add_parser("plan", help="为单个 ticket 生成只读验证计划")
     plan.add_argument("--ticket-dir", required=True, help="包含 .ico_metadata.json 的工单目录")
     plan.add_argument("--contract-file", help="工单内含 verification_contract 的只读 overlay")
     plan.add_argument("--output", required=True, help="JSON 计划路径")
-    plan.add_argument("--markdown", required=True, help="Markdown 计划路径")
+    plan.add_argument("--markdown", help="按需生成 Markdown 计划；省略时只写 JSON")
     return parser
 
 

@@ -70,7 +70,7 @@
   - `fetch`（1 个，不依赖 LLM provider）：`fetch_remote`；只拉公网材料，结果始终是 `untrusted_remote/source_material_only`
   - `llm`（8 个，必须 provider 可用）：`summarize` / `retrieve_similar` / `fill_template` / `extract` / `propose_repo_facts` / `diff_summary` / `generate_filename` / `select_template`
   - 真源：[mcp/cheap-research/tools_manifest.json](../mcp/cheap-research/tools_manifest.json)
-- **降级**（没装 / 装了没填三件套）：主会话 / 子代理走 `Agent(model="haiku")` 兜底（方案 A），不阻塞主流程。**子代理兜底时按 [subagent_spawn_wait.md](subagent_spawn_wait.md) 通用契约等待**（后台 spawn + `TaskOutput` 阻塞等 + 20 分钟墙钟硬截止，禁止裸同步 spawn / 被动等通知 / 无限等待）
+- **降级**（没装 / 装了没填三件套）：主会话按原始证据兜底，或使用当前宿主确实支持的低成本子代理（方案 A），不阻塞主流程。**子代理兜底时按 [subagent_spawn_wait.md](subagent_spawn_wait.md) 通用契约等待**（后台 spawn + `TaskOutput` 阻塞等 + 20 分钟墙钟硬截止，禁止裸同步 spawn / 被动等通知 / 无限等待）
 - **触发场景**：以各步骤**正文执行点**为真源（推荐表仅声明、正文无调用的不算入选）——log 阶段2 TB 评论预提取（`extract`，评论 ≥ 8 条）、doc 远程模块 README 拉取（`fetch_remote`）、review dedup 分类/找重复（`extract`）+ 审查输出压缩（`summarize`）、merge 跨轮 review 汇总（`summarize`，>1 轮）、deepcheck Fixed 预扫（`scan_patterns`）+ dedup（`extract`）、audit 仓库事实候选预审（`propose_repo_facts`）+ 计划vs代码差异摘要（`diff_summary`）、patch 阶段工具映射（见 [steps/08_patch.md](../steps/08_patch.md) 338 行）。**init/plan/code/status/readme 无正文执行点**（历史检索/ADR 检索/现状盘点/文件名/模板选择均走确定性机制 Read/rg/规则，`--scan` 零 LLM），标 ⚪。完整清单见 [tools_manifest.json](../mcp/cheap-research/tools_manifest.json)
 - **不接管决策**：所有高风险子任务（3 质疑者对抗 / 架构决策 / 终审裁决 / 修复方案 / 用户对话）一律不交给 cheap-research
 - **新增能力分工边界**：技术文档/压缩包先走 `tools/document_intake.py`，视觉页/原理图先走 `tools/media_router.py` 选择 native/bridge/dual；cheap-research 只可消费其**带 source hash + 页/区域回指的文本化候选**做压缩或结构化提取。它不得自己解析图片/视频/7z，不得裁决管脚复用、电气兼容、时序、MCU/SDK 适配或原理图正确性；这些结论留给对应 SKILL + 主模型复检
@@ -108,7 +108,7 @@
   - 函数数 < 50 → 整个 §2.5.7/§9.4 跳过（避免 LLM 成本浪费）
   - 函数数 > 500 → 分批（每批 100），合并结果
   - ripgrep 抽不到 / 不可用 → 整个 dedup 跳过
-  - cheap-research 不可用 → 整个 dedup 跳过（不降级主代理自跑，因为 高质量模型分类 + 找重复是高成本子任务）
+  - cheap-research 不可用 → 停止整轮 dedup，保留未消除的重复风险；符合门槛的 gate 仍按真实情况记录 `unavailable_before_call` 或 `degraded_after_attempt`，不得伪装成未触发或已完成。可在工具恢复后重跑。
   - 高质量模型某类返回空数组 → 该类跳过（无重复），不报错
 
 - **已知限制**：
@@ -156,3 +156,5 @@
 | **降本场景** | 上述 + **cheap-research**（仅低风险候选/压缩/结构化提取子任务，以各步骤正文执行点为真源；3 质疑者对抗 / 架构决策 / 终审裁决 / 修复方案一律不走）。**L0/L1 步骤不调用 sequential-thinking**，本身即降本 |
 
 完整安装：`/icode install`（一键扫描 `mcp/` 目录里所有 `install.sh`）
+
+**权限粒度**：本地 MCP policy 同时检查 server、逐工具 operation 与 step route 的 operations。local-index.build_index 只能按 managed_index_write 调用，learn/list 只允许 read；evaluate_call 返回允许仍不等于调用已执行，condition 与证据回执须由当前步骤核实。

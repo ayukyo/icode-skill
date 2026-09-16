@@ -70,6 +70,8 @@ FAST_RISK_TRIGGERS = [
 #   log/review/deepcheck/audit 为计划/质量阶段，identity_change 与 acceptance 只在
 #   code/deploy/audit-verified 生效（普通工单无身份变化/生命周期不得被这两个可选字段误杀）。
 STEP_GATES = {
+    "readme": [],
+    "verify": [],
     "log": [],
     "plan": ["semantic_decision", "requirement_delta"],
     "review": ["requirement_delta"],
@@ -156,6 +158,10 @@ def validate_execution_model_catalog(catalog: Dict) -> List[str]:
     if not isinstance(contracts, dict) or not contracts:
         issues.append("execution_model.step_contracts 必须是非空对象")
         contracts = {}
+    finish_steps = model.get("finish_gate_steps", [])
+    if not isinstance(finish_steps, list) or any(
+            not isinstance(step, str) or step not in contracts for step in finish_steps):
+        issues.append("execution_model.finish_gate_steps 必须只引用已登记步骤")
     for step, contract in contracts.items():
         prefix = f"execution_model.step_contracts.{step}"
         if not isinstance(contract, dict):
@@ -183,6 +189,10 @@ def validate_execution_model_catalog(catalog: Dict) -> List[str]:
                     issues.append(f"{prefix}.{field}[{index}].kind 非法")
                 if not isinstance(port.get("value"), str) or not port.get("value"):
                     issues.append(f"{prefix}.{field}[{index}].value 非空字符串")
+                if "path_pointer" in port and (
+                        port.get("kind") != "ticket_file" or not isinstance(port["path_pointer"], str)
+                        or not port["path_pointer"].startswith("/")):
+                    issues.append(f"{prefix}.{field}[{index}].path_pointer 必须是文件端口的 JSON pointer")
                 if field == "outputs" and port.get("kind") == "metadata_pointer" \
                         and not isinstance(port.get("receipt_event"), str):
                     issues.append(f"{prefix}.{field}[{index}] metadata_pointer 缺 receipt_event")

@@ -30,6 +30,8 @@
 - 交付报告：`{工程简名}_{需求关键词}.md`（示例：`{工程简名}_modulo_power.md`、`{工程简名}_overflow_fix.md`）
 - 跨领域简报：`{工程简名}_{需求关键词}_brief.md`（同 basename + `_brief` 后缀，两份成对、便于查找）
 
+**唯一文件身份**：在 `step start --step readme` 前，通过 `metadata-update --set-json` 登记 `delivery_files={"report":"<交付报告文件名>.md","brief":"<简报文件名>.md"}`，仅允许工单内不同的 Markdown 文件名。已有映射默认复用；随后 artifact/finish 和 UI 均使用该映射，不再复制 `07_readme.md` / `_brief.md`。旧工单无映射时仍能读取原固定名；重新生成时先登记选定的一对路径，旧文件不自动删除。
+
 ## 智能模板选择
 
 读 metadata 的 `completed_steps`，若含 `"log"` → **查BUG模板**，否则 → **功能开发模板**。**该选择只决定交付报告模板**；跨领域简报有独立模板（见「跨领域说明模板」），**不走功能/查BUG 选择**、统一用"本次变更"统领。
@@ -299,7 +301,7 @@ eval("2147483648") rc=3 (expect 3 OVERFLOW)
 2. 读取 `.ico_metadata.json`：确认 `status==completed` + 提取 `requirement` + `completed_steps` + `code_files` + `created_at`
 3. 读取所有产物（`00_init.md`/`log_analysis.md`/`01_plan.md`/`02_review.md`/`03_plan_final.md`/`05_deepcheck.md`/`06_audit.md`，**存在时含 `08_patch.md`**——补丁演进与 `patch_history.at` 时间点）+ 代码文件 + Makefile。若存在 `submission_contracts`，先运行 `python3 scripts/submission_guard.py handoff --metadata "{ICODE_OUT_DIR}/.ico_metadata.json" --output "{ICODE_OUT_DIR}/handoff_matrix.json" --markdown "{ICODE_OUT_DIR}/handoff_matrix.md"`，再读取同一 `handoff_matrix.json`；不得另行手算第二套逐仓结论
 4. 思考分级 L1（见上方）
-5. **生成文件名**：从 `requirement` 提炼关键词 + 工程简名 → 一对（交付报告 + `_brief` 简报）
+5. **确认文件名**：复用启动步骤前登记的 `delivery_files` 一对路径（交付报告 + `_brief` 简报），不重复生成另一套文件
 6. **选择模板**：`completed_steps` 含 `"log"` → 查BUG模板，否则 → 功能开发模板
 7. **逐章提取要点**（自包含，不引用内部文件名）
 8. 使用 Write 工具写入 `{ICODE_OUT_DIR}/{工程简名}_{需求关键词}.md`（交付报告）
