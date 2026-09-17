@@ -1,9 +1,9 @@
 ---
 name: icode
-description: 端到端编码工作流（步骤 0~6，含需求初稿、日志根因、验证、独立复评、学习与本地管理 UI），支持：/icode help, ui, install [--basic|--preview], init [--guide], log, start, fast, plan, review, merge, code, deepcheck, audit, crosscheck, patch, verify [--build|--plan|--deploy|--listen|--test|--reuse], doc, docx, limit, readme, ppt, learn [--project|--ticket|--since], study [--ticket|--library], status [--pending|--scan|--verdict], list [--all|--plain], bak, worktree --update/--close/--reopen/--merge。新建工单入口支持 --worktree opt-in
+description: 端到端编码工作流（步骤 0~6，含需求初稿、日志根因、验证、独立复评、学习与本地管理 UI），支持：/icode help, ui, install [--basic|--preview], init [--guide], log, start, fast, plan, review, merge, code, deepcheck, audit, crosscheck, patch, verify [--build] [--deploy] [--listen|--test] [--plan], doc, docx, limit, readme, ppt, learn [--project|--ticket|--since], study [--ticket|--library], status [--pending|--scan|--verdict], list [--all|--plain], bak, worktree --update/--close/--reopen/--merge。新建工单入口支持 --worktree opt-in
 ---
 
-**版本**: v2.30.0
+**版本**: v2.31.0
 
 # ICode 全流程编码工作流（步骤 0 + 1~6）
 
@@ -45,7 +45,7 @@ description: 端到端编码工作流（步骤 0~6，含需求初稿、日志根
 | `[可选步骤7]` `/icode readme` | 一次性生成交付报告（自己看）+ `_brief.md` 跨领域简报（给其它模块/测试/产品） | 用最新目录 |
 | `[独立]` `/icode patch [问题或新需求...]` | 追加修改：轻量四段式；不改变 status；`--listen` 可在修改后自动监听 | 用最新目录 |
 | `[独立复评]` `/icode crosscheck [--ticket <id>\|<工单路径>]` | 用户自行换 Agent/模型后完整复评 completed 工单；项目内隔离、多轮追加、原工单与代码零回写 | 否（写 `.icode_output/.crosscheck/`） |
-| `[独立]` `/icode verify --build [自然语言]` / `/icode verify [--deploy\|--listen\|--test <target>] [--reuse <artifact>]` / `/icode verify --plan [--ticket <id>]` | **独立构建/实机验证/只读计划**：build 读 LIMIT、静态检索入口并理解意图，只构建和核验产物；执行结果记 `verification_runs`，不自动升级 delivery_verdict（[steps/verify.md](steps/verify.md)） | 否（无工单build只写工程构建报告；plan只写派生报告） |
+| `[独立]` `/icode verify [--build] [--deploy] [--listen\|--test <target>] [自然语言]` / `/icode verify --plan [--ticket <id>]` | **分阶段构建/部署/监听/测试**：选项按顺序只执行各自阶段，可组合；无选项先识别自然语言意图。结果逐阶段记 `verification_runs`，不自动升级 delivery_verdict（[steps/verify.md](steps/verify.md)） | 否（无工单单独 build 只写工程构建报告；plan 只写派生报告） |
 | `[学习]` `/icode learn [--project <path>] [--ticket <id>] [--since <ISO-8601>]` | 从项目内观测生成复用/组合/增强/新建/工具化/no-action 建议，不直接创建或发布 Skill（[steps/learn.md](steps/learn.md)） | 否（写 `.icode_output/learn/` 派生报告） |
 | `[学习]` `/icode study [--ticket <id>] [--library <目录>] [主题]` | 从已写代码提炼通用技术文章，按卷/章保存在用户自己的知识库；源码溯源留在库外（[steps/study.md](steps/study.md)） | 否（写用户配置的知识库） |
 | `[工程]` `/icode doc [自然语言]` | 工程级知识库生成/维护（`project_docs/`+`module_docs/`）；doc_worklist 防中断丢进度 | 否（写全局） |
@@ -86,6 +86,7 @@ description: 端到端编码工作流（步骤 0~6，含需求初稿、日志根
 /icode plan → review → merge → code → deepcheck → audit   # 分步手动
 /icode readme / patch / verify --listen          # 交付报告 / 追加修改 / 纯实机验证
 /icode verify --build 仅增量编译 module_a，并发6   # 独立构建，按LIMIT/脚本/意图确定命令
+/icode verify --build --deploy --test camera_stream # 编译、部署后测试新版本
 /icode crosscheck --ticket <id>                  # 换 Agent/模型后的只读多轮复评
 /icode status --pending                          # 跨工单验证债务
 /icode learn --project .                          # 项目内使用观测的只读学习报告

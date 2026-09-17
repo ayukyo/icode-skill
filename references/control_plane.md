@@ -113,6 +113,8 @@ Git checkout 和逐仓提交契约由 `steps/reopen.md` 先创建/校验；然�
 
 `record-verification` 在一个事务中追加 `verification_runs` 和 `verification_recorded` 事件，不修改 `patch_history/status/completed_steps/delivery_verdict`。`--evidence` 必填；复用构建时 `--build-source reused` 还必须提供 `--artifact-identity`。embedded/camera 每个验证单元都必须附与合同完全一致的 `--profile`、`--baseline-ref sha256:<64hex>`；有量化指标时再附严格数值对象 `--metrics-json`。布尔、NaN、Infinity 或非对象在加锁写入前拒绝。
 
+公开 verify 阶段显式组合：`--build` 只构建，`--deploy` 只部署，`--listen`/`--test` 只验证已部署版本；`--build --deploy --listen/--test` 每阶段分别记录。公开 `--reuse` 已移除；内部 `build_source=reused` 只保留历史数据兼容。无动作选项先识别自然语言，再按实际阶段逐项调用 `action-policy`，`intent/default` 不能作为设备操作权限。
+
 `/icode verify --build [自然语言]` 的构建记录使用 `--kind build`，固定 `layer=build`，不带 device、不允许 reused/existing。pass 必须提供 `build_source=fresh`、非空 `artifact_identity` 和实际源码 `baseline`；失败或命令尚未执行则如实记 fail/inconclusive。它不能满足 deploy/physical 等其他层级验证单元。无工单只写工程 `.icode_output/build/<run_id>/build_run.json/.md`，不创建假工单或绕过已关闭工单冻结。
 
 需要分层验收时，在 metadata 声明 `verification_contract={required,required_layers,required_consumers,required_scenarios}`，并用 `record-verification --layer --consumer --scenario --baseline` 逐单元记录。缺 `required_cells` 时保持历史语义：验证三维笛卡尔积；提供 `required_cells[]` 时仅验证显式列出的稀疏单元。只有 `required=true` 才启用 verified 门禁；每个必需单元取最新记录，必须 `outcome=pass` 且 evidence/baseline 非空。可选 `profile=generic|embedded|camera`（缺省 generic）与 `required_metrics[]` 为指定 cell 增加量化门槛；指标合同必须带 baseline 的 `sha256:` 摘要，最新记录还须 profile 与摘要匹配、指标满足 `lt/lte/gt/gte/eq`。合同缺失、`required=false` 或未声明指标不会给纯 host/历史任务强加真实环境或性能要求。

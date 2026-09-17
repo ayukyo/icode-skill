@@ -21,27 +21,37 @@ def test_build_retains_intent_without_executing_shell_text():
 
 
 @pytest.mark.parametrize("text", [
-    "--build --deploy", "--plan --build", "--listen --test target",
-    "--build --reuse old", "--plan --reuse old", "--build --ticket",
+    "--plan --build", "--listen --test target",
+    "--build --reuse old", "--plan --reuse old", "--listen --reuse old", "--build --ticket",
     '--build --ticket " "', "--ticket A --ticket B --build", "--test",
     "/icode patch --build", '--build "unfinished',
     "--buid", "--build --builder", "--build --module module_a",
+    "--build --build", "--test smoke --test second", "--plan --listen",
+    "--build --listen", "--build --test smoke", "--listen --deploy",
+    "--test smoke --build", "--deploy --build",
 ])
 def test_invalid_requests_fail_before_any_action(text):
     with pytest.raises(ValueError):
         parse_request(text)
 
 
-@pytest.mark.parametrize("text,action,reuse,target", [
-    ("", "default", None, None),
-    ("--deploy --reuse old", "deploy", "old", None),
-    ("--reuse old --listen", "listen", "old", None),
-    ("--test unit_a --reuse old", "device_test", "old", "unit_a"),
-    ("--plan --ticket T-1", "plan", None, None),
+@pytest.mark.parametrize("text,action,actions,target", [
+    ("", "intent", [], None),
+    ("只核对现有日志，不部署", "intent", [], None),
+    ("--deploy", "deploy", ["deploy"], None),
+    ("--listen", "listen", ["listen"], None),
+    ("--test unit_a", "device_test", ["device_test"], "unit_a"),
+    ("--build --deploy", "deploy", ["build", "deploy"], None),
+    ("--deploy --listen", "listen", ["deploy", "listen"], None),
+    ("--deploy --test unit_a", "device_test", ["deploy", "device_test"], "unit_a"),
+    ("--build --deploy --listen", "listen", ["build", "deploy", "listen"], None),
+    ("--build --deploy --test unit_a", "device_test", ["build", "deploy", "device_test"], "unit_a"),
+    ("--plan --ticket T-1", "plan", ["plan"], None),
 ])
-def test_existing_modes_remain_available(text, action, reuse, target):
+def test_actions_are_explicit_and_ordered(text, action, actions, target):
     result = parse_request(text)
-    assert (result["action"], result["reuse"], result["target"]) == (action, reuse, target)
+    assert (result["action"], result["actions"], result["target"]) == (action, actions, target)
+    assert "reuse" not in result
 
 
 def test_explicit_separator_keeps_command_options_in_intent():

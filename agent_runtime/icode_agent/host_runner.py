@@ -84,14 +84,19 @@ def build_icode_prompt(step: str, note: str = "", ticket_id: str | None = None) 
     prompt = f"/icode {step}"
     if step == "verify":
         parsed = parse_verify_note(note, ticket_id)
-        action = parsed["action"]
-        if action != "default":
+        for action in parsed["actions"]:
             prompt += " --" + ("test" if action == "device_test" else action)
             if action == "device_test":
                 prompt += " " + shlex.quote(parsed["target"])
-        for option in ("ticket", "reuse"):
+        for option in ("ticket",):
             if parsed[option]:
                 prompt += " --" + option + " " + shlex.quote(parsed[option])
+        if parsed["action"] == "intent":
+            prompt += (
+                "\n\nverify 无动作选项：先按意图判断阶段；空白或歧义先询问，"
+                "不得默认部署。执行任何阶段前，以实际阶段重新调用"
+                " action-policy --action verify --verify-action <阶段>。"
+            )
     if ticket_id is not None:
         if not isinstance(ticket_id, str) or not ticket_id \
                 or len(ticket_id) > 240 or any(ord(char) < 32 for char in ticket_id):

@@ -5025,10 +5025,12 @@ def cmd_action_policy(args):
                 exit_code=1, gate_id="action_policy", status=status,
                 blocked_reason=blocked_reason, allowed_actions=allowed)
         if args.action == "verify":
-            variant = getattr(args, "verify_action", None) or "default"
+            variant = getattr(args, "verify_action", None) or "intent"
+            if variant == "default":
+                variant = "intent"  # 旧内部调用只解释意图，绝不默认部署。
             contract = actions["verify"].get("variants", {}).get(variant, actions["verify"])
             if status not in contract["statuses"]:
-                raise ControlError(f"verify {variant} 在当前状态不可执行；分析阶段只允许 --build/--plan",
+                raise ControlError(f"verify {variant} 在当前状态不可执行；分析阶段须先确定合法动作",
                                    gate_id="action_policy", status=status, verify_action=variant)
         model = load_execution_model()
         if args.action in model.get("step_contracts", {}):
@@ -5284,8 +5286,8 @@ def build_parser():
                        help="只读生成允许动作、可信执行根与 revision")
     p.add_argument("--dir", required=True)
     p.add_argument("--action", help="可选：启动前复检指定动作")
-    p.add_argument("--verify-action", choices=["default", "build", "plan", "deploy", "listen", "device_test"],
-                   help="verify 子动作；默认仍按部署权限校验")
+    p.add_argument("--verify-action", choices=["default", "intent", "build", "plan", "deploy", "listen", "device_test"],
+                   help="verify 子动作；无选项仅解释意图，实际执行前须按解析后的动作复检")
     p.add_argument("--expected-revision",
                    help="可选：UI 刷新时取得的 revision token")
     p.set_defaults(func=cmd_action_policy)

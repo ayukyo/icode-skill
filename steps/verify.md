@@ -1,15 +1,14 @@
 # 步骤：构建与实机验证（/icode verify）
 
-**命令**: `/icode verify --build [--ticket <id>] [自然语言]` / `/icode verify [--deploy | --listen | --test <target>] [--reuse <artifact>]` / `/icode verify --plan [--ticket <id>]`
+**命令**: `/icode verify [--build] [--deploy] [--listen | --test <target>] [--ticket <id>] [自然语言]` / `/icode verify --plan [--ticket <id>]` / `/icode verify <自然语言意图>`
 - `--build [自然语言]`：独立构建 + 产物核验；读取存在的 LIMIT、静态检索工程编译入口、理解后附自然语言；不读取设备连接配置、不部署、不烧录、不监听。
-- 默认（无参）：对当前工单执行**部署 + 一轮实机验证**（读 `~/.claude/icode_data/device_config/<project_id>.json` 配置；无配置/deploy_enabled=false → 按 08_patch §1.5 缺失诊断提示，不静默跳过）
-- `--deploy`：仅执行部署（构建/烧录/上传 + 版本核对），不监听
-- `--listen`：部署 + 自动监听（连设备部署 + 持续轮询 LOG + 实时链路分析，告知触发即监听、用户随时操作被捕获）
-- `--test <target>`：部署 + 指定目标侧测试（显式触发验证节奏：空转停下确认用户已操作再继续，防误触发）
-- `--reuse <artifact>`：构建来源修饰符，复用指定/最近产物并记 `build_source=reused` + `artifact_identity`，跳过重新构建
+- `--deploy`：只部署**已有、已核验身份**的构建产物并核对设备版本；不编译、不监听
+- `--listen`：只监听设备上**当前运行版本**的日志并分析链路；不编译、不重新部署
+- `--test <target>`：只对设备上**当前运行版本**执行指定目标测试；不编译、不重新部署。空转时停下确认触发动作
+- 无动作选项：只识别用户自然语言意图，先解释要执行的阶段；意图为空或有歧义时询问，不自动部署。识别到明确动作后按相同的阶段门禁执行
 - `--plan [--ticket <id>]`：只读展开指定/当前工单尚未满足的验证单元，生成验证计划；不部署、不记录 verification run
-- 互斥与组合：`--build`/`--plan`/`--deploy`/`--listen`/`--test` 主动作互斥；`--reuse` 只可与部署类动作组合，不能与 `--build`/`--plan` 组合。verify 选项放在自然语言之前；自然语言中的 `-j6`、`--module` 等属于构建意图。可用 `--` 显式分隔自然语言。
-**产出**: 执行模式向 metadata `verification_runs` 追加一条 + `verification_recorded` 事件；build 记 `kind=build, layer=build`。`--plan` 只写 `{ICODE_OUT_DIR}/verification_plan.json` 派生计划，需要展示文件时再生成 Markdown。无工单的 build 只写工程 `.icode_output/build/<run_id>/` 报告，不新建工单。均**不创建 Patch N 段、不写 `patch_history`、不改变 status/completed_steps**。
+- 组合：阶段按 `--build → --deploy → --listen` 或 `--build → --deploy → --test <target>` 顺序显式声明；可以从中间开始（如 `--deploy --listen`）。`--listen` 与 `--test` 互斥；编译后要验证**新版本**，必须带 `--deploy`。`--plan` 独立使用。`--reuse` 已移除；没有任何动作选项时只解析自然语言。自然语言中的 `-j6`、`--module` 等属于请求内容，可用 `--` 显式分隔。
+**产出**: 每个实际执行阶段向 metadata `verification_runs` 追加各自记录 + `verification_recorded` 事件；build 记 `kind=build, layer=build`，后续部署/监听/测试另记。失败阶段阻断后续阶段，不伪造成功记录。`--plan` 只写 `{ICODE_OUT_DIR}/verification_plan.json` 派生计划。无工单的单独 build 只写工程 `.icode_output/build/<run_id>/` 报告。均**不创建 Patch N 段、不写 `patch_history`、不改变 status/completed_steps**。
 **会话**: 主会话
 
 > **共享技能路由**：部署/监听前读取 [references/skill_routing.md](../references/skill_routing.md)，按设备、产物、多仓和消费者场景加载验证类技能。
@@ -17,21 +16,23 @@
 > **嵌入式/摄像头 profile**：`device_config.verification_profile` 或工单内 `embedded_baseline.json` 命中时，先用 `tools/embedded_profile.py` 校验并生成只读场景计划，再按同一个 verify 入口执行；不新增公开命令。
 > **工程接入门**：读取 [references/project_intake.md](../references/project_intake.md)，验证必须绑定实际 Git 根、活动构建配置与制品身份；静态画像不运行构建/烧录命令。
 
-> verify 是**独立构建/验证入口**：不承载源码修改语义（构建允许生成文件与日志），因此**不写 `patch_history`**（patch_history 只记录有变更的 Patch）；验证结果单独记 `verification_runs`。**验证通过不自动升级 `delivery_verdict=verified`**——delivery_verdict 是交付分层结论（`verified`/`verification_pending`/`blocked`/`not_applicable`），由 06_audit 终审结合全部验证证据（含本步骤记录）人工判定（见 [SKILL.md「可选字段」段](../SKILL.md)）。设备侧执行细节（轮询监听/三态判定/特征可见性核查/行为证据闭合）**全部复用 [08_patch.md §1.5](08_patch.md)**，本步骤只定义独立入口 + 记录契约，不复制设备流程。
+> verify 是**独立构建/验证入口**：不承载源码修改语义（构建允许生成文件与日志），因此**不写 `patch_history`**（patch_history 只记录有变更的 Patch）；验证结果单独记 `verification_runs`。**验证通过不自动升级 `delivery_verdict=verified`**——delivery_verdict 是交付分层结论（`verified`/`verification_pending`/`blocked`/`not_applicable`），由 06_audit 终审结合全部验证证据（含本步骤记录）人工判定（见 [SKILL.md「可选字段」段](../SKILL.md)）。设备侧身份核对、轮询监听、三态判定和行为证据闭合复用 [08_patch.md §1.5](08_patch.md) 的对应子段；其“编译前置”和“部署”子段**只在 verify 显式选择相应阶段时执行**，不得从 patch 的合并流程继承隐式动作。
 
 ## 定位
 
 **何时 verify**：已交付/打补丁后，需要单独再跑一轮实机验证（复测、回归、目标侧确认）而**无代码修改意图**时。改代码场景仍走 `/icode patch`；修改后需要自动监听时可用 `/icode patch --listen`，显式触发验证统一使用本步骤的 `--test`。
 
-**何时不用 verify**：要改代码 → `/icode patch`；部署类动作无 device_config → 先补配置；`--build` 不受设备配置或是否已部署限制。`--reuse` 但无既有构建产物 → 报错提示先 `--deploy`/`--listen`/`--test`。
+**何时不用 verify**：要改代码 → `/icode patch`；需要设备的阶段无 device_config → 先补配置；`--build` 不受设备配置或是否已部署限制。`--deploy` 无唯一可核验的现有产物 → 停止并说明所需产物身份，不猜测“最近文件”。
 
 ## 执行流程
 
-先解析主动作再进入分支，**build 必须在读取 device_config 前分流**。使用 `tools/verify_request.py --request '<原始 verify 参数>'` 校验选项互斥并保留 `raw_request` 和 `natural_language`；通过宿主结构化参数或正确引用传值，禁止把原始用户文本拼成 shell 命令。解析器只识别语法，**不会理解或执行自然语言中的编译命令**；语义由主代理按下节证据解析。
+先解析阶段序列再进入分支，**单独 build 必须在读取 device_config 前分流**。使用 `tools/verify_request.py --request '<原始 verify 参数>'` 校验阶段顺序、互斥性并保留 `actions`、`raw_request` 和 `natural_language`；通过宿主结构化参数或正确引用传值，禁止把原始用户文本拼成 shell 命令。解析器只识别语法，**不会理解或执行自然语言中的编译命令**；无动作选项时由主代理解释意图。意图不明时先询问；明确后仍须用解析出的实际阶段逐项执行 `action-policy --action verify --verify-action <build|deploy|listen|device_test|plan>`，不能借 `intent` 宽松预检绕过部署权限。空请求只展示用法，不执行副作用。
+
+**阶段执行合同**：`--build` 只运行下文的构建分支；`--deploy` 只读取刚完成且已核验的构建产物，或已有唯一可核验产物，部署并核对目标版本；单独 `--listen`/`--test` 只针对设备当前运行版本取证。任何副作用前先对**全部选定阶段**做权限预检；每阶段开始前再检查其依赖、revision 和工单状态，执行、留证、记录结果；失败或 `inconclusive` 时停止后续阶段。`--build --deploy --listen` 与 `--build --deploy --test <target>` 分别执行三阶段；`--deploy --listen`/`--deploy --test <target>` 分别执行两阶段。单独监听/测试不触发构建和部署，也不得把新构建产物冒充设备已部署版本。候选监听/测试命令须先静态核对调用链及依赖；带**隐式编译前置**或部署副作用的测试目标（例如 `make test` 依赖可执行文件构建）不得用于单独 `--test`，应直接调用设备上已存在的程序或测试接口。设备阶段仍须核对设备身份、现行版本和验证合同；无法识别运行版本时记 `inconclusive`，不能宣称验证了本次构建。
 
 ### `--build` 独立构建分支
 
-1. **工程与记录归属**：按工程接入合同解析实际执行根。显式 `--ticket` 或 UI 锁定工单必须唯一解析并使用其执行根，失败即停止，禁止换 latest。未指定时仅复用当前根已有的唯一活动/当前工单；不存在则写 `<工程根>/.icode_output/build/<run_id>/`，无需创建工单或设备配置。closed 工单仍冻结，不能以无工单报告绕过。`log_done` 等分析阶段也可构建，不要求先修改源码或完成 code。工单执行走现有 verify 的 `step start/check/finish`；无工单不伪造 metadata/事件。
+1. **工程与记录归属**：按工程接入合同解析实际执行根。显式 `--ticket` 或 UI 锁定工单必须唯一解析并使用其执行根，失败即停止，禁止换 latest。单独 build 未指定工单时仅复用当前根已有的唯一活动/当前工单；不存在则写 `<工程根>/.icode_output/build/<run_id>/`，无需创建工单或设备配置。组合设备阶段必须先解析到可写工单，不能把无工单 build 报告当设备验证记录。closed 工单仍冻结，不能以无工单报告绕过。`log_done` 等分析阶段也可单独构建，不要求先修改源码或完成 code。工单执行走现有 verify 的 `step start/check/finish`；无工单不伪造 metadata/事件。
 2. **读取 LIMIT（存在时必读）**：按 `references/dir_and_metadata.md` 的 `resolve_project_id` 及 F1 归一化定位 `~/.claude/icode_data/limits/<project_id>.md`，同时检查实际 checkout 的 `.icode_output/limit.local/<project_id>.md`，按 `steps/limit.md` 的有效视图规则合并。不存在则明确记 `limit_found=false` 后继续，不能因此阻断，也不能虚构红线。记录源路径、条目和摘要，提取编译入口、并发、增量/clean、环境、源码修改、制品保护及目标板约束。
 3. **理解自然语言与检索入口**：保留原始请求，提取目标/模块、全量或增量、配置/板型/工具链、并发、产物与可选打包需求。先读取用户点名入口及 LIMIT 强制入口，再读 README 的构建段、检索工程根/目标模块的编译脚本和 Makefile/CMakeLists.txt 等。复用现有静态工程画像，禁止为识别用途运行 `--help`、source 脚本或任意候选入口。记录候选路径及 file:line，阅读实际调用链，区分**编译、install、复制打包、镜像生成、部署**；仅复制已有 BIN 的 package 脚本不能证明已编译。
 4. **确定并公示具体命令**：用户明确意图决定目标和范围，LIMIT 决定硬约束；已有 wrapper 优先，脚本内容与 README 用来核验是否真的满足意图。未指定范围时优先工程已有的增量目标，不默认全量/clean。给出实际 cwd、逐条命令、来源、预期产物和副作用后，对已授权的普通构建直接执行。若目标有歧义或命令与有效红线冲突，先报告具体冲突并询问，不悄悄换目标、忽略限制或扩大到刷机；继续不依赖答案的只读核查。不猜通用脚本参数，不把自然语言当 shell。
@@ -58,6 +59,11 @@
 /icode verify --build 仅增量编译 module_a，并发6，不烧录
 /icode verify --build --ticket myproject-1 使用 LIMIT 的 wrapper，只编译 sensor_driver
 /icode verify --build 用 scripts/build.sh 编译 release 配置，先 install 再生成新包，保留旧包
+/icode verify --build --deploy --listen
+/icode verify --build --deploy --test camera_stream
+/icode verify --deploy --listen
+/icode verify --deploy --test camera_stream
+/icode verify 只查看设备当前日志，不重新部署
 ```
 
 ### `--plan` 只读分支
@@ -88,14 +94,13 @@
 
 4. 展示尚未满足单元的显式 required cell、当前原因、所需设备/制品/源码 baseline 摘要、指标和证据格式，然后结束本步骤。不得自动执行计划，不得追加 `verification_runs`，不得升级 `delivery_verdict`；legacy 工单缺验证合同则标 `legacy_untracked`。
 
-### 执行验证分支
+### 执行设备阶段（`--deploy` / `--listen` / `--test`）
 
 1. **身份解析 + 拓扑门禁**：按 `resolve-ticket --ticket <id> --workspace <工程根>`（或最新目录只读便利）确定 `ICODE_OUT_DIR`；worktree 工单先过统一拓扑门禁（§3.8），verdict=blocked 报错退出
-2. **读 device_config 与 profile**：按 [08_patch.md §1.5](08_patch.md)「读配置」计算 `project_id`（含 F1 worktree 归一）→ Read `~/.claude/icode_data/device_config/<project_id>.json` → 校验 `project_id` 一致；缺失/deploy_enabled=false → 按 §1.5 缺失诊断提示。若存在 `verification_profile={profile,baseline_manifest}`，只允许 `embedded|camera` 与 baseline 数据路径；先执行 `embedded_profile.py validate/plan`，禁止把配置扩展成任意 probe 命令。读取计划中的 `verification_contract`：metadata 未登记时用 `metadata-update --set-json` 原子登记；已登记且完全一致则复用；存在差异则展示合同差异并停止，不得静默覆盖用户验收合同。登记后重新 `validate`，再进入验证动作。
+2. **读 device_config 与 profile**：按 [08_patch.md §1.5](08_patch.md)「读配置」计算 `project_id`（含 F1 worktree 归一）→ Read `~/.claude/icode_data/device_config/<project_id>.json` → 校验 `project_id` 一致；缺失配置则诊断提示。只有声明 `--deploy` 时才要求 `deploy_enabled=true`；单独监听/测试按连接能力核查，不因禁用部署误阻断只读取证。若存在 `verification_profile={profile,baseline_manifest}`，只允许 `embedded|camera` 与 baseline 数据路径；先执行 `embedded_profile.py validate/plan`，禁止把配置扩展成任意 probe 命令。读取计划中的 `verification_contract`：metadata 未登记时用 `metadata-update --set-json` 原子登记；已登记且完全一致则复用；存在差异则展示合同差异并停止，不得静默覆盖用户验收合同。登记后重新 `validate`，再进入验证动作。
 3. **执行验证动作**：
-   - `--deploy`：部署（构建/烧录/上传）+ 版本核对（记录实际部署 commit/构建标识到 `artifact_identity`）
-   - `--listen` / `--test`：部署后按 [08_patch.md §1.5](08_patch.md) 轮询监听/三态判定（含特征可见性核查 + 证据双通道标注）；`--test` 走空转确认节奏
-   - `--reuse`：从 `verification_runs` 最近构建（或既有产物）取 `artifact_identity`，跳过构建直接部署，但本次 `kind` 仍记实际动作（deploy/listen/device_test）
+   - `--deploy`：只部署已核验产物并核对设备当前版本；单独执行时选择已有唯一产物，组合 `--build --deploy` 时使用本次构建的产物。记录真实 `artifact_identity` 和构建来源，不重复编译；若设备配置的 deploy 意图内还含编译指令，展示冲突并停止，不能隐式补编译
+   - `--listen` / `--test`：对已部署的设备按 [08_patch.md §1.5](08_patch.md) 轮询监听/三态判定（含特征可见性核查 + 证据双通道标注）；`--test` 走空转确认节奏。不运行构建或部署脚本；组合时使用前一部署阶段核验过的设备版本
 4. **三态判定**（仅监听类）：`pass`（修复生效/链路通）/ `fail`（进不了闭环但可定位）/ `inconclusive`（未触发 / 特征不可见 / 证据模糊）。**未触发 ≠ 失败**，如实记 `inconclusive` 并标注触发条件未发生
 5. **记录 verification_runs**（metadata，追加一条，schema 见 [schemas/ticket-metadata.schema.json](../schemas/ticket-metadata.schema.json)）：
    ```json
@@ -115,13 +120,13 @@
      "note": "<可选补充>"
    }
    ```
-   **vNext 工单禁止分两步直写**；用控制面原子记录 metadata+事件。公开 `--test <target>` 在这里映射到内部控制面参数 `--device <id>`，内部字段名不构成公开 `/icode` 别名：
+   **vNext 工单禁止分两步直写**；每阶段用控制面原子记录 metadata+事件。`build_source=reused` 仅用于历史记录读取，公开命令不再提供 `--reuse`；本次构建后部署记 `fresh`，已有产物部署记 `existing`。公开 `--test <target>` 的 target 是测试目标，记录在 `--scenario` 中；它不等于设备连接 ID，`--device <id>` 必须来自已核验的设备配置，不能把 target 原样填入：
 
    ```bash
    python3 tools/icode_control.py record-verification --dir {ICODE_OUT_DIR} \
      --kind <deploy|listen|device_test> --build-source <fresh|reused|existing|unknown> \
      --outcome <pass|fail|inconclusive> --evidence '<文件:行/时间窗/行为证据>' \
-     [--device <id>] [--artifact-identity <commit/build-id>] [--window <window>] \
+     [--device <id>] [--scenario <target或验证场景>] [--artifact-identity <commit/build-id>] [--window <window>] \
      [--profile <generic|embedded|camera>] \
      [--baseline-ref <sha256:与合同完全一致的64位小写十六进制摘要>] \
      [--metrics-json '{"fps":29.7}'] \
@@ -143,7 +148,8 @@
 
 - **禁止**把纯验证写成 Patch N 段 / 给 `patch_history` 塞验证记录（语义污染：patch_history 只承载代码变更）
 - **禁止** `verify` 通过就自行 `delivery_verdict=verified`（交付分层契约，见 [references/control_plane.md](../references/control_plane.md) 与 [06_audit.md](06_audit.md)）
-- **禁止** `--reuse` 跳过构建却不核对产物身份（artifact_identity 必须与最近构建一致）
+- **禁止**部署未经身份核验的旧产物或用同名文件/时间戳推定版本；无唯一候选时停下，不增加公开 `--reuse` 捷径
+- **禁止**单独 `--listen`/`--test` 隐式编译或部署；新构建版本要进入设备必须显式包含 `--deploy`
 - **禁止** 未触发判 fail（触发条件未发生 → `inconclusive`，先问用户）
 - **禁止** profile 计划工具执行设备命令；烧录、EEPROM/寄存器写、分区切换、断电或破坏性 fault injection 均需用户显式授权
 - **禁止** `--build` 读取设备连接配置、部署/烧录/上传/监听，或把仅打包成功记为编译通过

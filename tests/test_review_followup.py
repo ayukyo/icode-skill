@@ -208,9 +208,9 @@ def test_early_verify_only_build_and_plan(ticket):
     _, run = ticket
     projection = run("action-policy")
     assert "verify" in projection["allowed_actions"]
-    for action in ("build", "plan"):
+    for action in ("build", "plan", "intent", "default"):
         run("action-policy", "--action", "verify", "--verify-action", action)
-    for action in ("default", "deploy", "listen", "device_test"):
+    for action in ("deploy", "listen", "device_test"):
         run("action-policy", "--action", "verify", "--verify-action", action, success=False)
 
 

@@ -6,7 +6,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-Skill-8A2BE2.svg)](SKILL.md)
-[![Version](https://img.shields.io/badge/version-v2.30.0-blue.svg)](SKILL.md)
+[![Version](https://img.shields.io/badge/version-v2.31.0-blue.svg)](SKILL.md)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/ayukyo/icode-skill/issues)
 
 </div>
@@ -262,7 +262,7 @@ The seven local services add no public `/icode` commands; their machine-readable
 | `/icode readme` | Optional Step 7: one call, two docs — full report (for yourself) + `_brief.md` (concise, for other modules' dev/test/PM, key changed code included) |
 | `/icode patch [issue or new need]` | Follow-up modification (standalone step): keep modifying an existing ticket after/between main steps — test findings / new needs. Lightweight 4-phase (re-survey → incremental plan → minimal change → reverse re-check), context reloaded from disk artifacts (continuable across sessions), appended to `08_patch.md`; optional `--listen` auto-monitors an on-device deployment; configure `~/.claude/icode_data/device_config/<project_id>.json` (template `templates/device_config.json.template`, single-file multi-conn adb/ssh/serial) |
 | `/icode crosscheck [--ticket <id>\|<ticket path>]` | After switching Agent/model yourself, independently re-review a completed ticket. Appends project-local rounds under `.icode_output/.crosscheck/`; never writes the target ticket/code or auto-runs patch |
-| `/icode verify --build [natural language]` / `/icode verify [--deploy\|--listen\|--test\|--reuse]` / `/icode verify --plan [--ticket <id>]` | Build reads available LIMIT rules, inspects project build scripts, interprets intent, then builds and checks artifacts without device configuration or deployment. Execution records verification_runs; plan writes only a plan. No mode auto-upgrades delivery_verdict. |
+| `/icode verify [--build] [--deploy] [--listen\|--test <target>] [natural language]` / `/icode verify --plan [--ticket <id>]` | Explicit stages run in build → deploy → listen/test order; each standalone flag runs only its stage. No flags means interpret natural language before acting. Each executed stage records a verification run; plan writes only a plan. No mode auto-upgrades delivery_verdict. |
 | `/icode learn [--project <path>] [--ticket <id>] [--since <ISO-8601>]` | Project-scoped learning report from real skill-run observations; classifies reuse/composition/improvement/new-skill/tooling/no-action and never edits or publishes a Skill in this step |
 | `/icode study [--ticket <id>] [--library <dir>] [topic]` | Turn a ticket's real code changes into self-contained technical chapters with diagrams or tables; save to each user's configured knowledge library ([config template](templates/knowledge_config.json.template)), with private source records outside it; never commits or pushes |
 | `/icode doc [natural language]` | Project-level knowledge base (standalone step), auto-injected at phase zero |

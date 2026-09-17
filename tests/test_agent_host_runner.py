@@ -209,14 +209,26 @@ def test_claude_command_and_auto_selection(tmp_path):
 @pytest.mark.parametrize("note,first", [
     ("--ticket T-1 --build 增量编译", "/icode verify --build --ticket T-1"),
     ("--plan", "/icode verify --plan"),
-    ("--listen --reuse build-1", "/icode verify --listen --reuse build-1"),
+    ("--build --deploy --listen", "/icode verify --build --deploy --listen"),
+    ("--build --deploy --test smoke", "/icode verify --build --deploy --test smoke"),
+    ("--deploy --listen", "/icode verify --deploy --listen"),
+    ("--deploy --test smoke", "/icode verify --deploy --test smoke"),
+    ("--listen", "/icode verify --listen"),
     ("--test smoke", "/icode verify --test smoke"),
+    ("只检查现有日志", "/icode verify"),
 ])
 def test_verify_prompt_preserves_action_and_options(note, first):
     assert build_icode_prompt("verify", note, "T-1").splitlines()[0] == first
 
 
-@pytest.mark.parametrize("note", ["--plan --deploy", "--ticket OTHER --build", "--build --reuse old"])
+def test_verify_without_flags_requires_intent_resolution():
+    prompt = build_icode_prompt("verify", "只检查现有日志", "T-1")
+    assert "按意图判断阶段" in prompt
+    assert "不得默认部署" in prompt
+    assert "--verify-action" in prompt
+
+
+@pytest.mark.parametrize("note", ["--plan --deploy", "--ticket OTHER --build", "--build --reuse old", "--build --listen"])
 def test_verify_conflicts_fail_before_host_spawn(note):
     with pytest.raises(HostRunnerError):
         build_icode_prompt("verify", note, "T-1")
@@ -231,6 +243,17 @@ def test_verify_build_policy_receives_parsed_action(tmp_path):
         request_id="verify-build-policy", expected_revision="a"*64)
     wait_terminal(runner, job["job_id"])
     assert lifecycle.verify_action == "build"
+
+
+def test_verify_combination_policy_uses_final_action(tmp_path):
+    lifecycle = FakeLifecycle()
+    runner = HostJobRunner(executable_resolver=lambda host: "/opt/codex",
+        process_factory=ProcessFactory([FakeProcess()]), lifecycle=lifecycle)
+    job = runner.start(ticket(tmp_path), step="verify", note="--build --deploy --listen",
+        settings={"host":"codex","model":"","fallback":False},
+        request_id="verify-build-listen-policy", expected_revision="a"*64)
+    wait_terminal(runner, job["job_id"])
+    assert lifecycle.verify_action == "listen"
 
 
 def test_fallback_happens_only_before_spawn(tmp_path):

@@ -40,7 +40,8 @@ require_text steps/status.md '--dependency <module>:<commit>[:<path>]' 'premise 
 require_text steps/verify.md '/icode verify' 'verify command remains present'
 require_text steps/verify.md '/icode verify --build' 'standalone build command remains present'
 require_text steps/verify.md '--test <target>' 'device-side verification uses test'
-require_text steps/verify.md '--reuse <artifact>' 'artifact reuse uses reuse'
+require_text steps/verify.md '/icode verify --build --deploy --listen' 'build/deploy/listen pipeline is canonical'
+require_text steps/verify.md '/icode verify --deploy --test' 'deploy/test pipeline is canonical'
 require_text steps/list.md '--all' 'stale inclusion uses all'
 require_text steps/list.md '--plain' 'plain output flag is canonical'
 require_text steps/install.md '/icode install --basic' 'basic install flag is canonical'
@@ -52,6 +53,7 @@ require_text SKILL.md '/icode study' 'study command is canonical'
 reject_public '--submit-check' 'old submit-check public flag is absent'
 reject_public '--verification-pending' 'old verification-pending public flag is absent'
 reject_public '--reuse-build' 'old reuse-build public flag is absent'
+reject_public '/icode verify[^\n`]*--reuse' 'removed verify reuse public flag is absent'
 reject_public '/icode verify[^\n`]*--device' 'old verify device public form is absent'
 reject_public '--scan-verdict' 'old scan-verdict public flag is absent'
 reject_public '--to-ref' 'old to-ref public flag is absent'
@@ -66,7 +68,8 @@ reject_public '/icode patch --listen/--test|patch --listen/--test' 'combined dep
 
 require_text steps/install.md '内部 `install.sh --skip-mcp`' 'public basic maps to internal installer flag'
 require_text steps/install.md '内部 `install.sh --dry-run`' 'public preview maps to internal installer flag'
-require_text steps/verify.md '内部控制面参数 `--device <id>`' 'public test maps to internal control field'
+require_text steps/verify.md 'target 是测试目标，记录在 `--scenario` 中' 'public test target stays distinct from device identity'
+require_text steps/verify.md '隐式编译前置' 'standalone device test rejects build-coupled test targets'
 
 printf '\nRESULT: %d passed, %d failed\n' "$PASS" "$FAIL"
 [[ "$FAIL" -eq 0 ]]

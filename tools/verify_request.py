@@ -15,26 +15,38 @@ def parse_request(request):
         tokens = tokens[2:]
     elif tokens and tokens[0] == "/icode":
         raise ValueError("请求必须是 /icode verify")
-    action = None
+    selected = []
     values = {}
     intent = []
     index = 0
-    actions = {"--build": "build", "--plan": "plan", "--deploy": "deploy",
-               "--listen": "listen", "--test": "device_test"}
+    action_flags = {"--build": "build", "--plan": "plan", "--deploy": "deploy",
+                    "--listen": "listen", "--test": "device_test"}
     while index < len(tokens):
         token = tokens[index]
         if token == "--":
             intent = tokens[index + 1:]
             break
-        if token in actions:
-            if action is not None:
-                raise ValueError("--build/--plan/--deploy/--listen/--test 主动作互斥")
-            action = actions[token]
+        if token in action_flags:
+            action = action_flags[token]
+            if action in selected:
+                raise ValueError(f"{token} 不可重复")
+            if (action == "plan" and selected) or "plan" in selected:
+                raise ValueError("--plan 只能单独使用")
+            if action == "build" and selected:
+                raise ValueError("--build 必须在 --deploy/--listen/--test 前")
+            if action == "deploy" and any(x in selected for x in ("listen", "device_test")):
+                raise ValueError("--deploy 必须在 --listen/--test 前")
+            if action in {"listen", "device_test"}:
+                if any(x in selected for x in ("listen", "device_test")):
+                    raise ValueError("--listen 与 --test 只能选择一个")
+                if "build" in selected and "deploy" not in selected:
+                    raise ValueError("--build 后监听/测试新版本须显式加 --deploy")
+            selected.append(action)
             if token != "--test":
                 index += 1
                 continue
             name = "target"
-        elif token in {"--ticket", "--reuse"}:
+        elif token == "--ticket":
             name = token[2:]
             if name in values:
                 raise ValueError(f"{token} 不可重复")
@@ -50,11 +62,8 @@ def parse_request(request):
             raise ValueError(f"{token} 缺少参数")
         values[name] = tokens[index]
         index += 1
-    action = action or "default"
-    if action in {"build", "plan"} and "reuse" in values:
-        raise ValueError(f"--{action} 不可与 --reuse 组合")
-    return {"action": action, "ticket": values.get("ticket"),
-            "reuse": values.get("reuse"), "target": values.get("target"),
+    return {"action": selected[-1] if selected else "intent", "actions": selected,
+            "ticket": values.get("ticket"), "target": values.get("target"),
             "natural_language": " ".join(intent), "raw_request": request}
 
 
