@@ -23,6 +23,7 @@
     ppt: "生成演示文稿",
     limit: "维护项目约束",
     learn: "分析可复用经验",
+    study: "提炼通用技术文章",
     bak: "备份工单",
   };
   const STATUS_LABELS = {

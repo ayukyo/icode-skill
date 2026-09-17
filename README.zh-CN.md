@@ -258,6 +258,7 @@ python3 tools/lint_mcp_coverage.py <out_dir> --step review --strict
 | `/icode verify --build [自然语言]` / `/icode verify [--deploy\|--listen\|--test\|--reuse]` / `/icode verify --plan [--ticket <id>]` | build 读取存在的 LIMIT、检索工程编译入口并理解意图，只构建和核验产物，无需设备配置；执行结果记 verification_runs，plan 只写计划，均不自动升级 delivery_verdict |
 | `/icode learn [--project <path>] [--ticket <id>] [--since <ISO-8601>]` | 基于项目内真实 skill-run 观测生成学习报告，分类复用/组合/增强/新建/工具化/no-action；本步骤不直接创建或发布 Skill |
 | `/icode doc [自然语言]` | 工程级知识库生成（独立步骤）：扫描代码特征生成全局知识库章节，供段零自动检索注入 |
+| `/icode study [--ticket <id>] [--library <目录>] [主题]` | 从工单代码提炼可独立阅读的通用技术文章，按卷章写入用户自己的知识库（[配置模板](templates/knowledge_config.json.template)）；私有源码溯源留库外，不自动提交或推送 |
 | `/icode docx [自然语言]` | DOCX 交付（独立步骤）：指定 Markdown 忠实转换为同级 Word，或把已有项目/模块/本次工单真实材料组织到 `<工程根>/.icode_output/docx/`；ICODE 自管固定依赖、source map/hash manifest、结构验收与显式 renderer 视觉验收状态，不依赖系统 LibreOffice |
 | `/icode limit [自然语言]` | 项目约束红线（独立步骤）：定义和维护本工程的红线/约束/禁区。主存全局 + 单 checkout 覆盖（自动 gitignore），追加式演进。plan 步骤引用作为硬基线 |
 | `/icode ppt [自然语言]` | PPT 生成（独立交付步骤）：自然语言 → 真实 `.pptx`，4 类场景——**项目 / 模块 / 本次功能开发 / 本次BUG修复**；内容源为 icode 产物/知识库（禁止编造），内置 16 套模板（`tools/ppt/templates/`，AI 先筛 2-3 个风格匹配候选、由用户挑选；也可直接点名模板），产出 `<工程根>/.icode_output/ppt/`（不放进工单目录）可回溯；依赖 python-pptx（必需），LibreOffice+poppler 可选（PNG 预览自检）；内置模板非商业授权（见 `tools/ppt/NOTICE`） |

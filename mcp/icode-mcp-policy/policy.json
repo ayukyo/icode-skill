@@ -122,6 +122,10 @@
     "learn": [
       {"server": "icode-local-index", "condition": "仅查询已有索引，不联网补历史", "required": false, "operations": ["read"]}
     ],
+    "study": [
+      {"server": "icode-workspace", "condition": "工单实现根或多仓身份需核对", "required": false},
+      {"server": "icode-local-index", "condition": "大仓库符号检索，仅查询已有索引", "required": false, "operations": ["read"]}
+    ],
     "list": [
       {"server": "icode-local-index", "condition": "查询已有本地索引", "required": false, "operations": ["read"]}
     ]

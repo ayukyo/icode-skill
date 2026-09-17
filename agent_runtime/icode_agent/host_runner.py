@@ -39,7 +39,7 @@ def parse_verify_note(note, ticket_id=None):
 ALLOWED_STEPS = frozenset({
     "init", "start", "fast", "log", "plan", "review", "merge", "code",
     "deepcheck", "audit", "readme", "patch", "verify", "status", "doc",
-    "docx", "ppt", "limit", "learn", "bak",
+    "docx", "ppt", "limit", "learn", "study", "bak",
 })
 MAX_NOTE_CHARS = 8000
 DEFAULT_MAX_OUTPUT_BYTES = 512 * 1024

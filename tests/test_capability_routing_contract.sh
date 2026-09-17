@@ -12,6 +12,8 @@ for path in \
   tools/runtime_baseline.py \
   tools/verification_debt.py \
   tools/learn.py \
+  tools/knowledge_library.py \
+  tools/lint_knowledge_article.py \
   tools/docx/bootstrap_runtime.py \
   tools/docx/build_docx.py \
   tools/docx/inspect_docx.py \
@@ -20,12 +22,14 @@ for path in \
   tools/docx/requirements.lock \
   tools/docx/renderer_manifest.json \
   steps/docx.md \
-  steps/learn.md; do
+  steps/learn.md \
+  steps/study.md; do
   test -f "$ROOT/$path" || { printf 'missing bundled capability: %s\n' "$path" >&2; exit 1; }
 done
 
 rg -q '/icode learn' "$ROOT/SKILL.md"
 rg -q '/icode docx' "$ROOT/SKILL.md"
+rg -q '/icode study' "$ROOT/SKILL.md"
 rg -q 'steps/learn\.md' "$ROOT/SKILL.md"
 python3 - "$ROOT/mcp/reasoning-gate/gates.json" <<'PY'
 import json
@@ -35,6 +39,9 @@ gates = json.load(open(sys.argv[1], encoding="utf-8"))
 learn = gates["steps"]["learn"]
 assert learn["default_tier"] == "L0"
 assert learn["requires_trace"] is False
+study = gates["steps"]["study"]
+assert study["default_tier"] == "L1"
+assert study["requires_trace"] is False
 PY
 rg -q 'install/bak/learn' "$ROOT/references/thinking_core.md"
 rg -q 'learn.*L0' "$ROOT/references/mcp_per_step.md"
@@ -63,10 +70,12 @@ assert policy["default"] == "deny"
 assert any(route["server"] == "icode-mcp-health" for route in policy["steps"]["install"])
 assert any(route["server"] == "icode-workspace" for route in policy["steps"]["worktree"])
 assert {route["server"] for route in policy["steps"]["docx"]} == {"icode-evidence", "icode-local-index"}
+assert {route["server"] for route in policy["steps"]["study"]} == {"icode-workspace", "icode-local-index"}
 PY
 
 for readme in README.md README.zh-CN.md; do
   rg -q '/icode learn' "$ROOT/$readme"
+  rg -q '/icode study' "$ROOT/$readme"
   rg -q '/icode status \[--pending\]' "$ROOT/$readme"
   rg -q 'handoff' "$ROOT/$readme"
   rg -q 'bundled|内置|随 ICODE' "$ROOT/$readme"
@@ -92,6 +101,8 @@ python3 -m py_compile \
   "$ROOT/tools/runtime_baseline.py" \
   "$ROOT/tools/verification_debt.py" \
   "$ROOT/tools/learn.py" \
+  "$ROOT/tools/knowledge_library.py" \
+  "$ROOT/tools/lint_knowledge_article.py" \
   "$ROOT/tools/docx/bootstrap_runtime.py" \
   "$ROOT/tools/docx/build_docx.py" \
   "$ROOT/tools/docx/inspect_docx.py" \

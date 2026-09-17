@@ -1,6 +1,6 @@
 ---
 name: icode
-description: ICODE 端到端编码工作流。用法 /icode <子命令> [参数]，支持 help、init、log、start、fast、plan、review、merge、code、deepcheck、audit、crosscheck、readme、patch、verify、doc、docx、ppt、ui、limit、learn、status、list、bak、worktree。
+description: ICODE 端到端编码工作流。用法 /icode <子命令> [参数]，支持 help、init、log、start、fast、plan、review、merge、code、deepcheck、audit、crosscheck、readme、patch、verify、doc、docx、ppt、ui、limit、learn、study、status、list、bak、worktree。
 ---
 
 按 ICODE 端到端编码工作流处理本次请求。

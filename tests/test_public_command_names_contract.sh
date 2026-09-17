@@ -47,6 +47,7 @@ require_text steps/install.md '/icode install --basic' 'basic install flag is ca
 require_text steps/install.md '/icode install --preview' 'install preview flag is canonical'
 require_text SKILL.md '/icode init [--guide]' 'init guide flag is canonical'
 require_text SKILL.md '/icode crosscheck' 'crosscheck command is canonical'
+require_text SKILL.md '/icode study' 'study command is canonical'
 
 reject_public '--submit-check' 'old submit-check public flag is absent'
 reject_public '--verification-pending' 'old verification-pending public flag is absent'

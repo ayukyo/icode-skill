@@ -1,6 +1,6 @@
 ---
 name: icode
-description: 端到端编码工作流（步骤 0~6，含需求初稿、日志根因、验证、独立复评、学习与本地管理 UI），支持：/icode help, ui, install [--basic|--preview], init [--guide], log, start, fast, plan, review, merge, code, deepcheck, audit, crosscheck, patch, verify [--build|--plan|--deploy|--listen|--test|--reuse], doc, docx, limit, readme, ppt, learn [--project|--ticket|--since], status [--pending|--scan|--verdict], list [--all|--plain], bak, worktree --update/--close/--reopen/--merge。新建工单入口支持 --worktree opt-in
+description: 端到端编码工作流（步骤 0~6，含需求初稿、日志根因、验证、独立复评、学习与本地管理 UI），支持：/icode help, ui, install [--basic|--preview], init [--guide], log, start, fast, plan, review, merge, code, deepcheck, audit, crosscheck, patch, verify [--build|--plan|--deploy|--listen|--test|--reuse], doc, docx, limit, readme, ppt, learn [--project|--ticket|--since], study [--ticket|--library], status [--pending|--scan|--verdict], list [--all|--plain], bak, worktree --update/--close/--reopen/--merge。新建工单入口支持 --worktree opt-in
 ---
 
 **版本**: v2.30.0
@@ -12,9 +12,9 @@ description: 端到端编码工作流（步骤 0~6，含需求初稿、日志根
 - **步骤 0（可选）**：需求初稿对话，落档为 `00_init.md`；`init --guide` 派生新人指南
 - **步骤 1~6**：拟定计划 → 审查 → 定稿 → 编码 → 复检 → 终审
 
-> **主流程步骤真源（防误用，唯一真源 = `steps/` 目录，启动强制 Read）**：步骤编号 / 产物文件名 / `completed_steps` 合法值**一律以 `steps/*.md` 实时清单为准**（`ls steps/*.md` 完整列出，含主流程与辅助入口 log / doc / docx / limit / status / install / list / bak / verify / learn / crosscheck，及精简全流程入口 fast）——**本块仅示意，steps/ 演进后以目录为准，勿依赖写死**。`/icode start` / `/icode fast` / `/icode plan` 进入第一步**先 `ls steps/*.md`** 核对，不按"编码→测试→部署"直觉推断
+> **主流程步骤真源（防误用，唯一真源 = `steps/` 目录，启动强制 Read）**：步骤编号 / 产物文件名 / `completed_steps` 合法值**一律以 `steps/*.md` 实时清单为准**（`ls steps/*.md` 完整列出，含主流程与辅助入口 log / doc / docx / limit / status / install / list / bak / verify / learn / study / crosscheck，及精简全流程入口 fast）——**本块仅示意，steps/ 演进后以目录为准，勿依赖写死**。`/icode start` / `/icode fast` / `/icode plan` 进入第一步**先 `ls steps/*.md`** 核对，不按"编码→测试→部署"直觉推断
 > - 当前主流程示意（以 `ls steps/*.md` 为准）：`00_init → 01_plan → 02_review → 03_merge → 04_code → 05_deepcheck → 06_audit → 07_readme → 08_patch`；**不存在 `03_code` / `04_test` / `05_deploy`**（测试验证在 04_code 子段，部署/回归归 07_readme / 08_patch / verify）
-> - 辅助独立步骤（doc / docx / log / limit / status / install / list / bak / verify / learn / crosscheck）不参与 1~6 推进；**fast 为精简全流程（非辅助独立步骤）**——参与 1~6 但各步缩略（见命令表 fast 行）
+> - 辅助独立步骤（doc / docx / log / limit / status / install / list / bak / verify / learn / study / crosscheck）不参与 1~6 推进；**fast 为精简全流程（非辅助独立步骤）**——参与 1~6 但各步缩略（见命令表 fast 行）
 > - **强制**：产物命名 + `completed_steps` 写号**对照 `ls steps/*.md` 实时结果**（如入口含 `log` → 可写 `"log"`），不在清单 → 停下核对，禁止自造产物占位；steps/ 目录与本文档不一致时**以 steps/ 目录为准**
 
 ## 通用约定（对话语言）
@@ -47,6 +47,7 @@ description: 端到端编码工作流（步骤 0~6，含需求初稿、日志根
 | `[独立复评]` `/icode crosscheck [--ticket <id>\|<工单路径>]` | 用户自行换 Agent/模型后完整复评 completed 工单；项目内隔离、多轮追加、原工单与代码零回写 | 否（写 `.icode_output/.crosscheck/`） |
 | `[独立]` `/icode verify --build [自然语言]` / `/icode verify [--deploy\|--listen\|--test <target>] [--reuse <artifact>]` / `/icode verify --plan [--ticket <id>]` | **独立构建/实机验证/只读计划**：build 读 LIMIT、静态检索入口并理解意图，只构建和核验产物；执行结果记 `verification_runs`，不自动升级 delivery_verdict（[steps/verify.md](steps/verify.md)） | 否（无工单build只写工程构建报告；plan只写派生报告） |
 | `[学习]` `/icode learn [--project <path>] [--ticket <id>] [--since <ISO-8601>]` | 从项目内观测生成复用/组合/增强/新建/工具化/no-action 建议，不直接创建或发布 Skill（[steps/learn.md](steps/learn.md)） | 否（写 `.icode_output/learn/` 派生报告） |
+| `[学习]` `/icode study [--ticket <id>] [--library <目录>] [主题]` | 从已写代码提炼通用技术文章，按卷/章保存在用户自己的知识库；源码溯源留在库外（[steps/study.md](steps/study.md)） | 否（写用户配置的知识库） |
 | `[工程]` `/icode doc [自然语言]` | 工程级知识库生成/维护（`project_docs/`+`module_docs/`）；doc_worklist 防中断丢进度 | 否（写全局） |
 | `[交付]` `/icode docx [自然语言]` | DOCX 交付：明确 Markdown 忠实转换，或将已有工单/知识库组织为交付 Word；自管运行时、结构验收、兼容 renderer 视觉验收 | 否（P0 同级；P1 写 `<工程根>/.icode_output/docx/`） |
 | `[配置]` `/icode limit [自然语言]` | 项目约束红线（主存+单 checkout 覆盖）；plan/log 前置硬基线 + `limit_checkpoint.md` 读留痕 | 否（写全局 limits/ + 工程根 limit.local/） |
@@ -88,6 +89,7 @@ description: 端到端编码工作流（步骤 0~6，含需求初稿、日志根
 /icode crosscheck --ticket <id>                  # 换 Agent/模型后的只读多轮复评
 /icode status --pending                          # 跨工单验证债务
 /icode learn --project .                          # 项目内使用观测的只读学习报告
+/icode study --ticket <id> 状态恢复               # 从本次代码提炼通用技术文章
 /icode ui                                         # 打开本地全局工单工作台
 ```
 
@@ -175,7 +177,7 @@ python3 -c "import json,sys; d=json.load(open('{ICODE_OUT_DIR}/.ico_metadata.jso
 
 | 主题 | 真源 | 核心要点 |
 |------|------|---------|
-| 强制思考前置（分级 reasoning gate） | [references/thinking_core.md](references/thinking_core.md)（每步必读）+ [references/thinking_detail.md](references/thinking_detail.md)（按需读） | 每步开始前先按 **reasoning gate 分级 L0～L3**：L0（help/status/list/install/bak/learn）只执行机器门禁；L1（readme/ppt/close/reopen/worktree/init/doc/limit/merge）写 `.decision_anchors.json` 决策记录；**L2/L3（plan/review/code/patch/log/deepcheck/audit）才首选 `sequential-thinking` MCP 3～5 步**，MCP 不可用降级 `### 结构化思考` 文字块；思考子项见各 step 文件。分级判定机器真源 = `mcp/reasoning-gate/gates.json`，运行痕迹 = `{ICODE_OUT_DIR}/.thinking_gate_trace.jsonl`，校验器 = `python3 tools/lint_thinking_gate.py` |
+| 强制思考前置（分级 reasoning gate） | [references/thinking_core.md](references/thinking_core.md)（每步必读）+ [references/thinking_detail.md](references/thinking_detail.md)（按需读） | 每步开始前先按 **reasoning gate 分级 L0～L3**：L0（help/status/list/install/bak/learn）只执行机器门禁；L1（readme/ppt/study/close/reopen/worktree/init/doc/limit/merge）写决策记录（study 写库外私有来源，其余按步骤合同写 `.decision_anchors.json`）；**L2/L3（plan/review/code/patch/log/deepcheck/audit）才首选 `sequential-thinking` MCP 3～5 步**，MCP 不可用降级 `### 结构化思考` 文字块；思考子项见各 step 文件。分级判定机器真源 = `mcp/reasoning-gate/gates.json`，工单运行痕迹 = `{ICODE_OUT_DIR}/.thinking_gate_trace.jsonl`（study 无工单 trace），校验器 = `python3 tools/lint_thinking_gate.py` |
 | 反偷懒约束 | [references/anti_laziness.md](references/anti_laziness.md) | 39 条典型偷懒行为 + 正面合规要求；引用 references 必须每步重新 Read 输出 `📖 已 Read` 确认行；思考块每子项 ≥2 句实质内容 |
 
 ### 根因优先决策准则（修复缺陷逻辑本身，优先于规避/绕过/补丁/开关）
@@ -293,6 +295,7 @@ test -f "{ICODE_OUT_DIR}/03_plan_final.md" && python3 -c "import json,sys; d=jso
 | crosscheck | `crosscheck` | [steps/crosscheck.md](steps/crosscheck.md)（completed 工单外部只读复评；多轮追加，不写原工单/代码） |
 | verify | `verify` | [steps/verify.md](steps/verify.md)（独立构建/实机验证，不改源码；结果记 `verification_runs`，不自动升级 delivery_verdict） |
 | learn | `learn` | [steps/learn.md](steps/learn.md)（独立学习报告；不直接创建、安装或同步 Skill） |
+| study | `study` | [steps/study.md](steps/study.md)（独立通用技术文章；用户知识库按卷章管理，私有来源留库外） |
 | doc | `doc` | [steps/doc.md](steps/doc.md) |
 | docx | `docx` | [steps/docx.md](steps/docx.md)（独立交付步骤：P0 Markdown 忠实转换；P1 项目/模块/本次功能/本次BUG → .docx） |
 | limit | `limit` | [steps/limit.md](steps/limit.md)（独立步骤，不参与 1~6 流程推进；plan 步骤硬基线引用源） |

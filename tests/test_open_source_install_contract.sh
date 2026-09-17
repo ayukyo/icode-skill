@@ -60,6 +60,8 @@ BUNDLED_CAPABILITIES=(
   tools/runtime_baseline.py
   tools/verification_debt.py
   tools/learn.py
+  tools/knowledge_library.py
+  tools/lint_knowledge_article.py
   tools/docx/bootstrap_runtime.py
   tools/docx/build_docx.py
   tools/docx/inspect_docx.py
@@ -68,7 +70,9 @@ BUNDLED_CAPABILITIES=(
   tools/docx/requirements.lock
   tools/docx/renderer_manifest.json
   templates/media_policy.json.template
+  templates/knowledge_config.json.template
   steps/learn.md
+  steps/study.md
   steps/docx.md
 )
 BUNDLED_OK="$ALL_INSTALLED"

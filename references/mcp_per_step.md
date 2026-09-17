@@ -69,7 +69,7 @@
 > **强制思考不再以「每步必调 sequential-thinking ≥3 次」承载**，改为 **reasoning gate 分级（L0～L3）** 选择思考载体：
 >
 > - **L0 确定性执行**（status/list/help/install/bak/learn）：不调用 sequential-thinking，只执行机器门禁（`mechanism=deterministic_checks`）。
-> - **L1 简短决策**（readme/ppt/docx/close/reopen/worktree/init/doc/limit/merge）：写 `.decision_anchors.json` 决策摘要（`mechanism=decision_record`），不调用 sequential-thinking。
+> - **L1 简短决策**（readme/ppt/docx/study/close/reopen/worktree/init/doc/limit/merge）：写决策摘要（study 写库外私有溯源；工单步骤写 `.decision_anchors.json`），不调用 sequential-thinking。
 > - **L2 复杂推理**（plan/review/code/patch/log/deepcheck/audit）：**必须调用** sequential-thinking 3～5 步（`mechanism=sequential-thinking`），不可用时结构化降级。
 > - **L3 高风险对抗**（任意步骤命中升级触发器）：L2 + 独立对抗验证（`mechanism=sequential-thinking+adversarial`）。
 >
@@ -82,6 +82,7 @@
 > | help / status / list | L0 | 纯查询和格式化，依赖 schema/索引校验 |
 > | install / bak | L0 | 依赖检测、路径校验、原子写和回读 |
 > | learn | L0 | 项目内只读观测分类；不在本步骤执行 Skill 晋升或发布 |
+> | study | L1 | 选题、卷章复用与公开边界；摘要保存在库外私有溯源 |
 > | readme / ppt / docx | L1 | 交付内容取舍，通常不涉及新根因裁决 |
 > | close / reopen / worktree | L1 | submission guard + 不可逆操作确认；多仓歧义升级 |
 > | init / doc / limit | L1 | 汇总需求和规则；范围冲突或多方案时升级 |
@@ -105,6 +106,7 @@
 | **doc** | ⚪ | 🟢* | ⚪ | ⚪ | 🟢* |
 | **docx** | ⚪ | ⚪ | ⚪ | ⚪ | ⚪ |
 | **learn** | ⚪ | ⚪ | ⚪ | ⚪ | ⚪ |
+| **study** | ⚪ | ⚪ | ⚪ | ⚪ | ⚪ |
 | **1 plan** | 🟢* | 🟢* | ⚪ | 🟢* | ⚪ |
 | **2 review** | ⚪ | 🟢* | ⚪ | ⚪ | 🟢* |
 | **3 merge** | ⚪ | ⚪ | ⚪ | ⚪ | 🟢* |

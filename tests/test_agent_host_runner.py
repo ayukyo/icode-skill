@@ -122,11 +122,12 @@ def wait_terminal(runner: HostJobRunner, job_id: str):
 
 
 def test_prompt_and_step_are_strictly_bounded():
-    assert {"plan", "code", "verify", "ppt", "status"}.issubset(ALLOWED_STEPS)
+    assert {"plan", "code", "verify", "ppt", "status", "study"}.issubset(ALLOWED_STEPS)
     assert build_icode_prompt("plan", "only inspect inputs") == (
         "/icode plan\n\n用户补充说明：\nonly inspect inputs"
     )
     assert build_icode_prompt("status", "") == "/icode status"
+    assert build_icode_prompt("study", "") == "/icode study"
     pinned = build_icode_prompt("plan", "", "T-1")
     assert 'ticket_id = "T-1"' in pinned
     assert "禁止改用 latest" in pinned
