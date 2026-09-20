@@ -140,6 +140,24 @@ class PublicDesignTests(unittest.TestCase):
                         with self.assertRaises(ValueError):
                             self.builder.content_checked(invalid)
 
+    def test_rendered_verify_commands_match_the_real_parser(self):
+        spec = importlib.util.spec_from_file_location('site_verify_parser', ROOT / 'tools/verify_request.py')
+        parser = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(parser)
+        for page in self.pages():
+            commands = {line.strip() for code in page.find('code') for line in code.text().splitlines()
+                        if line.strip().startswith('/icode verify ')}
+            self.assertGreaterEqual(len(commands), 3)
+            for command in commands:
+                with self.subTest(command=command):
+                    try:
+                        parsed = parser.parse_request(command)
+                    except ValueError as exc:
+                        self.fail(f'public example rejected: {command}: {exc}')
+                    self.assertTrue(parsed['actions'])
+                    if 'device_test' in parsed['actions']:
+                        self.assertTrue(parsed['target'])
+
     def test_new_nested_text_is_escaped_and_bad_input_creates_no_output(self):
         self.assertIn('stages', self.data['locales']['en'])
         root = self.work / 'source'

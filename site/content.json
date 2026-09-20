@@ -1,7 +1,7 @@
 {
   "locales": {
     "zh-CN": {
-      "title": "以工单串联审查与验证的 AI 编码工作流。",
+      "title": "有据可查的 AI 编码工作流。",
       "description": "ICODE 为 Claude Code、Codex 与 CodeBuddy 提供工单驱动的 AI 编码工作流：分步设计、自行换模型后的代码审查、证据化验证与断点续接。",
       "eyebrow": "Claude Code · Codex · CodeBuddy 开源工作流",
       "intro": "把需求、设计决策、代码变更与验证证据保存在同一条工单流程中。从计划到交付逐步推进，中断后核对状态再续接，也可通过本地 UI 管理工单。",
@@ -110,8 +110,8 @@
           "title": "04 / 构建与设备验证",
           "body": "按需选择动作，让验证记录对应实际执行。",
           "command": "/icode verify --listen",
-          "more": "/icode verify --build\n/icode verify --build --listen\n/icode verify --deploy --test",
-          "note": "--listen 或 --test 单独使用时检查设备现有版本，不隐式编译或部署；部署必须明确选择。"
+          "more": "/icode verify --build\n/icode verify --build --deploy --listen\n/icode verify --deploy --test <target>",
+          "note": "--listen 或 --test 单独使用时检查设备现有版本，不隐式编译或部署；部署必须明确选择。<target> 需替换为项目的测试目标。"
         },
         {
           "id": "docs",
@@ -186,7 +186,7 @@
       "privacy": "静态官网，无登录、无追踪。不会读取或上传你的 ICODE 工单。"
     },
     "en": {
-      "title": "An AI coding workflow for ticket-based development.",
+      "title": "An AI coding workflow, from plan to proof.",
       "description": "ICODE brings a ticket-based AI coding workflow to Claude Code, Codex and CodeBuddy: staged design, code review after switching models yourself, evidence-based verification and resumable work.",
       "eyebrow": "Open workflow for Claude Code · Codex · CodeBuddy",
       "intro": "Keep requirements, design decisions, code changes and verification evidence in one ticket workflow. Move from planning to delivery, check state before resuming interrupted work, and manage tickets through a local UI.",
@@ -295,8 +295,8 @@
           "title": "04 / Build & device checks",
           "body": "Choose the actions you need and keep records tied to actual execution.",
           "command": "/icode verify --listen",
-          "more": "/icode verify --build\n/icode verify --build --listen\n/icode verify --deploy --test",
-          "note": "Using --listen or --test alone checks the installed version. It does not implicitly build or deploy; deployment must be selected explicitly."
+          "more": "/icode verify --build\n/icode verify --build --deploy --listen\n/icode verify --deploy --test <target>",
+          "note": "Using --listen or --test alone checks the installed version. It does not implicitly build or deploy; deployment must be selected explicitly. Replace <target> with your project's test target."
         },
         {
           "id": "docs",

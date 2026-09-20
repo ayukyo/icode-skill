@@ -324,6 +324,12 @@ nav a {
   font-size: 0.875rem;
 }
 
+.card,
+.stage,
+.terminal {
+  box-shadow: 0 2px 8px #18223008;
+}
+
 .pending {
   border-top: 3px solid var(--pending);
 }
