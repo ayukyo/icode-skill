@@ -1,0 +1,4 @@
+interface:
+  display_name: "ICODE 编码工作流"
+  short_description: "ICODE 工单式 AI 编码：方案审查、证据验证与中断续接"
+  default_prompt: "使用 $icode 处理当前开发任务，先确认目标、工单与限制，再按既有步骤执行。"
