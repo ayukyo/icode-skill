@@ -5,7 +5,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SYNC="$ROOT/scripts/sync-to-global.sh"
 INSTALL="$ROOT/install.sh"
 COMMAND_SOURCE="$ROOT/integrations/codebuddy/commands/icode.md"
-LEGACY_COMMAND="$ROOT/integrations/codebuddy/commands/legacy/icode-v0.md"
+LEGACY_COMMANDS_DIR="$ROOT/integrations/codebuddy/commands/legacy"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
@@ -139,20 +139,39 @@ else
   bad "identical unmanaged CodeBuddy command is safely adopted"
 fi
 
-LEGACY_HOME="$TMP/legacy-home"
-LEGACY_CLAUDE="$TMP/legacy-claude"
-LEGACY_AGENTS="$TMP/legacy-agents"
-LEGACY_COMMANDS="$TMP/legacy-commands"
-mkdir -p "$LEGACY_COMMANDS"
-cp "$LEGACY_COMMAND" "$LEGACY_COMMANDS/icode.md"
-if run_sync "$LEGACY_HOME" "$LEGACY_CLAUDE" "$LEGACY_AGENTS" "$LEGACY_COMMANDS" \
-     --apply --client codebuddy >/dev/null 2>&1 \
-  && cmp -s "$COMMAND_SOURCE" "$LEGACY_COMMANDS/icode.md" \
-  && [[ -f "$LEGACY_COMMANDS/icode.md.icode-install-owner.json" ]]; then
-  ok "exact versioned legacy CodeBuddy bridge migrates safely"
-else
-  bad "exact versioned legacy CodeBuddy bridge migrates safely"
-fi
+# Each published predecessor must upgrade, but a user-edited predecessor must not.
+for LEGACY_COMMAND in "$LEGACY_COMMANDS_DIR"/*.md; do
+  LEGACY_VERSION="$(basename "$LEGACY_COMMAND" .md)"
+  LEGACY_HOME="$TMP/$LEGACY_VERSION-home"
+  LEGACY_CLAUDE="$TMP/$LEGACY_VERSION-claude"
+  LEGACY_AGENTS="$TMP/$LEGACY_VERSION-agents"
+  LEGACY_COMMANDS="$TMP/$LEGACY_VERSION-commands"
+  mkdir -p "$LEGACY_COMMANDS"
+  cp "$LEGACY_COMMAND" "$LEGACY_COMMANDS/icode.md"
+  if run_sync "$LEGACY_HOME" "$LEGACY_CLAUDE" "$LEGACY_AGENTS" "$LEGACY_COMMANDS" \
+       --apply --client codebuddy >/dev/null 2>&1 \
+    && cmp -s "$COMMAND_SOURCE" "$LEGACY_COMMANDS/icode.md" \
+    && [[ -f "$LEGACY_COMMANDS/icode.md.icode-install-owner.json" ]]; then
+    ok "exact $LEGACY_VERSION CodeBuddy bridge migrates safely"
+  else
+    bad "exact $LEGACY_VERSION CodeBuddy bridge migrates safely"
+  fi
+
+  CUSTOM_COMMANDS="$TMP/$LEGACY_VERSION-custom-commands"
+  mkdir -p "$CUSTOM_COMMANDS"
+  cp "$LEGACY_COMMAND" "$CUSTOM_COMMANDS/icode.md"
+  printf '\nUser customization must survive.\n' >>"$CUSTOM_COMMANDS/icode.md"
+  CUSTOM_HASH="$(sha256sum "$CUSTOM_COMMANDS/icode.md")"
+  if run_sync "$TMP/custom-home" "$TMP/custom-claude" "$TMP/custom-agents" "$CUSTOM_COMMANDS" \
+       --apply --client all >/dev/null 2>&1; then
+    bad "customized $LEGACY_VERSION bridge must not be adopted"
+  elif [[ "$CUSTOM_HASH" == "$(sha256sum "$CUSTOM_COMMANDS/icode.md")" ]] \
+    && [[ ! -e "$TMP/custom-claude" && ! -e "$TMP/custom-agents" ]]; then
+    ok "customized $LEGACY_VERSION bridge preserved with no skill writes"
+  else
+    bad "customized $LEGACY_VERSION rejection must preserve all targets"
+  fi
+done
 
 INSTALL_HOME="$TMP/install-home"
 INSTALL_CLAUDE="$TMP/install-claude"

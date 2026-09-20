@@ -11,6 +11,14 @@
 | 邮件/线程/附件 | 显式网页邮件链接优先已登录浏览器；导出件走离线 intake；无人值守才用邮箱观察器 | 显式网页邮件链接优先当前已登录浏览器；导出件走离线 intake；无人值守才用邮箱观察器 | 同左（导出件走 `tools/email_intake.py` 离线 intake） | 请求限定范围的 `.eml`/`.msg` 导出；保持线程和附件缺口 |
 | 文件修改 | 宿主提供的精确编辑工具 | `apply_patch` | `write_to_file` / `replace_in_file` | 停止修改，不用不安全覆盖命令替代 |
 
+## 自然语言入口适配
+
+三个宿主共用 `SKILL.md` 的发现描述和 [natural_language_entry.md](natural_language_entry.md) 的意图路由。用户点名 ICODE 后由当前主会话模型理解目标、限制和工单上下文；不要求 Hook、新增 MCP 或额外模型 API。已有命令仍有效，CodeBuddy 的自定义命令桥同时接受 `/icode <自然语言>`，不另设一份路由规则。
+
+技能文件已安装不等于当前旧会话已经重新加载。宿主未自动选中技能时，让用户显式选择 ICODE 技能或走已有 `/icode` 入口；升级后需按宿主机制重新加载或新开会话。不能把源文件/安装副本一致、路由情境自检通过，表述为三个宿主的新会话自动触发均已实测。
+
+此入口不扩展 Runtime/UI 的受控动作集合。UI 仍先选工单与动作，自由文本只补充该动作；若意图与已选动作/工单冲突，先纠正选择，不能从 note 绕过 action-policy、revision 或执行根检查。
+
 ## CodeBuddy 专项约定
 
 1. **命令入口**：CodeBuddy 不把 Skill 自动注册为斜杠命令。`/icode <子命令>` 依赖**自定义斜杠指令**。仓库真源为 `integrations/codebuddy/commands/icode.md`；`scripts/sync-to-global.sh --apply --client codebuddy` 将其原子发布为用户级 `~/.codebuddy/commands/icode.md`。同内容旧文件可通过所有权标记接管，不同内容的未托管命令必须失败关闭；项目级 `<工程>/.codebuddy/commands/icode.md` 仍由项目自行管理。

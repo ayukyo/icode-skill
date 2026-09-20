@@ -159,6 +159,17 @@ python3 tools/lint_mcp_coverage.py <out_dir> --step review --strict
 
 ## 快速开始
 
+不必背命令，可以直接点名 ICODE，说清想做什么和不要做什么：
+
+```text
+使用 ICODE 给这个模块增加重试，先出方案，不改代码。
+用 ICODE 测一下设备上的现有版本，不编译、不部署。
+让 ICODE 把当前工单做成 PPT，给测试同事看。
+/icode 帮我查看当前工单还有哪些验证没完成
+```
+
+当前宿主 Agent 会映射到原有步骤，保留工单绑定、停止点和全部安全门禁；不需要额外模型服务。完整的[全能力自然语言示例](references/natural_language_entry.md)涵盖开发、诊断、验证、文档、学习、查询与生命周期，`/icode help` 也可查看。自动触发取决于宿主是否加载已安装技能；未触发时显式选择 ICODE 技能或使用 `/icode`。原命令用法不变：
+
 ```bash
 # 一步走完全流程
 /icode start 实现一个功能模块
@@ -241,7 +252,7 @@ python3 tools/lint_mcp_coverage.py <out_dir> --step review --strict
 
 | 命令 | 功能 |
 | ---- | ---- |
-| `/icode help` | 帮助：输出使用流程示例 |
+| `/icode help` | 帮助：命令一览、全能力自然语言示例与组合/续接用法 |
 | `/icode log [零散信息...]` | 可选入口：确定性证据清单 + debug 本地复用 + 逐仓现场基线 → 日志根因分析 → 修复需求 `00_init.md` |
 | `/icode init [--guide] [<粗略需求或指南约束>]` | 常规：新建步骤 0 工单并多轮形成初稿；`--guide`：复用最新合格 init，刷新 `deliverables/guide.md` 与内部证据审计，不新建工单 |
 | `/icode start <需求>` | 全流程：创建/复用目录 → 步骤 1→6 |

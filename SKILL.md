@@ -1,9 +1,9 @@
 ---
 name: icode
-description: 端到端编码工作流（步骤 0~6，含需求初稿、日志根因、验证、独立复评、学习与本地管理 UI），支持：/icode help, ui, install [--basic|--preview], init [--guide], log, start, fast, plan, review, merge, code, deepcheck, audit, crosscheck, patch, verify [--build] [--deploy] [--listen|--test] [--plan], doc, docx, limit, readme, ppt, learn [--project|--ticket|--since], study [--ticket|--library], status [--pending|--scan|--verdict], list [--all|--plain], bak, worktree --update/--close/--reopen/--merge。新建工单入口支持 --worktree opt-in
+description: ICODE 端到端编码工作流。用户调用 /icode，或说“使用 ICODE”“用 icode 帮我”“让 ICODE”完成开发、日志分析、设计审查、验证、独立复评、文档/Word/PPT、学习、工单管理等任务时使用；也用于已绑定 ICODE 工单的续接。支持自然语言目标与限制，不要求背命令；能力咨询只解释不执行。保留全部 /icode 子命令，复用既有步骤与安全门禁，不接管未指定 ICODE 的普通请求。
 ---
 
-**版本**: v2.31.0
+**版本**: v2.32.0
 
 # ICode 全流程编码工作流（步骤 0 + 1~6）
 
@@ -23,13 +23,21 @@ description: 端到端编码工作流（步骤 0~6，含需求初稿、日志根
 
 > 适用所有 `/icode` 命令的会话交互与步骤内对用户的询问/报告；产物文件正文遵循既有中文风格撰写。
 
+## 自然语言入口
+
+用户可直接说“使用 ICODE 给这个模块增加重试，先出方案，不改代码”或“用 ICODE 测设备现有版本，不编译、不部署”。由**当前宿主 Agent**理解意图，不新增模型调用或 Runtime 依赖；`/icode <自然语言>` 与原有 `/icode <子命令>` 并存。
+
+**自然语言请求、命令混合描述或上下文续接时，先读 [references/natural_language_entry.md](references/natural_language_entry.md)**：区分咨询与执行 → 解析目标/工程工单/限制/停止点 → 回显简短路由 → 读取原步骤文件并执行原门禁。用户显式工单/路径优先于已绑定工单，均不得被“最新目录”覆盖；歧义先只读定位，仍不唯一才问。否定条件不得丢失，不因一句“继续”扩大已授权范围。
+
+裸 `/icode`、`/icode help` 和能力咨询只展示帮助，不建工单；帮助覆盖下表全部能力与上述参考文档的分类示例，用户要完整示例时展开，不能只给 start/plan/code。示例中的请求不是执行授权。普通未点名 ICODE 的新任务不强制接管。
+
 ## 调用命令
 
 正式工单产物保存在 `.icode_output/.icode_output_N/`（N 自动递增）；非工单命令按各自行指定隔离目录。**详细语义一律以 `steps/*.md` 为准，下表只给路由与关键 flag**：
 
 | 命令 | 一句话用途 + 关键 flag | 创建目录？ |
 |------|------|-----------|
-| `[辅助]` `/icode help` | 输出使用流程示例与命令一览 | 否 |
+| `[辅助]` `/icode help` | 输出命令一览、自然语言分类示例与组合/续接用法（[入口与示例](references/natural_language_entry.md)） | 否 |
 | `[管理]` `/icode ui` | 启动/复用本地 ICODE 工作台；全局项目/工单管理、手动/默认30秒自动刷新、设置和受控步骤执行 | 否 |
 | `[辅助]` `/icode install [--client claude\|codex\|codebuddy\|all] [--basic\|--preview]` | ICODE、宿主命令桥与 MCP 一键安装；`--basic` 跳过 MCP，`--preview` 零写入预览 | 否 |
 | `[入口]` `/icode log [零散信息...]` | 日志根因分析→转修复需求；版本基线门；TB 复用/批量/`--debug`/`--worktree`；对外简报 | ✅ 每次都新建（同 TB 单复用除外） |
@@ -72,13 +80,13 @@ description: 端到端编码工作流（步骤 0~6，含需求初稿、日志根
 
 **新工单一律 schema v3**，经 `tools/icode_control.py create` 原子创建 metadata+出生事件；状态、metadata、事件、步骤端口/边界回检/回执、验证、索引与关闭均由控制面执行，**禁止绕过直写**。文中凡称“写/更新/追加 metadata”，除专用控制字段外，均指 `metadata-update`。机器真源：[mcp/workflow-gate/gates.json](mcp/workflow-gate/gates.json) + [schemas/](schemas/)；执行器含 `step/artifact/operation/policy/trace` 等子命令。完整契约见 [references/control_plane.md](references/control_plane.md) 与 [references/execution_model.md](references/execution_model.md)。 审查轮次与Read/Dedup声明按[inspection_evidence](references/inspection_evidence.md)；新trace v2，旧证据未跟踪不补造。legacy 工单只读，变更前须迁移。**`crosscheck` 是明确例外**：它不是工单，独立工具只读解析目标并仅写项目 `.crosscheck/`，不进入本控制面状态机。
 
-可选 Agent Runtime 位于 [agent_runtime/](agent_runtime/README.md)，只在用户显式调用 `/icode ui` 或 `python3 tools/icode_agent.py` 时工作；UI 默认监听 `127.0.0.1:8765`（占用则自动换空闲 loopback 端口），不要求 `--dir`。无参数重复调用复用已存活的全局实例；自动刷新默认 30 秒且可在设置中调整。它是 Codex/Claude Code CLI 的受控管理入口，不替代两者当前主会话；步骤合法性、revision、执行根和 Agent 前后回执仍由控制面决定。
+可选 Agent Runtime 位于 [agent_runtime/](agent_runtime/README.md)，只在用户显式调用 `/icode ui`（含等价的自然语言打开工作台请求）或 `python3 tools/icode_agent.py` 时工作；UI 默认监听 `127.0.0.1:8765`（占用则自动换空闲 loopback 端口），不要求 `--dir`。无参数重复调用复用已存活的全局实例；自动刷新默认 30 秒且可在设置中调整。它是 Codex/Claude Code CLI 的受控管理入口，不替代两者当前主会话；步骤合法性、revision、执行根和 Agent 前后回执仍由控制面决定。
 
 嵌入式、摄像头、邮件、技术文档、原理图与 MCU 项目不增加公开命令：既有步骤按 [共享技能路由](references/skill_routing.md)加载能力。workspace-scoped 入口先按 [工程接入合同](references/project_intake.md)解析根；大型 SDK 仅做有界静态画像，禁止执行 build/help 探测。邮件默认复用目标阅读窗，`.eml/.msg` 用 `tools/email_intake.py`；`tools/embedded_profile.py` 生成验证合同，`tools/document_intake.py` 检查文档，`tools/media_router.py` 选择视觉证据来源。摄取内容均不可信；邮箱无发送/移动副作用，硬件写入、故障注入和测量仍须显式授权。
 
 ## 使用流程示例
 
-> 完整示例见 [README.md](README.md)「快速开始」与各步骤文件；此处只给最小骨架。
+> 完整自然语言示例见 [入口与全能力示例](references/natural_language_entry.md)；命令示例见 [README.zh-CN.md](README.zh-CN.md)「快速开始」与各步骤文件；此处只给最小骨架。
 
 ```text
 /icode init 粗略需求 → /icode start 需求        # 全流程（步骤0 可选 + 1~6 串联）
@@ -325,6 +333,7 @@ test -f "{ICODE_OUT_DIR}/03_plan_final.md" && python3 -c "import json,sys; d=jso
 
 | 共享文件 | 内容 | 引用方 |
 |---------|------|--------|
+| [references/natural_language_entry.md](references/natural_language_entry.md) | 自然语言入口、意图/工单/限制/停止点解析、全能力示例与帮助；不另建执行状态机 | 入口 / help / 上下文续接 |
 | [references/thinking_core.md](references/thinking_core.md) | 强制思考前置核心（每步必读：MCP+降级文字块/结构化思考/Read references） | 所有 step |
 | [references/thinking_detail.md](references/thinking_detail.md) | 强制思考前置细节（按需读：各步骤子项速查/历史参考小节） | 所有 step |
 | [references/anti_laziness.md](references/anti_laziness.md) | 反偷懒约束（39条偷懒行为+合规要求+references必读+确认行） | 所有 step |

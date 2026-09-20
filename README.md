@@ -6,7 +6,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-Skill-8A2BE2.svg)](SKILL.md)
-[![Version](https://img.shields.io/badge/version-v2.31.0-blue.svg)](SKILL.md)
+[![Version](https://img.shields.io/badge/version-v2.32.0-blue.svg)](SKILL.md)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/ayukyo/icode-skill/issues)
 
 </div>
@@ -42,6 +42,17 @@ cd ~/icode-skill
 # 3) Run a full flow
 /icode start Implement a feature module
 ```
+
+You can also name ICODE and describe the goal in plain language. The current host agent routes to the existing steps and gates; no extra model service is needed:
+
+```text
+Use ICODE to design retries for this module. Stop at the plan; do not change code.
+Use ICODE to test the version already on the device. Do not build or deploy.
+使用 ICODE 把当前工单做成 PPT，给测试同事看。
+/icode 帮我查看当前工单还有哪些验证没完成
+```
+
+See [the complete natural-language guide](references/natural_language_entry.md) for every capability, combined requests, constraints, and resuming a ticket. `/icode help` also exposes these examples. Automatic discovery depends on the host loading the installed skill; if it does not, explicitly select the ICODE skill or use `/icode`. Existing commands remain supported.
 
 Or run step by step (switch models between steps anytime):
 
@@ -248,7 +259,7 @@ The seven local services add no public `/icode` commands; their machine-readable
 
 | Command | Description |
 | --- | --- |
-| `/icode help` | Help: show usage examples |
+| `/icode help` | Help: commands, natural-language examples, combinations and continuation |
 | `/icode log [scattered info...]` | Optional entry: deterministic evidence manifest + project-local debug reuse + per-repo runtime baseline → root-cause analysis → fix requirement `00_init.md`; auto-generates a bounded cross-audience brief |
 | `/icode init [--guide] [<rough req or guide constraints>]` | Normal: new Step 0 ticket and multi-turn draft; `--guide`: reuse the latest eligible init and refresh `deliverables/guide.md` plus its internal evidence audit |
 | `/icode start <req>` | Full flow: create/reuse dir → steps 1–6 |
