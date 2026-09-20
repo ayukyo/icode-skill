@@ -41,6 +41,14 @@ class WorkflowTests(unittest.TestCase):
             with self.subTest(path=path):
                 self.assertIn("- '" + path + "'", paths)
 
+    def test_listing_drafts_are_gated_offline_not_published_by_ci(self):
+        text = self.text()
+        self.assertIn("- 'tools/prepare_skill_listing.py'", text)
+        self.assertIn("- 'tests/test_skill_listing.py'", text)
+        self.assertIn('python3 -m unittest discover -s tests -p test_skill_listing.py -v', text)
+        self.assertNotIn('skillhub publish', text)
+        self.assertNotIn('SMITHERY_API_KEY', text)
+
     def test_disabled_by_default_and_no_pr_deploy(self):
         text = self.text()
         self.assertIn('  push:\n    branches: [main]\n', text)

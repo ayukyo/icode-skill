@@ -10,6 +10,7 @@ on:
       - 'tools/notify_indexnow.py'
       - 'tools/build_skill_distribution.py'
       - 'tools/check_skill_discovery.py'
+      - 'tools/prepare_skill_listing.py'
       - 'tools/validate_skill_pack.py'
       - 'tools/install_skill_pack.py'
       - 'install.sh'
@@ -23,6 +24,7 @@ on:
       - 'tests/test_skill_distribution.py'
       - 'tests/test_skill_discovery_probe.py'
       - 'tests/test_skill_discovery_metadata.py'
+      - 'tests/test_skill_listing.py'
       - 'tests/run_public_site_checks.py'
       - 'tests/test_public_site*.py'
       - 'tests/test_notify_indexnow.py'
@@ -31,6 +33,7 @@ on:
       - 'docs/public-discovery.md'
       - 'docs/agent-skill-discovery.md'
       - 'docs/skill-distribution.md'
+      - 'docs/skill-catalog-submission.md'
       - '.github/workflows/public-site.yml'
   release:
     types: [published]
@@ -83,6 +86,7 @@ jobs:
           python3 -m unittest discover -s tests -p test_notify_indexnow.py -v
           python3 -m unittest discover -s tests -p test_skill_distribution.py -v
           python3 -m unittest discover -s tests -p test_skill_discovery_probe.py -v
+          python3 -m unittest discover -s tests -p test_skill_listing.py -v
           python3 -m pytest -p no:anyio tests/test_skill_discovery_metadata.py -q
       - name: Build preview (no secrets, no deployment)
         if: steps.policy.outputs.publish != 'true'

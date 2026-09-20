@@ -59,7 +59,7 @@ ICODE 已具备标准技能入口和 Claude Code、Codex、CodeBuddy 安装适�
 - [Smithery：icode](https://api.smithery.ai/skills?q=icode&pageSize=100)
 - [Context7：icode](https://context7.com/api/v2/skills?query=icode)
 
-本轮不把这些不稳定或另有认证条件的接口全部塞进自动探针。收录所需账号、实名、凭证、许可同意和人工审核不能靠仓库改动替代；不能为了“大部分能搜到”伪造完成状态。
+按用户追加的多渠道接入要求，以上四个目录也纳入显式只读探针，保留其公开端点、schema 漂移和弃用边界，不引入平台 CLI 运行依赖。SkillHub 与 Smithery 的专用材料由离线工具生成草稿，见[目录接入与提交准备](skill-catalog-submission.md)。收录所需账号、实名、凭证、许可同意和人工审核不能靠仓库改动替代；不能为了“大部分能搜到”伪造完成状态。
 
 公开查询证据（匿名只读，无安装或遥测事件）：
 
@@ -79,7 +79,8 @@ SkillsMP FAQ 当前描述公开仓库、有效技能元数据及相关 topic 的
 | 官网 `llms.txt` 与双语 `index.md` | 从单一文案生成精简索引及完整可读页面；HTML 提供标准链接关系 | 不是各 Agent 必须读取的标准，不保证被引用 |
 | 无脚本 `SoftwareSourceCode` microdata | 明确可见名称、源码地址、版本、用途、MIT 许可证 | 不伪造评分、安装量或新宿主认证 |
 | [三宿主分发原型](skill-distribution.md) | 从单一源码生成完整工作流与共享技能包、薄插件清单、SHA-256 摘要 | 尚未插件实装、上架或加入用户默认市场 |
-| `tools/check_skill_discovery.py` | 默认离线；显式联网后得到可复查的有限查询 JSON | 不提交、不安装、不刷遥测，不把错误当成未收录 |
+| `tools/check_skill_discovery.py` | 覆盖 SkillsMP、skills.sh、Context7、SkillHub、ClawHub、Smithery；默认离线，显式联网后得到可复查的有限查询 JSON | 不提交、不安装、不刷遥测；同名未核实来源不算收录，错误不当成未命中 |
+| `tools/prepare_skill_listing.py` | 生成 SkillHub 专用元数据及 Smithery 提交请求的可审查草稿，版本跟随根技能 | 不读凭据、不联网、不写入、不重新许可，不等于完整平台包或发布成功 |
 
 2026-09-20 追加关键词抽查：两个目录分别查询 `icode`、`AI coding workflow`、`code review`、`工单`，各取最多 50 条，均未在返回结果中命中本仓库。独立作者词 `ayukyo` 在 SkillsMP 返回 5 条、本技能位于该响应第 1 项；skills.sh 返回 0 条。**已收录与泛关键词容易被推荐仍有明显差距**，不能用作者词命中掩盖这一点。上述查询发生在本轮新元数据推送前；后续应给予平台正常刷新时间，不反复刷请求。
 

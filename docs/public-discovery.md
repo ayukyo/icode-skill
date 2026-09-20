@@ -37,11 +37,14 @@ python3 tests/run_public_site_checks.py --report-dir demo/.icode_output/public-s
 
 ```bash
 python3 tools/check_skill_discovery.py                    # 零网络，仅显示查询计划
-python3 tools/check_skill_discovery.py --online           # 2 渠道 × 4 个公开查询
+python3 tools/check_skill_discovery.py --online           # 6 渠道，各查询 icode
 python3 tools/check_skill_discovery.py --online --channel skillsmp --query icode
+python3 tools/check_skill_discovery.py --online --channel smithery --query "code review"
 ```
 
-该工具只使用 SkillsMP 文档中的公开搜索和 skills.sh 网站当前公开搜索端点；后者不是稳定 API 保证。每次最多 10 次请求、每响应最多 2 MB、单次网络超时 12 秒，无自动重试；不把个人信息当查询词。`matched` 仅证明该次有限结果含准确仓库与技能；`not_in_results` 不证明全站未收录。认证、限流、网络失败、返回结构变化分别记录，不能当作未命中。输出到 stdout，不自动更新宣传材料或触发线上发布。
+该工具支持 `skillsmp`、`skills.sh`、`context7`、`skillhub`、`clawhub`、`smithery` 的公开只读搜索。网站公开端点不等于稳定 API 保证；Context7 的 skills CLI 已有弃用提示，不把它作为 ICODE 运行依赖。默认仅一个名称词；可指定单渠道与最多 5 个公开词，总请求预算不超过 10，超限需分渠道检查。每响应最多 2 MB、单次网络超时 12 秒，无自动重试；不把个人信息当查询词。`matched` 仅证明该次有限结果含可靠身份；`candidate_unverified` 表示同名但身份未核实，不算已收录；`not_in_results` 不证明全站未收录。认证、限流、网络失败、返回结构变化分别记录，不能当作未命中。输出到 stdout，不自动更新宣传材料或触发线上发布。
+
+`python3 tools/prepare_skill_listing.py` 可离线生成 SkillHub/Smithery 的专用提交资料草稿；不带凭据、不提交、不修改根技能，剩余账号/许可/包完整性要求见[接入说明](skill-catalog-submission.md)。
 
 [三宿主分发原型](skill-distribution.md)只生成完整资源包，尚非已发布市场插件；源安装器依然是正式安装路线。
 
