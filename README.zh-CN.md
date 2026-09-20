@@ -1,8 +1,10 @@
-# ICode — 全流程编码工作流（步骤 0 + 1~6，含日志根因分析入口 + 工程级知识库生成）
+# ICode — 面向 Claude Code、Codex 与 CodeBuddy 的 AI 编码工作流
 
 > English: [README.md](README.md) | 中文: 本文件
 
-ICode 是可供 Claude Code、Codex 与 CodeBuddy 使用的工程工作流 Skill，将需求到交付拆解为严格步骤，每步可单独调用，手动切换模型时操作更灵活。
+ICode 是可供 Claude Code、Codex 与 CodeBuddy 使用的开源 AI 编码工作流 Skill。通过工单驱动开发，串联需求、设计、实现、代码审查与证据化验证，保存状态以支持跨会话断点续接。
+
+多模型代码审查由用户先自行切换 Agent/模型，再用 `/icode crosscheck` 复评已完成工单；ICODE 不会自动切换模型。可选的 `/icode ui` 提供本地工单工作台。仅在点名 ICODE 或续接已绑定的 ICODE 工单时使用，不接管未指定 ICODE 的普通请求。
 
 - **入口命令（可选）**：`/icode log` 日志根因分析（领域无关）→ 转修复需求；`/icode init` 需求初稿对话
 - **步骤 0（可选）**：需求初稿对话，多轮迭代后落档为 `00_init.md`
@@ -31,7 +33,7 @@ ICode 是可供 Claude Code、Codex 与 CodeBuddy 使用的工程工作流 Skill
 
 ## 安装
 
-中英文官网支持本地预览；[官网与公开发现说明](docs/public-discovery.md)提供 GitHub Pages、RSS 和可选搜索通知的启用方法。发布默认关闭，官网不读取工单，也不替代安装器或本地 UI。
+中英文官网支持本地预览；[官网与公开发现说明](docs/public-discovery.md)提供 GitHub Pages、RSS 和可选搜索通知的启用方法。发布默认关闭；启用后，每次 push 到 `main` 自动更新官网。正式 Release 和手动运行仍可触发，但只发布默认分支最新提交，过期运行会被拒绝。其他分支与 PR 不发布。官网不读取工单，也不替代安装器或本地 UI。
 
 ### 开源统一安装入口
 
@@ -57,6 +59,16 @@ CodeBuddy 复用 `~/.claude/skills/`，不会产生第三份 ICODE 副本；安�
 git clone https://github.com/ayukyo/icode-skill ~/.claude/skills/icode
 /icode install --client all
 ```
+
+### 安装前只读发现
+
+如需从 GitHub 列出根技能、但不安装到宿主，可关闭遥测后运行 Skills CLI 发现命令：
+
+```bash
+DISABLE_TELEMETRY=1 npx skills add ayukyo/icode-skill --list
+```
+
+此只读发现可能把 CLI 和仓库下载到临时目录或缓存；下载完成、列出技能都不等于完整安装。Skills CLI 解析不覆盖共享技能、MCP 注册、DOCX runtime 或 CodeBuddy 命令桥，完整安装仍使用上述官方 `./install.sh --client all`。发现结果不代表 skills.sh 已收录，也不要通过重复安装刷计数。评估范围见[带日期的发现记录](docs/public-discovery.md)。
 
 ### 开发者更新命令
 

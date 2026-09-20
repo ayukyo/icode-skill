@@ -2,6 +2,8 @@
 
 这是独立于 ICODE Runtime 的静态官网与发布工具，不是新的 Agent 服务。构建不读取工单，不安装 Skill，不更改 Claude Code、Codex 或 CodeBuddy 配置。
 
+公开介绍中的 AI coding workflow、ticket-based development、多模型代码审查、证据化验证、断点续接和本地 UI 描述的是用途，不扩大执行触发范围。仅在用户点名 ICODE 或续接已绑定的 ICODE 工单时使用；不接管未指定 ICODE 的普通请求。多模型复评需要用户先在宿主中自行切换 Agent/模型，再运行 `/icode crosscheck`，不自动换模型。
+
 ## 本地预览
 
 需要 Python 3.10+，无额外构建依赖。在仓库根执行：
@@ -33,19 +35,27 @@ python3 tests/run_public_site_checks.py --report-dir demo/.icode_output/public-s
 2. 在仓库 Settings → Pages 中把 Source 设为 GitHub Actions。默认地址预期为 `https://ayukyo.github.io/icode-skill/`，配置完成和成功部署之前不算上线。
 3. 在 Actions repository variables 中设 `PUBLIC_SITE_URL` 为真实 HTTPS 站点基址，项目站点需包含 `/icode-skill/`。设置 `PUBLIC_SITE_ENABLED=true` 才启用发布。
 4. 配置 `github-pages` environment 的允许来源：默认分支和授权的 Release 标签。首次可加 required reviewers；如果希望之后发布无需逐次批准，可在确认公开范围后调整环境策略。不要允许不可信分支获得发布权限。
-5. 由你提交/推送本次代码后，在默认分支手动运行 **Public site**，或发布包含该工作流的正式 Release。工作流不会代你提交、推送、创建 Release 或修改设置。
+5. 启用后，每次 push 到 `main` 自动构建更新官网。也可在默认分支手动运行 **Public site**，或发布包含该工作流的正式 Release。工作流不会代你提交、推送、创建 Release 或修改设置；仅在本地 commit 不会触发线上发布。
 
-PR 仅运行离线测试和无凭证构建，不部署或提交搜索通知。手动运行只允许默认分支部署；正式 Release 用对应标签源码构建，并要求标签与 `SKILL.md` 的 `vX.Y.Z` 版本一致。草稿、预发布、关闭开关或未设置基址时只构建。构建成功后才上传 `_site`，部署权限限定到部署 job。
+其他分支与 PR 不发布；PR 仅运行离线测试和无凭证构建，不部署或提交搜索通知。自动发布限于 `main` 的 push，手动运行只允许默认分支部署；正式 Release 保留标签与该源码 `SKILL.md` 的 `vX.Y.Z` 版本一致性检查。草稿、预发布、关闭开关或未设置基址时不发布。构建成功后才上传 `_site`，部署权限限定到部署 job。
+
+源码继续绑定事件的 `github.sha`，构建与部署使用同一提交，不在 checkout 时动态替换为 main。发布前必须核对该 SHA 等于当前默认分支 HEAD，只有默认分支最新提交可以发布。若旧 Release、旧 run 重跑的 SHA 已不等于该 HEAD，或构建期间默认分支已推进，则属于过期源，会明确拒绝发布，避免回退官网；应改用新 main 提交对应的运行，或在当前默认分支重新发起手动运行，不能反复重跑过期 run。正式 Release 必须同时满足标签版本一致与源码为当前默认分支 HEAD 这两项条件。
 
 工作流用固定提交 SHA 引用官方 Actions。升级时核对上游 tag 与 SHA，并重跑合同测试。可以通过 GitHub 自动依赖更新工具提出升级，但本实现不擅自启用额外服务。
 
 ## 日常发布：只维护公开内容
 
 - `site/content.json` 是双语文案与公开版本说明的唯一输入。更新功能时两种语言成对修改。
-- `updates` 的 `reviewed_on` 是文案审阅日期，不是捏造的版本发布日期。新版本如需 RSS 公告，发布前添加经审查的版本条目；源码版本徽标由 `SKILL.md` 自动读取。
+- `updates` 的 `reviewed_on` 是文案审阅日期，不是捏造的版本发布日期。新版本如需 RSS 公告，push 到 main 前添加经审查的版本条目；源码版本徽标由 `SKILL.md` 自动读取。
 - 不从任意 commit、PR、Release 正文生成营销文案。不要把本地工单、demo 输出、真实日志、企业邮件或路径复制到公开文案。
 - 案例默认是通用用法示例，不是运行成功证明。要增加真实演示，先单独取得披露授权并核验内容及验证边界。
 - 不承诺零缺陷、全部宿主实测通过、节省固定比例或搜索排名。
+
+## Packages、Release 与 Pages
+
+[GitHub Packages](https://docs.github.com/en/packages/learn-github-packages/introduction-to-github-packages) 用于分发 npm 等软件包及 Docker/OCI 容器制品，不是 Skill 目录；Release 记录版本与发行附件，Pages 托管本项目的静态官网，三者用途不同。
+
+本项目当前不启用 Packages：根目录没有独立 npm 包或容器包，安装仍依赖源码、宿主适配与官方 `install.sh`。不为展示 Packages 入口制造空包，也不添加包发布权限；未来确有可独立分发的 Runtime 容器时，再评估通过 GHCR 发布。
 
 ## 可选 IndexNow
 
@@ -64,17 +74,47 @@ python3 tools/notify_indexnow.py --manifest _site/public-manifest.json --submit
 
 网络请求有超时和有限重试。通知失败在 Actions 中保留错误，不回滚已成功部署的站点。HTTP 200 表示 received，202 表示 pending；均不表示已收录。不要频繁重跑相同版本来刷通知。项目子目录的 robots.txt 不能代表整个域名，因此不生成误导性的 robots 文件。
 
+工作流整体绿色不等于 IndexNow 通知成功：通知步骤保留 `continue-on-error`，因此应检查原始 `.outcome`，不能用经过容错处理的 `.conclusion` 判断。验收新的 **Public site** run 时，分别查看 summary 中的 `Pages deployment: <outcome>`、`IndexNow step outcome: <outcome>` 与 notifier 原始受控 JSON。JSON 的 `status`、`stage`、`http_status`（如有）用于区分所有权验证与通知提交；`skipped`、`dry-run`、`failed` 都不能报成已通知，`received` / `pending` 也不能报成已收录。旧 summary 若只有通用边界说明，应回看通知步骤输出。
+
+### 2026-09-20 启用排查快照
+
+本轮已保存 repository variable `INDEXNOW_ENABLED=true` 与 Actions secret `INDEXNOW_KEY`；这只证明配置已保存，不证明通知已成功。本记录不包含真实所有权 key。
+
+旧 [Public site run 35511779722](https://github.com/ayukyo/icode-skill/actions/runs/35511779722) 的打包产物包含所有权文件，但公开访问该文件返回 404，通知结果为 `failed`。同一 SHA 重新部署时可能复用了旧产物，与 [actions/deploy-pages issue #383](https://github.com/actions/deploy-pages/issues/383) 描述的现象疑似相关；目前仅作排查线索，不能视为已确认根因。
+
+后续应在新提交进入默认分支后手动运行 **Public site**，核对该次源码 SHA、打包产物和实际部署，再检查公开所有权文件与新 summary 的通知 JSON / outcome。新 run 的结果另记在本地运行报告；这里保留带日期的故障快照与验收方法，不将旧失败或未来成功写成永久状态。未获得新运行证据前，不能宣称已通知或已收录。
+
 ## skills.sh 与宿主兼容边界
 
 ICODE 根 `SKILL.md` 有规范的 name/description，适合技能发现；共享技能则使用 `.template` 源文件，由本仓库安装器生成。skills CLI 的技能发现不等同于执行 ICODE 安装器，也不证明共享技能、MCP、DOCX runtime 或 CodeBuddy 命令桥全部安装。
 
+只读发现命令（关闭遥测）：
+
+```bash
+DISABLE_TELEMETRY=1 npx skills add ayukyo/icode-skill --list
+```
+
+`--list` 在安装阶段之前返回，不安装到宿主。npx 可能下载 CLI，发现过程也可能下载仓库到临时目录或缓存；这些下载不等于安装完成。复核下面的版本快照时，可用 `DISABLE_TELEMETRY=1 npx skills@1.7.0 add ayukyo/icode-skill --list` 固定 CLI 版本。
+
 正式安装入口仍是仓库根 `./install.sh --client all`，CodeBuddy 单独安装用 `--client codebuddy`；默认 `--client claude`。发现/兼容性评估不等于已上榜，不能把本地列出技能当成 skills.sh 已收录证据。测试不得刷安装量；不得访问用户真实宿主配置或全局安装。
 
-## 已执行的技能发现评估
+## 2026-09-20 技能发现评估快照
 
-2026-09-20 在临时目录解包 npm `skills@1.7.0`（先检查包内容，禁用安装脚本和遥测），对本地 ICODE 源码运行 `add <本地源码路径> --list`，实际发现 **1 个技能：icode**。此模式在安装阶段之前返回，没有安装到任何宿主，没有生成安装计数。根技能可被发现，无须为了目录展示修改现有 Skill 结构。
+以下为本轮开始前及本轮的带日期观测，不是在线目录或搜索能力的永久结论：
 
-配套共享技能的 `.template`、MCP 注册、DOCX runtime 和 CodeBuddy 命令桥不在此发现结果中；仍需使用本仓库统一安装器。没有验证 skills.sh 在线收录、榜单位置或完整 skills CLI 安装。
+| 检查入口 | 本轮观测 | 证据边界 |
+| --- | --- | --- |
+| 临时目录解包 npm `skills@1.7.0`，对本地源码运行 `add <本地源码路径> --list` | 发现 1 个技能：`icode` | 先检查包内容，禁用安装脚本和遥测；未安装到宿主 |
+| `skills@1.7.0` 直接对 GitHub 仓库运行 `add ayukyo/icode-skill --list` | 可识别 `icode` | 遥测关闭，只验证仓库解析与列出技能，未执行完整安装 |
+| 本轮优化前的 skills.sh 与旧 CLI search 检索 | 品牌词 `icode` 以及 `coding workflow`、`code review`、`multi-model` 等检索未命中 | 仅代表当时查询结果；不是永久未收录，也不与直接 GitHub 发现成功矛盾 |
+
+配套共享技能的 `.template`、MCP 注册、DOCX runtime 和 CodeBuddy 命令桥不在此发现结果中，仍需使用本仓库统一安装器。没有获得 skills.sh 在线收录、榜单位置或完整 skills CLI 安装成功的证据；不通过重复安装制造计数，也不为目录展示修改现有 Skill 结构。
+
+### 第三方目录的根路径过滤问题
+
+2026-09-20 检查 `Chat2AnyLLM/awesome-claude-skills`：目录已列出本仓库，但显示技能数为 0。其配置 `skillsPath='./'` 经 `metadata_catalog.py` 的 `strip('/')` 处理后成为 `'.'`；后续路径过滤排除了仓库根的 `SKILL.md`。这是该目录的根路径处理问题，不能据此认定 ICODE 缺少技能文件。
+
+已提交可复现的 [上游 issue #52](https://github.com/Chat2AnyLLM/awesome-claude-skills/issues/52)，截至本次快照状态为 **Open，待上游修复**。未宣称上游已修复；保持现有根 `SKILL.md` 与 `.template` 结构，不复制或移动仓库内容绕过目录过滤。
 
 ## 故障定位
 
@@ -82,10 +122,13 @@ ICODE 根 `SKILL.md` 有规范的 name/description，适合技能发现；共享
 | --- | --- |
 | output already exists | 改用新输出目录，工具不会覆盖现有产物 |
 | version mismatch | 确认 Release 标签与该标签中的 SKILL 版本一致 |
+| stale source / 过期源拒绝发布 | 事件 SHA 已不等于当前默认分支 HEAD；使用新 main 运行或从当前默认分支新建手动运行，不重跑旧 Release/旧 run |
 | 构建通过但没有部署 | 检查启用开关、基址、触发来源与环境策略 |
 | Pages 失败 | 检查 Pages Source、仓库可见性/套餐及 environment 来源限制 |
 | IndexNow skipped | 未配置 key；网站仍可正常使用 |
-| 所有权验证失败 | 确认刚部署的 key、基址和子路径一致，等待站点生效后再试 |
+| 所有权验证失败 / 公开文件 404 | 对比该次打包产物与实际部署，确认 key、基址和子路径一致；若疑似同 SHA 产物复用，用新提交手动运行 Public site 后核验，不只反复重跑旧 run |
+| 工作流绿色但通知未成功 | 检查新 summary 的 Pages deployment、IndexNow step outcome 及受控 JSON；以 `.outcome` 和实际 `status` 为准，不能用 `.conclusion` 推断成功 |
+| 第三方目录列出仓库但技能数为 0 | 区分目录解析与真实技能发现；根路径过滤问题见上游 issue #52，待上游修复 |
 | 搜索不到项目 | 通知仅请求发现；抓取、收录和排名由搜索引擎决定 |
 
 ## 官方依据

@@ -1,6 +1,6 @@
 <div align="center">
 
-# ICode — End-to-End Coding Workflow for AI Coding Hosts
+# ICode — AI Coding Workflow for Claude Code, Codex and CodeBuddy
 
 **6-step workflow: Plan → Review → Finalize → Code → Deep Check → Audit.** Run all at once, or step-by-step and switch models between steps.
 
@@ -11,11 +11,13 @@
 
 </div>
 
-ICode is a Claude Code Skill that breaks the journey from requirement to delivery into strict, individually invokable steps. It adds a **quality gate, adversarial review, cross-project memory, and crash recovery** on top of vanilla Claude Code — without locking you into a single model or a single pass.
+ICode is an open-source AI coding workflow Skill for Claude Code, Codex and CodeBuddy. Ticket-based development connects requirements, design, implementation, code review and evidence-based verification, with saved state for resuming interrupted work across sessions.
+
+For multi-model code review, switch agents or models yourself, then run `/icode crosscheck` on a completed ticket; ICODE does not automatically switch models. The optional `/icode ui` provides a local ticket workspace. Use ICODE only when you name ICODE or resume a bound ICODE ticket; it does not take over unrelated requests.
 
 ## Why ICode?
 
-The bilingual public site can be built locally. See [site preview and opt-in publishing](docs/public-discovery.md) for GitHub Pages, RSS and optional search notifications. Publication is disabled by default; the site never reads your tickets and does not replace the installer or local UI.
+The bilingual public site can be built locally. See [site preview and opt-in publishing](docs/public-discovery.md) for GitHub Pages, RSS and optional search notifications. Publication is disabled by default; once enabled, each push to `main` updates the site automatically. Formal Release and manual runs remain available, but only the latest commit on the default branch may publish; stale runs are rejected. Other branches and PRs do not publish. The site never reads your tickets and does not replace the installer or local UI.
 
 | Concern | Vanilla Claude Code | ICode |
 |---|---|---|
@@ -171,6 +173,16 @@ The historical direct-Claude clone remains supported as a compatibility path. Af
 git clone https://github.com/ayukyo/icode-skill ~/.claude/skills/icode
 /icode install --client all
 ```
+
+### Read-only discovery before installation
+
+To list the root skill from GitHub without installing it into a host, use the Skills CLI discovery command with telemetry disabled:
+
+```bash
+DISABLE_TELEMETRY=1 npx skills add ayukyo/icode-skill --list
+```
+
+This read-only discovery may download the CLI and repository into temporary/cache directories; a download or a listed skill does not mean installation is complete. Skills CLI parsing does not cover the shared skills, MCP registration, DOCX runtime or CodeBuddy command bridge. Use the official `./install.sh --client all` for the full installation described above. A discovery result is not proof of skills.sh indexing; do not repeat installs to inflate counts. See the [dated discovery assessment](docs/public-discovery.md).
 
 ### Developer update command
 
