@@ -42,6 +42,25 @@ ICODE 已具备标准技能入口和 Claude Code、Codex、CodeBuddy 安装适�
 | SkillsMP | 聚合公开 GitHub 技能，关键词/分类检索；文档提供有限额匿名 API | **已收录 ICODE**：作者查询返回 name=icode、author=ayukyo 和本仓库。描述仍含旧 `--reuse` 参数，不能当作最新版使用说明。[ICODE 条目](https://skillsmp.com/creators/ayukyo/icode-skill/skill)、[API](https://skillsmp.com/docs/api)、[抓取条件](https://skillsmp.com/docs/faq) |
 | awesome-claude-skills 第三方目录 | 仓库配置与技能文件扫描 | 根路径过滤问题仍按此前待上游处理记录，不将另一个目录的收录当成它已修复。[上游 issue #52](https://github.com/Chat2AnyLLM/awesome-claude-skills/issues/52) |
 
+### 补充渠道：并非都有无账号自动收录
+
+| 渠道 | 机制与本次观测 | 当前可做与限制 |
+| --- | --- | --- |
+| Context7 Skills / ctx7 | 确有 Skill 注册表；查询 `icode` 返回 20 条，按 project/url 核对未见本仓库。当前官方 master 已将 `ctx7 skills` 标记弃用，并声明下一主版本停止 | 保持标准入口及完整资源；不增加长期依赖，不把文档库收录当 Skill 收录。[命令源码](https://github.com/upstash/context7/blob/master/packages/cli/src/commands/skill.ts)、[技能说明](https://github.com/upstash/context7/blob/master/skills/context7-cli/references/skills.md) |
+| 腾讯 SkillHub | 有独立技能目录；`keyword=icode`、pageSize24 的本次搜索为空。官方教程要求账号/实名认证，CLI 发布需 Token，不能假定 GitHub 公开即自动抓取 | 本仓库保留名称、双语用途、MIT/主页。其发布专用 slug/version/displayName 必须在单独发行材料中准备，不往公共根技能强塞非通用字段；本轮未注册、发布或获审核。[官网](https://skillhub.cn/)、[教程](https://skillhub.cn/tutorials#publish-via-cli)、[发布字段](https://skillhub.cn/ai/release.md) |
+| ClawHub / OpenClaw | 有公开注册表；`q=icode`、limit10 本次为空。正式发布需登录/凭证；官方说明发布技能采用 MIT-0、无需署名 | 其许可条件与仓库现有 MIT 不同，不擅自重新许可、发布或用空包装上架；需权利人另行确认。本轮只确认渠道，不声称 OpenClaw 实装兼容。[发布](https://github.com/openclaw/clawhub/blob/main/docs/publishing.md)、[CLI 与许可说明](https://github.com/openclaw/clawhub/blob/main/docs/cli.md) |
+| Smithery Skills | **有独立 Skills 目录**，不是只有 MCP 市场。`q=icode`、pageSize100 本次返回 100 条，按 namespace/gitUrl 核对未见本仓库 | 提交为带 Bearer API key 的 `PUT /skills/{namespace}/{slug}`，提交公开 gitUrl；本轮不注册或写入。标准 GitHub 技能可作为后续候选，不代表已收录。[目录](https://smithery.ai/skills)、[提交 API](https://smithery.ai/docs/api-reference/skills/create-or-update-a-skill) |
+| Glama | 本次确认其 MCP 服务器/连接器/工具目录，未获得独立 Skill 注册表的官方证据 | 不把第三方 `search_skills` 工具等同平台技能市场，也不为收录额外制造 MCP 服务。[官网](https://glama.ai/)、[第三方工具条目](https://glama.ai/mcp/connectors/io.911fund.skills/directory/tools/search_skills) |
+
+这些均是有限关键词结果，不是平台全库无条目的证明。复查入口：
+
+- [腾讯 SkillHub：icode](https://api.skillhub.cn/api/skills?page=1&pageSize=24&keyword=icode)
+- [ClawHub：icode](https://clawhub.ai/api/v1/search?q=icode&limit=10)
+- [Smithery：icode](https://api.smithery.ai/skills?q=icode&pageSize=100)
+- [Context7：icode](https://context7.com/api/v2/skills?query=icode)
+
+本轮不把这些不稳定或另有认证条件的接口全部塞进自动探针。收录所需账号、实名、凭证、许可同意和人工审核不能靠仓库改动替代；不能为了“大部分能搜到”伪造完成状态。
+
 公开查询证据（匿名只读，无安装或遥测事件）：
 
 - SkillsMP `GET /api/v1/skills/search?q=ayukyo&limit=50`：HTTP 200，返回 `id=ayukyo-icode-skill-skill-md` 与正确 GitHub 来源；不能证明所有功能关键词都能匹配，也不能证明排名。
