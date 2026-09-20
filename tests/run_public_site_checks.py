@@ -46,7 +46,7 @@ def main():
         ('17-existing-public-command-contract', ['bash', 'tests/test_public_command_names_contract.sh']),
         ('18-existing-verify-behavior', [PY, '-m', 'pytest', '-p', 'no:anyio', 'tests/test_verify_request.py', '-q']),
         ('19-existing-runtime-compatibility', ['bash', 'tests/test_agent_runtime_compat_contract.sh']),
-        ('20-final-complete-regression', unit('test_public_site', 'test_public_site_discovery', 'test_public_site_workflow', 'test_public_site_demo', 'test_notify_indexnow')),
+        ('20-final-complete-regression', unit('test_public_site', 'test_public_site_design', 'test_public_site_style', 'test_public_site_discovery', 'test_public_site_workflow', 'test_public_site_demo', 'test_notify_indexnow')),
     ]
     env = dict(os.environ)
     env['PYTHONPATH'] = str(ROOT / 'tests') + os.pathsep + str(ROOT)

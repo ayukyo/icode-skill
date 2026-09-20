@@ -81,7 +81,7 @@ class PublicSiteTests(unittest.TestCase):
         css = (self.work / 'out/style.css').read_text()
         # Grid items default to min-width:auto, allowing long commands to expand
         # the whole page instead of scrolling inside the existing pre block.
-        self.assertIn('.install-grid>div{min-width:0}', css)
+        self.assertRegex(css, r'\.install-grid\s*>\s*div\s*\{\s*min-width:\s*0;?\s*\}')
 
     def test_private_files_not_copied_or_read(self):
         root = self.fixture()

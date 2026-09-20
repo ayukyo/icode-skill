@@ -25,7 +25,35 @@ INSTALL = ('git clone https://github.com/ayukyo/icode-skill ~/icode-skill\n'
 FIELDS = {'title', 'description', 'eyebrow', 'intro', 'install_cta', 'flow_title',
           'features_title', 'install_title', 'terminal_label', 'host_label',
           'install_note', 'host_note', 'examples_title', 'examples_note', 'boundary',
-          'updates_title', 'source_label', 'docs_label', 'privacy'}
+          'updates_title', 'source_label', 'docs_label', 'privacy', 'flow_cta',
+          'flow_intro', 'input_label', 'output_label', 'checkpoint_label',
+          'step_docs_label', 'optional_title', 'more_label', 'scenes_title',
+          'principles_label', 'illustration_label', 'delivery_title', 'delivery_note'}
+STAGE_DOCS = dict(zip(('plan', 'review', 'merge', 'code', 'deepcheck', 'audit'),
+                     ('01_plan.md', '02_review.md', '03_merge.md', '04_code.md',
+                      '05_deepcheck.md', '06_audit.md')))
+# IDs/order are fixed presentation contracts, not a second workflow engine.
+RECORDS = {
+    'stages': (tuple(STAGE_DOCS), {'id', 'purpose', 'input', 'output', 'checkpoint'}),
+    'paths': (('intake', 'verify', 'crosscheck'), {'id', 'title', 'body'}),
+    'scenes': (('develop', 'logs', 'review', 'verify', 'docs', 'manage'),
+               {'id', 'title', 'body', 'command', 'more', 'note'}),
+    'delivery': (('design', 'code', 'evidence', 'pending'), {'id', 'title', 'body'}),
+}
+
+
+def nonempty_text(value):
+    return isinstance(value, str) and bool(value.strip())
+
+
+def checked_records(value, ids, fields):
+    if not isinstance(value, list) or len(value) != len(ids):
+        raise ValueError('invalid structured content count')
+    for record, expected_id in zip(value, ids):
+        if (not isinstance(record, dict) or set(record) != fields
+                or record['id'] != expected_id
+                or any(not nonempty_text(v) for v in record.values())):
+            raise ValueError('invalid structured content fields, order or text')
 
 
 def normalize_base_url(value):
@@ -96,7 +124,7 @@ def content_checked(data):
     if not isinstance(locales, dict) or set(locales) != {'zh-CN', 'en'}:
         raise ValueError('both locales are required')
     for text in locales.values():
-        if not isinstance(text, dict) or set(text) != FIELDS | {'flow', 'features', 'examples'}:
+        if not isinstance(text, dict) or set(text) != FIELDS | {'flow', 'features', 'examples'} | set(RECORDS):
             raise ValueError('invalid locale fields')
         if any(not isinstance(text[k], str) or not text[k].strip() for k in FIELDS):
             raise ValueError('locale strings must be nonempty')
@@ -110,6 +138,8 @@ def content_checked(data):
                 raise ValueError('invalid feature or example pair')
         if len(text['examples']) < 2:
             raise ValueError('design-only and full-flow examples are required')
+        for field, (ids, fields) in RECORDS.items():
+            checked_records(text[field], ids, fields)
     if not isinstance(data['updates'], list) or not data['updates']:
         raise ValueError('at least one reviewed update is required')
     seen = set()
@@ -138,6 +168,25 @@ def render_page(data, lang, base, version):
                        for title, body in t['features'])
     examples = ''.join('<article><h3>' + e(title) + '</h3><code>' + e(command) + '</code></article>'
                        for title, command in t['examples'])
+    stages = []
+    for n, (stage, label) in enumerate(zip(t['stages'], t['flow']), 1):
+        stage_id = stage['id']
+        fields = ''.join('<dt>' + e(t[key + '_label']) + '</dt><dd>' + e(stage[key]) + '</dd>'
+                         for key in ('input', 'output', 'checkpoint'))
+        stages.append(f'<details class="stage" id="stage-{stage_id}"' + (' open' if n == 1 else '')
+                      + f'><summary><span class="step-number">{n:02}</span><strong>{e(label)}</strong>'
+                      + f'<code>{stage_id}</code></summary><div class="stage-body"><p>{e(stage["purpose"])}</p>'
+                      + f'<dl>{fields}</dl><a href="{REPO}/blob/main/steps/{STAGE_DOCS[stage_id]}">'
+                      + e(t['step_docs_label']) + '</a></div></details>')
+    paths = ''.join('<article class="card"><h3>' + e(p['title']) + '</h3><p>' + e(p['body'])
+                    + '</p></article>' for p in t['paths'])
+    scenes = ''.join('<article class="card"><h3>' + e(s['title']) + '</h3><p>' + e(s['body'])
+                     + '</p><code class="example-command">' + e(s['command']) + '</code><details><summary>'
+                     + e(t['more_label']) + '</summary><pre><code>' + e(s['more']) + '</code></pre><p class="note">'
+                     + e(s['note']) + '</p></details></article>' for s in t['scenes'])
+    delivery = ''.join('<article class="card' + (' pending' if p['id'] == 'pending' else '')
+                       + '"><h3>' + e(p['title']) + '</h3><p>' + e(p['body']) + '</p></article>'
+                       for p in t['delivery'])
     updates = ''.join('<article class="update" id="note-' + e(item['version']) + '"><h3>' + e(item['version'])
                       + '<time datetime="' + e(item['reviewed_on']) + '">' + e(item['reviewed_on'])
                       + '</time></h3><p>' + e(item[lang]) + '</p></article>' for item in data['updates'])
@@ -155,18 +204,22 @@ def render_page(data, lang, base, version):
 <link rel="alternate" type="application/rss+xml" title="ICODE version notes" href="{relative}feed.xml">
 <link rel="stylesheet" href="{relative}style.css"></head><body>
 <a class="skip" href="#content">{skip}</a><header><a class="brand" href="{relative or './'}">I<span>CODE</span></a>
-<nav aria-label="{'Navigation' if english else '导航'}">{switch}<a href="{docs}">{e(t['docs_label'])}</a><a href="{REPO}">GitHub ↗</a></nav></header>
+<nav aria-label="{'Navigation' if english else '导航'}"><a href="#flow">{e(t['flow_cta'])}</a><a href="#capabilities">{e(t['scenes_title'])}</a><a href="#install">{e(t['install_cta'])}</a>{switch}<a href="{REPO}">GitHub ↗</a></nav></header>
 <main id="content"><section class="hero"><div><p class="eyebrow">{e(t['eyebrow'])}</p><h1>{e(t['title'])}</h1>
-<p class="lead">{e(t['intro'])}</p><div class="actions"><a class="button" href="#install">{e(t['install_cta'])} →</a><a href="#examples">{e(t['examples_title'])}</a></div>
+<p class="lead">{e(t['intro'])}</p><ul class="hosts"><li>Claude Code</li><li>Codex</li><li>CodeBuddy</li></ul>
+<div class="actions"><a class="button" href="#install">{e(t['install_cta'])} →</a><a href="#flow">{e(t['flow_cta'])} ↗</a></div>
 <p class="version">{e(t['source_label'])} · {e(version)}</p></div>
-<aside class="terminal" aria-label="{'Workflow example' if english else '流程示例'}"><div class="terminal-head">ICODE / {'WORKFLOW EXAMPLE' if english else '流程示意'}</div>
+<aside class="terminal" aria-label="{'Workflow example' if english else '流程示例'}"><div class="terminal-head">{e(t['illustration_label'])}</div>
 <div class="terminal-body"><p class="prompt">{e(t['examples'][1][1])}</p><ul class="trace">{trace}</ul></div></aside></section>
-<section class="section"><h2>{e(t['flow_title'])}</h2><ol class="flow">{flow}</ol></section>
-<section class="section"><h2>{e(t['features_title'])}</h2><div class="grid">{features}</div></section>
+<section class="section" id="flow"><h2>{e(t['flow_title'])}</h2><p class="note">{e(t['flow_intro'])}</p><ol class="flow">{flow}</ol>
+<div class="stage-grid">{''.join(stages)}</div><h3>{e(t['optional_title'])}</h3><div class="optional-grid">{paths}</div></section>
+<section class="section" id="capabilities"><h2>{e(t['scenes_title'])}</h2><p class="note">{e(t['examples_note'])}</p><div class="scenes">{scenes}</div>
+<details class="principles"><summary>{e(t['principles_label'])}</summary><h3>{e(t['features_title'])}</h3><div class="grid">{features}</div></details></section>
+<section class="section" id="delivery"><h2>{e(t['delivery_title'])}</h2><p class="note">{e(t['delivery_note'])}</p><div class="delivery-grid">{delivery}</div></section>
 <section class="section" id="install"><h2>{e(t['install_title'])}</h2><div class="install-grid"><div><h3>{e(t['terminal_label'])}</h3>
 <pre><code>{e(INSTALL)}</code></pre><p class="note">{e(t['install_note'])}</p></div><div><h3>{e(t['host_label'])}</h3>
 <pre><code>/icode help\n{e(t['examples'][0][1])}</code></pre><p class="note">{e(t['host_note'])}</p><a href="{docs}">{e(t['docs_label'])} ↗</a></div></div></section>
-<section class="section" id="examples"><h2>{e(t['examples_title'])}</h2><p class="note">{e(t['examples_note'])}</p><div class="examples">{examples}</div>
+<section class="section" id="examples"><details class="more-examples"><summary>{e(t['examples_title'])}</summary><p class="note">{e(t['examples_note'])}</p><div class="examples">{examples}</div></details>
 <p class="boundary note">{e(t['boundary'])}</p></section>
 <section class="section" id="updates"><h2>{e(t['updates_title'])}</h2>{updates}</section></main>
 <footer><p>{e(t['privacy'])}</p><a href="{REPO}">GitHub</a><a href="{relative}feed.xml">RSS</a><a href="{REPO}/blob/main/LICENSE">MIT</a></footer>

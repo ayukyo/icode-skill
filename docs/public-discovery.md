@@ -90,6 +90,8 @@ python3 tools/notify_indexnow.py --manifest _site/public-manifest.json --submit
 
 ## skills.sh 与宿主兼容边界
 
+主流宿主的本地技能加载、插件市场、跨宿主目录和 ICODE 支持等级，见 [2026-09-20 Agent Skill 发现调研](agent-skill-discovery.md)。该次只读查询确认 SkillsMP 已有 ICODE 条目，但描述仍旧；skills.sh 指定查询未命中。不要把目录收录、关键词推荐、安装完整与运行验收混为一谈。
+
 ICODE 根 `SKILL.md` 有规范的 name/description，适合技能发现；共享技能则使用 `.template` 源文件，由本仓库安装器生成。skills CLI 的技能发现不等同于执行 ICODE 安装器，也不证明共享技能、MCP、DOCX runtime 或 CodeBuddy 命令桥全部安装。
 
 只读发现命令（关闭遥测）：

@@ -6,6 +6,152 @@
       "eyebrow": "Claude Code · Codex · CodeBuddy 开源工作流",
       "intro": "把需求、设计决策、代码变更与验证证据保存在同一条工单流程中。从计划到交付逐步推进，中断后核对状态再续接，也可通过本地 UI 管理工单。",
       "install_cta": "开始使用",
+      "flow_cta": "工作流程",
+      "flow_intro": "先明确边界，再推进实现。展开任一步，了解它接收什么、留下什么，以及继续前要检查什么。",
+      "input_label": "输入",
+      "output_label": "产物",
+      "checkpoint_label": "检查点",
+      "step_docs_label": "查看步骤规则 ↗",
+      "optional_title": "按需使用，不是额外必经步骤",
+      "more_label": "更多用法与边界",
+      "scenes_title": "能做什么",
+      "principles_label": "了解 ICODE 如何保护工作边界",
+      "illustration_label": "通用流程示意 · 非实际运行",
+      "delivery_title": "交付的不只是代码，还有判断依据",
+      "delivery_note": "通用计算器示例，人工编写，仅说明产物如何组织；不是实际工单或本次测试结果。报告存在不代表设备已验证。",
+      "stages": [
+        {
+          "id": "plan",
+          "purpose": "把想法变成可检查的实现方案。",
+          "input": "目标、限制与现有代码。",
+          "output": "01_plan.md：范围、方案与验证计划。",
+          "checkpoint": "明确不做什么、风险在哪里；仅设计请求在此停止。"
+        },
+        {
+          "id": "review",
+          "purpose": "在动手前找出设计的缺口。",
+          "input": "计划与相关源码、接口合同。",
+          "output": "02_review.md：问题、风险与建议。",
+          "checkpoint": "让建议能追溯到设计或代码依据，不凭印象放行。"
+        },
+        {
+          "id": "merge",
+          "purpose": "把审查意见收敛成实施依据。",
+          "input": "计划、审查意见与已确认取舍。",
+          "output": "03_plan_final.md：吸纳意见后的定稿。",
+          "checkpoint": "未决问题与范围变更要处理或明确保留。"
+        },
+        {
+          "id": "code",
+          "purpose": "按定稿实施，让修改与计划对应。",
+          "input": "定稿方案与当前代码基线。",
+          "output": "源码修改、测试与实际执行记录。",
+          "checkpoint": "遵守授权范围，记录执行结果；不能把计划当完成。"
+        },
+        {
+          "id": "deepcheck",
+          "purpose": "回看实现与相关调用链，查漏补缺。",
+          "input": "源码变更、设计依据与执行记录。",
+          "output": "05_deepcheck.md 及覆盖记录。",
+          "checkpoint": "检查边界、回归和证据缺口；发现问题先修复复测。"
+        },
+        {
+          "id": "audit",
+          "purpose": "核对交付结论有没有证据支撑。",
+          "input": "设计、代码变更和已有验证证据。",
+          "output": "06_audit.md：交付结论及未验证事项。",
+          "checkpoint": "区分已验证、待验证与阻塞，不把报告等同设备实测。"
+        }
+      ],
+      "paths": [
+        {
+          "id": "intake",
+          "title": "可选前置 · init / log",
+          "body": "复杂需求先整理，日志问题先核对设备与源码版本；按任务选择入口，不必强行经过所有命令。"
+        },
+        {
+          "id": "verify",
+          "title": "独立验证 · verify",
+          "body": "显式选择编译、部署、监听或测试，可独立或组合执行。只监听、测试时直接使用设备现有版本，不隐式编译或部署。"
+        },
+        {
+          "id": "crosscheck",
+          "title": "高级可选复评 · crosscheck",
+          "body": "仅对已完成工单独立复评。可自行换 Agent 或模型，多轮结果单独保存；不改原工单历史或代码，不自动切换模型。"
+        }
+      ],
+      "scenes": [
+        {
+          "id": "develop",
+          "title": "01 / 开发与设计",
+          "body": "工单驱动开发，也可以只要方案。把目标和停止点一起告诉 Agent。",
+          "command": "使用 ICODE 给这个模块增加重试，先出方案，不改代码。",
+          "more": "/icode start 给计算器增加取模功能并补充测试\n/icode plan",
+          "note": "start 串联主线，plan 可单步使用；明确“只设计”时不得越过停止点。"
+        },
+        {
+          "id": "logs",
+          "title": "02 / 日志与排障",
+          "body": "先确认版本、时间窗口和证据来源，再分析异常与可能原因。",
+          "command": "使用 ICODE 分析这份异常日志，先定位原因，不修改代码。",
+          "more": "/icode log",
+          "note": "当前源码、部署版本、历史日志不是同一层证据；缺少现场数据时保留不确定性。"
+        },
+        {
+          "id": "review",
+          "title": "03 / 设计与代码复评",
+          "body": "review 审查当前阶段设计；crosscheck 对已完成工单做独立、多轮复评。",
+          "command": "/icode review",
+          "more": "/icode crosscheck",
+          "note": "多模型代码审查时先自行切换 Agent/模型。ICODE 不会自动切换模型；crosscheck 不改原工单历史或代码。"
+        },
+        {
+          "id": "verify",
+          "title": "04 / 构建与设备验证",
+          "body": "按需选择动作，让验证记录对应实际执行。",
+          "command": "/icode verify --listen",
+          "more": "/icode verify --build\n/icode verify --build --listen\n/icode verify --deploy --test",
+          "note": "--listen 或 --test 单独使用时检查设备现有版本，不隐式编译或部署；部署必须明确选择。"
+        },
+        {
+          "id": "docs",
+          "title": "05 / 文档与知识交付",
+          "body": "从工程文档到 Word、PPT 和可复用知识，按目标选择交付形式。",
+          "command": "使用 ICODE 为本项目整理一份面向新人的使用文档。",
+          "more": "/icode doc\n/icode docx\n/icode ppt\n/icode study",
+          "note": "生成成功不等于视觉验收通过；纯文本模型不能直接检查图片，需保留视觉复核边界。"
+        },
+        {
+          "id": "manage",
+          "title": "06 / 工单管理与续接",
+          "body": "查看状态、待验证事项，或在本地工作台管理和续接工单。",
+          "command": "/icode status --pending",
+          "more": "/icode list\n/icode ui\n续接已绑定的 ICODE 工单，先核对状态和执行回执，再从中断点继续。",
+          "note": "官网不连接本机 UI，不读取工单；跨会话续接仍保持原授权范围和停止点。"
+        }
+      ],
+      "delivery": [
+        {
+          "id": "design",
+          "title": "设计依据",
+          "body": "为什么增加取模、输入限制是什么、审查意见如何处理。计划与定稿随工单保留。"
+        },
+        {
+          "id": "code",
+          "title": "代码与测试",
+          "body": "变更哪些源码、覆盖哪些边界、运行了哪些命令。执行记录与实际修改对应。"
+        },
+        {
+          "id": "evidence",
+          "title": "验证记录",
+          "body": "分别记录构建、部署与测试证据；带上实际版本和结果，不用“已完成”替代数据。"
+        },
+        {
+          "id": "pending",
+          "title": "未验证事项",
+          "body": "若未接入真实目标设备，就明确标为未验证。把后续验证条件与限制一并交付。"
+        }
+      ],
       "flow_title": "六步推进，每一步都有据可查",
       "flow": ["拟定计划", "审查设计", "合并定稿", "编码实施", "深度复检", "最终审计"],
       "features_title": "让开发过程不止于一段对话",
@@ -45,6 +191,152 @@
       "eyebrow": "Open workflow for Claude Code · Codex · CodeBuddy",
       "intro": "Keep requirements, design decisions, code changes and verification evidence in one ticket workflow. Move from planning to delivery, check state before resuming interrupted work, and manage tickets through a local UI.",
       "install_cta": "Get started",
+      "flow_cta": "Workflow",
+      "flow_intro": "Set the boundaries, then move forward. Expand a stage to see what goes in, what comes out, and what must be checked before continuing.",
+      "input_label": "Input",
+      "output_label": "Output",
+      "checkpoint_label": "Checkpoint",
+      "step_docs_label": "Read step rules ↗",
+      "optional_title": "Optional paths, not extra required stages",
+      "more_label": "More examples & boundaries",
+      "scenes_title": "Capabilities",
+      "principles_label": "How ICODE keeps work within its boundaries",
+      "illustration_label": "Generic illustration · not a live run",
+      "delivery_title": "Deliver code with the reasons to trust it.",
+      "delivery_note": "A hand-written, generic calculator example showing how evidence is organized, not a real ticket or test result. Having a report does not mean a device was verified.",
+      "stages": [
+        {
+          "id": "plan",
+          "purpose": "Turn an idea into a reviewable implementation plan.",
+          "input": "Goals, constraints and existing code.",
+          "output": "01_plan.md: scope, approach and verification plan.",
+          "checkpoint": "Make exclusions and risks explicit. A design-only request stops here."
+        },
+        {
+          "id": "review",
+          "purpose": "Find design gaps before implementation.",
+          "input": "The plan, relevant source and interface contracts.",
+          "output": "02_review.md: issues, risks and recommendations.",
+          "checkpoint": "Ground recommendations in the design or code, not impressions."
+        },
+        {
+          "id": "merge",
+          "purpose": "Consolidate review feedback into an implementation basis.",
+          "input": "Plan, review findings and agreed trade-offs.",
+          "output": "03_plan_final.md: the finalized design.",
+          "checkpoint": "Resolve or explicitly retain open questions and scope changes."
+        },
+        {
+          "id": "code",
+          "purpose": "Implement the finalized plan with traceable changes.",
+          "input": "Final design and the current code baseline.",
+          "output": "Source changes, tests and actual execution records.",
+          "checkpoint": "Stay within authorized scope. A plan is not evidence of completion."
+        },
+        {
+          "id": "deepcheck",
+          "purpose": "Revisit implementation and related call chains for gaps.",
+          "input": "Source changes, design decisions and execution records.",
+          "output": "05_deepcheck.md and coverage records.",
+          "checkpoint": "Check boundaries, regressions and missing evidence; fix and retest findings."
+        },
+        {
+          "id": "audit",
+          "purpose": "Check whether the delivery conclusion has supporting evidence.",
+          "input": "Design, code changes and available verification evidence.",
+          "output": "06_audit.md: delivery conclusion and unverified items.",
+          "checkpoint": "Separate verified, pending and blocked. A report is not a device test."
+        }
+      ],
+      "paths": [
+        {
+          "id": "intake",
+          "title": "Optional intake · init / log",
+          "body": "Organize complex requirements or establish device and source provenance for log analysis. Choose the entry that fits the task."
+        },
+        {
+          "id": "verify",
+          "title": "Independent verification · verify",
+          "body": "Explicitly choose build, deploy, listen or test, independently or in combination. Listening or testing alone uses the installed version; it does not implicitly build or deploy."
+        },
+        {
+          "id": "crosscheck",
+          "title": "Advanced optional review · crosscheck",
+          "body": "Review a completed ticket independently. Switch agents or models yourself; repeated rounds stay separate from original history and code. No automatic model switching."
+        }
+      ],
+      "scenes": [
+        {
+          "id": "develop",
+          "title": "01 / Develop & design",
+          "body": "Ticket-based development, or just a design. Tell the agent both your goal and where to stop.",
+          "command": "Use ICODE to design retries for this module. Stop at the plan; do not change code.",
+          "more": "/icode start Add modulo to the calculator and cover it with tests\n/icode plan",
+          "note": "start follows the main workflow; plan can run independently. Design-only requests must stop before implementation."
+        },
+        {
+          "id": "logs",
+          "title": "02 / Logs & diagnosis",
+          "body": "Establish the version, time window and evidence source before analyzing an incident.",
+          "command": "Use ICODE to analyze this failure log. Find the cause without changing code.",
+          "more": "/icode log",
+          "note": "Current source, deployed versions and historical logs are different evidence layers. Keep uncertainty explicit when field data is missing."
+        },
+        {
+          "id": "review",
+          "title": "03 / Design & code review",
+          "body": "review examines the current design; crosscheck provides repeatable independent review of completed tickets.",
+          "command": "/icode review",
+          "more": "/icode crosscheck",
+          "note": "For multi-model code review, switch agents or models yourself first. ICODE does not automatically switch models; crosscheck leaves original history and code unchanged."
+        },
+        {
+          "id": "verify",
+          "title": "04 / Build & device checks",
+          "body": "Choose the actions you need and keep records tied to actual execution.",
+          "command": "/icode verify --listen",
+          "more": "/icode verify --build\n/icode verify --build --listen\n/icode verify --deploy --test",
+          "note": "Using --listen or --test alone checks the installed version. It does not implicitly build or deploy; deployment must be selected explicitly."
+        },
+        {
+          "id": "docs",
+          "title": "05 / Docs & reusable knowledge",
+          "body": "Choose project documentation, Word, PPT or reusable knowledge to match your delivery needs.",
+          "command": "Use ICODE to write a newcomer-friendly guide for this project.",
+          "more": "/icode doc\n/icode docx\n/icode ppt\n/icode study",
+          "note": "Successful generation is not visual acceptance. A text-only model cannot inspect images directly; keep visual review limits explicit."
+        },
+        {
+          "id": "manage",
+          "title": "06 / Manage & resume tickets",
+          "body": "Check state and verification debt, or manage and resume tickets in the local workspace.",
+          "command": "/icode status --pending",
+          "more": "/icode list\n/icode ui\nResume the bound ICODE ticket: check its state and execution receipts before continuing.",
+          "note": "This website does not connect to your local UI or read tickets. Resuming work retains the original scope and stop points."
+        }
+      ],
+      "delivery": [
+        {
+          "id": "design",
+          "title": "Design rationale",
+          "body": "Why modulo is needed, which inputs are allowed, and how review findings were handled. Plans stay with the ticket."
+        },
+        {
+          "id": "code",
+          "title": "Code & tests",
+          "body": "Which source changed, which boundaries were covered and which commands ran. Execution records match actual changes."
+        },
+        {
+          "id": "evidence",
+          "title": "Verification records",
+          "body": "Record build, deployment and test evidence separately, with actual versions and results, not just a completed label."
+        },
+        {
+          "id": "pending",
+          "title": "Not verified",
+          "body": "Without access to the target device, mark it not verified. Deliver the remaining conditions and limitations alongside the code."
+        }
+      ],
       "flow_title": "Six stages. A traceable path forward.",
       "flow": ["Plan", "Review", "Finalize", "Code", "Deep check", "Audit"],
       "features_title": "Development that outlasts a conversation",
