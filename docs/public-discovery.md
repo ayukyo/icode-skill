@@ -50,6 +50,7 @@ python3 tests/run_public_site_checks.py --report-dir demo/.icode_output/public-s
 ## 日常发布：只维护公开内容
 
 - `site/content.json` 是双语文案与公开版本说明的唯一输入。更新功能时两种语言成对修改。
+- 浅色官网以原生 `details/summary` 展示六步规则和场景，不依赖脚本。`stages`、`paths`、`scenes`、`delivery` 的 id/顺序和字段集合由生成器严格校验；不要把 HTML 或任意链接混入文案字段。六步标签与说明应一同修改；步骤文档链接在生成器中固定映射。
 - `updates` 的 `reviewed_on` 是文案审阅日期，不是捏造的版本发布日期。新版本如需 RSS 公告，push 到 main 前添加经审查的版本条目；源码版本徽标由 `SKILL.md` 自动读取。
 - 不从任意 commit、PR、Release 正文生成营销文案。不要把本地工单、demo 输出、真实日志、企业邮件或路径复制到公开文案。
 - 案例默认是通用用法示例，不是运行成功证明。要增加真实演示，先单独取得披露授权并核验内容及验证边界。
