@@ -1,0 +1,18 @@
+{
+  "name": "icode",
+  "description": "ICODE: evidence-driven coding workflow, code review, debugging and verification. 编码、审查、日志分析与验证；运行依赖须单独准备。",
+  "author": {"name": "ayukyo"},
+  "repository": "https://github.com/ayukyo/icode-skill",
+  "license": "MIT",
+  "keywords": ["icode", "workflow", "code-review", "debugging", "verification"],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "ICODE",
+    "shortDescription": "Evidence-driven coding, review and verification",
+    "longDescription": "ICODE 编码工作流及共享技能资源包。支持需求规划、审查、日志分析与验证；Python、DOCX runtime 和 MCP 须按宿主另行准备。此包不证明宿主实装或市场上架。",
+    "developerName": "ayukyo",
+    "category": "Productivity",
+    "capabilities": ["Read", "Write"],
+    "defaultPrompt": ["使用 ICODE 分析当前工程，先出方案，不修改代码。"]
+  }
+}

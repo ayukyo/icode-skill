@@ -1,0 +1,9 @@
+{
+  "name": "icode",
+  "description": "ICODE: evidence-driven coding workflow, code review, debugging and verification. 编码、审查、日志分析与验证；运行依赖须单独准备。",
+  "author": {"name": "ayukyo"},
+  "repository": "https://github.com/ayukyo/icode-skill",
+  "license": "MIT",
+  "keywords": ["icode", "workflow", "code-review", "debugging", "verification"],
+  "skills": "./skills/"
+}
