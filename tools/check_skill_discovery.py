@@ -9,6 +9,7 @@ import argparse
 from datetime import datetime, timezone
 from http.client import HTTPException
 import json
+import re
 import socket
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlsplit
@@ -20,6 +21,7 @@ MAX_BYTES = 2_000_000
 MAX_QUERIES = 5
 MAX_REQUESTS = 10
 LIMIT = 50
+TARGET_REPOSITORY = ('ayukyo', 'icode-skill')
 ENDPOINTS = {
     'skillsmp': 'https://skillsmp.com/api/v1/skills/search',
     'skills.sh': 'https://skills.sh/api/search',
@@ -64,9 +66,34 @@ def query_plan(channel, query):
             'source': source, 'stability': stability}
 
 
+class BudgetExhausted(Exception):
+    """Raised before sending a request beyond the shared HTTP budget."""
+
+
+class RequestBudget:
+    def __init__(self, limit=MAX_REQUESTS):
+        self.limit = limit
+        self.used = 0
+
+    def consume(self):
+        if self.used >= self.limit:
+            raise BudgetExhausted(f'HTTP budget exhausted: {self.limit} requests including redirects')
+        self.used += 1
+
+
 class PublicRedirects(HTTPRedirectHandler):
     # Python 3.10 does not dispatch permanent redirects by default.
     http_error_308 = HTTPRedirectHandler.http_error_302
+
+    def __init__(self, budget=None):
+        self.budget = budget
+
+    def https_request(self, request):
+        # urllib runs this hook for initial requests AND accepted redirects,
+        # before invoking the transport. Rejected redirects consume no request.
+        if self.budget is not None:
+            self.budget.consume()
+        return request
 
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         old, new = urlsplit(req.full_url), urlsplit(newurl)
@@ -78,9 +105,10 @@ class PublicRedirects(HTTPRedirectHandler):
         return super().redirect_request(req, fp, 307 if code == 308 else code, msg, headers, newurl)
 
 
-def fetch(url):
+def fetch(url, budget=None):
+    budget = budget if budget is not None else RequestBudget()
     request = Request(url, headers={'Accept': 'application/json', 'User-Agent': 'ICODE-discovery-check/1.0'})
-    with build_opener(PublicRedirects()).open(request, timeout=12) as response:
+    with build_opener(PublicRedirects(budget)).open(request, timeout=12) as response:
         body = response.read(MAX_BYTES + 1)
     if len(body) > MAX_BYTES:
         raise ValueError('response too large')
@@ -116,23 +144,44 @@ def text_field(item, key, *, nullable=False, optional=False):
     return value
 
 
-def github_source(value):
-    """Recognize the exact repository, never a substring or another URL's query."""
+def github_repository(value):
+    """Return a recognized GitHub owner/repo, or None when identity is unknown.
+
+    Case, .git and fragments may describe the SAME repo; failure of the stricter
+    match contract below must not turn those spellings into another repository.
+    """
     if value is None:
-        return False
+        return None
     # urlsplit strips some controls; browsers may also normalize escapes/slashes.
     # Refuse ambiguous spellings instead of promoting them to source evidence.
     if any(c.isspace() or ord(c) < 32 or c in '%\\' for c in value):
+        return None
+    try:
+        url = urlsplit(value)
+    except ValueError:
+        return None
+    if url.scheme != 'https' or url.query:
+        return None
+    parts = url.path.removeprefix('/').removesuffix('/').split('/')
+    if len(parts) < 2 or any(p in ('', '.', '..') for p in parts):
+        return None
+    if url.netloc == 'github.com':
+        if len(parts) != 2 and not (len(parts) >= 4 and parts[2] in ('tree', 'blob')):
+            return None
+    elif url.netloc != 'raw.githubusercontent.com' or len(parts) < 4:
+        return None
+    owner, repo = parts[0].casefold(), parts[1].casefold().removesuffix('.git')
+    if not re.fullmatch(r'[a-z0-9]+(?:-[a-z0-9]+)*', owner) or not re.fullmatch(r'[a-z0-9_.-]+', repo):
+        return None
+    return owner, repo
+
+
+def github_source(value):
+    """Only the original exact source spelling proves a match; never follow it."""
+    if github_repository(value) != TARGET_REPOSITORY:
         return False
     url = urlsplit(value)
-    if url.scheme != 'https' or url.query or url.fragment:
-        return False
-    parts = url.path.removeprefix('/').removesuffix('/').split('/')
-    if parts[:2] != ['ayukyo', 'icode-skill'] or any(p in ('', '.', '..') for p in parts):
-        return False
-    if url.netloc == 'github.com':
-        return len(parts) == 2 or (len(parts) >= 4 and parts[2] in ('tree', 'blob'))
-    return url.netloc == 'raw.githubusercontent.com' and len(parts) >= 4
+    return not url.fragment and url.path.split('/')[1:3] == list(TARGET_REPOSITORY)
 
 
 def classify(channel, item):
@@ -145,7 +194,8 @@ def classify(channel, item):
         source = text_field(item, 'url', nullable=True)
         target = name.casefold() == 'icode'
         matches = (project in (None, '/ayukyo/icode-skill') and github_source(source))
-        known_other = project not in (None, '/ayukyo/icode-skill') or (source is not None and not github_source(source))
+        project_repo = github_repository('https://github.com' + project) if project and project.startswith('/') else None
+        known_other = project_repo is not None and project_repo != TARGET_REPOSITORY
     elif channel == 'skillhub':
         name, slug = text_field(item, 'name'), text_field(item, 'slug')
         text_field(item, 'source')
@@ -153,14 +203,14 @@ def classify(channel, item):
         source = text_field(item, 'upstream_url', optional=True)
         target = name.casefold() == 'icode' or slug == 'icode'
         matches = slug == 'icode' and github_source(source)
-        known_other = source is not None and not github_source(source)
+        known_other = False
     elif channel == 'smithery':
         text_field(item, 'namespace')
         name, slug = text_field(item, 'displayName'), text_field(item, 'slug')
         source = text_field(item, 'gitUrl', nullable=True)
         target = name.casefold() == 'icode' or slug == 'icode'
         matches = slug == 'icode' and github_source(source)
-        known_other = source is not None and not github_source(source)
+        known_other = False
     else:  # ClawHub allows missing/null owner information in its search schema.
         name, slug = text_field(item, 'displayName'), text_field(item, 'slug')
         text_field(item, 'ownerHandle', optional=True)
@@ -173,7 +223,9 @@ def classify(channel, item):
         target = name.casefold() == 'icode' or slug == 'icode'
         # Platform handles/canonical URLs do not authenticate a GitHub owner.
         matches = slug == 'icode' and github_source(source)
-        known_other = source is not None and not github_source(source)
+        known_other = False
+    source_repo = github_repository(source)
+    known_other = known_other or (source_repo is not None and source_repo != TARGET_REPOSITORY)
     if not target:
         return 'not_in_results'
     if matches:
@@ -201,16 +253,18 @@ def search_rows(channel, payload):
     return rows
 
 
-def observe(channel, query):
+def observe(channel, query, budget=None):
     result = query_plan(channel, query)
     try:
-        rows = search_rows(channel, fetch(result['url']))
+        rows = search_rows(channel, fetch(result['url'], budget=budget))
         # Validate the entire page before declaring success, including nonmatches.
         identities = [classify(channel, row) for row in rows]
         positions = [n for n, state in enumerate(identities, 1) if state == 'matched']
         candidates = [n for n, state in enumerate(identities, 1) if state == 'candidate_unverified']
         result.update(status='matched' if positions else 'candidate_unverified' if candidates else 'not_in_results',
                       returned=len(rows), positions=positions, candidate_positions=candidates)
+    except BudgetExhausted as exc:
+        result.update(status='budget_exhausted', reason=str(exc))
     except HTTPError as exc:
         result.update(status={401: 'auth_required', 403: 'auth_required', 429: 'rate_limited'}.get(exc.code, 'unavailable'),
                       http_status=exc.code)
@@ -221,11 +275,11 @@ def observe(channel, query):
     return result
 
 
-def main(argv=None):
+def main(argv=None, budget=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--online', action='store_true', help='make anonymous public GET requests')
     parser.add_argument('--channel', choices=(*CHANNELS, 'all'), default='all')
-    parser.add_argument('--query', action='append', help='up to five public search phrases within the 10-request budget (default: icode)')
+    parser.add_argument('--query', action='append', help='up to five public search phrases; 10 HTTP requests including redirects (default: icode)')
     args = parser.parse_args(argv)
     queries = args.query or QUERIES
     if len(queries) > MAX_QUERIES or any(not q.strip() or len(q) > 128 or any(ord(c) < 32 for c in q) for q in queries):
@@ -237,7 +291,9 @@ def main(argv=None):
     report = {'status': 'observed' if args.online else 'dry-run',
               'checked_at': datetime.now(timezone.utc).isoformat(),
               'boundary': 'Only these bounded queries; not proof of ranking, recommendation, installation or global absence.'}
-    report['queries'] = [observe(item['channel'], item['query']) for item in plan] if args.online else plan
+    budget = budget if budget is not None else RequestBudget()
+    report['queries'] = [observe(item['channel'], item['query'], budget=budget) for item in plan] if args.online else plan
+    report['http_budget'] = {'limit': budget.limit, 'used': budget.used}
     print(json.dumps(report, ensure_ascii=False, indent=2))
     # Candidates/misses are valid observations, not verified discovery claims.
     return int(args.online and any(r['status'] not in {'matched', 'not_in_results', 'candidate_unverified'}

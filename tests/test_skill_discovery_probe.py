@@ -1,6 +1,7 @@
 """Bounded read-only observations, never synthetic installs or ranking claims."""
 import importlib.util
 from copy import deepcopy
+from email.message import Message
 from http.client import HTTPException, HTTPResponse
 import io
 import json
@@ -9,6 +10,8 @@ import unittest
 from unittest.mock import patch
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, urlsplit
+from urllib.request import HTTPSHandler, ProxyHandler, build_opener as urllib_build_opener
+from urllib.response import addinfourl
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -50,6 +53,39 @@ def envelope(channel, rows):
     if channel in ('context7', 'clawhub'):
         return {'results': rows}
     return {'skills': rows, 'pagination': {'currentPage': 1, 'pageSize': 50}}
+
+
+class RedirectTransport(HTTPSHandler):
+    """Replace only the transport; urllib must process every 308 itself."""
+    def __init__(self, redirects=1):
+        super().__init__()
+        self.redirects = redirects
+        self.requests = []
+        self.visits = {}
+
+    def https_open(self, request):
+        self.requests.append(request.full_url)
+        url = urlsplit(request.full_url)
+        host = url.hostname.removeprefix('www.')
+        self.visits[host] = self.visits.get(host, 0) + 1
+        headers = Message()
+        if self.visits[host] <= self.redirects:
+            headers['Location'] = url._replace(netloc='www.' + host).geturl()
+            response = addinfourl(io.BytesIO(b''), headers, request.full_url, 308)
+            response.msg = 'Permanent Redirect'
+        else:
+            pages = {
+                'skillsmp.com': {'success': True, 'data': {'skills': []}},
+                'skills.sh': {'skills': []},
+                'context7.com': {'results': []},
+                'api.skillhub.cn': {'code': 0, 'data': {'skills': []}},
+                'clawhub.ai': {'results': []},
+                'api.smithery.ai': {'skills': []},
+            }
+            headers['Content-Type'] = 'application/json'
+            response = addinfourl(io.BytesIO(json.dumps(pages[host]).encode()), headers, request.full_url, 200)
+            response.msg = 'OK'
+        return response
 
 
 class ProbeTests(unittest.TestCase):
@@ -190,6 +226,80 @@ class ProbeTests(unittest.TestCase):
         row = {**MATCH_ROWS['clawhub'], 'links': {'source': 'https://github.com/other/icode-skill'}}
         with patch.object(self.probe, 'fetch', return_value=envelope('clawhub', [row])):
             self.assertEqual(self.probe.observe('clawhub', 'icode')['status'], 'not_in_results')
+
+    def test_unknown_sources_and_target_repo_aliases_remain_candidates(self):
+        urls = ['https://icode.example.org',
+                'https://github.com/ayukyo/icode-skill.git',
+                'https://github.com/ayukyo/icode-skill/#readme',
+                'https://github.com/ayukyo/icode-skill.git/#readme',
+                'https://github.com/AYUKYO/ICODE-SKILL',
+                'https://github.com.evil.example/other/repo']
+        for channel in PUBLIC_ROWS:
+            for url in urls:
+                row = deepcopy(MATCH_ROWS[channel])
+                if channel == 'clawhub':
+                    row['links']['source'] = url
+                else:
+                    field = {'context7': 'url', 'skillhub': 'upstream_url', 'smithery': 'gitUrl'}[channel]
+                    row[field] = url
+                with self.subTest(channel=channel, url=url), \
+                        patch.object(self.probe, 'fetch', return_value=envelope(channel, [row])) as fetch:
+                    result = self.probe.observe(channel, 'icode')
+                    self.assertEqual(result['status'], 'candidate_unverified')
+                    self.assertEqual(result['positions'], [])
+                    self.assertEqual(result['candidate_positions'], [1])
+                    self.assertEqual(fetch.call_count, 1)  # Never follow a result's source link.
+
+    def test_context7_unknown_project_is_not_another_repository(self):
+        for project in (None, 'unknown', '/ayukyo/icode-skill.git', '/AYUKYO/ICODE-SKILL'):
+            row = {**MATCH_ROWS['context7'], 'project': project, 'url': 'https://icode.example.org'}
+            with self.subTest(project=project), patch.object(self.probe, 'fetch', return_value=envelope('context7', [row])):
+                self.assertEqual(self.probe.observe('context7', 'icode')['status'], 'candidate_unverified')
+        row = {**MATCH_ROWS['context7'], 'project': '/other/icode-skill', 'url': None}
+        with patch.object(self.probe, 'fetch', return_value=envelope('context7', [row])):
+            self.assertEqual(self.probe.observe('context7', 'icode')['status'], 'not_in_results')
+
+    def test_only_explicit_other_github_repositories_are_excluded(self):
+        for channel in PUBLIC_ROWS:
+            for url in ('https://github.com/other/icode-skill',
+                        'https://github.com/ayukyo/other-skill.git/#readme',
+                        'https://raw.githubusercontent.com/other/icode-skill/main/SKILL.md'):
+                row = deepcopy(MATCH_ROWS[channel])
+                if channel == 'clawhub':
+                    row['links']['source'] = url
+                else:
+                    field = {'context7': 'url', 'skillhub': 'upstream_url', 'smithery': 'gitUrl'}[channel]
+                    row[field] = url
+                with self.subTest(channel=channel, url=url), patch.object(self.probe, 'fetch', return_value=envelope(channel, [row])):
+                    self.assertEqual(self.probe.observe(channel, 'icode')['status'], 'not_in_results')
+
+    def test_real_urllib_redirects_share_the_run_http_budget(self):
+        for redirects, completed in ((1, 5), (2, 3)):
+            transport = RedirectTransport(redirects)
+            def opener(*handlers):
+                return urllib_build_opener(ProxyHandler({}), transport, *handlers)
+            with self.subTest(redirects=redirects), \
+                    patch.object(self.probe, 'build_opener', side_effect=opener), \
+                    patch('socket.socket', side_effect=AssertionError('real network forbidden')), \
+                    patch('sys.stdout', new_callable=io.StringIO) as output:
+                code = self.probe.main(['--online'])
+                report = json.loads(output.getvalue())
+                self.assertEqual(len(transport.requests), 10)
+                self.assertEqual(code, 1)
+                self.assertEqual(report['http_budget'], {'limit': 10, 'used': 10})
+                self.assertEqual(len(report['queries']), 6)
+                self.assertEqual([r['status'] for r in report['queries']],
+                                 ['not_in_results'] * completed + ['budget_exhausted'] * (6 - completed))
+                for result in report['queries'][completed:]:
+                    self.assertIn('redirect', result['reason'])
+                    self.assertIn('10', result['reason'])
+                self.assertTrue(any(urlsplit(url).hostname.startswith('www.') for url in transport.requests))
+
+    def test_offline_never_opens_urllib_transport(self):
+        with patch.object(self.probe, 'build_opener', side_effect=AssertionError('offline')), \
+                patch('sys.stdout', new_callable=io.StringIO) as output:
+            self.assertEqual(self.probe.main([]), 0)
+        self.assertEqual(json.loads(output.getvalue()).get('http_budget'), {'limit': 10, 'used': 0})
 
     def test_optional_source_type_drift_is_not_a_candidate(self):
         for channel, field in (('skillhub', 'upstream_url'), ('clawhub', 'ownerHandle'),
