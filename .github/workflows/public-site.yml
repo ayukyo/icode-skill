@@ -1,6 +1,8 @@
 name: Public site
 
 on:
+  push:
+    branches: [main]
   pull_request:
     paths:
       - 'site/**'
@@ -9,19 +11,21 @@ on:
       - 'tests/test_public_site*.py'
       - 'tests/test_notify_indexnow.py'
       - 'SKILL.md'
+      - 'README*.md'
+      - 'docs/public-discovery.md'
       - '.github/workflows/public-site.yml'
   release:
     types: [published]
   workflow_dispatch:
 
-# No automatic push, release creation, settings changes or external posting.
+# Publishes after an authorized main push; never creates commits or releases.
 permissions:
   contents: read
 
 concurrency:
   # Only authorized publications share cancellation across the complete build/deploy run.
   # Keep eligibility identical to the PUBLISH policy below; previews cannot cancel a deployment.
-  group: public-site-${{ vars.PUBLIC_SITE_ENABLED == 'true' && vars.PUBLIC_SITE_URL != '' && ((github.event_name == 'release' && !github.event.release.prerelease && !github.event.release.draft) || (github.event_name == 'workflow_dispatch' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch))) && 'deployment' || format('preview-{0}-{1}', github.event_name, github.ref) }}
+  group: public-site-${{ vars.PUBLIC_SITE_ENABLED == 'true' && vars.PUBLIC_SITE_URL != '' && ((github.event_name == 'release' && !github.event.release.prerelease && !github.event.release.draft) || ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == format('refs/heads/{0}', github.event.repository.default_branch))) && 'deployment' || format('preview-{0}-{1}', github.event_name, github.ref) }}
   cancel-in-progress: true
 
 jobs:
@@ -48,7 +52,7 @@ jobs:
       - name: Evaluate publication authorization
         id: policy
         env:
-          PUBLISH: ${{ vars.PUBLIC_SITE_ENABLED == 'true' && vars.PUBLIC_SITE_URL != '' && ((github.event_name == 'release' && !github.event.release.prerelease && !github.event.release.draft) || (github.event_name == 'workflow_dispatch' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch))) }}
+          PUBLISH: ${{ vars.PUBLIC_SITE_ENABLED == 'true' && vars.PUBLIC_SITE_URL != '' && ((github.event_name == 'release' && !github.event.release.prerelease && !github.event.release.draft) || ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == format('refs/heads/{0}', github.event.repository.default_branch))) }}
         run: echo "publish=$PUBLISH" >> "$GITHUB_OUTPUT"
       - name: Offline regression tests
         run: |
@@ -62,6 +66,18 @@ jobs:
         env:
           INDEXNOW_KEY: ${{ secrets.INDEXNOW_KEY }}
         run: python3 tools/build_public_site.py --output _site --base-url "$SITE_URL" --expected-version "$EXPECTED_VERSION"
+      - name: Reject superseded publication source
+        if: steps.policy.outputs.publish == 'true'
+        shell: bash
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          latest=$(git ls-remote --exit-code origin "refs/heads/$DEFAULT_BRANCH")
+          latest=${latest%%[[:space:]]*}
+          if [ "$latest" != "$(git rev-parse HEAD)" ]; then
+            echo '::error::Superseded publication source; publish the latest default-branch run instead.'
+            exit 1
+          fi
       - name: Package only generated public files
         if: steps.policy.outputs.publish == 'true'
         uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3
@@ -81,22 +97,51 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5
-      - uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4
-        id: deployment
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: ${{ needs.build.outputs.commit }}
           persist-credentials: false
+      - name: Reject superseded publication source
+        shell: bash
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          latest=$(git ls-remote --exit-code origin "refs/heads/$DEFAULT_BRANCH")
+          latest=${latest%%[[:space:]]*}
+          if [ "$latest" != "$(git rev-parse HEAD)" ]; then
+            echo '::error::Superseded publication source; publish the latest default-branch run instead.'
+            exit 1
+          fi
+      - uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5
+      - uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4
+        id: deployment
       - name: Notify participating search engines (optional)
+        id: search_notification
         if: steps.deployment.outcome == 'success' && vars.INDEXNOW_ENABLED == 'true'
         continue-on-error: true
+        shell: bash
         env:
           SITE_URL: ${{ vars.PUBLIC_SITE_URL }}
           INDEXNOW_KEY: ${{ secrets.INDEXNOW_KEY }}
         run: |
           python3 tools/build_public_site.py --output _site --base-url "$SITE_URL"
-          python3 tools/notify_indexnow.py --manifest _site/public-manifest.json --submit
+          python3 tools/notify_indexnow.py --manifest _site/public-manifest.json --submit | tee "$RUNNER_TEMP/indexnow-result.json"
       - name: Summarize evidence boundary
         if: always()
-        run: echo 'Pages deployment and search notification are separate results. A received notification is not proof of indexing or ranking. Inspect each step above.' >> "$GITHUB_STEP_SUMMARY"
+        env:
+          DEPLOYMENT_OUTCOME: ${{ steps.deployment.outcome }}
+          NOTIFICATION_OUTCOME: ${{ steps.search_notification.outcome }}
+        shell: bash
+        run: |
+          # Use outcome, not conclusion: continue-on-error can make a failure look successful.
+          {
+            printf 'Pages deployment: %s\n\nIndexNow step outcome: %s\n\n' "$DEPLOYMENT_OUTCOME" "$NOTIFICATION_OUTCOME"
+            if [ -s "$RUNNER_TEMP/indexnow-result.json" ]; then
+              printf '```json\n'
+              cat "$RUNNER_TEMP/indexnow-result.json"
+              printf '\n```\n\n'
+            else
+              printf 'No notification result was produced; notification may be disabled, skipped or interrupted.\n\n'
+            fi
+            printf 'Pages deployment and search notification are separate results. A received notification is not proof of indexing or ranking.\n'
+          } >> "$GITHUB_STEP_SUMMARY"

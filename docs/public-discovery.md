@@ -82,7 +82,7 @@ python3 tools/notify_indexnow.py --manifest _site/public-manifest.json --submit
 
 旧 [Public site run 35511779722](https://github.com/ayukyo/icode-skill/actions/runs/35511779722) 的打包产物包含所有权文件，但公开访问该文件返回 404，通知结果为 `failed`。同一 SHA 重新部署时可能复用了旧产物，与 [actions/deploy-pages issue #383](https://github.com/actions/deploy-pages/issues/383) 描述的现象疑似相关；目前仅作排查线索，不能视为已确认根因。
 
-后续应在新提交进入默认分支后手动运行 **Public site**，核对该次源码 SHA、打包产物和实际部署，再检查公开所有权文件与新 summary 的通知 JSON / outcome。新 run 的结果另记在本地运行报告；这里保留带日期的故障快照与验收方法，不将旧失败或未来成功写成永久状态。未获得新运行证据前，不能宣称已通知或已收录。
+后续应在新提交 push 到 `main` 后检查自动触发的 **Public site**，核对该次源码 SHA、打包产物和实际部署，再检查公开所有权文件与新 summary 的通知 JSON / outcome；无需重复手动触发同一次发布。新 run 的结果另记在本地运行报告；这里保留带日期的故障快照与验收方法，不将旧失败或未来成功写成永久状态。未获得新运行证据前，不能宣称已通知或已收录。
 
 ## skills.sh 与宿主兼容边界
 
@@ -126,7 +126,7 @@ DISABLE_TELEMETRY=1 npx skills add ayukyo/icode-skill --list
 | 构建通过但没有部署 | 检查启用开关、基址、触发来源与环境策略 |
 | Pages 失败 | 检查 Pages Source、仓库可见性/套餐及 environment 来源限制 |
 | IndexNow skipped | 未配置 key；网站仍可正常使用 |
-| 所有权验证失败 / 公开文件 404 | 对比该次打包产物与实际部署，确认 key、基址和子路径一致；若疑似同 SHA 产物复用，用新提交手动运行 Public site 后核验，不只反复重跑旧 run |
+| 所有权验证失败 / 公开文件 404 | 对比该次打包产物与实际部署，确认 key、基址和子路径一致；若疑似同 SHA 产物复用，核验新 main 提交自动触发的 Public site，不只反复重跑旧 run |
 | 工作流绿色但通知未成功 | 检查新 summary 的 Pages deployment、IndexNow step outcome 及受控 JSON；以 `.outcome` 和实际 `status` 为准，不能用 `.conclusion` 推断成功 |
 | 第三方目录列出仓库但技能数为 0 | 区分目录解析与真实技能发现；根路径过滤问题见上游 issue #52，待上游修复 |
 | 搜索不到项目 | 通知仅请求发现；抓取、收录和排名由搜索引擎决定 |

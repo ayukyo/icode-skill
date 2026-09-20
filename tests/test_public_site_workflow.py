@@ -1,6 +1,10 @@
 """Fail-closed publishing configuration; no GitHub credentials needed."""
 from pathlib import Path
+import os
 import re
+import subprocess
+import tempfile
+import textwrap
 from types import SimpleNamespace
 import unittest
 
@@ -23,6 +27,7 @@ class WorkflowTests(unittest.TestCase):
 
     def test_disabled_by_default_and_no_pr_deploy(self):
         text = self.text()
+        self.assertIn('  push:\n    branches: [main]\n', text)
         self.assertIn("vars.PUBLIC_SITE_ENABLED == 'true'", text)
         self.assertIn("github.event_name == 'release'", text)
         self.assertIn("github.event_name == 'workflow_dispatch'", text)
@@ -76,7 +81,9 @@ class WorkflowTests(unittest.TestCase):
                   ('workflow_dispatch', 'refs/heads/feature', False, False, False),
                   ('workflow_dispatch', 'refs/tags/v1.2.3', False, False, False),
                   ('pull_request', 'refs/pull/7/merge', False, False, False),
-                  ('push', 'refs/heads/main', False, False, False)]
+                  ('push', 'refs/heads/main', False, False, True),
+                  ('push', 'refs/heads/feature', False, False, False),
+                  ('push', 'refs/tags/v1.2.3', False, False, False)]
         for enabled in ('true', 'false', ''):
             for url in ('https://example.org/project/', ''):
                 for event, ref, prerelease, draft, allowed in events:
@@ -95,6 +102,84 @@ class WorkflowTests(unittest.TestCase):
         policy = re.search(r'PUBLISH: \$\{\{ (.+) \}\}', text).group(1)
         group = re.search(r'group: public-site-\$\{\{ (.+) \}\}', text).group(1)
         self.assertTrue(group.startswith(policy + " && 'deployment' || "))
+
+    def test_stale_publications_fail_closed_before_upload_and_deploy(self):
+        text = self.text()
+        scripts = re.findall(r'- name: Reject superseded publication source\n(.*?)(?=      - )', text, re.S)
+        self.assertEqual(len(scripts), 2, 'check freshness before upload and again before deployment')
+        build, deploy = text.split('\n  deploy:\n', 1)
+        self.assertLess(build.index('Reject superseded'), build.index('Package only generated'))
+        self.assertLess(deploy.index('needs.build.outputs.commit'), deploy.index('Reject superseded'))
+        self.assertLess(deploy.index('Reject superseded'), deploy.index('actions/deploy-pages@'))
+        for block in scripts:
+            self.assertIn('DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}', block)
+            self.assertIn('shell: bash', block)
+        script = textwrap.dedent(scripts[0].split('run: |\n', 1)[1])
+        self.assertEqual(script, textwrap.dedent(scripts[1].split('run: |\n', 1)[1]))
+        with tempfile.TemporaryDirectory() as tmp:
+            origin, checkout = Path(tmp) / 'origin', Path(tmp) / 'checkout'
+            def git(*args, cwd=origin):
+                return subprocess.run(['git', *args], cwd=cwd, check=True,
+                                      capture_output=True, text=True, timeout=10)
+            origin.mkdir()
+            git('init', '-b', 'main')
+            git('config', 'user.email', 'fixture@example.invalid')
+            git('config', 'user.name', 'Fixture')
+            git('commit', '--allow-empty', '-m', 'initial')
+            git('clone', str(origin), str(checkout), cwd=Path(tmp))
+            def run(branch='main'):
+                return subprocess.run(['bash', '-e', '-o', 'pipefail', '-c', script],
+                                      cwd=checkout, env=dict(os.environ, DEFAULT_BRANCH=branch),
+                                      capture_output=True, text=True, timeout=10)
+            self.assertEqual(run().returncode, 0)
+            git('commit', '--allow-empty', '-m', 'newer source')
+            stale = run()
+            self.assertNotEqual(stale.returncode, 0)
+            self.assertIn('Superseded publication source', stale.stdout)
+            self.assertNotEqual(run('missing-branch').returncode, 0)
+            git('remote', 'set-url', 'origin', str(Path(tmp) / 'unavailable'), cwd=checkout)
+            self.assertNotEqual(run().returncode, 0)
+
+    def test_notification_preserves_real_outcome_and_machine_result(self):
+        block = self.text().split('- name: Notify participating search engines (optional)', 1)[1]
+        block = block.split('- name: Summarize evidence boundary', 1)[0]
+        self.assertIn('id: search_notification', block)
+        self.assertIn('shell: bash', block)  # Explicit Bash enables pipefail in Actions.
+        self.assertIn('continue-on-error: true', block)
+        self.assertIn('--submit | tee "$RUNNER_TEMP/indexnow-result.json"', block)
+
+    def test_summary_distinguishes_delivery_failure_skipped_and_missing_evidence(self):
+        block = self.text().split('- name: Summarize evidence boundary', 1)[1]
+        self.assertIn('if: always()', block)
+        self.assertIn('DEPLOYMENT_OUTCOME: ${{ steps.deployment.outcome }}', block)
+        self.assertIn('NOTIFICATION_OUTCOME: ${{ steps.search_notification.outcome }}', block)
+        self.assertIn('run: |\n', block)
+        script = textwrap.dedent(block.split('run: |\n', 1)[1])
+        for outcome, result in [('success', '{"status":"received","http_status":200}'),
+                                ('success', '{"status":"pending","http_status":202}'),
+                                ('failure', '{"status":"failed","stage":"ownership","http_status":404}'),
+                                ('success', '{"status":"skipped","reason":"missing_key"}'),
+                                ('skipped', None), ('failure', None)]:
+            with self.subTest(outcome=outcome, result=result), tempfile.TemporaryDirectory() as tmp:
+                temp = Path(tmp)
+                if result is not None:
+                    (temp / 'indexnow-result.json').write_text(result + '\n')
+                env = dict(os.environ, RUNNER_TEMP=tmp, GITHUB_STEP_SUMMARY=str(temp / 'summary.md'),
+                           DEPLOYMENT_OUTCOME='success', NOTIFICATION_OUTCOME=outcome,
+                           INDEXNOW_KEY='NOT-A-LOGGABLE-KEY')
+                proc = subprocess.run(['bash', '-e', '-o', 'pipefail', '-c', script],
+                                      env=env, capture_output=True, text=True, timeout=10)
+                self.assertEqual(proc.returncode, 0, proc.stderr)
+                rendered = (temp / 'summary.md').read_text()
+                self.assertIn('Pages deployment: success', rendered)
+                self.assertIn('IndexNow step outcome: ' + outcome, rendered)
+                self.assertIn('not proof of indexing or ranking', rendered)
+                self.assertNotIn('NOT-A-LOGGABLE-KEY', rendered)
+                if result is None:
+                    self.assertIn('No notification result was produced', rendered)
+                    self.assertNotIn('"status":"received"', rendered)
+                else:
+                    self.assertIn(result, rendered)
 
 
 if __name__ == '__main__':
