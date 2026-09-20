@@ -38,7 +38,7 @@ MATCH_ROWS = {
                  'upstream_url': 'https://github.com/ayukyo/icode-skill'},
     'clawhub': {'slug': 'icode', 'displayName': 'ICODE', 'source': 'clawhub',
                 'ownerHandle': 'ayukyo', 'canonicalUrl': '/ayukyo/skills/icode',
-                'links': {'source': None}},
+                'links': {'source': 'https://github.com/ayukyo/icode-skill'}},
     'smithery': {'namespace': 'ayukyo', 'slug': 'icode', 'displayName': 'ICODE',
                  'gitUrl': 'https://github.com/ayukyo/icode-skill/tree/main'},
 }
@@ -128,7 +128,8 @@ class ProbeTests(unittest.TestCase):
                          'url': 'https://raw.githubusercontent.com/other/icode-skill/main/SKILL.md'},
             'skillhub': {**MATCH_ROWS['skillhub'], 'upstream_url': 'https://github.com/other/icode-skill'},
             'clawhub': {**MATCH_ROWS['clawhub'], 'ownerHandle': 'other',
-                        'canonicalUrl': '/other/skills/icode'},
+                        'canonicalUrl': '/other/skills/icode',
+                        'links': {'source': 'https://github.com/other/icode-skill'}},
             'smithery': {**MATCH_ROWS['smithery'], 'namespace': 'other',
                          'gitUrl': 'https://github.com/other/icode-skill'},
         }
@@ -162,9 +163,23 @@ class ProbeTests(unittest.TestCase):
                     with patch.object(self.probe, 'fetch', return_value=envelope(channel, [row])):
                         self.assertNotEqual(self.probe.observe(channel, 'icode')['status'], 'matched')
 
-    def test_clawhub_owner_slug_requires_canonical_identity_or_exact_github_source(self):
+    def test_clawhub_platform_identity_alone_is_unverified(self):
+        # Platform handles, even "ayukyo", do not prove the GitHub owner's identity.
+        for owner in ('ayukyo', 'other'):
+            for prefix in ('', 'https://clawhub.ai'):
+                row = {**MATCH_ROWS['clawhub'], 'ownerHandle': owner,
+                       'canonicalUrl': f'{prefix}/{owner}/skills/icode',
+                       'links': {'source': None}}
+                with self.subTest(owner=owner, prefix=prefix), \
+                        patch.object(self.probe, 'fetch', return_value=envelope('clawhub', [row])), \
+                        patch('sys.stdout', new_callable=io.StringIO) as output:
+                    self.assertEqual(self.probe.main(['--online', '--channel', 'clawhub']), 0)
+                    result = json.loads(output.getvalue())['queries'][0]
+                    self.assertEqual(result['status'], 'candidate_unverified')
+                    self.assertEqual(result['positions'], [])
+                    self.assertEqual(result['candidate_positions'], [1])
         for field in ('ownerHandle', 'canonicalUrl', 'source'):
-            row = deepcopy(MATCH_ROWS['clawhub'])
+            row = {**MATCH_ROWS['clawhub'], 'links': {'source': None}}
             del row[field]
             with self.subTest(field=field), patch.object(self.probe, 'fetch', return_value=envelope('clawhub', [row])):
                 self.assertEqual(self.probe.observe('clawhub', 'icode')['status'], 'candidate_unverified')
@@ -280,21 +295,28 @@ class ProbeTests(unittest.TestCase):
                 self.assertEqual(caught.exception.code, 2)
                 self.assertIn('10', err.getvalue())
                 self.assertIn('--channel', err.getvalue())
-        args = ['--channel', 'skills.sh'] + ['--query', 'icode'] * 10
-        with patch.object(self.probe, 'fetch', return_value={'skills': []}) as fetch, \
-                patch('sys.stdout', new_callable=io.StringIO) as output, \
-                patch('sys.stderr', new_callable=io.StringIO):
-            try:
-                code = self.probe.main(['--online'] + args)
-            except SystemExit:
-                self.fail('ten single-channel requests must fit the budget')
-            self.assertEqual(code, 0)
-        self.assertEqual(len(json.loads(output.getvalue())['queries']), 10)
-        self.assertEqual(fetch.call_count, 10)
-        with patch.object(self.probe, 'fetch', side_effect=AssertionError('no network')), \
-                patch('sys.stderr', new_callable=io.StringIO), self.assertRaises(SystemExit) as caught:
-            self.probe.main(args + ['--query', 'review'])
-        self.assertEqual(caught.exception.code, 2)
+
+    def test_single_channel_five_queries_pass_but_six_are_rejected_before_network(self):
+        phrases = ['icode', 'code review', 'workflow', '工单', 'testing']
+        args = ['--channel', 'skills.sh']
+        for phrase in phrases:
+            args.extend(['--query', phrase])
+        for online in ([], ['--online']):
+            with self.subTest(online=online), patch.object(self.probe, 'fetch', return_value={'skills': []}) as fetch, \
+                    patch('sys.stdout', new_callable=io.StringIO) as output:
+                self.assertEqual(self.probe.main(online + args), 0)
+            self.assertEqual([r['query'] for r in json.loads(output.getvalue())['queries']], phrases)
+            self.assertEqual(fetch.call_count, 5 if online else 0)
+            with self.subTest(online=online, rejected=6), \
+                    patch.object(self.probe, 'fetch', return_value={'skills': []}) as fetch, \
+                    patch('sys.stdout', new_callable=io.StringIO) as output, \
+                    patch('sys.stderr', new_callable=io.StringIO) as err:
+                with self.assertRaises(SystemExit) as caught:
+                    self.probe.main(online + args + ['--query', 'debug'])
+                self.assertEqual(caught.exception.code, 2)
+                fetch.assert_not_called()
+                self.assertEqual(output.getvalue(), '')
+                self.assertIn('5', err.getvalue())
 
     def test_matching_requires_exact_source_and_skill_identity(self):
         cases = [

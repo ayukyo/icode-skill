@@ -17,6 +17,7 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 CHANNELS = ('skillsmp', 'skills.sh', 'context7', 'skillhub', 'clawhub', 'smithery')
 QUERIES = ('icode',)
 MAX_BYTES = 2_000_000
+MAX_QUERIES = 5
 MAX_REQUESTS = 10
 LIMIT = 50
 ENDPOINTS = {
@@ -162,20 +163,17 @@ def classify(channel, item):
         known_other = source is not None and not github_source(source)
     else:  # ClawHub allows missing/null owner information in its search schema.
         name, slug = text_field(item, 'displayName'), text_field(item, 'slug')
-        owner = text_field(item, 'ownerHandle', optional=True)
-        origin = text_field(item, 'source', optional=True)
-        canonical = text_field(item, 'canonicalUrl', optional=True)
+        text_field(item, 'ownerHandle', optional=True)
+        text_field(item, 'source', optional=True)
+        text_field(item, 'canonicalUrl', optional=True)
         links = item.get('links')
         if links is not None and not isinstance(links, dict):
             raise ValueError('search result links changed')
         source = text_field(links or {}, 'source', optional=True)
         target = name.casefold() == 'icode' or slug == 'icode'
-        # A display name or bare slug alone does not establish publisher identity.
-        platform_match = (origin == 'clawhub' and owner == 'ayukyo'
-                          and canonical in ('/ayukyo/skills/icode', 'https://clawhub.ai/ayukyo/skills/icode'))
-        matches = slug == 'icode' and (github_source(source) or (source is None and platform_match))
-        known_other = ((source is not None and not github_source(source))
-                       or (source is None and owner not in (None, 'ayukyo')))
+        # Platform handles/canonical URLs do not authenticate a GitHub owner.
+        matches = slug == 'icode' and github_source(source)
+        known_other = source is not None and not github_source(source)
     if not target:
         return 'not_in_results'
     if matches:
@@ -227,11 +225,11 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--online', action='store_true', help='make anonymous public GET requests')
     parser.add_argument('--channel', choices=(*CHANNELS, 'all'), default='all')
-    parser.add_argument('--query', action='append', help='public search phrase; repeat within the 10-request budget (default: icode)')
+    parser.add_argument('--query', action='append', help='up to five public search phrases within the 10-request budget (default: icode)')
     args = parser.parse_args(argv)
     queries = args.query or QUERIES
-    if any(not q.strip() or len(q) > 128 or any(ord(c) < 32 for c in q) for q in queries):
-        parser.error('use nonempty public phrases of at most 128 characters')
+    if len(queries) > MAX_QUERIES or any(not q.strip() or len(q) > 128 or any(ord(c) < 32 for c in q) for q in queries):
+        parser.error('use 1–5 nonempty public phrases of at most 128 characters')
     channels = CHANNELS if args.channel == 'all' else (args.channel,)
     if len(channels) * len(queries) > MAX_REQUESTS:
         parser.error('at most 10 search requests per run; split queries into separate --channel runs')
