@@ -1,7 +1,615 @@
-:root{color-scheme:dark;--bg:#101419;--panel:#192028;--text:#f3f1eb;--muted:#b4bec8;--line:#333e49;--accent:#ffc58f;--green:#a6dbbe}
-*{box-sizing:border-box}html{scroll-behavior:smooth;scroll-padding-top:2rem}body{margin:0;background:var(--bg);color:var(--text);font:16px/1.75 system-ui,-apple-system,"Segoe UI",sans-serif}a{color:inherit;text-underline-offset:5px}a:hover{color:var(--accent)}a:focus-visible{outline:3px solid var(--accent);outline-offset:5px}header,main,footer{max-width:1180px;margin:auto;padding:0 32px}header{display:flex;justify-content:space-between;align-items:center;gap:24px;padding-top:26px;padding-bottom:26px;border-bottom:1px solid var(--line)}nav{display:flex;gap:24px;flex-wrap:wrap}.brand{font-size:23px;font-weight:800;letter-spacing:3px;text-decoration:none}.brand span{color:var(--accent)}.skip{position:absolute;left:12px;top:-70px}.skip:focus{top:8px;background:var(--bg);padding:8px;z-index:2}.hero{display:grid;grid-template-columns:1.25fr 1fr;gap:64px;align-items:center;padding:90px 0 70px}.eyebrow{color:var(--accent);font-size:12px;font-weight:700;letter-spacing:2px;text-transform:uppercase}h1{font-size:clamp(2.5rem,4.8vw,4rem);line-height:1.15;letter-spacing:-.045em;margin:24px 0}h2{font-size:clamp(1.65rem,3vw,2.3rem);line-height:1.3;letter-spacing:-.025em;margin:0 0 26px}h3{font-size:1.12rem;margin:0 0 10px}p{margin:0 0 16px}.lead{color:var(--muted);max-width:42rem;font-size:1.08rem}.actions{display:flex;gap:16px;align-items:center;flex-wrap:wrap;margin-top:30px}.button{display:inline-block;background:var(--accent);color:var(--bg);padding:10px 22px;border-radius:7px;text-decoration:none;font-weight:750}.button:hover{background:#ffdbb9;color:var(--bg)}.terminal{background:#0b0e12;border:1px solid var(--line);border-radius:14px;box-shadow:0 24px 60px #0004;overflow:hidden;min-width:0}.terminal-head{padding:12px 20px;border-bottom:1px solid var(--line);font:12px ui-monospace,monospace;color:var(--muted)}.terminal-body{padding:26px}.terminal-body .prompt{color:var(--green);font:14px/1.8 ui-monospace,monospace;overflow-wrap:anywhere}.trace{list-style:none;padding:0;margin:25px 0 0;display:grid;gap:13px}.trace li{display:flex;justify-content:space-between;gap:12px;color:var(--muted);font-size:13px}.trace b{color:var(--text);font-weight:500}.tag{font-size:11px;letter-spacing:1px;border:1px solid var(--line);padding:2px 7px;border-radius:4px}.section{padding:54px 0;border-top:1px solid var(--line)}.flow{list-style:none;padding:0;display:grid;grid-template-columns:repeat(6,1fr);gap:12px;counter-reset:stage}.flow li{padding:18px 12px;background:var(--panel);border:1px solid var(--line);border-radius:8px;counter-increment:stage}.flow li:before{content:"0" counter(stage);display:block;color:var(--accent);font:12px ui-monospace,monospace;margin-bottom:8px}.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:22px}.card{padding:25px;border:1px solid var(--line);border-radius:10px;background:var(--panel)}.card p,.note{color:var(--muted);font-size:14px}.install-grid{display:grid;grid-template-columns:1fr 1fr;gap:26px}pre{margin:15px 0;padding:22px;background:#0b0e12;border:1px solid var(--line);border-radius:9px;overflow:auto;font:13px/1.9 ui-monospace,SFMono-Regular,Consolas,monospace}code{font-family:ui-monospace,SFMono-Regular,Consolas,monospace}.examples{display:grid;grid-template-columns:1fr 1fr;gap:16px}.examples article{border:1px solid var(--line);border-radius:8px;padding:22px}.examples code{display:block;white-space:pre-wrap;overflow-wrap:anywhere;font-size:13px;color:var(--green)}.boundary{padding:22px;border-left:3px solid var(--accent);background:var(--panel);margin-top:28px}.update{padding:20px 0;border-bottom:1px solid var(--line)}.update time{color:var(--muted);font-size:13px;margin-left:15px}footer{padding-top:30px;padding-bottom:45px;color:var(--muted);font-size:13px}footer a{margin-right:18px}.version{font:12px ui-monospace,monospace;color:var(--muted);margin-top:20px}
-@media(max-width:850px){.hero{grid-template-columns:1fr;gap:35px;padding:55px 0}.grid{grid-template-columns:repeat(2,1fr)}.flow{grid-template-columns:repeat(3,1fr)}.install-grid{grid-template-columns:1fr}}
-@media(max-width:520px){header,main,footer{padding-left:20px;padding-right:20px}header{align-items:flex-start}nav{gap:12px;font-size:13px}.grid,.examples{grid-template-columns:1fr}.flow{grid-template-columns:repeat(2,1fr)}.card{padding:20px}.section{padding:36px 0}h1{font-size:2.5rem}.terminal-body{padding:20px}}
-/* Keep long install commands inside their scrollable code blocks. */
-.install-grid>div{min-width:0}
-@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+/* Shared light palette: text tokens pass 4.5:1 on both page surfaces. */
+:root {
+  color-scheme: light;
+  --bg: #FAFAF7;
+  --panel: #FFFFFF;
+  --text: #182230;
+  --muted: #516071;
+  --accent: #4F46E5;
+  --green: #087F72;
+  --pending: #946200;
+  --line: #CCD4DD;
+}
+
+/* Document, typography and keyboard navigation. */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-padding-top: 2rem;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 16px/1.75 system-ui, -apple-system, "Segoe UI", sans-serif;
+  overflow-wrap: anywhere;
+}
+
+a {
+  display: inline-block;
+  min-width: 44px;
+  min-height: 44px;
+  max-width: 100%;
+  padding-block: 0.5rem;
+  color: var(--accent);
+  text-underline-offset: 0.2em;
+}
+
+a:hover {
+  color: var(--accent);
+  text-decoration-thickness: 2px;
+}
+
+a:focus-visible,
+summary:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 4px;
+}
+
+.skip {
+  position: absolute;
+  left: 12px;
+  top: -100px;
+}
+
+.skip:focus {
+  top: 8px;
+  z-index: 2;
+  padding: 0.5rem 1rem;
+  background: var(--panel);
+}
+
+h1 {
+  margin: 1.25rem 0;
+  font-size: clamp(2.5rem, 4.8vw, 4rem);
+  line-height: 1.15;
+  letter-spacing: normal;
+}
+
+h2 {
+  margin: 0 0 1.5rem;
+  font-size: clamp(1.65rem, 3vw, 2.3rem);
+  line-height: 1.3;
+  letter-spacing: normal;
+}
+
+h3 {
+  margin: 0 0 0.625rem;
+  font-size: 1.125rem;
+  line-height: 1.5;
+}
+
+p {
+  margin: 0 0 1rem;
+}
+
+/* Header accepts flow, capabilities and install links in either locale. */
+header,
+main,
+footer {
+  max-width: 1180px;
+  margin-inline: auto;
+  padding-inline: 32px;
+}
+
+header {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem 1.5rem;
+  padding-block: 1.25rem;
+  border-bottom: 1px solid var(--line);
+}
+
+nav {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem 1rem;
+  min-width: 0;
+}
+
+nav a {
+  color: var(--text);
+  font-size: 0.875rem;
+}
+
+.brand {
+  color: var(--text);
+  font-size: 23px;
+  font-weight: 800;
+  letter-spacing: 3px;
+  text-decoration: none;
+}
+
+.brand span {
+  color: var(--accent);
+}
+
+/* Hero and host badges. Terminal content remains a static usage illustration. */
+.hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+  align-items: center;
+  gap: 3.5rem;
+  padding-block: 5rem 4rem;
+}
+
+.eyebrow {
+  color: var(--accent);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.lead {
+  max-width: 42rem;
+  color: var(--muted);
+  font-size: 1.08rem;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 1rem;
+  margin-top: 1.75rem;
+}
+
+.button,
+.button:hover {
+  padding: 0.625rem 1.25rem;
+  border-radius: 0.5rem;
+  background: var(--accent);
+  color: var(--panel);
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.button:hover {
+  text-decoration: underline;
+}
+
+.hosts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.625rem;
+  margin: 1.5rem 0;
+  padding: 0;
+  list-style: none;
+}
+
+.hosts li {
+  padding: 0.375rem 0.875rem;
+  border: 1px solid var(--line);
+  border-radius: 0.5rem;
+  background: var(--panel);
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.terminal {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 0.875rem;
+  background: var(--panel);
+}
+
+.terminal-head {
+  padding: 0.75rem 1.25rem;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0.875rem 0.875rem 0 0;
+  background: var(--bg);
+  color: var(--muted);
+  font: 0.75rem/1.6 ui-monospace, monospace;
+}
+
+.terminal-body {
+  padding: 1.5rem;
+}
+
+.terminal-body .prompt {
+  color: var(--green);
+  font: 0.875rem/1.8 ui-monospace, monospace;
+  overflow-wrap: anywhere;
+}
+
+.trace {
+  display: grid;
+  gap: 0.75rem;
+  margin: 1.5rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.trace li {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.75rem;
+  color: var(--muted);
+  font-size: 0.8125rem;
+}
+
+.trace b {
+  min-width: 0;
+  color: var(--text);
+  font-weight: 500;
+}
+
+.tag {
+  flex-shrink: 0;
+  padding: 0.125rem 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: 0.25rem;
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.version {
+  margin-top: 1.25rem;
+  color: var(--muted);
+  font: 0.75rem/1.75 ui-monospace, monospace;
+}
+
+/* Section and grid primitives: items shrink instead of expanding the page. */
+.section {
+  padding-block: 3.5rem;
+  border-top: 1px solid var(--line);
+}
+
+.grid,
+.stage-grid,
+.optional-grid,
+.scenes {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1.25rem;
+}
+
+.stage-grid {
+  align-items: start;
+  margin-top: 1.5rem;
+  margin-bottom: 2rem;
+}
+
+.delivery-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1.25rem;
+}
+
+.install-grid,
+.examples {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1.5rem;
+}
+
+.hero > *,
+.flow > *,
+.grid > *,
+.stage-grid > *,
+.optional-grid > *,
+.scenes > *,
+.delivery-grid > *,
+.install-grid > *,
+.examples > *,
+.trace > * {
+  min-width: 0;
+}
+
+.install-grid > div {
+  min-width: 0;
+}
+
+.card,
+.examples article {
+  padding: 1.5rem;
+  border: 1px solid var(--line);
+  border-radius: 0.75rem;
+  background: var(--panel);
+}
+
+.card p,
+.note {
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+
+.pending {
+  border-top: 3px solid var(--pending);
+}
+
+.pending h3 {
+  color: var(--pending);
+}
+
+/* Six compact overview cells, separate from the expandable stage reference. */
+.flow {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: stage;
+}
+
+.flow li {
+  padding: 1rem 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 0.5rem;
+  background: var(--panel);
+  font-size: 0.875rem;
+  counter-increment: stage;
+}
+
+.flow li::before {
+  display: block;
+  margin-bottom: 0.375rem;
+  color: var(--accent);
+  font: 0.75rem/1.75 ui-monospace, monospace;
+  content: "0" counter(stage);
+}
+
+/* Native summary retains its keyboard behavior and disclosure marker. */
+summary {
+  display: list-item;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0.75rem;
+  color: var(--text);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+summary::marker {
+  color: var(--accent);
+}
+
+summary:hover {
+  color: var(--accent);
+}
+
+.stage,
+.principles,
+.more-examples {
+  border: 1px solid var(--line);
+  border-radius: 0.75rem;
+  background: var(--panel);
+}
+
+.stage summary {
+  padding: 1rem;
+}
+
+.step-number {
+  display: inline-block;
+  margin-inline-end: 0.5rem;
+  color: var(--accent);
+  font: 0.8125rem/1.75 ui-monospace, monospace;
+}
+
+.stage summary strong {
+  font-size: 1rem;
+}
+
+.stage summary code {
+  display: block;
+  margin-top: 0.375rem;
+  color: var(--muted);
+  font-size: 0.8125rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.stage-body {
+  padding: 1.25rem;
+  border-top: 1px solid var(--line);
+}
+
+.stage-body p {
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+
+.stage-body dl {
+  margin: 0;
+  font-size: 0.875rem;
+}
+
+.stage-body dt {
+  font-weight: 700;
+}
+
+.stage-body dd {
+  margin: 0.25rem 0 1rem;
+  color: var(--muted);
+}
+
+.stage-body a {
+  font-size: 0.875rem;
+}
+
+.scenes details {
+  margin-top: 1rem;
+  border-top: 1px solid var(--line);
+}
+
+.principles,
+.more-examples {
+  margin-top: 1.5rem;
+}
+
+.principles .grid,
+.more-examples .examples {
+  padding: 1.25rem;
+  border-top: 1px solid var(--line);
+}
+
+.principles > h3,
+.more-examples > .note {
+  padding-inline: 1.25rem;
+}
+
+/* Commands wrap in cards; installation scripts scroll within their pre only. */
+code {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  overflow-wrap: anywhere;
+}
+
+pre {
+  max-width: 100%;
+  margin: 1rem 0;
+  padding: 1.25rem;
+  border: 1px solid var(--line);
+  border-radius: 0.5rem;
+  background: var(--panel);
+  color: var(--text);
+  overflow-x: auto;
+  font: 0.8125rem/1.9 ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+
+pre code {
+  white-space: pre;
+  overflow-wrap: normal;
+}
+
+.example-command,
+.examples code {
+  display: block;
+  color: var(--green);
+  font-size: 0.8125rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Boundary notes, reviewed updates and footer. */
+.boundary {
+  margin-top: 1.75rem;
+  padding: 1.25rem;
+  border-left: 3px solid var(--accent);
+  background: var(--panel);
+}
+
+.update {
+  padding-block: 1.25rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.update time {
+  margin-inline-start: 1rem;
+  color: var(--muted);
+  font-size: 0.8125rem;
+}
+
+footer {
+  padding-block: 2rem 2.75rem;
+  color: var(--muted);
+  font-size: 0.8125rem;
+}
+
+footer a {
+  margin-inline-end: 1rem;
+}
+
+/* Tablet: two reference columns; navigation wraps without clipping. */
+@media (max-width: 850px) {
+  header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .hero {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2rem;
+    padding-block: 3rem;
+  }
+
+  .grid,
+  .stage-grid,
+  .optional-grid,
+  .scenes,
+  .delivery-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .flow {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .install-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Phone: single columns and a numbered vertical overview timeline. */
+@media (max-width: 520px) {
+  header,
+  main,
+  footer {
+    padding-inline: 20px;
+  }
+
+  .grid,
+  .stage-grid,
+  .optional-grid,
+  .scenes,
+  .delivery-grid,
+  .examples,
+  .flow {
+    grid-template-columns: repeat(1, minmax(0, 1fr));
+  }
+
+  .flow {
+    gap: 0;
+  }
+
+  .flow li {
+    display: grid;
+    grid-template-columns: 2rem minmax(0, 1fr);
+    align-items: baseline;
+    gap: 0.75rem;
+    padding: 0.75rem 1rem;
+    border: 0;
+    border-inline-start: 2px solid var(--line);
+    border-radius: 0;
+    background: none;
+  }
+
+  .flow li::before {
+    margin-bottom: 0;
+  }
+
+  .card,
+  .examples article,
+  .terminal-body {
+    padding: 1.25rem;
+  }
+
+  .section {
+    padding-block: 2.25rem;
+  }
+}
+
+/* No motion by default; make the reduced-motion override explicit. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+
+  html {
+    scroll-behavior: auto !important;
+  }
+}
