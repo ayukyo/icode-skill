@@ -8,11 +8,21 @@ on:
       - 'site/**'
       - 'tools/build_public_site.py'
       - 'tools/notify_indexnow.py'
+      - 'tools/build_skill_distribution.py'
+      - 'tools/check_skill_discovery.py'
+      - 'tools/validate_skill_pack.py'
+      - 'integrations/discovery/**'
+      - 'agents/**'
+      - 'skill-packs/**'
+      - 'tests/test_skill_distribution.py'
+      - 'tests/test_skill_discovery_probe.py'
       - 'tests/test_public_site*.py'
       - 'tests/test_notify_indexnow.py'
       - 'SKILL.md'
       - 'README*.md'
       - 'docs/public-discovery.md'
+      - 'docs/agent-skill-discovery.md'
+      - 'docs/skill-distribution.md'
       - '.github/workflows/public-site.yml'
   release:
     types: [published]
@@ -61,6 +71,8 @@ jobs:
         run: |
           python3 -m unittest discover -s tests -p 'test_public_site*.py' -v
           python3 -m unittest discover -s tests -p test_notify_indexnow.py -v
+          python3 -m unittest discover -s tests -p test_skill_distribution.py -v
+          python3 -m unittest discover -s tests -p test_skill_discovery_probe.py -v
       - name: Build preview (no secrets, no deployment)
         if: steps.policy.outputs.publish != 'true'
         run: python3 tools/build_public_site.py --output _site --base-url "$SITE_URL" --expected-version "$EXPECTED_VERSION"

@@ -43,6 +43,9 @@ def test_portable_metadata_has_valid_identity_and_size(frontmatter):
     "code review",
     "evidence verification",
     "resume",
+    "Claude Code",
+    "Codex",
+    "CodeBuddy",
 ])
 def test_english_use_cases_are_exposed_before_loading_body(frontmatter, query):
     # These are real advertised uses, not host names or a new search engine.

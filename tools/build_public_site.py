@@ -202,13 +202,14 @@ def render_page(data, lang, base, version):
 <meta property="og:title" content="ICODE — {e(t['title'])}"><meta property="og:description" content="{e(t['description'])}">
 <meta property="og:url" content="{e(canonical)}"><meta property="og:type" content="website">
 <link rel="alternate" type="application/rss+xml" title="ICODE version notes" href="{relative}feed.xml">
-<link rel="stylesheet" href="{relative}style.css"></head><body>
-<a class="skip" href="#content">{skip}</a><header><a class="brand" href="{relative or './'}">I<span>CODE</span></a>
+<link rel="alternate" type="text/markdown" href="index.md"><link rel="describedby" type="text/plain" href="{relative}llms.txt">
+<link rel="stylesheet" href="{relative}style.css"></head><body itemscope itemtype="https://schema.org/SoftwareSourceCode">
+<meta itemprop="name" content="ICODE"><a class="skip" href="#content">{skip}</a><header><a class="brand" href="{relative or './'}">I<span>CODE</span></a>
 <nav aria-label="{'Navigation' if english else '导航'}"><a href="#flow">{e(t['flow_cta'])}</a><a href="#capabilities">{e(t['scenes_title'])}</a><a href="#install">{e(t['install_cta'])}</a>{switch}<a href="{REPO}">GitHub ↗</a></nav></header>
 <main id="content"><section class="hero"><div><p class="eyebrow">{e(t['eyebrow'])}</p><h1>{e(t['title'])}</h1>
-<p class="lead">{e(t['intro'])}</p><ul class="hosts"><li>Claude Code</li><li>Codex</li><li>CodeBuddy</li></ul>
+<p class="lead" itemprop="description">{e(t['intro'])}</p><ul class="hosts"><li>Claude Code</li><li>Codex</li><li>CodeBuddy</li></ul>
 <div class="actions"><a class="button" href="#install">{e(t['install_cta'])} →</a><a href="#flow">{e(t['flow_cta'])} ↗</a></div>
-<p class="version">{e(t['source_label'])} · {e(version)}</p></div>
+<p class="version">{e(t['source_label'])} · <span itemprop="version">{e(version)}</span></p></div>
 <aside class="terminal" aria-label="{'Workflow example' if english else '流程示例'}"><div class="terminal-head">{e(t['illustration_label'])}</div>
 <div class="terminal-body"><p class="prompt">{e(t['examples'][1][1])}</p><ul class="trace">{trace}</ul></div></aside></section>
 <section class="section" id="flow"><h2>{e(t['flow_title'])}</h2><p class="note">{e(t['flow_intro'])}</p><ol class="flow">{flow}</ol>
@@ -222,8 +223,86 @@ def render_page(data, lang, base, version):
 <section class="section" id="examples"><details class="more-examples"><summary>{e(t['examples_title'])}</summary><p class="note">{e(t['examples_note'])}</p><div class="examples">{examples}</div></details>
 <p class="boundary note">{e(t['boundary'])}</p></section>
 <section class="section" id="updates"><h2>{e(t['updates_title'])}</h2>{updates}</section></main>
-<footer><p>{e(t['privacy'])}</p><a href="{REPO}">GitHub</a><a href="{relative}feed.xml">RSS</a><a href="{REPO}/blob/main/LICENSE">MIT</a></footer>
+<footer><p>{e(t['privacy'])}</p><a itemprop="codeRepository" href="{REPO}">GitHub</a><a href="{relative}feed.xml">RSS</a><a href="{relative}llms.txt">llms.txt</a><a href="index.md">Markdown</a><a itemprop="license" href="{REPO}/blob/main/LICENSE">MIT</a></footer>
 </body></html>\n'''
+
+
+def markdown_text(value):
+    """Render public prose as text, never injected HTML, headings or links."""
+    return re.sub(r'([\\`*_{}\[\]()#+!|~])', r'\\\1', escape(' '.join(value.split()), quote=False))
+
+
+def markdown_code(value):
+    # A public command containing backticks must not close its own code block.
+    fence = '`' * max(3, 1 + max((len(run) for run in re.findall(r'`+', value)), default=0))
+    return fence + '\n' + value + '\n' + fence
+
+
+def render_markdown(data, lang, base, version):
+    """Text counterpart of the page, derived from the same reviewed content."""
+    t, m = data['locales'][lang], markdown_text
+    docs = REPO + '/blob/main/' + ('README.md' if lang == 'en' else 'README.zh-CN.md')
+    parts = ['# ICODE — ' + m(t['title']), '> ' + m(t['description']),
+             m(t['intro']), 'Claude Code · Codex · CodeBuddy',
+             m(t['source_label']) + ': ' + version,
+             '[Website](' + base + ('en/' if lang == 'en' else '') + ')',
+             '## ' + m(t['flow_title']), m(t['flow_intro'])]
+    for label, stage in zip(t['flow'], t['stages']):
+        parts.extend(['### ' + m(label) + ' / ' + stage['id'], m(stage['purpose'])])
+        parts.extend('- ' + m(t[key + '_label']) + ': ' + m(stage[key])
+                     for key in ('input', 'output', 'checkpoint'))
+        parts.append('[' + m(t['step_docs_label']) + '](' + REPO + '/blob/main/steps/'
+                     + STAGE_DOCS[stage['id']] + ')')
+    parts.append('## ' + m(t['optional_title']))
+    for record in t['paths']:
+        parts.extend(['### ' + m(record['title']), m(record['body'])])
+    parts.extend(['## ' + m(t['scenes_title']), m(t['examples_note'])])
+    for scene in t['scenes']:
+        parts.extend(['### ' + m(scene['title']), m(scene['body']), markdown_code(scene['command']),
+                      markdown_code(scene['more']), m(scene['note'])])
+    parts.append('## ' + m(t['features_title']))
+    for title, body in t['features']:
+        parts.extend(['### ' + m(title), m(body)])
+    parts.extend(['## ' + m(t['delivery_title']), m(t['delivery_note'])])
+    for record in t['delivery']:
+        parts.extend(['### ' + m(record['title']), m(record['body'])])
+    parts.extend(['## ' + m(t['install_title']), '### ' + m(t['terminal_label']),
+                  markdown_code(INSTALL), m(t['install_note']), '### ' + m(t['host_label']),
+                  markdown_code('/icode help\n' + t['examples'][0][1]), m(t['host_note']),
+                  '[' + m(t['docs_label']) + '](' + docs + ')', '## ' + m(t['examples_title'])])
+    for title, command in t['examples']:
+        parts.extend(['### ' + m(title), markdown_code(command)])
+    parts.extend([m(t['boundary']), '## ' + m(t['updates_title'])])
+    for note in data['updates']:
+        parts.extend(['### ' + note['version'] + ' / ' + note['reviewed_on'], m(note[lang])])
+    parts.extend([m(t['privacy']), '[MIT](' + REPO + '/blob/main/LICENSE)'])
+    return '\n\n'.join(parts) + '\n'
+
+
+def render_llms(data, base, version):
+    """A voluntary, path-scoped reading index; not a registry or ranking signal."""
+    raw = 'https://raw.githubusercontent.com/ayukyo/icode-skill/main/'
+    return '\n\n'.join([
+        '# ICODE', '> ' + markdown_text(data['locales']['en']['description']),
+        markdown_text(data['locales']['zh-CN']['description']),
+        'Source version: ' + version + '. MIT licensed. Maintained installation adapters: Claude Code, Codex, CodeBuddy.',
+        'Use only when the user names ICODE or resumes a bound ICODE ticket. Discovery does not imply marketplace listing, '
+        'recommendation, complete installation, or validation on other hosts. Reports do not prove device verification.',
+        'The source install.sh sets up shared skills and host dependencies. A generic skill download is not the full installer. '
+        'This public site never reads private tickets and contains no model credentials.',
+        '## Overview and installation',
+        '- [English workflow and examples](' + base + 'en/index.md): purpose, stages, use cases, installation and limits.\n'
+        '- [中文流程与示例](' + base + 'index.md): 用途、步骤、场景、安装与证据边界。\n'
+        '- [English README](' + raw + 'README.md): complete source installation.\n'
+        '- [中文 README](' + raw + 'README.zh-CN.md): 完整安装与用法。',
+        '## Skill and compatibility',
+        '- [Canonical SKILL.md](' + raw + 'SKILL.md): the single workflow entry and trigger boundary.\n'
+        '- [Discovery coverage](' + raw + 'docs/agent-skill-discovery.md): dated channel observations, not universal support.\n'
+        '- [Distribution guide](' + raw + 'docs/skill-distribution.md): packaging versus runtime support.',
+        '## Optional',
+        '- [Source repository](' + REPO + '): review code and issues before installation.\n'
+        '- [Public updates](' + base + 'feed.xml): reviewed source version notes.',
+    ]) + '\n'
 
 
 def xml_bytes(root):
@@ -254,7 +333,10 @@ def build(source_root, output, base_url, indexnow_key=None, expected_version=Non
         raise ValueError('release/source version mismatch')
     files = {'index.html': render_page(data, 'zh-CN', base, version).encode(),
              'en/index.html': render_page(data, 'en', base, version).encode(),
-             'style.css': public_input(root, 'site/style.css').encode(), '.nojekyll': b''}
+             'style.css': public_input(root, 'site/style.css').encode(), '.nojekyll': b'',
+             'llms.txt': render_llms(data, base, version).encode(),
+             'index.md': render_markdown(data, 'zh-CN', base, version).encode(),
+             'en/index.md': render_markdown(data, 'en', base, version).encode()}
     urls = [base, base + 'en/']
     sitemap = ET.Element('urlset', xmlns='http://www.sitemaps.org/schemas/sitemap/0.9')
     for url in urls:

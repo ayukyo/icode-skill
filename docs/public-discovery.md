@@ -25,7 +25,25 @@ python3 -m unittest discover -s tests -p test_notify_indexnow.py -v
 python3 tests/run_public_site_checks.py --report-dir demo/.icode_output/public-site-checks-01
 ```
 
-`_site/` 被 gitignore。公开文件只有两种语言页面、CSS、sitemap、RSS、公共 URL 清单、`.nojekyll`，以及显式配置后的 IndexNow 所有权文件。站点不是本地 `/icode ui`，不能操作你的工单。
+`_site/` 被 gitignore。公开文件白名单为 10 项：两种语言 HTML 页面和对应 `index.md`、`llms.txt`、CSS、sitemap、RSS、公共 URL 清单、`.nojekyll`；显式配置 IndexNow 后另加 1 个所有权文件。输入仍只有 `site/content.json`、`site/style.css`、`SKILL.md` 三项，不遍历工单或其它资料。站点不是本地 `/icode ui`，不能操作你的工单。
+
+## 面向搜索工具与 Agent 的阅读入口
+
+`llms.txt` 按本站项目子路径提供简短双语索引，链接单一技能真源、完整安装文档、宿主边界和双语 Markdown。HTML 用 `rel="describedby"` 指向它，用 `rel="alternate" type="text/markdown"` 指向同目录 `index.md`。Markdown 从同一 `content.json` 生成，完整保留六步、场景、示例及验证限制，不单独维护第二套文案。页面使用无脚本的 Schema.org `SoftwareSourceCode` microdata 标识名称、仓库、版本、用途和许可证，全部对应可见内容；没有虚构评分、安装量或兼容标签。
+
+这是可读取性优化，不是私有排名接口。[llms.txt 是开放提案](https://llmstxt.org/)，不能假定所有 Agent 都采用；[Google 官方说明](https://developers.google.com/search/docs/appearance/ai-features)也明确 AI 搜索没有额外必需的 AI 文本文件或专属结构化数据，符合条件不保证收录。继续以有用的可见文本、正常链接、sitemap 与真实功能说明为基础。[SoftwareSourceCode 属性](https://schema.org/SoftwareSourceCode)
+
+可重复的目录检查（不读凭证、不安装、不制造遥测）：
+
+```bash
+python3 tools/check_skill_discovery.py                    # 零网络，仅显示查询计划
+python3 tools/check_skill_discovery.py --online           # 2 渠道 × 4 个公开查询
+python3 tools/check_skill_discovery.py --online --channel skillsmp --query icode
+```
+
+该工具只使用 SkillsMP 文档中的公开搜索和 skills.sh 网站当前公开搜索端点；后者不是稳定 API 保证。每次最多 10 次请求、每响应最多 2 MB、单次网络超时 12 秒，无自动重试；不把个人信息当查询词。`matched` 仅证明该次有限结果含准确仓库与技能；`not_in_results` 不证明全站未收录。认证、限流、网络失败、返回结构变化分别记录，不能当作未命中。输出到 stdout，不自动更新宣传材料或触发线上发布。
+
+[三宿主分发原型](skill-distribution.md)只生成完整资源包，尚非已发布市场插件；源安装器依然是正式安装路线。
 
 ## 首次启用 GitHub Pages（需要仓库管理员授权）
 

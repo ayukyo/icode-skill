@@ -49,7 +49,24 @@ ICODE 已具备标准技能入口和 Claude Code、Codex、CodeBuddy 安装适�
 
 SkillsMP FAQ 当前描述公开仓库、有效技能元数据及相关 topic 的自动抓取流程，手动提交仍为计划功能；因此已有条目不需要重复注册或投稿。内容刷新由目录控制，本站 push 或 IndexNow 不会强制刷新 Skill 目录。skills.sh 的安装遥测路径也不应嵌入 ICODE 安装器做隐式上报。[SkillsMP FAQ](https://skillsmp.com/docs/faq)、[skills.sh FAQ](https://skills.sh/docs/faq)
 
-## 建议实施顺序（未在本轮执行）
+## 本轮已实施的可发现性基础
+
+在上述只读调研后，按“缺口直接优化”的授权补齐以下入口；没有改变正式宿主范围：
+
+| 改进 | 直接作用 | 不代表什么 |
+| --- | --- | --- |
+| 根 `SKILL.md` 双语 description | 在加载正文前暴露真实用途、Claude/Codex/CodeBuddy 名称和点名/续接边界 | 不让普通请求自动转入 ICODE；不保证宿主模型选中 |
+| `agents/openai.yaml` | Codex 名称、短说明与显式 `$icode` 默认提示 | 不改变依赖、权限或调用政策 |
+| 官网 `llms.txt` 与双语 `index.md` | 从单一文案生成精简索引及完整可读页面；HTML 提供标准链接关系 | 不是各 Agent 必须读取的标准，不保证被引用 |
+| 无脚本 `SoftwareSourceCode` microdata | 明确可见名称、源码地址、版本、用途、MIT 许可证 | 不伪造评分、安装量或新宿主认证 |
+| [三宿主分发原型](skill-distribution.md) | 从单一源码生成完整工作流与共享技能包、薄插件清单、SHA-256 摘要 | 尚未插件实装、上架或加入用户默认市场 |
+| `tools/check_skill_discovery.py` | 默认离线；显式联网后得到可复查的有限查询 JSON | 不提交、不安装、不刷遥测，不把错误当成未收录 |
+
+2026-09-20 追加关键词抽查：两个目录分别查询 `icode`、`AI coding workflow`、`code review`、`工单`，各取最多 50 条，均未在返回结果中命中本仓库。独立作者词 `ayukyo` 在 SkillsMP 返回 5 条、本技能位于该响应第 1 项；skills.sh 返回 0 条。**已收录与泛关键词容易被推荐仍有明显差距**，不能用作者词命中掩盖这一点。上述查询发生在本轮新元数据推送前；后续应给予平台正常刷新时间，不反复刷请求。
+
+`llms.txt` 使用[路径级阅读索引提案](https://llmstxt.org/)，源码标记使用 [SoftwareSourceCode](https://schema.org/SoftwareSourceCode)。它们提高内容可读取性，不是排名技巧；[Google 官方说明](https://developers.google.com/search/docs/appearance/ai-features)明确 AI 搜索不要求新增专属文件或标记，索引和展示仍由搜索系统决定。
+
+## 后续市场接入边界
 
 1. **先做好被发现后的可靠安装。** 保留单一 ICODE 真源、清楚的中英文用途与停止边界；增加版本化的“发现 / 安装 / 运行”兼容矩阵。优先复核已有 CodeBuddy 契约漂移，保护原 Claude/Codex 安装。不要先堆十几个未验证的宿主图标。
 2. **再做完整插件发行原型。** 优先覆盖已有宿主的分发路径，再选 Cursor/Copilot 或 Gemini/OpenCode 做隔离试点。复用安装清单，明确共享技能、MCP、DOCX runtime、命令入口、插件命名空间和旧安装去重；不把只复制根 SKILL 当完整安装。插件公共上架仍可能需要账号、提交和审核。
@@ -57,4 +74,4 @@ SkillsMP FAQ 当前描述公开仓库、有效技能元数据及相关 topic 的
 
 新宿主的最低验收应覆盖：隔离用户目录的 install/dry-run/重复安装、完整资源与共享技能、缺 MCP 的显式降级、实际 help/plan/verify 等流程、失败与停止点、旧宿主回归、Runtime 支持范围。当前 Runtime runner 仅支持 Claude/Codex，不能随技能目录兼容性一起扩张为全部宿主支持。
 
-本轮官网仍只展示现有三宿主，不修改安装器、Runtime、技能触发、工单记录或全局设置。新增适配、插件发布或市场申请应另立实施范围；此报告不构成它们已完成的承诺。
+本轮官网仍只展示现有三宿主；只增强技能发现描述，不修改正文执行语义、安装器、Runtime、工单记录或真实全局设置。新宿主实装、插件公开发布或市场申请仍需相应环境与授权；此报告不构成它们已完成的承诺。

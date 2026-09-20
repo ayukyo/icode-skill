@@ -17,7 +17,7 @@ from validate_skill_pack import iter_source_publish_files, validate_routes, vali
 ROOT = Path(__file__).resolve().parents[1]
 HOSTS = ("claude", "codex", "codebuddy")
 # Runtime resources only. Website, tests, demo, host settings and Git are excluded.
-DIRECTORIES = {"steps", "references", "tools", "schemas", "templates", "scripts",
+DIRECTORIES = {"steps", "references", "tools", "schemas", "templates", "scripts", "agents",
                "mcp", "agent_runtime", "skill-packs", "docs"}
 FILES = {"SKILL.md", "LICENSE", "README.md", "README.zh-CN.md", "install.sh", ".gitignore"}
 METADATA = {"integrations/discovery/README.md"} | {

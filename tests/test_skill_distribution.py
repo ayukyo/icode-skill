@@ -37,6 +37,7 @@ class DistributionTests(unittest.TestCase):
             "tools/docx/requirements.lock": "# locked dependencies\n",
             "scripts/sync-to-global.sh": "#!/bin/sh\nexit 0\n",
             "agent_runtime/README.md": "runtime\n",
+            "agents/openai.yaml": "interface:\n  display_name: ICODE\n",
             "docs/example.md": "documentation\n",
             "integrations/codebuddy/commands/icode.md": "bridge\n",
             "mcp/workflow-gate/gates.json": "{}\n",
@@ -93,6 +94,7 @@ class DistributionTests(unittest.TestCase):
                      "schemas/metadata.schema.json", "tools/icode_control.py",
                      "mcp/workflow-gate/gates.json", "templates/metadata.json",
                      "agent_runtime/README.md", "scripts/sync-to-global.sh",
+                     "agents/openai.yaml",
                      "tools/docx/requirements.lock", "mcp/example/config.example.json",
                      "integrations/codebuddy/commands/icode.md"):
             self.assertEqual((workflow / name).read_bytes(), (self.source / name).read_bytes())

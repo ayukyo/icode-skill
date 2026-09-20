@@ -43,7 +43,8 @@ class PublicSiteTests(unittest.TestCase):
         files = {p.relative_to(self.work / "out").as_posix()
                  for p in (self.work / "out").rglob("*") if p.is_file()}
         self.assertEqual(files, {"index.html", "en/index.html", "style.css",
-                                 "sitemap.xml", "feed.xml", "public-manifest.json", ".nojekyll"})
+                                 "sitemap.xml", "feed.xml", "public-manifest.json", ".nojekyll",
+                                 "llms.txt", "index.md", "en/index.md"})
         zh = (self.work / "out/index.html").read_text()
         en = (self.work / "out/en/index.html").read_text()
         for page, lang in [(zh, "zh-CN"), (en, "en")]:

@@ -32,7 +32,7 @@
   skills/
     icode/
       SKILL.md                  # 原样复制根入口
-      steps/ references/ tools/ schemas/ templates/
+      steps/ references/ tools/ schemas/ templates/ agents/
       mcp/ scripts/ agent_runtime/ docs/
       skill-packs/               # 原始模板及 manifest，保持相对资源链
       integrations/codebuddy/    # 原命令桥资源快照，不自动启用
@@ -43,7 +43,7 @@
 ```
 
 生成器复用 `validate_skill_pack.py` 的 manifest/路由校验和 `iter_source_publish_files` 转换规则。
-完整性范围是根工作流公开资源及 `skill-packs/manifest.json` 声明的全部共享技能，当前 1+16 个。
+完整性范围是根工作流公开资源及 `skill-packs/manifest.json` 声明的全部共享技能，当前 1+16 个。根技能的 `agents/openai.yaml` 一并携带，包与普通安装使用同一份发现元数据。
 某些共享技能会引用用户另装的窄技能，这些不在声明集合内；不可用时按原路由降级并记录缺口。
 
 安全规则：仅选 Git 跟踪文件，结合显式顶层资源白名单；排除网站、tests、demo、Git、宿主配置与未跟踪文件。

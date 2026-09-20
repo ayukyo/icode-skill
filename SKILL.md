@@ -1,6 +1,6 @@
 ---
 name: icode
-description: ICODE 端到端编码工作流。用户调用 /icode、$icode，或说“使用 ICODE”“用 icode 帮我”“让 ICODE”“Use ICODE”完成开发、日志分析、设计/代码审查、证据验证、独立复评、文档/Word/PPT、学习、工单管理等任务时使用；也用于已绑定 ICODE 工单的续接。Use when users explicitly request ICODE for an AI coding workflow, ticket-based development, code review, or evidence verification; also use to resume a bound ICODE ticket. 支持自然语言目标与限制，不要求背命令；能力咨询只解释不执行。保留全部 /icode 子命令，复用既有步骤与安全门禁，不接管未指定 ICODE 的普通请求。
+description: ICODE 端到端编码工作流，适配 Claude Code、Codex、CodeBuddy。用户调用 /icode、$icode，或说“使用 ICODE”“用 icode 帮我”“让 ICODE”“Use ICODE”完成开发、日志分析、设计/代码审查、证据验证、独立复评、文档/Word/PPT、学习、工单管理等任务时使用；也用于已绑定 ICODE 工单的续接。Use when users explicitly request ICODE for an AI coding workflow, ticket-based development, code review, log analysis, documentation, or evidence verification; also use to resume a bound ICODE ticket. 支持自然语言目标与限制，不要求背命令；能力咨询只解释不执行。保留全部 /icode 子命令，复用既有步骤与安全门禁，不接管未指定 ICODE 的普通请求。
 ---
 
 **版本**: v2.32.0
