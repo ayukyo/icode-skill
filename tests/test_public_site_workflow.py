@@ -58,7 +58,8 @@ class WorkflowTests(unittest.TestCase):
     def test_workflow_concurrency_separates_preview_from_eligible_publication(self):
         text = self.text()
         block = text.split('concurrency:\n', 1)[1].split('\njobs:', 1)[0]
-        self.assertIn('cancel-in-progress: true', block)
+        self.assertIn('cancel-in-progress: false', block)
+        self.assertIn('queue: max', block)
         group = re.search(r'group: public-site-\$\{\{ (.+) \}\}', block).group(1)
         policy = re.search(r'PUBLISH: \$\{\{ (.+) \}\}', text).group(1)
 
@@ -93,7 +94,7 @@ class WorkflowTests(unittest.TestCase):
                         self.assertEqual(evaluate(policy, *args), eligible)
                         selected = evaluate(group, *args)
                         if eligible:
-                            self.assertEqual(selected, 'deployment')
+                            self.assertEqual(selected, 'deployment-v2')
                         else:
                             self.assertTrue(str(selected).startswith('preview-'), selected)
 
@@ -101,7 +102,32 @@ class WorkflowTests(unittest.TestCase):
         text = self.text()
         policy = re.search(r'PUBLISH: \$\{\{ (.+) \}\}', text).group(1)
         group = re.search(r'group: public-site-\$\{\{ (.+) \}\}', text).group(1)
-        self.assertTrue(group.startswith(policy + " && 'deployment' || "))
+        self.assertTrue(group.startswith(policy + " && 'deployment-v2' || "))
+
+    def test_old_rerun_cannot_cancel_active_or_pending_latest_publication(self):
+        block = self.text().split('concurrency:\n', 1)[1].split('\njobs:', 1)[0]
+        cancel = re.search(r'cancel-in-progress: (\w+)', block).group(1) == 'true'
+        queue_match = re.search(r'queue: (\w+)', block)
+        capacity = 100 if queue_match and queue_match.group(1) == 'max' else 1
+        # Model GitHub's documented queue semantics with the real workflow settings.
+        # A stale rerun must neither cancel an active current SHA nor replace its pending retry.
+        active = 'current'
+        pending = ['current']
+        cancelled = []
+        if cancel:
+            cancelled.append(active)
+            active = None
+        if capacity == 1:
+            cancelled.extend(pending)
+            pending.clear()
+        pending.append('stale-rerun')
+        self.assertEqual(cancelled, [])
+        self.assertEqual(active, 'current')
+        self.assertEqual(pending, ['current', 'stale-rerun'])
+        # The separately executed Git regression proves stale source fails closed;
+        # the queue must retain every current publication until it reaches that gate.
+        published = [source for source in [active, *pending] if source == 'current']
+        self.assertEqual(len(published), 2)
 
     def test_stale_publications_fail_closed_before_upload_and_deploy(self):
         text = self.text()

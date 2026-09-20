@@ -23,10 +23,13 @@ permissions:
   contents: read
 
 concurrency:
-  # Only authorized publications share cancellation across the complete build/deploy run.
-  # Keep eligibility identical to the PUBLISH policy below; previews cannot cancel a deployment.
-  group: public-site-${{ vars.PUBLIC_SITE_ENABLED == 'true' && vars.PUBLIC_SITE_URL != '' && ((github.event_name == 'release' && !github.event.release.prerelease && !github.event.release.draft) || ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == format('refs/heads/{0}', github.event.repository.default_branch))) && 'deployment' || format('preview-{0}-{1}', github.event_name, github.ref) }}
-  cancel-in-progress: true
+  # Serialize authorized publications without letting an old rerun cancel a newer one.
+  # queue:max also preserves pending runs; cancel:false alone still replaces the pending slot.
+  # Keep eligibility identical to PUBLISH; previews use a separate group.
+  # Version the group so reruns of the old cancel:true workflow cannot cancel this queue.
+  group: public-site-${{ vars.PUBLIC_SITE_ENABLED == 'true' && vars.PUBLIC_SITE_URL != '' && ((github.event_name == 'release' && !github.event.release.prerelease && !github.event.release.draft) || ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == format('refs/heads/{0}', github.event.repository.default_branch))) && 'deployment-v2' || format('preview-{0}-{1}', github.event_name, github.ref) }}
+  cancel-in-progress: false
+  queue: max
 
 jobs:
   build:

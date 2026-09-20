@@ -43,6 +43,10 @@ python3 tests/run_public_site_checks.py --report-dir demo/.icode_output/public-s
 
 工作流用固定提交 SHA 引用官方 Actions。升级时核对上游 tag 与 SHA，并重跑合同测试。可以通过 GitHub 自动依赖更新工具提出升级，但本实现不擅自启用额外服务。
 
+发布任务使用串行队列（`cancel-in-progress: false` + `queue: max`），不让旧 run 重跑取消正在运行或等待中的新提交；排到后再检查源码是否过期。GitHub 最多保留 100 个排队任务，超限会取消新增任务，异常集中推送时应查看 Actions 队列。此行为依据 [GitHub 并发与多任务排队规则](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-workflow-concurrency)。
+
+以上保护适用于包含新版工作流的运行。旧历史 run/标签仍可能使用其当时的工作流定义，修改 main 不会追溯修改它们；不要重跑升级前的发布，应从当前 main 新建运行。新版发布组 `public-site-deployment-v2` 与旧取消式并发组隔离，但不能替旧工作流补上源码校验。
+
 ## 日常发布：只维护公开内容
 
 - `site/content.json` 是双语文案与公开版本说明的唯一输入。更新功能时两种语言成对修改。
