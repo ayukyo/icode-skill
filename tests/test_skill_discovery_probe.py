@@ -1,5 +1,6 @@
 """Bounded read-only observations, never synthetic installs or ranking claims."""
 import importlib.util
+from copy import deepcopy
 from http.client import HTTPException, HTTPResponse
 import io
 import json
@@ -7,8 +8,48 @@ from pathlib import Path
 import unittest
 from unittest.mock import patch
 from urllib.error import HTTPError, URLError
+from urllib.parse import parse_qs, urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
+
+# Independent, reduced public-response fixtures observed anonymously 2026-09-20.
+# Only parser-relevant fields retained; no user IDs, descriptions or images.
+PUBLIC_ROWS = {
+    'context7': {'name': 'context7-mcp', 'project': '/upstash/context7',
+                 'url': 'https://raw.githubusercontent.com/upstash/context7/refs/heads/master/plugins/claude/context7/skills/context7-mcp/SKILL.md'},
+    'skillhub': {'name': 'slide-maker', 'slug': 'slides-maker', 'source': 'community',
+                 'ownerName': 'fixture-owner', 'upstream_url': None,
+                 'upstream_owner_login': None, 'tags': None},
+    'clawhub': {'slug': 'smart-code-review', 'displayName': 'Code Review',
+                'ownerHandle': 'caingao', 'source': 'clawhub',
+                'canonicalUrl': '/caingao/skills/smart-code-review',
+                'links': {'source': None}, 'version': None},
+    'smithery': {'namespace': 'bgauryy', 'slug': 'octocode-local-search',
+                 'displayName': 'octocode-local-search',
+                 'gitUrl': 'https://github.com/bgauryy/octocode-mcp/tree/main/packages/octocode-cli/skills/octocode-local-search'},
+}
+
+# Synthetic positive identities test contracts; they are NOT live listing proof.
+MATCH_ROWS = {
+    'context7': {'name': 'icode', 'project': '/ayukyo/icode-skill',
+                 'url': 'https://raw.githubusercontent.com/ayukyo/icode-skill/refs/heads/main/SKILL.md'},
+    'skillhub': {'name': 'icode', 'slug': 'icode', 'source': 'community',
+                 'ownerName': 'fixture-owner',
+                 'upstream_url': 'https://github.com/ayukyo/icode-skill'},
+    'clawhub': {'slug': 'icode', 'displayName': 'ICODE', 'source': 'clawhub',
+                'ownerHandle': 'ayukyo', 'canonicalUrl': '/ayukyo/skills/icode',
+                'links': {'source': None}},
+    'smithery': {'namespace': 'ayukyo', 'slug': 'icode', 'displayName': 'ICODE',
+                 'gitUrl': 'https://github.com/ayukyo/icode-skill/tree/main'},
+}
+
+
+def envelope(channel, rows):
+    if channel == 'skillhub':
+        return {'code': 0, 'message': 'success', 'data': {'skills': rows, 'total': len(rows)}}
+    if channel in ('context7', 'clawhub'):
+        return {'results': rows}
+    return {'skills': rows, 'pagination': {'currentPage': 1, 'pageSize': 50}}
 
 
 class ProbeTests(unittest.TestCase):
@@ -22,7 +63,238 @@ class ProbeTests(unittest.TestCase):
             self.assertEqual(self.probe.main([]), 0)
         report = json.loads(output.getvalue())
         self.assertEqual(report['status'], 'dry-run')
-        self.assertEqual(len(report['queries']), 8)
+        self.assertEqual(len(report['queries']), 6)
+        self.assertEqual({r['query'] for r in report['queries']}, {'icode'})
+        self.assertEqual({r['channel'] for r in report['queries']},
+                         {'skillsmp', 'skills.sh', 'context7', 'skillhub', 'clawhub', 'smithery'})
+
+    def test_new_channels_use_verified_query_parameters(self):
+        expected = {
+            'context7': ('context7.com', '/api/v2/skills', {'query': ['工单 & code']}),
+            'skillhub': ('api.skillhub.cn', '/api/skills',
+                         {'keyword': ['工单 & code'], 'page': ['1'], 'pageSize': ['50']}),
+            'clawhub': ('clawhub.ai', '/api/v1/search', {'q': ['工单 & code'], 'limit': ['50']}),
+            'smithery': ('api.smithery.ai', '/skills', {'q': ['工单 & code'], 'pageSize': ['50']}),
+        }
+        for channel, (host, path, params) in expected.items():
+            with self.subTest(channel=channel):
+                self.assertIn(channel, self.probe.CHANNELS)
+                url = urlsplit(self.probe.endpoint(channel, '工单 & code'))
+                self.assertEqual((url.scheme, url.netloc, url.path), ('https', host, path))
+                self.assertEqual(parse_qs(url.query), params)
+
+    def test_new_channels_match_miss_and_preserve_null_unrelated_fields(self):
+        for channel in PUBLIC_ROWS:
+            with self.subTest(channel=channel):
+                self.assertIn(channel, self.probe.CHANNELS)
+                rows = [PUBLIC_ROWS[channel], {**MATCH_ROWS[channel], 'description': None, 'score': None}]
+                with patch.object(self.probe, 'fetch', return_value=envelope(channel, rows)):
+                    result = self.probe.observe(channel, 'icode')
+                self.assertEqual(result['status'], 'matched')
+                self.assertEqual(result['positions'], [2])
+                self.assertEqual(result['returned'], 2)
+                for miss_rows in ([], [PUBLIC_ROWS[channel]]):
+                    with patch.object(self.probe, 'fetch', return_value=envelope(channel, miss_rows)):
+                        result = self.probe.observe(channel, 'icode')
+                    self.assertEqual(result['status'], 'not_in_results')
+                    self.assertEqual(result['returned'], len(miss_rows))
+
+    def test_source_less_same_name_is_candidate_not_a_miss(self):
+        candidates = {
+            'context7': {**MATCH_ROWS['context7'], 'project': None, 'url': None},
+            'skillhub': {**MATCH_ROWS['skillhub'], 'upstream_url': None},
+            'clawhub': {'slug': 'icode', 'displayName': 'ICODE'},
+            'smithery': {**MATCH_ROWS['smithery'], 'gitUrl': None},
+        }
+        for channel, row in candidates.items():
+            with self.subTest(channel=channel):
+                self.assertIn(channel, self.probe.CHANNELS)
+                with patch.object(self.probe, 'fetch', return_value=envelope(channel, [row])), \
+                        patch('sys.stdout', new_callable=io.StringIO) as output:
+                    self.assertEqual(self.probe.main(['--online', '--channel', channel]), 0)
+                result = json.loads(output.getvalue())['queries'][0]
+                self.assertEqual(result['status'], 'candidate_unverified')
+                self.assertEqual(result['positions'], [])
+                self.assertEqual(result['candidate_positions'], [1])
+                with patch.object(self.probe, 'fetch', return_value=envelope(channel, [row, MATCH_ROWS[channel]])):
+                    result = self.probe.observe(channel, 'icode')
+                self.assertEqual(result['status'], 'matched')
+                self.assertEqual(result['positions'], [2])
+                self.assertEqual(result['candidate_positions'], [1])
+
+    def test_collisions_never_match(self):
+        collisions = {
+            'context7': {**MATCH_ROWS['context7'], 'project': '/other/icode-skill',
+                         'url': 'https://raw.githubusercontent.com/other/icode-skill/main/SKILL.md'},
+            'skillhub': {**MATCH_ROWS['skillhub'], 'upstream_url': 'https://github.com/other/icode-skill'},
+            'clawhub': {**MATCH_ROWS['clawhub'], 'ownerHandle': 'other',
+                        'canonicalUrl': '/other/skills/icode'},
+            'smithery': {**MATCH_ROWS['smithery'], 'namespace': 'other',
+                         'gitUrl': 'https://github.com/other/icode-skill'},
+        }
+        for channel, row in collisions.items():
+            with self.subTest(channel=channel):
+                self.assertIn(channel, self.probe.CHANNELS)
+                with patch.object(self.probe, 'fetch', return_value=envelope(channel, [row])):
+                    self.assertEqual(self.probe.observe(channel, 'icode')['status'], 'not_in_results')
+
+    def test_github_provenance_rejects_url_spoofing_and_normalization(self):
+        bad_urls = [
+            'https://evil.example/ayukyo/icode-skill',
+            'https://github.com.evil.example/ayukyo/icode-skill',
+            'https://user@github.com/ayukyo/icode-skill',
+            'https://github.com:443/ayukyo/icode-skill',
+            'https://github.com/ayukyo/icode-skill-other',
+            'http://github.com/ayukyo/icode-skill',
+            'https://github.com/ayukyo/icode-skill?repo=other',
+            'https://github.com/ayukyo/icode-skill#other',
+            'https://github.com/ayukyo/icode-skill/tree/main/../../other',
+            'https://github.com/ayukyo/icode-skill/tree/main/%2e%2e/%2e%2e/other',
+            'https://github.com/ayukyo/icode-skill/tree/main\\..\\other',
+            '\nhttps://github.com/ayukyo/icode-skill',
+            'https://github.com//ayukyo/icode-skill',
+            'https://raw.githubusercontent.com.evil.example/ayukyo/icode-skill/main/SKILL.md',
+        ]
+        for channel, field in (('context7', 'url'), ('skillhub', 'upstream_url'), ('smithery', 'gitUrl')):
+            for url in bad_urls:
+                with self.subTest(channel=channel, url=url):
+                    row = {**MATCH_ROWS[channel], field: url}
+                    with patch.object(self.probe, 'fetch', return_value=envelope(channel, [row])):
+                        self.assertNotEqual(self.probe.observe(channel, 'icode')['status'], 'matched')
+
+    def test_clawhub_owner_slug_requires_canonical_identity_or_exact_github_source(self):
+        for field in ('ownerHandle', 'canonicalUrl', 'source'):
+            row = deepcopy(MATCH_ROWS['clawhub'])
+            del row[field]
+            with self.subTest(field=field), patch.object(self.probe, 'fetch', return_value=envelope('clawhub', [row])):
+                self.assertEqual(self.probe.observe('clawhub', 'icode')['status'], 'candidate_unverified')
+        row = {'slug': 'icode', 'displayName': 'ICODE',
+               'links': {'source': 'https://github.com/ayukyo/icode-skill/blob/main/SKILL.md'}}
+        with patch.object(self.probe, 'fetch', return_value=envelope('clawhub', [row])):
+            self.assertEqual(self.probe.observe('clawhub', 'icode')['status'], 'matched')
+        row = {**MATCH_ROWS['clawhub'], 'links': {'source': 'https://github.com/other/icode-skill'}}
+        with patch.object(self.probe, 'fetch', return_value=envelope('clawhub', [row])):
+            self.assertEqual(self.probe.observe('clawhub', 'icode')['status'], 'not_in_results')
+
+    def test_optional_source_type_drift_is_not_a_candidate(self):
+        for channel, field in (('skillhub', 'upstream_url'), ('clawhub', 'ownerHandle'),
+                               ('clawhub', 'source'), ('clawhub', 'canonicalUrl'), ('clawhub', 'links')):
+            for value in ('', ' ', 1, False, []):
+                with self.subTest(channel=channel, field=field, value=value):
+                    row = {**PUBLIC_ROWS[channel], field: value}
+                    with patch.object(self.probe, 'fetch', return_value=envelope(channel, [row])):
+                        self.assertEqual(self.probe.observe(channel, 'icode')['status'], 'invalid_response')
+        for channel, field in (('context7', 'name'), ('skillhub', 'slug'), ('skillhub', 'name'),
+                               ('skillhub', 'source'), ('skillhub', 'ownerName'), ('clawhub', 'slug'),
+                               ('clawhub', 'displayName'), ('smithery', 'namespace'),
+                               ('smithery', 'slug'), ('smithery', 'displayName')):
+            with self.subTest(channel=channel, field=field):
+                row = {**PUBLIC_ROWS[channel], field: None}
+                with patch.object(self.probe, 'fetch', return_value=envelope(channel, [row])):
+                    self.assertEqual(self.probe.observe(channel, 'icode')['status'], 'invalid_response')
+
+    def test_default_online_batch_has_six_queries_and_continues_after_failure(self):
+        responses = [HTTPException('truncated'), {'skills': []},
+                     envelope('context7', []), envelope('skillhub', []),
+                     envelope('clawhub', []), envelope('smithery', [])]
+        with patch.object(self.probe, 'fetch', side_effect=responses) as fetch, \
+                patch('sys.stdout', new_callable=io.StringIO) as output:
+            self.assertEqual(self.probe.main(['--online']), 1)
+        self.assertEqual(fetch.call_count, 6)
+        self.assertEqual([r['status'] for r in json.loads(output.getvalue())['queries']],
+                         ['unavailable'] + ['not_in_results'] * 5)
+
+    def test_invalid_query_is_rejected_offline_and_online(self):
+        for online in ([], ['--online']):
+            for phrase in ('', ' ', 'x' * 129, 'a\nb', '\0'):
+                with self.subTest(online=online, phrase=phrase), \
+                        patch.object(self.probe, 'fetch', side_effect=AssertionError('no network')), \
+                        patch('sys.stderr', new_callable=io.StringIO), self.assertRaises(SystemExit) as caught:
+                    self.probe.main(online + ['--query', phrase])
+                self.assertEqual(caught.exception.code, 2)
+
+    def test_new_channel_schema_drift_is_invalid_even_after_a_match(self):
+        required = {'context7': ('name', 'project', 'url'),
+                    'skillhub': ('name', 'slug', 'source', 'ownerName'),
+                    'clawhub': ('slug', 'displayName'),
+                    'smithery': ('namespace', 'slug', 'displayName', 'gitUrl')}
+        for channel, fields in required.items():
+            with self.subTest(channel=channel):
+                self.assertIn(channel, self.probe.CHANNELS)
+                bad_payloads = [{}, [], {'items': []}, envelope(channel, [None]), envelope(channel, {})]
+                for field in fields:
+                    row = deepcopy(PUBLIC_ROWS[channel])
+                    del row[field]
+                    bad_payloads.append(envelope(channel, [MATCH_ROWS[channel], row]))
+                    for value in ('', ' ', 123, False, [], {}):
+                        row = {**PUBLIC_ROWS[channel], field: value}
+                        bad_payloads.append(envelope(channel, [row]))
+                for payload in bad_payloads:
+                    with self.subTest(payload=payload), patch.object(self.probe, 'fetch', return_value=payload):
+                        self.assertEqual(self.probe.observe(channel, 'icode')['status'], 'invalid_response')
+
+    def test_new_channels_error_envelopes_and_http_errors(self):
+        for channel in PUBLIC_ROWS:
+            with self.subTest(channel=channel):
+                self.assertIn(channel, self.probe.CHANNELS)
+                for error in ({'error': 'failed'}, {'success': False}):
+                    with patch.object(self.probe, 'fetch', return_value={**envelope(channel, []), **error}):
+                        self.assertEqual(self.probe.observe(channel, 'icode')['status'], 'invalid_response')
+                for code, status in ((401, 'auth_required'), (403, 'auth_required'), (429, 'rate_limited'), (503, 'unavailable')):
+                    with patch.object(self.probe, 'fetch', side_effect=HTTPError('https://public.example', code, '', {}, None)), \
+                            patch('sys.stdout', new_callable=io.StringIO) as output:
+                        self.assertEqual(self.probe.main(['--online', '--channel', channel]), 1)
+                    self.assertEqual(json.loads(output.getvalue())['queries'][0]['status'], status)
+                for error in (URLError('redacted'), HTTPException('truncated')):
+                    with patch.object(self.probe, 'fetch', side_effect=error):
+                        self.assertEqual(self.probe.observe(channel, 'icode')['status'], 'unavailable')
+        for code in (None, False, '0', 1):
+            self.assertIn('skillhub', self.probe.CHANNELS)
+            with patch.object(self.probe, 'fetch', return_value={**envelope('skillhub', []), 'code': code}):
+                self.assertEqual(self.probe.observe('skillhub', 'icode')['status'], 'invalid_response')
+
+    def test_source_and_limit_metadata_are_honest_in_plan_and_observation(self):
+        with patch.object(self.probe, 'fetch', side_effect=AssertionError('offline')), \
+                patch('sys.stdout', new_callable=io.StringIO) as output:
+            self.probe.main([])
+        for item in json.loads(output.getvalue())['queries']:
+            with self.subTest(channel=item['channel']):
+                self.assertTrue(item.get('source', '').startswith('https://'))
+                self.assertTrue(item.get('stability'))
+                expected = None if item['channel'] == 'context7' else 50
+                self.assertEqual(item['limit'], expected)
+                self.assertEqual(item['limit_mode'], 'upstream_default' if expected is None else 'requested')
+        self.assertIn('context7', self.probe.CHANNELS)
+        with patch.object(self.probe, 'fetch', return_value=envelope('context7', [PUBLIC_ROWS['context7']] * 20)):
+            result = self.probe.observe('context7', 'icode')
+        self.assertIsNone(result['limit'])
+        self.assertEqual(result['returned'], 20)
+        self.assertEqual(result['limit_mode'], 'upstream_default')
+
+    def test_request_budget_fails_before_network_and_tells_user_to_split_channels(self):
+        for online in ([], ['--online']):
+            with self.subTest(online=online), patch.object(self.probe, 'fetch', side_effect=AssertionError('no network')), \
+                    patch('sys.stdout', new_callable=io.StringIO), patch('sys.stderr', new_callable=io.StringIO) as err:
+                with self.assertRaises(SystemExit) as caught:
+                    self.probe.main(online + ['--channel', 'all', '--query', 'icode', '--query', 'code review'])
+                self.assertEqual(caught.exception.code, 2)
+                self.assertIn('10', err.getvalue())
+                self.assertIn('--channel', err.getvalue())
+        args = ['--channel', 'skills.sh'] + ['--query', 'icode'] * 10
+        with patch.object(self.probe, 'fetch', return_value={'skills': []}) as fetch, \
+                patch('sys.stdout', new_callable=io.StringIO) as output, \
+                patch('sys.stderr', new_callable=io.StringIO):
+            try:
+                code = self.probe.main(['--online'] + args)
+            except SystemExit:
+                self.fail('ten single-channel requests must fit the budget')
+            self.assertEqual(code, 0)
+        self.assertEqual(len(json.loads(output.getvalue())['queries']), 10)
+        self.assertEqual(fetch.call_count, 10)
+        with patch.object(self.probe, 'fetch', side_effect=AssertionError('no network')), \
+                patch('sys.stderr', new_callable=io.StringIO), self.assertRaises(SystemExit) as caught:
+            self.probe.main(args + ['--query', 'review'])
+        self.assertEqual(caught.exception.code, 2)
 
     def test_matching_requires_exact_source_and_skill_identity(self):
         cases = [
