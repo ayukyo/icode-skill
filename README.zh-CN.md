@@ -31,6 +31,8 @@ ICode 是可供 Claude Code、Codex 与 CodeBuddy 使用的工程工作流 Skill
 
 ## 安装
 
+中英文官网支持本地预览；[官网与公开发现说明](docs/public-discovery.md)提供 GitHub Pages、RSS 和可选搜索通知的启用方法。发布默认关闭，官网不读取工单，也不替代安装器或本地 UI。
+
 ### 开源统一安装入口
 
 把源码 clone 到普通目录，再运行仓库顶层安装器。它会一次性安装 ICODE、[`skill-packs/manifest.json`](skill-packs/manifest.json) 声明的全部共享技能、宿主命令桥和 MCP。默认只安装 Claude（`--client claude`）；Claude Code 与 Codex 双端使用 `--client all`。CodeBuddy 单独使用 `--client codebuddy`；`all` 仅在检测到 `~/.codebuddy/` 时追加 CodeBuddy，避免原有双端安装凭空创建第三方配置。

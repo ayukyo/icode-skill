@@ -15,6 +15,8 @@ ICode is a Claude Code Skill that breaks the journey from requirement to deliver
 
 ## Why ICode?
 
+The bilingual public site can be built locally. See [site preview and opt-in publishing](docs/public-discovery.md) for GitHub Pages, RSS and optional search notifications. Publication is disabled by default; the site never reads your tickets and does not replace the installer or local UI.
+
 | Concern | Vanilla Claude Code | ICode |
 |---|---|---|
 | Process discipline | Depends on your prompt | Hard 6-step gates + L1–L4 blocking matrix |
