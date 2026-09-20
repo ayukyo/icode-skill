@@ -42,6 +42,8 @@ ICODE 已具备标准技能入口和 Claude Code、Codex、CodeBuddy 安装适�
 | SkillsMP | 聚合公开 GitHub 技能，关键词/分类检索；文档提供有限额匿名 API | **已收录 ICODE**：作者查询返回 name=icode、author=ayukyo 和本仓库。描述仍含旧 `--reuse` 参数，不能当作最新版使用说明。[ICODE 条目](https://skillsmp.com/creators/ayukyo/icode-skill/skill)、[API](https://skillsmp.com/docs/api)、[抓取条件](https://skillsmp.com/docs/faq) |
 | awesome-claude-skills 第三方目录 | 仓库配置与技能文件扫描 | 根路径过滤问题仍按此前待上游处理记录，不将另一个目录的收录当成它已修复。[上游 issue #52](https://github.com/Chat2AnyLLM/awesome-claude-skills/issues/52) |
 
+GitHub Code Search 补充实测（同日、新元数据推送前）：登录后的公开代码查询 `repo:ayukyo/icode-skill path:SKILL.md icode` 显示 0 files，同时明确提示仓库正在建立索引。此结果是 **indexing_pending**，不是技能文件缺失或格式错误，也不是 `gh skill search` CLI 实测成功。该 CLI 的官方说明确认它使用 Code Search 匹配 `SKILL.md` 名称/描述；本机未安装 gh，未为了检查额外安装或读取凭据。索引与排序由 GitHub 控制，避免反复刷请求。[本次查询](https://github.com/search?q=repo%3Aayukyo%2Ficode-skill%20path%3ASKILL.md%20icode&type=code)、[官方查找命令](https://cli.github.com/manual/gh_skill_search)
+
 ### 补充渠道：并非都有无账号自动收录
 
 | 渠道 | 机制与本次观测 | 当前可做与限制 |
