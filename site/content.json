@@ -4,10 +4,17 @@
       "title": "有据可查的 AI 编码工作流。",
       "description": "ICODE 为 Claude Code、Codex 与 CodeBuddy 提供工单驱动的 AI 编码工作流：分步设计、自行换模型后的代码审查、证据化验证与断点续接。",
       "eyebrow": "Claude Code · Codex · CodeBuddy 开源工作流",
-      "intro": "把需求、设计决策、代码变更与验证证据保存在同一条工单流程中。从计划到交付逐步推进，中断后核对状态再续接，也可通过本地 UI 管理工单。",
+      "intro": "计划、审查、编码、验证，留在同一张可续接的工单里。",
+      "motion_label": "播放流程演示",
+      "diagram_input": "从一句需求开始",
+      "diagram_ticket": "一条工单 · 六步推进 · 随时续接",
+      "diagram_output": "代码变更 ＋ 验证证据",
+      "flow_details_label": "展开六步的输入、产物与检查点",
+      "delivery_details_label": "这些交付记录里有什么？",
+      "install_details_label": "安装与使用须知",
       "install_cta": "开始使用",
       "flow_cta": "工作流程",
-      "flow_intro": "先明确边界，再推进实现。展开任一步，了解它接收什么、留下什么，以及继续前要检查什么。",
+      "flow_intro": "先定边界，再做实现；每一步留下判断依据。",
       "input_label": "输入",
       "output_label": "产物",
       "checkpoint_label": "检查点",
@@ -18,7 +25,7 @@
       "principles_label": "了解 ICODE 如何保护工作边界",
       "illustration_label": "通用流程示意 · 非实际运行",
       "delivery_title": "交付的不只是代码，还有判断依据",
-      "delivery_note": "通用计算器示例，人工编写，仅说明产物如何组织；不是实际工单或本次测试结果。报告存在不代表设备已验证。",
+      "delivery_note": "通用计算器示意，非真实工单或测试结果。报告存在不代表设备已验证。",
       "stages": [
         {
           "id": "plan",
@@ -83,7 +90,7 @@
       "scenes": [
         {
           "id": "develop",
-          "title": "01 / 开发与设计",
+          "title": "开发与设计",
           "body": "工单驱动开发，也可以只要方案。把目标和停止点一起告诉 Agent。",
           "command": "使用 ICODE 给这个模块增加重试，先出方案，不改代码。",
           "more": "/icode start 给计算器增加取模功能并补充测试\n/icode plan",
@@ -91,7 +98,7 @@
         },
         {
           "id": "logs",
-          "title": "02 / 日志与排障",
+          "title": "日志与排障",
           "body": "先确认版本、时间窗口和证据来源，再分析异常与可能原因。",
           "command": "使用 ICODE 分析这份异常日志，先定位原因，不修改代码。",
           "more": "/icode log",
@@ -99,7 +106,7 @@
         },
         {
           "id": "review",
-          "title": "03 / 设计与代码复评",
+          "title": "设计与代码复评",
           "body": "review 审查当前阶段设计；crosscheck 对已完成工单做独立、多轮复评。",
           "command": "/icode review",
           "more": "/icode crosscheck",
@@ -107,7 +114,7 @@
         },
         {
           "id": "verify",
-          "title": "04 / 构建与设备验证",
+          "title": "构建与设备验证",
           "body": "按需选择动作，让验证记录对应实际执行。",
           "command": "/icode verify --listen",
           "more": "/icode verify --build\n/icode verify --build --deploy --listen\n/icode verify --deploy --test <target>",
@@ -115,7 +122,7 @@
         },
         {
           "id": "docs",
-          "title": "05 / 文档与知识交付",
+          "title": "文档与知识交付",
           "body": "从工程文档到 Word、PPT 和可复用知识，按目标选择交付形式。",
           "command": "使用 ICODE 为本项目整理一份面向新人的使用文档。",
           "more": "/icode doc\n/icode docx\n/icode ppt\n/icode study",
@@ -123,7 +130,7 @@
         },
         {
           "id": "manage",
-          "title": "06 / 工单管理与续接",
+          "title": "工单管理与续接",
           "body": "查看状态、待验证事项，或在本地工作台管理和续接工单。",
           "command": "/icode status --pending",
           "more": "/icode list\n/icode ui\n续接已绑定的 ICODE 工单，先核对状态和执行回执，再从中断点继续。",
@@ -169,7 +176,7 @@
       "install_note": "需要已配置的 AI 编码宿主及其模型访问。安装可能下载运行时和可选 MCP 依赖。all 默认安装 Claude Code 与 Codex；检测到 CodeBuddy 配置才追加它，也可单独使用 --client codebuddy。安装默认仅 Claude。",
       "host_note": "重启或重新加载宿主技能；未触发时显式选用技能或输入 /icode。仅在点名 ICODE 或续接已绑定的 ICODE 工单时使用，不接管未指定 ICODE 的普通请求。这些是宿主 Agent 指令，不是系统 shell 命令。",
       "examples_title": "从一句话开始，也可以精确到一步",
-      "examples_note": "以下为用法示例，不是本次运行或设备验证证据。执行范围、权限和可用工具仍由原工作流检查。",
+      "examples_note": "按目标选择入口。展开查看命令与边界；示例不是执行证据。",
       "examples": [
         ["只做设计", "使用 ICODE 给这个模块增加重试，先出方案，不改代码。"],
         ["开发完整流程", "/icode start 给计算器增加取模功能并补充测试"],
@@ -189,10 +196,17 @@
       "title": "An AI coding workflow, from plan to proof.",
       "description": "ICODE brings a ticket-based AI coding workflow to Claude Code, Codex and CodeBuddy: staged design, code review after switching models yourself, evidence-based verification and resumable work.",
       "eyebrow": "Open workflow for Claude Code · Codex · CodeBuddy",
-      "intro": "Keep requirements, design decisions, code changes and verification evidence in one ticket workflow. Move from planning to delivery, check state before resuming interrupted work, and manage tickets through a local UI.",
+      "intro": "Plan, review, build and verify in one resumable ticket.",
+      "motion_label": "Play workflow illustration",
+      "diagram_input": "Start with one request",
+      "diagram_ticket": "One ticket · Six stages · Resumable",
+      "diagram_output": "Code changes + verification evidence",
+      "flow_details_label": "Explore stage inputs, outputs and checkpoints",
+      "delivery_details_label": "What goes into these records?",
+      "install_details_label": "Installation & usage notes",
       "install_cta": "Get started",
       "flow_cta": "Workflow",
-      "flow_intro": "Set the boundaries, then move forward. Expand a stage to see what goes in, what comes out, and what must be checked before continuing.",
+      "flow_intro": "Set the boundaries. Build the change. Keep the reasons behind each step.",
       "input_label": "Input",
       "output_label": "Output",
       "checkpoint_label": "Checkpoint",
@@ -203,7 +217,7 @@
       "principles_label": "How ICODE keeps work within its boundaries",
       "illustration_label": "Generic illustration · not a live run",
       "delivery_title": "Deliver code with the reasons to trust it.",
-      "delivery_note": "A hand-written, generic calculator example showing how evidence is organized, not a real ticket or test result. Having a report does not mean a device was verified.",
+      "delivery_note": "Generic calculator illustration, not a real ticket or test result. A report does not mean a device was verified.",
       "stages": [
         {
           "id": "plan",
@@ -268,7 +282,7 @@
       "scenes": [
         {
           "id": "develop",
-          "title": "01 / Develop & design",
+          "title": "Develop & design",
           "body": "Ticket-based development, or just a design. Tell the agent both your goal and where to stop.",
           "command": "Use ICODE to design retries for this module. Stop at the plan; do not change code.",
           "more": "/icode start Add modulo to the calculator and cover it with tests\n/icode plan",
@@ -276,7 +290,7 @@
         },
         {
           "id": "logs",
-          "title": "02 / Logs & diagnosis",
+          "title": "Logs & diagnosis",
           "body": "Establish the version, time window and evidence source before analyzing an incident.",
           "command": "Use ICODE to analyze this failure log. Find the cause without changing code.",
           "more": "/icode log",
@@ -284,7 +298,7 @@
         },
         {
           "id": "review",
-          "title": "03 / Design & code review",
+          "title": "Design & code review",
           "body": "review examines the current design; crosscheck provides repeatable independent review of completed tickets.",
           "command": "/icode review",
           "more": "/icode crosscheck",
@@ -292,7 +306,7 @@
         },
         {
           "id": "verify",
-          "title": "04 / Build & device checks",
+          "title": "Build & device checks",
           "body": "Choose the actions you need and keep records tied to actual execution.",
           "command": "/icode verify --listen",
           "more": "/icode verify --build\n/icode verify --build --deploy --listen\n/icode verify --deploy --test <target>",
@@ -300,7 +314,7 @@
         },
         {
           "id": "docs",
-          "title": "05 / Docs & reusable knowledge",
+          "title": "Docs & reusable knowledge",
           "body": "Choose project documentation, Word, PPT or reusable knowledge to match your delivery needs.",
           "command": "Use ICODE to write a newcomer-friendly guide for this project.",
           "more": "/icode doc\n/icode docx\n/icode ppt\n/icode study",
@@ -308,7 +322,7 @@
         },
         {
           "id": "manage",
-          "title": "06 / Manage & resume tickets",
+          "title": "Manage & resume tickets",
           "body": "Check state and verification debt, or manage and resume tickets in the local workspace.",
           "command": "/icode status --pending",
           "more": "/icode list\n/icode ui\nResume the bound ICODE ticket: check its state and execution receipts before continuing.",
@@ -354,7 +368,7 @@
       "install_note": "Bring a configured AI coding host and model access. Installation may download runtimes and optional MCP dependencies. all installs Claude Code and Codex, adding CodeBuddy only when its configuration exists; --client codebuddy selects it explicitly. The default is Claude only.",
       "host_note": "Restart or reload skills in your host; select the skill explicitly or use /icode if needed. Use it only when you name ICODE or resume a bound ICODE ticket. It does not take over unrelated requests. These are host agent instructions, not shell commands.",
       "examples_title": "Start with a sentence. Or choose a step.",
-      "examples_note": "Usage examples, not evidence of a completed run or device verification. Existing gates still check scope, permissions and available tools.",
+      "examples_note": "Choose your goal. Expand for commands and boundaries; examples are not execution evidence.",
       "examples": [
         ["Design only", "Use ICODE to design retries for this module. Stop at the plan; do not change code."],
         ["Full development flow", "/icode start Add modulo to the calculator and cover it with tests"],

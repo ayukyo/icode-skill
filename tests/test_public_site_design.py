@@ -75,7 +75,7 @@ class PublicDesignTests(unittest.TestCase):
         for page in self.pages():
             stages = page.find('details', 'stage')
             self.assertEqual([s.attrs.get('id') for s in stages], ['stage-' + s for s in STAGES])
-            self.assertEqual([i for i, s in enumerate(stages) if 'open' in s.attrs], [0])
+            self.assertEqual([i for i, s in enumerate(stages) if 'open' in s.attrs], [])
             for stage, doc in zip(stages, DOCS):
                 self.assertEqual(len(stage.find('summary')), 1)
                 self.assertEqual(len(stage.find('dt')), 3)

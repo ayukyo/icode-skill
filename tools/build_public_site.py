@@ -29,6 +29,8 @@ FIELDS = {'title', 'description', 'eyebrow', 'intro', 'install_cta', 'flow_title
           'flow_intro', 'input_label', 'output_label', 'checkpoint_label',
           'step_docs_label', 'optional_title', 'more_label', 'scenes_title',
           'principles_label', 'illustration_label', 'delivery_title', 'delivery_note'}
+FIELDS |= {'motion_label', 'diagram_input', 'diagram_ticket', 'diagram_output',
+           'flow_details_label', 'delivery_details_label', 'install_details_label'}
 STAGE_DOCS = dict(zip(('plan', 'review', 'merge', 'code', 'deepcheck', 'audit'),
                      ('01_plan.md', '02_review.md', '03_merge.md', '04_code.md',
                       '05_deepcheck.md', '06_audit.md')))
@@ -155,6 +157,45 @@ def content_checked(data):
     return data
 
 
+# Authored geometry only: no SVG or URLs are taken from content.json.
+ICON_PATHS = {
+    'plan': ('M12 5h17l7 7v30H12Z M29 5v9h7', 'M18 22h12 M18 28h12 M18 34h8'),
+    'review': ('M31 21a12 12 0 1 1-24 0 12 12 0 0 1 24 0Z M28 30l13 13', 'M13 21h12 M19 15v12'),
+    'merge': ('M12 6v24c0 6 5 10 12 10h12 M36 6v14c0 6-5 10-12 10H12', 'M7 6h10 M31 6h10 M31 35l5 5-5 5'),
+    'code': ('M16 12 4 24l12 12 M32 12l12 12-12 12', 'M27 7 21 41'),
+    'deepcheck': ('M24 4 40 10v12c0 10-7 17-16 22C15 39 8 32 8 22V10Z', 'M16 24l6 6 12-13'),
+    'audit': ('M11 5h26v38H11Z M17 5v6h14V5', 'M17 22l3 3 5-6 M28 22h4 M17 34h15'),
+    'logs': ('M5 8h38v32H5Z M5 15h38', 'M10 29h6l4-8 7 14 4-6h7'),
+    'verify': ('M6 7h36v27H6Z M17 42h14 M24 34v8', 'M15 21l6 6 12-13'),
+    'docs': ('M6 12h25v31H6Z M16 5h20l6 6v25 M36 5v8h6', 'M12 22h13 M12 29h13 M12 36h8'),
+    'manage': ('M4 8h40v33H4Z M4 16h40 M17 16v25 M31 16v25', 'M8 23h5 M8 30h5 M21 23h6 M35 23h5 M35 30h5'),
+    'pending': ('M43 24a19 19 0 1 1-38 0 19 19 0 0 1 38 0Z', 'M24 12v13l8 5'),
+    'request': ('M5 8h38v26H20L10 43v-9H5Z', 'M12 17h24 M12 25h16'),
+}
+
+
+def icon(name, cls):
+    return (f'<svg class="{cls}" viewBox="0 0 48 48" aria-hidden="true" focusable="false" '
+            'fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
+            + ''.join('<path d="' + d + '"></path>' for d in ICON_PATHS[name]) + '</svg>')
+
+
+def render_diagram(t):
+    e = escape
+    nodes = ''.join(f'<li class="diagram-node node-{n}" data-stage="{stage}">'
+                    + icon(stage, 'diagram-icon') + f'<span class="diagram-number">0{n}</span>'
+                    + '<b>' + e(label) + '</b></li>'
+                    for n, (stage, label) in enumerate(zip(STAGE_DOCS, t['flow']), 1))
+    return ('<aside class="terminal workflow-illustration"><p class="diagram-caption">'
+            + e(t['illustration_label']) + '</p><input type="checkbox" id="motion-toggle" checked>'
+            + '<label class="motion-control" for="motion-toggle">' + e(t['motion_label']) + '</label>'
+            + '<div class="workflow-canvas"><div class="request-node">' + icon('request', 'diagram-icon')
+            + '<span class="diagram-kicker">' + e(t['diagram_input']) + '</span><p class="prompt">'
+            + e(t['examples'][1][1]) + '</p></div><div class="diagram-ticket">' + e(t['diagram_ticket'])
+            + '</div><ol class="diagram-stages">' + nodes + '</ol><div class="diagram-delivery">'
+            + icon('audit', 'diagram-icon') + '<span>' + e(t['diagram_output']) + '</span></div></div></aside>')
+
+
 def render_page(data, lang, base, version):
     t = data['locales'][lang]
     e = escape
@@ -173,27 +214,32 @@ def render_page(data, lang, base, version):
         stage_id = stage['id']
         fields = ''.join('<dt>' + e(t[key + '_label']) + '</dt><dd>' + e(stage[key]) + '</dd>'
                          for key in ('input', 'output', 'checkpoint'))
-        stages.append(f'<details class="stage" id="stage-{stage_id}"' + (' open' if n == 1 else '')
-                      + f'><summary><span class="step-number">{n:02}</span><strong>{e(label)}</strong>'
+        stages.append(f'<details class="stage" id="stage-{stage_id}">'
+                      + f'<summary><span class="step-number">{n:02}</span><strong>{e(label)}</strong>'
                       + f'<code>{stage_id}</code></summary><div class="stage-body"><p>{e(stage["purpose"])}</p>'
                       + f'<dl>{fields}</dl><a href="{REPO}/blob/main/steps/{STAGE_DOCS[stage_id]}">'
                       + e(t['step_docs_label']) + '</a></div></details>')
     paths = ''.join('<article class="card"><h3>' + e(p['title']) + '</h3><p>' + e(p['body'])
                     + '</p></article>' for p in t['paths'])
-    scenes = ''.join('<article class="card"><h3>' + e(s['title']) + '</h3><p>' + e(s['body'])
-                     + '</p><code class="example-command">' + e(s['command']) + '</code><details><summary>'
-                     + e(t['more_label']) + '</summary><pre><code>' + e(s['more']) + '</code></pre><p class="note">'
+    scene_icons = {'develop': 'code', 'logs': 'logs', 'review': 'review',
+                   'verify': 'verify', 'docs': 'docs', 'manage': 'manage'}
+    scenes = ''.join('<article class="card">' + icon(scene_icons[s['id']], 'scene-art')
+                     + '<h3>' + e(s['title']) + '</h3><p>' + e(s['body'])
+                     + '</p><details><summary>' + e(t['more_label'])
+                     + '</summary><code class="example-command">' + e(s['command'])
+                     + '</code><pre><code>' + e(s['more']) + '</code></pre><p class="note">'
                      + e(s['note']) + '</p></details></article>' for s in t['scenes'])
+    delivery_icons = {'design': 'plan', 'code': 'code', 'evidence': 'audit', 'pending': 'pending'}
     delivery = ''.join('<article class="card' + (' pending' if p['id'] == 'pending' else '')
-                       + '"><h3>' + e(p['title']) + '</h3><p>' + e(p['body']) + '</p></article>'
+                       + '">' + icon(delivery_icons[p['id']], 'delivery-icon')
+                       + '<h3>' + e(p['title']) + '</h3></article>'
                        for p in t['delivery'])
+    delivery_details = ''.join('<h3>' + e(p['title']) + '</h3><p>' + e(p['body']) + '</p>'
+                               for p in t['delivery'])
     updates = ''.join('<article class="update" id="note-' + e(item['version']) + '"><h3>' + e(item['version'])
                       + '<time datetime="' + e(item['reviewed_on']) + '">' + e(item['reviewed_on'])
                       + '</time></h3><p>' + e(item[lang]) + '</p></article>' for item in data['updates'])
     skip = 'Skip to content' if english else '跳到正文'
-    # The terminal is a labeled usage illustration, never a fake successful run.
-    trace = ''.join('<li><b>' + e(label) + '</b><span class="tag">' + str(n) + '/6</span></li>'
-                    for n, label in enumerate(t['flow'], 1))
     return f'''<!doctype html>
 <html lang="{lang}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>ICODE — {e(t['title'])}</title><meta name="description" content="{e(t['description'])}">
@@ -210,19 +256,20 @@ def render_page(data, lang, base, version):
 <p class="lead" itemprop="description">{e(t['intro'])}</p><ul class="hosts"><li>Claude Code</li><li>Codex</li><li>CodeBuddy</li></ul>
 <div class="actions"><a class="button" href="#install">{e(t['install_cta'])} →</a><a href="#flow">{e(t['flow_cta'])} ↗</a></div>
 <p class="version">{e(t['source_label'])} · <span itemprop="version">{e(version)}</span></p></div>
-<aside class="terminal" aria-label="{'Workflow example' if english else '流程示例'}"><div class="terminal-head">{e(t['illustration_label'])}</div>
-<div class="terminal-body"><p class="prompt">{e(t['examples'][1][1])}</p><ul class="trace">{trace}</ul></div></aside></section>
-<section class="section" id="flow"><h2>{e(t['flow_title'])}</h2><p class="note">{e(t['flow_intro'])}</p><ol class="flow">{flow}</ol>
-<div class="stage-grid">{''.join(stages)}</div><h3>{e(t['optional_title'])}</h3><div class="optional-grid">{paths}</div></section>
+{render_diagram(t)}</section>
+<section class="section" id="flow"><h2>{e(t['flow_title'])}</h2><p class="note">{e(t['flow_intro'])}</p>
+<details class="workflow-details"><summary>{e(t['flow_details_label'])}</summary><ol class="flow">{flow}</ol>
+<div class="stage-grid">{''.join(stages)}</div></details><details class="optional-details"><summary>{e(t['optional_title'])}</summary><div class="optional-grid">{paths}</div></details></section>
 <section class="section" id="capabilities"><h2>{e(t['scenes_title'])}</h2><p class="note">{e(t['examples_note'])}</p><div class="scenes">{scenes}</div>
 <details class="principles"><summary>{e(t['principles_label'])}</summary><h3>{e(t['features_title'])}</h3><div class="grid">{features}</div></details></section>
-<section class="section" id="delivery"><h2>{e(t['delivery_title'])}</h2><p class="note">{e(t['delivery_note'])}</p><div class="delivery-grid">{delivery}</div></section>
+<section class="section" id="delivery"><h2>{e(t['delivery_title'])}</h2><div class="delivery-grid">{delivery}</div><p class="note">{e(t['delivery_note'])}</p>
+<details class="delivery-details"><summary>{e(t['delivery_details_label'])}</summary><div>{delivery_details}</div></details></section>
 <section class="section" id="install"><h2>{e(t['install_title'])}</h2><div class="install-grid"><div><h3>{e(t['terminal_label'])}</h3>
-<pre><code>{e(INSTALL)}</code></pre><p class="note">{e(t['install_note'])}</p></div><div><h3>{e(t['host_label'])}</h3>
-<pre><code>/icode help\n{e(t['examples'][0][1])}</code></pre><p class="note">{e(t['host_note'])}</p><a href="{docs}">{e(t['docs_label'])} ↗</a></div></div></section>
+<pre><code>{e(INSTALL)}</code></pre><details class="install-note-details"><summary>{e(t['install_details_label'])}</summary><p class="note">{e(t['install_note'])}</p></details></div><div><h3>{e(t['host_label'])}</h3>
+<pre><code>/icode help\n{e(t['examples'][0][1])}</code></pre><details class="install-note-details"><summary>{e(t['install_details_label'])}</summary><p class="note">{e(t['host_note'])}</p></details><a href="{docs}">{e(t['docs_label'])} ↗</a></div></div></section>
 <section class="section" id="examples"><details class="more-examples"><summary>{e(t['examples_title'])}</summary><p class="note">{e(t['examples_note'])}</p><div class="examples">{examples}</div></details>
 <p class="boundary note">{e(t['boundary'])}</p></section>
-<section class="section" id="updates"><h2>{e(t['updates_title'])}</h2>{updates}</section></main>
+<section class="section" id="updates"><details class="updates-details"><summary>{e(t['updates_title'])}</summary>{updates}</details></section></main>
 <footer><p>{e(t['privacy'])}</p><a itemprop="codeRepository" href="{REPO}">GitHub</a><a href="{relative}feed.xml">RSS</a><a href="{relative}llms.txt">llms.txt</a><a href="index.md">Markdown</a><a itemprop="license" href="{REPO}/blob/main/LICENSE">MIT</a></footer>
 </body></html>\n'''
 
