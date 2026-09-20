@@ -46,7 +46,9 @@ a:hover {
 }
 
 a:focus-visible,
-summary:focus-visible {
+summary:focus-visible,
+#motion-toggle:focus-visible,
+#motion-toggle:focus-visible + .motion-control {
   outline: 3px solid var(--accent);
   outline-offset: 4px;
 }
@@ -132,13 +134,13 @@ nav a {
   color: var(--accent);
 }
 
-/* Hero and host badges. Terminal content remains a static usage illustration. */
+/* Hero and host badges; the adjacent diagram is an illustration, never live status. */
 .hero {
   display: grid;
-  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr);
   align-items: center;
-  gap: 3.5rem;
-  padding-block: 5rem 4rem;
+  gap: 2rem;
+  padding-block: 2.5rem;
 }
 
 .eyebrow {
@@ -195,7 +197,8 @@ nav a {
   font-weight: 600;
 }
 
-.terminal {
+.terminal,
+.workflow-illustration {
   min-width: 0;
   border: 1px solid var(--line);
   border-radius: 0.875rem;
@@ -221,29 +224,6 @@ nav a {
   overflow-wrap: anywhere;
 }
 
-.trace {
-  display: grid;
-  gap: 0.75rem;
-  margin: 1.5rem 0 0;
-  padding: 0;
-  list-style: none;
-}
-
-.trace li {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  gap: 0.75rem;
-  color: var(--muted);
-  font-size: 0.8125rem;
-}
-
-.trace b {
-  min-width: 0;
-  color: var(--text);
-  font-weight: 500;
-}
-
 .tag {
   flex-shrink: 0;
   padding: 0.125rem 0.5rem;
@@ -259,9 +239,199 @@ nav a {
   font: 0.75rem/1.75 ui-monospace, monospace;
 }
 
+/* Native checkbox controls every animation in its following canvas, without JS. */
+.workflow-illustration {
+  padding: 1.25rem;
+  box-shadow: 0 12px 40px #1822300D;
+}
+
+.diagram-caption {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.8125rem;
+}
+
+#motion-toggle {
+  width: 20px;
+  height: 20px;
+  margin: 0 0.5rem 0 0;
+  vertical-align: middle;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.motion-control {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  min-width: 44px;
+  max-width: calc(100% - 36px);
+  vertical-align: middle;
+  color: var(--muted);
+  font-size: 0.8125rem;
+  cursor: pointer;
+  border-radius: 0.25rem;
+}
+
+.workflow-canvas {
+  min-width: 0;
+  margin-top: 0.5rem;
+}
+
+.request-node {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr);
+  align-items: center;
+  column-gap: 0.75rem;
+  padding: 1rem 1.125rem;
+  border: 1px solid var(--line);
+  border-inline-start: 3px solid var(--accent);
+  border-radius: 0.625rem;
+  background: var(--bg);
+}
+
+.diagram-kicker {
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.request-node .prompt {
+  margin: 0.25rem 0 0;
+  color: var(--green);
+  font: 0.875rem/1.65 ui-monospace, monospace;
+  overflow-wrap: anywhere;
+}
+
+.request-node .diagram-icon {
+  grid-row: span 2;
+  width: 40px;
+  height: 40px;
+}
+
+.diagram-ticket {
+  margin: 0.875rem 0;
+  color: var(--muted);
+  font-size: 0.8125rem;
+  text-align: center;
+}
+
+.diagram-stages {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-auto-flow: row;
+  gap: 1rem 1.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.workflow-canvas .diagram-node {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.25rem;
+  padding: 0.75rem 0.375rem;
+  border: 2px solid var(--line);
+  border-radius: 0.75rem;
+  background: var(--panel);
+  text-align: center;
+  animation: diagram-emphasis 24s ease-in-out infinite;
+}
+
+.diagram-node b {
+  font-size: 0.875rem;
+  line-height: 1.4;
+}
+
+.diagram-icon {
+  width: 56px;
+  height: 56px;
+  max-width: 100%;
+  color: var(--accent);
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.diagram-number {
+  color: var(--muted);
+  font: 0.75rem/1.4 ui-monospace, monospace;
+}
+
+/* Only connect neighbors on the same row. Numbers preserve row-major reading. */
+.diagram-node::after {
+  content: "→";
+  position: absolute;
+  inset-inline-end: -1.375rem;
+  top: 42%;
+  color: var(--muted);
+  font-size: 1rem;
+}
+
+.diagram-node:nth-child(3n)::after {
+  content: none;
+}
+
+.diagram-delivery {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  margin-top: 1rem;
+  padding: 0.75rem;
+  border: 1px solid var(--green);
+  border-radius: 0.625rem;
+  color: var(--green);
+  font-weight: 700;
+}
+
+.diagram-delivery svg {
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+}
+
+.workflow-canvas .node-1 { animation-delay: 0s; }
+.workflow-canvas .node-2 { animation-delay: 4s; }
+.workflow-canvas .node-3 { animation-delay: 8s; }
+.workflow-canvas .node-4 { animation-delay: 12s; }
+.workflow-canvas .node-5 { animation-delay: 16s; }
+.workflow-canvas .node-6 { animation-delay: 20s; }
+
+/* A single gentle emphasis per node, with no opacity or text changes. */
+@keyframes diagram-emphasis {
+  0%, 16%, 100% {
+    border-color: var(--line);
+    transform: none;
+    box-shadow: none;
+  }
+  4%, 12% {
+    border-color: var(--accent);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px #4F46E51A;
+  }
+}
+
+#motion-toggle:not(:checked) ~ .workflow-canvas,
+#motion-toggle:not(:checked) ~ .workflow-canvas::before,
+#motion-toggle:not(:checked) ~ .workflow-canvas::after,
+#motion-toggle:not(:checked) ~ .workflow-canvas *,
+#motion-toggle:not(:checked) ~ .workflow-canvas *::before,
+#motion-toggle:not(:checked) ~ .workflow-canvas *::after {
+  animation-play-state: paused !important;
+}
+
 /* Section and grid primitives: items shrink instead of expanding the page. */
 .section {
-  padding-block: 3.5rem;
+  padding-block: 2.5rem;
   border-top: 1px solid var(--line);
 }
 
@@ -302,7 +472,7 @@ nav a {
 .delivery-grid > *,
 .install-grid > *,
 .examples > *,
-.trace > * {
+.diagram-stages > * {
   min-width: 0;
 }
 
@@ -312,7 +482,7 @@ nav a {
 
 .card,
 .examples article {
-  padding: 1.5rem;
+  padding: 1.25rem;
   border: 1px solid var(--line);
   border-radius: 0.75rem;
   background: var(--panel);
@@ -328,6 +498,60 @@ nav a {
 .stage,
 .terminal {
   box-shadow: 0 2px 8px #18223008;
+}
+
+/* The six scenes and four deliverables lead with local SVG artwork. */
+.scene-art,
+.delivery-icon {
+  display: block;
+  width: 80px;
+  height: 80px;
+  max-width: 100%;
+  margin-bottom: 0.875rem;
+  color: var(--accent);
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.delivery-icon {
+  width: 48px;
+  height: 48px;
+}
+
+.scenes {
+  align-items: start;
+}
+
+.delivery-grid h3 {
+  margin-bottom: 0;
+}
+
+.pending .delivery-icon {
+  color: var(--pending);
+}
+
+.workflow-details,
+.optional-details,
+.delivery-details,
+.install-note-details,
+.updates-details {
+  min-width: 0;
+  margin-top: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 0.75rem;
+  background: var(--panel);
+}
+
+.workflow-details > :not(summary),
+.optional-details > :not(summary),
+.delivery-details > :not(summary),
+.install-note-details > :not(summary),
+.updates-details > :not(summary) {
+  margin-inline: 1rem;
+  margin-bottom: 1rem;
 }
 
 .pending {
@@ -537,7 +761,7 @@ footer a {
   .hero {
     grid-template-columns: minmax(0, 1fr);
     gap: 2rem;
-    padding-block: 3rem;
+    padding-block: 2rem;
   }
 
   .grid,
@@ -575,6 +799,22 @@ footer a {
     grid-template-columns: repeat(1, minmax(0, 1fr));
   }
 
+  .workflow-illustration {
+    padding: 0.875rem;
+  }
+
+  .diagram-stages {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .diagram-node:nth-child(3n)::after {
+    content: "→";
+  }
+
+  .diagram-node:nth-child(2n)::after {
+    content: none;
+  }
+
   .flow {
     gap: 0;
   }
@@ -606,7 +846,7 @@ footer a {
   }
 }
 
-/* No motion by default; make the reduced-motion override explicit. */
+/* Reduced motion is fully static regardless of the checkbox state. */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

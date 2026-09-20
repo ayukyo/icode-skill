@@ -12,12 +12,12 @@ PALETTE = {
 }
 GRID_SELECTORS = (
     ".hero", ".flow", ".grid", ".stage-grid", ".optional-grid", ".scenes",
-    ".delivery-grid", ".install-grid", ".examples", ".trace",
+    ".delivery-grid", ".install-grid", ".examples", ".diagram-stages",
 )
 
 
 def css_rules(source, media=""):
-    """Read this site's flat rules / single-level media blocks, not computed CSS.
+    """Read flat rules, media and keyframes, not computed CSS.
 
     Fail on unsupported or malformed syntax instead of silently skipping it.
     This intentionally small reader keeps the contracts dependency-free.
@@ -31,7 +31,7 @@ def css_rules(source, media=""):
             raise AssertionError("Unsupported CSS near: " + source[position:position + 80])
         head, body = match.groups()
         head = head.strip()
-        if head.startswith("@media"):
+        if head.startswith(("@media", "@keyframes")):
             if media:
                 raise AssertionError("Nested media rules are outside the site contract")
             yield from css_rules(body, head)
@@ -125,8 +125,8 @@ class PublicSiteStyleTests(unittest.TestCase):
         required = {
             "header", "nav", ".brand", ".brand span", ".skip", ".skip:focus",
             ".hero", ".eyebrow", ".lead", ".actions", ".button", ".terminal",
-            ".terminal-head", ".terminal-body", ".terminal-body .prompt", ".trace",
-            ".trace li", ".trace b", ".tag", ".section", ".flow", ".flow li",
+            ".terminal-head", ".terminal-body", ".terminal-body .prompt",
+            ".tag", ".section", ".flow", ".flow li",
             ".grid", ".card", ".card p", ".note", ".install-grid", "pre", "code",
             ".examples", ".examples article", ".examples code", ".boundary",
             ".update", ".update time", "footer", "footer a", ".version",
@@ -136,6 +136,12 @@ class PublicSiteStyleTests(unittest.TestCase):
             ".stage-body dd", ".stage-body a", ".optional-grid", ".scenes",
             ".example-command", ".scenes details", ".principles", ".principles .grid",
             ".delivery-grid", ".pending", ".more-examples", ".more-examples .examples",
+            ".workflow-illustration", ".diagram-caption", ".motion-control", "#motion-toggle",
+            ".workflow-canvas", ".request-node", ".diagram-kicker", ".request-node .prompt",
+            ".diagram-ticket", ".diagram-stages", ".workflow-canvas .diagram-node",
+            ".diagram-icon", ".diagram-number", ".diagram-delivery", ".scene-art", ".delivery-icon",
+            ".workflow-details", ".optional-details", ".delivery-details",
+            ".install-note-details", ".updates-details",
         }
         self.assertEqual(required - selectors, set())
 
@@ -193,21 +199,18 @@ class PublicSiteStyleTests(unittest.TestCase):
                 self.assertNotEqual(declarations.get("display"), "none", selector)
         self.assertNotIn("::-webkit-details-marker", self.css)
 
-    def test_terminal_is_a_static_light_illustration(self):
+    def test_illustration_uses_light_surfaces_and_only_decorative_generated_content(self):
         self.assertEqual(self.declarations(".terminal").get("background"), "var(--panel)")
         self.assertEqual(self.declarations(".terminal-head").get("background"), "var(--bg)")
         self.assertEqual(self.declarations(".tag").get("color"), "var(--muted)")
         for _, selector, declarations in self.rules:
             if "content" in declarations:
-                self.assertIn(selector, (".flow li::before", ".flow li:before"))
+                self.assertTrue(selector in (".flow li::before", ".flow li:before")
+                                or selector.startswith(".diagram-node"), selector)
 
-    def test_system_fonts_no_remote_resources_or_motion(self):
+    def test_system_fonts_no_remote_resources_and_static_reduced_motion(self):
         self.assertIn("system-ui", self.declarations("body").get("font", ""))
         self.assertNotRegex(self.css, r"(?i)@import|@font-face|url\s*\(|expression\s*\(|javascript:")
-        for _, selector, declarations in self.rules:
-            for name, value in declarations.items():
-                if name.startswith(("animation", "transition")):
-                    self.assertEqual(value, "none !important", selector)
         reduced = [(selector, values) for media, selector, values in self.rules
                    if "prefers-reduced-motion" in media]
         self.assertTrue(reduced)
@@ -218,6 +221,76 @@ class PublicSiteStyleTests(unittest.TestCase):
                                 for candidate, values in reduced), selector)
         self.assertEqual(self.declarations("html", reduced=True).get("scroll-behavior"),
                          "auto !important")
+
+    def test_motion_is_scoped_slow_sequential_and_never_hides_text(self):
+        animated = [(selector, values) for media, selector, values in self.rules
+                    if not media and "animation" in values]
+        self.assertEqual(len(animated), 1)
+        selector, values = animated[0]
+        self.assertEqual(selector, ".workflow-canvas .diagram-node")
+        animation = values["animation"]
+        duration = float(re.search(r"\b(\d+(?:\.\d+)?)s\b", animation)[1])
+        self.assertGreaterEqual(duration, 18)
+        self.assertIn("infinite", animation)
+        frames = [(point, props) for media, point, props in self.rules
+                  if media == "@keyframes " + animation.split()[0]]
+        self.assertTrue(frames)
+        for _, props in frames:
+            self.assertTrue(set(props) <= {"border-color", "transform", "box-shadow"})
+        # One contiguous emphasis window, shorter than a sixth of the full cycle.
+        percentages = {float(p.rstrip("%")) for p, _ in frames}
+        self.assertTrue({0, 100} <= percentages)
+        self.assertLessEqual(max(percentages - {100}), 100 / 6)
+        for index in range(1, 7):
+            delay = self.declarations(f".workflow-canvas .node-{index}").get("animation-delay")
+            self.assertEqual(delay, f"{(index - 1) * duration / 6:g}s")
+        for media, candidate, props in self.rules:
+            if media.startswith("@keyframes") or "prefers-reduced-motion" in media:
+                continue
+            for name in props:
+                if name.startswith(("animation", "transition")):
+                    self.assertIn(".workflow-canvas", candidate)
+
+    def test_native_checkbox_pauses_all_canvas_motion_without_script(self):
+        for suffix in ("", "::before", "::after", " *", " *::before", " *::after"):
+            selector = "#motion-toggle:not(:checked) ~ .workflow-canvas" + suffix
+            self.assertEqual(self.declarations(selector).get("animation-play-state"), "paused !important")
+        toggle = self.declarations("#motion-toggle")
+        self.assertNotIn(toggle.get("appearance"), ("none",))
+        self.assertNotIn(toggle.get("display"), ("none",))
+        self.assertNotIn(toggle.get("visibility"), ("hidden",))
+        self.assertEqual(self.declarations(".motion-control").get("min-height"), "44px")
+        self.assertRegex(self.declarations("#motion-toggle:focus-visible").get("outline", ""),
+                         r"[2-9]px solid")
+        self.assertNotRegex(self.css, r"(?i)\.js\b|\.no-js\b|:has\(|(?<![-\w])behavior\s*:")
+
+    def test_diagram_grid_preserves_dom_order_and_mobile_readability(self):
+        for width, count in ((360, 2), (768, 3), (1440, 3)):
+            style = self.declarations(".diagram-stages", width)
+            self.assertEqual(style.get("grid-template-columns"), f"repeat({count}, minmax(0, 1fr))")
+            self.assertEqual(style.get("grid-auto-flow"), "row")
+        for _, selector, props in self.rules:
+            if "diagram" in selector or ".node-" in selector:
+                self.assertNotIn("order", props, selector)
+                self.assertNotIn("grid-area", props, selector)
+        self.assertEqual(self.declarations(".request-node .prompt").get("overflow-wrap"), "anywhere")
+        for selector in (".scene-art", ".diagram-icon", ".delivery-icon"):
+            self.assertEqual(self.declarations(selector).get("max-width"), "100%")
+
+    def test_request_icon_sits_beside_the_command_without_an_extra_text_row(self):
+        self.assertEqual(self.declarations(".request-node").get("display"), "grid")
+        self.assertEqual(self.declarations(".request-node").get("grid-template-columns"),
+                         "40px minmax(0, 1fr)")
+        self.assertEqual(self.declarations(".request-node .diagram-icon").get("grid-row"), "span 2")
+
+    def test_parser_preserves_keyframe_and_media_context_and_rejects_broken_css(self):
+        rules = list(css_rules("@keyframes demo { 0%, 100% { transform: none; } }"
+                               "@media (max-width: 520px) { .node { color: inherit; } }"))
+        self.assertEqual([rule[0] for rule in rules],
+                         ["@keyframes demo", "@keyframes demo", "@media (max-width: 520px)"])
+        for broken in ("@unknown x { color: red; }", ".x { missing }", ".x {", "orphan"):
+            with self.subTest(broken=broken), self.assertRaises(AssertionError):
+                list(css_rules(broken))
 
     def test_css_is_readable_component_source(self):
         self.assertLessEqual(max(map(len, self.css.splitlines())), 120)
