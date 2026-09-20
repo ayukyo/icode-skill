@@ -25,6 +25,22 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn('name: github-pages', text)
         self.assertNotIn('pull_request_target', text)
 
+    def test_metadata_regression_has_pinned_ci_dependencies(self):
+        text = self.text().split('\n  deploy:\n', 1)[0]
+        self.assertIn('python3 -m pip install --disable-pip-version-check --no-cache-dir pytest==9.0.3 PyYAML==6.0.2', text)
+        self.assertIn('python3 -m pytest -p no:anyio tests/test_skill_discovery_metadata.py -q', text)
+        self.assertLess(text.index('python3 -m pip install'), text.index('python3 -m pytest'))
+        self.assertNotIn('--user', text)
+
+    def test_metadata_and_install_chain_changes_trigger_pr_regression(self):
+        paths = self.text().split('  pull_request:\n', 1)[1].split('  release:\n', 1)[0]
+        for path in ('tests/test_skill_discovery_metadata.py', 'tests/run_public_site_checks.py',
+                     'install.sh', 'scripts/sync-to-global.sh', 'tools/install_skill_pack.py',
+                     'tools/validate_skill_pack.py', 'mcp/workflow-gate/skill-routes.json',
+                     'integrations/codebuddy/**', '.gitignore', 'agents/**', 'skill-packs/**'):
+            with self.subTest(path=path):
+                self.assertIn("- '" + path + "'", paths)
+
     def test_disabled_by_default_and_no_pr_deploy(self):
         text = self.text()
         self.assertIn('  push:\n    branches: [main]\n', text)

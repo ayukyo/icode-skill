@@ -1,5 +1,6 @@
 """Bounded read-only observations, never synthetic installs or ranking claims."""
 import importlib.util
+from http.client import HTTPException, HTTPResponse
 import io
 import json
 from pathlib import Path
@@ -61,6 +62,76 @@ class ProbeTests(unittest.TestCase):
         url = self.probe.endpoint('skillsmp', '工单 & code')
         self.assertIn('%E5%B7%A5%E5%8D%95', url)
         self.assertNotIn('owner=', self.probe.endpoint('skills.sh', 'icode'))
+
+    def test_identity_schema_drift_is_not_a_search_miss(self):
+        # Identity fields observed in anonymous public results on 2026-09-20.
+        identities = {
+            'skillsmp': {'name': 'icode', 'author': 'ayukyo',
+                         'githubUrl': 'https://github.com/ayukyo/icode-skill/tree/main'},
+            'skills.sh': {'name': 'icode', 'source': 'ayukyo/icode-skill', 'skillId': 'icode'},
+        }
+        for channel, identity in identities.items():
+            for field in identity:
+                for value in (None, '', ' ', 123, False, [], {}):
+                    row = {**identity, field: value}
+                    payload = {'skills': [row]}
+                    if channel == 'skillsmp':
+                        payload = {'success': True, 'data': payload}
+                    with self.subTest(channel=channel, field=field, value=value), \
+                            patch.object(self.probe, 'fetch', return_value=payload):
+                        self.assertEqual(self.probe.observe(channel, 'icode')['status'], 'invalid_response')
+            row = {**identity, 'description': None, 'installs': None}
+            payload = {'skills': [row]}
+            if channel == 'skillsmp':
+                payload = {'success': True, 'data': payload}
+            with patch.object(self.probe, 'fetch', return_value=payload):
+                self.assertEqual(self.probe.observe(channel, 'icode')['status'], 'matched')
+        for row in ({}, {'name': 'icode', 'repository': 'ayukyo/icode-skill'}):
+            with patch.object(self.probe, 'fetch', return_value={'skills': [row]}):
+                self.assertEqual(self.probe.observe('skills.sh', 'icode')['status'], 'invalid_response')
+
+    def test_error_envelope_is_not_successful_empty_results(self):
+        for payload in ({'success': False, 'skills': []}, {'error': 'backend failure', 'skills': []}):
+            with patch.object(self.probe, 'fetch', return_value=payload), \
+                    patch('sys.stdout', new_callable=io.StringIO) as output:
+                self.assertEqual(self.probe.main(['--online', '--channel', 'skills.sh', '--query', 'icode']), 1)
+                self.assertEqual(json.loads(output.getvalue())['queries'][0]['status'], 'invalid_response')
+
+    def test_redirect_query_cannot_change_or_disappear(self):
+        from urllib.request import Request
+        request = Request('https://skills.sh/api/search?q=icode&limit=50')
+        for query in ('q=other&limit=50', 'q=icode&limit=5000', '', 'q=icode&limit=50&q=other'):
+            with self.subTest(query=query), self.assertRaises(ValueError):
+                self.probe.PublicRedirects().redirect_request(
+                    request, None, 308, 'move', {}, 'https://www.skills.sh/api/search?' + query)
+
+    def test_truncated_chunked_http_response_is_isolated(self):
+        class Socket:
+            def makefile(self, *args):
+                return io.BytesIO(b'HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n20\r\n{"skills":[')
+        response = HTTPResponse(Socket())
+        response.begin()
+        with patch.object(self.probe, 'build_opener') as opener:
+            opener.return_value.open.side_effect = [response, io.BytesIO(b'{"skills":[]}')]
+            with patch('sys.stdout', new_callable=io.StringIO) as output:
+                try:
+                    code = self.probe.main(['--online', '--channel', 'skills.sh', '--query', 'icode', '--query', 'review'])
+                except HTTPException as exc:
+                    self.fail('HTTP read failure escaped the query: ' + type(exc).__name__)
+            self.assertEqual(code, 1)
+            self.assertEqual([r['status'] for r in json.loads(output.getvalue())['queries']],
+                             ['unavailable', 'not_in_results'])
+
+    def test_other_http_protocol_errors_continue_the_batch(self):
+        with patch.object(self.probe, 'fetch', side_effect=[HTTPException('bad status'), {'skills': []}]), \
+                patch('sys.stdout', new_callable=io.StringIO) as output:
+            try:
+                code = self.probe.main(['--online', '--channel', 'skills.sh', '--query', 'icode', '--query', 'review'])
+            except HTTPException:
+                self.fail('HTTP protocol error escaped the query')
+        self.assertEqual(code, 1)
+        self.assertEqual([r['status'] for r in json.loads(output.getvalue())['queries']],
+                         ['unavailable', 'not_in_results'])
 
     def test_response_size_is_bounded(self):
         class Response(io.BytesIO):

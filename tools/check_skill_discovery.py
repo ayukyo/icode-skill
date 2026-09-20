@@ -7,6 +7,7 @@ The skills.sh search route is a public website endpoint, not a stable API promis
 """
 import argparse
 from datetime import datetime, timezone
+from http.client import HTTPException
 import json
 import socket
 from urllib.error import HTTPError, URLError
@@ -36,7 +37,7 @@ class PublicRedirects(HTTPRedirectHandler):
         # Only canonical www/non-www redirects on this exact public API path.
         if (new.scheme != 'https' or new.username or new.password or new.port
                 or new.hostname not in {old.hostname, 'www.' + old.hostname.removeprefix('www.')}
-                or new.path != old.path):
+                or new.path != old.path or new.query != old.query):
             raise ValueError('unexpected search redirect')
         return super().redirect_request(req, fp, 307 if code == 308 else code, msg, headers, newurl)
 
@@ -51,11 +52,16 @@ def fetch(url):
 
 
 def is_icode(channel, item):
-    if str(item.get('name', '')).casefold() != 'icode':
+    # Validate every result, including non-matches: schema drift is not absence.
+    # Other API fields may be null and are deliberately outside this contract.
+    fields = ('name', 'source', 'skillId') if channel == 'skills.sh' else ('name', 'author', 'githubUrl')
+    if any(not isinstance(item.get(key), str) or not item[key].strip() for key in fields):
+        raise ValueError('search result identity fields changed')
+    if item['name'].casefold() != 'icode':
         return False
     if channel == 'skills.sh':
         return item.get('source') == 'ayukyo/icode-skill' and item.get('skillId') == 'icode'
-    url = urlsplit(str(item.get('githubUrl', '')))
+    url = urlsplit(item['githubUrl'])
     return (item.get('author') == 'ayukyo' and url.scheme == 'https'
             and url.netloc == 'github.com' and url.path.rstrip('/') in {
                 '/ayukyo/icode-skill', '/ayukyo/icode-skill/tree/main',
@@ -68,6 +74,8 @@ def observe(channel, query):
         payload = fetch(result['url'])
         if not isinstance(payload, dict):
             raise ValueError('response object expected')
+        if payload.get('error') or payload.get('success', True) is not True:
+            raise ValueError('search returned an error envelope')
         if channel == 'skillsmp':
             if payload.get('success') is not True or not isinstance(payload.get('data'), dict):
                 raise ValueError('SkillsMP response changed')
@@ -80,7 +88,7 @@ def observe(channel, query):
     except HTTPError as exc:
         result.update(status={401: 'auth_required', 403: 'auth_required', 429: 'rate_limited'}.get(exc.code, 'unavailable'),
                       http_status=exc.code)
-    except (URLError, OSError, socket.timeout):
+    except (URLError, OSError, socket.timeout, HTTPException):
         result['status'] = 'unavailable'
     except (ValueError, TypeError):
         result['status'] = 'invalid_response'
