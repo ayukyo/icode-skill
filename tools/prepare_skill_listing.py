@@ -23,10 +23,22 @@ def drafts(source, platform):
     # This repository has a deliberately flat, plain-scalar discovery header.
     # Do not guess or partially interpret a changed YAML structure.
     header = re.match(r'\A---\r?\nname: icode\r?\ndescription: ([^\r\n]+)\r?\n---(?:\r?\n|\Z)', text)
+    if not header:
+        raise ValueError('unsupported ICODE header: expected name: icode and a single-line plain description')
+    description = header[1].strip(' ')
+    # Accept only a conservative subset of plain text, not general YAML:
+    # a letter starts prose (including Chinese), not a number, tag or collection.
+    # Preserve punctuation inside prose, but reject comment/mapping separators,
+    # implicit null/boolean values and controls rather than changing their meaning.
+    if (not description or not description[0].isalpha() or not description.isprintable()
+            or description.casefold() in {'null', 'true', 'false', 'yes', 'no', 'on', 'off', 'y', 'n'}
+            or re.search(r'\s#|:(?:\s|$)', description)):
+        raise ValueError('unsupported description: expected single-line plain text starting with a letter; '
+                         'YAML syntax and null/boolean scalars are not supported')
     versions = re.findall(r'^\*\*版本\*\*:\s*v([^\s]+)\s*$', text, re.MULTILINE)
-    if (not header or not header[1].strip() or len(versions) != 1
-            or not re.fullmatch(r'(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)', versions[0])):
-        raise ValueError('expected ICODE discovery header and one stable source version')
+    if (len(versions) != 1
+            or not re.fullmatch(r'(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)', versions[0])):
+        raise ValueError('expected one stable ASCII source version (X.Y.Z)')
     data = {
         'skillhub': {
             'platform': 'skillhub',
@@ -34,7 +46,7 @@ def drafts(source, platform):
             'frontmatter': {
                 'slug': 'icode', 'version': versions[0], 'displayName': 'ICODE AI Coding Workflow',
                 'summary': '工单式 AI 编码、设计与代码审查、证据验证和中断续接。',
-                'description': header[1].strip(),
+                'description': description,
                 'tags': ['ai-coding', 'workflow', 'code-review', 'verification', 'documentation'],
                 'license': 'MIT', 'homepage': DEFAULT_BASE,
             },

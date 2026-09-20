@@ -76,6 +76,59 @@ class ListingTests(unittest.TestCase):
             with self.subTest(text=text), self.assertRaises(ValueError):
                 self.tool.drafts(self.root, 'all')
 
+    def test_unsupported_description_syntax_fails_closed(self):
+        descriptions = (
+            '"ICODE workflow"', "'ICODE workflow'", '"unterminated',
+            'ICODE workflow # editorial note', '# comment only',
+            '[foo, bar]', '{name: value}', 'foo: bar', 'workflow:',
+            'null', 'Null', 'NULL', '~', 'true', 'FALSE', 'yes', 'NO', 'On', 'off', 'y', 'N',
+            '123', '1.25', '-3', '+4', '1e3', '0x10', '.inf', '.NaN', '2026-09-20',
+            '|', '>', '|\n  ICODE workflow', '>\n  ICODE workflow',
+            'ICODE\n  workflow', 'ICODE\rworkflow',
+            '!!str workflow', '!custom workflow', '&desc workflow', '*desc',
+            '- workflow', '? workflow', '@workflow', '`workflow',
+            '\tICODE', 'ICODE\tworkflow', 'ICODE\x00workflow',
+            'ICODE\x85workflow', 'ICODE\u2028workflow', 'ICODE\u2029workflow',
+        )
+        for description in descriptions:
+            self.skill.write_text(self.text.replace('ICODE AI coding workflow', description))
+            with self.subTest(description=description), self.assertRaisesRegex(ValueError, 'plain'):
+                self.tool.drafts(self.root, 'all')
+
+    def test_plain_description_content_is_preserved(self):
+        for description in (
+            'ICODE AI coding workflow', '中文工作流，代码审查与验证。',
+            'ICODE uses https://example.org/docs#usage and key:value',
+            'ICODE supports C# and "code review" (steps [1, 2]); use /icode or $icode.',
+            'False positives and null handling',
+        ):
+            self.skill.write_text(self.text.replace('ICODE AI coding workflow', description))
+            with self.subTest(description=description):
+                report = self.tool.drafts(self.root, 'skillhub')
+                self.assertEqual(report['drafts'][0]['frontmatter']['description'], description)
+
+    def test_unicode_version_digits_are_rejected(self):
+        for version in ('1２.3.4', '1.2３.4', '1.2.3４', '1\u0662.3.4'):
+            self.skill.write_text(self.text.replace('3.4.5', version))
+            with self.subTest(version=version), self.assertRaisesRegex(ValueError, 'ASCII'):
+                self.tool.drafts(self.root, 'all')
+
+    def test_unsupported_description_cli_error_does_not_disclose_content(self):
+        self.skill.write_text(self.text.replace('ICODE AI coding workflow', 'ICODE # SECRET_CANARY'))
+        with contextlib.redirect_stdout(io.StringIO()) as stdout, contextlib.redirect_stderr(io.StringIO()) as stderr:
+            result = self.tool.main(['--source', str(self.root)])
+        self.assertEqual(result, 1)
+        self.assertEqual(stdout.getvalue(), '')
+        self.assertIn('plain', json.loads(stderr.getvalue())['error'])
+        self.assertNotIn('SECRET_CANARY', stderr.getvalue())
+
+    def test_repository_header_is_supported(self):
+        text = (ROOT / 'SKILL.md').read_text(encoding='utf-8')
+        report = self.tool.drafts(ROOT, 'all')
+        self.assertEqual(report['drafts'][0]['frontmatter']['description'],
+                         text.splitlines()[2].removeprefix('description: '))
+        self.assertIn('**版本**: v' + report['source_version'], text.splitlines())
+
     def test_missing_symlink_or_oversized_input_is_rejected(self):
         with self.assertRaises(ValueError):
             self.tool.drafts(self.root / 'missing', 'all')
