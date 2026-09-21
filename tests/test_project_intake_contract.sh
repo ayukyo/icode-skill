@@ -12,8 +12,8 @@ MANIFEST="mcp/icode-workspace/tools_manifest.json"
 POLICY="mcp/icode-mcp-policy/policy.json"
 REFERENCE="references/project_intake.md"
 
-if ! rg -q 'cwd 不在 git 仓库' SKILL.md \
-  && rg -q 'L1·致命.*工程接入.*解析失败' SKILL.md; then
+if ! grep -Eq 'cwd 不在 git 仓库' SKILL.md \
+  && grep -Eq 'L1·致命.*工程接入.*解析失败' SKILL.md; then
   ok "入口阻断以目标工程解析结果为准，不与唯一嵌套根支持冲突"
 else
   bad "入口仍将宿主非 Git cwd 直接当作目标解析失败"
@@ -32,27 +32,27 @@ assert expected <= set(policy["servers"]["icode-workspace"]["tools"])
 PY
 then ok "工程解析与画像工具已在实现/manifest/policy 同步登记"; else bad "工具登记不同步"; fi
 
-if rg -q '唯一嵌套 Git 根' "$REFERENCE" \
-  && rg -q '多根/截断即阻断' "$REFERENCE" \
-  && rg -q '不得运行.*build\.sh' "$REFERENCE" \
-  && rg -q 'huge（≥150k）' "$REFERENCE"; then
+if grep -Eq '唯一嵌套 Git 根' "$REFERENCE" \
+  && grep -Eq '多根/截断即阻断' "$REFERENCE" \
+  && grep -Eq '不得运行.*build\.sh' "$REFERENCE" \
+  && grep -Eq 'huge（≥150k）' "$REFERENCE"; then
   ok "共享合同覆盖唯一根、歧义阻断、静态探测和大仓预算"
 else
   bad "共享工程接入合同不完整"
 fi
 
-if rg -q 'project_intake\.md' SKILL.md \
-  && rg -q 'project_intake\.md' steps/00_init.md \
-  && rg -q 'project_intake\.md' steps/log.md \
-  && rg -q 'project_intake\.md' steps/01_plan.md \
-  && rg -q 'project_intake\.md' steps/doc.md \
-  && rg -q 'project_intake\.md' steps/limit.md; then
+if grep -Eq 'project_intake\.md' SKILL.md \
+  && grep -Eq 'project_intake\.md' steps/00_init.md \
+  && grep -Eq 'project_intake\.md' steps/log.md \
+  && grep -Eq 'project_intake\.md' steps/01_plan.md \
+  && grep -Eq 'project_intake\.md' steps/doc.md \
+  && grep -Eq 'project_intake\.md' steps/limit.md; then
   ok "核心入口均接入工程解析真源"
 else
   bad "核心入口存在未接线项"
 fi
 
-if ! rg -q '/home/[^ >`]*|tn2610|ssc308qe|rk3576' "$REFERENCE"; then
+if ! grep -Eq '/home/[^ >`]*|tn2610|ssc308qe|rk3576' "$REFERENCE"; then
   ok "共享合同不含真实项目路径或产品代号"
 else
   bad "共享合同泄漏真实项目术语"

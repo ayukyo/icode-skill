@@ -3,12 +3,32 @@ from datetime import date
 from pathlib import Path
 import json
 import re
+import os
+import shutil
+import subprocess
+import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
 class ToolSupportProgressTest(unittest.TestCase):
+    def test_project_intake_contract_runs_without_ripgrep(self):
+        # The hosted runner need not have developer conveniences such as rg.
+        with tempfile.TemporaryDirectory(prefix='icode-contract-path-') as directory:
+            for command in ('bash', 'dirname', 'grep', 'python3'):
+                executable = shutil.which(command)
+                self.assertIsNotNone(executable, command)
+                (Path(directory) / command).symlink_to(executable)
+            self.assertIsNone(shutil.which('rg', path=directory))
+            environment = dict(os.environ, PATH=directory)
+            result = subprocess.run(
+                [str(Path(directory) / 'bash'), str(ROOT / 'tests/test_project_intake_contract.sh')],
+                cwd=ROOT, env=environment, text=True, capture_output=True, timeout=15,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn('5 passed, 0 failed', result.stdout)
+
     def test_context7_config_selects_public_workflow_docs(self):
         path = ROOT / 'context7.json'
         self.assertTrue(path.is_file(), 'missing repository-managed documentation config')
@@ -41,7 +61,7 @@ class ToolSupportProgressTest(unittest.TestCase):
                      'evals/**', 'tests/test_skill_installation.py',
                      'tests/test_skill_evaluation.py', 'tests/test_tool_support_progress.py',
                      'tests/test_build_preflight_safety.py', 'tests/test_project_intake_contract.sh',
-                     'references/project_intake.md', 'steps/verify.md', 'mcp/icode-workspace/**',
+                     'references/**', 'steps/**', 'mcp/icode-workspace/**',
                      'mcp/_lib/**'):
             self.assertIn(f"      - '{path}'", trigger[1].splitlines())
         for test in ('test_skill_installation.py', 'test_tool_support_progress.py'):
