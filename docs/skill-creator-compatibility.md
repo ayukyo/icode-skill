@@ -4,6 +4,9 @@
 
 ## 官方格式与兼容范围
 
+补充证据：[Codex/Claude真实加载与10目标安装](host-loading-validation.md)已独立完成。
+它使用禁网初始化协议，不调用模型，因此不替代下文的触发评估、行为分数或工具执行验收。
+
 2026-09-21 只读核对 Anthropic 官方仓库，固定参考提交为 `34040c9c568585f6929bedeaad110ad08f079624`：
 
 - [输入 schema](https://github.com/anthropics/skills/blob/34040c9c568585f6929bedeaad110ad08f079624/skills/skill-creator/references/schemas.md)：行为输入使用 `skill_name` 与 `evals`，案例包含整数 `id`、`prompt`、`expected_output`、`files`；上游还允许 `expectations`。

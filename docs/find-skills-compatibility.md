@@ -2,6 +2,8 @@
 
 本文提供可复核的安装资源检查方法，不新增 ICODE 命令，不调整运行时或安装器。
 平台发现/收录状态统一由[工具支持进度台账](tool-support-progress.md)维护。
+完整17技能包的10宿主目标复制/重复安装和两个真实宿主加载结果见
+[宿主加载验证](host-loading-validation.md)。该路线补齐共享技能，不把根技能直装当整包安装。
 2026-09-21 主代理检查 agentskill.sh 安装载荷，仅有根 SKILL 和50个附加文件，缺少
 `steps/`、`references/`、`tools/`。本工具按资源路径和内容识别此类截断，
 不设置固定文件数量门槛；尚不能确定平台截断的服务端原因。
@@ -208,6 +210,15 @@ evaluation_record remote-refresh evaluation_env env SKILLS_CLONE_TIMEOUT_MS=3600
 这是有内容变化的0b7a3f49→6eb09d4远程刷新，不是仅重装同版本。
 可用替代路线为显式 `add --copy` + 固定源码完整性校验，**不等于update子命令已修复或自动跟随更新**。
 其后源码提交仍需重新验收，不把这次安装身份改写成未来HEAD。
+
+追加一次有界复测：仍使用1.7.0、独立HOME/XDG和禁遥测环境，保留本地6eb09d4安装，
+设置 `SKILLS_CLONE_TIMEOUT_MS=360000`、外层760秒上限，并将 `GIT_TRACE2_EVENT`
+写入私有评估目录以辨认失败阶段。命令退出1，提示
+`Failed to check for deleted skills from ayukyo/icode-skill`。
+Git trace显示第一轮克隆进入index-pack后，约360秒时收到终止信号；没有进入子安装。
+这是本次克隆超时的直接阶段证据，不证明先前“Failed to update”的子安装失败同因。
+失败后锁文件与原回执SHA-256一致，328项安装资源仍匹配6eb09d4。
+不继续无界重试、不要求GitHub新增权限；更新仍保留显式刷新+完整性检查的可用路线。
 
 ### Smithery 下载样本复验
 

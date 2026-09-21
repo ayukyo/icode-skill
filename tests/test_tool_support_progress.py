@@ -13,6 +13,27 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class ToolSupportProgressTest(unittest.TestCase):
+    def test_host_probe_is_opt_in_and_documents_its_scope(self):
+        environment = {key: value for key, value in os.environ.items()
+                       if key not in {'ICODE_RUN_HOST_LOADING', 'ICODE_SKILLS_CLI'}}
+        result = subprocess.run(
+            ['python3', '-B', '-m', 'unittest', 'discover', '-s', 'tests',
+             '-p', 'test_host_skill_loading.py', '-v'], cwd=ROOT, env=environment,
+            capture_output=True, text=True, timeout=15,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('real-host tests require explicit opt-in', result.stderr)
+        self.assertIn('skipped=1', result.stderr)
+        document = ROOT / 'docs/host-loading-validation.md'
+        self.assertTrue(document.is_file(), 'host loading evidence needs a reproducible public recipe')
+        content = document.read_text(encoding='utf-8')
+        for boundary in ('ICODE_RUN_HOST_LOADING=1', 'ICODE_SKILLS_CLI',
+                         '不调用模型', '待验', '17', '344', '1.7.0'):
+            self.assertIn(boundary, content)
+        for path in ('docs/tool-support-progress.md', 'docs/find-skills-compatibility.md',
+                     'docs/skill-creator-compatibility.md', 'docs/workbuddy-support.md'):
+            self.assertIn('host-loading-validation.md', (ROOT / path).read_text())
+
     def test_project_intake_contract_runs_without_ripgrep(self):
         # The hosted runner need not have developer conveniences such as rg.
         with tempfile.TemporaryDirectory(prefix='icode-contract-path-') as directory:
@@ -59,6 +80,7 @@ class ToolSupportProgressTest(unittest.TestCase):
         self.assertIsNotNone(regression)
         for path in ('context7.json', 'tools/check_skill_installation.py', 'tools/check_skill_evaluation.py',
                      'evals/**', 'tests/test_skill_installation.py',
+                     'tests/test_host_skill_loading.py',
                      'tests/test_skill_evaluation.py', 'tests/test_tool_support_progress.py',
                      'tests/test_build_preflight_safety.py', 'tests/test_project_intake_contract.sh',
                      'tests/test_control_plane_verify_doc_contract.sh',

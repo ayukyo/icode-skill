@@ -17,6 +17,11 @@ WorkBuddy 的[项目配置说明](https://www.codebuddy.cn/docs/workbuddy/From-B
 
 当前 `install.sh` 的 `--client` 只有 `claude`、`codex`、`codebuddy`、`all`，**没有 `--client workbuddy`**。CodeBuddy 安装中的共享技能路径与命令桥还需在 WorkBuddy 实机确认；不要运行不存在的参数，或用重命名宿主绕过校验。
 
+同日补充：[完整包安装验证](host-loading-validation.md)已通过官方 Skills CLI 的
+`--agent codebuddy --copy` 路线，将17个技能及344项技能文件安装到独立项目的
+`.codebuddy/skills/`，首次与重复安装摘要均一致。该路径可用于后续 WorkBuddy 项目接入试点，
+但本轮没有运行 WorkBuddy 本体，也不自动写入其 MCP 配置、命令桥或宿主信任设置。
+
 ## 分发容量与许可边界
 
 含 8 套现有 PPT 模板的本地归档约 18 MiB；保留资源与原版本逐字节一致，8 套均通过单页文字替换生成测试。这些仅是本地资源和体积验证，不能当作平台接受、线上归档已更新或发布成功的证据。

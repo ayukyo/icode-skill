@@ -36,6 +36,7 @@ on:
       - 'tests/test_skill_listing.py'
       - 'tests/test_docs_publication.py'
       - 'tests/test_skill_installation.py'
+      - 'tests/test_host_skill_loading.py'
       - 'tests/test_skill_evaluation.py'
       - 'tests/test_tool_support_progress.py'
       - 'tests/test_build_preflight_safety.py'
