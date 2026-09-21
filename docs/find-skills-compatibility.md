@@ -185,6 +185,30 @@ CLI 仍为官方 `skills@1.7.0`，直接安装
 因此“远程直装”已实测通过；搜索未命中、真实宿主加载、共享技能/MCP、旧→新升级分别验收，
 不能由这个结果直接推定完成。浮动来源的身份由全量内容比对固定，不仅依据安装成功提示。
 
+### 同日远程旧版到新版刷新
+
+在上述同一隔离安装中运行 `update icode --project --yes`：CLI识别github/main来源，
+但最终返回 `Failed to update 1 skill(s)`、退出1。原锁和328项旧资源仍与0b7a3f49一致。
+该版本更新器会先克隆解析技能，再调用子安装；父命令没有输出子安装错误细节，
+所以不能仅凭耗时把根因认定为超时，也不能记录成自动update通过。
+
+随后在同一隔离目录执行显式GitHub刷新（非全局、无遥测）：
+
+```bash
+evaluation_record remote-refresh evaluation_env env SKILLS_CLONE_TIMEOUT_MS=360000 \
+  timeout --kill-after=5s 400s \
+  npx --yes --package=skills@1.7.0 skills add \
+  https://github.com/ayukyo/icode-skill/tree/main \
+  --skill icode --agent codex --copy --yes
+```
+
+实测使用已验证1.7.0的缓存CLI入口直接运行等价参数，退出0。
+新安装与干净源码 `6eb09d4863d31d844ece819429c73afc8626f0f7` **328/328项一致**；
+锁的 `computedHash` 从 `7727c38f…` 变为 `ebb494bf…`，来源仍为github/main。
+这是有内容变化的0b7a3f49→6eb09d4远程刷新，不是仅重装同版本。
+可用替代路线为显式 `add --copy` + 固定源码完整性校验，**不等于update子命令已修复或自动跟随更新**。
+其后源码提交仍需重新验收，不把这次安装身份改写成未来HEAD。
+
 ### Smithery 下载样本复验
 
 同日通过 [Smithery ICODE 页面](https://smithery.ai/skills/ayukyo/icode)实际下载 ZIP，

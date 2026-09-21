@@ -40,6 +40,7 @@ on:
       - 'tests/test_tool_support_progress.py'
       - 'tests/test_build_preflight_safety.py'
       - 'tests/test_project_intake_contract.sh'
+      - 'tests/test_control_plane_verify_doc_contract.sh'
       - 'tests/run_public_site_checks.py'
       - 'tests/test_public_site*.py'
       - 'tests/test_notify_indexnow.py'
@@ -106,6 +107,7 @@ jobs:
           python3 -m pytest -p no:anyio tests/test_skill_discovery_metadata.py -q
           python3 -m pytest -p no:anyio tests/test_build_preflight_safety.py -q
           bash tests/test_project_intake_contract.sh
+          bash tests/test_control_plane_verify_doc_contract.sh
       - name: Build preview (no secrets, no deployment)
         if: steps.policy.outputs.publish != 'true'
         run: python3 tools/build_public_site.py --output _site --base-url "$SITE_URL" --expected-version "$EXPECTED_VERSION"

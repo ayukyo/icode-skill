@@ -61,6 +61,7 @@ class ToolSupportProgressTest(unittest.TestCase):
                      'evals/**', 'tests/test_skill_installation.py',
                      'tests/test_skill_evaluation.py', 'tests/test_tool_support_progress.py',
                      'tests/test_build_preflight_safety.py', 'tests/test_project_intake_contract.sh',
+                     'tests/test_control_plane_verify_doc_contract.sh',
                      'references/**', 'steps/**', 'mcp/icode-workspace/**',
                      'mcp/_lib/**'):
             self.assertIn(f"      - '{path}'", trigger[1].splitlines())
@@ -79,6 +80,8 @@ class ToolSupportProgressTest(unittest.TestCase):
             regression[1].splitlines(),
         )
         self.assertIn('          bash tests/test_project_intake_contract.sh',
+                      regression[1].splitlines())
+        self.assertIn('          bash tests/test_control_plane_verify_doc_contract.sh',
                       regression[1].splitlines())
 
     def test_registry_has_extendable_rows_and_evidence_boundaries(self):

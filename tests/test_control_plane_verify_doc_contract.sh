@@ -14,6 +14,12 @@ if grep -q 'patch_history' steps/verify.md && grep -q '不写 `patch_history`' s
   ok "verify 声明与 patch_history 分离"; else bad "verify 未声明 patch_history 分离"; fi
 if grep -q '不自动升级' steps/verify.md && grep -q 'delivery_verdict' steps/verify.md; then
   ok "verify 不自动升级 delivery_verdict"; else bad "verify 未声明 delivery_verdict 不自动升级"; fi
+if grep -q '`fail`.*有明确失败证据' steps/verify.md \
+  && grep -q '不得将已证失败降为.*`inconclusive`' steps/verify.md; then
+  ok "verify 同时保护未触发不判失败、已证失败不降为不确定"
+else
+  bad "verify 缺少已证失败不得降级的反向约束"
+fi
 
 # 2) patch 只保留修改后监听；显式触发验证归 verify --test，结果仍记 verification_runs
 if grep -q '仅用于 patch 修改后的自动监听' steps/08_patch.md \

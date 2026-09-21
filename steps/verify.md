@@ -105,7 +105,7 @@
 3. **执行验证动作**：
    - `--deploy`：只部署已核验产物并核对设备当前版本；单独执行时选择已有唯一产物，组合 `--build --deploy` 时使用本次构建的产物。记录真实 `artifact_identity` 和构建来源，不重复编译；若设备配置的 deploy 意图内还含编译指令，展示冲突并停止，不能隐式补编译
    - `--listen` / `--test`：对已部署的设备按 [08_patch.md §1.5](08_patch.md) 轮询监听/三态判定（含特征可见性核查 + 证据双通道标注）；`--test` 走空转确认节奏。不运行构建或部署脚本；组合时使用前一部署阶段核验过的设备版本
-4. **三态判定**（仅监听类）：`pass`（修复生效/链路通）/ `fail`（进不了闭环但可定位）/ `inconclusive`（未触发 / 特征不可见 / 证据模糊）。**未触发 ≠ 失败**，如实记 `inconclusive` 并标注触发条件未发生
+4. **三态判定**（监听/测试取证）：`pass`（验收证据满足）/ `fail`（有明确失败证据，例如已触发场景中的失败断言或可定位链路错误）/ `inconclusive`（未触发 / 特征不可见且无等效行为证据 / 证据模糊）。**未触发 ≠ 失败**，如实记 `inconclusive` 并标注触发条件未发生；反之，**不得将已证失败降为 `inconclusive`**。实际失败与尚未查明失败根因是两回事；完全未执行则报告阻塞、不伪造运行。
 5. **记录 verification_runs**（metadata，实际执行的阶段按真实 pass/fail/inconclusive 追加，不是仅成功才追加；完全未执行只报阻塞、不伪造 run。schema 见 [schemas/ticket-metadata.schema.json](../schemas/ticket-metadata.schema.json)）：
    ```json
    {
