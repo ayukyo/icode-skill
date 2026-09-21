@@ -147,6 +147,24 @@ def test_index_assets_and_security_headers_are_local(tmp_path):
         assert js and css
 
 
+def test_ticket_icon_asset_is_served_locally(tmp_path):
+    with running_ui(make_ticket(tmp_path)) as server:
+        status, headers, body = request(
+            server, "GET", "/assets/icode-ticket-hex.svg"
+        )
+
+        assert status == 200
+        assert headers["Content-Type"] == "image/svg+xml"
+        assert headers["Cache-Control"] == "no-store"
+        assert body == (
+            ROOT
+            / "agent_runtime"
+            / "icode_agent"
+            / "ui_assets"
+            / "icode-ticket-hex.svg"
+        ).read_bytes()
+
+
 def test_status_and_health_use_versioned_trusted_projection(tmp_path):
     with running_ui(make_ticket(tmp_path)) as server:
         health_status, _, health_raw = request(server, "GET", "/api/v1/health")

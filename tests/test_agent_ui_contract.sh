@@ -108,6 +108,24 @@ else
   bad "响应式或可访问动画降级缺失"
 fi
 
+if [ -s assets/icode-ticket-hex.svg ] \
+  && [ -s agent_runtime/icode_agent/ui_assets/icode-ticket-hex.svg ] \
+  && cmp -s assets/icode-ticket-hex.svg \
+    agent_runtime/icode_agent/ui_assets/icode-ticket-hex.svg; then
+  ok "工作台图标是品牌源文件的同字节静态副本"
+else
+  bad "工作台图标缺失或与品牌源文件不一致"
+fi
+
+if rg -q '<div class="brand-mark"><img src="/assets/icode-ticket-hex.svg" alt="ICODE"></div>' \
+    agent_runtime/icode_agent/ui_assets/index.html \
+  && rg -q '<div class="welcome-orb"><img src="/assets/icode-ticket-hex.svg" alt="ICODE"></div>' \
+    agent_runtime/icode_agent/ui_assets/index.html; then
+  ok "侧栏与欢迎页使用本地可访问 ICODE 图标"
+else
+  bad "侧栏或欢迎页 ICODE 图标接入缺失"
+fi
+
 if rg -q '127\.0\.0\.1' agent_runtime/icode_agent/ui_server.py \
   && ! python3 tools/icode_agent.py ui --help 2>/dev/null | grep -q -- '--host'; then
   ok "第一版 UI 固定 loopback 且不暴露远程 bind"
@@ -118,7 +136,10 @@ fi
 if [ -s agent_runtime/icode_agent/ui_assets/index.html ] \
   && [ -s agent_runtime/icode_agent/ui_assets/app.js ] \
   && [ -s agent_runtime/icode_agent/ui_assets/style.css ] \
-  && ! rg -q 'https?://|<script[^>]*>[^<]' agent_runtime/icode_agent/ui_assets; then
+  && ! rg -q 'https?://|<script[^>]*>[^<]' \
+    agent_runtime/icode_agent/ui_assets/index.html \
+    agent_runtime/icode_agent/ui_assets/app.js \
+    agent_runtime/icode_agent/ui_assets/style.css; then
   ok "UI 静态资源随仓且无外链/内联脚本"
 else
   bad "UI 静态资源不完整或含外部依赖"

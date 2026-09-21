@@ -59,12 +59,10 @@ button { color: inherit; }
 .brand-mark, .welcome-orb {
   display: grid;
   place-items: center;
-  color: #fff;
-  background: linear-gradient(145deg, #1d7d60, #0b4c3a);
-  box-shadow: 0 8px 24px rgba(23, 107, 82, 0.25);
 }
 
-.brand-mark { width: 34px; height: 34px; border-radius: 10px; font-weight: 800; }
+.brand-mark img, .welcome-orb img { display: block; width: 100%; height: 100%; object-fit: contain; }
+.brand-mark { width: 34px; height: 34px; }
 .brand-row strong, .brand-row span { display: block; }
 .brand-row strong { font-size: 0.98rem; letter-spacing: 0.08em; }
 .brand-row span { margin-top: 2px; color: var(--muted); font-size: 0.73rem; }
@@ -220,7 +218,7 @@ button { color: inherit; }
   text-align: center;
 }
 
-.welcome-orb { width: 72px; height: 72px; margin-bottom: 24px; border-radius: 24px; font-size: 2rem; font-weight: 800; }
+.welcome-orb { width: 72px; height: 72px; margin-bottom: 24px; }
 .welcome-view h1 { margin: 0 0 12px; font-size: clamp(2rem, 5vw, 3.6rem); letter-spacing: -0.055em; }
 .welcome-view > p:not(.eyebrow) { max-width: 550px; margin: 0 0 26px; color: var(--muted); line-height: 1.7; }
 .welcome-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; }

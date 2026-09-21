@@ -94,6 +94,10 @@ ASSET_ROOT = Path(__file__).resolve().parent / "ui_assets"
 STATIC_ASSETS = {
     "/assets/app.js": (ASSET_ROOT / "app.js", "text/javascript; charset=utf-8"),
     "/assets/style.css": (ASSET_ROOT / "style.css", "text/css; charset=utf-8"),
+    "/assets/icode-ticket-hex.svg": (
+        ASSET_ROOT / "icode-ticket-hex.svg",
+        "image/svg+xml",
+    ),
 }
 CONTENT_SECURITY_POLICY = (
     "default-src 'none'; script-src 'self'; style-src 'self'; "
