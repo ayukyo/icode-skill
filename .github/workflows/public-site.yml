@@ -12,6 +12,7 @@ on:
       - 'tools/build_public_site.py'
       - 'tools/render_brand_assets.py'
       - 'tools/notify_indexnow.py'
+      - 'tools/release_promotion.py'
       - 'tools/build_skill_distribution.py'
       - 'tools/check_skill_discovery.py'
       - 'tools/check_skill_installation.py'
@@ -50,10 +51,12 @@ on:
       - 'tests/run_public_site_checks.py'
       - 'tests/test_public_site*.py'
       - 'tests/test_notify_indexnow.py'
+      - 'tests/test_release_promotion*.py'
       - 'SKILL.md'
       - 'README*.md'
       - 'docs/**'
       - '.github/workflows/public-site.yml'
+      - '.github/workflows/release-promotion.yml'
   release:
     types: [published]
   workflow_dispatch:
@@ -107,6 +110,7 @@ jobs:
         run: |
           python3 -m unittest discover -s tests -p 'test_public_site*.py' -v
           python3 -m unittest discover -s tests -p test_notify_indexnow.py -v
+          python3 -m unittest discover -s tests -p 'test_release_promotion*.py' -v
           python3 -m unittest discover -s tests -p test_skill_distribution.py -v
           python3 -m unittest discover -s tests -p test_skill_discovery_probe.py -v
           python3 -m unittest discover -s tests -p test_skill_listing.py -v

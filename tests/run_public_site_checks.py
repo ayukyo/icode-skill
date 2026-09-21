@@ -27,7 +27,7 @@ def main():
     report.mkdir(parents=True, exist_ok=False)
     case = 'test_public_site.PublicSiteTests.'
     checks = [
-        ('01-python-syntax', [PY, '-m', 'py_compile', 'tools/build_public_site.py', 'tools/notify_indexnow.py', 'tools/build_skill_distribution.py', 'tools/check_skill_discovery.py', 'tools/prepare_skill_listing.py']),
+        ('01-python-syntax', [PY, '-m', 'py_compile', 'tools/build_public_site.py', 'tools/notify_indexnow.py', 'tools/release_promotion.py', 'tools/build_skill_distribution.py', 'tools/check_skill_discovery.py', 'tools/prepare_skill_listing.py']),
         ('02-bilingual-public-allowlist', unit(case + 'test_bilingual_pages_and_exact_output_allowlist')),
         ('03-xml-seo-manifest', unit(case + 'test_xml_and_manifest_match_public_pages', case + 'test_public_links_and_fragment_targets_exist')),
         ('04-byte-reproducibility', unit(case + 'test_repeatable_bytes')),
@@ -41,17 +41,20 @@ def main():
         ('12-stdlib-cli', unit(case + 'test_no_optional_packages_required', case + 'test_cli_argument_error_is_concise')),
         ('13-notifier-transport-and-errors', unit('test_notify_indexnow')),
         ('14-real-demo-copy-and-integration', unit('test_public_site_demo')),
-        ('15-publication-gates', unit('test_public_site_workflow')),
+        ('15-publication-gates', unit('test_public_site_workflow', 'test_release_promotion', 'test_release_promotion_workflow')),
         ('16-existing-install-doc-contract', ['bash', 'tests/test_open_source_install_docs_contract.sh']),
         ('17-existing-public-command-contract', ['bash', 'tests/test_public_command_names_contract.sh']),
         ('18-existing-verify-and-isolated-host-metadata', [PY, '-m', 'pytest', '-p', 'no:anyio', 'tests/test_verify_request.py', 'tests/test_skill_discovery_metadata.py', '-q']),
         ('19-existing-runtime-compatibility', ['bash', 'tests/test_agent_runtime_compat_contract.sh']),
-        ('20-final-complete-regression', unit('test_public_site', 'test_public_site_design', 'test_public_site_diagram', 'test_public_site_style', 'test_public_site_discovery', 'test_public_site_agent_reading', 'test_public_site_workflow', 'test_public_site_demo', 'test_notify_indexnow', 'test_skill_distribution', 'test_skill_discovery_probe', 'test_skill_listing')),
+        ('20-final-complete-regression', unit('test_public_site', 'test_public_site_design', 'test_public_site_diagram', 'test_public_site_style', 'test_public_site_discovery', 'test_public_site_agent_reading', 'test_public_site_workflow', 'test_public_site_demo', 'test_notify_indexnow', 'test_release_promotion', 'test_release_promotion_workflow', 'test_skill_distribution', 'test_skill_discovery_probe', 'test_skill_listing')),
     ]
     env = dict(os.environ)
     env['PYTHONPATH'] = str(ROOT / 'tests') + os.pathsep + str(ROOT)
     # Real user notification credentials are neither required nor inherited.
-    env.pop('INDEXNOW_KEY', None)
+    for credential in ('INDEXNOW_KEY', 'GITHUB_TOKEN', 'GITHUB_DISCUSSION_CATEGORY',
+                       'BSKY_HANDLE', 'BSKY_APP_PASSWORD', 'MASTODON_BASE_URL',
+                       'MASTODON_ACCESS_TOKEN'):
+        env.pop(credential, None)
     results = []
     for name, command in checks:
         start = time.monotonic()

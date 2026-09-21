@@ -79,6 +79,8 @@ python3 tools/check_skill_discovery.py --online --channel smithery --query "code
 
 ## Packages、Release 与 Pages
 
+正式 Release 的可选跨平台公告由[Release 自动推广（第一阶段）](release-promotion.md)单独管理。它与 Pages 部署、IndexNow 通知相互独立：推广失败不回滚官网，官网部署成功也不等于任何社交渠道已发布。
+
 [GitHub Packages](https://docs.github.com/en/packages/learn-github-packages/introduction-to-github-packages) 用于分发 npm 等软件包及 Docker/OCI 容器制品，不是 Skill 目录；Release 记录版本与发行附件，Pages 托管本项目的静态官网，三者用途不同。
 
 本项目当前不启用 Packages：根目录没有独立 npm 包或容器包，安装仍依赖源码、宿主适配与官方 `install.sh`。不为展示 Packages 入口制造空包，也不添加包发布权限；未来确有可独立分发的 Runtime 容器时，再评估通过 GHCR 发布。

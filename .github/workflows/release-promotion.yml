@@ -1,0 +1,114 @@
+name: Release promotion
+
+on:
+  # Automatic writes are limited to the release.published event.
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing final Release tag to preview or promote
+        required: true
+        type: string
+      dry_run:
+        description: Build and preview the campaign without external writes
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-promotion-${{ github.event.release.tag_name || inputs.release_tag || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.11'
+      - name: Run offline promotion contracts
+        run: python3 -m unittest tests.test_release_promotion tests.test_release_promotion_workflow -v
+      - name: Resolve selected final Release
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" > "$RUNNER_TEMP/release.json"
+      - name: Build immutable promotion plan
+        env:
+          SITE_URL: ${{ vars.PUBLIC_SITE_URL || 'https://ayukyo.github.io/icode-skill/' }}
+        shell: bash
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = release ]; then
+            python3 tools/release_promotion.py plan --event "$GITHUB_EVENT_PATH" --repository "$GITHUB_REPOSITORY" --site-url "$SITE_URL" --output "$RUNNER_TEMP/promotion-plan.json"
+          else
+            python3 tools/release_promotion.py plan --release-json "$RUNNER_TEMP/release.json" --repository "$GITHUB_REPOSITORY" --site-url "$SITE_URL" --output "$RUNNER_TEMP/promotion-plan.json"
+          fi
+      - name: Render zero-write preview
+        env:
+          PROMOTION_CHANNELS: ${{ vars.PROMOTION_CHANNELS || 'github,bluesky,mastodon' }}
+        shell: bash
+        run: |
+          set -o pipefail
+          python3 tools/release_promotion.py publish --plan "$RUNNER_TEMP/promotion-plan.json" --channels "$PROMOTION_CHANNELS" --output "$RUNNER_TEMP/promotion-receipt.json" | tee -a "$GITHUB_STEP_SUMMARY"
+
+  publish:
+    needs: plan
+    if: >-
+      vars.PROMOTION_ENABLED == 'true' &&
+      ((github.event_name == 'release' && !github.event.release.draft && !github.event.release.prerelease) ||
+       (github.event_name == 'workflow_dispatch' && inputs.dry_run == false &&
+        github.ref == format('refs/heads/{0}', github.event.repository.default_branch)))
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      discussions: write
+    environment:
+      name: release-promotion
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.11'
+      - name: Resolve selected final Release
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" > "$RUNNER_TEMP/release.json"
+      - name: Rebuild promotion plan from trusted Release metadata
+        env:
+          SITE_URL: ${{ vars.PUBLIC_SITE_URL || 'https://ayukyo.github.io/icode-skill/' }}
+        shell: bash
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = release ]; then
+            python3 tools/release_promotion.py plan --event "$GITHUB_EVENT_PATH" --repository "$GITHUB_REPOSITORY" --site-url "$SITE_URL" --output "$RUNNER_TEMP/promotion-plan.json"
+          else
+            python3 tools/release_promotion.py plan --release-json "$RUNNER_TEMP/release.json" --repository "$GITHUB_REPOSITORY" --site-url "$SITE_URL" --output "$RUNNER_TEMP/promotion-plan.json"
+          fi
+      - name: Publish configured channels
+        env:
+          PROMOTION_CHANNELS: ${{ vars.PROMOTION_CHANNELS || 'github,bluesky,mastodon' }}
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_DISCUSSION_CATEGORY: ${{ vars.PROMOTION_DISCUSSION_CATEGORY || 'Announcements' }}
+          BSKY_HANDLE: ${{ secrets.BSKY_HANDLE }}
+          BSKY_APP_PASSWORD: ${{ secrets.BSKY_APP_PASSWORD }}
+          MASTODON_BASE_URL: ${{ vars.MASTODON_BASE_URL }}
+          MASTODON_ACCESS_TOKEN: ${{ secrets.MASTODON_ACCESS_TOKEN }}
+        shell: bash
+        run: |
+          set -o pipefail
+          python3 tools/release_promotion.py publish --plan "$RUNNER_TEMP/promotion-plan.json" --channels "$PROMOTION_CHANNELS" --submit --output "$RUNNER_TEMP/promotion-receipt.json" | tee -a "$GITHUB_STEP_SUMMARY"
