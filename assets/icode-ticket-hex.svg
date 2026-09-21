@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="ICODE workflow ticket">
+  <path data-role="ticket" fill="#12AAA8" d="M256 24 438 129q26 15 26 45v29a45 45 0 0 0 0 90v45q0 30-26 45L256 488 74 383q-26-15-26-45v-45a45 45 0 0 0 0-90v-29q0-30 26-45Z"/>
+  <path data-role="workflow-path" fill="none" stroke="#FFFFFF" stroke-width="32" stroke-linecap="round" stroke-linejoin="round" d="M150 150h164q56 0 56 56v148H178q-36 0-36-36V198q0-32 8-48Z"/>
+  <path data-role="brand-i" fill="#FFFFFF" d="M214 190h84v30h-24v78h24v30h-84v-30h24v-78h-24Z"/>
+  <g data-role="start-node">
+    <circle fill="#FFFFFF" cx="150" cy="150" r="48"/>
+    <circle fill="#FFC857" cx="150" cy="150" r="28"/>
+  </g>
+  <g data-role="done-node">
+    <circle fill="#FFFFFF" cx="370" cy="354" r="62"/>
+    <circle fill="#4FCB86" cx="370" cy="354" r="44"/>
+  </g>
+  <path data-role="done-check" fill="none" stroke="#FFFFFF" stroke-width="18" stroke-linecap="round" stroke-linejoin="round" d="m344 354 17 17 36-40"/>
+</svg>

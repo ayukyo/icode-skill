@@ -74,11 +74,23 @@ def test_codex_interface_is_valid_and_keeps_default_discovery():
     assert isinstance(document, dict)
     assert set(document) == {"interface"}, "No new invocation or dependency policy"
     interface = document["interface"]
-    assert set(interface) == {"display_name", "short_description", "default_prompt"}
+    assert set(interface) == {
+        "display_name",
+        "short_description",
+        "default_prompt",
+        "icon_small",
+        "icon_large",
+        "brand_color",
+    }
     assert all(isinstance(value, str) and value.strip() for value in interface.values())
     assert "ICODE" in interface["display_name"]
     assert 25 <= len(interface["short_description"]) <= 64
     assert re.search(r"\$icode\b", interface["default_prompt"])
+    assert interface["brand_color"] == "#12AAA8"
+    for field in ("icon_small", "icon_large"):
+        relative = Path(interface[field])
+        assert not relative.is_absolute() and ".." not in relative.parts
+        assert (ROOT / relative).is_file()
     nodes = yaml.compose(path.read_text(encoding="utf-8"))
     for _, value in nodes.value[0][1].value:
         assert value.style == '"', "UI string values must be quoted"
@@ -120,7 +132,13 @@ def test_sync_carries_discovery_files_to_isolated_targets(tmp_path, engine):
     sync("--apply")
     for target_root in (claude_root, agents_root):
         installed = target_root / "icode"
-        for relative in ("SKILL.md", "agents/openai.yaml"):
+        for relative in (
+            "SKILL.md",
+            "agents/openai.yaml",
+            "assets/icode-ticket-hex.svg",
+            "assets/icode-ticket-hex-128.png",
+            "assets/icode-ticket-hex-512.png",
+        ):
             assert (installed / relative).read_bytes() == (ROOT / relative).read_bytes()
         assert not (installed / ".git").exists()
         assert not (installed / "tests").exists()
