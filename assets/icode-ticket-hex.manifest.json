@@ -1,0 +1,25 @@
+{
+  "outputs": {
+    "assets/icode-ticket-hex-128.png": {
+      "height": 128,
+      "mode": "RGBA",
+      "sha256": "4bea5f07d3c2872a5b052218ee6a8bed081e55bbb48dedc95d4af9685a8d1794",
+      "width": 128
+    },
+    "assets/icode-ticket-hex-512.png": {
+      "height": 512,
+      "mode": "RGBA",
+      "sha256": "32418a9c51ea02d5a6e6bc940f1f7ae8cd0bedddefa00b226d3815fe70573862",
+      "width": 512
+    }
+  },
+  "renderer": {
+    "name": "Google Chrome",
+    "version": "153.0.8010.36"
+  },
+  "schema_version": 1,
+  "source": {
+    "path": "assets/icode-ticket-hex.svg",
+    "sha256": "2e1c2ec9cdc31eef0ae9a54fd6c47aa254605ae5c644568763a73deb5a286a88"
+  }
+}

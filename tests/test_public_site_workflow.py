@@ -41,6 +41,20 @@ class WorkflowTests(unittest.TestCase):
             with self.subTest(path=path):
                 self.assertIn("- '" + path + "'", paths)
 
+    def test_brand_and_ui_changes_trigger_and_run_their_contracts(self):
+        text = self.text()
+        paths = text.split('  pull_request:\n', 1)[1].split('  release:\n', 1)[0]
+        for path in ('assets/**', 'agent_runtime/**', 'tools/render_brand_assets.py',
+                     'tests/test_brand_assets.py', 'tests/test_agent_ui*'):
+            with self.subTest(path=path):
+                self.assertIn("- '" + path + "'", paths)
+        regression = text.split('- name: Offline regression tests', 1)[1].split(
+            '- name: Build preview', 1
+        )[0]
+        self.assertIn('tests/test_brand_assets.py', regression)
+        self.assertIn('tests/test_agent_ui*.py', regression)
+        self.assertIn('bash tests/test_agent_ui_contract.sh', regression)
+
     def test_listing_drafts_are_gated_offline_not_published_by_ci(self):
         text = self.text()
         self.assertIn("- 'tools/prepare_skill_listing.py'", text)

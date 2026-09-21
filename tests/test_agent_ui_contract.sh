@@ -117,9 +117,9 @@ else
   bad "工作台图标缺失或与品牌源文件不一致"
 fi
 
-if rg -q '<div class="brand-mark"><img src="/assets/icode-ticket-hex.svg" alt="ICODE"></div>' \
-    agent_runtime/icode_agent/ui_assets/index.html \
-  && rg -q '<div class="welcome-orb"><img src="/assets/icode-ticket-hex.svg" alt="ICODE"></div>' \
+if rg -q '<div class="brand-mark"><img src="/assets/icode-ticket-hex.svg" alt="" aria-hidden="true"></div>' \
+  agent_runtime/icode_agent/ui_assets/index.html \
+  && rg -q '<div class="welcome-orb"><img src="/assets/icode-ticket-hex.svg" alt="" aria-hidden="true"></div>' \
     agent_runtime/icode_agent/ui_assets/index.html; then
   ok "侧栏与欢迎页使用本地可访问 ICODE 图标"
 else
