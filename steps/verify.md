@@ -30,6 +30,8 @@
 
 **阶段执行合同**：`--build` 只运行下文的构建分支；`--deploy` 只读取刚完成且已核验的构建产物，或已有唯一可核验产物，部署并核对目标版本；单独 `--listen`/`--test` 只针对设备当前运行版本取证。任何副作用前先对**全部选定阶段**做权限预检；每阶段开始前再检查其依赖、revision 和工单状态，执行、留证、记录结果；失败或 `inconclusive` 时停止后续阶段。`--build --deploy --listen` 与 `--build --deploy --test <target>` 分别执行三阶段；`--deploy --listen`/`--deploy --test <target>` 分别执行两阶段。单独监听/测试不触发构建和部署，也不得把新构建产物冒充设备已部署版本。候选监听/测试命令须先静态核对调用链及依赖；带**隐式编译前置**或部署副作用的测试目标（例如 `make test` 依赖可执行文件构建）不得用于单独 `--test`，应直接调用设备上已存在的程序或测试接口。设备阶段仍须核对设备身份、现行版本和验证合同；无法识别运行版本时记 `inconclusive`，不能宣称验证了本次构建。
 
+> **风险与实际执行分开**：构建依赖说明测试目标可能重编，是否实际重编还取决于目标存在性、时间戳及具体规则（含头文件、生成依赖、伪目标等），不能简化为只看源文件变化，也不能说 `make test` 每次必然调用编译器。但这种可能性仍不满足严格禁编译请求，不能靠猜测缓存命中放行。该禁令约束整段答复及后续建议：当前只测现有版本时，省略新版本 build/deploy 路线，即使写成条件句也不是本次所需；缺入口就说明缺口，不扩大阶段。
+
 ### `--build` 独立构建分支
 
 1. **工程与记录归属**：按工程接入合同解析实际执行根。显式 `--ticket` 或 UI 锁定工单必须唯一解析并使用其执行根，失败即停止，禁止换 latest。单独 build 未指定工单时仅复用当前根已有的唯一活动/当前工单；不存在则写 `<工程根>/.icode_output/build/<run_id>/`，无需创建工单或设备配置。组合设备阶段必须先解析到可写工单，不能把无工单 build 报告当设备验证记录。closed 工单仍冻结，不能以无工单报告绕过。`log_done` 等分析阶段也可单独构建，不要求先修改源码或完成 code。工单执行走现有 verify 的 `step start/check/finish`；无工单不伪造 metadata/事件。
@@ -102,7 +104,7 @@
    - `--deploy`：只部署已核验产物并核对设备当前版本；单独执行时选择已有唯一产物，组合 `--build --deploy` 时使用本次构建的产物。记录真实 `artifact_identity` 和构建来源，不重复编译；若设备配置的 deploy 意图内还含编译指令，展示冲突并停止，不能隐式补编译
    - `--listen` / `--test`：对已部署的设备按 [08_patch.md §1.5](08_patch.md) 轮询监听/三态判定（含特征可见性核查 + 证据双通道标注）；`--test` 走空转确认节奏。不运行构建或部署脚本；组合时使用前一部署阶段核验过的设备版本
 4. **三态判定**（仅监听类）：`pass`（修复生效/链路通）/ `fail`（进不了闭环但可定位）/ `inconclusive`（未触发 / 特征不可见 / 证据模糊）。**未触发 ≠ 失败**，如实记 `inconclusive` 并标注触发条件未发生
-5. **记录 verification_runs**（metadata，追加一条，schema 见 [schemas/ticket-metadata.schema.json](../schemas/ticket-metadata.schema.json)）：
+5. **记录 verification_runs**（metadata，实际执行的阶段按真实 pass/fail/inconclusive 追加，不是仅成功才追加；完全未执行只报阻塞、不伪造 run。schema 见 [schemas/ticket-metadata.schema.json](../schemas/ticket-metadata.schema.json)）：
    ```json
    {
      "run_id": "<uuid>",

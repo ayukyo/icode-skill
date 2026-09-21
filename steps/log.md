@@ -533,8 +533,8 @@ print('✓ 版本基线门：现场版本已绑定 + 证据可回指 + 与 HEAD 
     📌 本工单是 debug 孪生（debug: true），不入索引、不参与主流程，`log_analysis.md` 仅供与正常工单并列对照研读（设计意图，见 references/debug_mode.md）。
     📁 产物目录绝对路径 = `{ICODE_OUT_DIR}`（创建时已打印 📁 行；metadata 同时记录 `project_path` 供回追）。若该目录被 gitignore，git status 不会提示写入位置，以绝对路径为准。
     ⛔ 不进入修复流程：debug 工单不支持 /icode plan / /icode start / /icode fast（L1 阻断）。
-    如需对根因正式修复：请用 /icode init（不带 --debug）或正常 /icode log 新建正常工单走修复流程。
     ```
+    **完成提示条件**：用户明确“不写正式历史”时，省略“如需正式修复”建议；否则可在上述说明后追加“如需对根因正式修复：请用 /icode init（不带 --debug）或正常 /icode log 新建正常工单走修复流程”，仅解释入口，不自动执行。
     **非 debug 时**：根因已定，可敲 `/icode plan` / `/icode start` / `/icode fast`（均无参）复用本目录的 `00_init.md` 进入修复流程；其中 fast 适合小改动（单文件/少量文件、边界清晰、无架构变更）；若对根因有异议，继续对话即可重跑对抗分析
 
 ## 对外简报（log_problem_brief.md / TB 分析为 <单号>_log_problem_brief.md，报告完成时自动生成）

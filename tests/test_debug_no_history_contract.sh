@@ -46,6 +46,16 @@ check_contains references/debug_mode.md "## 14. debug 工单不参考历史工�
 check_contains references/debug_mode.md "跳过历史工单检索" "§14 跳过历史工单检索"
 check_contains references/debug_mode.md "参考自己" "§14 保留 debug 域旧孪生复用（参考自己）"
 
+echo "=== 6. 完成提示不得重新越过不写正式历史的边界 ==="
+for file in references/debug_mode.md steps/00_init.md steps/log.md; do
+  check_contains "$file" "完成提示条件.*不写正式历史.*省略.*正式修复" "$file 收尾保留禁写边界"
+  if grep -Eq '^[[:space:]]*如需(对根因)?正式修复' "$file"; then
+    bad "$file 仍有无条件正式修复输出行"
+  else
+    ok "$file 无旧式无条件输出行"
+  fi
+done
+
 echo ""
 echo "结果: PASS=$PASS FAIL=$FAIL"
 [ "$FAIL" -eq 0 ] || exit 1

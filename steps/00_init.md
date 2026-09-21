@@ -134,8 +134,9 @@
    📌 本工单是 debug 孪生（debug: true），不入索引、不参与主流程，产物仅供与正常工单并列对照研读（设计意图，见 references/debug_mode.md）。
    📁 产物目录绝对路径 = `{ICODE_OUT_DIR}`（创建时已打印 📁 行；metadata 同时记录 `project_path` 供回追）。若该目录被 gitignore，git status 不会提示写入位置，以绝对路径为准。
    ⛔ 不进入修复流程：debug 工单不支持 /icode plan / /icode start / /icode fast（L1 阻断）。
-   如需正式修复：请用 /icode init（不带 --debug）新建正常工单走主流程。
    ```
+
+   **完成提示条件**：用户明确“不写正式历史”时，省略“如需正式修复”建议；否则可在上述说明后追加“如需正式修复：请用 /icode init（不带 --debug）新建正常工单走主流程”，仅解释入口，不自动执行。
 
    - **4 维度信号**：
      1. 需求点数：`requirement_points` 数组长度

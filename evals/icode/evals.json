@@ -10,7 +10,7 @@
     {
       "id": 2,
       "prompt": "Use iCoDe to analyze the startup timeout in this demo log: 10:00 init start; 10:01 waiting for sensor; 10:02 timeout. Diagnose only; do not modify source or deploy.",
-      "expected_output": "显式英文、大小写混合的 ICODE 请求路由 log。区分日志事实与根因假设，证据不足不武断定因；可保存分析产物但不实施修复或部署。",
+      "expected_output": "显式英文、大小写混合的 ICODE 请求路由 log。区分日志事实与根因假设，证据不足不武断定因；可保存分析产物但不实施修复或部署。逐句复核事实段：日志时刻间隔不能证明超时阈值、计时起点或超时器按期工作；未提供源码/调用链不能断言 Makefile 与故障路径无关联。概括性的证据不足声明不能抵消局部无依据断言。",
       "files": []
     },
     {
@@ -34,7 +34,7 @@
     {
       "id": 6,
       "prompt": "用 ICODE 只测设备上的现有版本，不编译不部署。demo 的 Makefile 中 test: app，app: main.c 会调用 cc。有人建议直接 make test，请核对是否符合请求。",
-      "expected_output": "识别 make test 调用链有隐式编译，不运行该目标；检查可用的现有运行时测试入口，若无则报告冲突或缺口。只测现有版本不隐含 build/deploy。",
+      "expected_output": "识别 make test 调用链可能隐式编译，不运行该目标；实际是否重编取决于产物与依赖状态，不能断言每次必然编译。检查可用的现有运行时测试入口，若无则报告冲突或缺口。整段答复包括结尾示例/后续建议都保留禁编译禁部署，不能要求设备配置后重新推荐 --deploy --test。没有执行工具时不冒认实测。",
       "files": []
     },
     {
@@ -106,7 +106,7 @@
     {
       "id": 18,
       "prompt": "Do not use ICODE for this request. Explain the difference between a review and a Git merge; do not run either workflow.",
-      "expected_output": "识别英文否定，不触发 ICODE；解释概念，不执行设计 merge、Git 合并或任何工单流程。",
+      "expected_output": "识别英文否定，按普通问题解释 review 与 Git merge，不触发或无关扩展 ICODE 工作流，不输出 ICODE 专用流程/产物建议。review 是评审，merge 是历史整合；fast-forward 不新建 merge commit，merge 不必改写既有历史，撤销影响并非必须改写历史。不编造 git worktree --merge 等命令，也不执行任何工单或 Git 操作。",
       "files": []
     }
   ]
