@@ -99,6 +99,10 @@ jobs:
         run: echo "publish=$PUBLISH" >> "$GITHUB_OUTPUT"
       - name: Prepare CI test dependencies
         run: python3 -m pip install --disable-pip-version-check --no-cache-dir pytest==9.0.3 PyYAML==6.0.2 -r mcp/icode-workspace/requirements.txt
+      - name: Brand and UI regression tests
+        run: |
+          python3 -m pytest -p no:anyio tests/test_brand_assets.py tests/test_agent_ui*.py -q
+          bash tests/test_agent_ui_contract.sh
       - name: Offline regression tests
         run: |
           python3 -m unittest discover -s tests -p 'test_public_site*.py' -v
@@ -111,9 +115,7 @@ jobs:
           python3 -m pytest -p no:anyio tests/test_skill_evaluation.py -q
           python3 -m unittest discover -s tests -p test_tool_support_progress.py -v
           python3 -m pytest -p no:anyio tests/test_skill_discovery_metadata.py -q
-          python3 -m pytest -p no:anyio tests/test_brand_assets.py tests/test_agent_ui*.py -q
           python3 -m pytest -p no:anyio tests/test_build_preflight_safety.py -q
-          bash tests/test_agent_ui_contract.sh
           bash tests/test_project_intake_contract.sh
           bash tests/test_control_plane_verify_doc_contract.sh
       - name: Build preview (no secrets, no deployment)

@@ -48,8 +48,8 @@ class WorkflowTests(unittest.TestCase):
                      'tests/test_brand_assets.py', 'tests/test_agent_ui*'):
             with self.subTest(path=path):
                 self.assertIn("- '" + path + "'", paths)
-        regression = text.split('- name: Offline regression tests', 1)[1].split(
-            '- name: Build preview', 1
+        regression = text.split('- name: Brand and UI regression tests', 1)[1].split(
+            '- name: Offline regression tests', 1
         )[0]
         self.assertIn('tests/test_brand_assets.py', regression)
         self.assertIn('tests/test_agent_ui*.py', regression)
