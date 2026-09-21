@@ -74,3 +74,46 @@ def test_codex_metadata_uses_existing_relative_brand_assets():
         value = Path(interface[field])
         assert not value.is_absolute() and ".." not in value.parts
         assert (ROOT / value).is_file()
+
+
+def test_bilingual_readmes_show_the_workflow_icon_once_at_the_top():
+    readmes = {
+        "README.md": "![ICODE workflow icon](assets/icode-ticket-hex.svg)",
+        "README.zh-CN.md": "![ICODE 工作流图标](assets/icode-ticket-hex.svg)",
+    }
+    for filename, icon in readmes.items():
+        text = (ROOT / filename).read_text(encoding="utf-8")
+        assert text.count("assets/icode-ticket-hex.svg") == 1
+        assert text.splitlines().count(icon) == 1
+        assert text.index(icon) < text.index("# ICode")
+
+
+def test_tool_support_progress_records_brand_icon_sync_actions_and_boundaries():
+    text = (ROOT / "docs/tool-support-progress.md").read_text(encoding="utf-8")
+    section = text.split("## 品牌图标同步", 1)[1].split("\n## ", 1)[0]
+
+    for action in (
+        "自动部署",
+        "关联仓库待刷新核验",
+        "人工资料更新",
+        "暂不重复提交",
+    ):
+        assert action in section
+
+    for platform in (
+        "GitHub Pages",
+        "Context7",
+        "SkillsMP",
+        "agentskill.sh",
+        "Smithery",
+        "skills.sh",
+        "SkillHub",
+        "SkillKit.io",
+    ):
+        assert platform in section
+
+    assert "`main` push" in section
+    assert "固定提交" in section
+    assert "不承诺实时" in section
+    assert "载荷完整性" in section
+    assert "不宣称完整安装通过" in section

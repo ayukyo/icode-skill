@@ -1,3 +1,5 @@
+![ICODE 工作流图标](assets/icode-ticket-hex.svg)
+
 # ICode — 面向 Claude Code、Codex 与 CodeBuddy 的 AI 编码工作流
 
 > [官网与流程图解](https://ayukyo.github.io/icode-skill/) · [English website](https://ayukyo.github.io/icode-skill/en/) · [English README](README.md) · [安装](#安装)

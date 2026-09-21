@@ -1,5 +1,7 @@
 <div align="center">
 
+![ICODE workflow icon](assets/icode-ticket-hex.svg)
+
 # ICode — AI Coding Workflow for Claude Code, Codex and CodeBuddy
 
 **6-step workflow: Plan → Review → Finalize → Code → Deep Check → Audit.** Run all at once, or step-by-step and switch models between steps.
