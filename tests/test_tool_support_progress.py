@@ -1,6 +1,7 @@
 """Maintain a public, evidence-bounded registry; this does not certify hosts."""
 from datetime import date
 from pathlib import Path
+import json
 import re
 import unittest
 
@@ -8,6 +9,25 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class ToolSupportProgressTest(unittest.TestCase):
+    def test_context7_config_selects_public_workflow_docs(self):
+        path = ROOT / 'context7.json'
+        self.assertTrue(path.is_file(), 'missing repository-managed documentation config')
+        config = json.loads(path.read_text(encoding='utf-8'))
+        self.assertEqual(config['$schema'], 'https://context7.com/schema/context7.json')
+        self.assertEqual(config['branch'], 'main')
+        self.assertTrue(10 <= len(config['description']) <= 200)
+        self.assertTrue({'steps', 'references', 'docs', 'mcp'} <= set(config['folders']))
+        for folder in config['folders']:
+            self.assertTrue((ROOT / folder).is_dir(), folder)
+        self.assertTrue({'docs/local', 'docs/nbl', 'docs/private', 'tools/ppt/templates'}
+                        <= set(config['excludeFolders']))
+        self.assertFalse(config.get('disallow', False))
+        self.assertNotIn('redirect', config)
+        self.assertNotIn('public_key', config)
+        self.assertNotIn('url', config)
+        self.assertTrue(all(isinstance(rule, str) and 0 < len(rule) <= 255
+                            for rule in config['rules']))
+
     def test_ci_runs_new_checks_when_their_inputs_change(self):
         workflow = (ROOT / '.github/workflows/public-site.yml').read_text(encoding='utf-8')
         trigger = re.search(r'(?ms)^  pull_request:\n(.*?)(?=^  \S|\Z)', workflow)
@@ -17,7 +37,7 @@ class ToolSupportProgressTest(unittest.TestCase):
         )
         self.assertIsNotNone(trigger)
         self.assertIsNotNone(regression)
-        for path in ('tools/check_skill_installation.py', 'tools/check_skill_evaluation.py',
+        for path in ('context7.json', 'tools/check_skill_installation.py', 'tools/check_skill_evaluation.py',
                      'evals/**', 'tests/test_skill_installation.py',
                      'tests/test_skill_evaluation.py', 'tests/test_tool_support_progress.py'):
             self.assertIn(f"      - '{path}'", trigger[1].splitlines())

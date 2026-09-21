@@ -1,0 +1,13 @@
+{
+  "$schema": "https://context7.com/schema/context7.json",
+  "projectTitle": "ICODE",
+  "description": "Ticket-driven coding workflow for Claude Code, Codex and CodeBuddy: planning, review, debugging, verification and resumable delivery with explicit evidence boundaries.",
+  "branch": "main",
+  "folders": ["steps", "references", "docs", "mcp", "agent_runtime", "tools"],
+  "excludeFolders": ["docs/local", "docs/nbl", "docs/private", "tools/ppt/templates", "**/node_modules", "**/__pycache__"],
+  "rules": [
+    "Use SKILL.md for command routing and the linked step documents for detailed workflow contracts.",
+    "Distinguish documented host compatibility, automated checks and actual host or device execution evidence.",
+    "Documentation retrieval does not authorize workflow execution, deployment, publishing or changes to user tickets."
+  ]
+}
