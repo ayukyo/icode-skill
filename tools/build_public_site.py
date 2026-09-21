@@ -42,6 +42,11 @@ RECORDS = {
                {'id', 'title', 'body', 'command', 'more', 'note'}),
     'delivery': (('design', 'code', 'evidence', 'pending'), {'id', 'title', 'body'}),
 }
+PUBLIC_ASSETS = (
+    'assets/icode-ticket-hex.svg',
+    'assets/icode-ticket-hex-128.png',
+    'assets/icode-ticket-hex-512.png',
+)
 
 
 def nonempty_text(value):
@@ -94,13 +99,23 @@ def no_symlinks(path):
     return path
 
 
-def public_input(root, relative):
+def checked_public_path(root, relative):
     path = no_symlinks(root / relative)
     if not path.is_file() or not path.resolve().is_relative_to(root.resolve()):
         raise ValueError('missing or unsafe public input: ' + relative)
     if path.stat().st_size > 1_000_000:
         raise ValueError('public input exceeds 1 MB limit')
-    return path.read_text(encoding='utf-8')
+    return path
+
+
+def public_input(root, relative):
+    return checked_public_path(root, relative).read_text(encoding='utf-8')
+
+
+def public_asset(root, relative):
+    if relative not in PUBLIC_ASSETS:
+        raise ValueError('public asset is not in allowlist')
+    return checked_public_path(root, relative).read_bytes()
 
 
 def validate_xml_strings(data):
@@ -202,6 +217,9 @@ def render_page(data, lang, base, version):
     english = lang == 'en'
     relative = '../' if english else ''
     canonical = base + ('en/' if english else '')
+    favicon = relative + PUBLIC_ASSETS[0]
+    brand_image = relative + PUBLIC_ASSETS[1]
+    social_image = base + PUBLIC_ASSETS[2]
     switch = '<a href="../" lang="zh-CN">中文</a>' if english else '<a href="en/" lang="en">English</a>'
     docs = REPO + '/blob/main/' + ('README.md' if english else 'README.zh-CN.md')
     flow = ''.join('<li>' + e(label) + '</li>' for label in t['flow'])
@@ -246,11 +264,12 @@ def render_page(data, lang, base, version):
 <link rel="canonical" href="{e(canonical)}"><link rel="alternate" hreflang="zh-CN" href="{e(base)}">
 <link rel="alternate" hreflang="en" href="{e(base)}en/"><link rel="alternate" hreflang="x-default" href="{e(base)}">
 <meta property="og:title" content="ICODE — {e(t['title'])}"><meta property="og:description" content="{e(t['description'])}">
-<meta property="og:url" content="{e(canonical)}"><meta property="og:type" content="website">
+<meta property="og:url" content="{e(canonical)}"><meta property="og:type" content="website"><meta property="og:image" content="{e(social_image)}">
+<link rel="icon" type="image/svg+xml" href="{favicon}">
 <link rel="alternate" type="application/rss+xml" title="ICODE version notes" href="{relative}feed.xml">
 <link rel="alternate" type="text/markdown" href="index.md"><link rel="describedby" type="text/plain" href="{relative}llms.txt">
 <link rel="stylesheet" href="{relative}style.css"></head><body itemscope itemtype="https://schema.org/SoftwareSourceCode">
-<meta itemprop="name" content="ICODE"><a class="skip" href="#content">{skip}</a><header><a class="brand" href="{relative or './'}">I<span>CODE</span></a>
+<meta itemprop="name" content="ICODE"><a class="skip" href="#content">{skip}</a><header><a class="brand" href="{relative or './'}"><img src="{brand_image}" alt="ICODE" width="40" height="40"></a>
 <nav aria-label="{'Navigation' if english else '导航'}"><a href="#flow">{e(t['flow_cta'])}</a><a href="#capabilities">{e(t['scenes_title'])}</a><a href="#install">{e(t['install_cta'])}</a>{switch}<a href="{REPO}">GitHub ↗</a></nav></header>
 <main id="content"><section class="hero"><div><p class="eyebrow">{e(t['eyebrow'])}</p><h1>{e(t['title'])}</h1>
 <p class="lead" itemprop="description">{e(t['intro'])}</p><ul class="hosts"><li>Claude Code</li><li>Codex</li><li>CodeBuddy</li></ul>
@@ -384,6 +403,7 @@ def build(source_root, output, base_url, indexnow_key=None, expected_version=Non
              'llms.txt': render_llms(data, base, version).encode(),
              'index.md': render_markdown(data, 'zh-CN', base, version).encode(),
              'en/index.md': render_markdown(data, 'en', base, version).encode()}
+    files.update((relative, public_asset(root, relative)) for relative in PUBLIC_ASSETS)
     urls = [base, base + 'en/']
     sitemap = ET.Element('urlset', xmlns='http://www.sitemaps.org/schemas/sitemap/0.9')
     for url in urls:

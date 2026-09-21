@@ -81,20 +81,29 @@ class AgentReadingTests(unittest.TestCase):
             self.assertNotIn('<script', page)
             self.assertNotIn('aggregateRating', page)
 
-    def test_no_new_source_inputs_or_network_are_needed(self):
-        seen = []
-        original = self.builder.public_input
-        def audited(root, relative):
-            seen.append(relative)
-            return original(root, relative)
-        with patch.object(self.builder, 'public_input', side_effect=audited), patch('socket.getaddrinfo', side_effect=AssertionError('offline')):
+    def test_only_explicit_text_and_brand_inputs_are_read_without_network(self):
+        seen_text = []
+        seen_assets = []
+        original_text = self.builder.public_input
+        original_asset = self.builder.public_asset
+        def audited_text(root, relative):
+            seen_text.append(relative)
+            return original_text(root, relative)
+        def audited_asset(root, relative):
+            seen_assets.append(relative)
+            return original_asset(root, relative)
+        with patch.object(self.builder, 'public_input', side_effect=audited_text), \
+                patch.object(self.builder, 'public_asset', side_effect=audited_asset), \
+                patch('socket.getaddrinfo', side_effect=AssertionError('offline')):
             self.build()
-        self.assertEqual(set(seen), {'site/content.json', 'site/style.css', 'SKILL.md'})
+        self.assertEqual(set(seen_text), {'site/content.json', 'site/style.css', 'SKILL.md'})
+        self.assertEqual(tuple(seen_assets), self.builder.PUBLIC_ASSETS)
 
     def test_markdown_does_not_turn_public_text_into_html_or_injected_links(self):
         source = self.work / 'source'
         source.mkdir()
         shutil.copytree(ROOT / 'site', source / 'site')
+        shutil.copytree(ROOT / 'assets', source / 'assets')
         shutil.copy2(ROOT / 'SKILL.md', source / 'SKILL.md')
         content = source / 'site/content.json'
         data = json.loads(content.read_text())

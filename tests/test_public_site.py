@@ -12,6 +12,11 @@ import xml.etree.ElementTree as ET
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE = "https://ayukyo.github.io/icode-skill/"
+PUBLIC_ASSETS = (
+    "assets/icode-ticket-hex.svg",
+    "assets/icode-ticket-hex-128.png",
+    "assets/icode-ticket-hex-512.png",
+)
 
 
 class PublicSiteTests(unittest.TestCase):
@@ -35,6 +40,7 @@ class PublicSiteTests(unittest.TestCase):
         root = self.work / "source"
         root.mkdir()
         shutil.copytree(ROOT / "site", root / "site")
+        shutil.copytree(ROOT / "assets", root / "assets")
         shutil.copy2(ROOT / "SKILL.md", root / "SKILL.md")
         return root
 
@@ -44,7 +50,7 @@ class PublicSiteTests(unittest.TestCase):
                  for p in (self.work / "out").rglob("*") if p.is_file()}
         self.assertEqual(files, {"index.html", "en/index.html", "style.css",
                                  "sitemap.xml", "feed.xml", "public-manifest.json", ".nojekyll",
-                                 "llms.txt", "index.md", "en/index.md"})
+                                 "llms.txt", "index.md", "en/index.md", *PUBLIC_ASSETS})
         zh = (self.work / "out/index.html").read_text()
         en = (self.work / "out/en/index.html").read_text()
         for page, lang in [(zh, "zh-CN"), (en, "en")]:
@@ -59,6 +65,66 @@ class PublicSiteTests(unittest.TestCase):
             self.assertNotIn('<script', page)
         self.assertIn('href="style.css"', zh)
         self.assertIn('href="../style.css"', en)
+
+    def test_brand_asset_allowlist_is_fixed_and_outputs_exact_bytes(self):
+        builder = self.builder()
+        self.assertEqual(builder.PUBLIC_ASSETS, PUBLIC_ASSETS)
+        self.build()
+        for relative in PUBLIC_ASSETS:
+            with self.subTest(relative=relative):
+                self.assertEqual((self.work / "out" / relative).read_bytes(),
+                                 (ROOT / relative).read_bytes())
+
+    def test_bilingual_pages_use_brand_assets_with_depth_correct_paths(self):
+        self.build()
+        expected = {
+            "index.html": "",
+            "en/index.html": "../",
+        }
+        for page_path, prefix in expected.items():
+            with self.subTest(page=page_path):
+                page = (self.work / "out" / page_path).read_text()
+                self.assertIn(
+                    f'<link rel="icon" type="image/svg+xml" href="{prefix}assets/icode-ticket-hex.svg">',
+                    page,
+                )
+                self.assertIn(
+                    f'<img src="{prefix}assets/icode-ticket-hex-128.png" alt="ICODE" width="40" height="40">',
+                    page,
+                )
+                self.assertIn(
+                    f'<meta property="og:image" content="{BASE}assets/icode-ticket-hex-512.png">',
+                    page,
+                )
+                self.assertNotIn('<script', page)
+
+    def test_binary_asset_reader_rejects_non_whitelisted_input_before_read(self):
+        builder = self.builder()
+        with patch.object(Path, 'read_bytes', side_effect=AssertionError('unexpected file read')):
+            with self.assertRaisesRegex(ValueError, 'allowlist'):
+                builder.public_asset(ROOT, 'assets/unlisted.png')
+
+    def test_symlink_and_oversized_brand_assets_fail_before_output(self):
+        builder = self.builder()
+        symlink_root = self.fixture()
+        symlink_asset = symlink_root / PUBLIC_ASSETS[0]
+        outside = self.work / 'outside.svg'
+        outside.write_bytes(symlink_asset.read_bytes())
+        symlink_asset.unlink()
+        symlink_asset.symlink_to(outside)
+        with self.assertRaisesRegex(ValueError, 'symlink'):
+            builder.build(symlink_root, self.work / 'symlink-out', BASE)
+        self.assertFalse((self.work / 'symlink-out').exists())
+
+        oversized_root = self.work / 'oversized-source'
+        oversized_root.mkdir()
+        shutil.copytree(ROOT / 'site', oversized_root / 'site')
+        shutil.copytree(ROOT / 'assets', oversized_root / 'assets')
+        shutil.copy2(ROOT / 'SKILL.md', oversized_root / 'SKILL.md')
+        (oversized_root / PUBLIC_ASSETS[1]).write_bytes(b'x' * 1_000_001)
+        with self.assertRaisesRegex(ValueError, '1 MB'):
+            builder.build(oversized_root, self.work / 'oversized-out', BASE)
+        self.assertFalse((self.work / 'oversized-out').exists())
 
     def test_xml_and_manifest_match_public_pages(self):
         self.build()

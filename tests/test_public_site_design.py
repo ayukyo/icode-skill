@@ -162,6 +162,7 @@ class PublicDesignTests(unittest.TestCase):
         self.assertIn('stages', self.data['locales']['en'])
         root = self.work / 'source'
         shutil.copytree(ROOT / 'site', root / 'site')
+        shutil.copytree(ROOT / 'assets', root / 'assets')
         shutil.copy2(ROOT / 'SKILL.md', root / 'SKILL.md')
         file = root / 'site/content.json'
         self.data['locales']['en']['stages'][0]['purpose'] = '<img src=x onerror=alert(1)>'
@@ -169,7 +170,10 @@ class PublicDesignTests(unittest.TestCase):
         self.builder.build(root, self.work / 'escaped', self.builder.DEFAULT_BASE)
         html = (self.work / 'escaped/en/index.html').read_text()
         self.assertIn('&lt;img', html)
-        self.assertFalse(Page(html).root.find('img'))
+        images = Page(html).root.find('img')
+        self.assertEqual(len(images), 1)
+        self.assertEqual(images[0].attrs.get('alt'), 'ICODE')
+        self.assertNotIn('onerror', images[0].attrs)
         for index, value in enumerate(('', '  ', None, ['wrong type'], '\x00')):
             self.data['locales']['en']['stages'][0]['purpose'] = value
             file.write_text(json.dumps(self.data))

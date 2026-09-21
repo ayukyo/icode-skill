@@ -28,6 +28,7 @@ class PublicDemoTests(unittest.TestCase):
                 shutil.copy2(ROOT / 'demo' / name, source / name)
             shutil.copy2(ROOT / 'SKILL.md', source / 'SKILL.md')
             shutil.copytree(ROOT / 'site', source / 'site')
+            shutil.copytree(ROOT / 'assets', source / 'assets')
             for relative in ['.icode_output/.icode_output_1/.ico_metadata.json',
                              '.icode_output/.crosscheck/review.md', 'mcp/private/config.json',
                              'log/device.log', '.env', 'README.md', 'site/unlisted-secret.txt']:
