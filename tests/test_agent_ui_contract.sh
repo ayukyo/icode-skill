@@ -7,6 +7,12 @@ FAIL=0
 ok() { PASS=$((PASS + 1)); printf '  PASS %s\n' "$1"; }
 bad() { FAIL=$((FAIL + 1)); printf '  FAIL %s\n' "$1" >&2; }
 
+# Hosted runners and minimal installations do not always provide ripgrep.
+# Keep the contract runnable with GNU grep while preferring rg when available.
+if [ "${ICODE_UI_TEST_NO_RG:-0}" = "1" ] || ! command -v rg >/dev/null 2>&1; then
+  rg() { grep -E -r --binary-files=without-match "$@"; }
+fi
+
 if python3 tools/icode_agent.py ui --help 2>/dev/null \
   | grep -q -- '--no-browser' \
   && python3 tools/icode_agent.py ui --help 2>/dev/null | grep -q -- '--ticket' \

@@ -102,7 +102,7 @@ jobs:
       - name: Brand and UI regression tests
         run: |
           python3 -m pytest -p no:anyio tests/test_brand_assets.py tests/test_agent_ui*.py -q
-          bash tests/test_agent_ui_contract.sh
+          ICODE_UI_TEST_NO_RG=1 bash tests/test_agent_ui_contract.sh
       - name: Offline regression tests
         run: |
           python3 -m unittest discover -s tests -p 'test_public_site*.py' -v

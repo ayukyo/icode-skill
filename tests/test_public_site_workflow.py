@@ -53,7 +53,7 @@ class WorkflowTests(unittest.TestCase):
         )[0]
         self.assertIn('tests/test_brand_assets.py', regression)
         self.assertIn('tests/test_agent_ui*.py', regression)
-        self.assertIn('bash tests/test_agent_ui_contract.sh', regression)
+        self.assertIn('ICODE_UI_TEST_NO_RG=1 bash tests/test_agent_ui_contract.sh', regression)
 
     def test_listing_drafts_are_gated_offline_not_published_by_ci(self):
         text = self.text()
