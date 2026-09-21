@@ -123,7 +123,7 @@ class PublicSiteStyleTests(unittest.TestCase):
     def test_existing_and_new_component_contracts_have_rules(self):
         selectors = {selector for _, selector, _ in self.rules}
         required = {
-            "header", "nav", ".brand", ".brand span", ".skip", ".skip:focus",
+            "header", "nav", ".brand", ".brand img", ".skip", ".skip:focus",
             ".hero", ".eyebrow", ".lead", ".actions", ".button", ".terminal",
             ".terminal-head", ".terminal-body", ".terminal-body .prompt",
             ".tag", ".section", ".flow", ".flow li",
@@ -144,6 +144,15 @@ class PublicSiteStyleTests(unittest.TestCase):
             ".install-note-details", ".updates-details",
         }
         self.assertEqual(required - selectors, set())
+
+    def test_brand_image_has_stable_header_dimensions(self):
+        brand = self.declarations(".brand")
+        image = self.declarations(".brand img")
+        self.assertEqual(brand.get("display"), "inline-flex")
+        self.assertEqual(brand.get("align-items"), "center")
+        self.assertEqual(image.get("display"), "block")
+        self.assertEqual(image.get("width"), "40px")
+        self.assertEqual(image.get("height"), "40px")
 
     def test_stage_and_card_grids_adapt_at_required_viewports(self):
         for width, columns in ((360, 1), (768, 2), (1440, 3)):

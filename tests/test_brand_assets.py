@@ -78,14 +78,15 @@ def test_codex_metadata_uses_existing_relative_brand_assets():
 
 def test_bilingual_readmes_show_the_workflow_icon_once_at_the_top():
     readmes = {
-        "README.md": "![ICODE workflow icon](assets/icode-ticket-hex.svg)",
-        "README.zh-CN.md": "![ICODE 工作流图标](assets/icode-ticket-hex.svg)",
+        "README.md": 'alt="ICODE workflow icon"',
+        "README.zh-CN.md": 'alt="ICODE 工作流图标"',
     }
-    for filename, icon in readmes.items():
+    for filename, alt in readmes.items():
         text = (ROOT / filename).read_text(encoding="utf-8")
         assert text.count("assets/icode-ticket-hex.svg") == 1
-        assert text.splitlines().count(icon) == 1
-        assert text.index(icon) < text.index("# ICode")
+        assert text.count(alt) == 1
+        assert 'width="128"' in text
+        assert text.index("assets/icode-ticket-hex.svg") < text.index("# ICode")
 
 
 def test_tool_support_progress_records_brand_icon_sync_actions_and_boundaries():

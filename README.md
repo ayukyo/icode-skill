@@ -1,6 +1,6 @@
 <div align="center">
 
-![ICODE workflow icon](assets/icode-ticket-hex.svg)
+<img src="assets/icode-ticket-hex.svg" alt="ICODE workflow icon" width="128">
 
 # ICode — AI Coding Workflow for Claude Code, Codex and CodeBuddy
 

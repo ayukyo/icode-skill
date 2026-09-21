@@ -1,4 +1,4 @@
-![ICODE 工作流图标](assets/icode-ticket-hex.svg)
+<p align="center"><img src="assets/icode-ticket-hex.svg" alt="ICODE 工作流图标" width="128"></p>
 
 # ICode — 面向 Claude Code、Codex 与 CodeBuddy 的 AI 编码工作流
 
