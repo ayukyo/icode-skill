@@ -167,7 +167,42 @@ CLI 的“安装成功”后仍必须检查 `integrity-before` 的 JSON 和退�
 
 同日另建隔离项目，以该完整提交的 GitHub tree URL 执行远程 copy 安装，
 在克隆阶段达到90秒时限、退出124，尚未产生可验收的安装。
-因此远程直装、旧版到新版升级及自动跟随更新仍待网络条件满足后验证。
+该次失败保留；后续提高受控克隆预算后的远程直装已通过，见下节，不能把先前超时抹成成功。
+
+### 同日 GitHub 远程直装复验
+
+CLI 仍为官方 `skills@1.7.0`，直接安装
+`https://github.com/ayukyo/icode-skill/tree/main`，保留
+`--skill icode --agent codex --copy --yes`，不全局安装、不启用遥测。
+本轮使用已核实版本的 CLI 文件，独立 HOME/XDG/临时目录且清除继承凭据；
+按[官方克隆超时配置](https://github.com/vercel-labs/skills/blob/v1.7.0/README.md)
+设置 `SKILLS_CLONE_TIMEOUT_MS=240000`，外层 `timeout --kill-after=5s 280s`。
+增加的是单次有界等待预算，不无限重试；配方的外层120秒也必须同步提高，否则会先杀掉克隆。
+
+安装退出0，锁文件实际为 `sourceType=github`、`source=ayukyo/icode-skill`、`ref=main`。
+安装所得资源与干净源码 `0b7a3f49ea9187b5d33f20b83313ec09200587f9` 对比：
+**328/328项 SHA-256 一致，零缺失、零变化、零不安全项**。
+因此“远程直装”已实测通过；搜索未命中、真实宿主加载、共享技能/MCP、旧→新升级分别验收，
+不能由这个结果直接推定完成。浮动来源的身份由全量内容比对固定，不仅依据安装成功提示。
+
+### Smithery 下载样本复验
+
+同日通过 [Smithery ICODE 页面](https://smithery.ai/skills/ayukyo/icode)实际下载 ZIP，
+只在新临时目录检查、未执行任何载荷内容。归档496个文件，SHA-256：
+`21eb13e626041d42ab68edf9bc8d85d7145c0e015afbddac356a58f10b3059fb`。
+对比上述 `0b7a3f49` 的328项公开资源，**缺失1项（`.gitignore`），变化25项**：
+9项文本不同，另外16项为全部8套模板的 PNG/PPTX。
+文本差异可能是同步滞后，不能把所有差异都归因为二进制损坏。
+
+其中 architecture-deck 的 PNG 原始签名 `89 50 4e 47` 变为
+`ef bf bd 50 4e 47`，`unzip -t template.pptx` 报中央目录损坏。
+这与经过文本解码/重编码相符，但服务端原因未核实。
+已向官方维护入口提交[问题 #816](https://github.com/arcadeai-labs/smithery-cli/issues/816)，
+明确它是网页下载问题，请维护者按实际归属转交，未将其认定为 CLI 执行缺陷。
+在平台修复并通过重新校验前，不建议把该 ZIP 用作完整安装；完整资源走 GitHub copy 安装或原安装器，
+不删除源码模板、改许可或放宽 hash 检查来让损坏载荷“通过”。
+
+### 隔离更新配方
 
 只在上面的临时项目执行更新。CLI 1.7.0 的项目更新会跳过 `local` 来源，
 因此本地 payload 的更新通常是无操作；不能将退出 `0` 写成更新了资源。

@@ -12,6 +12,13 @@ MANIFEST="mcp/icode-workspace/tools_manifest.json"
 POLICY="mcp/icode-mcp-policy/policy.json"
 REFERENCE="references/project_intake.md"
 
+if ! rg -q 'cwd 不在 git 仓库' SKILL.md \
+  && rg -q 'L1·致命.*工程接入.*解析失败' SKILL.md; then
+  ok "入口阻断以目标工程解析结果为准，不与唯一嵌套根支持冲突"
+else
+  bad "入口仍将宿主非 Git cwd 直接当作目标解析失败"
+fi
+
 if python3 - "$SERVER" "$MANIFEST" "$POLICY" <<'PY'
 import ast, json, sys
 tree = ast.parse(open(sys.argv[1], encoding="utf-8").read())

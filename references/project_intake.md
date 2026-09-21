@@ -25,6 +25,8 @@
 
 这套“唯一嵌套 Git 根才自动选择”的规则不提供模糊匹配或名称猜测旁路。
 
+解析对象是用户请求的目标路径，不是承载代理的临时 cwd。目标未读取或工具不可用时，只能报告“工程根待核验”，不能把宿主非 Git 目录作为目标 L1 失败证据；即使请求路径本身非 Git，也应先走上述唯一嵌套根解析，而非立即退出。
+
 解析完成后，后续 step 文档里的 `cwd`、`WORKSPACE_ROOT`、`GIT_ROOT`、`project_path` 和 `<project_root>` 默认都指已解析的实际工程根。若宿主不能切换 cwd，则每个命令显式使用该根作为 `workdir` 或 `git -C <root>`，不得继续在容器目录创建 `.icode_output/`。
 
 MCP 不可用时可用只读 `git -C <path> rev-parse --show-toplevel` 与有界 `find <path> -maxdepth 3 -name .git` 复核，但仍执行同一“唯一才选、多根/截断即阻断”语义，并记录 `degraded_after_attempt`；禁止退化成 `pwd` 后静默把容器目录当项目。

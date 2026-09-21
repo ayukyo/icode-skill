@@ -20,6 +20,11 @@ on:
       - 'install.sh'
       - 'scripts/sync-to-global.sh'
       - 'mcp/workflow-gate/skill-routes.json'
+      - 'mcp/icode-workspace/**'
+      - 'mcp/_lib/**'
+      - 'mcp/icode-mcp-policy/policy.json'
+      - 'references/project_intake.md'
+      - 'steps/verify.md'
       - 'integrations/codebuddy/**'
       - '.gitignore'
       - 'integrations/discovery/**'
@@ -33,6 +38,8 @@ on:
       - 'tests/test_skill_installation.py'
       - 'tests/test_skill_evaluation.py'
       - 'tests/test_tool_support_progress.py'
+      - 'tests/test_build_preflight_safety.py'
+      - 'tests/test_project_intake_contract.sh'
       - 'tests/run_public_site_checks.py'
       - 'tests/test_public_site*.py'
       - 'tests/test_notify_indexnow.py'
@@ -84,7 +91,7 @@ jobs:
           PUBLISH: ${{ vars.PUBLIC_SITE_ENABLED == 'true' && vars.PUBLIC_SITE_URL != '' && ((github.event_name == 'release' && !github.event.release.prerelease && !github.event.release.draft) || ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == format('refs/heads/{0}', github.event.repository.default_branch))) }}
         run: echo "publish=$PUBLISH" >> "$GITHUB_OUTPUT"
       - name: Prepare CI test dependencies
-        run: python3 -m pip install --disable-pip-version-check --no-cache-dir pytest==9.0.3 PyYAML==6.0.2
+        run: python3 -m pip install --disable-pip-version-check --no-cache-dir pytest==9.0.3 PyYAML==6.0.2 -r mcp/icode-workspace/requirements.txt
       - name: Offline regression tests
         run: |
           python3 -m unittest discover -s tests -p 'test_public_site*.py' -v
@@ -97,6 +104,8 @@ jobs:
           python3 -m pytest -p no:anyio tests/test_skill_evaluation.py -q
           python3 -m unittest discover -s tests -p test_tool_support_progress.py -v
           python3 -m pytest -p no:anyio tests/test_skill_discovery_metadata.py -q
+          python3 -m pytest -p no:anyio tests/test_build_preflight_safety.py -q
+          bash tests/test_project_intake_contract.sh
       - name: Build preview (no secrets, no deployment)
         if: steps.policy.outputs.publish != 'true'
         run: python3 tools/build_public_site.py --output _site --base-url "$SITE_URL" --expected-version "$EXPECTED_VERSION"

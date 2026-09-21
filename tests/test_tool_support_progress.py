@@ -39,7 +39,10 @@ class ToolSupportProgressTest(unittest.TestCase):
         self.assertIsNotNone(regression)
         for path in ('context7.json', 'tools/check_skill_installation.py', 'tools/check_skill_evaluation.py',
                      'evals/**', 'tests/test_skill_installation.py',
-                     'tests/test_skill_evaluation.py', 'tests/test_tool_support_progress.py'):
+                     'tests/test_skill_evaluation.py', 'tests/test_tool_support_progress.py',
+                     'tests/test_build_preflight_safety.py', 'tests/test_project_intake_contract.sh',
+                     'references/project_intake.md', 'steps/verify.md', 'mcp/icode-workspace/**',
+                     'mcp/_lib/**'):
             self.assertIn(f"      - '{path}'", trigger[1].splitlines())
         for test in ('test_skill_installation.py', 'test_tool_support_progress.py'):
             self.assertIn(
@@ -51,6 +54,12 @@ class ToolSupportProgressTest(unittest.TestCase):
             regression[1].splitlines(),
         )
         self.assertNotIn('unittest discover -s tests -p test_skill_evaluation.py', regression[1])
+        self.assertIn(
+            '          python3 -m pytest -p no:anyio tests/test_build_preflight_safety.py -q',
+            regression[1].splitlines(),
+        )
+        self.assertIn('          bash tests/test_project_intake_contract.sh',
+                      regression[1].splitlines())
 
     def test_registry_has_extendable_rows_and_evidence_boundaries(self):
         path = ROOT / 'docs/tool-support-progress.md'

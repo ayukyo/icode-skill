@@ -4,7 +4,9 @@
 
 持续更新的逐工具状态、证据及下一步统一维护在[工具支持进度台账](tool-support-progress.md)；下文历史快照不覆盖该台账的新核查结果。
 
-CodeBuddy 宿主文档漂移已在 [宿主适配契约](../references/host_adapters.md)修正为按版本和实际暴露能力判断；保留旧命令桥，不自动新增 Hook、权限或 Runtime 后端。[WorkBuddy](workbuddy-support.md)已有官方配置路径依据，尚未完成宿主实机验证。含 8 套 PPT 模板的归档低于 20 MiB 仍不证明平台接受：SkillHub 当前仓库状态错误及候选包限制见[官方反馈](https://github.com/Tencent/skillhub/issues/2)，完整包还须核对依赖和[第三方素材许可](../tools/ppt/NOTICE)。[目录草稿工具](skill-catalog-submission.md)不自动声明整包 MIT。[Smithery 条目](https://smithery.ai/skills/ayukyo/icode)已发布且设置关联仓库根 URL，完整安装及自动更新仍待验；agentskill.sh 已收录但当前安装载荷缺关键资源。不能把条目发布当作完整运行通过。
+两项常用工具另有完整记录：[find-skills 的搜索、远程安装与更新验证](find-skills-compatibility.md)、[skill-creator 的触发集、行为对照与失败记录](skill-creator-compatibility.md)。它们分别解决发现/安装和创建/评估，不是另两个需要上架的市场。
+
+CodeBuddy 宿主文档漂移已在 [宿主适配契约](../references/host_adapters.md)修正为按版本和实际暴露能力判断；保留旧命令桥，不自动新增 Hook、权限或 Runtime 后端。[WorkBuddy](workbuddy-support.md)已有官方配置路径依据，尚未完成宿主实机验证。含 8 套 PPT 模板的归档低于 20 MiB 仍不证明平台接受：SkillHub 当前导入下载失败及候选包限制见[官方反馈](https://github.com/Tencent/skillhub/issues/2)，完整包还须核对依赖和[第三方素材许可](../tools/ppt/NOTICE)。[目录草稿工具](skill-catalog-submission.md)不自动声明整包 MIT。[Smithery 条目](https://smithery.ai/skills/ayukyo/icode)已发布且设置关联仓库根 URL，但实际下载包检出二进制损坏；agentskill.sh 已收录但当前安装载荷缺关键资源并附加指令。解决前使用完整 GitHub 来源，详见[载荷实测](find-skills-compatibility.md)。不能把条目发布当作完整运行通过。
 
 以下保留 2026-09-20 的历史快照，查询结果与“未注册”等表述仅对应该次核查。
 
