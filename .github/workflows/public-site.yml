@@ -25,15 +25,13 @@ on:
       - 'tests/test_skill_discovery_probe.py'
       - 'tests/test_skill_discovery_metadata.py'
       - 'tests/test_skill_listing.py'
+      - 'tests/test_docs_publication.py'
       - 'tests/run_public_site_checks.py'
       - 'tests/test_public_site*.py'
       - 'tests/test_notify_indexnow.py'
       - 'SKILL.md'
       - 'README*.md'
-      - 'docs/public-discovery.md'
-      - 'docs/agent-skill-discovery.md'
-      - 'docs/skill-distribution.md'
-      - 'docs/skill-catalog-submission.md'
+      - 'docs/**'
       - '.github/workflows/public-site.yml'
   release:
     types: [published]
@@ -87,6 +85,7 @@ jobs:
           python3 -m unittest discover -s tests -p test_skill_distribution.py -v
           python3 -m unittest discover -s tests -p test_skill_discovery_probe.py -v
           python3 -m unittest discover -s tests -p test_skill_listing.py -v
+          python3 -m unittest discover -s tests -p test_docs_publication.py -v
           python3 -m pytest -p no:anyio tests/test_skill_discovery_metadata.py -q
       - name: Build preview (no secrets, no deployment)
         if: steps.policy.outputs.publish != 'true'

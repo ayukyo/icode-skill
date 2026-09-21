@@ -48,21 +48,30 @@ def drafts(source, platform):
                 'summary': '工单式 AI 编码、设计与代码审查、证据验证和中断续接。',
                 'description': description,
                 'tags': ['ai-coding', 'workflow', 'code-review', 'verification', 'documentation'],
-                'license': 'MIT', 'homepage': DEFAULT_BASE,
+                'homepage': DEFAULT_BASE,
             },
+            # The root SKILL.md cannot establish licensing for a complete package.
+            'license_required': True,
             'requires': ['Account and platform identity verification',
                          'Review publishing terms and supply your own credential outside this tool',
                          'Stage a complete skill payload with shared skills and resource dependencies',
+                         'Package licensing is not verified: manually verify the complete package, '
+                         'including shared skills, resources and dependencies; preserve required notices '
+                         'and supply the appropriate license field in the staging copy',
                          'Merge these fields only into that staging copy, then run the official dry-run',
                          'Verify host entrypoints and installation before publication'],
         },
         'smithery': {
             'platform': 'smithery',
-            'official_source': 'https://smithery.ai/docs/api-reference/skills/create-or-update-a-skill',
-            'request': {'method': 'PUT', 'url': 'https://api.smithery.ai/skills/ayukyo/icode',
+            'official_source': 'https://smithery.ai/skills/new',
+            # Keep the draft body shape, but do not generate an executable API request.
+            'request': {'url': 'https://smithery.ai/skills/new',
                         'body': {'gitUrl': REPO}},
-            'requires': ['Confirm ownership and availability of the ayukyo namespace',
-                         'Review publishing terms and supply your own API key outside this tool',
+            'namespace_verified': False,
+            'requires': ['The Smithery namespace is not verified; confirm ownership and availability '
+                         'in the web submission flow without inferring it from the GitHub owner',
+                         'Use the web entrypoint manually with the gitUrl draft; this is not an API request',
+                         'Review publishing terms and sign in outside this tool',
                          'Review registry ingestion and complete-install instructions',
                          'Obtain explicit publication approval; this tool sends no request'],
         },

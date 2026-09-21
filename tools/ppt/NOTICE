@@ -1,15 +1,19 @@
-# tools/ppt 模板非商业授权声明
+# tools/ppt 来源与使用范围
 
 `tools/ppt/templates/` 下的 PowerPoint **模板**（`template.pptx` / `preview.png`）来自第三方设计师作品
-（原项目 [lmori1301/Agent-PPTSkill](https://github.com/lmori1301/Agent-PPTSkill)，设计署名「稻壳儿原创设计师」，仅存在于形状内部 name 元数据，渲染不可见）。
+（原项目 [lmori1301/Agent-PPTSkill](https://github.com/lmori1301/Agent-PPTSkill)）。源素材署名与许可应保留，不因页面没有可见水印而移除。
+
+**水印外观与使用许可分开说明**：不把购买商业授权作为上游许可范围内个人学习、非商业研究的前置条件；是否有可见水印不改变下述第三方素材限制，也不能据此宣称无限制使用。此限制不覆盖整个 ICODE。
+
+上游 [LICENSE](https://github.com/lmori1301/Agent-PPTSkill/blob/main/LICENSE)明确将 MIT 限于源代码与元数据；模板与预览适用独立 [NOTICE.md](https://github.com/lmori1301/Agent-PPTSkill/blob/main/NOTICE.md)（2026-09-21 核对）。
 
 **这些模板仅供个人学习与研究，严禁任何商业用途**，包括但不限于：
 - 商业演示、销售、培训分发、客户提案
 - 企业内部以营利为目的的使用
-- 再分发 / 并入付费 SaaS / 插件 / 商业模板库
+- 作为付费产品再分发，或并入付费 SaaS / API / 插件 / 商业模板库
 
 二次商用需获取原作者授权。
 
 `tools/ppt/scripts/`（生成脚本）与 `steps/ppt.md` 为本仓库 MIT 授权，不受上述限制。
 
-> 若需商用模板，请使用**用户自备的 `.pptx` 模板**（模式B：把自有模板交给 AI 自动建模），或 `/icode ppt` 的原创简洁版式路径。
+> 使用**用户自备且具有相应用途权利的 `.pptx` 模板**时，按该模板自身许可处理，不套用本页内置素材的限制。当前没有开箱即用的原创无模板生成器，不将该能力写成已实现。

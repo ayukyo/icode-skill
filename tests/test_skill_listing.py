@@ -37,14 +37,40 @@ class ListingTests(unittest.TestCase):
         self.assertEqual(hub['platform'], 'skillhub')
         self.assertEqual(hub['frontmatter']['version'], '3.4.5')
         self.assertEqual(hub['frontmatter']['slug'], 'icode')
-        self.assertEqual(hub['frontmatter']['license'], 'MIT')
         self.assertTrue(hub['frontmatter']['displayName'])
         self.assertEqual(hub['frontmatter']['description'], 'ICODE AI coding workflow')
-        self.assertEqual(smithery['request']['method'], 'PUT')
-        self.assertEqual(smithery['request']['url'], 'https://api.smithery.ai/skills/ayukyo/icode')
         self.assertEqual(smithery['request']['body'], {'gitUrl': 'https://github.com/ayukyo/icode-skill'})
         self.assertNotIn('headers', smithery['request'])
         self.assertTrue(all(d['requires'] and d['official_source'] for d in report['drafts']))
+
+    def test_skillhub_license_requires_manual_complete_package_review(self):
+        for platform in ('skillhub', 'all'):
+            with self.subTest(platform=platform):
+                hub = self.tool.drafts(self.root, platform)['drafts'][0]
+                self.assertNotIn('license', hub['frontmatter'])
+                self.assertIs(hub.get('license_required'), True)
+                requirements = ' '.join(hub['requires']).lower()
+                self.assertIn('manually verify', requirements)
+                self.assertIn('complete package', requirements)
+                self.assertIn('dependencies', requirements)
+                self.assertIn('license', requirements)
+                self.assertIn('not verified', requirements)
+
+    def test_smithery_uses_web_draft_without_assuming_a_namespace(self):
+        for platform in ('smithery', 'all'):
+            with self.subTest(platform=platform):
+                smithery = self.tool.drafts(self.root, platform)['drafts'][-1]
+                self.assertNotIn('method', smithery['request'])
+                self.assertEqual(smithery['request']['url'], 'https://smithery.ai/skills/new')
+                self.assertEqual(smithery['official_source'], 'https://smithery.ai/skills/new')
+                self.assertEqual(smithery['request']['body'],
+                                 {'gitUrl': 'https://github.com/ayukyo/icode-skill'})
+                self.assertIs(smithery.get('namespace_verified'), False)
+                requirements = ' '.join(smithery['requires']).lower()
+                self.assertIn('namespace is not verified', requirements)
+                self.assertIn('ownership and availability', requirements)
+                self.assertNotIn('api.smithery.ai', json.dumps(smithery))
+                self.assertNotIn('ayukyo', requirements)
 
     def test_only_reads_public_entry_and_never_connects_or_writes(self):
         (self.root / '.env').write_text('SECRET_CANARY')

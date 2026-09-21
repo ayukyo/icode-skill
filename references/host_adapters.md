@@ -5,8 +5,8 @@
 | 抽象操作 | Claude Code 适配 | Codex 适配 | CodeBuddy 适配 | 无能力时 |
 |---|---|---|---|---|
 | 读文件/文本检索 | Read、Grep、Glob 或 shell `rg` | 文件读取工具或 shell `rg` | `read_file` / `search_content` / `search_file` 或 shell `rg` | 使用当前宿主最窄只读命令 |
-| 结构化思考 | 已注册的 sequential-thinking MCP | 当前可调用的 sequential-thinking MCP | 已注册 sequential-thinking 时同左；**未提供 `ToolSearch` 能力**，配置读取走 `~/.codebuddy/mcp.json` | 输出显式结构化思考块 |
-| 独立审查 | 后台 Agent + 有界等待 | collaboration 子代理 + 有界等待 | **仅提供检索型子代理（`code-explorer`），无可裁决型 general-purpose** → 对抗验证须主代理代行并显式标注 | 标记无独立审查环境，不由主代理伪装 |
+| 结构化思考 | 已注册的 sequential-thinking MCP | 当前可调用的 sequential-thinking MCP | 依据本会话实际暴露的工具；有工具发现接口才调用，无则检查直接工具列表，配置读取走 `~/.codebuddy/mcp.json` | 按项目/步骤允许的降级路径处理；上位规则要求停下时不得擅自替代 |
+| 独立审查 | 后台 Agent + 有界等待 | collaboration 子代理 + 有界等待 | 按实际版本的可用 Agent 类型选择；当前 CLI 文档已有 general-purpose/Plan/Explore，不能一律按“仅检索型”处理 | 标记无独立审查环境；主代理复核不冒充独立裁决 |
 | 外部文档/媒体 | 当前已注册 MCP；native 按路由上限串行分批 | 当前已注册 MCP 或本地 CLI；native 按路由上限串行分批 | 当前已注册 MCP（同 `{mcpServers}` 结构）；无 MCP 时走文本优先 + 未观测边界 | 声明降级，保留未观测边界 |
 | 邮件/线程/附件 | 显式网页邮件链接优先已登录浏览器；导出件走离线 intake；无人值守才用邮箱观察器 | 显式网页邮件链接优先当前已登录浏览器；导出件走离线 intake；无人值守才用邮箱观察器 | 同左（导出件走 `tools/email_intake.py` 离线 intake） | 请求限定范围的 `.eml`/`.msg` 导出；保持线程和附件缺口 |
 | 文件修改 | 宿主提供的精确编辑工具 | `apply_patch` | `write_to_file` / `replace_in_file` | 停止修改，不用不安全覆盖命令替代 |
@@ -21,13 +21,21 @@
 
 ## CodeBuddy 专项约定
 
-1. **命令入口**：CodeBuddy 不把 Skill 自动注册为斜杠命令。`/icode <子命令>` 依赖**自定义斜杠指令**。仓库真源为 `integrations/codebuddy/commands/icode.md`；`scripts/sync-to-global.sh --apply --client codebuddy` 将其原子发布为用户级 `~/.codebuddy/commands/icode.md`。同内容旧文件可通过所有权标记接管，不同内容的未托管命令必须失败关闭；项目级 `<工程>/.codebuddy/commands/icode.md` 仍由项目自行管理。
-2. **MCP 配置位置**：宿主配置读 `~/.codebuddy/mcp.json`（**不是** `~/.claude.json`）；其 `mcpServers` 与 Claude Code 结构同源（`{mcpServers:{name:{command,args,env}}}`），可整段迁移。
-3. **无 ToolSearch**：MCP 可用性判定只能靠「工具列表直接可见」这一条路径，不得因 ToolSearch 缺失直接判“工具不存在”。
-4. **无 Hook 层**：`UserPromptSubmit` 等 Hook 不可用，强制思考前置仅由 Prompt 层 + 步骤文件保证。
+1. **命令入口**：当前 CodeBuddy CLI 文档支持 `/skill-name` 和 `user-invocable`；IDE、旧 CLI 和插件命名空间需分别验证。ICODE 现有 `/icode <子命令>` 自定义命令桥继续保留，不因文档更新自动删除。仓库真源为 `integrations/codebuddy/commands/icode.md`；`scripts/sync-to-global.sh --apply --client codebuddy` 将其原子发布为用户级 `~/.codebuddy/commands/icode.md`。同内容旧文件可通过所有权标记接管，不同内容的未托管命令必须失败关闭；项目级 `<工程>/.codebuddy/commands/icode.md` 仍由项目自行管理。新版本需检查技能/命令同名时的实际优先级。
+2. **MCP 配置位置**：CodeBuddy 配置使用 `~/.codebuddy/mcp.json`（**不是** `~/.claude.json`），常见条目为 `{mcpServers:{name:{command,args,env}}}`。相同 JSON 结构不代表跨宿主路径、凭据、信任和可执行文件一定有效；仅经授权的安装器管理，不盲目整段复制用户配置。
+3. **工具发现**：以当前会话能力为准。没有 ToolSearch 时查看直接暴露的工具，不能因 ToolSearch 缺失判“工具不存在”；有工具发现接口时使用它。注册配置只是配置证据，不证明本会话可调用。
+4. **Hook 层**：当前官方文档有全局 Hook 和受版本/信任约束的 fork Skill Hook；不能笼统写“不支持”。ICODE 不依赖这些新增能力、不自动启用 Hook、不打开 `allowUntrustedFrontmatterHooks`，仍由既有 Prompt、步骤与机器门禁执行约束。
 5. **推理预算控制**：`CLAUDE_CODE_EFFORT_LEVEL` / `model=opus` 对 CodeBuddy 无效，不依赖其调节思考深度。
 6. **Skill 目录**：CodeBuddy 会扫描 `~/.claude/skills/`（与 Claude Code 共用），也可放项目级 `.codebuddy/skills/`。全局安装只维护共享根中的一份 ICODE，不复制到第三个全局技能目录。
 7. **同步边界**：普通 Skill 同步只发布 ICODE、共享 Skill 和命令桥，绝不改 `~/.codebuddy/mcp.json`；MCP 注册/卸载只走 `mcp/install.sh` / `mcp/uninstall.sh`。`--client all` 仅在检测到 `~/.codebuddy/` 时追加 CodeBuddy，保护原有 Claude+Codex 使用方式。
+
+2026-09-21 官方合同核对：[Skills 与 Hook](https://www.codebuddy.ai/docs/cli/skills)、[子代理类型](https://www.codebuddy.ai/docs/cli/sub-agents)。这些是能力存在的文档依据，不代替当前用户安装版本的运行验证。
+
+## WorkBuddy 与其它宿主
+
+WorkBuddy 的代码开发场景有 `.codebuddy/` 兼容路径，但不能把 CodeBuddy CLI 的全部工具、Hook 或配置位置直接外推给它。其专用 MCP 文档列出 `.workbuddy/mcp.json`；实际技能目录、命令优先级、MCP 生效和权限须按产品版本检查，见 [WorkBuddy 接入说明](../docs/workbuddy-support.md)。目前没有 `--client workbuddy` 或 WorkBuddy Runtime runner，不伪造这两个入口。
+
+Cursor、Copilot、Gemini CLI、OpenCode 等宿主按[发现矩阵](../docs/agent-skill-discovery.md)分别验证：目录能读只是第一层，还需完整依赖、命令命名空间、权限、MCP、恢复与停止点。统一复用工作流，不复制宿主专属步骤，不把插件清单解析通过说成全流程兼容。现有 Claude/Codex/CodeBuddy 安装和 Runtime 支持范围不变。
 
 ## 共同约束
 

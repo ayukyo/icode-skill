@@ -1,6 +1,6 @@
 # ICode — 面向 Claude Code、Codex 与 CodeBuddy 的 AI 编码工作流
 
-> English: [README.md](README.md) | 中文: 本文件
+> [官网与流程图解](https://ayukyo.github.io/icode-skill/) · [English website](https://ayukyo.github.io/icode-skill/en/) · [English README](README.md) · [安装](#安装)
 
 ICode 是可供 Claude Code、Codex 与 CodeBuddy 使用的开源 AI 编码工作流 Skill。通过工单驱动开发，串联需求、设计、实现、代码审查与证据化验证，保存状态以支持跨会话断点续接。
 
@@ -10,10 +10,22 @@ ICode 是可供 Claude Code、Codex 与 CodeBuddy 使用的开源 AI 编码工�
 - **步骤 0（可选）**：需求初稿对话，多轮迭代后落档为 `00_init.md`
 - **步骤 1~6**：拟定计划 → 审查 → 定稿 → 编码 → 复检 → 终审
 
+## 按任务选择入口
+
+| 你需要什么 | ICODE 入口 | 使用边界 |
+| --- | --- | --- |
+| AI 编码工作流 / 工单驱动开发 | `/icode start` 或 `/icode plan` | 只要方案时，停在编码之前。 |
+| 设计审查 / 跨模型代码复评 | `/icode review` 或 `/icode crosscheck` | 自行切模型；crosscheck 对已完成工单独立复评，不修改它。 |
+| 调试 / 日志根因分析 | `/icode log` | 先核对源码与现场版本，不凭相似日志断言根因。 |
+| 证据化验证 | `/icode verify --listen` 或 `/icode verify --test <target>` | 单独使用时针对设备现有版本，不隐式编译、部署。 |
+| 断点续接 / 本地工单管理 | 续接已绑定 ICODE 工单或 `/icode ui` | 原宿主会话继续可用；UI 执行器当前支持 Claude/Codex。 |
+
+目录登录不等于收录，收录不等于推荐或完整安装。见[当前发现与分发的技术边界](docs/agent-skill-discovery.md)；正式使用请走[源码安装器](#安装)，不要只下载 `SKILL.md`。
+
 ## 特性
 
 - **闭环交付**：(可选) 需求初稿 → 计划 → 审查 → 定稿 → 编码 → 复检 → 终审，每步可独立调用，主会话执行、不切换模型
-- **双模式**：`/icode start` 全流程（多轮审查 + 对抗验证）/ `/icode fast` 精简（1 轮无对抗，约 65% 耗时），自动串联步骤 1→6
+- **双模式**：`/icode start` 全流程（多轮审查 + 对抗验证）/ `/icode fast` 精简（1 轮无对抗），自动串联步骤 1→6；实际耗时与费用取决于任务、模型和必要复检轮次，不承诺固定节省比例
 - **防偷懒质量门**：三阶段复检（Reverse/Fixed/Free）、Plan 断言实证验证、ADR 决策记录、对抗验证（独立质疑者——证据不足不确认、诚实降级不伪造共识）
 - **完成后独立复评**（`/icode crosscheck`）：用户自行切换 Agent/模型后重审 completed 工单；项目内隔离、支持多轮，不写原工单历史或代码
 - **关联审查与真实定位**：原生[审查清单](references/inspection_worklist.md)覆盖必审文件、范围内真实差异及显式关联调用方/头文件/测试；逐阶段 Read 绑定源码版本，finding 校验行段原文，遗漏保留债务。无需 open-code-review 依赖或额外模型 API，既有宿主命令不变
@@ -197,7 +209,7 @@ python3 tools/lint_mcp_coverage.py <out_dir> --step review --strict
 /icode deepcheck                       # 步骤5：循环复检
 /icode audit                           # 步骤6：终极终审
 
-# 精简全流程（fast 模式：单文件/小改动场景，耗时约为全流程 65%）
+# 精简全流程（fast 模式：单文件/小改动场景，不承诺固定耗时或费用比例）
 /icode fast 给 calc.c 增加 isqrt 函数   # plan→review(1轮无对抗)→merge→code→deepcheck(Reverse)→audit
 
 # 工程级知识库生成（独立步骤，任意时刻可跑，不参与 1~6 流程）
@@ -270,7 +282,7 @@ python3 tools/lint_mcp_coverage.py <out_dir> --step review --strict
 | `/icode log [零散信息...]` | 可选入口：确定性证据清单 + debug 本地复用 + 逐仓现场基线 → 日志根因分析 → 修复需求 `00_init.md` |
 | `/icode init [--guide] [<粗略需求或指南约束>]` | 常规：新建步骤 0 工单并多轮形成初稿；`--guide`：复用最新合格 init，刷新 `deliverables/guide.md` 与内部证据审计，不新建工单 |
 | `/icode start <需求>` | 全流程：创建/复用目录 → 步骤 1→6 |
-| `/icode fast <需求>` | 精简全流程：plan→review(1轮无对抗)→merge→code→deepcheck(Reverse)→audit（耗时约 65%） |
+| `/icode fast <需求>` | 精简全流程：plan→review(1轮无对抗)→merge→code→deepcheck(Reverse)→audit；不承诺固定耗时或费用比例 |
 | `/icode plan <需求>` | 仅步骤 1：拟定项目计划 |
 | `/icode review [N]` | 仅步骤 2：专项审查计划（N=软上限轮数，默认 3） |
 | `/icode merge` | 仅步骤 3：合并审查意见定稿 |
@@ -286,7 +298,7 @@ python3 tools/lint_mcp_coverage.py <out_dir> --step review --strict
 | `/icode study [--ticket <id>] [--library <目录>] [主题]` | 从工单代码提炼可独立阅读的通用技术文章，按卷章写入用户自己的知识库（[配置模板](templates/knowledge_config.json.template)）；私有源码溯源留库外，不自动提交或推送 |
 | `/icode docx [自然语言]` | DOCX 交付（独立步骤）：指定 Markdown 忠实转换为同级 Word，或把已有项目/模块/本次工单真实材料组织到 `<工程根>/.icode_output/docx/`；ICODE 自管固定依赖、source map/hash manifest、结构验收与显式 renderer 视觉验收状态，不依赖系统 LibreOffice |
 | `/icode limit [自然语言]` | 项目约束红线（独立步骤）：定义和维护本工程的红线/约束/禁区。主存全局 + 单 checkout 覆盖（自动 gitignore），追加式演进。plan 步骤引用作为硬基线 |
-| `/icode ppt [自然语言]` | PPT 生成（独立交付步骤）：自然语言 → 真实 `.pptx`，4 类场景——**项目 / 模块 / 本次功能开发 / 本次BUG修复**；内容源为 icode 产物/知识库（禁止编造），内置 16 套模板（`tools/ppt/templates/`，AI 先筛 2-3 个风格匹配候选、由用户挑选；也可直接点名模板），产出 `<工程根>/.icode_output/ppt/`（不放进工单目录）可回溯；依赖 python-pptx（必需），LibreOffice+poppler 可选（PNG 预览自检）；内置模板非商业授权（见 `tools/ppt/NOTICE`） |
+| `/icode ppt [自然语言]` | PPT 生成（独立交付步骤）：自然语言 → 真实 `.pptx`，4 类场景——**项目 / 模块 / 本次功能开发 / 本次BUG修复**；内容源为 icode 产物/知识库（禁止编造），内置 8 套模板（`tools/ppt/templates/`，AI 先筛 2-3 个风格匹配候选、由用户挑选；也可直接点名模板），产出 `<工程根>/.icode_output/ppt/`（不放进工单目录）可回溯；依赖 python-pptx（必需），LibreOffice+poppler 可选（PNG 预览自检）；内置模板非商业授权（见 `tools/ppt/NOTICE`） |
 | `/icode status [--pending]` | 查询当前工单状态，或只读生成跨工单验证债务报告（`--verdict` 仍是显式标注模式） |
 | `/icode list [关键词]` | 跨工程工单查找（纯只读） |
 | `/icode worktree --update [--target <ref>]` | worktree 生命周期（独立步骤）：把活动实现根受控迁移到基于最新/指定基线的新 checkout——11 阶段状态机，失败保留旧活动根，可中断恢复 + 幂等。**换基线必须走本命令**（禁止静默改指针）；多业务子仓按整体事务处理 |
@@ -318,4 +330,4 @@ cd demo && make && ./calc_demo   # 确认基线可编译可运行
 - **方式B（分步）**： `cd demo && /icode plan 给计算器增加 isqrt 函数` 然后逐步 `/icode review` `/icode merge` `/icode code` `/icode deepcheck` `/icode audit`
 - **方式C（先 init 后 start）**： `cd demo && /icode init 计算器加新功能`（多轮对话澄清需求）→ `/icode start`
 - **方式D（先 log 后 start）**： `cd demo && /icode log <log路径> "症状描述"` → 产出根因 + 修复需求 → `/icode start`
-- **方式E（fast 精简）**： `cd demo && /icode fast 给 calc.c 增加 isqrt 函数`（耗时约 65%）
+- **方式E（fast 精简）**： `cd demo && /icode fast 给 calc.c 增加 isqrt 函数`（耗时取决于任务与必要复检）

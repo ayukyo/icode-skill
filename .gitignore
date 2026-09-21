@@ -16,7 +16,12 @@
 /demo/log/
 /demo/.serena/
 /optimization_*.md
+# 本地内部报告和私密资料；其余公开安装、发现与 ADR 文档继续分发。
 /docs/nbl/
+/docs/discovery-status-*.md
+/docs/ppt-package-size-*.md
+/docs/private/
+/docs/local/
 /.pytest_cache/
 /_site/
 

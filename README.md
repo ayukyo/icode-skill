@@ -11,6 +11,8 @@
 
 </div>
 
+[Website & workflow diagrams](https://ayukyo.github.io/icode-skill/en/) · [中文官网](https://ayukyo.github.io/icode-skill/) · [中文说明](README.zh-CN.md) · [Installation](#installation)
+
 ICode is an open-source AI coding workflow Skill for Claude Code, Codex and CodeBuddy. Ticket-based development connects requirements, design, implementation, code review and evidence-based verification, with saved state for resuming interrupted work across sessions.
 
 For multi-model code review, switch agents or models yourself, then run `/icode crosscheck` on a completed ticket; ICODE does not automatically switch models. The optional `/icode ui` provides a local ticket workspace. Use ICODE only when you name ICODE or resume a bound ICODE ticket; it does not take over unrelated requests.
@@ -30,8 +32,20 @@ The bilingual public site can be built locally. See [site preview and opt-in pub
 | Project knowledge | None | `/icode doc` generates a global per-project/branch knowledge base, auto-injected at phase zero |
 | DOCX delivery | Manual conversion and host-dependent tools | `/icode docx` creates traceable Word deliverables using an ICODE-managed runtime and ABI-checked renderer contract |
 | Crash recovery | Restart from scratch | `.ico_metadata.json` status + round counters enable resumable runs at any step |
-| Cost control | Everything on the main model | `cheap-research` offloads low-risk candidate/compression/structured-extraction sub-tasks (the ones with real call sites in each step) to cheap models; `/icode fast` ≈ 65% of full-flow cost |
+| Cost control | Depends on host configuration and task | Optional `cheap-research` offloads eligible low-risk extraction/compression tasks; `/icode fast` trims the review flow. Actual time and cost depend on the task, model and review rounds; no fixed savings are promised. |
 | Model freedom | Manual | Every step is a separate command, so you can switch models between steps |
+
+## Find the right workflow
+
+| What you need | ICODE entry | Boundary |
+| --- | --- | --- |
+| AI coding workflow / ticket-based development | `/icode start` or `/icode plan` | A plan-only request stops before code changes. |
+| Design review / code review across models | `/icode review` or `/icode crosscheck` | Switch models yourself; crosscheck re-reviews a completed ticket without modifying it. |
+| Debugging / log root-cause analysis | `/icode log` | Check source and runtime provenance before claiming a cause. |
+| Evidence-based verification | `/icode verify --listen` or `/icode verify --test <target>` | These standalone stages use the device's existing version; no implicit build/deploy. |
+| Resumable tickets / local ticket manager | Resume a bound ICODE ticket or `/icode ui` | Existing host chat remains supported; UI runners currently support Claude/Codex. |
+
+Directory login is not listing, and listing is not a recommendation or a complete installation. See the [current discovery and distribution boundaries](docs/agent-skill-discovery.md); use the [source installer](#installation), not a downloaded `SKILL.md` alone.
 
 ## Quick Start
 
@@ -75,7 +89,7 @@ Other entry points:
 # Local global ticket manager (defaults to 127.0.0.1:8765; auto-falls back if occupied)
 /icode ui
 
-# Trimmed full flow (fast mode: single-file/small changes; ~65% of full-flow cost)
+# Trimmed full flow (fast mode: single-file/small changes; not a fixed cost guarantee)
 /icode fast "Add isqrt function to calc.c"          # plan→review(1 round, no adversarial)→merge→code→deepcheck(Reverse only)→audit
 
 # Requirement unclear? Draft it in conversation first
@@ -127,7 +141,7 @@ Other entry points:
   │ Step 1 │   │ Step 2 │   │ Step 3 │   │ Step 4 │   │ Check  │   │ Step 6 │
   └────────┘   └────────┘   └────────┘   └────────┘   │ Step 5 │   └────────┘
                                                        └────────┘
-       /icode start = steps 1→6 chained  |  /icode fast = trimmed chain (~65% cost)
+       /icode start = steps 1→6 chained  |  /icode fast = trimmed chain
 ```
 
 Every main ticket step produces a real artifact in `.icode_output/.icode_output_N/` (plan → review → final plan → code → deep-check report → audit report), tracked by `.ico_metadata.json` for cross-session recovery and resumable runs. Detached deliverables and crosscheck rounds use their documented sibling directories and do not pretend to be tickets.
@@ -135,7 +149,7 @@ Every main ticket step produces a real artifact in `.icode_output/.icode_output_
 ## Features
 
 - **Closed-loop delivery**: (optional) Requirement Draft → Plan → Review → Finalize → Code → Deep Check → Audit; each step callable independently, runs in the main session without model switching
-- **Dual modes**: `/icode start` full flow (multi-round review + adversarial verification) / `/icode fast` trimmed (1 round, no adversarial, ~65% cost)
+- **Dual modes**: `/icode start` full flow (multi-round review + adversarial verification) / `/icode fast` trimmed (1 round, no adversarial). Actual time and cost vary with workload, model and required rechecks.
 - **Anti-laziness quality gates**: triple-phase deepcheck (Reverse/Fixed/Free), plan assertion verification, ADR decision records, adversarial verification (independent skeptics — insufficient evidence is never confirmed, honest downgrade over fake consensus)
 - **Cross-project history retrieval**: init/log/plan/start auto-search similar past tickets and inject by command; references stay in-session, never pollute project artifacts. **Verdict-based injection** prevents disproved/superseded tickets from misleading new work
 - **Project-level knowledge base** (`/icode doc`): global per-project/per-branch knowledge base (module docs generated once and reused across projects), auto-retrieved and injected by phase-zero search
@@ -277,7 +291,7 @@ The seven local services add no public `/icode` commands; their machine-readable
 | `/icode log [scattered info...]` | Optional entry: deterministic evidence manifest + project-local debug reuse + per-repo runtime baseline → root-cause analysis → fix requirement `00_init.md`; auto-generates a bounded cross-audience brief |
 | `/icode init [--guide] [<rough req or guide constraints>]` | Normal: new Step 0 ticket and multi-turn draft; `--guide`: reuse the latest eligible init and refresh `deliverables/guide.md` plus its internal evidence audit |
 | `/icode start <req>` | Full flow: create/reuse dir → steps 1–6 |
-| `/icode fast <req>` | Trimmed full flow: plan→review(1 round, no adversarial)→merge→code→deepcheck(Reverse only)→audit (~65% cost) |
+| `/icode fast <req>` | Trimmed full flow: plan→review(1 round, no adversarial)→merge→code→deepcheck(Reverse only)→audit; no fixed cost guarantee |
 | `/icode plan <req>` | Step 1 only: draft project plan |
 | `/icode review [N]` | Step 2 only: review the plan (N=soft cap rounds, default 3) |
 | `/icode merge` | Step 3 only: merge reviews & finalize |
@@ -293,7 +307,7 @@ The seven local services add no public `/icode` commands; their machine-readable
 | `/icode doc [natural language]` | Project-level knowledge base (standalone step), auto-injected at phase zero |
 | `/icode docx [natural language]` | DOCX delivery (standalone): explicit Markdown → faithful Word beside the source, or existing ICODE project/module/current-ticket artifacts → `<project_root>/.icode_output/docx/`; isolated pinned runtime, source-map/hash manifest, structural QA and explicit renderer-compatible visual QA |
 | `/icode limit [natural language]` | Project constraint red lines (standalone step); hard baseline for the plan step |
-| `/icode ppt [natural language]` | PPT generation (standalone deliverable step): natural language → real `.pptx` for **project / module / current feature dev / current bug fix**; content sourced from icode artifacts & knowledge base (no fabrication), 16 built-in templates (`tools/ppt/templates/`, the AI shortlists 2-3 style-matched candidates and the user picks; user may also name a template directly), editable `edits.json` for re-run; outputs to `<project_root>/.icode_output/ppt/` (outside any ticket dir); needs `pip install python-pptx` (LibreOffice+poppler optional for PNG preview). Built-in templates are **non-commercial** (see `tools/ppt/NOTICE`) |
+| `/icode ppt [natural language]` | PPT generation (standalone deliverable step): natural language → real `.pptx` for **project / module / current feature dev / current bug fix**; content sourced from icode artifacts & knowledge base (no fabrication), 8 built-in templates (`tools/ppt/templates/`, the AI shortlists 2-3 style-matched candidates and the user picks; user may also name a template directly), editable `edits.json` for re-run; outputs to `<project_root>/.icode_output/ppt/` (outside any ticket dir); needs `pip install python-pptx` (LibreOffice+poppler optional for PNG preview). Built-in templates are **non-commercial** (see `tools/ppt/NOTICE`) |
 | `/icode status [--pending]` | Query current ticket status or generate a read-only cross-ticket verification debt report (`--verdict` remains the explicit annotation mode) |
 | `/icode list [keywords]` | Cross-project ticket search (pure read-only) |
 | `/icode worktree --update [--target <ref>]` | Worktree lifecycle (standalone): controlled migration of the active implementation checkout to a new one on the latest/specified baseline — 11-phase state machine, failure keeps the old active root, interrupt-recoverable & idempotent. Switching baselines must go through this command (no silent pointer changes); multi-subrepo handled as one transaction |
@@ -321,7 +335,7 @@ Example test requirements:
 - **Mode B (step-by-step)**: `cd demo && /icode plan add isqrt to calc.c` then `/icode review` `/icode merge` `/icode code` `/icode deepcheck` `/icode audit`
 - **Mode C (init then start)**: `cd demo && /icode init add new feature to calculator` (multi-turn dialogue to clarify) → `/icode start`
 - **Mode D (log then start)**: `cd demo && /icode log <log_path> "symptom"` → outputs root cause + fix requirement → `/icode start`
-- **Mode E (fast trimmed)**: `cd demo && /icode fast add isqrt to calc.c` (~65% time cost)
+- **Mode E (fast trimmed)**: `cd demo && /icode fast add isqrt to calc.c` (time depends on the task and required rechecks)
 
 ## License
 

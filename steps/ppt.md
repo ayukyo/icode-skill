@@ -5,7 +5,7 @@
 **会话**: 主会话
 **定位**: **独立交付步骤**——用自然语言把 icode 的既有产物/知识库转成真实 `.pptx`。**不创建工单目录、不写 `.ico_metadata.json`、不更新 `completed_steps`/`status`、不参与步骤1~6推进**。4 类场景：**项目 / 模块 / 本次功能开发 / 本次BUG修复**。
 
-> **本质**：本步骤是「内容组织 + 模板替换」两步。内容**必须**来自 icode 已有产物/知识库（先收集再组织），模板**只替换文字不破坏排版**（内置 16 套模板，见 [tools/ppt/](../tools/ppt/README.md)）。
+> **本质**：本步骤是「内容组织 + 模板替换」两步。内容**必须**来自 icode 已有产物/知识库（先收集再组织），模板**只替换文字不破坏排版**（内置 8 套模板，见 [tools/ppt/](../tools/ppt/README.md)）。
 > **工程接入门**：读取 [references/project_intake.md](../references/project_intake.md)，项目/模块场景绑定实际工程根；large/huge 仓只抽取 worklist 命中的知识库、README 和目标源码，不为做 PPT 扫完整 SDK。
 
 ## 0. 前置校验
@@ -38,9 +38,10 @@
 
 ## 2. 模板选择（给 2-3 个候选，让用户挑）
 
-1. 读 [tools/ppt/templates/INDEX.md](../tools/ppt/templates/INDEX.md)（16 套模板的风格/主色/适用场景/页数，每套配 `preview.png`）。
-2. 按「场景 + 风格」从 16 套里筛 **2-3 个候选**：候选必须与本次场景匹配，且彼此风格/主色互不相同（避免同风同款）。参考：汇报/复盘类 `minimal-business-summary`、`report-massive-models`、`competition-speech`；数据密集 `data-viz-deck`、`report-massive-charts`；架构讲解 `architecture-deck`、`mckinsey-style`、`premium-corp`；学术 `thesis-*`。把每套的一句话特点 + 推荐理由一并列出。
+1. 读 [tools/ppt/templates/INDEX.md](../tools/ppt/templates/INDEX.md)（8 套模板的风格/主色/适用场景/页数，每套配 `preview.png`）。
+2. 按「场景 + 风格」从 8 套里筛 **2-3 个候选**：候选必须实际存在且与本次场景匹配，优先选择不同风格/主色；匹配不足时如实少列，不为凑数量推荐不合适的模板。参考：汇报/复盘类 `minimal-business-summary`、`premium-corp`、`competition-speech`；数据密集 `data-viz-deck`、`mckinsey-style`；架构讲解 `architecture-deck`、`mckinsey-style`、`premium-corp`；学术 `thesis-novice`、`thesis-formula`。把每套的一句话特点 + 推荐理由一并列出。
 3. **让用户在候选中挑一套**（用户直接指定模板名 → 跳过候选、直接用）。选定后才进入 §3；不要把选择结果锁死在某一套上。
+4. **指定模板缺失**：用户或既有 edits 指定的模板不在当前安装中时，明确列出可用替代项，等待用户选款或提供原模板；保留原 edits/成品，不静默换模板，不自动下载已移除资源。
 
 ## 3. 生成工作流
 
@@ -113,4 +114,4 @@ python3 tools/media_router.py route \
 
 ## 6. 许可声明
 
-内置 16 套模板来自第三方设计师作品，**仅供个人学习与研究，严禁商业用途**（含商业演示、企业内部营利性使用、再分发/并入付费产品），详见 [tools/ppt/NOTICE](../tools/ppt/NOTICE)。产出 PPT 仅限本工程内部使用。生成脚本（`tools/ppt/scripts/`）为 MIT，可自由使用。
+内置 8 套模板来自第三方设计师作品，**仅供个人学习与非商业研究，禁止商业用途**，详见 [tools/ppt/NOTICE](../tools/ppt/NOTICE)及其中的上游许可来源。个人学习与非商业研究不以购买商业授权为前置；无可见水印不表示无使用限制。生成脚本（`tools/ppt/scripts/`）为 MIT；用户自备模板按其自身许可，不将内置模板限制笼统套用到全部 ICODE 或所有成品。

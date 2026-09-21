@@ -59,7 +59,7 @@ description: ICODE 端到端编码工作流，适配 Claude Code、Codex、CodeB
 | `[工程]` `/icode doc [自然语言]` | 工程级知识库生成/维护（`project_docs/`+`module_docs/`）；doc_worklist 防中断丢进度 | 否（写全局） |
 | `[交付]` `/icode docx [自然语言]` | DOCX 交付：明确 Markdown 忠实转换，或将已有工单/知识库组织为交付 Word；自管运行时、结构验收、兼容 renderer 视觉验收 | 否（P0 同级；P1 写 `<工程根>/.icode_output/docx/`） |
 | `[配置]` `/icode limit [自然语言]` | 项目约束红线（主存+单 checkout 覆盖）；plan/log 前置硬基线 + `limit_checkpoint.md` 读留痕 | 否（写全局 limits/ + 工程根 limit.local/） |
-| `[交付]` `/icode ppt [自然语言]` | PPT 生成（4 类场景），16 套模板只换文字 | 否（写 `<工程根>/.icode_output/ppt/`） |
+| `[交付]` `/icode ppt [自然语言]` | PPT 生成（4 类场景），8 套模板只换文字 | 否（写 `<工程根>/.icode_output/ppt/`） |
 | `[查询]` `/icode status` | 只读查状态；`--pending` 汇总验证债务；`--verdict` 可配 `--replacement`/`--dependency` 标注方向结论；`--scan` 批量扫证伪信号；`--validate` 产物集机器校验 | 否（仅 `--verdict` 写 metadata+索引；债务报告为派生产物） |
 | `[查询]` `/icode list [关键词] [--all] [--plain]` | 跨工程工单查找；`--all` 含 stale，`--plain` 禁用颜色 | 否（纯只读） |
 | `[备份]` `/icode bak [--project <path>]` | 工程工单手动备份到全局快照（删工程前安全网） | 否（写全局） |
