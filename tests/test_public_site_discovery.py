@@ -168,6 +168,27 @@ class PublicDiscoveryTests(unittest.TestCase):
             self.assertIn(evidence, report)
         self.assertRegex(report, r"不表示已收录|不代表.{0,10}收录")
 
+    def test_webmaster_verification_and_sitemap_freshness_are_bounded(self):
+        report = (ROOT / "docs/public-discovery.md").read_text(encoding="utf-8")
+        for phrase in ("GOOGLE_SITE_VERIFICATION", "BING_SITE_VERIFICATION",
+                       "Google Search Console", "Bing Webmaster Tools",
+                       "source-lastmod", "Git 提交日期", "sitemap.xml"):
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, report)
+        self.assertRegex(report, r"不.{0,12}代表.{0,12}(?:已收录|排名)")
+        self.assertRegex(report, r"不生成.{0,20}robots\.txt|robots\.txt.{0,20}不生成")
+        self.assertIn("Google Indexing API", report)
+
+    def test_focused_search_pages_are_documented_without_ranking_claims(self):
+        report = (ROOT / "docs/public-discovery.md").read_text(encoding="utf-8")
+        for path in ("/ai-coding-workflow/", "/en/ai-coding-workflow/",
+                     "/multi-model-code-review/", "/en/multi-model-code-review/"):
+            with self.subTest(path=path):
+                self.assertIn(path, report)
+        for concept in ("普通链接", "sitemap", "IndexNow manifest", "不生成门页"):
+            self.assertIn(concept, report)
+        self.assertRegex(report, r"不.{0,10}声称.{0,10}排名")
+
     def test_publication_docs_require_main_push_and_current_source(self):
         report = (ROOT / "docs/public-discovery.md").read_text(encoding="utf-8")
         sources = {"guide": report}

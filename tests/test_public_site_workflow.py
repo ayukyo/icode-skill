@@ -93,6 +93,18 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn("steps.deployment.outcome == 'success'", text)
         self.assertIn('continue-on-error: true', text)
 
+    def test_search_metadata_uses_bound_source_date_and_public_verification_variables(self):
+        text = self.text()
+        self.assertIn('source_lastmod=$(git show -s --format=%cs "$GITHUB_SHA")', text)
+        self.assertIn('SOURCE_LASTMOD: ${{ steps.source.outputs.source_lastmod }}', text)
+        self.assertIn('GOOGLE_SITE_VERIFICATION: ${{ vars.GOOGLE_SITE_VERIFICATION }}', text)
+        self.assertIn('BING_SITE_VERIFICATION: ${{ vars.BING_SITE_VERIFICATION }}', text)
+        for argument in ('--source-lastmod "$SOURCE_LASTMOD"',
+                         '--google-site-verification "$GOOGLE_SITE_VERIFICATION"',
+                         '--bing-site-verification "$BING_SITE_VERIFICATION"'):
+            with self.subTest(argument=argument):
+                self.assertEqual(text.count(argument), 2)
+
     def test_workflow_concurrency_separates_preview_from_eligible_publication(self):
         text = self.text()
         block = text.split('concurrency:\n', 1)[1].split('\njobs:', 1)[0]

@@ -25,7 +25,7 @@ python3 -m unittest discover -s tests -p test_notify_indexnow.py -v
 python3 tests/run_public_site_checks.py --report-dir demo/.icode_output/public-site-checks-01
 ```
 
-`_site/` 被 gitignore。公开文件白名单为 10 项：两种语言 HTML 页面和对应 `index.md`、`llms.txt`、CSS、sitemap、RSS、公共 URL 清单、`.nojekyll`；显式配置 IndexNow 后另加 1 个所有权文件。输入仍只有 `site/content.json`、`site/style.css`、`SKILL.md` 三项，不遍历工单或其它资料。站点不是本地 `/icode ui`，不能操作你的工单。
+`_site/` 被 gitignore。公开文件使用固定白名单：双语首页、双语专题页、首页对应的 `index.md`、品牌资源、`llms.txt`、CSS、sitemap、RSS、公共 URL 清单和 `.nojekyll`；显式配置 IndexNow 后另加 1 个所有权文件。输入仍只有 `site/content.json`、`site/style.css`、`SKILL.md` 三项，不遍历工单或其它资料。站点不是本地 `/icode ui`，不能操作你的工单。
 
 ## 面向搜索工具与 Agent 的阅读入口
 
@@ -67,6 +67,30 @@ python3 tools/check_skill_discovery.py --online --channel smithery --query "code
 发布任务使用串行队列（`cancel-in-progress: false` + `queue: max`），不让旧 run 重跑取消正在运行或等待中的新提交；排到后再检查源码是否过期。GitHub 最多保留 100 个排队任务，超限会取消新增任务，异常集中推送时应查看 Actions 队列。此行为依据 [GitHub 并发与多任务排队规则](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-workflow-concurrency)。
 
 以上保护适用于包含新版工作流的运行。旧历史 run/标签仍可能使用其当时的工作流定义，修改 main 不会追溯修改它们；不要重跑升级前的发布，应从当前 main 新建运行。新版发布组 `public-site-deployment-v2` 与旧取消式并发组隔离，但不能替旧工作流补上源码校验。
+
+## Google 与 Bing 站长验证
+
+官网支持 Google Search Console 和 Bing Webmaster Tools 的公开 HTML meta 验证值。先在相应站长平台添加 URL-prefix 站点 `https://ayukyo.github.io/icode-skill/`，取得平台给出的 content 值，再分别保存为 Actions repository variables：
+
+- `GOOGLE_SITE_VERIFICATION`
+- `BING_SITE_VERIFICATION`
+
+这两个值会公开出现在生成页面中，是所有权证明字符串，不是账户密码、OAuth token 或 API key。生成器只接受 8–128 位字母、数字、下划线和连字符，拒绝 HTML、空白及其它可注入内容；未配置时不输出对应标签，也不影响 Pages 发布。
+
+工作流从已绑定的 `github.sha` 读取真实 Git 提交日期，并通过 `--source-lastmod YYYY-MM-DD` 写入 `sitemap.xml` 和公开 manifest。它不使用构建时间冒充内容更新时间；相同源码重复构建保持相同 `lastmod`。部署后分别在 Google Search Console 与 Bing Webmaster Tools 提交 `https://ayukyo.github.io/icode-skill/sitemap.xml`，再检查平台是否成功抓取。
+
+站点同时发布四个面向明确检索意图的双语专题 URL：`/ai-coding-workflow/`、`/en/ai-coding-workflow/`、`/multi-model-code-review/` 和 `/en/multi-model-code-review/`。它们解释 ICODE 的真实工作方式、宿主边界和命令示例，由首页普通链接进入，并与首页一起写入 sitemap 和 IndexNow manifest；不复制无关关键词、不生成门页，也不声称因此获得排名。
+
+所有权验证、sitemap 接受和 IndexNow `received` 都不代表已经收录或获得排名。Google Indexing API 仅适用于官方限定的职位/直播页面，本项目不调用它。GitHub Pages 项目站无法从 `/icode-skill/robots.txt` 控制域名根，因此不生成误导性的项目子路径 `robots.txt`；站长平台直接提交 sitemap 即可。
+
+本地可验证元数据生成，但不要把真实平台账户凭证传给构建器：
+
+```bash
+python3 tools/build_public_site.py --output /tmp/icode-site-seo \
+  --source-lastmod 2026-09-21 \
+  --google-site-verification example_google_token \
+  --bing-site-verification example_bing_token
+```
 
 ## 日常发布：只维护公开内容
 
@@ -164,5 +188,8 @@ DISABLE_TELEMETRY=1 npx skills add ayukyo/icode-skill --list
 ## 官方依据
 
 - [GitHub Pages 工作流及权限](https://docs.github.com/en/pages/getting-started-with-github-pages/using-custom-workflows-with-github-pages)
+- [Google Search Console 所有权验证](https://support.google.com/webmasters/answer/9008080)
+- [Google sitemap 指南](https://developers.google.com/search/docs/crawling-indexing/sitemaps/build-sitemap)
+- [Bing Webmaster Tools](https://www.bing.com/webmasters/)
 - [IndexNow 协议、所有权与子路径](https://www.indexnow.org/documentation)
 - [Skills CLI](https://github.com/vercel-labs/skills) 与 [技能生态文档](https://www.skills.sh/docs)

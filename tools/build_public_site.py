@@ -15,6 +15,7 @@ import xml.etree.ElementTree as ET
 REPO = 'https://github.com/ayukyo/icode-skill'
 DEFAULT_BASE = 'https://ayukyo.github.io/icode-skill/'
 VERSION_RE = r'v\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?'
+VERIFICATION_RE = re.compile(r'[A-Za-z0-9_-]{8,128}')
 # XML 1.0 character ranges; TAB, LF and CR remain valid public text.
 INVALID_XML_CHARS = re.compile(r'[^\x09\x0a\x0d\x20-\ud7ff\ue000-\ufffd\U00010000-\U0010ffff]')
 LOCAL_SUFFIXES = {'localhost', 'local', 'localdomain', 'internal', 'lan', 'home',
@@ -47,6 +48,8 @@ PUBLIC_ASSETS = (
     'assets/icode-ticket-hex-128.png',
     'assets/icode-ticket-hex-512.png',
 )
+GUIDE_SLUGS = ('ai-coding-workflow', 'multi-model-code-review')
+GUIDE_FIELDS = {'title', 'description', 'intro', 'sections', 'commands'}
 
 
 def nonempty_text(value):
@@ -86,6 +89,30 @@ def normalize_base_url(value):
             or any(part in ('.', '..') for part in path.split('/'))):
         raise ValueError('invalid base URL path')
     return 'https://' + host + path.rstrip('/') + '/'
+
+
+def normalize_source_lastmod(value):
+    """Accept only a truthful, date-only source revision timestamp."""
+    if value in (None, ''):
+        return None
+    if not isinstance(value, str) or not re.fullmatch(r'\d{4}-\d{2}-\d{2}', value):
+        raise ValueError('source lastmod must use YYYY-MM-DD')
+    try:
+        parsed = date.fromisoformat(value)
+    except ValueError:
+        raise ValueError('source lastmod must be a valid date') from None
+    if parsed.isoformat() != value:
+        raise ValueError('source lastmod must use canonical YYYY-MM-DD')
+    return value
+
+
+def normalize_verification(value, provider):
+    """Validate public ownership tokens before placing them in HTML metadata."""
+    if value in (None, ''):
+        return None
+    if not isinstance(value, str) or not VERIFICATION_RE.fullmatch(value):
+        raise ValueError('invalid ' + provider + ' site verification value')
+    return value
 
 
 def no_symlinks(path):
@@ -135,7 +162,7 @@ def validate_xml_strings(data):
 
 def content_checked(data):
     validate_xml_strings(data)
-    if not isinstance(data, dict) or set(data) != {'locales', 'updates'}:
+    if not isinstance(data, dict) or set(data) != {'locales', 'guides', 'updates'}:
         raise ValueError('invalid content root')
     locales = data['locales']
     if not isinstance(locales, dict) or set(locales) != {'zh-CN', 'en'}:
@@ -157,6 +184,34 @@ def content_checked(data):
             raise ValueError('design-only and full-flow examples are required')
         for field, (ids, fields) in RECORDS.items():
             checked_records(text[field], ids, fields)
+    guides = data['guides']
+    if not isinstance(guides, dict) or tuple(guides) != GUIDE_SLUGS:
+        raise ValueError('invalid guide slugs or order')
+    guide_titles = set()
+    for slug in GUIDE_SLUGS:
+        localized = guides[slug]
+        if not isinstance(localized, dict) or set(localized) != {'zh-CN', 'en'}:
+            raise ValueError('both guide locales are required')
+        for guide in localized.values():
+            if not isinstance(guide, dict) or set(guide) != GUIDE_FIELDS:
+                raise ValueError('invalid guide fields')
+            if any(not nonempty_text(guide[field])
+                   for field in ('title', 'description', 'intro')):
+                raise ValueError('guide strings must be nonempty')
+            if guide['title'] in guide_titles:
+                raise ValueError('guide titles must be unique')
+            guide_titles.add(guide['title'])
+            sections = guide['sections']
+            if (not isinstance(sections, list) or len(sections) < 3
+                    or any(not isinstance(section, dict)
+                           or set(section) != {'title', 'body'}
+                           or any(not nonempty_text(value) for value in section.values())
+                           for section in sections)):
+                raise ValueError('each guide requires at least three complete sections')
+            commands = guide['commands']
+            if (not isinstance(commands, list) or not commands
+                    or any(not nonempty_text(command) for command in commands)):
+                raise ValueError('each guide requires commands')
     if not isinstance(data['updates'], list) or not data['updates']:
         raise ValueError('at least one reviewed update is required')
     seen = set()
@@ -211,7 +266,8 @@ def render_diagram(t):
             + icon('audit', 'diagram-icon') + '<span>' + e(t['diagram_output']) + '</span></div></div></aside>')
 
 
-def render_page(data, lang, base, version):
+def render_page(data, lang, base, version, google_site_verification=None,
+                bing_site_verification=None):
     t = data['locales'][lang]
     e = escape
     english = lang == 'en'
@@ -227,6 +283,10 @@ def render_page(data, lang, base, version):
                        for title, body in t['features'])
     examples = ''.join('<article><h3>' + e(title) + '</h3><code>' + e(command) + '</code></article>'
                        for title, command in t['examples'])
+    guide_links = ''.join('<article class="card"><h3><a href="' + slug + '/">'
+                          + e(data['guides'][slug][lang]['title']) + '</a></h3><p>'
+                          + e(data['guides'][slug][lang]['description']) + '</p></article>'
+                          for slug in GUIDE_SLUGS)
     stages = []
     for n, (stage, label) in enumerate(zip(t['stages'], t['flow']), 1):
         stage_id = stage['id']
@@ -258,13 +318,21 @@ def render_page(data, lang, base, version):
                       + '<time datetime="' + e(item['reviewed_on']) + '">' + e(item['reviewed_on'])
                       + '</time></h3><p>' + e(item[lang]) + '</p></article>' for item in data['updates'])
     skip = 'Skip to content' if english else '跳到正文'
+    verification = ''
+    if google_site_verification:
+        verification += ('<meta name="google-site-verification" content="'
+                         + e(google_site_verification) + '">')
+    if bing_site_verification:
+        verification += ('<meta name="msvalidate.01" content="'
+                         + e(bing_site_verification) + '">')
     return f'''<!doctype html>
 <html lang="{lang}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>ICODE — {e(t['title'])}</title><meta name="description" content="{e(t['description'])}">
+{verification}<title>ICODE — {e(t['title'])}</title><meta name="description" content="{e(t['description'])}">
 <link rel="canonical" href="{e(canonical)}"><link rel="alternate" hreflang="zh-CN" href="{e(base)}">
 <link rel="alternate" hreflang="en" href="{e(base)}en/"><link rel="alternate" hreflang="x-default" href="{e(base)}">
 <meta property="og:title" content="ICODE — {e(t['title'])}"><meta property="og:description" content="{e(t['description'])}">
-<meta property="og:url" content="{e(canonical)}"><meta property="og:type" content="website"><meta property="og:image" content="{e(social_image)}">
+<meta property="og:url" content="{e(canonical)}"><meta property="og:type" content="website"><meta property="og:image" content="{e(social_image)}"><meta property="og:image:alt" content="ICODE">
+<meta name="twitter:card" content="summary"><meta name="twitter:title" content="ICODE — {e(t['title'])}"><meta name="twitter:description" content="{e(t['description'])}"><meta name="twitter:image" content="{e(social_image)}"><meta name="twitter:image:alt" content="ICODE">
 <link rel="icon" type="image/svg+xml" href="{favicon}">
 <link rel="alternate" type="application/rss+xml" title="ICODE version notes" href="{relative}feed.xml">
 <link rel="alternate" type="text/markdown" href="index.md"><link rel="describedby" type="text/plain" href="{relative}llms.txt">
@@ -281,6 +349,7 @@ def render_page(data, lang, base, version):
 <div class="stage-grid">{''.join(stages)}</div></details><details class="optional-details"><summary>{e(t['optional_title'])}</summary><div class="optional-grid">{paths}</div></details></section>
 <section class="section" id="capabilities"><h2>{e(t['scenes_title'])}</h2><p class="note">{e(t['examples_note'])}</p><div class="scenes">{scenes}</div>
 <details class="principles"><summary>{e(t['principles_label'])}</summary><h3>{e(t['features_title'])}</h3><div class="grid">{features}</div></details></section>
+<section class="section" id="guides"><h2>{'Focused guides' if english else '专题指南'}</h2><div class="grid">{guide_links}</div></section>
 <section class="section" id="delivery"><h2>{e(t['delivery_title'])}</h2><div class="delivery-grid">{delivery}</div><p class="note">{e(t['delivery_note'])}</p>
 <details class="delivery-details"><summary>{e(t['delivery_details_label'])}</summary><div>{delivery_details}</div></details></section>
 <section class="section" id="install"><h2>{e(t['install_title'])}</h2><div class="install-grid"><div><h3>{e(t['terminal_label'])}</h3>
@@ -291,6 +360,51 @@ def render_page(data, lang, base, version):
 <section class="section" id="updates"><details class="updates-details"><summary>{e(t['updates_title'])}</summary>{updates}</details></section></main>
 <footer><p>{e(t['privacy'])}</p><a itemprop="codeRepository" href="{REPO}">GitHub</a><a href="{relative}feed.xml">RSS</a><a href="{relative}llms.txt">llms.txt</a><a href="index.md">Markdown</a><a itemprop="license" href="{REPO}/blob/main/LICENSE">MIT</a></footer>
 </body></html>\n'''
+
+
+def render_guide(data, slug, lang, base, google_site_verification=None,
+                 bing_site_verification=None):
+    """Render one reviewed, crawlable guide without executable page content."""
+    guide = data['guides'][slug][lang]
+    e = escape
+    english = lang == 'en'
+    relative = '../../' if english else '../'
+    home_relative = '../'
+    localized_prefix = 'en/' if english else ''
+    canonical = base + localized_prefix + slug + '/'
+    zh_url = base + slug + '/'
+    en_url = base + 'en/' + slug + '/'
+    social_image = base + PUBLIC_ASSETS[2]
+    verification = ''
+    if google_site_verification:
+        verification += ('<meta name="google-site-verification" content="'
+                         + e(google_site_verification) + '">')
+    if bing_site_verification:
+        verification += ('<meta name="msvalidate.01" content="'
+                         + e(bing_site_verification) + '">')
+    sections = ''.join('<section class="guide-section"><h2>' + e(section['title'])
+                       + '</h2><p>' + e(section['body']) + '</p></section>'
+                       for section in guide['sections'])
+    commands = ''.join('<pre><code>' + e(command) + '</code></pre>'
+                       for command in guide['commands'])
+    back = 'Back to ICODE' if english else '返回 ICODE 首页'
+    language_switch = (f'<a href="{zh_url}" lang="zh-CN">中文</a>' if english
+                       else f'<a href="{en_url}" lang="en">English</a>')
+    return f'''<!doctype html>
+<html lang="{lang}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+{verification}<title>{e(guide['title'])} — ICODE</title><meta name="description" content="{e(guide['description'])}">
+<link rel="canonical" href="{e(canonical)}"><link rel="alternate" hreflang="zh-CN" href="{e(zh_url)}">
+<link rel="alternate" hreflang="en" href="{e(en_url)}"><link rel="alternate" hreflang="x-default" href="{e(zh_url)}">
+<meta property="og:title" content="{e(guide['title'])} — ICODE"><meta property="og:description" content="{e(guide['description'])}">
+<meta property="og:url" content="{e(canonical)}"><meta property="og:type" content="article"><meta property="og:image" content="{e(social_image)}"><meta property="og:image:alt" content="ICODE">
+<meta name="twitter:card" content="summary"><meta name="twitter:title" content="{e(guide['title'])} — ICODE"><meta name="twitter:description" content="{e(guide['description'])}"><meta name="twitter:image" content="{e(social_image)}"><meta name="twitter:image:alt" content="ICODE">
+<link rel="icon" type="image/svg+xml" href="{relative}{PUBLIC_ASSETS[0]}"><link rel="stylesheet" href="{relative}style.css"></head>
+<body><a class="skip" href="#content">{'Skip to content' if english else '跳到正文'}</a><header><a class="brand" href="{home_relative}"><img src="{relative}{PUBLIC_ASSETS[1]}" alt="ICODE" width="40" height="40"></a>
+<nav aria-label="{'Navigation' if english else '导航'}"><a href="{home_relative}">{back}</a>{language_switch}<a href="{REPO}">GitHub ↗</a></nav></header>
+<main id="content" class="guide-page" itemscope itemtype="https://schema.org/TechArticle"><article><p class="eyebrow">ICODE · Claude Code · Codex · CodeBuddy · WorkBuddy</p><h1 itemprop="headline">{e(guide['title'])}</h1>
+<p class="lead" itemprop="description">{e(guide['intro'])}</p>{sections}<section class="guide-section"><h2>{'Commands' if english else '命令示例'}</h2>{commands}</section>
+<p class="boundary note">{'Examples explain workflow behavior; they are not execution evidence.' if english else '示例用于说明工作流行为，不代表已经执行或验证。'}</p></article></main>
+<footer><a href="{home_relative}">{back}</a><a href="{REPO}">GitHub</a><a href="{REPO}/blob/main/LICENSE">MIT</a></footer></body></html>\n'''
 
 
 def markdown_text(value):
@@ -359,6 +473,8 @@ def render_llms(data, base, version):
         '## Overview and installation',
         '- [English workflow and examples](' + base + 'en/index.md): purpose, stages, use cases, installation and limits.\n'
         '- [中文流程与示例](' + base + 'index.md): 用途、步骤、场景、安装与证据边界。\n'
+        '- [AI coding workflow guide](' + base + 'en/ai-coding-workflow/): resumable stages and verification evidence.\n'
+        '- [Multi-model code review guide](' + base + 'en/multi-model-code-review/): independent crosscheck boundaries.\n'
         '- [English README](' + raw + 'README.md): complete source installation.\n'
         '- [中文 README](' + raw + 'README.zh-CN.md): 完整安装与用法。',
         '## Skill and compatibility',
@@ -375,7 +491,9 @@ def xml_bytes(root):
     return ET.tostring(root, encoding='utf-8', xml_declaration=True) + b'\n'
 
 
-def build(source_root, output, base_url, indexnow_key=None, expected_version=None):
+def build(source_root, output, base_url, indexnow_key=None, expected_version=None,
+          source_lastmod=None, google_site_verification=None,
+          bing_site_verification=None):
     """Validate and render fully before creating a fresh output directory."""
     base = normalize_base_url(base_url)
     root = no_symlinks(source_root).resolve()
@@ -389,6 +507,11 @@ def build(source_root, output, base_url, indexnow_key=None, expected_version=Non
         raise ValueError('in-repository output must be the dedicated _site directory')
     if indexnow_key and not re.fullmatch(r'[A-Za-z0-9-]{8,128}', indexnow_key):
         raise ValueError('invalid IndexNow key')
+    source_lastmod = normalize_source_lastmod(source_lastmod)
+    google_site_verification = normalize_verification(
+        google_site_verification, 'Google')
+    bing_site_verification = normalize_verification(
+        bing_site_verification, 'Bing')
     data = content_checked(json.loads(public_input(root, 'site/content.json')))
     skill = public_input(root, 'SKILL.md')
     match = re.search(r'^\*\*版本\*\*:\s*(' + VERSION_RE + r')\s*$', skill, re.MULTILINE)
@@ -397,17 +520,31 @@ def build(source_root, output, base_url, indexnow_key=None, expected_version=Non
     version = match.group(1)
     if expected_version and expected_version != version:
         raise ValueError('release/source version mismatch')
-    files = {'index.html': render_page(data, 'zh-CN', base, version).encode(),
-             'en/index.html': render_page(data, 'en', base, version).encode(),
+    files = {'index.html': render_page(data, 'zh-CN', base, version,
+                                      google_site_verification, bing_site_verification).encode(),
+             'en/index.html': render_page(data, 'en', base, version,
+                                         google_site_verification, bing_site_verification).encode(),
              'style.css': public_input(root, 'site/style.css').encode(), '.nojekyll': b'',
              'llms.txt': render_llms(data, base, version).encode(),
              'index.md': render_markdown(data, 'zh-CN', base, version).encode(),
              'en/index.md': render_markdown(data, 'en', base, version).encode()}
+    for slug in GUIDE_SLUGS:
+        files[slug + '/index.html'] = render_guide(
+            data, slug, 'zh-CN', base, google_site_verification,
+            bing_site_verification).encode()
+        files['en/' + slug + '/index.html'] = render_guide(
+            data, slug, 'en', base, google_site_verification,
+            bing_site_verification).encode()
     files.update((relative, public_asset(root, relative)) for relative in PUBLIC_ASSETS)
     urls = [base, base + 'en/']
+    for slug in GUIDE_SLUGS:
+        urls.extend((base + slug + '/', base + 'en/' + slug + '/'))
     sitemap = ET.Element('urlset', xmlns='http://www.sitemaps.org/schemas/sitemap/0.9')
     for url in urls:
-        ET.SubElement(ET.SubElement(sitemap, 'url'), 'loc').text = url
+        entry = ET.SubElement(sitemap, 'url')
+        ET.SubElement(entry, 'loc').text = url
+        if source_lastmod:
+            ET.SubElement(entry, 'lastmod').text = source_lastmod
     files['sitemap.xml'] = xml_bytes(sitemap)
     rss = ET.Element('rss', version='2.0')
     channel = ET.SubElement(rss, 'channel')
@@ -423,6 +560,8 @@ def build(source_root, output, base_url, indexnow_key=None, expected_version=Non
         ET.SubElement(item, 'description').text = note['zh-CN'] + '\n' + note['en']
     files['feed.xml'] = xml_bytes(rss)
     manifest = {'schema_version': 1, 'base_url': base, 'version': version, 'urls': urls}
+    if source_lastmod:
+        manifest['lastmod'] = source_lastmod
     files['public-manifest.json'] = (json.dumps(manifest, indent=2) + '\n').encode()
     if indexnow_key:
         files[indexnow_key + '.txt'] = (indexnow_key + '\n').encode()
@@ -440,9 +579,15 @@ def main():
     parser.add_argument('--output', type=Path, required=True, help='new directory; never overwritten')
     parser.add_argument('--base-url', default=DEFAULT_BASE)
     parser.add_argument('--expected-version', help='release tag must exactly match source version')
+    parser.add_argument('--source-lastmod', help='source revision date in YYYY-MM-DD')
+    parser.add_argument('--google-site-verification', help='public Google ownership token')
+    parser.add_argument('--bing-site-verification', help='public Bing ownership token')
     args = parser.parse_args()
     try:
-        result = build(args.source_root, args.output, args.base_url, os.environ.get('INDEXNOW_KEY'), args.expected_version)
+        result = build(args.source_root, args.output, args.base_url,
+                       os.environ.get('INDEXNOW_KEY'), args.expected_version,
+                       args.source_lastmod, args.google_site_verification,
+                       args.bing_site_verification)
     except (ValueError, OSError) as exc:
         print('site build rejected: ' + str(exc), file=sys.stderr)
         return 2

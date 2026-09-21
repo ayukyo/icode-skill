@@ -84,6 +84,8 @@ jobs:
     env:
       SITE_URL: ${{ vars.PUBLIC_SITE_URL || 'https://ayukyo.github.io/icode-skill/' }}
       EXPECTED_VERSION: ${{ github.event_name == 'release' && github.event.release.tag_name || '' }}
+      GOOGLE_SITE_VERIFICATION: ${{ vars.GOOGLE_SITE_VERIFICATION }}
+      BING_SITE_VERIFICATION: ${{ vars.BING_SITE_VERIFICATION }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -94,7 +96,11 @@ jobs:
           python-version: '3.11'
       - name: Bind exact source
         id: source
-        run: echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+        shell: bash
+        run: |
+          echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          source_lastmod=$(git show -s --format=%cs "$GITHUB_SHA")
+          echo "source_lastmod=$source_lastmod" >> "$GITHUB_OUTPUT"
       - name: Evaluate publication authorization
         id: policy
         env:
@@ -124,12 +130,15 @@ jobs:
           bash tests/test_control_plane_verify_doc_contract.sh
       - name: Build preview (no secrets, no deployment)
         if: steps.policy.outputs.publish != 'true'
-        run: python3 tools/build_public_site.py --output _site --base-url "$SITE_URL" --expected-version "$EXPECTED_VERSION"
+        env:
+          SOURCE_LASTMOD: ${{ steps.source.outputs.source_lastmod }}
+        run: python3 tools/build_public_site.py --output _site --base-url "$SITE_URL" --expected-version "$EXPECTED_VERSION" --source-lastmod "$SOURCE_LASTMOD" --google-site-verification "$GOOGLE_SITE_VERIFICATION" --bing-site-verification "$BING_SITE_VERIFICATION"
       - name: Build approved public artifact
         if: steps.policy.outputs.publish == 'true'
         env:
           INDEXNOW_KEY: ${{ secrets.INDEXNOW_KEY }}
-        run: python3 tools/build_public_site.py --output _site --base-url "$SITE_URL" --expected-version "$EXPECTED_VERSION"
+          SOURCE_LASTMOD: ${{ steps.source.outputs.source_lastmod }}
+        run: python3 tools/build_public_site.py --output _site --base-url "$SITE_URL" --expected-version "$EXPECTED_VERSION" --source-lastmod "$SOURCE_LASTMOD" --google-site-verification "$GOOGLE_SITE_VERIFICATION" --bing-site-verification "$BING_SITE_VERIFICATION"
       - name: Reject superseded publication source
         if: steps.policy.outputs.publish == 'true'
         shell: bash

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Bounded IndexNow notification for the public manifest's two known pages.
+"""Bounded IndexNow notification for the public manifest's known pages.
 
 Usage: python3 tools/notify_indexnow.py --manifest FILE [--submit]
 INDEXNOW_KEY is optional. The default is offline dry-run, including no DNS.
@@ -39,6 +39,14 @@ DNS_LABEL_PATTERN = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?")
 PATH_PATTERN = re.compile(r"/[A-Za-z0-9._~!$&'()*+,;=:@/-]*")
 LOCAL_SUFFIXES = {"localhost", "local", "localdomain", "internal", "lan", "home", "test",
                   "invalid", "example", "onion", "alt", "arpa"}
+PUBLIC_PATHS = (
+    "",
+    "en/",
+    "ai-coding-workflow/",
+    "en/ai-coding-workflow/",
+    "multi-model-code-review/",
+    "en/multi-model-code-review/",
+)
 
 
 class InputError(ValueError):
@@ -99,7 +107,7 @@ def validate_manifest(manifest: object) -> tuple[str, str, list[str]]:
             or any(segment in (".", "..") for segment in path.split("/"))):
         raise InputError("invalid_base_path")
     urls = manifest.get("urls")
-    allowed = {base, base + "en/"}
+    allowed = {base + path for path in PUBLIC_PATHS}
     if (not isinstance(urls, list) or not 1 <= len(urls) <= MAX_URLS
             or any(not isinstance(url, str) or url not in allowed for url in urls)
             or len(set(urls)) != len(urls)):

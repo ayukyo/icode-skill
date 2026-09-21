@@ -435,6 +435,25 @@ nav a {
   border-top: 1px solid var(--line);
 }
 
+.guide-page {
+  max-width: 860px;
+  padding-block: 2.5rem 4rem;
+}
+
+.guide-page article > .lead {
+  max-width: 72ch;
+}
+
+.guide-section {
+  padding-block: 1.75rem;
+  border-top: 1px solid var(--line);
+}
+
+.guide-section h2 {
+  margin-bottom: 0.75rem;
+  font-size: clamp(1.35rem, 2.5vw, 1.8rem);
+}
+
 .grid,
 .stage-grid,
 .optional-grid,

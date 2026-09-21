@@ -40,7 +40,12 @@ class PublicDemoTests(unittest.TestCase):
                                      ('custom', 'https://icode.example.org/', 'demo-test-key-1234')]:
                 out = Path(temp) / name
                 manifest = builder.build(source, out, base, key)
-                self.assertEqual(manifest['urls'], [base, base + 'en/'])
+                self.assertEqual(
+                    manifest['urls'],
+                    [base, base + 'en/',
+                     base + 'ai-coding-workflow/', base + 'en/ai-coding-workflow/',
+                     base + 'multi-model-code-review/', base + 'en/multi-model-code-review/'],
+                )
                 for content in digest_tree(out):
                     self.assertNotIn(b'PRIVATE-DEMO-CANARY', (out / content).read_bytes())
                 with self.assertRaises(ValueError):

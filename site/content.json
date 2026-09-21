@@ -385,6 +385,120 @@
       "privacy": "A static website. No login or tracking. Your ICODE tickets are never read or uploaded."
     }
   },
+  "guides": {
+    "ai-coding-workflow": {
+      "zh-CN": {
+        "title": "AI 编码工作流：从需求到验证证据",
+        "description": "用 ICODE 在 Claude Code、Codex、CodeBuddy 与 WorkBuddy 中推进可续接的 AI 编码工作流，保留设计、实现和验证证据。",
+        "intro": "ICODE 把一次开发请求组织成可检查、可暂停、可续接的工单。它不替代宿主 Agent，而是在现有会话中约束步骤、停止点和证据边界。",
+        "sections": [
+          {
+            "title": "先绑定真实工程与需求边界",
+            "body": "从项目会话发起 /icode start，先确认请求路径对应的 Git 根目录，再建立工单。把目标、不做什么和停止点写清楚，避免把技能仓库误当成业务工程。"
+          },
+          {
+            "title": "分步设计、审查与实施",
+            "body": "计划、设计审查、定稿和编码分别留下产物。执行阶段以定稿和当前源码为准；发生范围变化时先回到门禁，而不是让对话中的临时判断覆盖工单依据。"
+          },
+          {
+            "title": "验证动作必须对应真实证据",
+            "body": "使用 /icode verify 显式选择构建、部署、监听或测试。只监听或测试时直接检查设备现有版本，不隐式编译或部署；缺少设备或工具时保留待验证结论。"
+          },
+          {
+            "title": "跨宿主保持同一工作方式",
+            "body": "Claude Code、Codex、CodeBuddy 与 WorkBuddy 读取同一套 ICODE 步骤合同。模型和宿主可以变化，但工单状态、授权范围和证据要求不因此放宽。"
+          }
+        ],
+        "commands": [
+          "/icode start 给现有模块增加重试并补充测试",
+          "/icode verify --build --deploy --test <target>"
+        ]
+      },
+      "en": {
+        "title": "AI coding workflow: from request to verification evidence",
+        "description": "Use ICODE with Claude Code, Codex, CodeBuddy and WorkBuddy to run a resumable AI coding workflow with traceable design, implementation and verification evidence.",
+        "intro": "ICODE turns a development request into a ticket that can be inspected, paused and resumed. It does not replace your host agent; it adds explicit stages, stop points and evidence boundaries to the existing session.",
+        "sections": [
+          {
+            "title": "Bind the real project and its boundaries",
+            "body": "Run /icode start from the project session, confirm the requested path and actual Git root, then create the ticket. State the goal, exclusions and stop point so the skill repository is never mistaken for the product repository."
+          },
+          {
+            "title": "Separate design, review and implementation",
+            "body": "Planning, design review, finalization and coding leave separate artifacts. Implementation follows the finalized plan and current source; a scope change returns to the relevant gate instead of silently replacing the ticket contract."
+          },
+          {
+            "title": "Make verification match real evidence",
+            "body": "Use /icode verify to select build, deploy, listen or test explicitly. Listen or test alone uses the version already on the device and never implies a build or deployment. Missing devices and tools remain visible verification debt."
+          },
+          {
+            "title": "Keep one workflow across hosts",
+            "body": "Claude Code, Codex, CodeBuddy and WorkBuddy use the same ICODE step contracts. You may change host or model, but ticket state, authorization boundaries and evidence requirements remain intact."
+          }
+        ],
+        "commands": [
+          "/icode start Add retries to the existing module and cover them with tests",
+          "/icode verify --build --deploy --test <target>"
+        ]
+      }
+    },
+    "multi-model-code-review": {
+      "zh-CN": {
+        "title": "多模型代码审查：独立复评已完成工单",
+        "description": "在 Claude Code、Codex、CodeBuddy 或 WorkBuddy 中自行切换 Agent 或模型，再用 ICODE crosscheck 独立复评设计与代码。",
+        "intro": "同一模型完整推进后容易保留相同盲区。crosscheck 为已完成工单建立项目内独立复评记录，帮助发现设计遗漏、实现偏差和验证缺口。",
+        "sections": [
+          {
+            "title": "先完成原工单，再独立复评",
+            "body": "crosscheck 面向已完成工单，不替代主流程中的 review、deepcheck 或 audit。未指定工单时评审当前会话绑定的工单，也可以从用户给出的工单路径解析归属。"
+          },
+          {
+            "title": "模型切换由用户或宿主完成",
+            "body": "ICODE 不提供 --model，也不会自动替换模型。你可以切换到另一个 AI Agent，或在同一 Agent 中自行切换模型，然后运行 /icode crosscheck。"
+          },
+          {
+            "title": "复评保持零写入边界",
+            "body": "复评读取工单设计、源码变更和验证证据，但不修改原工单历史，也不直接修改业务代码。结论区分必须修复、建议优化、证据不足和无需修改。"
+          },
+          {
+            "title": "允许多轮，但每轮可追溯",
+            "body": "原工单后续发生修改时可以再次 crosscheck。每轮记录独立保存在项目的 .icode_output/.crosscheck 目录，关联原工单并保留轮次边界。"
+          }
+        ],
+        "commands": [
+          "/icode crosscheck",
+          "/icode crosscheck <工单路径>"
+        ]
+      },
+      "en": {
+        "title": "Multi-model code review for completed tickets",
+        "description": "Switch agents or models yourself in Claude Code, Codex, CodeBuddy or WorkBuddy, then use ICODE crosscheck for an independent design and code review.",
+        "intro": "A model that drove the full implementation can retain the same blind spots. crosscheck creates a project-local, independent review record for a completed ticket to expose design omissions, implementation drift and verification gaps.",
+        "sections": [
+          {
+            "title": "Complete the source ticket before independent review",
+            "body": "crosscheck reviews completed tickets and does not replace review, deepcheck or audit in the main flow. Without an explicit ticket it uses the ticket bound to the current session; it can also resolve ownership from a supplied ticket path."
+          },
+          {
+            "title": "Switch the model in your host",
+            "body": "ICODE has no --model option and never changes models automatically. Switch to another AI agent, or switch models in the same agent, then run /icode crosscheck."
+          },
+          {
+            "title": "Keep the review zero-write",
+            "body": "The review reads ticket design, source changes and verification evidence, but does not change the original ticket history or product code. Findings distinguish required fixes, optional improvements, missing evidence and no-change recommendations."
+          },
+          {
+            "title": "Repeat reviews with traceable rounds",
+            "body": "Run crosscheck again after later changes to the source ticket. Every round remains separate under the project's .icode_output/.crosscheck directory and records the ticket relationship and round boundary."
+          }
+        ],
+        "commands": [
+          "/icode crosscheck",
+          "/icode crosscheck <ticket-path>"
+        ]
+      }
+    }
+  },
   "updates": [
     {
       "version": "v2.32.0",

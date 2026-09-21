@@ -17,6 +17,7 @@ PUBLIC_ASSETS = (
     "assets/icode-ticket-hex-128.png",
     "assets/icode-ticket-hex-512.png",
 )
+GUIDE_SLUGS = ("ai-coding-workflow", "multi-model-code-review")
 
 
 class PublicSiteTests(unittest.TestCase):
@@ -33,8 +34,8 @@ class PublicSiteTests(unittest.TestCase):
         spec.loader.exec_module(module)
         return module
 
-    def build(self, output="out", base=BASE, source=None, key=None):
-        return self.builder().build(source or ROOT, self.work / output, base, key)
+    def build(self, output="out", base=BASE, source=None, key=None, **kwargs):
+        return self.builder().build(source or ROOT, self.work / output, base, key, **kwargs)
 
     def fixture(self):
         root = self.work / "source"
@@ -50,7 +51,9 @@ class PublicSiteTests(unittest.TestCase):
                  for p in (self.work / "out").rglob("*") if p.is_file()}
         self.assertEqual(files, {"index.html", "en/index.html", "style.css",
                                  "sitemap.xml", "feed.xml", "public-manifest.json", ".nojekyll",
-                                 "llms.txt", "index.md", "en/index.md", *PUBLIC_ASSETS})
+                                 "llms.txt", "index.md", "en/index.md", *PUBLIC_ASSETS,
+                                 *(f"{slug}/index.html" for slug in GUIDE_SLUGS),
+                                 *(f"en/{slug}/index.html" for slug in GUIDE_SLUGS)})
         zh = (self.work / "out/index.html").read_text()
         en = (self.work / "out/en/index.html").read_text()
         for page, lang in [(zh, "zh-CN"), (en, "en")]:
@@ -65,6 +68,9 @@ class PublicSiteTests(unittest.TestCase):
             self.assertNotIn('<script', page)
         self.assertIn('href="style.css"', zh)
         self.assertIn('href="../style.css"', en)
+        for slug in GUIDE_SLUGS:
+            self.assertIn(f'href="{slug}/"', zh)
+            self.assertIn(f'href="{slug}/"', en)
 
     def test_brand_asset_allowlist_is_fixed_and_outputs_exact_bytes(self):
         builder = self.builder()
@@ -130,11 +136,98 @@ class PublicSiteTests(unittest.TestCase):
         self.build()
         manifest = json.loads((self.work / "out/public-manifest.json").read_text())
         self.assertEqual(manifest['schema_version'], 1)
-        self.assertEqual(manifest['urls'], [BASE, BASE + 'en/'])
+        expected = [BASE, BASE + 'en/']
+        for slug in GUIDE_SLUGS:
+            expected.extend([BASE + slug + '/', BASE + 'en/' + slug + '/'])
+        self.assertEqual(manifest['urls'], expected)
         tree = ET.parse(self.work / "out/sitemap.xml")
         self.assertEqual([n.text for n in tree.findall('.//{*}loc')], manifest['urls'])
         rss = ET.parse(self.work / "out/feed.xml")
         self.assertTrue(rss.findall('./channel/item'))
+
+    def test_focused_bilingual_guides_are_unique_crawlable_and_linked(self):
+        self.build()
+        root = self.work / 'out'
+        home = (root / 'index.html').read_text()
+        english_home = (root / 'en/index.html').read_text()
+        seen_titles = set()
+        for slug in GUIDE_SLUGS:
+            self.assertIn(f'href="{slug}/"', home)
+            self.assertIn(f'href="{slug}/"', english_home)
+            for lang, relative, prefix in (
+                    ('zh-CN', f'{slug}/index.html', '../'),
+                    ('en', f'en/{slug}/index.html', '../../')):
+                with self.subTest(slug=slug, lang=lang):
+                    page = (root / relative).read_text()
+                    self.assertIn(f'<html lang="{lang}">', page)
+                    self.assertIn('rel="canonical"', page)
+                    self.assertIn('hreflang="zh-CN"', page)
+                    self.assertIn('hreflang="en"', page)
+                    self.assertIn(f'href="{prefix}style.css"', page)
+                    self.assertIn('Claude Code', page)
+                    self.assertIn('Codex', page)
+                    self.assertIn('CodeBuddy', page)
+                    self.assertIn('WorkBuddy', page)
+                    self.assertNotIn('<script', page)
+                    title = page.split('<title>', 1)[1].split('</title>', 1)[0]
+                    self.assertNotIn(title, seen_titles)
+                    seen_titles.add(title)
+                    if slug == 'ai-coding-workflow':
+                        self.assertIn('/icode start', page)
+                        self.assertIn('/icode verify', page)
+                    else:
+                        self.assertIn('/icode crosscheck', page)
+                        self.assertRegex(page, r'(?i)switch|切换')
+
+    def test_invalid_guide_content_fails_before_output(self):
+        root = self.fixture()
+        content = root / 'site/content.json'
+        data = json.loads(content.read_text())
+        data['guides']['ai-coding-workflow']['en']['sections'] = []
+        content.write_text(json.dumps(data))
+        with self.assertRaises(ValueError):
+            self.build(source=root)
+        self.assertFalse((self.work / 'out').exists())
+
+    def test_search_verification_social_cards_and_truthful_sitemap_lastmod(self):
+        self.build(source_lastmod='2026-09-21',
+                   google_site_verification='google_test-token_12345678',
+                   bing_site_verification='BING_test-token_12345678')
+        manifest = json.loads((self.work / 'out/public-manifest.json').read_text())
+        self.assertEqual(manifest['lastmod'], '2026-09-21')
+        tree = ET.parse(self.work / 'out/sitemap.xml')
+        entries = tree.findall('.//{*}url')
+        self.assertEqual([entry.findtext('{*}lastmod') for entry in entries],
+                         ['2026-09-21'] * (2 + 2 * len(GUIDE_SLUGS)))
+        for relative in ('index.html', 'en/index.html'):
+            page = (self.work / 'out' / relative).read_text()
+            self.assertIn('<meta name="google-site-verification" content="google_test-token_12345678">', page)
+            self.assertIn('<meta name="msvalidate.01" content="BING_test-token_12345678">', page)
+            self.assertIn('<meta name="twitter:card" content="summary">', page)
+            self.assertIn('<meta name="twitter:title"', page)
+            self.assertIn('<meta name="twitter:description"', page)
+            self.assertIn(f'<meta name="twitter:image" content="{BASE}assets/icode-ticket-hex-512.png">', page)
+            self.assertIn('<meta property="og:image:alt" content="ICODE">', page)
+
+    def test_optional_verification_is_absent_and_invalid_metadata_fails_before_write(self):
+        self.build()
+        page = (self.work / 'out/index.html').read_text()
+        self.assertNotIn('google-site-verification', page)
+        self.assertNotIn('msvalidate.01', page)
+        builder = self.builder()
+        invalid = [
+            {'source_lastmod': '2026-9-1'},
+            {'source_lastmod': 'not-a-date'},
+            {'google_site_verification': 'short'},
+            {'google_site_verification': 'bad\" content=\"injected'},
+            {'bing_site_verification': '<meta>'},
+            {'bing_site_verification': 'x' * 129},
+        ]
+        for index, kwargs in enumerate(invalid):
+            output = self.work / f'invalid-seo-{index}'
+            with self.subTest(kwargs=kwargs), self.assertRaises(ValueError):
+                builder.build(ROOT, output, BASE, **kwargs)
+            self.assertFalse(output.exists())
 
     def test_repeatable_bytes(self):
         self.build('first')

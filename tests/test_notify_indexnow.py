@@ -134,6 +134,18 @@ class NotifyIndexNowTests(unittest.TestCase):
         self.assertEqual(self.invoke(submit=True)[0], 0)
         self.assertTrue(self.requests()[0].startswith(f"GET /icode-skill/{KEY}.txt ".encode()))
 
+    def test_all_fixed_focused_pages_are_accepted(self):
+        base = "https://ayukyo.github.io/icode-skill/"
+        self.manifest = {
+            "schema_version": 1,
+            "base_url": base,
+            "urls": [base + path for path in self.module.PUBLIC_PATHS],
+        }
+        code, result = self.invoke()
+        self.assertEqual((code, result["status"], result["url_count"]),
+                         (0, "dry-run", len(self.module.PUBLIC_PATHS)))
+        self.assert_no_network()
+
     def test_script_entry_point_exits_zero_in_offline_default(self):
         self.manifest_path.write_text(json.dumps(self.manifest), encoding="utf-8")
         stdout = io.StringIO()
