@@ -37,7 +37,60 @@
 """
 import argparse
 import contextlib
-import fcntl
+# 跨平台 advisory 锁:POSIX 上 fcntl.flock (整文件锁),Windows 上 msvcrt.locking
+# (字节范围锁) fallback。fcntl 在原生 Windows Python 中不存在,直接 import
+# 会让 vNext 工单系统整体不可用。
+try:
+    import fcntl as _fcntl_mod
+except ImportError:  # pragma: no cover - Windows 路径
+    _fcntl_mod = None
+try:
+    import msvcrt as _msvcrt_mod
+except ImportError:  # pragma: no cover - POSIX 路径
+    _msvcrt_mod = None
+
+
+def _acquire_exclusive_lock(fh):
+    """跨平台 advisory 排它锁(阻塞等待)。
+
+    优先 fcntl.flock;Windows 上 fcntl 缺失时 fallback 到 msvcrt.locking。
+    msvcrt.locking 是字节范围锁,要求锁定区间至少 1 字节;helper 在文件
+    为空时 best-effort 写入 \\0 占位字节以保证锁定语义,
+    fcntl 路径上 lock 文件保持原 0 字节语义。
+    """
+    if _fcntl_mod is not None:
+        _fcntl_mod.flock(fh.fileno(), _fcntl_mod.LOCK_EX)
+        return
+    if _msvcrt_mod is None:
+        raise RuntimeError(
+            "工单并发锁不可降级:既无 fcntl 也无 msvcrt"
+            "(非 POSIX 也非 Windows Python)"
+        )
+    try:
+        fh.seek(0, 2)
+        size = fh.tell()
+        if size < 1:
+            fh.seek(0)
+            fh.write("\0")
+            fh.flush()
+        fh.seek(0)
+    except OSError:
+        # 占位字节写入失败不致命,msvcrt.locking 会自行报错。
+        pass
+    _msvcrt_mod.locking(fh.fileno(), _msvcrt_mod.LK_LOCK, 1)
+
+
+def _release_exclusive_lock(fh):
+    if _fcntl_mod is not None:
+        _fcntl_mod.flock(fh.fileno(), _fcntl_mod.LOCK_UN)
+        return
+    if _msvcrt_mod is None:
+        return
+    try:
+        _msvcrt_mod.locking(fh.fileno(), _msvcrt_mod.LK_UNLCK, 1)
+    except OSError:
+        # 解锁失败不应阻塞 __exit__ 的清理(close)。
+        pass
 import fnmatch
 import glob as globlib
 import hashlib
@@ -176,25 +229,27 @@ def atomic_append_line(path, line):
 
 
 class DirLock:
-    """工单目录级排它锁（fcntl.flock，阻塞等待，防并发写撕裂）。"""
+    """工单目录级排它锁(fcntl.flock,Windows 上 msvcrt.locking fallback;阻塞等待,防并发写撕裂)。"""
 
     def __init__(self, out_dir):
         self.path = Path(out_dir) / ".icontrol.lock"
 
     def __enter__(self):
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.fh = open(self.path, "w")
-        fcntl.flock(self.fh.fileno(), fcntl.LOCK_EX)
+        self.fh = open(self.path, "w", encoding="utf-8")
+        _acquire_exclusive_lock(self.fh)
         return self
 
     def __exit__(self, *exc):
-        fcntl.flock(self.fh.fileno(), fcntl.LOCK_UN)
-        self.fh.close()
+        try:
+            _release_exclusive_lock(self.fh)
+        finally:
+            self.fh.close()
         return False
 
 
 class FileLock:
-    """任意共享文件的旁路锁；锁文件固定存在，业务文件仍可原子 rename。"""
+    """任意共享文件的旁路锁;锁文件固定存在,业务文件仍可原子 rename。"""
 
     def __init__(self, path):
         self.path = Path(str(path) + ".lock")
@@ -202,12 +257,14 @@ class FileLock:
     def __enter__(self):
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.fh = open(self.path, "a+", encoding="utf-8")
-        fcntl.flock(self.fh.fileno(), fcntl.LOCK_EX)
+        _acquire_exclusive_lock(self.fh)
         return self
 
     def __exit__(self, *exc):
-        fcntl.flock(self.fh.fileno(), fcntl.LOCK_UN)
-        self.fh.close()
+        try:
+            _release_exclusive_lock(self.fh)
+        finally:
+            self.fh.close()
         return False
 
 

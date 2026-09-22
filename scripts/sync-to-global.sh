@@ -446,11 +446,25 @@ def atomic_publish_bytes(path: Path, payload: bytes, mode: int) -> None:
             os.fsync(stream.fileno())
         os.chmod(temporary, mode)
         os.replace(temporary, path)
-        directory_fd = os.open(path.parent, os.O_RDONLY)
+        # 目录 fsync 让 rename 元数据持久化。Windows 上对目录的
+        # FlushFileBuffers / open(O_RDONLY) 可能抛 PermissionError
+        # (Errno 13);NTFS 不保证目录 entry fsync 的语义,但数据已经
+        # 通过 os.replace 落地。跨平台把目录 fsync 视为 best-effort,
+        # 避免 Windows 平台限制把成功的同步误报为失败。
+        directory_fd = None
         try:
-            os.fsync(directory_fd)
+            directory_fd = os.open(path.parent, os.O_RDONLY)
+            try:
+                os.fsync(directory_fd)
+            except OSError:
+                # 目录 fsync 在本平台不可用;不影响本次发布的语义。
+                pass
+        except OSError:
+            # 目录句柄获取失败;不影响本次发布的语义。
+            pass
         finally:
-            os.close(directory_fd)
+            if directory_fd is not None:
+                os.close(directory_fd)
     finally:
         try:
             os.unlink(temporary)
