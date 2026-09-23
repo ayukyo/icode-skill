@@ -28,6 +28,21 @@ if $CTL close-phase --dir "$D" --phase checkouts_removed 2>/dev/null | grep -q '
 $CTL close-phase --dir "$D" --phase close_planned >/dev/null 2>&1
 if $CTL close-phase --dir "$D" --phase close_planned 2>/dev/null | grep -q 'already_applied'; then
   ok "已应用阶段重放 → already_applied（分阶段幂等）"; else bad "分阶段幂等未生效"; fi
+if $CTL record-verification --dir "$D" --kind device_test --outcome pass \
+    --layer physical --consumer close --scenario evidence-repair \
+    --baseline close-1 --evidence existing-device-log 2>/dev/null \
+    | grep -q 'closed_ticket_mutation_frozen' \
+   && $CTL record-verification --dir "$D" --kind device_test --outcome pass \
+    --layer physical --consumer close --scenario evidence-repair \
+    --baseline close-1 --evidence existing-device-log \
+    --close-repair --request-id close-evidence-repair-1 >/dev/null \
+   && $CTL record-verification --dir "$D" --kind device_test --outcome pass \
+    --layer physical --consumer close --scenario evidence-repair \
+    --baseline close-1 --evidence existing-device-log \
+    --close-repair --request-id close-evidence-repair-1 2>/dev/null \
+      | grep -q already_applied; then
+  ok "close_planned 仅允许显式幂等补录已有验证证据"
+else bad "close_planned 验证证据恢复边界失效"; fi
 if $CTL metadata-update --dir "$D" --set-json '{"submitted_baseline":"abc"}' \
     --request-id close-meta-1 >/dev/null \
    && $CTL metadata-update --dir "$D" --set-json '{"keywords":["late"]}' 2>/dev/null \

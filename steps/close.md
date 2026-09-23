@@ -63,6 +63,8 @@
 
 > 注：`submitted_baselines`/`submission_audit`/`removed_at`/`active_checkout` 等非 status 字段也禁止直写，统一用 `metadata-update --set-json/--append-json --request-id <key>` 原子写回并留 `metadata_updated` 事件；`close_state` 本身由 `close-phase` 独占推进。`archived` 之后这些写回和最终 `index-write --ticket-dir <control_root>` 都必须针对归档根；索引 writer 保留原 `project_path/out_dir` 身份三元组。
 
+> **`close_planned` 证据恢复**：若下一阶段的归档门禁发现真实验证已经完成、但对应 `verification_runs` 尚未登记，可在归档和 checkout 删除均未发生时，用 `record-verification --close-repair --request-id <幂等键>` 补录现存证据后重跑归档。该恢复不回滚/删除 close 事件，不允许模拟、重写验收合同或启动新的验证；除 `close_planned` 外所有关闭阶段继续冻结验证写入。
+
 > 注：清理业务子仓 checkout 前先确认已 merge 回原子仓；`git worktree remove` 含未提交改动时 remove 失败是保护，**禁止自动 `--force`**（I-5）。
 
 ## §7 身份计划（identity plan，close_planned 阶段输出）

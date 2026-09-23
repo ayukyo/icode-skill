@@ -94,7 +94,7 @@ python3 tools/icode_control.py create --dir <out_dir> --ticket-id <id> \
 ## 6. 关闭分阶段（close_state）
 
 - 阶段序列（gates.json `state_machine.close_phases`）：`close_planned → archived → roots_verified → checkouts_removed → branches_removed → closed`。
-- 任一 `close_state` 非空后，普通 `transition`、通用 `event`、`step/artifact/operation`、`record-verification` 和会追加事件的 `snapshot` 均冻结；只读 `snapshot --verify`/`trace` 仍允许。不得在关闭流程中并行重开 review/code。关闭后修改必须先按 `/icode worktree --reopen` 建立新的活动 checkout。
+- 任一 `close_state` 非空后，普通 `transition`、通用 `event`、`step/artifact/operation`、`record-verification` 和会追加事件的 `snapshot` 均冻结；只读 `snapshot --verify`/`trace` 仍允许。唯一恢复例外是：`close_state=close_planned`、归档与 checkout 删除均尚未发生，且归档门禁发现“已有验证证据未登记”时，可用 `record-verification --close-repair --request-id <幂等键>` 补录已经取得的证据。该入口不能用于模拟证据、启动新验证或其它关闭阶段。不得在关闭流程中并行重开 review/code。关闭后修改必须先按 `/icode worktree --reopen` 建立新的活动 checkout。
 - 记录：`python3 tools/icode_control.py close-phase --dir <out_dir> --phase <phase>`；仅 `status=completed` 且事件链有完成证据时可用；每阶段**幂等**，**禁止跨阶段跳转**。
 - `archived` 前：先把必需小型控制产物复制到 `archive_path`，再运行 `archive-manifest --dir <out_dir> --archive-dir <archive_path> --write`。工具比对源/归档 hash，对顶层大文件留指针+hash，并复跑三类 linter；缺文件、hash 不同或门禁不等价时不生成 complete manifest，`close-phase --phase archived` 也会拒绝。
 - **控制根交接**：`close-phase --dir <source_out_dir> --phase archived` 成功后，工具把包含 archived 事件的最新 metadata/事件链同步到 `archive_path`，刷新 manifest hash，并返回 `control_root`。`roots_verified` 起必须以该归档根作 `--dir`；源 checkout 消失不再阻断关闭留痕。

@@ -3526,6 +3526,10 @@ def cmd_record_claim(args):
 
 def cmd_record_verification(args):
     out_dir = Path(args.dir).resolve()
+    if args.close_repair and not args.request_id:
+        raise ControlError(
+            "--close-repair 必须提供 --request-id，避免关闭恢复记录被重复追加",
+            exit_code=2, gate_id="close_repair_idempotency")
     if not args.evidence or not args.evidence.strip():
         raise ControlError("verification run 必须提供可审计 --evidence", exit_code=2,
                            gate_id="verification_evidence")
@@ -3588,10 +3592,18 @@ def cmd_record_verification(args):
         meta = load_metadata(out_dir)
         require_vnext(meta, out_dir)
         require_valid_metadata(meta)
-        if meta.get("close_state") is not None:
+        close_state = meta.get("close_state")
+        if close_state is not None:
+            repair_allowed = close_state == "close_planned" and args.close_repair
+            if not repair_allowed:
+                raise ControlError(
+                    "工单已进入关闭流程，禁止继续追加验证记录；仅 close_planned 且归档前"
+                    "可用 --close-repair 补录已取得的验证证据，其余情况需先 reopen",
+                    exit_code=1, gate_id="closed_ticket_mutation_frozen")
+        elif args.close_repair:
             raise ControlError(
-                "工单已进入关闭流程，禁止继续追加验证记录；需修改请先 reopen",
-                exit_code=1, gate_id="closed_ticket_mutation_frozen")
+                "--close-repair 仅用于 close_state=close_planned 的归档前证据恢复",
+                exit_code=1, gate_id="close_repair_state")
         events, problems = verify_event_chain(out_dir, meta)
         if problems:
             raise ControlError("现有事件链不完整，拒绝记录验证", exit_code=1,
@@ -5352,6 +5364,10 @@ def build_parser():
     p.add_argument("--evidence", required=True)
     p.add_argument("--note")
     p.add_argument("--request-id", help="幂等键（同键同记录重放=已应用）")
+    p.add_argument(
+        "--close-repair", action="store_true",
+        help="仅 close_state=close_planned 且归档前，受控补录已经取得的验证证据；必须带 --request-id",
+    )
     p.set_defaults(func=cmd_record_verification)
 
     p = sub.add_parser("record-claim", help="原子记录 claims + claim_recorded 事件")
