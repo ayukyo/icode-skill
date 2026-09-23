@@ -2716,6 +2716,11 @@ def refresh_index_status(out_dir, meta, index_path=None):
         return "updated"
 
 
+def serialize_index_out_dir(relative):
+    """索引 wire 格式固定使用正斜杠，独立于宿主系统路径分隔符。"""
+    return relative.as_posix()
+
+
 def build_index_entry(out_dir, meta, identity=None):
     out_dir = Path(out_dir).resolve()
     if identity is None:
@@ -2728,7 +2733,7 @@ def build_index_entry(out_dir, meta, identity=None):
         "control_schema_version": 3,
         "ticket_id": meta.get("ticket_id"),
         "project_path": str(workspace),
-        "out_dir": str(rel),
+        "out_dir": serialize_index_out_dir(rel),
         "status": meta.get("status"),
         "updated_at": now_iso(),
         "created_at": meta.get("created_at"),
