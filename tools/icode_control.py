@@ -103,6 +103,7 @@ import importlib.util
 import subprocess
 import sys
 import tempfile
+import time
 import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -186,6 +187,22 @@ def load_json(path, what):
         raise ControlError(f"{what} JSON 解析失败: {path}: {exc}", exit_code=1, path=str(path))
 
 
+_ATOMIC_REPLACE_ATTEMPTS = 5
+_ATOMIC_REPLACE_RETRY_SECONDS = 0.02
+
+
+def replace_with_retry(source, destination):
+    """Windows 并发读句柄可短暂阻止替换；仅重试共享/权限冲突。"""
+    for attempt in range(_ATOMIC_REPLACE_ATTEMPTS):
+        try:
+            os.replace(source, destination)
+            return
+        except PermissionError:
+            if attempt + 1 == _ATOMIC_REPLACE_ATTEMPTS:
+                raise
+            time.sleep(_ATOMIC_REPLACE_RETRY_SECONDS)
+
+
 def atomic_write_json(path, obj):
     """临时文件 + fsync + 同目录原子 rename。"""
     path = Path(path)
@@ -196,7 +213,7 @@ def atomic_write_json(path, obj):
             f.write("\n")
             f.flush()
             os.fsync(f.fileno())
-        os.replace(tmp, path)
+        replace_with_retry(tmp, path)
     except BaseException:
         if os.path.exists(tmp):
             os.unlink(tmp)
@@ -212,7 +229,7 @@ def atomic_write_bytes(path, data):
             target.write(data)
             target.flush()
             os.fsync(target.fileno())
-        os.replace(tmp, path)
+        replace_with_retry(tmp, path)
     except BaseException:
         if os.path.exists(tmp):
             os.unlink(tmp)
