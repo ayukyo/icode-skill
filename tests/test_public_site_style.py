@@ -6,8 +6,8 @@ import unittest
 
 CSS_PATH = Path(__file__).resolve().parents[1] / "site/style.css"
 PALETTE = {
-    "--bg": "#FAFAF7", "--panel": "#FFFFFF", "--text": "#182230",
-    "--muted": "#516071", "--accent": "#4F46E5", "--green": "#087F72",
+    "--bg": "#F4F8F7", "--panel": "#FFFFFF", "--text": "#102432",
+    "--muted": "#506574", "--accent": "#075E56", "--green": "#087F72",
     "--pending": "#946200",
 }
 GRID_SELECTORS = (

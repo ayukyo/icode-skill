@@ -1,4 +1,4 @@
-"""Contracts for the actual bilingual, script-free workflow presentation."""
+"""Contracts for the bilingual workflow presentation and fixed locale script."""
 import copy
 from html.parser import HTMLParser
 import importlib.util
@@ -95,7 +95,10 @@ class PublicDesignTests(unittest.TestCase):
             self.assertRegex(page.find('aside')[0].text(), r'(?i)not a live run|非实际运行')
             links = {a.attrs.get('href') for a in page.find('a')}
             self.assertTrue({'#flow', '#capabilities', '#install'} <= links)
-            self.assertFalse(page.find('script') or page.find('form') or page.find('iframe'))
+            scripts = page.find('script')
+            self.assertEqual(len(scripts), 1)
+            self.assertIn(scripts[0].attrs.get('src'), {'locale.js', '../locale.js'})
+            self.assertFalse(scripts[0].text() or page.find('form') or page.find('iframe'))
 
     def test_optional_paths_scenes_and_evidence_boundaries(self):
         for page in self.pages():

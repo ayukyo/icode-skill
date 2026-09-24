@@ -49,7 +49,7 @@ class PublicSiteTests(unittest.TestCase):
         self.build()
         files = {p.relative_to(self.work / "out").as_posix()
                  for p in (self.work / "out").rglob("*") if p.is_file()}
-        self.assertEqual(files, {"index.html", "en/index.html", "style.css",
+        self.assertEqual(files, {"index.html", "en/index.html", "style.css", "locale.js",
                                  "sitemap.xml", "feed.xml", "public-manifest.json", ".nojekyll",
                                  "llms.txt", "index.md", "en/index.md", *PUBLIC_ASSETS,
                                  *(f"{slug}/index.html" for slug in GUIDE_SLUGS),
@@ -65,9 +65,14 @@ class PublicSiteTests(unittest.TestCase):
             self.assertIn('./install.sh --dry-run --client all', page)
             self.assertIn('/icode crosscheck', page)
             self.assertIn('/icode verify --listen', page)
-            self.assertNotIn('<script', page)
+            self.assertEqual(page.count('<script'), 1)
+            self.assertNotIn('<script>', page)
         self.assertIn('href="style.css"', zh)
         self.assertIn('href="../style.css"', en)
+        self.assertIn('<script src="locale.js"></script>', zh)
+        self.assertIn('<script src="../locale.js"></script>', en)
+        self.assertIn('href="en/?lang=en"', zh)
+        self.assertIn('href="../?lang=zh-CN"', en)
         for slug in GUIDE_SLUGS:
             self.assertIn(f'href="{slug}/"', zh)
             self.assertIn(f'href="{slug}/"', en)
@@ -102,7 +107,7 @@ class PublicSiteTests(unittest.TestCase):
                     f'<meta property="og:image" content="{BASE}assets/icode-ticket-hex-512.png">',
                     page,
                 )
-                self.assertNotIn('<script', page)
+                self.assertIn(f'<script src="{prefix}locale.js"></script>', page)
 
     def test_binary_asset_reader_rejects_non_whitelisted_input_before_read(self):
         builder = self.builder()
@@ -168,7 +173,8 @@ class PublicSiteTests(unittest.TestCase):
                     self.assertIn('Codex', page)
                     self.assertIn('CodeBuddy', page)
                     self.assertIn('WorkBuddy', page)
-                    self.assertNotIn('<script', page)
+                    self.assertIn(f'<script src="{prefix}locale.js"></script>', page)
+                    self.assertIn('?lang=', page)
                     title = page.split('<title>', 1)[1].split('</title>', 1)[0]
                     self.assertNotIn(title, seen_titles)
                     seen_titles.add(title)

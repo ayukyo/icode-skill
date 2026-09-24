@@ -25,11 +25,13 @@ python3 -m unittest discover -s tests -p test_notify_indexnow.py -v
 python3 tests/run_public_site_checks.py --report-dir demo/.icode_output/public-site-checks-01
 ```
 
-`_site/` 被 gitignore。公开文件使用固定白名单：双语首页、双语专题页、首页对应的 `index.md`、品牌资源、`llms.txt`、CSS、sitemap、RSS、公共 URL 清单和 `.nojekyll`；显式配置 IndexNow 后另加 1 个所有权文件。输入仍只有 `site/content.json`、`site/style.css`、`SKILL.md` 三项，不遍历工单或其它资料。站点不是本地 `/icode ui`，不能操作你的工单。
+`_site/` 被 gitignore。公开文件使用固定白名单：双语首页、双语专题页、首页对应的 `index.md`、品牌资源、`llms.txt`、CSS、本地语言选择脚本、sitemap、RSS、公共 URL 清单和 `.nojekyll`；显式配置 IndexNow 后另加 1 个所有权文件。输入只有 `site/content.json`、`site/style.css`、`site/locale.js`、`SKILL.md` 四项，不遍历工单或其它资料。站点不是本地 `/icode ui`，不能操作你的工单。
+
+从默认首页进入时按浏览器语言选择中文或英文，未知语言回退中文；直接打开明确的语言 URL 时保持该语言。手动切换后在本机保存偏好。语言脚本不联网，禁用 JavaScript 时仍可使用两种语言的固定 URL 和手动链接。
 
 ## 面向搜索工具与 Agent 的阅读入口
 
-`llms.txt` 按本站项目子路径提供简短双语索引，链接单一技能真源、完整安装文档、宿主边界和双语 Markdown。HTML 用 `rel="describedby"` 指向它，用 `rel="alternate" type="text/markdown"` 指向同目录 `index.md`。Markdown 从同一 `content.json` 生成，完整保留六步、场景、示例及验证限制，不单独维护第二套文案。页面使用无脚本的 Schema.org `SoftwareSourceCode` microdata 标识名称、仓库、版本、用途和许可证，全部对应可见内容；没有虚构评分、安装量或兼容标签。
+`llms.txt` 按本站项目子路径提供简短双语索引，链接单一技能真源、完整安装文档、宿主边界和双语 Markdown。HTML 用 `rel="describedby"` 指向它，用 `rel="alternate" type="text/markdown"` 指向同目录 `index.md`。Markdown 从同一 `content.json` 生成，完整保留六步、场景、示例及验证限制，不单独维护第二套文案。页面使用静态 Schema.org `SoftwareSourceCode` microdata 标识名称、仓库、版本、用途和许可证，全部对应可见内容；没有虚构评分、安装量或兼容标签。
 
 这是可读取性优化，不是私有排名接口。[llms.txt 是开放提案](https://llmstxt.org/)，不能假定所有 Agent 都采用；[Google 官方说明](https://developers.google.com/search/docs/appearance/ai-features)也明确 AI 搜索没有额外必需的 AI 文本文件或专属结构化数据，符合条件不保证收录。继续以有用的可见文本、正常链接、sitemap 与真实功能说明为基础。[SoftwareSourceCode 属性](https://schema.org/SoftwareSourceCode)
 

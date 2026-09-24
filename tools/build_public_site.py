@@ -276,7 +276,8 @@ def render_page(data, lang, base, version, google_site_verification=None,
     favicon = relative + PUBLIC_ASSETS[0]
     brand_image = relative + PUBLIC_ASSETS[1]
     social_image = base + PUBLIC_ASSETS[2]
-    switch = '<a href="../" lang="zh-CN">中文</a>' if english else '<a href="en/" lang="en">English</a>'
+    switch = ('<a href="../?lang=zh-CN" lang="zh-CN">中文</a>' if english
+              else '<a href="en/?lang=en" lang="en">English</a>')
     docs = REPO + '/blob/main/' + ('README.md' if english else 'README.zh-CN.md')
     flow = ''.join('<li>' + e(label) + '</li>' for label in t['flow'])
     features = ''.join('<article class="card"><h3>' + e(title) + '</h3><p>' + e(body) + '</p></article>'
@@ -336,7 +337,7 @@ def render_page(data, lang, base, version, google_site_verification=None,
 <link rel="icon" type="image/svg+xml" href="{favicon}">
 <link rel="alternate" type="application/rss+xml" title="ICODE version notes" href="{relative}feed.xml">
 <link rel="alternate" type="text/markdown" href="index.md"><link rel="describedby" type="text/plain" href="{relative}llms.txt">
-<link rel="stylesheet" href="{relative}style.css"></head><body itemscope itemtype="https://schema.org/SoftwareSourceCode">
+<script src="{relative}locale.js"></script><link rel="stylesheet" href="{relative}style.css"></head><body itemscope itemtype="https://schema.org/SoftwareSourceCode">
 <meta itemprop="name" content="ICODE"><a class="skip" href="#content">{skip}</a><header><a class="brand" href="{relative or './'}"><img src="{brand_image}" alt="ICODE" width="40" height="40"></a>
 <nav aria-label="{'Navigation' if english else '导航'}"><a href="#flow">{e(t['flow_cta'])}</a><a href="#capabilities">{e(t['scenes_title'])}</a><a href="#install">{e(t['install_cta'])}</a>{switch}<a href="{REPO}">GitHub ↗</a></nav></header>
 <main id="content"><section class="hero"><div><p class="eyebrow">{e(t['eyebrow'])}</p><h1>{e(t['title'])}</h1>
@@ -364,7 +365,7 @@ def render_page(data, lang, base, version, google_site_verification=None,
 
 def render_guide(data, slug, lang, base, google_site_verification=None,
                  bing_site_verification=None):
-    """Render one reviewed, crawlable guide without executable page content."""
+    """Render one reviewed, crawlable guide with the fixed local locale script."""
     guide = data['guides'][slug][lang]
     e = escape
     english = lang == 'en'
@@ -388,8 +389,8 @@ def render_guide(data, slug, lang, base, google_site_verification=None,
     commands = ''.join('<pre><code>' + e(command) + '</code></pre>'
                        for command in guide['commands'])
     back = 'Back to ICODE' if english else '返回 ICODE 首页'
-    language_switch = (f'<a href="{zh_url}" lang="zh-CN">中文</a>' if english
-                       else f'<a href="{en_url}" lang="en">English</a>')
+    language_switch = (f'<a href="{zh_url}?lang=zh-CN" lang="zh-CN">中文</a>' if english
+                       else f'<a href="{en_url}?lang=en" lang="en">English</a>')
     return f'''<!doctype html>
 <html lang="{lang}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 {verification}<title>{e(guide['title'])} — ICODE</title><meta name="description" content="{e(guide['description'])}">
@@ -398,7 +399,7 @@ def render_guide(data, slug, lang, base, google_site_verification=None,
 <meta property="og:title" content="{e(guide['title'])} — ICODE"><meta property="og:description" content="{e(guide['description'])}">
 <meta property="og:url" content="{e(canonical)}"><meta property="og:type" content="article"><meta property="og:image" content="{e(social_image)}"><meta property="og:image:alt" content="ICODE">
 <meta name="twitter:card" content="summary"><meta name="twitter:title" content="{e(guide['title'])} — ICODE"><meta name="twitter:description" content="{e(guide['description'])}"><meta name="twitter:image" content="{e(social_image)}"><meta name="twitter:image:alt" content="ICODE">
-<link rel="icon" type="image/svg+xml" href="{relative}{PUBLIC_ASSETS[0]}"><link rel="stylesheet" href="{relative}style.css"></head>
+<link rel="icon" type="image/svg+xml" href="{relative}{PUBLIC_ASSETS[0]}"><script src="{relative}locale.js"></script><link rel="stylesheet" href="{relative}style.css"></head>
 <body><a class="skip" href="#content">{'Skip to content' if english else '跳到正文'}</a><header><a class="brand" href="{home_relative}"><img src="{relative}{PUBLIC_ASSETS[1]}" alt="ICODE" width="40" height="40"></a>
 <nav aria-label="{'Navigation' if english else '导航'}"><a href="{home_relative}">{back}</a>{language_switch}<a href="{REPO}">GitHub ↗</a></nav></header>
 <main id="content" class="guide-page" itemscope itemtype="https://schema.org/TechArticle"><article><p class="eyebrow">ICODE · Claude Code · Codex · CodeBuddy · WorkBuddy</p><h1 itemprop="headline">{e(guide['title'])}</h1>
@@ -524,7 +525,8 @@ def build(source_root, output, base_url, indexnow_key=None, expected_version=Non
                                       google_site_verification, bing_site_verification).encode(),
              'en/index.html': render_page(data, 'en', base, version,
                                          google_site_verification, bing_site_verification).encode(),
-             'style.css': public_input(root, 'site/style.css').encode(), '.nojekyll': b'',
+             'style.css': public_input(root, 'site/style.css').encode(),
+             'locale.js': public_input(root, 'site/locale.js').encode(), '.nojekyll': b'',
              'llms.txt': render_llms(data, base, version).encode(),
              'index.md': render_markdown(data, 'zh-CN', base, version).encode(),
              'en/index.md': render_markdown(data, 'en', base, version).encode()}

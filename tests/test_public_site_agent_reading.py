@@ -69,7 +69,7 @@ class AgentReadingTests(unittest.TestCase):
             self.assertRegex(text, r'(?i)not.*(?:evidence|verified)|不是.*(?:证据|结果)|不代表设备已验证')
             self.assertRegex(text, r'(?i)does not.*(?:ordinary|unrelated) requests|不接管.*普通请求')
 
-    def test_microdata_describes_visible_source_without_script_or_fake_ratings(self):
+    def test_microdata_describes_visible_source_without_inline_script_or_fake_ratings(self):
         out = self.build()
         for path in ['index.html', 'en/index.html']:
             page = (out / path).read_text()
@@ -78,7 +78,8 @@ class AgentReadingTests(unittest.TestCase):
             self.assertIn(('meta', {'itemprop': 'name', 'content': 'ICODE'}), tags)
             self.assertTrue(any(attrs.get('itemprop') == 'codeRepository' and attrs.get('href') == self.builder.REPO for _, attrs in tags))
             self.assertTrue(any(attrs.get('itemprop') == 'license' for _, attrs in tags))
-            self.assertNotIn('<script', page)
+            self.assertEqual(len([tag for tag, _ in tags if tag == 'script']), 1)
+            self.assertNotIn('<script>', page)
             self.assertNotIn('aggregateRating', page)
 
     def test_only_explicit_text_and_brand_inputs_are_read_without_network(self):
@@ -96,7 +97,7 @@ class AgentReadingTests(unittest.TestCase):
                 patch.object(self.builder, 'public_asset', side_effect=audited_asset), \
                 patch('socket.getaddrinfo', side_effect=AssertionError('offline')):
             self.build()
-        self.assertEqual(set(seen_text), {'site/content.json', 'site/style.css', 'SKILL.md'})
+        self.assertEqual(set(seen_text), {'site/content.json', 'site/style.css', 'site/locale.js', 'SKILL.md'})
         self.assertEqual(tuple(seen_assets), self.builder.PUBLIC_ASSETS)
 
     def test_markdown_does_not_turn_public_text_into_html_or_injected_links(self):
