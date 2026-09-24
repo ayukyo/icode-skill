@@ -648,9 +648,14 @@ def cmd_start(args):
                 if current.get("fresh_sha256"):
                     raise CrosscheckError("已冻结轮缺工作清单，禁止重新生成", gate_id="inspection_worklist")
                 helper = inspection_module()
+                # 默认 scope 用种子文件本身而非其父目录（与正式流程 prepare 传种子文件作
+                # scopes 的已验证行为一致）：种子含仓库根文件（如 build.sh）时，父目录默认
+                # 会引入 "."，在大型仓触发关联枚举预算截断并使清单永久 partial；显式
+                # --scope 仍优先，关联文件的发现依赖显式 --related 与评审者独立核对。
                 report = helper.build_worklist(code_root_for(metadata, Path(target["project_root"])),
                     normalize_code_files(metadata), step="crosscheck", ticket_id=target["ticket_id"],
-                    attempt=f"crosscheck-{current['round']}", related=args.related, scopes=args.scope,
+                    attempt=f"crosscheck-{current['round']}", related=args.related,
+                    scopes=args.scope if args.scope else normalize_code_files(metadata),
                     baselines=requested_baselines)
                 atomic_write_json(worklist, report)
             else:
@@ -711,9 +716,18 @@ def check_inspection(directory, manifest, item, findings=None, *, allow_incomple
     workspace = snapshot["code_root"]
     seeds = [f["declared"] for f in snapshot["code_files"]]
     candidate = dict(report, coverage_status="partial", debt_reason="pending Read") if pending else report
+    # 覆盖门禁语义（对齐 steps/crosscheck.md L2「blocked 或带建议通过」与 inspection_worklist
+    # 「预算/超时记录 partial+unobserved 即显式债务」）：缺阅读（任一单元缺 fresh Read）仍只能
+    # 以 blocked 终结；全部单元均已实读、覆盖缺口仅为清单已记录的范围债务（unobserved+debt_reason，
+    # 如大仓关联枚举预算截断）时，允许非 blocked 结论终结，债务由 evidence_boundary 承载。
+    reads_complete = all(
+        isinstance(f.get("reads"), dict) and bool(f["reads"].get("fresh"))
+        for unit in report.get("units", []) for f in unit.get("files", [])
+    )
     issues = helper.validate_worklist(candidate, workspace, code_files=seeds,
         step="crosscheck", ticket_id=manifest["target"]["ticket_id"],
-        attempt=f"crosscheck-{item['round']}", allow_incomplete=allow_incomplete or pending)
+        attempt=f"crosscheck-{item['round']}",
+        allow_incomplete=allow_incomplete or pending or reads_complete)
     if report.get("mode") != "full":
         issues.append("crosscheck 必须完整独立审查")
     if findings is not None:
