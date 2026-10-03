@@ -6,8 +6,8 @@ SYNC="$ROOT/scripts/sync-to-global.sh"
 INSTALL="$ROOT/install.sh"
 COMMAND_SOURCE="$ROOT/integrations/codebuddy/commands/icode.md"
 LEGACY_COMMANDS_DIR="$ROOT/integrations/codebuddy/commands/legacy"
-TMP="$(mktemp -d)"
-trap 'rm -rf "$TMP"' EXIT
+TMP="$(mktemp -d /tmp/icode_cb_sync.XXXXXX)"
+trap 'rm -rf "$TMP" >/dev/null 2>&1 &' EXIT
 
 PASS=0
 FAIL=0
@@ -212,7 +212,7 @@ else
 fi
 
 if grep -q '/icode ui' "$COMMAND_SOURCE" 2>/dev/null \
-  && grep -q 'claude|codex|codebuddy|all' <("$SYNC" --help); then
+  && grep -q 'claude|codex|codebuddy|workbuddy|all' <("$SYNC" --help); then
   ok "published bridge and CLI help expose the current CodeBuddy contract"
 else
   bad "published bridge and CLI help expose the current CodeBuddy contract"

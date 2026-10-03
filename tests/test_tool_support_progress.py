@@ -36,15 +36,34 @@ class ToolSupportProgressTest(unittest.TestCase):
 
     def test_project_intake_contract_runs_without_ripgrep(self):
         # The hosted runner need not have developer conveniences such as rg.
+        # Instead of symlinks (which need administrator/developer-mode
+        # privileges on Windows), shim the PATH with minimal interpreter
+        # forwarders that delegate to the real absolute executables.
         with tempfile.TemporaryDirectory(prefix='icode-contract-path-') as directory:
+            directory = Path(directory)
+            bash_executable = Path(shutil.which('bash'))
             for command in ('bash', 'dirname', 'grep', 'python3'):
                 executable = shutil.which(command)
                 self.assertIsNotNone(executable, command)
-                (Path(directory) / command).symlink_to(executable)
+                shim = directory / command
+                if command == 'bash':
+                    # Invoke the script host by absolute path so the shims
+                    # work even when this PATH alone cannot resolve bash.
+                    shim.write_text(
+                        '#!/bin/sh\n'
+                        f'exec {json.dumps(executable)} "$@"\n',
+                        encoding='utf-8',
+                    )
+                else:
+                    shim.write_text(
+                        f'#!{bash_executable.as_posix()}\n'
+                        f'exec {json.dumps(executable)} "$@"\n',
+                        encoding='utf-8',
+                    )
             self.assertIsNone(shutil.which('rg', path=directory))
-            environment = dict(os.environ, PATH=directory)
+            environment = dict(os.environ, PATH=str(directory))
             result = subprocess.run(
-                [str(Path(directory) / 'bash'), str(ROOT / 'tests/test_project_intake_contract.sh')],
+                [bash_executable, str(ROOT / 'tests/test_project_intake_contract.sh')],
                 cwd=ROOT, env=environment, text=True, capture_output=True, timeout=15,
             )
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)

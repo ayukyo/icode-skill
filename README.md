@@ -2,7 +2,7 @@
 
 <img src="assets/icode-ticket-hex.svg" alt="ICODE workflow icon" width="128">
 
-# ICode — AI Coding Workflow for Claude Code, Codex and CodeBuddy
+# ICode — AI Coding Workflow for Claude Code, Codex, CodeBuddy and WorkBuddy
 
 **6-step workflow: Plan → Review → Finalize → Code → Deep Check → Audit.** Run all at once, or step-by-step and switch models between steps.
 
@@ -15,7 +15,7 @@
 
 [Website & workflow diagrams](https://ayukyo.github.io/icode-skill/en/) · [中文官网](https://ayukyo.github.io/icode-skill/) · [中文说明](README.zh-CN.md) · [Installation](#installation)
 
-ICode is an open-source AI coding workflow Skill for Claude Code, Codex and CodeBuddy. Ticket-based development connects requirements, design, implementation, code review and evidence-based verification, with saved state for resuming interrupted work across sessions.
+ICode is an open-source AI coding workflow Skill for Claude Code, Codex, CodeBuddy and WorkBuddy. Ticket-based development connects requirements, design, implementation, code review and evidence-based verification, with saved state for resuming interrupted work across sessions.
 
 For multi-model code review, switch agents or models yourself, then run `/icode crosscheck` on a completed ticket; ICODE does not automatically switch models. The optional `/icode ui` provides a local ticket workspace. Use ICODE only when you name ICODE or resume a bound ICODE ticket; it does not take over unrelated requests.
 
@@ -167,7 +167,7 @@ Every main ticket step produces a real artifact in `.icode_output/.icode_output_
 
 ### One public installer
 
-Clone the source into a neutral directory, then use the root installer. It installs ICODE, every shared skill declared by [`skill-packs/manifest.json`](skill-packs/manifest.json), host command adapters, and the MCP servers. The installer keeps `default: claude` (`--client claude`); use `--client all` for Claude Code and Codex together. Use `--client codebuddy` for CodeBuddy. With `all`, CodeBuddy is added only when `~/.codebuddy/` is detected, preserving the historical two-host behavior.
+Clone the source into a neutral directory, then use the root installer. It installs ICODE, every shared skill declared by [`skill-packs/manifest.json`](skill-packs/manifest.json), host command adapters, and the MCP servers. The installer keeps `default: claude` (`--client claude`); use `--client all` for Claude Code and Codex together. Use `--client codebuddy` for CodeBuddy and `--client workbuddy` for WorkBuddy. With `all`, CodeBuddy is added only when `~/.codebuddy/` is detected and WorkBuddy only when `~/.workbuddy/` is detected, preserving the historical two-host behavior.
 
 ```bash
 git clone https://github.com/ayukyo/icode-skill ~/icode-skill
@@ -178,6 +178,8 @@ cd ~/icode-skill
 Use `./install.sh --dry-run --client all` for a zero-write preflight, or `--skip-mcp` when only ICODE and the shared skills are required. ICODE is installed as `<skills-root>/icode/`; each shared skill is generated from its source template at `<skills-root>/<skill-name>/SKILL.md`. Source templates cannot be discovered as nested skills.
 
 CodeBuddy scans `~/.claude/skills/`, so it reuses that ICODE copy rather than creating a third one. The installer atomically publishes the versioned [`integrations/codebuddy/commands/icode.md`](integrations/codebuddy/commands/icode.md) template as `~/.codebuddy/commands/icode.md`, providing `/icode ...`; a separate ownership marker permits identical-file adoption and rejects conflicting unmanaged commands before any Skill root is changed. CodeBuddy MCP entries remain isolated in `~/.codebuddy/mcp.json`.
+
+WorkBuddy uses its own skill root `~/.workbuddy/skills/` and its own command bridge `~/.workbuddy/commands/icode.md` (same template, ownership marker artifact `workbuddy-command`); its MCP entries are registered into `~/.workbuddy/mcp.json`. `--client workbuddy` installs all of these; WorkBuddy-specific tool syntax in-session follows the current host's exposed capabilities.
 
 The installer writes an ownership marker into managed skills. An identical unmanaged same-name skill is adopted safely; a different unmanaged same-name skill is refused before either host is modified. Runtime configuration and caches are preserved.
 

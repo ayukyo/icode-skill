@@ -1,10 +1,10 @@
 <p align="center"><img src="assets/icode-ticket-hex.svg" alt="ICODE 工作流图标" width="128"></p>
 
-# ICode — 面向 Claude Code、Codex 与 CodeBuddy 的 AI 编码工作流
+# ICode — 面向 Claude Code、Codex、CodeBuddy 与 WorkBuddy 的 AI 编码工作流
 
 > [官网与流程图解](https://ayukyo.github.io/icode-skill/) · [English website](https://ayukyo.github.io/icode-skill/en/) · [English README](README.md) · [安装](#安装)
 
-ICode 是可供 Claude Code、Codex 与 CodeBuddy 使用的开源 AI 编码工作流 Skill。通过工单驱动开发，串联需求、设计、实现、代码审查与证据化验证，保存状态以支持跨会话断点续接。
+ICode 是可供 Claude Code、Codex、CodeBuddy 与 WorkBuddy 使用的开源 AI 编码工作流 Skill。通过工单驱动开发，串联需求、设计、实现、代码审查与证据化验证，保存状态以支持跨会话断点续接。
 
 多模型代码审查由用户先自行切换 Agent/模型，再用 `/icode crosscheck` 复评已完成工单；ICODE 不会自动切换模型。可选的 `/icode ui` 提供本地工单工作台。仅在点名 ICODE 或续接已绑定的 ICODE 工单时使用，不接管未指定 ICODE 的普通请求。
 
@@ -51,7 +51,7 @@ ICode 是可供 Claude Code、Codex 与 CodeBuddy 使用的开源 AI 编码工�
 
 ### 开源统一安装入口
 
-把源码 clone 到普通目录，再运行仓库顶层安装器。它会一次性安装 ICODE、[`skill-packs/manifest.json`](skill-packs/manifest.json) 声明的全部共享技能、宿主命令桥和 MCP。默认只安装 Claude（`--client claude`）；Claude Code 与 Codex 双端使用 `--client all`。CodeBuddy 单独使用 `--client codebuddy`；`all` 仅在检测到 `~/.codebuddy/` 时追加 CodeBuddy，避免原有双端安装凭空创建第三方配置。
+把源码 clone 到普通目录，再运行仓库顶层安装器。它会一次性安装 ICODE、[`skill-packs/manifest.json`](skill-packs/manifest.json) 声明的全部共享技能、宿主命令桥和 MCP。默认只安装 Claude（`--client claude`）；Claude Code 与 Codex 双端使用 `--client all`。CodeBuddy 单独使用 `--client codebuddy`，WorkBuddy 单独使用 `--client workbuddy`；`all` 仅在检测到 `~/.codebuddy/` 时追加 CodeBuddy、检测到 `~/.workbuddy/` 时追加 WorkBuddy，避免原有双端安装凭空创建第三方配置。
 
 ```bash
 git clone https://github.com/ayukyo/icode-skill ~/icode-skill
@@ -62,6 +62,8 @@ cd ~/icode-skill
 `./install.sh --dry-run --client all` 可做零写入预检；`--skip-mcp` 只安装 ICODE 和共享技能。ICODE 本体发布到 `<skills-root>/icode/`，每个共享技能从不可发现的源模板生成到顶层 `<skills-root>/<skill-name>/SKILL.md`，不会再出现嵌套同名技能。
 
 CodeBuddy 复用 `~/.claude/skills/`，不会产生第三份 ICODE 副本；安装器会把版本化模板 [`integrations/codebuddy/commands/icode.md`](integrations/codebuddy/commands/icode.md) 原子发布为 `~/.codebuddy/commands/icode.md`，从而提供 `/icode ...`。命令桥使用独立所有权标记：同内容旧文件可接管，不同内容的未托管文件会在任何 Skill 写入前拒绝覆盖。其 MCP 独立注册到 `~/.codebuddy/mcp.json`。
+
+WorkBuddy 使用独立技能根 `~/.workbuddy/skills/` 与命令桥 `~/.workbuddy/commands/icode.md`（同一模板，所有权标记 artifact 为 `workbuddy-command`），MCP 独立注册到 `~/.workbuddy/mcp.json`。`--client workbuddy` 一次性安装以上全部；会话内工具语法以当前 WorkBuddy 实际暴露能力为准。
 
 安装器通过所有权标记管理共享技能：内容一致的旧副本可以无损接管；内容不同的未托管的同名技能会在任何宿主写入前拒绝，不会静默覆盖。运行配置和缓存继续保留。
 

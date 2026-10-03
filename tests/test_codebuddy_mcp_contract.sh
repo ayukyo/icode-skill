@@ -2,8 +2,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-TMP="$(mktemp -d)"
-trap 'rm -rf "$TMP"' EXIT
+TMP="$(mktemp -d /tmp/icode_cb_mcp.XXXXXX)"
+trap 'rm -rf "$TMP" >/dev/null 2>&1 &' EXIT
 
 PASS=0
 FAIL=0
@@ -23,7 +23,7 @@ printf '%s\n' \
   '{"theme":"dark","mcpServers":{"demo":{"command":"demo"},"keep":{"command":"keep"}}}' \
   >"$CB_HOME/.codebuddy/mcp.json"
 OUTPUT=""
-if OUTPUT="$(HOME="$CB_HOME" bash "$FIXTURE/uninstall.sh" \
+if OUTPUT="$(HOME="$CB_HOME" USERPROFILE="$CB_HOME" bash "$FIXTURE/uninstall.sh" \
      --client codebuddy demo 2>&1)" \
   && python3 - "$CB_HOME/.codebuddy/mcp.json" <<'PY'
 import json
@@ -40,7 +40,7 @@ else
 fi
 
 BEFORE="$(sha256sum "$CB_HOME/.codebuddy/mcp.json")"
-if HOME="$CB_HOME" bash "$FIXTURE/uninstall.sh" \
+if HOME="$CB_HOME" USERPROFILE="$CB_HOME" bash "$FIXTURE/uninstall.sh" \
      --client codebuddy demo >/dev/null 2>&1 \
   && [[ "$BEFORE" == "$(sha256sum "$CB_HOME/.codebuddy/mcp.json")" ]]; then
   ok "repeated CodeBuddy MCP uninstall is idempotent"
@@ -52,7 +52,7 @@ BROKEN_HOME="$TMP/broken-home"
 mkdir -p "$BROKEN_HOME/.codebuddy"
 printf '{broken json\n' >"$BROKEN_HOME/.codebuddy/mcp.json"
 BROKEN_HASH="$(sha256sum "$BROKEN_HOME/.codebuddy/mcp.json")"
-if HOME="$BROKEN_HOME" python3 "$FIXTURE/_lib/client_registry.py" \
+if HOME="$BROKEN_HOME" USERPROFILE="$BROKEN_HOME" python3 "$FIXTURE/_lib/client_registry.py" \
      codebuddy-unregister demo >/dev/null 2>&1; then
   bad "malformed CodeBuddy MCP config fails closed"
 elif [[ "$BROKEN_HASH" == "$(sha256sum "$BROKEN_HOME/.codebuddy/mcp.json")" ]]; then
@@ -62,8 +62,8 @@ else
 fi
 
 REGISTRY_HELP="$(python3 "$ROOT/mcp/_lib/client_registry.py" 2>&1 || true)"
-if bash "$ROOT/mcp/install.sh" --help | grep -q 'claude|codex|codebuddy|all' \
-  && grep -q 'claude|codex|codebuddy|all' "$ROOT/mcp/uninstall.sh" \
+if bash "$ROOT/mcp/install.sh" --help | grep -q 'claude|codex|codebuddy|workbuddy|all' \
+  && grep -q 'claude|codex|codebuddy|workbuddy|all' "$ROOT/mcp/uninstall.sh" \
   && grep -q 'codebuddy-register' <<<"$REGISTRY_HELP"; then
   ok "MCP entrypoint help exposes symmetric CodeBuddy operations"
 else

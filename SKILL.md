@@ -1,6 +1,6 @@
 ---
 name: icode
-description: ICODE 端到端编码工作流，适配 Claude Code、Codex、CodeBuddy。用户调用 /icode、$icode，或说“使用 ICODE”“用 icode 帮我”“让 ICODE”“Use ICODE”完成开发、日志分析、设计/代码审查、证据验证、独立复评、文档/Word/PPT、学习、工单管理等任务时使用；也用于已绑定 ICODE 工单的续接。Use when users explicitly request ICODE for an AI coding workflow, ticket-based development, code review, log analysis, documentation, or evidence verification; also use to resume a bound ICODE ticket. 支持自然语言目标与限制，不要求背命令；能力咨询只解释不执行。保留全部 /icode 子命令，复用既有步骤与安全门禁，不接管未指定 ICODE 的普通请求。
+description: ICODE 端到端编码工作流，适配 Claude Code、Codex、CodeBuddy、WorkBuddy。用户调用 /icode、$icode，或说“使用 ICODE”“用 icode 帮我”“让 ICODE”“Use ICODE”完成开发、日志分析、设计/代码审查、证据验证、独立复评、文档/Word/PPT、学习、工单管理等任务时使用；也用于已绑定 ICODE 工单的续接。Use when users explicitly request ICODE for an AI coding workflow, ticket-based development, code review, log analysis, documentation, or evidence verification; also use to resume a bound ICODE ticket. 支持自然语言目标与限制，不要求背命令；能力咨询只解释不执行。保留全部 /icode 子命令，复用既有步骤与安全门禁，不接管未指定 ICODE 的普通请求。
 ---
 
 **版本**: v2.32.0
@@ -41,7 +41,7 @@ description: ICODE 端到端编码工作流，适配 Claude Code、Codex、CodeB
 |------|------|-----------|
 | `[辅助]` `/icode help` | 输出命令一览、自然语言分类示例与组合/续接用法（[入口与示例](references/natural_language_entry.md)） | 否 |
 | `[管理]` `/icode ui` | 启动/复用本地 ICODE 工作台；全局项目/工单管理、手动/默认30秒自动刷新、设置和受控步骤执行 | 否 |
-| `[辅助]` `/icode install [--client claude\|codex\|codebuddy\|all] [--basic\|--preview]` | ICODE、宿主命令桥与 MCP 一键安装；`--basic` 跳过 MCP，`--preview` 零写入预览 | 否 |
+| `[辅助]` `/icode install [--client claude\|codex\|codebuddy\|workbuddy\|all] [--basic\|--preview]` | ICODE、宿主命令桥与 MCP 一键安装；`--basic` 跳过 MCP，`--preview` 零写入预览 | 否 |
 | `[入口]` `/icode log [零散信息...]` | 日志根因分析→转修复需求；版本基线门；TB 复用/批量/`--debug`/`--worktree`；对外简报 | ✅ 每次都新建（同 TB 单复用除外） |
 | `[入口]` `/icode init [--guide] [<需求或指南约束>]` | 常规：新建并产出 `00_init.md`；`--guide`：复用最新合格 init，刷新新人指南+审计 | 常规 ✅；guide 否 |
 | `[流程]` `/icode start <需求>` | 全流程：创建/复用目录 → 步骤1~6 串联；`--worktree` | ✅ 创建 / 复用 |

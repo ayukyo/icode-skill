@@ -6,7 +6,8 @@
 #   ./mcp/uninstall.sh <name>             # 只卸载指定子工程
 #   ./mcp/uninstall.sh --client codex     # 全部卸载 + 同时清 Codex 注册
 #   ./mcp/uninstall.sh --client codebuddy # 全部卸载 + 同时清 CodeBuddy 注册
-#   --client 取值: claude(默认)| codex | codebuddy | all
+#   ./mcp/uninstall.sh --client workbuddy # 全部卸载 + 同时清 WorkBuddy 注册
+#   --client 取值: claude(默认)| codex | codebuddy | workbuddy | all
 set -e
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -17,7 +18,7 @@ positional=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --client)
-      if [ $# -lt 2 ]; then echo "❌ --client 需要参数: claude|codex|codebuddy|all"; exit 1; fi
+      if [ $# -lt 2 ]; then echo "❌ --client 需要参数: claude|codex|codebuddy|workbuddy|all"; exit 1; fi
       client="$2"; shift 2 ;;
     --client=*)
       client="${1#--client=}"; shift ;;
@@ -26,8 +27,8 @@ while [ $# -gt 0 ]; do
   esac
 done
 case "$client" in
-  claude|codex|codebuddy|all) ;;
-  *) echo "❌ --client 取值须为 claude|codex|codebuddy|all (当前: $client)"; exit 1 ;;
+  claude|codex|codebuddy|workbuddy|all) ;;
+  *) echo "❌ --client 取值须为 claude|codex|codebuddy|workbuddy|all (当前: $client)"; exit 1 ;;
 esac
 
 # 探测 Python 解释器(Codex 分支跑 client_registry.py 用; 与子工程 uninstall 探测模式一致)
@@ -68,7 +69,8 @@ case "$client" in
   claude) echo "   客户端: claude (~/.claude.json, 默认)" ;;
   codex)  echo "   客户端: codex (子工程卸载 Claude + codex mcp 移除)" ;;
   codebuddy) echo "   客户端: codebuddy (子工程卸载 Claude + CodeBuddy 配置移除)" ;;
-  all)    echo "   客户端: all (Claude Code + Codex + CodeBuddy 三端清理)" ;;
+  workbuddy) echo "   客户端: workbuddy (子工程卸载 Claude + WorkBuddy 配置移除)" ;;
+  all)    echo "   客户端: all (Claude Code + Codex + CodeBuddy + WorkBuddy 全端清理)" ;;
 esac
 echo ""
 
@@ -111,6 +113,19 @@ for un in "${uninstallers[@]}"; do
       failed+=("$name(codebuddy)")
     fi
   fi
+  # WorkBuddy 分支不依赖 entry 导出；子工程卸载可能已先清理该文件。
+  if [ "$client" = "workbuddy" ] || [ "$client" = "all" ]; then
+    if [ -z "$PYTHON_BIN" ]; then
+      echo "   ⚠️ 未找到 python3/python，跳过 WorkBuddy 清理（client_registry.py 需 Python）"
+      fail_count=$((fail_count + 1))
+      failed+=("$name(workbuddy:no-python)")
+    elif "$PYTHON_BIN" "$HERE/_lib/client_registry.py" workbuddy-unregister "$name"; then
+      :
+    else
+      fail_count=$((fail_count + 1))
+      failed+=("$name(workbuddy)")
+    fi
+  fi
   echo ""
 done
 
@@ -126,6 +141,7 @@ case "$client" in
     echo "   Claude Code: 重启 Claude Code 后生效"
     echo "   Codex:       新建或重开 Codex 任务后生效"
     echo "   CodeBuddy:   新建或重开 CodeBuddy 会话后生效"
+    echo "   WorkBuddy:   新建或重开 WorkBuddy 会话后生效"
     ;;
   codex)
     echo "🎉 全部卸载完成!"
@@ -136,6 +152,11 @@ case "$client" in
     echo "🎉 全部卸载完成!"
     echo "   Claude Code: 重启 Claude Code 后生效"
     echo "   CodeBuddy:   新建或重开 CodeBuddy 会话后生效"
+    ;;
+  workbuddy)
+    echo "🎉 全部卸载完成!"
+    echo "   Claude Code: 重启 Claude Code 后生效"
+    echo "   WorkBuddy:   新建或重开 WorkBuddy 会话后生效"
     ;;
   *)
     echo "🎉 全部卸载完成!重启 Claude Code 让注册失效。"

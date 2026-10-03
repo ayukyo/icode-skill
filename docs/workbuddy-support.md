@@ -1,6 +1,6 @@
 # WorkBuddy 接入与上架边界
 
-核查日期：2026-09-21。状态：**官方兼容路径已调研；ICODE 专用安装目标、宿主端到端验证和市场上架未完成**。
+核查日期：2026-09-21（首次调研）；2026-10-02（`--client workbuddy` 安装目标落地）。状态：**安装器/命令桥/MCP 注册已实现并有契约测试；WorkBuddy 宿主实机端到端验证和市场上架未完成**。
 
 ## 可以复用什么
 
@@ -15,7 +15,7 @@ WorkBuddy 的[项目配置说明](https://www.codebuddy.cn/docs/workbuddy/From-B
 | 市场 | 官方提供[技能市场](https://www.workbuddy.ai/docs/workbuddy/From-Beginner-to-Expert-Guide/Function-Description/Skills-Market)；SkillHub 有独立发布/审核流程 | 获得真实条目后，还要在目标 WorkBuddy 版本中搜索、安装和运行 |
 | Runtime | 当前 ICODE runner 为 Claude/Codex | 不把技能可读取等同新增模型执行后端；本轮不改 UI/runner |
 
-当前 `install.sh` 的 `--client` 只有 `claude`、`codex`、`codebuddy`、`all`，**没有 `--client workbuddy`**。CodeBuddy 安装中的共享技能路径与命令桥还需在 WorkBuddy 实机确认；不要运行不存在的参数，或用重命名宿主绕过校验。
+当前 `install.sh` 的 `--client` 为 `claude`、`codex`、`codebuddy`、`workbuddy`、`all`。**2026-10-02 起已提供 `--client workbuddy`**：ICODE 同步到独立技能根 `~/.workbuddy/skills`、命令桥发布到 `~/.workbuddy/commands/icode.md`（所有权标记 `workbuddy-command`）、MCP 注册到 `~/.workbuddy/mcp.json`；`--client all` 在检测到 `~/.workbuddy/` 时追加该宿主。合同与 CodeBuddy 安装路径逐项对齐，契约测试见 `tests/test_workbuddy_sync_contract.sh` 与 `tests/test_workbuddy_mcp_contract.sh`。仍不存在的入口：WorkBuddy Runtime runner（`/icode ui` 后端仍仅 Claude/Codex）。宿主实机加载/执行验证未完成，不宣称全流程兼容。
 
 同日补充：[完整包安装验证](host-loading-validation.md)已通过官方 Skills CLI 的
 `--agent codebuddy --copy` 路线，将17个技能及344项技能文件安装到独立项目的
@@ -38,7 +38,7 @@ WorkBuddy 的[项目配置说明](https://www.codebuddy.cn/docs/workbuddy/From-B
 2. 隔离目录验证完整步骤、工具、schema、gate 与共享技能；不得依赖开发者机器已有的私有路径。
 3. 在实际 WorkBuddy 中确认技能被发现，help、只规划、恢复工单和不隐式编译/部署的 verify 行为正确。
 4. MCP 已配置和缺失两种情况都检查；缺失时明确降级，不假装门禁已调用。
-5. 重复安装/已有 CodeBuddy 共存不覆盖用户设置；Claude Code、Codex、CodeBuddy 既有测试保持通过。
+5. 重复安装/已有 CodeBuddy 共存不覆盖用户设置；Claude Code、Codex、CodeBuddy、WorkBuddy 既有测试保持通过。
 6. 获得提交回执、审核状态和真实条目 URL 后再宣布上架；WorkBuddy 市场可见与 SkillHub 审核分别记录。
 
 当前没有执行 WorkBuddy 宿主实机测试，也没有发布成功回执。更多渠道的公开技术边界见[发现说明](agent-skill-discovery.md)。

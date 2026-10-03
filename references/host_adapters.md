@@ -1,15 +1,15 @@
-# Claude Code / Codex / CodeBuddy 宿主适配契约
+# Claude Code / Codex / CodeBuddy / WorkBuddy 宿主适配契约
 
 共享 SKILL 描述“要完成的操作”，ICODE 在运行时映射到当前宿主可用工具。方法论只有一份，工具语法不进入共享技能正文。
 
-| 抽象操作 | Claude Code 适配 | Codex 适配 | CodeBuddy 适配 | 无能力时 |
-|---|---|---|---|---|
-| 读文件/文本检索 | Read、Grep、Glob 或 shell `rg` | 文件读取工具或 shell `rg` | `read_file` / `search_content` / `search_file` 或 shell `rg` | 使用当前宿主最窄只读命令 |
-| 结构化思考 | 已注册的 sequential-thinking MCP | 当前可调用的 sequential-thinking MCP | 依据本会话实际暴露的工具；有工具发现接口才调用，无则检查直接工具列表，配置读取走 `~/.codebuddy/mcp.json` | 按项目/步骤允许的降级路径处理；上位规则要求停下时不得擅自替代 |
-| 独立审查 | 后台 Agent + 有界等待 | collaboration 子代理 + 有界等待 | 按实际版本的可用 Agent 类型选择；当前 CLI 文档已有 general-purpose/Plan/Explore，不能一律按“仅检索型”处理 | 标记无独立审查环境；主代理复核不冒充独立裁决 |
-| 外部文档/媒体 | 当前已注册 MCP；native 按路由上限串行分批 | 当前已注册 MCP 或本地 CLI；native 按路由上限串行分批 | 当前已注册 MCP（同 `{mcpServers}` 结构）；无 MCP 时走文本优先 + 未观测边界 | 声明降级，保留未观测边界 |
-| 邮件/线程/附件 | 显式网页邮件链接优先已登录浏览器；导出件走离线 intake；无人值守才用邮箱观察器 | 显式网页邮件链接优先当前已登录浏览器；导出件走离线 intake；无人值守才用邮箱观察器 | 同左（导出件走 `tools/email_intake.py` 离线 intake） | 请求限定范围的 `.eml`/`.msg` 导出；保持线程和附件缺口 |
-| 文件修改 | 宿主提供的精确编辑工具 | `apply_patch` | `write_to_file` / `replace_in_file` | 停止修改，不用不安全覆盖命令替代 |
+| 抽象操作 | Claude Code 适配 | Codex 适配 | CodeBuddy 适配 | WorkBuddy 适配 | 无能力时 |
+|---|---|---|---|---|---|
+| 读文件/文本检索 | Read、Grep、Glob 或 shell `rg` | 文件读取工具或 shell `rg` | `read_file` / `search_content` / `search_file` 或 shell `rg` | 以当前会话实际暴露的内置工具为准；无命中时走 shell `rg` | 使用当前宿主最窄只读命令 |
+| 结构化思考 | 已注册的 sequential-thinking MCP | 当前可调用的 sequential-thinking MCP | 依据本会话实际暴露的工具；有工具发现接口才调用，无则检查直接工具列表，配置读取走 `~/.codebuddy/mcp.json` | 同 CodeBuddy 原则；配置读取走 `~/.workbuddy/mcp.json` | 按项目/步骤允许的降级路径处理；上位规则要求停下时不得擅自替代 |
+| 独立审查 | 后台 Agent + 有界等待 | collaboration 子代理 + 有界等待 | 按实际版本的可用 Agent 类型选择；当前 CLI 文档已有 general-purpose/Plan/Explore，不能一律按“仅检索型”处理 | 以当前会话实际暴露的 Agent/子代理类型为准，先探测再使用 | 标记无独立审查环境；主代理复核不冒充独立裁决 |
+| 外部文档/媒体 | 当前已注册 MCP；native 按路由上限串行分批 | 当前已注册 MCP 或本地 CLI；native 按路由上限串行分批 | 当前已注册 MCP（同 `{mcpServers}` 结构）；无 MCP 时走文本优先 + 未观测边界 | 当前已注册 MCP（`~/.workbuddy/mcp.json` 同 `{mcpServers}` 结构）；无 MCP 时走文本优先 + 未观测边界 | 声明降级，保留未观测边界 |
+| 邮件/线程/附件 | 显式网页邮件链接优先已登录浏览器；导出件走离线 intake；无人值守才用邮箱观察器 | 显式网页邮件链接优先当前已登录浏览器；导出件走离线 intake；无人值守才用邮箱观察器 | 同左（导出件走 `tools/email_intake.py` 离线 intake） | 同左（导出件走 `tools/email_intake.py` 离线 intake） | 请求限定范围的 `.eml`/`.msg` 导出；保持线程和附件缺口 |
+| 文件修改 | 宿主提供的精确编辑工具 | `apply_patch` | `write_to_file` / `replace_in_file` | 以当前会话实际暴露的写入/编辑工具为准；禁止不安全整文件覆盖 | 停止修改，不用不安全覆盖命令替代 |
 
 ## 自然语言入口适配
 
@@ -31,11 +31,21 @@
 
 2026-09-21 官方合同核对：[Skills 与 Hook](https://www.codebuddy.ai/docs/cli/skills)、[子代理类型](https://www.codebuddy.ai/docs/cli/sub-agents)。这些是能力存在的文档依据，不代替当前用户安装版本的运行验证。
 
-## WorkBuddy 与其它宿主
+2026-09-21 官方合同核对：[Skills 与 Hook](https://www.codebuddy.ai/docs/cli/skills)、[子代理类型](https://www.codebuddy.ai/docs/cli/sub-agents)。这些是能力存在的文档依据，不代替当前用户安装版本的运行验证。
 
-WorkBuddy 的代码开发场景有 `.codebuddy/` 兼容路径，但不能把 CodeBuddy CLI 的全部工具、Hook 或配置位置直接外推给它。其专用 MCP 文档列出 `.workbuddy/mcp.json`；实际技能目录、命令优先级、MCP 生效和权限须按产品版本检查，见 [WorkBuddy 接入说明](../docs/workbuddy-support.md)。目前没有 `--client workbuddy` 或 WorkBuddy Runtime runner，不伪造这两个入口。
+## WorkBuddy 专项约定
 
-Cursor、Copilot、Gemini CLI、OpenCode 等宿主按[发现矩阵](../docs/agent-skill-discovery.md)分别验证：目录能读只是第一层，还需完整依赖、命令命名空间、权限、MCP、恢复与停止点。统一复用工作流，不复制宿主专属步骤，不把插件清单解析通过说成全流程兼容。现有 Claude/Codex/CodeBuddy 安装和 Runtime 支持范围不变。
+1. **安装目标**：`--client workbuddy` 安装 ICODE 到独立技能根 `~/.workbuddy/skills`（不复用 Claude 根），并发布命令桥 `~/.workbuddy/commands/icode.md`。所有权标记、同内容接管、未托管冲突失败关闭等合同与 CodeBuddy 命令桥一致（marker artifact 为 `workbuddy-command`）。
+2. **MCP 配置位置**：WorkBuddy 配置使用 `~/.workbuddy/mcp.json`（**不是** `~/.claude.json` 或 `~/.codebuddy/mcp.json`），条目同为 `{mcpServers:{name:{command,args,env}}}` 结构。MCP 注册/卸载只走 `mcp/install.sh` / `mcp/uninstall.sh --client workbuddy`；普通技能同步不碰该文件。
+3. **项目级配置**：WorkBuddy 代码开发场景官方文档称复用 `.codebuddy/` 项目配置（技能、命令、规则），且另有 `~/.workbuddy/mcp.json` 与项目 `.workbuddy/mcp.json` 专用 MCP 路径。实际技能加载优先级、命令命名空间与 MCP 生效须按当前产品版本实测，不把文档路径直接当作运行证据。
+4. **工具发现**：以当前会话能力为准；注册配置只是配置证据，不证明本会话可调用。
+5. **运行时边界**：WorkBuddy 会话由宿主管理模型与工具；ICODE Runtime runner（`/icode ui`）当前仍只支持 Claude/Codex 后端，不把技能可读取等同新增 Runtime 执行后端。
+
+## WorkBuddy 与其它宿主（历史边界记录）
+
+WorkBuddy 的代码开发场景有 `.codebuddy/` 兼容路径，但不能把 CodeBuddy CLI 的全部工具、Hook 或配置位置直接外推给它。其专用 MCP 文档列出 `.workbuddy/mcp.json`；实际技能目录、命令优先级、MCP 生效和权限须按产品版本检查，见 [WorkBuddy 接入说明](../docs/workbuddy-support.md)。`--client workbuddy` 安装目标已于 2026-10-02 加入（技能根、命令桥与 MCP 注册，见上方「WorkBuddy 专项约定」），但 WorkBuddy 宿主实机端到端验证仍未完成；不存在 WorkBuddy Runtime runner，不伪造该入口。
+
+Cursor、Copilot、Gemini CLI、OpenCode 等宿主按[发现矩阵](../docs/agent-skill-discovery.md)分别验证：目录能读只是第一层，还需完整依赖、命令命名空间、权限、MCP、恢复与停止点。统一复用工作流，不复制宿主专属步骤，不把插件清单解析通过说成全流程兼容。现有 Claude/Codex/CodeBuddy/WorkBuddy 安装和 Runtime 支持范围不变。
 
 ## 共同约束
 

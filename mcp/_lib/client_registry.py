@@ -1,9 +1,11 @@
-"""跨客户端 MCP 注册分发共享模块（Claude Code + Codex + CodeBuddy）。
+"""跨客户端 MCP 注册分发共享模块（Claude Code + Codex + CodeBuddy + WorkBuddy）。
 
 顶层 mcp/install.sh / mcp/uninstall.sh 的
---client claude|codex|codebuddy|all 使用。
-- detect_clients()：返回 Claude Code、Codex、CodeBuddy 的可用性证据
+--client claude|codex|codebuddy|workbuddy|all 使用。
+- detect_clients()：返回 Claude Code、Codex、CodeBuddy、WorkBuddy 的可用性证据
 - Codex 适配器：只调官方 CLI（codex mcp add/remove/get --json/list），不直接读写 ~/.codex 配置
+- CodeBuddy / WorkBuddy 适配器：静态 JSON 配置（结构同为 {mcpServers:{...}}），
+  仅配置路径不同（~/.codebuddy/mcp.json 与 ~/.workbuddy/mcp.json）
 - entry 真源：子工程 register_mcp.py 注册 Claude 时已导出到
   ~/.claude/icode_data/mcp_entries/<name>.json（见 claude_registry.export_entry）
 - 安全策略（同名已有节点）：
@@ -19,6 +21,9 @@
     python3 client_registry.py codebuddy-register <name>
     python3 client_registry.py codebuddy-unregister <name>
     python3 client_registry.py codebuddy-inspect <name>
+    python3 client_registry.py workbuddy-register <name>
+    python3 client_registry.py workbuddy-unregister <name>
+    python3 client_registry.py workbuddy-inspect <name>
 """
 import json
 import os
@@ -35,12 +40,13 @@ CODEX_BIN = os.environ.get("ICODE_CODEX_BIN") or shutil.which("codex")
 
 
 def detect_clients() -> dict:
-    """返回 {claude, codex, codebuddy} 可用性证据。
+    """返回 {claude, codex, codebuddy, workbuddy} 可用性证据。
 
     - claude：~/.claude.json 可访问（存在或可写）
     - codex：codex CLI 在 PATH
     - codebuddy：~/.codebuddy 目录存在（CodeBuddy 与 Claude 共用 skills 目录，
       仅 MCP 配置独立，故以其配置目录存在为判据）
+    - workbuddy：~/.workbuddy 目录存在（WorkBuddy 独立 skills 与 MCP 配置目录）
     """
     cfg = Path.home() / ".claude.json"
     claude_ok = cfg.exists() or cfg.parent.exists()
@@ -48,6 +54,7 @@ def detect_clients() -> dict:
         "claude": claude_ok,
         "codex": shutil.which("codex") is not None,
         "codebuddy": CODEBUDDY_CFG.parent.exists(),
+        "workbuddy": WORKBUDDY_CFG.parent.exists(),
     }
 
 
@@ -157,16 +164,20 @@ def codex_unregister(name: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# CodeBuddy 适配器
+# CodeBuddy / WorkBuddy 适配器（静态 JSON 配置）
 #
-# CodeBuddy 没有官方 MCP CLI，其 MCP 配置为 ~/.codebuddy/mcp.json，结构与
-# Claude Code 的 mcpServers 同源：{"mcpServers": {name: {command, args, env}}}。
-# 因此注册实现为「读 entry 真源 → 合并进 mcpServers → 原子写回」。
-# 注意：CodeBuddy 与 Claude Code 共用 ~/.claude/skills，ICODE 目录无需重复安装，
-#      仅 MCP 注册目标不同。
+# 两个宿主均无官方 MCP CLI，其 MCP 配置为与 Claude Code 的 mcpServers 同源的
+# JSON：{"mcpServers": {name: {command, args, env}}}，仅配置路径不同：
+#   - CodeBuddy: ~/.codebuddy/mcp.json
+#   - WorkBuddy: ~/.workbuddy/mcp.json
+# 因此两者共用同一实现：「读 entry 真源 → 合并进 mcpServers → 原子写回」，
+# 按宿主绑定不同配置路径。
+# 注意：CodeBuddy 与 Claude Code 共用 ~/.claude/skills；WorkBuddy 使用独立的
+#      ~/.workbuddy/skills，由 sync-to-global.sh --client workbuddy 负责同步。
 # ---------------------------------------------------------------------------
 
 CODEBUDDY_CFG = Path.home() / ".codebuddy" / "mcp.json"
+WORKBUDDY_CFG = Path.home() / ".workbuddy" / "mcp.json"
 
 # 对比关键可执行字段（与 Codex 侧一致：不含 cwd，避免 venv 系 entry 误判）
 _COMPARE_KEYS = ("command", "args", "env")
@@ -179,13 +190,13 @@ def _norm(value):
     return value
 
 
-def codebuddy_inspect(name: str) -> str:
-    """读 ~/.codebuddy/mcp.json 判定 absent | match | mismatch | error。"""
+def _static_config_inspect(cfg_path: Path, name: str) -> str:
+    """读静态 JSON 配置判定 absent | match | mismatch | error（CodeBuddy/WorkBuddy 共用）。"""
     entry = _read_entry(name)
-    if not CODEBUDDY_CFG.exists():
+    if not cfg_path.exists():
         return "absent"
     try:
-        data = json.loads(CODEBUDDY_CFG.read_text(encoding="utf-8"))
+        data = json.loads(cfg_path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
         return "error"
     actual = (data.get("mcpServers") or {}).get(name)
@@ -197,50 +208,50 @@ def codebuddy_inspect(name: str) -> str:
     return "match"
 
 
-def codebuddy_register(name: str) -> tuple[str, bool]:
-    """注册/同步 <name> 到 CodeBuddy。返回 (说明, 是否成功)。
+def _static_config_register(cfg_path: Path, host_label: str, name: str) -> tuple[str, bool]:
+    """注册/同步 <name> 到静态 JSON 配置宿主。返回 (说明, 是否成功)。
 
     同名已存在且内容不一致时不静默覆盖：返回失败并给出人工处理指引
     （与 Codex 适配器一致的「不自动破坏性更新」策略）。
     """
-    if not CODEBUDDY_CFG.parent.exists():
-        return f"未检测到 CodeBuddy 配置目录 {CODEBUDDY_CFG.parent}，跳过注册（{name}）", False
+    if not cfg_path.parent.exists():
+        return f"未检测到 {host_label} 配置目录 {cfg_path.parent}，跳过注册（{name}）", False
     entry = _read_entry(name)
-    status = codebuddy_inspect(name)
+    status = _static_config_inspect(cfg_path, name)
     if status == "match":
         return f"已存在且内容一致，跳过（{name}）", True
     if status == "error":
-        return f"{CODEBUDDY_CFG} 解析失败，跳过注册（{name}）", False
+        return f"{cfg_path} 解析失败，跳过注册（{name}）", False
     if status == "mismatch":
         return (
-            f"CodeBuddy 已有同名 {name} 且内容不一致，未覆盖。"
+            f"{host_label} 已有同名 {name} 且内容不一致，未覆盖。"
             f"请先手工移除 mcpServers.{name} 后重试，或人工核对两者差异。",
             False,
         )
 
-    data = json.loads(CODEBUDDY_CFG.read_text(encoding="utf-8")) if CODEBUDDY_CFG.exists() else {}
+    data = json.loads(cfg_path.read_text(encoding="utf-8")) if cfg_path.exists() else {}
     if not isinstance(data, dict):
-        return f"{CODEBUDDY_CFG} 顶层必须是 JSON object，跳过注册（{name}）", False
+        return f"{cfg_path} 顶层必须是 JSON object，跳过注册（{name}）", False
     servers = data.get("mcpServers") or {}
     if not isinstance(servers, dict):
-        return f"{CODEBUDDY_CFG} 的 mcpServers 必须是 JSON object，跳过注册（{name}）", False
+        return f"{cfg_path} 的 mcpServers 必须是 JSON object，跳过注册（{name}）", False
     servers[name] = {
         key: entry[key] for key in ("command", "args", "env") if entry.get(key) is not None
     }
     data["mcpServers"] = servers
-    _atomic_write_codebuddy_config(data)
+    _atomic_write_static_config(cfg_path, data)
 
-    after = codebuddy_inspect(name)
+    after = _static_config_inspect(cfg_path, name)
     if after == "match":
-        return f"已注册到 CodeBuddy（{name}）→ 重启会话后生效", True
-    return f"写入后校验未通过（{name}：{after}），请人工检查 {CODEBUDDY_CFG}", False
+        return f"已注册到 {host_label}（{name}）→ 重启会话后生效", True
+    return f"写入后校验未通过（{name}：{after}），请人工检查 {cfg_path}", False
 
 
-def _atomic_write_codebuddy_config(data: dict) -> None:
+def _atomic_write_static_config(cfg_path: Path, data: dict) -> None:
     """同目录临时文件 + fsync + replace，避免并发名字碰撞和半截 JSON。"""
-    CODEBUDDY_CFG.parent.mkdir(parents=True, exist_ok=True)
+    cfg_path.parent.mkdir(parents=True, exist_ok=True)
     fd, temporary = tempfile.mkstemp(
-        prefix=f".{CODEBUDDY_CFG.name}.icode-stage-", dir=CODEBUDDY_CFG.parent
+        prefix=f".{cfg_path.name}.icode-stage-", dir=cfg_path.parent
     )
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as stream:
@@ -249,8 +260,8 @@ def _atomic_write_codebuddy_config(data: dict) -> None:
             stream.flush()
             os.fsync(stream.fileno())
         os.chmod(temporary, 0o600)
-        os.replace(temporary, CODEBUDDY_CFG)
-        directory_fd = os.open(CODEBUDDY_CFG.parent, os.O_RDONLY)
+        os.replace(temporary, cfg_path)
+        directory_fd = os.open(cfg_path.parent, os.O_RDONLY)
         try:
             os.fsync(directory_fd)
         finally:
@@ -262,26 +273,60 @@ def _atomic_write_codebuddy_config(data: dict) -> None:
             pass
 
 
-def codebuddy_unregister(name: str) -> tuple[str, bool]:
-    """从 CodeBuddy 移除 <name>；不依赖可能已被子卸载器删除的 entry。"""
-    if not CODEBUDDY_CFG.exists():
+def _static_config_unregister(cfg_path: Path, host_label: str, name: str) -> tuple[str, bool]:
+    """从静态 JSON 配置宿主移除 <name>；不依赖可能已被子卸载器删除的 entry。"""
+    if not cfg_path.exists():
         return f"未注册，跳过（{name}）", True
     try:
-        data = json.loads(CODEBUDDY_CFG.read_text(encoding="utf-8"))
+        data = json.loads(cfg_path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError, UnicodeError) as exc:
-        return f"{CODEBUDDY_CFG} 解析失败，拒绝改写（{name}）：{exc}", False
+        return f"{cfg_path} 解析失败，拒绝改写（{name}）：{exc}", False
     if not isinstance(data, dict):
-        return f"{CODEBUDDY_CFG} 顶层不是 JSON object，拒绝改写（{name}）", False
+        return f"{cfg_path} 顶层不是 JSON object，拒绝改写（{name}）", False
     servers = data.get("mcpServers")
     if servers is None:
         return f"未注册，跳过（{name}）", True
     if not isinstance(servers, dict):
-        return f"{CODEBUDDY_CFG} 的 mcpServers 不是 JSON object，拒绝改写（{name}）", False
+        return f"{cfg_path} 的 mcpServers 不是 JSON object，拒绝改写（{name}）", False
     if name not in servers:
         return f"未注册，跳过（{name}）", True
     servers.pop(name)
-    _atomic_write_codebuddy_config(data)
-    return f"已从 CodeBuddy 移除（{name}）", True
+    _atomic_write_static_config(cfg_path, data)
+    return f"已从 {host_label} 移除（{name}）", True
+
+
+# --- CodeBuddy 绑定 ---
+
+def codebuddy_inspect(name: str) -> str:
+    """读 ~/.codebuddy/mcp.json 判定 absent | match | mismatch | error。"""
+    return _static_config_inspect(CODEBUDDY_CFG, name)
+
+
+def codebuddy_register(name: str) -> tuple[str, bool]:
+    """注册/同步 <name> 到 CodeBuddy。"""
+    return _static_config_register(CODEBUDDY_CFG, "CodeBuddy", name)
+
+
+def codebuddy_unregister(name: str) -> tuple[str, bool]:
+    """从 CodeBuddy 移除 <name>。"""
+    return _static_config_unregister(CODEBUDDY_CFG, "CodeBuddy", name)
+
+
+# --- WorkBuddy 绑定 ---
+
+def workbuddy_inspect(name: str) -> str:
+    """读 ~/.workbuddy/mcp.json 判定 absent | match | mismatch | error。"""
+    return _static_config_inspect(WORKBUDDY_CFG, name)
+
+
+def workbuddy_register(name: str) -> tuple[str, bool]:
+    """注册/同步 <name> 到 WorkBuddy。"""
+    return _static_config_register(WORKBUDDY_CFG, "WorkBuddy", name)
+
+
+def workbuddy_unregister(name: str) -> tuple[str, bool]:
+    """从 WorkBuddy 移除 <name>。"""
+    return _static_config_unregister(WORKBUDDY_CFG, "WorkBuddy", name)
 
 
 def main() -> int:
@@ -290,7 +335,8 @@ def main() -> int:
         print(
             "用法: client_registry.py "
             "<detect|codex-register|codex-unregister|codex-inspect|"
-            "codebuddy-register|codebuddy-unregister|codebuddy-inspect> [name]"
+            "codebuddy-register|codebuddy-unregister|codebuddy-inspect|"
+            "workbuddy-register|workbuddy-unregister|workbuddy-inspect> [name]"
         )
         return 1
     cmd = sys.argv[1]
@@ -319,6 +365,16 @@ def main() -> int:
         return 0 if ok else 1
     elif cmd == "codebuddy-inspect":
         print(codebuddy_inspect(name))
+    elif cmd == "workbuddy-register":
+        msg, ok = workbuddy_register(name)
+        print(msg)
+        return 0 if ok else 1
+    elif cmd == "workbuddy-unregister":
+        msg, ok = workbuddy_unregister(name)
+        print(msg)
+        return 0 if ok else 1
+    elif cmd == "workbuddy-inspect":
+        print(workbuddy_inspect(name))
     else:
         print(f"未知命令: {cmd}")
         return 1

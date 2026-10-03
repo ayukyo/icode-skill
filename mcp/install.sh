@@ -7,15 +7,16 @@
 #   ./mcp/install.sh <name>               # 只装指定子工程(如 vision-bridge)
 #   ./mcp/install.sh --client codex       # 全部安装 + 注册到 Codex
 #   ./mcp/install.sh --client codebuddy   # 全部安装 + 注册到 CodeBuddy(~/.codebuddy/mcp.json)
-#   ./mcp/install.sh --client all <name>  # 指定子工程 + 注册到 Claude Code/Codex/CodeBuddy
-#   --client 取值: claude(默认)| codex | codebuddy | all
+#   ./mcp/install.sh --client workbuddy   # 全部安装 + 注册到 WorkBuddy(~/.workbuddy/mcp.json)
+#   ./mcp/install.sh --client all <name>  # 指定子工程 + 注册到 Claude Code/Codex/检测到的 CodeBuddy/WorkBuddy
+#   --client 取值: claude(默认)| codex | codebuddy | workbuddy | all
 set -e
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 
 usage() {
   cat <<'EOF'
-Usage: ./mcp/install.sh [--check] [--client claude|codex|codebuddy|all] [mcp-name]
+Usage: ./mcp/install.sh [--check] [--client claude|codex|codebuddy|workbuddy|all] [mcp-name]
 
 Installs all MCP subprojects, or one named subproject. This is the MCP-only
 maintenance entry; use the repository root install.sh for a full installation.
@@ -34,7 +35,7 @@ while [ $# -gt 0 ]; do
     --check)
       check_only=true; shift ;;
     --client)
-      if [ $# -lt 2 ]; then echo "❌ --client 需要参数: claude|codex|codebuddy|all"; exit 1; fi
+      if [ $# -lt 2 ]; then echo "❌ --client 需要参数: claude|codex|codebuddy|workbuddy|all"; exit 1; fi
       client="$2"; shift 2 ;;
     --client=*)
       client="${1#--client=}"; shift ;;
@@ -54,16 +55,21 @@ while [ $# -gt 0 ]; do
   esac
 done
 case "$client" in
-  claude|codex|codebuddy|all) ;;
-  *) echo "❌ --client 取值须为 claude|codex|codebuddy|all (当前: $client)"; exit 1 ;;
+  claude|codex|codebuddy|workbuddy|all) ;;
+  *) echo "❌ --client 取值须为 claude|codex|codebuddy|workbuddy|all (当前: $client)"; exit 1 ;;
 esac
 
-# `all` preserves the historical Claude+Codex path and adds CodeBuddy only
-# when that host is detected. Explicit `codebuddy` always selects it.
+# `all` preserves the historical Claude+Codex path and adds CodeBuddy/WorkBuddy
+# only when that host is detected. Explicit `codebuddy`/`workbuddy` always selects it.
 codebuddy_enabled=false
 if [ "$client" = "codebuddy" ] \
   || { [ "$client" = "all" ] && [ -d "$HOME/.codebuddy" ]; }; then
   codebuddy_enabled=true
+fi
+workbuddy_enabled=false
+if [ "$client" = "workbuddy" ] \
+  || { [ "$client" = "all" ] && [ -d "$HOME/.workbuddy" ]; }; then
+  workbuddy_enabled=true
 fi
 
 # 探测 Python 解释器(Codex 分支跑 client_registry.py 用; 与子工程 install 探测模式一致)
@@ -112,9 +118,9 @@ for installer in "${installers[@]}"; do
     exit 1
   fi
 done
-if [ "$client" = "codex" ] || [ "$client" = "codebuddy" ] || [ "$client" = "all" ]; then
+if [ "$client" = "codex" ] || [ "$client" = "codebuddy" ] || [ "$client" = "workbuddy" ] || [ "$client" = "all" ]; then
   if [ -z "$PYTHON_BIN" ]; then
-    echo "❌ Codex/CodeBuddy MCP 注册需要 python3/python" >&2
+    echo "❌ Codex/CodeBuddy/WorkBuddy MCP 注册需要 python3/python" >&2
     exit 1
   fi
   if [ ! -f "$HERE/_lib/client_registry.py" ] \
@@ -133,11 +139,14 @@ case "$client" in
   claude)    echo "   客户端: claude (~/.claude.json, 默认)" ;;
   codex)     echo "   客户端: codex (子工程注册 Claude + codex mcp 注册)" ;;
   codebuddy) echo "   客户端: codebuddy (子工程注册 Claude + 写入 ~/.codebuddy/mcp.json)" ;;
+  workbuddy) echo "   客户端: workbuddy (子工程注册 Claude + 写入 ~/.workbuddy/mcp.json)" ;;
   all)
-    if [ "$codebuddy_enabled" = true ]; then
-      echo "   客户端: all (Claude Code + Codex + 已检测到的 CodeBuddy)"
-    else
-      echo "   客户端: all (Claude Code + Codex；未检测到 CodeBuddy，保持不写)"
+    hosts="Claude Code + Codex"
+    [ "$codebuddy_enabled" = true ] && hosts="$hosts + 已检测到的 CodeBuddy"
+    [ "$workbuddy_enabled" = true ] && hosts="$hosts + 已检测到的 WorkBuddy"
+    echo "   客户端: all ($hosts)"
+    if [ "$codebuddy_enabled" != true ] && [ "$workbuddy_enabled" != true ]; then
+      echo "   客户端: all (Claude Code + Codex；未检测到 CodeBuddy/WorkBuddy，保持不写)"
     fi
     ;;
 esac
@@ -178,6 +187,19 @@ for installer in "${installers[@]}"; do
         failed+=("$name(codebuddy)")
       fi
     fi
+    # WorkBuddy 分支: 同样依赖子工程导出的 entry，写入 ~/.workbuddy/mcp.json
+    if [ "$workbuddy_enabled" = true ]; then
+      if [ -z "$PYTHON_BIN" ]; then
+        echo "   ⚠️ 未找到 python3/python，跳过 WorkBuddy 注册（client_registry.py 需 Python）"
+        fail_count=$((fail_count + 1))
+        failed+=("$name(workbuddy:no-python)")
+      elif "$PYTHON_BIN" "$HERE/_lib/client_registry.py" workbuddy-register "$name"; then
+        :
+      else
+        fail_count=$((fail_count + 1))
+        failed+=("$name(workbuddy)")
+      fi
+    fi
   else
     fail_count=$((fail_count + 1))
     failed+=("$name")
@@ -199,6 +221,9 @@ case "$client" in
     if [ "$codebuddy_enabled" = true ]; then
       echo "   CodeBuddy:   新建或重开 CodeBuddy 会话后生效"
     fi
+    if [ "$workbuddy_enabled" = true ]; then
+      echo "   WorkBuddy:   新建或重开 WorkBuddy 会话后生效"
+    fi
     ;;
   codex)
     echo "🎉 全部完成!"
@@ -209,6 +234,11 @@ case "$client" in
     echo "🎉 全部完成!"
     echo "   Claude Code: 重启 Claude Code 后生效"
     echo "   CodeBuddy:   新建或重开 CodeBuddy 会话后生效"
+    ;;
+  workbuddy)
+    echo "🎉 全部完成!"
+    echo "   Claude Code: 重启 Claude Code 后生效"
+    echo "   WorkBuddy:   新建或重开 WorkBuddy 会话后生效"
     ;;
   *)
     echo "🎉 全部完成!记得重启 Claude Code 让注册生效。"

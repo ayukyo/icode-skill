@@ -13,7 +13,7 @@ Installs ICODE, its isolated DOCX runtime, all manifest-declared shared skills,
 then installs MCPs.
 
 Options:
-  --client claude|codex|codebuddy|all Select target client (default: claude)
+  --client claude|codex|codebuddy|workbuddy|all Select target client (default: claude)
   --skip-mcp                Install ICODE, DOCX runtime and shared skills only
   --dry-run                 Report skill changes; do not write or install MCPs
   -h, --help                Show this help
@@ -28,7 +28,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --client)
       if [[ $# -lt 2 ]]; then
-        echo "❌ --client 需要参数: claude|codex|codebuddy|all" >&2
+        echo "❌ --client 需要参数: claude|codex|codebuddy|workbuddy|all" >&2
         exit 2
       fi
       CLIENT="$2"
@@ -66,9 +66,9 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 case "$CLIENT" in
-  claude|codex|codebuddy|all) ;;
+  claude|codex|codebuddy|workbuddy|all) ;;
   *)
-    echo "❌ --client 取值须为 claude|codex|codebuddy|all (当前: $CLIENT)" >&2
+    echo "❌ --client 取值须为 claude|codex|codebuddy|workbuddy|all (当前: $CLIENT)" >&2
     exit 2
     ;;
 esac
@@ -104,13 +104,18 @@ fi
 
 CLAUDE_ROOT="${CLAUDE_SKILLS_ROOT:-$HOME/.claude/skills}"
 CODEX_ROOT="${AGENTS_SKILLS_ROOT:-$HOME/.agents/skills}"
+WORKBUDDY_ROOT="${WORKBUDDY_SKILLS_ROOT:-$HOME/.workbuddy/skills}"
 CLAUDE_ICODE="${GLOBAL_DIR:-$CLAUDE_ROOT/icode}"
 CODEX_ICODE="${AGENTS_DIR:-$CODEX_ROOT/icode}"
+WORKBUDDY_ICODE="${WORKBUDDY_DIR:-$WORKBUDDY_ROOT/icode}"
 case "$CLIENT" in
   # CodeBuddy 与 Claude Code 共用 ~/.claude/skills，ICODE 目录同 claude；
   # 两者差异仅在 MCP 注册目标（CodeBuddy 写 ~/.codebuddy/mcp.json），由 mcp/install.sh 处理。
   claude|codebuddy|all) ICODE_DIR="$CLAUDE_ICODE" ;;
   codex) ICODE_DIR="$CODEX_ICODE" ;;
+  # WorkBuddy 使用独立的 ~/.workbuddy/skills 根，ICode 目录独立一份；
+  # MCP 注册写 ~/.workbuddy/mcp.json，由 mcp/install.sh 处理。
+  workbuddy) ICODE_DIR="$WORKBUDDY_ICODE" ;;
 esac
 
 DOCX_BOOTSTRAP="$ICODE_DIR/tools/docx/bootstrap_runtime.py"
