@@ -83,3 +83,6 @@ Thumbs.db
 # --- 8. MCP 运行时临时目录 ---
 # playwright MCP 在 cwd 创建 page snapshot/截图缓存（page-YYYY-MM-DD*.yml）
 .playwright-mcp/
+
+# --- 9. WorkBuddy 本地工作记忆（个人日志，不入库）---
+.workbuddy/
