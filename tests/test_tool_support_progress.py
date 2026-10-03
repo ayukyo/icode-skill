@@ -60,6 +60,9 @@ class ToolSupportProgressTest(unittest.TestCase):
                         f'exec {json.dumps(executable)} "$@"\n',
                         encoding='utf-8',
                     )
+                # Forwarders are plain text files; mark them executable or
+                # POSIX kernels refuse to run them ("Permission denied").
+                shim.chmod(0o755)
             self.assertIsNone(shutil.which('rg', path=directory))
             environment = dict(os.environ, PATH=str(directory))
             result = subprocess.run(
