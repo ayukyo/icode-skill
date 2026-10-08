@@ -225,7 +225,7 @@ python3 tools/lint_mcp_coverage.py <out_dir> --step review --strict
 # DOCX 交付（独立交付步骤；不改变上面的工程知识库语义）
 /icode docx docs/release-guide.md                    # P0：指定 Markdown → 同级可编辑 Word
 /icode docx 本次BUG交付 Word                          # P1：最近且唯一 ICODE 工单 → .icode_output/docx/
-# 安装器会创建 ICODE 自管的固定依赖 runtime；未配置 pip 源时会在网络失败后自动回退可信镜像，显式 pip 源不被覆盖；没有匹配的自带 renderer 时只标 visual_qa_pending，不使用系统 LibreOffice
+# 安装器会创建 ICODE 自管的固定依赖 runtime；未配置 pip 源时会在网络失败后自动回退可信镜像，显式 pip 源不被覆盖；安装与首次渲染会自动获取固定版本、SHA-256 校验的兼容渲染器，用户运行时登记不受技能同步覆盖；当前支持 Linux x86_64/glibc≥2.35/x86-64-v2，其他渲染平台仍标 visual_qa_pending，不使用系统 LibreOffice。详见 tools/docx/README.md
 
 # 工程工单备份（独立步骤：把工程 .icode_output/ 快照到全局，删工程前安全网，可多次备份）
 /icode bak                              # 备份当前工程全部工单（快照 + 索引写 backup_path）

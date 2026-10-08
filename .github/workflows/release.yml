@@ -1,0 +1,57 @@
+name: Publish qualified release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: qualified-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  renderer:
+    uses: ./.github/workflows/docx-renderer.yml
+
+  publish:
+    needs: renderer
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.10'
+      - name: Bind tag to source version and reviewed notes
+        run: |
+          python3 - <<'PY'
+          import os, re
+          from pathlib import Path
+          tag = os.environ['GITHUB_REF_NAME']
+          version = re.search(r'^\*\*版本\*\*:\s*(v\d+\.\d+\.\d+)\s*$', Path('SKILL.md').read_text(), re.M)
+          if not re.fullmatch(r'v\d+\.\d+\.\d+', tag) or not version or version.group(1) != tag:
+              raise SystemExit('Release tag/source version mismatch')
+          if not Path('docs/releases', tag + '.md').is_file():
+              raise SystemExit('Reviewed release notes missing')
+          PY
+      - name: Build complete public skills archive
+        run: |
+          mkdir -p "$RUNNER_TEMP/release-package"
+          python3 tools/build_skill_distribution.py --output "$RUNNER_TEMP/release-package/icode"
+          tar -C "$RUNNER_TEMP/release-package" -czf "$RUNNER_TEMP/icode-$GITHUB_REF_NAME.tar.gz" icode
+          cd "$RUNNER_TEMP"
+          sha256sum "icode-$GITHUB_REF_NAME.tar.gz" > "icode-$GITHUB_REF_NAME.tar.gz.sha256"
+      - name: Publish verified tag and archive
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" --verify-tag --target "$GITHUB_SHA" \
+            --title "ICODE $GITHUB_REF_NAME" --notes-file "docs/releases/$GITHUB_REF_NAME.md" --latest \
+            "$RUNNER_TEMP/icode-$GITHUB_REF_NAME.tar.gz" "$RUNNER_TEMP/icode-$GITHUB_REF_NAME.tar.gz.sha256"

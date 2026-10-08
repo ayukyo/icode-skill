@@ -10,6 +10,7 @@ Run the bootstrapper once (the public `./install.sh` does this automatically):
 
 ```bash
 python3 tools/docx/bootstrap_runtime.py
+python3 tools/docx/bootstrap_renderer.py
 ```
 
 It creates a lock-content-addressed venv under
@@ -41,10 +42,35 @@ code block and is recorded in the source map; it is never silently discarded.
 
 ## Visual QA contract
 
-`renderer_manifest.json` only selects ICODE-owned renderer bundles by OS, CPU
-architecture, and glibc requirement, then verifies executable SHA-256.  It
-will **never** fall back to a `soffice` found on PATH.  If the release contains
-no compatible renderer, `render_docx.py` writes `visual_qa_pending` to the
-delivery manifest without claiming a visual pass.  A release adds compatible
-binaries under `tools/docx/renderers/` and a matching manifest record; no
-workflow or host setup change is required.
+The public installer and first default render both call `bootstrap_renderer.py`.
+`renderer_packages.lock.json` pins official HTTPS archives, exact sizes and
+SHA-256; installation extracts owned binaries without sudo or maintainer scripts.
+The current recipe targets Linux x86_64, glibc >= 2.35, kernel >= 4.18 and
+x86-64-v2 CPU flags. It was validated on Ubuntu 22.04; general shared libraries,
+`dpkg-deb`, `ldd`, and fonts remain host prerequisites. Missing libraries fail
+installation with a specific error; unsupported OS/CPU combinations stay
+`visual_qa_pending`. Windows, macOS and ARM renderer recipes are not supplied.
+
+Bundles and their atomic registry live under
+`~/.local/share/icode/runtime/docx-renderer/`, outside synchronized skill trees.
+Default resolution reads the shipped manifest and this persistent registry;
+`--manifest` explicitly selects just one manifest and disables auto-install.
+Entrypoints and payload executable/library hashes are checked; invocation uses
+an isolated temporary Office profile and bounded subprocess timeouts. There is
+**never** a PATH LibreOffice/Poppler fallback. Broken or incompatible existing
+bundles are not overwritten and cannot be reported as ready.
+
+Read-only check: `python3 tools/docx/bootstrap_renderer.py --check`.
+Offline install: `python3 tools/docx/bootstrap_renderer.py --offline --package-cache /path/to/archives`.
+Use the exact artifact filenames in the lock; offline/cache inputs are rehashed.
+`ICODE_DOCX_RENDERER_ROOT` relocates user state; `ICODE_DOCX_RENDERER_CATALOG`
+selects an explicit administrator-controlled catalog for the bootstrap CLI.
+No personal path belongs in the shipped lock or manifest.
+
+The distribution builder requires the installer, launcher, validator and lock
+as a complete set. `.github/workflows/docx-renderer.yml` qualifies source/release
+snapshots through public install, sync, and real Word-to-page smoke rendering.
+The public-site artifact build depends on this reusable qualification workflow;
+failed renderer qualification prevents distribution upload and deployment.
+A local equivalent is `python3 scripts/check-docx-renderer-release.py --output-dir /new/report/dir`.
+Rendering success is separate from a human visual inspection of every page.

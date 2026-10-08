@@ -7,6 +7,11 @@ VALIDATE="$ROOT/tools/validate_skill_pack.py"
 MANIFEST="$ROOT/skill-packs/manifest.json"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
+# Generic installer contracts stay offline and isolate renderer state. The
+# dedicated renderer suite and release smoke exercise matching real packages.
+printf '{"schema_version":1,"packages":[]}\n' >"$TMP/unsupported-renderer.json"
+export ICODE_DOCX_RENDERER_CATALOG="$TMP/unsupported-renderer.json"
+export ICODE_DOCX_RENDERER_ROOT="$TMP/renderer-runtime"
 
 PASS=0
 FAIL=0
@@ -63,6 +68,10 @@ BUNDLED_CAPABILITIES=(
   tools/knowledge_library.py
   tools/lint_knowledge_article.py
   tools/docx/bootstrap_runtime.py
+  tools/docx/bootstrap_renderer.py
+  tools/docx/renderer_packages.lock.json
+  tools/docx/renderer_support.py
+  tools/docx/renderer_launch.py
   tools/docx/build_docx.py
   tools/docx/inspect_docx.py
   tools/docx/render_docx.py

@@ -501,6 +501,12 @@
   },
   "updates": [
     {
+      "version": "v2.32.1",
+      "reviewed_on": "2026-10-08",
+      "zh-CN": "修复 Word 兼容渲染器的自动安装、哈希校验与同步后登记保留；公开发行加入真实渲染验收。当前渲染配方覆盖 Ubuntu 兼容的 Linux x86_64，其他平台仍明确待补。",
+      "en": "Fix automatic installation, hash verification and persistent registration of the owned Word renderer. Public distributions require real rendering qualification. The current renderer recipe supports Ubuntu-compatible Linux x86_64; other platforms remain pending."
+    },
+    {
       "version": "v2.32.0",
       "reviewed_on": "2026-09-20",
       "zh-CN": "自然语言入口：点名 ICODE 并描述目标和限制，复用已有命令与门禁。日期为本条公开说明的审阅日期，不是版本发布日期。",

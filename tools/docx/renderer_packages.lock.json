@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "packages": [
+    {
+      "id": "linux-x86_64-lo26.8.0-poppler22.02.0-13",
+      "os": "linux",
+      "arch": "x86_64",
+      "libc": "glibc",
+      "glibc_min": "2.35",
+      "kernel_min": "4.18",
+      "cpu_flags": [
+        "cx16",
+        "lahf_lm",
+        "popcnt",
+        "pni",
+        "ssse3",
+        "sse4_1",
+        "sse4_2"
+      ],
+      "min_free_bytes": 2500000000,
+      "executables": {
+        "soffice": "root/opt/libreoffice26.8/program/soffice",
+        "pdftoppm": "root/usr/bin/pdftoppm"
+      },
+      "library_dir": "root/usr/lib/x86_64-linux-gnu",
+      "artifacts": [
+        {
+          "name": "LibreOffice_26.8.0_Linux_x86-64_deb.tar.gz",
+          "kind": "libreoffice-debs",
+          "bytes": 219786895,
+          "sha256": "d0a6031a3837e48f9854e6d2da6489b9fadbd814afa4741fa32a197741663a22",
+          "urls": [
+            "https://download.documentfoundation.org/libreoffice/stable/26.8.0/deb/x86_64/LibreOffice_26.8.0_Linux_x86-64_deb.tar.gz",
+            "https://mirrors.bfsu.edu.cn/libreoffice/libreoffice/stable/26.8.0/deb/x86_64/LibreOffice_26.8.0_Linux_x86-64_deb.tar.gz"
+          ],
+          "provenance": "https://download.documentfoundation.org/libreoffice/stable/26.8.0/deb/x86_64/LibreOffice_26.8.0_Linux_x86-64_deb.tar.gz.mirrorlist"
+        },
+        {
+          "name": "poppler-utils_22.02.0-2ubuntu0.13_amd64.deb",
+          "kind": "deb",
+          "bytes": 185972,
+          "sha256": "4b29486f5293907402f7f1d3f4cf84622759903720c866f52f7de5a1dab914a5",
+          "urls": [
+            "https://security.ubuntu.com/ubuntu/pool/main/p/poppler/poppler-utils_22.02.0-2ubuntu0.13_amd64.deb"
+          ],
+          "provenance": "Ubuntu jammy-security signed APT Packages metadata"
+        },
+        {
+          "name": "libpoppler118_22.02.0-2ubuntu0.13_amd64.deb",
+          "kind": "deb",
+          "bytes": 1081210,
+          "sha256": "a381c80d94c284d433ac014e40a3a98661d6e7e7e47e91d5aba26134be66d264",
+          "urls": [
+            "https://security.ubuntu.com/ubuntu/pool/main/p/poppler/libpoppler118_22.02.0-2ubuntu0.13_amd64.deb"
+          ],
+          "provenance": "Ubuntu jammy-security signed APT Packages metadata"
+        }
+      ]
+    }
+  ]
+}

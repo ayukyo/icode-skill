@@ -8,7 +8,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-Skill-8A2BE2.svg)](SKILL.md)
-[![Version](https://img.shields.io/badge/version-v2.32.0-blue.svg)](SKILL.md)
+[![Version](https://img.shields.io/badge/version-v2.32.1-blue.svg)](SKILL.md)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/ayukyo/icode-skill/issues)
 
 </div>
@@ -155,7 +155,7 @@ Every main ticket step produces a real artifact in `.icode_output/.icode_output_
 - **Anti-laziness quality gates**: triple-phase deepcheck (Reverse/Fixed/Free), plan assertion verification, ADR decision records, adversarial verification (independent skeptics — insufficient evidence is never confirmed, honest downgrade over fake consensus)
 - **Cross-project history retrieval**: init/log/plan/start auto-search similar past tickets and inject by command; references stay in-session, never pollute project artifacts. **Verdict-based injection** prevents disproved/superseded tickets from misleading new work
 - **Project-level knowledge base** (`/icode doc`): global per-project/per-branch knowledge base (module docs generated once and reused across projects), auto-retrieved and injected by phase-zero search
-- **DOCX delivery** (`/icode docx`): separate P0 Markdown conversion and P1 project/module/current-ticket delivery report. The installer creates a pinned, user-private DOCX runtime; every output includes hashes, source map, structural QA and an explicit visual-QA state. Visual rendering uses only an ICODE-owned OS/CPU/glibc-compatible bundle, never host LibreOffice.
+- **DOCX delivery** (`/icode docx`): separate P0 Markdown conversion and P1 project/module/current-ticket delivery report. The installer creates a pinned, user-private DOCX runtime; every output includes hashes, source map, structural QA and an explicit visual-QA state. Visual rendering uses only an ICODE-owned OS/CPU/glibc-compatible bundle, never host LibreOffice. Public install and first render automatically fetch SHA-256-pinned official packages for supported Linux x86_64/glibc≥2.35/x86-64-v2 hosts; the user-runtime registry survives skill sync. Other renderer platforms remain pending. See [renderer installation and release checks](tools/docx/README.md).
 - **Project work-order backup** (`/icode bak`): snapshot the project's entire `.icode_output/` (tickets + debug twins + isolated crosscheck rounds + limit.local + ppt) to global `~/.claude/icode_data/project_backup/`, repeatable with hardlink dedup. Run it before deleting a project — once deleted, history retrieval still reads full work orders from the backup (project-first, backup fallback), and `/icode list` marks them `[path_gone→backup]`. For closed worktree tickets whose `project_path` is gone but whose `archive_path` is valid, `/icode list` marks them `[path_gone→archive]` (or `[path_gone→archive+backup]` when both archive and backup exist)
 - **Anti-duplicate injection**: history retrieval and project-doc retrieval share an injection cache, avoiding repeated injection within one dev chain
 - **Decision anchors**: steps pass concise decision summaries (`.decision_anchors.json`) downstream — saves tokens, keeps reasoning continuity

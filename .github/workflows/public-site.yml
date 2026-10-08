@@ -14,6 +14,10 @@ on:
       - 'tools/notify_indexnow.py'
       - 'tools/release_promotion.py'
       - 'tools/build_skill_distribution.py'
+      - 'tools/docx/**'
+      - 'scripts/check-docx-renderer-release.py'
+      - 'tests/test_docx_renderer.py'
+      - '.github/workflows/docx-renderer.yml'
       - 'tools/check_skill_discovery.py'
       - 'tools/check_skill_installation.py'
       - 'tools/check_skill_evaluation.py'
@@ -52,11 +56,13 @@ on:
       - 'tests/test_public_site*.py'
       - 'tests/test_notify_indexnow.py'
       - 'tests/test_release_promotion*.py'
+      - 'tests/test_release_workflow.py'
       - 'SKILL.md'
       - 'README*.md'
       - 'docs/**'
       - '.github/workflows/public-site.yml'
       - '.github/workflows/release-promotion.yml'
+      - '.github/workflows/release.yml'
   release:
     types: [published]
   workflow_dispatch:
@@ -75,7 +81,13 @@ concurrency:
   queue: max
 
 jobs:
+  renderer:
+    # Distribution downloads must pass the real installer and render chain
+    # before a public artifact can be uploaded or deployed.
+    uses: ./.github/workflows/docx-renderer.yml
+
   build:
+    needs: renderer
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
@@ -117,6 +129,7 @@ jobs:
           python3 -m unittest discover -s tests -p 'test_public_site*.py' -v
           python3 -m unittest discover -s tests -p test_notify_indexnow.py -v
           python3 -m unittest discover -s tests -p 'test_release_promotion*.py' -v
+          python3 -m unittest discover -s tests -p test_release_workflow.py -v
           python3 -m unittest discover -s tests -p test_skill_distribution.py -v
           python3 -m unittest discover -s tests -p test_skill_discovery_probe.py -v
           python3 -m unittest discover -s tests -p test_skill_listing.py -v

@@ -12,7 +12,8 @@
 
 1. 先执行 `python3 tools/docx/bootstrap_runtime.py`。未显式配置 pip 源时，它会以同一 lock 先尝试 PyPI，仅在网络/超时失败后依次回退到内置 HTTPS 镜像；用户的 `PIP_INDEX_URL` / `PIP_EXTRA_INDEX_URL` / `PIP_NO_INDEX` 保持原样。依赖或版本冲突不切源。失败时停止；不得 `pip install --user`、不得使用全局 `python-docx`。
 2. 输出 JSON 中的 `python` 是本次唯一可使用的 DOCX Python。该运行时由 ICODE 安装器自己维护在用户目录，升级随 lock hash 创建新版本，旧版本不被删除。
-3. 禁止调用 PATH 上的 `soffice` / `libreoffice`。视觉验收只能走 `tools/docx/render_docx.py` 的 ICODE 受管理 renderer resolver。
+3. 正常 `./install.sh` 会安装兼容渲染器；首次默认 `render_docx.py` 也复用 `bootstrap_renderer.py` 自动补齐。固定官方包在用户 `runtime/docx-renderer/` 中独立解包并原子登记，登记不受技能目录同步覆盖；Windows/macOS/ARM 等无 recipe 的平台明确保留 `visual_qa_pending`。
+4. 禁止调用 PATH 上的 `soffice` / `libreoffice`。视觉验收只能走 `tools/docx/render_docx.py` 的 ICODE 受管理 renderer resolver。
 
 ## 1. 自然语言 → 场景
 
@@ -51,7 +52,7 @@ DOCX_PYTHON="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["pytho
 
 构建器支持标题、段落、清单、表格、引用、代码、本地图片和常见 Mermaid flowchart。Mermaid 成功时是嵌入 DOCX 的 PNG；不支持的 Mermaid 不会丢失，会保留源码代码块并在 manifest 标注 fallback。图片、代码、表格和每个来源块都写入 source map。
 
-`inspect_docx.py` 检查 OOXML 包、标题样式、表格、嵌入 media/drawing 和输入 hash。`render_docx.py` 的三种合法状态：`passed`、`visual_qa_pending`、`visual_qa_failed`；只有 `passed` 可以声称视觉渲染已验收。当前发行包不带匹配 renderer 时，结构验收通过仍可交付，但必须在收尾说明视觉验收待发行包补齐，禁止使用系统 LibreOffice 兜底。
+`inspect_docx.py` 检查 OOXML 包、标题样式、表格、嵌入 media/drawing 和输入 hash。`render_docx.py` 的三种合法状态：`passed`、`visual_qa_pending`、`visual_qa_failed`；只有 `passed` 可以声称视觉渲染已验收。当前 OS/CPU/glibc/kernel 不匹配发行 recipe 时，结构验收通过仍可交付，但必须在收尾说明视觉验收待发行包补齐，禁止使用系统 LibreOffice 兜底。
 
 ## 4. 收尾
 

@@ -9,7 +9,7 @@ usage() {
   cat <<'EOF'
 Usage: ./install.sh [options] [mcp-name]
 
-Installs ICODE, its isolated DOCX runtime, all manifest-declared shared skills,
+Installs ICODE, its isolated DOCX runtime and compatible owned renderer, all manifest-declared shared skills,
 then installs MCPs.
 
 Options:
@@ -129,6 +129,12 @@ if ! command -v "$DOCX_PYTHON" >/dev/null 2>&1; then
   exit 1
 fi
 "$DOCX_PYTHON" "$DOCX_BOOTSTRAP"
+DOCX_RENDERER_BOOTSTRAP="$ICODE_DIR/tools/docx/bootstrap_renderer.py"
+if [[ ! -f "$DOCX_RENDERER_BOOTSTRAP" || ! -r "$DOCX_RENDERER_BOOTSTRAP" ]]; then
+  echo "❌ 已安装 ICODE 中缺少 DOCX renderer 安装器: $DOCX_RENDERER_BOOTSTRAP" >&2
+  exit 1
+fi
+"$DOCX_PYTHON" "$DOCX_RENDERER_BOOTSTRAP"
 
 if [[ "$SKIP_MCP" == true ]]; then
   echo "✅ ICODE、自管 DOCX runtime 与共享技能安装完成；已按要求跳过 MCP"

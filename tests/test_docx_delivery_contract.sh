@@ -12,7 +12,7 @@ FAIL=0
 ok() { printf '  PASS %s\n' "$1"; PASS=$((PASS + 1)); }
 bad() { printf '  FAIL %s\n' "$1" >&2; FAIL=$((FAIL + 1)); }
 
-for file in requirements.lock bootstrap_runtime.py build_docx.py inspect_docx.py resolve_renderer.py render_docx.py renderer_manifest.json README.md; do
+for file in requirements.lock bootstrap_runtime.py bootstrap_renderer.py renderer_support.py renderer_launch.py renderer_packages.lock.json build_docx.py inspect_docx.py resolve_renderer.py render_docx.py renderer_manifest.json README.md; do
   if [[ -f "$TOOLS/$file" ]]; then ok "bundled DOCX payload contains $file"; else bad "missing DOCX payload $file"; fi
 done
 
@@ -91,7 +91,7 @@ else
   bad "delivery manifest records hashes, source map and Mermaid image"
 fi
 
-if "$DOCX_PYTHON" "$TOOLS/render_docx.py" "$OUTPUT" "$TMP/preview" --result-manifest "$MANIFEST" >/dev/null \
+if "$DOCX_PYTHON" "$TOOLS/render_docx.py" "$OUTPUT" "$TMP/preview" --manifest "$TOOLS/renderer_manifest.json" --result-manifest "$MANIFEST" >/dev/null \
   && "$DOCX_PYTHON" - "$MANIFEST" <<'PY'
 import json
 import sys
@@ -104,7 +104,7 @@ else
   bad "no bundled renderer is explicit visual_qa_pending without PATH fallback"
 fi
 
-if python3 "$TOOLS/resolve_renderer.py" | python3 -c 'import json,sys; assert json.load(sys.stdin)["status"] == "unavailable"'; then
+if python3 "$TOOLS/resolve_renderer.py" --manifest "$TOOLS/renderer_manifest.json" | python3 -c 'import json,sys; assert json.load(sys.stdin)["status"] == "unavailable"'; then
   ok "renderer resolver is deterministic and host-LibreOffice-free"
 else
   bad "renderer resolver is deterministic and host-LibreOffice-free"

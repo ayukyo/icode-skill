@@ -1,7 +1,7 @@
 # 步骤 install — ICODE / 共享技能 / MCP 一键安装（独立步骤）
 
 **命令**: `/icode install`
-**产出**: 所选宿主的 ICODE 与共享技能目录；ICODE 自管 DOCX Python runtime；可选 MCP 注册和运行环境
+**产出**: 所选宿主的 ICODE 与共享技能目录；ICODE 自管 DOCX Python runtime 与兼容渲染器；可选 MCP 注册和运行环境
 **会话**: 主会话
 **定位**: **独立步骤**，不创建 `.icode_output_N/`、不写 `.ico_metadata.json`、不参与 1~6 流程推进。与 `doc` / `docx` / `status` / `list` 并列。
 
@@ -147,7 +147,11 @@
 
 `./install.sh` 在 ICODE 同步成功后，自动运行已安装副本的 `tools/docx/bootstrap_runtime.py`。它在 `~/.local/share/icode/runtime/docx/<lock-hash>/` 创建独立 venv 并安装锁定依赖，不使用全局 pip、sudo、宿主 `python-docx` 或系统 LibreOffice。首次安装需要包索引网络（离线发行可随 `tools/docx/wheels/` 附带 wheels）；失败时 ICODE 同步结果保持有效，但安装命令以非零退出，不能把 DOCX 能力宣传为可用。
 
-DOCX 视觉验收只使用 ICODE 发行为当前 OS/CPU/glibc 打包且 SHA-256 校验通过的 renderer；无匹配 bundle 时生成和结构验收仍可用，manifest 必须标注 `visual_qa_pending`。禁止回退系统 `soffice`。
+根安装器随后自动运行 `tools/docx/bootstrap_renderer.py`：以发行源码的 `renderer_packages.lock.json` 固定官方 HTTPS 包、长度及 SHA-256，在用户 `~/.local/share/icode/runtime/docx-renderer/` 独立解包并原子登记；缓存/离线包也必须重校验。源码不携带本机绝对路径，不调用 sudo 或 Debian maintainer scripts。登记和运行时位于技能同步目录外，后续 `sync-to-global.sh` 不会覆盖。
+
+当前渲染包支持 Linux x86_64、glibc≥2.35、kernel≥4.18、x86-64-v2 CPU，已验证 Ubuntu22.04；通用动态库、字体、dpkg-deb 与 ldd 仍需宿主具备。支持的平台遇到下载/哈希/解包/缺库/探针失败时安装返回非零，不伪报可用。不匹配的平台返回明确 unavailable，生成和结构验收仍可用，manifest 必须标注 `visual_qa_pending`。Windows/macOS/ARM 尚无 recipe。禁止回退系统 `soffice`。
+
+`/icode docx` 默认渲染会复用同一安装器完成首次缺包补齐；显式 `--manifest` 只读该清单并禁用自动安装。`--check` 为零写入状态检查，`--offline --package-cache <目录>` 从固定名称且哈希符合 lock 的官方缓存安装。发行包生成器要求安装器、launcher、validator、lock 成套存在；发行验证流程 `docx-renderer.yml` 执行真实安装→同步→Word 页面渲染。
 
 ## 与其他步骤的关系
 
