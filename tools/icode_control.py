@@ -1996,6 +1996,14 @@ def run_gate_linters(out_dir, to_status=None, delivery_verdict=None, legacy=Fals
     results = []
     for gate_id, cmd in lint_cfg.items():
         full_cmd = list(cmd)
+        # Only the three bundled Python gates share the CP's trusted runtime.
+        # Preserve custom commands and their existing text/locale semantics.
+        fixed_python_linter = (
+            gate_id in ("thinking_gate", "mcp_coverage", "workflow_contract")
+            and full_cmd[:2] == ["python3", f"tools/lint_{gate_id}.py"]
+        )
+        if fixed_python_linter:
+            full_cmd[:1] = [sys.executable, "-X", "utf8"]
         if legacy:
             full_cmd = [arg for arg in full_cmd if arg != "--strict"]
         # 按 linter 归一化 audit-verified：workflow_contract 的 STEP_GATES 有
@@ -2010,7 +2018,7 @@ def run_gate_linters(out_dir, to_status=None, delivery_verdict=None, legacy=Fals
             full_cmd += ["--step", linter_step]
         full_cmd += [str(out_dir)]
         try:
-            proc = subprocess.run(full_cmd, capture_output=True, text=True, timeout=180,
+            proc = subprocess.run(full_cmd, capture_output=True, text=not fixed_python_linter, timeout=180,
                                   cwd=str(SKILL_ROOT))
         except subprocess.TimeoutExpired:
             results.append({"gate_id": gate_id, "ok": False, "fail_closed": True,
@@ -2020,9 +2028,21 @@ def run_gate_linters(out_dir, to_status=None, delivery_verdict=None, legacy=Fals
             results.append({"gate_id": gate_id, "ok": False, "fail_closed": True,
                             "detail": f"linter 启动失败: {exc}", "hint": f"手动运行: {' '.join(full_cmd)}"})
             continue
+        stdout, stderr = proc.stdout, proc.stderr
+        if fixed_python_linter:
+            # Decode in this thread: Windows text-mode reader failures can
+            # otherwise lose the output. str is retained only for old mocks.
+            try:
+                stdout = stdout.decode("utf-8") if isinstance(stdout, bytes) else stdout
+                stderr = stderr.decode("utf-8") if isinstance(stderr, bytes) else stderr
+            except UnicodeDecodeError:
+                results.append({"gate_id": gate_id, "ok": False, "fail_closed": True,
+                                "detail": "linter 输出不是合法 UTF-8",
+                                "hint": f"修复后重试: {' '.join(full_cmd)}"})
+                continue
         report = None
         try:
-            report = strict_json_loads(proc.stdout)
+            report = strict_json_loads(stdout)
         except (json.JSONDecodeError, ValueError):
             pass
         # 所有门禁命令都声明 --json；exit 0 但没有 JSON 报告不能当成可审计通过。
@@ -2032,7 +2052,7 @@ def run_gate_linters(out_dir, to_status=None, delivery_verdict=None, legacy=Fals
         if isinstance(report, dict):
             entry["report"] = report
         else:
-            raw = (proc.stdout or proc.stderr or "")[-500:]
+            raw = (stdout or stderr or "")[-500:]
             entry["detail"] = "linter 未返回合法 JSON 对象" + (f": {raw}" if raw else "")
         if not ok:
             entry["fail_closed"] = True
