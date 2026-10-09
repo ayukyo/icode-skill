@@ -31,6 +31,23 @@ python3 tools/icode_control.py create --dir <out_dir> --ticket-id <id> \
 
 本地 UI 的“新建工单”走组合入口 `create-next --workspace <可信工程根> --requirement <需求> --request-id <幂等键>`。它在索引锁与工程序列锁内计算 `max(N)+1`，按工程名冲突规则生成 ticket ID，以 `birth=plan` 调用同一出生逻辑并立即通过 `index-write` 登记。浏览器只提交不透明 project ID；workspace 由服务端目录册解析。若出生后索引写入中断，相同 request ID 会找回该未完成出生并只补齐索引，不再分配第二张工单。
 
+### 2.1 外置控制根的一次性执行根绑定
+
+可信宿主拥有与工单控制根分离的代码目录时，先正常 `create`，再调用：
+
+```bash
+python3 tools/icode_control.py bind-execution-root --dir <out_dir> \
+  --ticket-id <id> --execution-root <规范绝对代码目录> --request-id <key>
+```
+
+该命令保留 `ticket_id/project_path/out_dir` 存储及索引身份，仅设置受保护的 `execution_binding`；`create --metadata-json` 和普通 `metadata-update` 均禁止注入或改写它。绑定只能发生一次：工单不得处于关闭流程，不能有未结束的 step、operation 或 agent，也不能有 `active_checkout` 或活动 `checkout_history`。无配对 ID 的旧 start 不能证明已结束，同样阻止首次绑定。非活动 checkout 历史保留。
+
+绑定记录固定版本 `1`、规范绝对路径，以及从文件系统根到代码目录的逐级 `path/device/inode`，最多 256 层。每级必须是可识别身份的真实目录，拒绝 symlink、Windows reparse point、缺失目录、非规范路径和身份不可用；控制根与代码根互不包含。两个执行根入口及其现有源码端口消费者每次都重新核对全部目录身份，祖先或末级目录被替换即拒绝。未绑定的旧工单保持原执行根逻辑，Git inspection 身份逻辑不变。
+
+绑定通过原事务写入 `metadata_updated`，事件 payload 必须恰好有四个字段：`execution_root_binding: 1`、`set: {execution_binding: ...}`、`append: {}` 和事务添加的 `metadata_hash_after`。后者必须是 64 位小写十六进制字符串，缺失或非法不能被后续事件的合法 hash 掩盖；actor 固定 `icode`，request ID 必填。精确同键同对象重放返回原 `event_id` 与 `already_applied`，不追加事件、不授予新的执行许可；即使随后有开放执行，也可返回旧回执。换键重绑或换根均拒绝。
+
+事件归约离线检查绑定标记、唯一性、绑定时静止状态、后续 checkout 冲突及 metadata 镜像，不访问原代码目录。因此目录消失后仍可读取 `trace` 和验证事件链。该一致性仅证明记录自洽，不能认证可信宿主或当时操作系统状态，也不构成操作系统沙箱；已绑定工单不能通过 checkout reopen 更换根。
+
 ## 3. 状态流转（transition 强制）
 
 > **Crosscheck 例外**：`/icode crosscheck` 不是 ticket-scoped 状态步骤。它只用 `resolve-ticket` 做身份解析，随后由 `tools/icode_crosscheck.py` 写项目 `.icode_output/.crosscheck/`；不得调用 transition/event/index/metadata writer，也不创建 metadata。完整边界见 [crosscheck_mode.md](crosscheck_mode.md)。

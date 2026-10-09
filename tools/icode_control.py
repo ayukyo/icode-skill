@@ -101,12 +101,13 @@ import re
 import io
 import importlib.util
 import subprocess
+import stat
 import sys
 import tempfile
 import time
 import uuid
 from datetime import datetime, timedelta
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 SKILL_ROOT = Path(__file__).resolve().parent.parent
 GATES_JSON = SKILL_ROOT / "mcp" / "workflow-gate" / "gates.json"
@@ -142,7 +143,9 @@ AGENT_CAPABILITIES = {"text", "image", "tools", "reasoning"}
 AGENT_RESULTS = {"joined", "timed_out", "stopped", "failed"}
 AGENT_ADOPTION = {"yes", "partial", "no"}
 MAX_OPEN_AGENT_SPAWNS = 3
+MAX_EXECUTION_BINDING_ANCESTORS = 256
 CONTROLLED_BIRTH_FIELDS = {
+    "execution_binding",
     "schema_version", "ticket_id", "requirement", "created_at", "status",
     "completed_steps", "indexed", "debug", "project_path", "close_state",
     "delivery_verdict", "claims", "verification_runs", "control_plane_degraded",
@@ -396,6 +399,95 @@ def validate_index(index, gate_id="index_schema"):
     return [{"gate_id": gate_id, "path": e.split(":")[0], "detail": e} for e in errors]
 
 
+def execution_binding_shape_ok(binding):
+    """Validate portable recorded identities without accessing the filesystem."""
+    if not isinstance(binding, dict) or set(binding) != {"version", "path", "ancestors"}:
+        return False
+    if type(binding["version"]) is not int or binding["version"] != 1:
+        return False
+    raw = binding["path"]
+    if not isinstance(raw, str) or not raw or "\x00" in raw:
+        return False
+    cls = PureWindowsPath if PureWindowsPath(raw).is_absolute() else PurePosixPath
+    root = cls(raw)
+    if not root.is_absolute() or str(root) != raw or ".." in root.parts:
+        return False
+    depth = len(root.parents) + 1
+    if depth > MAX_EXECUTION_BINDING_ANCESTORS:
+        return False
+    chain = list(reversed(root.parents)) + [root]
+    rows = binding["ancestors"]
+    if not isinstance(rows, list) or len(rows) != depth:
+        return False
+    for row, expected in zip(rows, chain):
+        if not isinstance(row, dict) or set(row) != {"path", "device", "inode"}:
+            return False
+        if row["path"] != str(expected):
+            return False
+        if type(row["device"]) is not int or row["device"] < 0:
+            return False
+        if type(row["inode"]) is not int or row["inode"] <= 0:
+            return False
+    return True
+
+
+def execution_binding_topology_ok(meta):
+    if "execution_binding" not in meta:
+        return True
+    history = meta.get("checkout_history") or []
+    return (execution_binding_shape_ok(meta["execution_binding"])
+            and meta.get("active_checkout") is None
+            and isinstance(history, list)
+            and not any(isinstance(row, dict) and row.get("state") == "active"
+                        for row in history))
+
+
+def capture_execution_binding(raw):
+    """Capture every directory identity; never canonicalize untrusted input silently."""
+    try:
+        if not isinstance(raw, str) or not raw or "\x00" in raw:
+            raise ValueError("path text")
+        root = Path(raw)
+        if not root.is_absolute() or str(root) != raw or ".." in root.parts:
+            raise ValueError("path not canonical")
+        if len(root.parents) + 1 > MAX_EXECUTION_BINDING_ANCESTORS:
+            raise ValueError("path depth")
+        chain = list(reversed(root.parents)) + [root]
+        rows = []
+        for path in chain:
+            info = path.lstat()
+            if (not stat.S_ISDIR(info.st_mode) or stat.S_ISLNK(info.st_mode)
+                    or getattr(info, "st_file_attributes", 0)
+                    & stat.FILE_ATTRIBUTE_REPARSE_POINT):
+                raise ValueError("linked or non-directory component")
+            if type(info.st_dev) is not int or info.st_dev < 0:
+                raise ValueError("device identity unavailable")
+            if type(info.st_ino) is not int or info.st_ino <= 0:
+                raise ValueError("inode identity unavailable")
+            rows.append({"path": str(path), "device": info.st_dev, "inode": info.st_ino})
+        if root.resolve(strict=True) != root:
+            raise ValueError("path resolution changed")
+        value = {"version": 1, "path": str(root), "ancestors": rows}
+        if not execution_binding_shape_ok(value):
+            raise ValueError("binding shape")
+        return value
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise ControlError("执行根目录对象校验失败", gate_id="execution_binding_identity") from exc
+
+
+def bound_execution_workspace(out_dir, meta):
+    binding = meta["execution_binding"]
+    if not execution_binding_topology_ok(meta):
+        raise ControlError("执行根绑定与 checkout 拓扑冲突", gate_id="execution_binding_topology")
+    if capture_execution_binding(binding["path"]) != binding:
+        raise ControlError("执行根或祖先目录对象已替换", gate_id="execution_binding_identity")
+    root = Path(binding["path"])
+    control = containing_workspace(out_dir)
+    if root.is_relative_to(control) or control.is_relative_to(root):
+        raise ControlError("控制根与执行根不能互相包含", gate_id="execution_binding_topology")
+    return root
+
+
 def require_valid_metadata(meta):
     violations = validate_against(meta, SCHEMA_METADATA, "metadata_schema")
     if violations:
@@ -406,6 +498,9 @@ def require_valid_metadata(meta):
             violations=violations,
             hint="先运行 validate --dir <out_dir> 并修复字段类型/枚举；实验字段移入 extensions.<namespace>",
         )
+    if not execution_binding_topology_ok(meta):
+        raise ControlError("执行根绑定与 checkout 拓扑冲突",
+                           gate_id="execution_binding_topology")
 
 
 # ---------------------------------------------------------------- gates.json 状态机
@@ -829,6 +924,100 @@ def verify_event_chain(out_dir, meta=None, semantic=True):
     return events, problems
 
 
+class ExecutionBindingMirror:
+    """Stream binding consistency and open IDs, without duplicating the event log."""
+    def __init__(self, metadata):
+        self.metadata = metadata
+        self.binding = None
+        self.seen = False
+        self.open_steps = set()
+        self.open_operations = set()
+        self.open_agents = set()
+        self.closed = False
+        self.issues = set()
+
+    def consume(self, event):
+        kind = event.get("event_type")
+        payload = event.get("payload")
+        if not isinstance(payload, dict):
+            # Missing pairing identities still represent unclosed execution.
+            payload = {}
+        for start, finish, key, opened in (
+            ("step_started", "step_finished", "attempt", self.open_steps),
+            ("operation_started", "operation_finished", "attempt", self.open_operations),
+            ("agent_spawned", "agent_result", "spawn_id", self.open_agents),
+        ):
+            identity = payload.get(key)
+            if kind == start:
+                if isinstance(identity, str) and identity:
+                    opened.add(identity)
+                else:
+                    # Legacy starts without pairing identity cannot prove quiescence.
+                    opened.add(None)
+            elif kind == finish and isinstance(identity, str):
+                opened.discard(identity)
+        if kind == "close_phase":
+            self.closed = True
+        elif kind == "ticket_reopened":
+            self.closed = False
+            if self.seen:
+                self.issues.add("binding_checkout_conflict")
+        if kind != "metadata_updated":
+            if "execution_root_binding" in payload:
+                self.issues.add("binding_wrong_event_type")
+            return
+        updates = payload.get("set")
+        appends = payload.get("append")
+        touches = ((isinstance(updates, dict) and "execution_binding" in updates)
+                   or (isinstance(appends, dict) and "execution_binding" in appends))
+        marked = "execution_root_binding" in payload
+        if not touches and not marked:
+            if self.seen:
+                for change in (updates, appends):
+                    if isinstance(change, dict) and change.get("active_checkout") is not None:
+                        self.issues.add("binding_checkout_conflict")
+                    history = change.get("checkout_history") if isinstance(change, dict) else None
+                    if isinstance(history, list) and any(
+                        isinstance(row, dict) and row.get("state") == "active" for row in history
+                    ):
+                        self.issues.add("binding_checkout_conflict")
+            return
+        required = {"execution_root_binding", "set", "append", "metadata_hash_after"}
+        recorded_hash = payload.get("metadata_hash_after")
+        if (type(payload.get("execution_root_binding")) is not int
+                or payload.get("execution_root_binding") != 1
+                or set(payload) != required
+                or not isinstance(recorded_hash, str)
+                or re.fullmatch(r"[0-9a-f]{64}", recorded_hash) is None
+                or not isinstance(updates, dict)
+                or set(updates) != {"execution_binding"}
+                or appends != {}
+                or not isinstance(event.get("request_id"), str)
+                or not event["request_id"].strip()
+                or event.get("actor") != "icode"):
+            self.issues.add("binding_event_shape")
+        if self.seen:
+            self.issues.add("binding_event_duplicate")
+        if self.open_steps or self.open_operations or self.open_agents or self.closed:
+            self.issues.add("binding_not_quiescent")
+        candidate = updates.get("execution_binding") if isinstance(updates, dict) else None
+        if not execution_binding_shape_ok(candidate):
+            self.issues.add("binding_shape")
+        self.binding = candidate
+        self.seen = True
+
+    def finish(self):
+        meta = self.metadata
+        if isinstance(meta, dict):
+            if not execution_binding_topology_ok(meta):
+                self.issues.add("binding_checkout_conflict")
+            if ("execution_binding" in meta) != self.seen:
+                self.issues.add("binding_metadata_mismatch")
+            elif self.seen and meta["execution_binding"] != self.binding:
+                self.issues.add("binding_metadata_mismatch")
+        return sorted(self.issues)
+
+
 def validate_event_semantics(events, meta):
     """校验控制事件的顺序和 payload 语义，防止自洽 hash 掩盖伪造生命周期。"""
     problems = []
@@ -955,6 +1144,10 @@ def validate_event_semantics(events, meta):
             problems.append(
                 "metadata 与最后一条受控写事件的 metadata_hash_after 不一致，"
                 "疑似绕过 metadata-update/专用命令直写")
+    binding_mirror = ExecutionBindingMirror(meta)
+    for event in events:
+        binding_mirror.consume(event)
+    problems.extend(binding_mirror.finish())
     return problems
 
 
@@ -1189,6 +1382,8 @@ def json_pointer_get(document, pointer):
 
 
 def execution_workspace(out_dir, meta):
+    if "execution_binding" in meta:
+        return bound_execution_workspace(out_dir, meta)
     active = meta.get("active_checkout")
     if isinstance(active, dict):
         active_path = active.get("path") or active.get("worktree_path")
@@ -1202,6 +1397,8 @@ def execution_workspace(out_dir, meta):
 
 def trusted_execution_workspace(out_dir, meta):
     """为外部 Agent 返回经拓扑校验的执行根；拒绝直接信任任意 metadata 路径。"""
+    if "execution_binding" in meta:
+        return bound_execution_workspace(out_dir, meta)
     active = meta.get("active_checkout")
     active_history = [item for item in (meta.get("checkout_history") or [])
                       if isinstance(item, dict) and item.get("state") == "active"]
@@ -3413,6 +3610,7 @@ def known_metadata_fields():
 
 
 METADATA_UPDATE_PROTECTED = {
+    "execution_binding",
     "schema_version", "ticket_id", "created_at", "status", "completed_steps",
     "indexed", "delivery_verdict", "claims", "verification_runs", "close_state",
     "control_plane_degraded", "debug", "project_path",
@@ -3424,6 +3622,57 @@ CLOSE_BOOKKEEPING_FIELDS = {
     "wt_degraded", "sub_worktrees", "active_checkout", "checkout_history", "migration",
     "submitted_baseline", "submitted_baselines", "submission_contracts", "submission_audit",
 }
+
+
+def cmd_bind_execution_root(args):
+    out_dir = Path(args.dir).resolve()
+    if not isinstance(args.request_id, str) or not args.request_id.strip():
+        raise ControlError("绑定需要非空 request-id", exit_code=2,
+                           gate_id="execution_binding_request")
+    with DirLock(out_dir):
+        recover_pending_transaction(out_dir)
+        meta = load_metadata(out_dir)
+        require_vnext(meta, out_dir)
+        require_valid_metadata(meta)
+        if meta.get("ticket_id") != args.ticket_id:
+            raise ControlError("绑定 ticket-id 不匹配", gate_id="execution_binding_ticket")
+        events, problems = verify_event_chain(out_dir, meta)
+        if problems:
+            raise ControlError("现有事件链不完整，拒绝绑定", gate_id="event_chain",
+                               violations=problems)
+        binding = capture_execution_binding(args.execution_root)
+        proposed = dict(meta, execution_binding=binding)
+        bound_execution_workspace(out_dir, proposed)
+        payload = {"execution_root_binding": 1, "set": {"execution_binding": binding},
+                   "append": {}}
+        prior = find_idempotent_event(events, args.request_id, "metadata_updated", payload,
+                                     actor="icode",
+                                     payload_keys=("execution_root_binding", "set", "append"))
+        if prior:
+            if meta.get("execution_binding") != binding:
+                raise ControlError("绑定重放与当前对象不一致", gate_id="execution_binding_identity")
+            print(json.dumps({"ok": True, "already_applied": True,
+                              "event_id": prior["event_id"], "ticket_id": args.ticket_id,
+                              "request_id": args.request_id}, ensure_ascii=False, indent=2))
+            return 0
+        if "execution_binding" in meta:
+            raise ControlError("执行根已绑定，禁止替换或使用新请求重绑",
+                               gate_id="execution_binding_immutable")
+        if meta.get("close_state") is not None:
+            raise ControlError("关闭流程中禁止绑定", gate_id="execution_binding_quiescence")
+        mirror = ExecutionBindingMirror(meta)
+        for event in events:
+            mirror.consume(event)
+        if mirror.open_steps or mirror.open_operations or mirror.open_agents or mirror.closed:
+            raise ControlError("存在未结执行或关闭状态，禁止绑定",
+                               gate_id="execution_binding_quiescence")
+        require_valid_metadata(proposed)
+        event = commit_metadata_and_event(out_dir, meta, proposed, "metadata_updated", payload,
+                                          request_id=args.request_id, actor="icode")
+    print(json.dumps({"ok": True, "event_id": event["event_id"],
+                      "ticket_id": args.ticket_id, "request_id": args.request_id},
+                     ensure_ascii=False, indent=2))
+    return 0
 
 
 def cmd_metadata_update(args):
@@ -5411,6 +5660,13 @@ def build_parser():
     p.add_argument("--skip-gates", action="store_true",
                    help="仅限测试夹具；生产流程禁止跳门禁")
     p.set_defaults(func=cmd_transition)
+
+    p = sub.add_parser("bind-execution-root", help="一次性绑定可信宿主的隔离代码根")
+    p.add_argument("--dir", required=True)
+    p.add_argument("--ticket-id", required=True)
+    p.add_argument("--execution-root", required=True)
+    p.add_argument("--request-id", required=True)
+    p.set_defaults(func=cmd_bind_execution_root)
 
     p = sub.add_parser("metadata-update", help="原子更新已登记业务字段并追加 metadata_updated 事件")
     p.add_argument("--dir", required=True)

@@ -7,6 +7,27 @@
   "required": ["schema_version", "requirement", "created_at", "status", "completed_steps", "ticket_id"],
   "additionalProperties": false,
   "properties": {
+    "execution_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "path", "ancestors"],
+      "properties": {
+        "version": {"const": 1, "type": "integer"},
+        "path": {"type": "string", "minLength": 1},
+        "ancestors": {
+          "type": "array", "minItems": 1, "maxItems": 256,
+          "items": {
+            "type": "object", "additionalProperties": false,
+            "required": ["path", "device", "inode"],
+            "properties": {
+              "path": {"type": "string", "minLength": 1},
+              "device": {"type": "integer", "minimum": 0},
+              "inode": {"type": "integer", "minimum": 1}
+            }
+          }
+        }
+      }
+    },
     "schema_version": { "const": 3 },
     "template_version": { "type": "string" },
     "migration_log": { "type": "array" },
