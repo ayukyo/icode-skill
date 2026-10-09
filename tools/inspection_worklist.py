@@ -12,6 +12,8 @@ import selectors
 import stat
 import subprocess
 import time
+from queue import Empty, Full, Queue
+from threading import Event, Thread
 
 
 PHASES = {"code": ["code_review"], "deepcheck": ["reverse", "fixed", "free"],
@@ -74,6 +76,82 @@ def _paths(root, values, *, directory=False):
     return sorted({_path(root, x, directory=directory) for x in values})
 
 
+def _git_pipe(proc, limit, deadline):
+    """Read a bounded subprocess pipe without ``select`` on anonymous pipes.
+
+    Windows ``SelectSelector`` cannot wait on anonymous pipe handles.  A
+    bounded reader thread keeps the same stdout and deadline limits while the
+    caller remains responsible for killing the process on timeout/overflow.
+    The queue is deliberately small so a noisy Git process cannot turn this
+    compatibility path into an unbounded memory sink.
+    """
+    chunks = Queue(maxsize=2)
+    stop = Event()
+    reader_error = []
+
+    def read_chunks():
+        try:
+            while not stop.is_set():
+                chunk = proc.stdout.read(65536)
+                if not chunk:
+                    break
+                while not stop.is_set():
+                    try:
+                        chunks.put(chunk, timeout=0.05)
+                        break
+                    except Full:
+                        continue
+        except OSError as exc:
+            reader_error.append(exc)
+        finally:
+            while not stop.is_set():
+                try:
+                    chunks.put(None, timeout=0.05)
+                    break
+                except Full:
+                    continue
+
+    reader = Thread(target=read_chunks, name="icode-git-pipe", daemon=True)
+    reader.start()
+    data, truncated = bytearray(), False
+    try:
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise InspectionError("git timeout")
+            try:
+                chunk = chunks.get(timeout=min(0.05, remaining))
+            except Empty:
+                if not reader.is_alive():
+                    break
+                continue
+            if chunk is None:
+                break
+            data.extend(chunk)
+            if len(data) > limit:
+                truncated = True
+                proc.kill()
+                break
+        if proc.poll() is None:
+            proc.wait(timeout=max(0.01, deadline - time.monotonic()))
+        if reader_error and not truncated:
+            raise InspectionError(f"git pipe unavailable: {reader_error[0]}")
+        return bytes(data[:limit]), truncated
+    finally:
+        stop.set()
+        if proc.poll() is None:
+            proc.kill()
+        try:
+            proc.wait(timeout=1)
+        except subprocess.TimeoutExpired:
+            pass
+        try:
+            proc.stdout.close()
+        except OSError:
+            pass
+        reader.join(timeout=1)
+
+
 def _git(repo, args, limit=8192):
     """Bound both stdout memory and elapsed time, even for ls-files/git show."""
     env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
@@ -82,6 +160,11 @@ def _git(repo, args, limit=8192):
                "-c", "core.hooksPath=/dev/null", "-C", str(repo), *args]
     try:
         with subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=env) as proc:
+            if os.name == "nt":
+                data, truncated = _git_pipe(proc, limit, time.monotonic() + 5)
+                if proc.returncode and not truncated:
+                    raise InspectionError(f"git failed: {args[0]}")
+                return data, truncated
             with selectors.DefaultSelector() as selector:
                 selector.register(proc.stdout, selectors.EVENT_READ)
                 data, deadline, truncated = bytearray(), time.monotonic() + 5, False

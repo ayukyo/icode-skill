@@ -4,6 +4,8 @@ import hashlib
 import importlib.util
 import json
 import subprocess
+import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -23,6 +25,18 @@ def api():
 
 def test_api_exists_before_contract_tests():
     assert TOOL.is_file(), "inspection worklist API has not been implemented"
+
+
+def test_windows_pipe_reader_bounds_anonymous_pipe(api, monkeypatch):
+    """Windows must not register an anonymous Popen pipe with selectors."""
+    monkeypatch.setattr(api.os, "name", "nt")
+    script = "import sys; sys.stdout.write('x' * 20000); sys.stdout.flush()"
+    proc = subprocess.Popen([sys.executable, "-c", script], stdout=subprocess.PIPE,
+                            stderr=subprocess.DEVNULL)
+    data, truncated = api._git_pipe(proc, 128, time.monotonic() + 5)
+    assert len(data) == 128
+    assert truncated is True
+    assert proc.returncode is not None
 
 
 def git(root, *args):
