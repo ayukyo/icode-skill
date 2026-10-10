@@ -654,6 +654,30 @@ cleanup_prepared_stages() {
   done
 }
 
+# Best-effort cleanup of stale .icode-* transaction dirs left by prior runs
+# whose backup removal was SIGTERM'd by the sandbox (deleting a large tree can
+# exceed the delete time budget). Only the whitelisted transaction name
+# prefixes are touched, and removal is backgrounded so a slow deletion cannot
+# stall this run. Managed destinations themselves are never removed here.
+reap_transaction_leftovers() {
+  local roots=() seen=() d s dup t
+  for d in "${ICODE_DIRS[@]}"; do
+    roots+=("$(dirname "$d")")
+  done
+  for d in "${roots[@]}"; do
+    dup=false
+    for s in "${seen[@]}"; do
+      [[ "$s" == "$d" ]] && dup=true && break
+    done
+    [[ "$dup" == true ]] && continue
+    seen+=("$d")
+    for t in "$d"/.icode-backup-* "$d"/.icode-stage-*; do
+      [[ -e "$t" ]] || continue
+      { remove_transaction_tree "$t" >/dev/null 2>&1 & }
+    done
+  done
+}
+
 prepare_icode_stage() {
   local dst="$1"
   local parent stage
@@ -663,9 +687,13 @@ prepare_icode_stage() {
     || return 1
   ICODE_STAGE_DIRS+=("$stage")
   ICODE_STAGE_TARGETS+=("$dst")
-  if [[ -d "$dst" ]]; then
-    cp -a "$dst/." "$stage/" || return 1
-  fi
+  # The stage is built purely from the git payload below. A previous revision
+  # copied the existing destination into the stage (cp -a "$dst/."), which
+  # inherited runtime artifacts such as .venv / __pycache__ produced inside the
+  # managed skill tree. Combined with the cp engine never deleting
+  # destination-only files, those artifacts accumulated across syncs (the
+  # Claude target grew past 25k files / 552MB). Skipping the copy makes a
+  # committed destination mirror the source exactly, matching rsync --delete.
   sync_icode_payload "$stage" "$dst" || return 1
   remove_legacy_entrypoints "$stage" || return 1
   write_icode_marker "$stage" || return 1
@@ -749,8 +777,12 @@ commit_icode_stages() {
     cleanup_prepared_stages
     return 1
   fi
+  # Remove backups in the background: a large backup tree can exceed the
+  # sandbox delete time budget and be SIGTERM'd, which must not fail an
+  # otherwise successful commit. Leftover backups are reaped by the next run's
+  # startup reaper (see reap_transaction_leftovers).
   for backup in "${committed_backups[@]}"; do
-    [[ -z "$backup" ]] || remove_transaction_tree "$backup"
+    [[ -z "$backup" ]] || { remove_transaction_tree "$backup" >/dev/null 2>&1 & }
   done
 }
 
@@ -778,6 +810,7 @@ if [[ "$MODE" == "dry-run" ]]; then
     report_legacy_entrypoints "$dst"
   done
 else
+  reap_transaction_leftovers
   for dst in "${ICODE_DIRS[@]}"; do
     if same_path "$DEV_REPO" "$dst"; then
       echo "   ↪ source 与 ICODE 目标相同，跳过自同步: $dst"
