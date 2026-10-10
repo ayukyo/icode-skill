@@ -38,6 +38,7 @@ scripts/submission_guard.py — worktree 提交契约机器闸门（提案 workt
 """
 
 import argparse
+import importlib.util
 import json
 import os
 import re
@@ -47,6 +48,235 @@ import sys
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
+
+
+_CONTROL_MODULE = None
+
+
+def control_module():
+    """Load shared read-only APIs without invoking a control-plane writer."""
+    global _CONTROL_MODULE
+    if _CONTROL_MODULE is None:
+        path = Path(__file__).resolve().parents[1] / "tools/icode_control.py"
+        spec = importlib.util.spec_from_file_location("submission_control", path)
+        _CONTROL_MODULE = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(_CONTROL_MODULE)
+    return _CONTROL_MODULE
+
+
+def _inventory_git(repo, *args):
+    # Shared bounded plumbing disables hooks/filters and fails on truncation.
+    module = control_module().candidate_module()
+    return module._git(repo, list(args), module.DEFAULT_LIMITS["max_git_bytes"])
+
+
+def _status_entries(raw):
+    """Porcelain -z uses destination then origin; never split paths by lines."""
+    parts = raw.split(b"\0")
+    index = 0
+    rows = []
+    while index < len(parts) and parts[index]:
+        value = parts[index]
+        index += 1
+        if len(value) < 4 or value[2:3] != b" ":
+            raise ValueError("invalid git status -z record")
+        status = value[:2].decode("ascii")
+        row = {"path": os.fsdecode(value[3:]), "original_path": None,
+               "staged": status[0], "unstaged": status[1]}
+        if "R" in status or "C" in status:
+            if index >= len(parts) or not parts[index]:
+                raise ValueError("incomplete git rename -z record")
+            row["original_path"] = os.fsdecode(parts[index])
+            index += 1
+        rows.append(row)
+    return rows
+
+
+def _inventory_modes(raw, *, tree=False):
+    modes = {}
+    for value in raw.split(b"\0"):
+        if not value:
+            continue
+        info, path = value.split(b"\t", 1)
+        fields = info.decode("ascii").split()
+        if not tree and fields[2] != "0":
+            raise ValueError("unmerged index requires resolution")
+        modes[os.fsdecode(path)] = fields[0]
+    return modes
+
+
+def _binary_paths(raw):
+    parts, found, index = raw.split(b"\0"), set(), 0
+    while index < len(parts) and parts[index]:
+        added, removed, path = parts[index].split(b"\t", 2)
+        index += 1
+        if not path:  # --numstat -z rename: empty name, old name, new name.
+            if index + 1 >= len(parts):
+                raise ValueError("incomplete binary rename record")
+            old, path = parts[index:index + 2]
+            index += 2
+            if added == b"-" or removed == b"-":
+                found.add(os.fsdecode(old))
+        if added == b"-" or removed == b"-":
+            found.add(os.fsdecode(path))
+    return found
+
+
+def _generated_suggestion(path):
+    parts = Path(path).parts
+    suffix = Path(path).suffix.lower()
+    return (suffix in {".so", ".o", ".a", ".dll", ".exe", ".pyc", ".log"}
+            or any(p in {"build", "dist", "out", "__pycache__", ".idea", ".vscode", ".agents", ".codex", ".claude"}
+                   or p.startswith("cmake-build-") for p in parts))
+
+
+def build_submission_inventory(meta, metadata_path):
+    """Classify actual changes using declarations, never a free-text whitelist.
+
+    Directory inspection scopes are review boundaries, not blanket submission
+    authorization. Only named files/related seeds establish intended changes.
+    Generated-looking files stay unknown until an explicit candidate exclusion.
+    """
+    ctl = control_module()
+    metadata_path = Path(metadata_path).expanduser().resolve()
+    report = {"read_only": True, "ok": False, "repositories": [], "intended": [],
+              "side_effects": [], "unknown": [], "suggested_exclusions": [], "violations": []}
+    try:
+        contracts = meta.get("submission_contracts") or []
+        if not isinstance(contracts, list):
+            raise ValueError("submission_contracts must be an array")
+        explicit_roots = [Path(c["repo_path"]).expanduser().resolve() for c in contracts
+                          if isinstance(c, dict) and isinstance(c.get("repo_path"), str)]
+        try:
+            workspace = ctl.execution_workspace(metadata_path.parent, meta)
+        except ctl.ControlError:
+            if not explicit_roots or "execution_binding" in meta:
+                raise
+            # Remote-contract-only historical fixtures need no ticket migration.
+            workspace = explicit_roots[0]
+        if not (workspace / ".git").exists() and explicit_roots:
+            workspace = explicit_roots[0]
+        tracking = meta.get("candidate_tracking") or {}
+        if tracking.get("mode") == "enabled":
+            events, problems = ctl.verify_event_chain(metadata_path.parent, meta)
+            if problems:
+                raise ctl.ControlError("源工单事件链不完整", gate_id="event_chain", violations=problems)
+            scope = ctl.candidate_inspection_scope(metadata_path.parent, meta,
+                                                  effective_base=tracking["base"], events=events)
+        else:
+            scope = ctl.candidate_inspection_scope(metadata_path.parent)
+        seeds = []
+        for raw in meta.get("code_files") or []:
+            value = raw if isinstance(raw, str) else raw.get("path") or raw.get("file") if isinstance(raw, dict) else None
+            if not isinstance(value, str):
+                raise ValueError("invalid code_files declaration")
+            seeds.append(value)
+        seeds += scope["related"] + scope["scopes"]
+        declared = set()
+        for seed in seeds:
+            candidate = Path(seed).expanduser()
+            path = candidate if candidate.is_absolute() else workspace / candidate
+            # Missing/deleted declared files remain seeds. Directories stay boundaries.
+            if not path.is_dir():
+                declared.add(path.absolute())
+        exclusions = ctl.candidate_module()._paths(meta.get("excluded_side_effects") or [])
+        if "." in exclusions:
+            raise ValueError("excluding the entire candidate is prohibited")
+        for seed in declared:
+            try:
+                relative = seed.relative_to(workspace).as_posix()
+            except ValueError:
+                continue
+            if ctl.candidate_module()._excluded(relative, exclusions):
+                raise ValueError("declared source overlaps candidate exclusion")
+        visited = set()
+
+        def scan(repo):
+            repo = Path(repo).resolve()
+            if repo in visited:
+                return
+            visited.add(repo)
+            top = os.fsdecode(_inventory_git(repo, "rev-parse", "--show-toplevel")).strip()
+            if Path(top).resolve() != repo:
+                raise ValueError(f"repository unavailable or not checkout root: {repo}")
+            rows = _status_entries(_inventory_git(repo, "status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignore-submodules=none"))
+            indexed = _inventory_modes(_inventory_git(repo, "ls-files", "--stage", "-z"))
+            headed = _inventory_modes(_inventory_git(repo, "ls-tree", "-rz", "HEAD"), tree=True)
+            binary = _binary_paths(_inventory_git(repo, "diff", "--no-ext-diff", "--no-textconv", "--numstat", "-z", "HEAD"))
+            binary |= _binary_paths(_inventory_git(repo, "diff", "--no-ext-diff", "--no-textconv", "--numstat", "-z", "--cached"))
+            repository = {"repo_path": str(repo), "changes": []}
+            report["repositories"].append(repository)
+            for row in rows:
+                local = row["path"]
+                path = repo / local
+                try:
+                    name = path.relative_to(workspace).as_posix()
+                except ValueError:
+                    name = local
+                original = repo / row["original_path"] if row["original_path"] else None
+                old_mode = headed.get(row["original_path"] or local)
+                new_mode = indexed.get(local)
+                if path.is_file() and not path.is_symlink():
+                    new_mode = "100755" if path.stat().st_mode & 0o111 else "100644"
+                row.update(path=name, repo_path=str(repo), repo_relative_path=local,
+                           kind="gitlink" if "160000" in {old_mode, new_mode} else "symlink" if path.is_symlink() else "file",
+                           mode_changed=bool(old_mode and new_mode and old_mode != new_mode), binary=local in binary)
+                if path.is_file() and not path.is_symlink() and not row["binary"]:
+                    with path.open("rb") as stream:
+                        row["binary"] = b"\0" in stream.read(8192)
+                original_name = None
+                if original is not None:
+                    try:
+                        original_name = original.relative_to(workspace).as_posix()
+                    except ValueError:
+                        original_name = row["original_path"]
+                if ".icode_output" in Path(name).parts and (original_name is None or ".icode_output" in Path(original_name).parts):
+                    classification, reason = "side_effects", "control_artifact_exclusion"
+                elif path.absolute() in declared and (original is None or original.absolute() in declared):
+                    classification, reason = "intended", "declared_file"
+                elif repo == workspace or workspace in repo.parents:
+                    if (ctl.candidate_module()._excluded(name, exclusions)
+                            and (original_name is None or ctl.candidate_module()._excluded(original_name, exclusions))):
+                        classification, reason = "side_effects", "explicit_candidate_exclusion"
+                    else:
+                        classification, reason = "unknown", "needs_user_confirm"
+                else:
+                    classification, reason = "unknown", "needs_user_confirm"
+                row.update(classification=classification, reason=reason)
+                if classification == "unknown" and _generated_suggestion(name):
+                    row["suggested_exclusion"] = True
+                    report["suggested_exclusions"].append(name)
+                repository["changes"].append(row)
+                report[classification].append(row)
+            # Always descend initialized gitlinks, even when parent status is clean.
+            for local in sorted(p for p, mode in indexed.items() if mode == "160000"):
+                child = repo / local
+                if not (child / ".git").exists() or child.is_symlink():
+                    raise ValueError(f"submodule unavailable: {child}")
+                scan(child)
+
+        roots = [workspace, *explicit_roots]
+        for item in meta.get("sub_worktrees") or []:
+            if isinstance(item, dict) and isinstance(item.get("worktree_path"), str):
+                roots.append(Path(item["worktree_path"]).expanduser().resolve())
+        for root in roots:
+            scan(root)
+    except (ctl.ControlError, ctl.candidate_module().CandidateError, OSError, ValueError, TypeError, UnicodeError) as exc:
+        report["violations"].append(str(exc))
+    report["suggested_exclusions"] = sorted(set(report["suggested_exclusions"]))
+    report["ok"] = not report["unknown"] and not report["violations"]
+    return report
+
+
+def _print_inventory(report):
+    print("Submission inventory (read_only):")
+    for classification in ("intended", "side_effects", "unknown"):
+        paths = [row["path"] for row in report[classification]]
+        print(f"  {classification}: {json.dumps(paths, ensure_ascii=True)}")
+    if report["suggested_exclusions"]:
+        print("  needs_user_confirm suggested_exclusions: " + json.dumps(report["suggested_exclusions"], ensure_ascii=True))
+    for violation in report["violations"]:
+        print("  blocked: " + violation)
 
 
 # ---------------------------------------------------------------------------
@@ -684,17 +914,34 @@ def _print_merge_rows(rows: list[dict], merge_enabled: bool) -> None:
 
 
 def cmd_submit_check(args) -> int:
-    meta = load_metadata(Path(args.metadata).expanduser())
+    metadata_path = Path(args.metadata).expanduser()
+    meta = load_metadata(metadata_path)
     merge_enabled = bool(getattr(args, "merge", False))
-    contracts = meta.get("submission_contracts")
+    contracts = meta.get("submission_contracts", [])
     if not isinstance(contracts, list):
         print("❌ submission_contracts 必须是数组", file=sys.stderr)
         return 1
+    inventory = build_submission_inventory(meta, metadata_path)
+    if (metadata_path.parent / control_module().TXN_NAME).exists():
+        inventory["violations"].append("pending_transaction")
+        inventory["ok"] = False
+    _print_inventory(inventory)
+    source_ok = inventory["ok"]
+    if (meta.get("candidate_tracking") or {}).get("mode") == "enabled":
+        ctl = control_module()
+        review = ctl.delivery_freshness(metadata_path.parent, meta)
+        verification = ctl.verification_applicability(metadata_path.parent, meta)
+        print("  review: " + json.dumps({k: review.get(k) for k in ("ok", "state", "reasons")}, ensure_ascii=False))
+        print("  verification: " + json.dumps({k: verification.get(k) for k in ("ok", "state", "reasons")}, ensure_ascii=False))
+        source_ok = source_ok and review["ok"] and verification["ok"]
+    if not source_ok and not contracts:
+        print("❌ 总状态 = blocked——源码库存或当前候选证据待确认；未执行 merge / commit / push", file=sys.stderr)
+        return 2
     if not contracts:
         if merge_enabled:
             print("❌ /icode worktree --merge 要求非空 submission_contracts", file=sys.stderr)
             return 2
-        print("ℹ️ 无提交契约（只读工单或未迁移）。仅枚举变更文件供人工确认。")
+        print("ℹ️ 无提交契约；本地源码库存检查通过，提交目标保持未绑定（未执行 merge / commit / push）。")
         return 0
 
     # Phase 1：全部仓库只读预检。除 remote-tracking refs 外不修改用户仓库。
@@ -721,6 +968,19 @@ def cmd_submit_check(args) -> int:
     if any(row["issues"] for row in rows):
         _print_merge_rows(rows, merge_enabled)
         print("\n❌ 总状态 = blocked——全量预检未通过，未执行本地 merge", file=sys.stderr)
+        return 2
+
+    # A legacy, matching pending merge is preparation awaiting business recheck,
+    # not submission pass. Preserve its existing exit 3 without waiving unknown
+    # inventory for the ordinary final submit-check or enabled candidate gates.
+    pending_paths = {str(row["repo_path"].resolve()) for row in rows if row.get("pending_merge")}
+    legacy_pending_recheck = (merge_enabled and not (meta.get("candidate_tracking") or {}).get("mode") == "enabled"
+        and not inventory["violations"] and bool(pending_paths)
+        and all(change["repo_path"] in pending_paths and change["unstaged"] == " "
+                and change["staged"] not in {"?", " "} for change in inventory["unknown"]))
+    if not source_ok and not legacy_pending_recheck:
+        _print_merge_rows(rows, merge_enabled)
+        print("\n❌ 总状态 = blocked——源码库存或当前候选证据待确认；未执行 merge / commit / push", file=sys.stderr)
         return 2
 
     if not merge_enabled:

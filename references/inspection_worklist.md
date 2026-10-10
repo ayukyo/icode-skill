@@ -1,4 +1,4 @@
-# 审查工作清单与定位证据（v1）
+# 审查工作清单与定位证据（schema v1 / checks v1）
 
 补强现有审查，不增加第二套 Agent/模型接口，不替代 LIMIT、TDD、四维复检、Reverse/Fixed/Free、Audit、Dedup 或交付验证。机器实现：[inspection_worklist.py](../tools/inspection_worklist.py)；数据合同：[inspection-worklist.schema.json](../schemas/inspection-worklist.schema.json)。借鉴 open-code-review 的确定性预处理、关联审查和定位校验思路，无需安装该工具。
 
@@ -33,6 +33,36 @@ phase：code=`code_review`；deepcheck effective full=`reverse/fixed/free`，实
 
 遗漏保持 `coverage_status=partial|degraded` 和 `unobserved=[{"path":"<遗漏范围>","debt_reason":"<原因>"}]` 或明确全局 debt_reason，不允许 success/“全审完成”。degraded 可保留明确债务，但身份/路径/版本违规不能降级。deepcheck/audit 原有 coverage.json 与 Dedup 声明仍必需，清单不能代替它们。无 execution_model 事件的历史工单保持 untracked 可读，不追溯补写证据。
 
+## 专项结论：共享变体与时间合同
+
+新 prepare 保留 `schema_version=1`，始终生成顶层 `checks_version=1` 与 `checks`（未触发时为 `[]`）。仅在必审源码后缀中检测 timestamp/clock/duration/interval/epoch/ns/us/ms、整数宽度转换，以及 shared/variant/sibling/product/capability/probe/backend 等信号；普通 SDK 说明文档不触发。触发从当前有界内容与真实基线 diff **被删除的行**联合派生，删除相关代码不能消掉提示。基线读取超时、截断或文件不可读形成 `unobserved`/partial，不静默算完成。相同受影响仓库的 scopes/related 必审源码集合聚合检查；显式纳入的消费者一起审查。
+
+每项 `checks` 含派生 `check_id,kind,version,paths,required_items` 与按阶段保存的 `results`。这些身份字段纳入冻结声明 hash，results 不纳入声明 hash；增补消费者/更改基线须重新入轮。机器仅保证提示与记录完整性，不保证触发覆盖全部语义，也不能据此宣称已自动发现或修好兄弟产品 PID 错探测、clock `-1` 转 unsigned 等缺陷。
+
+| kind | 每阶段必需条目 |
+|---|---|
+| `timestamp_contract` | `signedness`（带符号类型）、`domain`（时钟域）、`unit`、`epoch`、`negative_zero_max`、`sentinel`、`overflow_underflow`、`projection`（窄化/转换）、`frame_window`、`interval_fallback` |
+| `shared_variant_consumers` | 产品 `target/sibling/unknown`；能力 `supported/unsupported/probe_failure/read_failure/stale`；`consumers`；`memory:mmap/memory:dma`；生命周期 `first_frame/steady/stop_start/reconnect`；`build_config:enabled/disabled`；`fallback:old_semantics/no_extra_probe/error_isolation` |
+
+默认检查各维度必需场景，不强制任意轴全笛卡尔积。`consumers` 的 reason 必须解释已声明接口/消费者的影响；真实项目要求组合验证时，在审查正文与证据中列明确产品×消费者场景，不能以无证据的一句“全部通过”替代。无 mmap/DMA 路径或不适用的条目使用 `not_applicable` 并给具体非空 reason 与真实引用。
+
+实际重新 Read 本阶段所有 check.paths，逐项完成判断后登记**完整阶段对象**：
+
+```bash
+python3 tools/icode_control.py inspection --dir <out_dir> --step <code|deepcheck|audit> \
+  --attempt <attempt> --phase assess --read-phase <required_phase> --check-id <派生ID> \
+  --assessment-json '<完整 assessment JSON>' --request <本次结论幂等键>
+```
+
+`--assessment-phase` 是 `--read-phase` 别名。assessment 只有 `cells` 字段；cells 的 key 必须恰好覆盖该检查 `required_items`，每格含 `status,reason,evidence`。status 可为 `handled/pass/not_applicable/pending/fail`；handled 表示已明确处理的审查结论，pass 的证明范围由证据决定。prepare/read 不自动填任何结论，Reverse/Fixed/Free/Audit 均独立填写；缺阶段、缺格、pending/fail 拒 success。有明确 debt 时可保留 pending/fail 走 degraded，空 NA reason、身份篡改或伪造引用始终拒绝。
+
+引用有两种闭合形状：
+
+- 静态源码：`{"kind":"source","path":"<check成员>","start_line":1,"end_line":2,"source_sha256":"<真实hash>","excerpt":"<逐字完整行段>"}`。允许静态 review 作证据，不强制所有物理测试完成；reason 应说明实际推理和验证边界。
+- 真实文件产物：`{"kind":"test|simulation|runtime","path":"<安全的工程相对文件>","sha256":"<真实hash>","simulated":false,"evidence_boundary":"<具体证明范围>"}`。simulation 必须 `simulated=true`，其它 kind 必须 false；文件须可读且 hash 当前一致，不能把模拟记录当实机通过。产物可位于 `.icode_output`（源码引用仍拒绝此目录），越界、符号链接、Git 内部、凭据/密钥路径始终拒绝。
+
+assess 复用同一步骤未终结 attempt、真实 before_write、artifact 回执与幂等保护；相同 request 重放保留后来进度，换结论或 check/phase 复用 request 拒绝且不写清单。所有新 prepare 的真实 writer 事件签发 `inspection_checks_version=1`，即使 checks 为空；控制面据该事件要求新版字段，删字段或自报 legacy 不能降级。真实旧 v1 清单/旧回执仍可只读解释，不补造专项历史；需新结论则重新入轮。跨阶段同范围自然新增 assessment 不改变规则身份。
+
 ## Finding 定位与版本
 
 本轮发现写入清单 findings，与 Markdown 用相同稳定 finding_id。确认的源码 finding 给 `verification_status=confirmed` 和 `locations`，每项含 `path,start_line,end_line,source_sha256,excerpt`。行号从 1 起；excerpt 与对应完整行段逐字相同（含换行）。校验单元成员、行段、hash 和原文；定位正确不等于语义正确，主代理仍复核因果/建议。
@@ -45,6 +75,8 @@ phase：code=`code_review`；deepcheck effective full=`reverse/fixed/free`，实
 
 ```bash
 python3 tools/icode_crosscheck.py inspection --dir <crosscheck_dir> --round <N> --phase read --path <file>
+python3 tools/icode_crosscheck.py inspection --dir <crosscheck_dir> --round <N> --phase assess \
+  --check-id <派生ID> --assessment-json '<完整 cells 对象>'
 python3 tools/icode_crosscheck.py inspection --dir <crosscheck_dir> --round <N> --phase check
 ```
 

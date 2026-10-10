@@ -1,12 +1,15 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Read-only deterministic inspection worklist",
-  "description": "Declarations/hashes cannot prove actual Read or judgment. Rules do not replace project LIMIT. Runtime validation independently re-derives required files.",
+  "description": "Declarations/hashes cannot prove actual Read or semantic correctness. New writers emit checks_version=1 and explicit phase assessments; old v1 remains readable. Runtime independently derives files and special check identities.",
   "type": "object",
   "additionalProperties": false,
   "required": ["schema_version", "workspace", "step", "ticket_id", "attempt", "mode", "required_phases", "code_files", "related", "scopes", "baselines", "resolved_baselines", "max_files", "max_bytes", "units", "exclusions", "unobserved", "findings", "coverage_status"],
+  "dependentRequired": {"checks_version": ["checks"], "checks": ["checks_version"]},
   "properties": {
     "schema_version": {"const": 1},
+    "checks_version": {"const": 1},
+    "checks": {"type": "array", "items": {"$ref": "#/$defs/check"}},
     "workspace": {"type": "string", "pattern": "^/"},
     "step": {"enum": ["code", "deepcheck", "audit", "crosscheck"]},
     "ticket_id": {"type": "string", "minLength": 1},
@@ -29,8 +32,54 @@
   },
   "$defs": {
     "path": {"type": "string", "minLength": 1, "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*(?:^|/)(?:\\.git|\\.icode_output)(?:/|$))[^\\u0000\\\\]+$"},
+    "artifact_path": {"type": "string", "minLength": 1, "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*(?:^|/)\\.git(?:/|$))[^\\u0000\\\\]+$"},
     "paths": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/path"}},
     "hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "nonempty": {"type": "string", "pattern": "\\S"},
+    "check": {
+      "type": "object", "additionalProperties": false,
+      "required": ["check_id", "kind", "version", "paths", "required_items", "results"],
+      "properties": {
+        "check_id": {"$ref": "#/$defs/hash"},
+        "kind": {"enum": ["timestamp_contract", "shared_variant_consumers"]},
+        "version": {"const": 1},
+        "paths": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/path"}},
+        "required_items": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/nonempty"}},
+        "results": {"type": "object", "propertyNames": {"enum": ["code_review", "reverse", "fixed", "free", "audit", "fresh"]}, "additionalProperties": {"$ref": "#/$defs/assessment"}}
+      }
+    },
+    "assessment": {
+      "type": "object", "additionalProperties": false, "required": ["cells"],
+      "properties": {"cells": {"type": "object", "minProperties": 1, "propertyNames": {"$ref": "#/$defs/nonempty"}, "additionalProperties": {"$ref": "#/$defs/cell"}}}
+    },
+    "cell": {
+      "type": "object", "additionalProperties": false, "required": ["status", "reason", "evidence"],
+      "properties": {
+        "status": {"enum": ["handled", "pass", "not_applicable", "pending", "fail"]},
+        "reason": {"$ref": "#/$defs/nonempty"},
+        "evidence": {"type": "array", "minItems": 1, "items": {"oneOf": [{"$ref": "#/$defs/source_evidence"}, {"$ref": "#/$defs/artifact_evidence"}]}}
+      }
+    },
+    "source_evidence": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind", "path", "start_line", "end_line", "source_sha256", "excerpt"],
+      "properties": {
+        "kind": {"const": "source"}, "path": {"$ref": "#/$defs/path"},
+        "start_line": {"type": "integer", "minimum": 1}, "end_line": {"type": "integer", "minimum": 1},
+        "source_sha256": {"$ref": "#/$defs/hash"}, "excerpt": {"type": "string", "minLength": 1}
+      }
+    },
+    "artifact_evidence": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind", "path", "sha256", "simulated", "evidence_boundary"],
+      "properties": {
+        "kind": {"enum": ["test", "simulation", "runtime"]}, "path": {"$ref": "#/$defs/artifact_path"},
+        "sha256": {"$ref": "#/$defs/hash"}, "simulated": {"type": "boolean"}, "evidence_boundary": {"$ref": "#/$defs/nonempty"}
+      },
+      "if": {"properties": {"kind": {"const": "simulation"}}},
+      "then": {"properties": {"simulated": {"const": true}}},
+      "else": {"properties": {"simulated": {"const": false}}}
+    },
     "file": {
       "type": "object", "additionalProperties": false,
       "required": ["path", "sha256", "kind", "reason", "rules", "reads"],

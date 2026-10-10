@@ -45,6 +45,7 @@ import sys
 import json
 import argparse
 import math
+import importlib.util
 import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -96,6 +97,17 @@ SENSITIVE_KEYWORDS = [
     "secret", "authorization", "bearer",
 ]
 
+_EVIDENCE = None
+
+
+def evidence_module():
+    global _EVIDENCE
+    if _EVIDENCE is None:
+        spec = importlib.util.spec_from_file_location("linter_verification_evidence", Path(__file__).with_name("verification_evidence.py"))
+        _EVIDENCE = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(_EVIDENCE)
+    return _EVIDENCE
+
 
 def load_json(path: Path) -> Any:
     """读取并解析 JSON，失败抛 ValueError（由调用方转成报告）"""
@@ -121,6 +133,25 @@ def scan_sensitive(obj: Any, path: str = "$") -> List[str]:
     """递归扫描 metadata 内敏感数据与超长文本。返回违规描述列表。"""
     issues: List[str] = []
     if isinstance(obj, dict):
+        # Candidate paths/hashes are typed source metadata, not credential
+        # values. Unknown contract fields remain free text and are scanned.
+        if "candidate_id" in obj and "manifest" in obj and evidence_module().control_module().candidate_module().snapshot_identity_ok(obj):
+            issues.extend(scan_sensitive(obj.get("scope_contract"), path + ".scope_contract"))
+            scope = obj.get("inspection_scope") or {}
+            for key, value in scope.items():
+                if key in {"scopes", "related"} and isinstance(value, list) and all(
+                        isinstance(item, str) and item and "\0" not in item and "\\" not in item
+                        and not Path(item).is_absolute() and ".." not in Path(item).parts for item in value):
+                    continue
+                if key == "baselines" and isinstance(value, dict):
+                    # Baseline keys are repository paths. Only resolved object
+                    # IDs have a typed exemption; arbitrary values remain text.
+                    for label, baseline in value.items():
+                        if not isinstance(baseline, str) or re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", baseline) is None:
+                            issues.extend(scan_sensitive(baseline, path + ".inspection_scope.baselines." + str(label)))
+                    continue
+                issues.extend(scan_sensitive({key: value}, path + ".inspection_scope"))
+            return issues
         for k, v in obj.items():
             kl = str(k).lower()
             if any(kw in kl for kw in SENSITIVE_KEYWORDS):
@@ -414,10 +445,18 @@ def validate_acceptance(metadata: Dict, catalog: Dict) -> List[str]:
     return issues
 
 
-def validate_delivery_evidence(metadata: Dict, catalog: Dict) -> List[str]:
+def validate_delivery_evidence(metadata: Dict, catalog: Dict, out_dir=None) -> List[str]:
     """显式 required 合同下，verified 必须覆盖全部分层验证单元。"""
     issues: List[str] = []
     contract = metadata.get("verification_contract")
+    module = evidence_module()
+    if isinstance(contract, dict) and contract.get("requirements_pending") is True:
+        return ["delivery_evidence requirements_pending：真实设备/场景合同待细化"]
+    if module.real_env_contract_required(metadata) and (not isinstance(contract, dict) or contract.get("required") is not True):
+        return ["delivery_evidence real_env_verification 必须细化 required 合同"]
+    selection = module.eligible_latest_runs(metadata, module.context(out_dir, metadata)) if module.enabled(metadata) else None
+    if selection is not None and selection["reasons"]:
+        return ["delivery_evidence " + reason for reason in selection["reasons"]]
     if contract is None:
         return issues
     if not isinstance(contract, dict):
@@ -535,13 +574,12 @@ def validate_delivery_evidence(metadata: Dict, catalog: Dict) -> List[str]:
     runs = metadata.get("verification_runs") or []
     if not isinstance(runs, list):
         return ["verification_runs 非数组"]
-    latest: Dict[Tuple[str, str, str], Dict] = {}
-    for run in runs:
-        if not isinstance(run, dict):
-            continue
-        key = (run.get("layer"), run.get("consumer"), run.get("scenario"))
-        if key in cell_set:
-            latest[key] = run
+    selection = selection or module.eligible_latest_runs(metadata, module.context(out_dir, metadata))
+    if selection["reasons"]:
+        return ["delivery_evidence " + reason for reason in selection["reasons"]]
+    latest = selection["latest"]
+    if module.real_env_contract_required(metadata) and not any(key[0] == "physical" for key in cells):
+        return ["delivery_evidence real_env_verification 缺具体 physical cell"]
 
     for layer, consumer, scenario in cells:
         key = (layer, consumer, scenario)
@@ -638,6 +676,8 @@ def build_report(out_dir: Path, step_filter: Optional[str], metadata: Dict,
         fn, _cfg = gate_runners[gate]
         if gate == "semantic_decision":
             issues = fn(metadata, catalog, blocking_impl)
+        elif gate == "delivery_evidence":
+            issues = fn(metadata, catalog, out_dir)
         else:
             issues = fn(metadata, catalog)
         # legacy：缺对应字段（未列入 metadata）且非 strict → 警告不阻断。
@@ -699,6 +739,10 @@ def build_report(out_dir: Path, step_filter: Optional[str], metadata: Dict,
         for key in ("semantic_decisions", "impact_contract", "requirement_deltas", "risk_profile"):
             if key in metadata:
                 sens += len(scan_sensitive(metadata[key]))
+    for run in metadata.get("verification_runs") or []:
+        sens += len(scan_sensitive(run, "$.verification_runs"))
+    for receipt in evidence_module().build_starts(metadata):
+        sens += len(scan_sensitive(receipt.get("parameters"), "$.build_start.parameters"))
     report["sensitive_data"] = sens
     return report
 

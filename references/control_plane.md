@@ -130,11 +130,25 @@ Git checkout 和逐仓提交契约由 `steps/reopen.md` 先创建/校验；然�
 
 `record-verification` 在一个事务中追加 `verification_runs` 和 `verification_recorded` 事件，不修改 `patch_history/status/completed_steps/delivery_verdict`。`--evidence` 必填；复用构建时 `--build-source reused` 还必须提供 `--artifact-identity`。embedded/camera 每个验证单元都必须附与合同完全一致的 `--profile`、`--baseline-ref sha256:<64hex>`；有量化指标时再附严格数值对象 `--metrics-json`。布尔、NaN、Infinity 或非对象在加锁写入前拒绝。
 
+启用候选的工单还须显式传 `--candidate-id` 和 `--environment`。ID 必须有真实 current/review/run/capture 历史快照或匹配 live source，任意编造 ID 拒绝；完整快照进入 metadata/event，CLI 只显示 ID。`candidate_id` 与 embedded 的 `baseline_ref` 相互独立。查询资格使用当前 live source，捕获失败即阻断；记录旧 ID 只追加历史，不能清除当前验证债务。候选相等或严格同内容线性提交证明可复用，其余漂移需新证据。
+
+`--supersedes-run-id` 只能引用真实已有同 cell run。`--reuse-json` 接收 `{origin_run_id,reason,scope_paths,scope_hash,comparison_ref}`，验证真实成功来源、相同设备/窗口/环境/制品/指标/测试身份，且机器比较只含文档差异与 scope 实际哈希未变。旧 run append-only；自由文字不能豁免源码/配置/依赖变化。`--direct-test-json` 的四个独立布尔 `target_built/binary_executed/test_runner_discovered/ci_registered` 与 `binary_exit_code` 精确区分直接执行、runner 发现和 CI 登记。
+
+`build-start --dir --build-dir --candidate-id --parameters-json --request-id` 在 configure/build 前真实观察指定目录，不执行命令、不清空、不隐式排除候选内容。回执保存到 `extensions.verification.build_starts`，由带受控标记的 `metadata_updated` 事件镜像；普通 metadata-update（包括整段 extensions）不能伪造或删除它。`--build-provenance-json` 引用 start_event_id 与实际命令/工具链/architecture/源码候选/制品 SHA256/evidence_refs，机器核验空目录、产物时间和真实本地哈希。非空/增量目录在 enabled 工单可记 existing，不能称 fresh。外部目录仅用于明确构建输出，不能代替 Git execution_workspace。
+
+`--deploy-provenance-json` / `--runtime-provenance-json` 分别保存 `{source_candidate_id,origin_build_run_id,artifacts:[{path,sha256}],evidence_refs}`，回指真实 build 事件的完整 SHA256 清单及源码，允许构建、部署副本和设备加载路径不同。部署校验本地文件；远端 runtime 只核对证据中已观测哈希，不声称工具读取了设备。合法文档复用保持 origin 的实际 source_candidate_id 和 provenance，通过已验证 origin 与 scope 证明关联新候选，不能改写旧制品的来源。
+
+本地产物核验复用 `candidate_tracking.limits` 的文件数、累计字节和超时上限，同一 run 的 build/deploy 读取共享预算，超限不追加 metadata/event 并释放写锁；提高上限使用既有 `candidate --phase capture --limits-json`。fresh 以 ctime 核对产物是否晚于开始回执，允许可复现构建归一化 mtime，读取前后仍检查 inode/大小/mtime/ctime 一致。自由 `external_note` 的 payload 同名候选字段只作普通数据；候选输入、收据和 writer 标记仅在相应受控事件类型中解释并严格校验。
+
+正式 `risk_profile.risk_flags/triggers`（兼容 flags）声明 real_env 风险时，新建或活动工单明确新增风险且缺合同自动标 `requirements_pending`，required 的三个数组保持空，等待设备/场景细化。它阻断 verified/debt，fast/full/override 不豁免；旧未 enabled 工单即使已有风险声明，也保持原合同语义，缺合同解释为 legacy_untracked，只读查询不迁移。显式启用候选后适用新规则。
+
+供 status/report/debt 使用的只读 Python API：`icode_control.verification_applicability(out_dir,meta=None)` 返回 `ok/state/current_candidate_id/reasons/eligible_runs/rejected_runs`，不含完整 manifest；`ok` 表示证据有资格且满足合同，不是查询执行成功。内部 `verification_context` 与 `verification_evidence_module().eligible_latest_runs(meta,context)` 共用先筛候选/环境再取 cell 最新的判断，避免 linter 与 debt 两套规则。旧未 enabled 工单保持原 latest-run 语义。
+
 公开 verify 阶段显式组合：`--build` 只构建，`--deploy` 只部署，`--listen`/`--test` 只验证已部署版本；`--build --deploy --listen/--test` 每阶段分别记录。公开 `--reuse` 已移除；内部 `build_source=reused` 只保留历史数据兼容。无动作选项先识别自然语言，再按实际阶段逐项调用 `action-policy`，`intent/default` 不能作为设备操作权限。
 
-`/icode verify --build [自然语言]` 的构建记录使用 `--kind build`，固定 `layer=build`，不带 device、不允许 reused/existing。pass 必须提供 `build_source=fresh`、非空 `artifact_identity` 和实际源码 `baseline`；失败或命令尚未执行则如实记 fail/inconclusive。它不能满足 deploy/physical 等其他层级验证单元。无工单只写工程 `.icode_output/build/<run_id>/build_run.json/.md`，不创建假工单或绕过已关闭工单冻结。
+`/icode verify --build [自然语言]` 的构建记录使用 `--kind build`，固定 `layer=build`，不带 device、不允许 reused。enabled 的非空/增量构建可记 existing，fresh 必须核验开始前回执；旧未 enabled 工单保持原 fresh 合同。pass 必须提供非空 `artifact_identity` 和实际源码 `baseline`；失败或命令尚未执行则如实记 fail/inconclusive。它不能满足 deploy/physical 等其他层级验证单元。无工单只写工程 `.icode_output/build/<run_id>/build_run.json/.md`，不创建假工单或绕过已关闭工单冻结。
 
-需要分层验收时，在 metadata 声明 `verification_contract={required,required_layers,required_consumers,required_scenarios}`，并用 `record-verification --layer --consumer --scenario --baseline` 逐单元记录。缺 `required_cells` 时保持历史语义：验证三维笛卡尔积；提供 `required_cells[]` 时仅验证显式列出的稀疏单元。只有 `required=true` 才启用 verified 门禁；每个必需单元取最新记录，必须 `outcome=pass` 且 evidence/baseline 非空。可选 `profile=generic|embedded|camera`（缺省 generic）与 `required_metrics[]` 为指定 cell 增加量化门槛；指标合同必须带 baseline 的 `sha256:` 摘要，最新记录还须 profile 与摘要匹配、指标满足 `lt/lte/gt/gte/eq`。合同缺失、`required=false` 或未声明指标不会给纯 host/历史任务强加真实环境或性能要求。
+需要分层验收时，在 metadata 声明 `verification_contract={required,required_layers,required_consumers,required_scenarios}`，并用 `record-verification --layer --consumer --scenario --baseline` 逐单元记录。缺 `required_cells` 时保持历史语义：验证三维笛卡尔积；提供 `required_cells[]` 时仅验证显式列出的稀疏单元。只有 `required=true` 才启用 verified 门禁；每个必需单元先筛选候选/环境资格，再取最新记录，必须 `outcome=pass` 且 evidence/baseline 非空。可选 `profile=generic|embedded|camera`（缺省 generic）与 `required_metrics[]` 为指定 cell 增加量化门槛；指标合同必须带 baseline 的 `sha256:` 摘要，最新记录还须 profile 与摘要匹配、指标满足 `lt/lte/gt/gte/eq`。合同缺失、`required=false` 或未声明指标不会给纯 host/历史任务强加真实环境或性能要求。
 
 `record-claim` 在一个事务中追加 `claims` 和 `claim_recorded` 事件。`kind` 仅允许 `fact/inference/unobserved/refuted`；所有 claim 必须写明 `source` 和“该证据不能证明什么”的 `boundary`，`fact/refuted` 还必须至少有一条 `--evidence`。普通 `metadata-update` 与通用 `event` 均不得伪造 claim。
 
@@ -162,6 +176,7 @@ Git checkout 和逐仓提交契约由 `steps/reopen.md` 先创建/校验；然�
 | index-update | 更新索引独有字段 | `--ticket-id [--increment-hit] [--set-json]` |
 | migration | legacy→v3 迁移 | `--dir [--apply]` |
 | record-verification | 原子记录验证 | `--dir --kind --outcome --evidence [--layer --consumer --scenario --baseline --profile --baseline-ref --metrics-json]` |
+| build-start | 机器观察构建前目录/候选 | `--dir --build-dir --candidate-id --parameters-json --request-id` |
 | record-claim | 原子记录证据结论 | `--dir --kind --statement --source --boundary [--evidence ...]` |
 | record-agent-spawn | 调用前原子记录 Agent 边界 | `--dir --task-scope --expected-artifact --evidence-boundary --join-condition --backend --model --capability --request-id` |
 | record-agent-result | 原子终结 Agent 调用 | `--dir --spawn-id --result --adopted --adoption-reason --evidence-ref --summary --request-id` |
@@ -171,3 +186,11 @@ Git checkout 和逐仓提交契约由 `steps/reopen.md` 先创建/校验；然�
 | snapshot | 快照生成/校验 | `--dir [--verify]` |
 
 退出码：0 成功；1 违例/fail-closed；2 参数错误；3 legacy 拒绝（提示迁移）；4 身份多义。
+
+## 11. 只读交付事实与提交库存
+
+`python3 tools/icode_delivery.py --dir <out_dir>` 汇总当前候选、内部评审、verification_contract/债务、run 的实际 build/deploy/runtime provenance、测试发现与提交库存。一次查询共享一个受控 `verification_context` 的 current/events，传给候选 review、验证资格和 `verification_debt.analyze_ticket(...,context=...)`；不跨查询缓存，不执行 writer、恢复事务或建锁。JSON 不倾倒源码 manifest；候选比较仍要求完整身份。报告查询 exit 0 表示读取成功，报告 `ok` 才表示当前主门禁满足；旧未绑定工单保持 `legacy_untracked`。
+
+`scripts/submission_guard.py submit-check --metadata <file>` 在原地无提交契约时仍枚举本地源码库存。intended 仅由声明 code_files/related/命名文件种子确定，宽审查目录不是整目录提交授权；显式 `excluded_side_effects` 为 side_effects。`.so`、build、IDE/agent 与日志等启发式只能给 suggested_exclusions，未确认仍 unknown 并阻断，不能用自由文字 handoff 白名单绕过。排除边界经专用 candidate capture 登记后进入候选 ID，声明源码不能排除。工具正确处理 -z rename/delete/staged/unstaged/mode/binary 和子仓，不删除或 restore 生成物。enabled 工单还必须满足当前 code/deepcheck/audit review 与 verification_applicability，fast 不省 deepcheck；保持旧 remote/G3 检查和退出码。
+
+交付报告按需提供 `--output <out_dir>/delivery_validation_report.json [--markdown <out_dir>/delivery_validation_report.md]`（兼容 delivery_report[_名称]），只允许派生输出，正式交付角色与任何真实 artifact 回执均受保护。直接执行结果由 binary_exit_code 独立派生，runner/CI 不能代替 binary result；文档复用保留 origin 的实际源码/制品来源。crosscheck 为可选事实，not_run 中性、stale 不自动重跑，不加入主门禁。人工经验记录使用 [escape_taxonomy.md](escape_taxonomy.md)，不会自动创建 rule/skill 或同步。

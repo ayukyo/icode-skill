@@ -19,6 +19,8 @@
 1. 执行目录管理中的「检测最新目录」逻辑，确定 `ICODE_OUT_DIR`
 2. 读取 `.ico_metadata.json`
 3. 运行 `python3 tools/icode_control.py trace --dir {ICODE_OUT_DIR} --limit 10`；成功时把开放 step/operation 与最近轨迹并入摘要，失败时明确标「执行轨迹不可验证」，不得用猜测补齐。
+   再运行 `python3 tools/icode_delivery.py --dir {ICODE_OUT_DIR}` 读取派生交付事实：当前候选 ID、内部 code/deepcheck/audit 新鲜度、验证合同/债务、run 的实际 build/deploy/runtime 来源、直接测试的四项独立事实，以及 intended/side_effects/unknown 提交库存。查询执行成功与报告 `ok` 分开：stdout 查询退出 0 不代表已满足交付；`legacy_untracked` 不补造评审。未完成事务或事件链不一致显示 blocked，禁止查询时恢复事务、建锁或改工单。
+   可选 crosscheck 仅显示事实：没有记录为中性 `not_run`，不推荐、不阻塞；有效历史可显示 `current(pass|changes_recommended)`，源码漂移显示 `stale`，无候选的旧记录附 `legacy_untracked`。不自动启动或重跑 crosscheck，也不把其结果加入主门禁。
 4. 输出状态摘要：
 
 ```
@@ -200,6 +202,8 @@ python3 tools/verification_debt.py pending \
 输出先给总债务数，再按 ticket/layer/scenario 列阻断原因和建议动作。报告是可删除重建的派生产物，禁止把生成报告等同于执行验证。
 
 ## 思考分级（L0：不强制思考）
+
+单工单交付摘要默认由 `python3 tools/icode_delivery.py --dir <out_dir>` 只输出 stdout。按需附 `--output <out_dir>/delivery_validation_report.json --markdown <out_dir>/delivery_validation_report.md`，也兼容 `delivery_report[_名称]`；只写可重建派生文件，不覆盖正式 delivery_files、受控 artifact 回执、源码、metadata/events/index 或 crosscheck 产物。生成报告不执行构建/验证，不改变状态，不自动提交或清理生成物。
 
 默认只读模式、`--scan`、`--validate` 与 `--pending` 为 **L0（确定性执行，不强制思考）**。`--verdict` 标注模式是结构化字段写入（非思考/审查/编码），同样为 **L0**，但须遵守本文件「反偷懒」约束。
 ## MCP 推荐

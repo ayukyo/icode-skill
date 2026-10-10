@@ -37,6 +37,64 @@ FINDING_STATES = {
 ROUND_STATES = {"in_progress", "completed", "blocked", "stale_input"}
 ROUND_PHASES = {"fresh_review", "history_compare", "finalized"}
 TRANSIENT_TARGET_FILES = {".icontrol.lock", ".icode_lock"}
+_CONTROL_MODULE = None
+
+
+def control_module():
+    global _CONTROL_MODULE
+    if _CONTROL_MODULE is None:
+        spec = importlib.util.spec_from_file_location("crosscheck_control", CONTROL)
+        _CONTROL_MODULE = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(_CONTROL_MODULE)
+    return _CONTROL_MODULE
+
+
+def source_candidate_base(metadata, historical_base=None):
+    """Enabled source follows its controlled contract; legacy keeps review base."""
+    tracking = metadata.get("candidate_tracking") or {}
+    if tracking.get("mode") == "enabled":
+        base = tracking.get("base")
+        if not isinstance(base, str) or not base:
+            raise CrosscheckError("enabled 候选缺当前基线", gate_id="crosscheck_candidate")
+        return base
+    return historical_base
+
+
+def source_candidate(target, metadata, *, base=None):
+    """A crosscheck-local binding never enables or writes the original ticket."""
+    ctl = control_module()
+    try:
+        workspace = code_root_for(metadata, Path(target["project_root"]))
+        tracking = metadata.get("candidate_tracking") or {}
+        base = source_candidate_base(metadata, base)
+        if base is None:
+            base = tracking.get("base") or ctl.candidate_module().repository_head(workspace)
+        if base is None:
+            return None  # Historical non-Git targets have no provable source candidate.
+        # Legacy worktree_path was supported by this controller before candidate
+        # tracking existed. Preserve that root locally, without writing a binding.
+        source_meta = metadata if tracking.get("mode") == "enabled" else dict(metadata, project_path=str(workspace))
+        ticket_dir = Path(target["ticket_dir"])
+        events, problems = ctl.verify_event_chain(ticket_dir, metadata)
+        if problems:
+            raise ctl.ControlError("源工单事件链不完整", gate_id="event_chain", violations=problems)
+        return ctl.candidate_snapshot(ticket_dir, source_meta, base=base, events=events)
+    except (ctl.ControlError, ctl.candidate_module().CandidateError) as exc:
+        raise CrosscheckError(str(exc), gate_id="crosscheck_candidate") from exc
+
+
+def source_snapshot_equivalent(recorded, current):
+    """Candidate comparisons bind source; the older artifact snapshot is history."""
+    if "candidate" not in recorded:
+        return object_digest(recorded) == object_digest(current)
+    previous, latest = recorded["candidate"], current.get("candidate")
+    if previous is None or latest is None:
+        return object_digest(recorded) == object_digest(current)
+    module = control_module().candidate_module()
+    if not module.snapshot_identity_ok(previous) or not module.snapshot_identity_ok(latest):
+        raise CrosscheckError("crosscheck candidate 身份非法", gate_id="crosscheck_candidate")
+    return (module.compare_candidates(previous, latest)["equivalent"]
+            and recorded.get("ticket_artifacts") == current.get("ticket_artifacts"))
 
 
 class CrosscheckError(Exception):
@@ -326,6 +384,12 @@ def snapshot_tree(root):
 
 
 def code_root_for(metadata, project_root):
+    if "execution_binding" in metadata or (metadata.get("candidate_tracking") or {}).get("mode") == "enabled":
+        ctl = control_module()
+        try:
+            return ctl.execution_workspace(Path(project_root) / ".icode_output", metadata)
+        except ctl.ControlError as exc:
+            raise CrosscheckError(str(exc), gate_id="crosscheck_execution_root") from exc
     active = metadata.get("active_checkout")
     if isinstance(active, dict) and isinstance(active.get("path"), str):
         candidate = Path(active["path"]).expanduser().resolve()
@@ -381,7 +445,7 @@ def git_snapshot(code_root):
     return result
 
 
-def capture_target_snapshot(target, metadata):
+def capture_target_snapshot(target, metadata, *, base=None):
     ticket_dir = Path(target["ticket_dir"])
     project_root = Path(target["project_root"])
     code_root = code_root_for(metadata, project_root)
@@ -406,6 +470,7 @@ def capture_target_snapshot(target, metadata):
         "code_files": code_entries,
         "git": git_snapshot(code_root),
         "patch_count": metadata.get("patch_count"),
+        "candidate": source_candidate(target, metadata, base=base),
     }
 
 
@@ -488,7 +553,7 @@ def validate_manifest(manifest, directory=None):
     }
     optional = {
         "finished_at", "fresh_sha256", "final_sha256", "round_markdown_sha256",
-        "verdict", "stale_snapshot_digest", "inspection_version", "worklist_file", "worklist_sha256", "inspection_declaration_hash",
+        "verdict", "stale_snapshot_digest", "inspection_version", "inspection_checks_version", "worklist_file", "worklist_sha256", "inspection_declaration_hash",
     }
     for index, item in enumerate(rounds, 1):
         if not isinstance(item, dict) or not round_required.issubset(item) or set(item) - round_required - optional:
@@ -501,6 +566,13 @@ def validate_manifest(manifest, directory=None):
         if "inspection_version" in item and (type(item["inspection_version"]) is not int or item["inspection_version"] != 1
                 or item.get("worklist_file") != f"crosscheck_round_{index}.worklist.json"):
             raise CrosscheckError("crosscheck 工作清单身份非法", gate_id="inspection_worklist")
+        if "inspection_checks_version" in item and (type(item["inspection_checks_version"]) is not int or item["inspection_checks_version"] != 1 or not item.get("inspection_version")):
+            raise CrosscheckError("crosscheck checks marker 非法", gate_id="inspection_worklist")
+        if not isinstance(item["start_snapshot"], dict):
+            raise CrosscheckError("crosscheck snapshot 必须为对象", gate_id="crosscheck_snapshot")
+        candidate = item["start_snapshot"].get("candidate")
+        if candidate is not None and not control_module().candidate_module().snapshot_identity_ok(candidate):
+            raise CrosscheckError("crosscheck candidate 身份非法", gate_id="crosscheck_candidate")
         for key in ("start_snapshot_digest", "fresh_sha256", "final_sha256",
                     "round_markdown_sha256", "stale_snapshot_digest", "worklist_sha256", "inspection_declaration_hash"):
             if key in item and (not isinstance(item[key], str) or not SHA256_RE.fullmatch(item[key])):
@@ -557,8 +629,8 @@ def matching_containers(root, target):
     return matches, numbers
 
 
-def new_round(target, metadata, round_no):
-    snapshot = capture_target_snapshot(target, metadata)
+def new_round(target, metadata, round_no, *, base=None):
+    snapshot = capture_target_snapshot(target, metadata, base=base)
     return {
         "round": round_no,
         "state": "in_progress",
@@ -569,6 +641,7 @@ def new_round(target, metadata, round_no):
         "fresh_file": f"crosscheck_round_{round_no}.fresh.json",
         "final_file": f"crosscheck_round_{round_no}.json",
         "inspection_version": 1,
+        "inspection_checks_version": 1,
         "worklist_file": f"crosscheck_round_{round_no}.worklist.json",
     }
 
@@ -588,6 +661,14 @@ def cmd_start(args):
         requested_baselines = json.loads(args.baselines_json) if args.baselines_json else None
         if matches:
             directory, manifest = matches[0]
+            # Validate immutable evidence BEFORE source drift can mark a new round.
+            cmd_validate(argparse.Namespace(dir=str(directory)))
+            first_candidate = next((old["start_snapshot"].get("candidate") for old in manifest["rounds"]
+                                    if old["start_snapshot"].get("candidate") is not None), None)
+            # Legacy containers predate candidate bindings. Their initial Git
+            # HEAD is still a frozen historical base, never today's HEAD.
+            historical_base = first_candidate["base"] if first_candidate else manifest["rounds"][0]["start_snapshot"].get("git", {}).get("head")
+            snapshot_base = source_candidate_base(metadata, historical_base)
             for old in manifest["rounds"]:
                 verify_frozen_worklist(directory, old)
             current = manifest["rounds"][-1]
@@ -601,8 +682,8 @@ def cmd_start(args):
                         requested_baselines = {k: declaration["resolved_baselines"][k] for k in declaration.get("baselines", {})}
                         break
             if current["state"] == "in_progress":
-                current_snapshot = capture_target_snapshot(target, metadata)
-                if object_digest(current_snapshot) == current["start_snapshot_digest"]:
+                current_snapshot = capture_target_snapshot(target, metadata, base=snapshot_base)
+                if source_snapshot_equivalent(current["start_snapshot"], current_snapshot):
                     resumed = True
                     worklist = directory / current.get("worklist_file", "unused.worklist.json")
                     if current.get("inspection_version") and worklist.exists():
@@ -619,10 +700,12 @@ def cmd_start(args):
                         "stale_snapshot_digest": object_digest(current_snapshot),
                     })
             if not resumed:
-                manifest["rounds"].append(new_round(target, metadata, len(manifest["rounds"]) + 1))
+                manifest["rounds"].append(new_round(target, metadata, len(manifest["rounds"]) + 1, base=snapshot_base))
                 manifest["current_round"] = len(manifest["rounds"])
                 manifest["updated_at"] = now_iso()
                 atomic_write_json(directory / MANIFEST_NAME, manifest)
+                if any(old["state"] == "completed" for old in manifest["rounds"]):
+                    write_derived_outputs(directory, manifest)
         else:
             number = max(numbers, default=0) + 1
             directory = root / f".icode_output_{number}"
@@ -727,7 +810,8 @@ def check_inspection(directory, manifest, item, findings=None, *, allow_incomple
     issues = helper.validate_worklist(candidate, workspace, code_files=seeds,
         step="crosscheck", ticket_id=manifest["target"]["ticket_id"],
         attempt=f"crosscheck-{item['round']}",
-        allow_incomplete=allow_incomplete or pending or reads_complete)
+        allow_incomplete=allow_incomplete or pending or reads_complete,
+        required_checks_version=item.get("inspection_checks_version"))
     if report.get("mode") != "full":
         issues.append("crosscheck 必须完整独立审查")
     if findings is not None:
@@ -747,8 +831,15 @@ def cmd_inspection(args):
         manifest = validate_manifest(load_json(directory / MANIFEST_NAME, "crosscheck manifest"), directory)
         item = get_round(manifest, args.round)
         if item["state"] != "in_progress" or item["phase"] != "fresh_review" or item.get("fresh_sha256"):
-            raise CrosscheckError("仅未冻结的本轮 fresh_review 可登记 Read", gate_id="inspection_worklist")
+            raise CrosscheckError("仅未冻结的本轮 fresh_review 可登记 Read/assessment", gate_id="inspection_worklist")
         report = check_inspection(directory, manifest, item, pending=True)
+        if args.phase == "assess":
+            if not args.check_id or not args.assessment_json:
+                raise CrosscheckError("assess 要求 --check-id 和 --assessment-json", gate_id="inspection_worklist")
+            report = inspection_module().apply_assessment(report, item["start_snapshot"]["code_root"],
+                args.check_id, "fresh", json.loads(args.assessment_json, parse_constant=reject_nonfinite))
+            atomic_write_json(directory / item["worklist_file"], report)
+            return {"ok": True, "round": args.round, "check_id": args.check_id, "phase": "fresh"}
         selected = [f for unit in report["units"] for f in unit["files"] if f["path"] == args.path]
         if len(selected) != 1:
             raise CrosscheckError("Read 路径不在唯一自查单元中", gate_id="inspection_worklist")
@@ -760,7 +851,11 @@ def cmd_inspection(args):
 def inspection_declaration_hash(report):
     keys = ("schema_version", "workspace", "step", "ticket_id", "attempt", "mode", "required_phases",
             "code_files", "related", "scopes", "baselines", "resolved_baselines", "max_files", "max_bytes")
-    return object_digest({k: report.get(k) for k in keys})
+    declaration = {k: report.get(k) for k in keys}
+    if "checks_version" in report or "checks" in report:
+        declaration.update(checks_version=report.get("checks_version"),
+                           checks=inspection_module().check_declarations(report))
+    return object_digest(declaration)
 
 
 def inspection_source_drift(exc):
@@ -810,6 +905,10 @@ def cmd_freeze(args):
             item["phase"] = "history_compare"
             manifest["updated_at"] = now_iso()
             atomic_write_json(directory / MANIFEST_NAME, manifest)
+            # Cumulative reports include manifest.updated_at; keep them valid
+            # throughout later-round phase transitions, even across clock ticks.
+            if any(old["state"] == "completed" for old in manifest["rounds"]):
+                write_derived_outputs(directory, manifest)
             already = False
         _previous_item, previous = previous_completed_round(directory, manifest, args.round)
         return {
@@ -960,6 +1059,8 @@ def mark_stale(directory, manifest, item, round_no, final_path, reason, current_
     item.update(updates)
     manifest["updated_at"] = now_iso()
     atomic_write_json(directory / MANIFEST_NAME, manifest)
+    if any(old["state"] == "completed" for old in manifest["rounds"]):
+        write_derived_outputs(directory, manifest)
     raise CrosscheckError(
         reason, gate_id="crosscheck_stale_input", state="stale_input", round=round_no,
         crosscheck_dir=str(directory),
@@ -1011,9 +1112,13 @@ def cmd_finish(args):
                 directory, manifest, item, args.round, final_path,
                 "目标工单身份在评审期间变化，本轮标记 stale_input",
             )
-        current_snapshot = capture_target_snapshot(target, metadata)
+        recorded_candidate = item["start_snapshot"].get("candidate")
+        snapshot_base = source_candidate_base(metadata, recorded_candidate["base"] if recorded_candidate else None)
+        current_snapshot = capture_target_snapshot(target, metadata, base=snapshot_base)
         current_digest = object_digest(current_snapshot)
-        if current_digest != item["start_snapshot_digest"]:
+        # Frozen worklist integrity is independent of source freshness.
+        verify_frozen_worklist(directory, item)
+        if not source_snapshot_equivalent(item["start_snapshot"], current_snapshot):
             mark_stale(
                 directory, manifest, item, args.round, final_path,
                 "目标工单或代码在本轮期间发生变化，本轮标记 stale_input；请重新运行 crosscheck",
@@ -1101,12 +1206,89 @@ def cmd_validate(args):
     }
 
 
+def crosscheck_freshness(ticket_dir=None, *, directory=None):
+    """Optional review status derived without mkdir, locks or source writers.
+
+    Missing legacy candidate identities never establish a current result.
+    Immutable history is always validated first, including when source is stale.
+    """
+    result = {"ok": True, "read_only": True, "required": False, "state": "not_run",
+              "verdict": None, "tracking_status": "untracked"}
+    if directory is None:
+        ticket_dir = Path(ticket_dir).expanduser().resolve()
+        metadata = load_json(ticket_dir / METADATA_NAME, "目标工单 metadata")
+        project_root = derive_project_root(ticket_dir, metadata)
+        root = project_root / ".icode_output/.crosscheck"
+        if root.is_symlink() or (project_root / ".icode_output").is_symlink():
+            raise CrosscheckError("crosscheck 路径不得经过符号链接", gate_id="crosscheck_symlink")
+        if not root.exists():
+            return result
+        target = {"ticket_id": metadata.get("ticket_id"), "project_root": str(project_root)}
+        matches, _ = matching_containers(root, target)
+        if len(matches) > 1:
+            raise CrosscheckError("同一目标存在多个 crosscheck 容器", gate_id="crosscheck_identity_ambiguous")
+        if not matches:
+            return result
+        directory = matches[0][0]
+    directory, manifest = load_manifest(directory)
+    cmd_validate(argparse.Namespace(dir=str(directory)))
+    result.update(crosscheck_dir=str(directory), latest_round=manifest["current_round"],
+                  review_state=manifest["rounds"][-1]["state"])
+    candidates = [item for item in manifest["rounds"] if item["state"] == "completed"]
+    if not candidates:
+        return result
+    item = candidates[-1]
+    result["round"] = item["round"]
+    recorded = item["start_snapshot"].get("candidate")
+    if recorded is None:
+        result["tracking_status"] = "legacy_untracked"
+        return result
+    module = control_module().candidate_module()
+    if not module.snapshot_identity_ok(recorded):
+        raise CrosscheckError("crosscheck candidate 身份非法", gate_id="crosscheck_candidate")
+    target = manifest["target"]
+    ticket_dir = Path(target["ticket_dir"])
+    metadata = load_json(ticket_dir / METADATA_NAME, "目标工单 metadata")
+    if metadata.get("ticket_id") != target["ticket_id"]:
+        raise CrosscheckError("目标工单身份变化", gate_id="target_identity")
+    current = source_candidate(target, metadata, base=source_candidate_base(metadata, recorded["base"]))
+    comparison = module.compare_candidates(recorded, current)
+    current_inputs = snapshot_tree(ticket_dir)
+    result.update(tracking_status="tracked", candidate_id=(current or {}).get("candidate_id"),
+                  recorded_candidate_id=recorded["candidate_id"], candidate_base=(current or {}).get("base"),
+                  recorded_candidate_base=recorded["base"],
+                  input_boundary_changed=current_inputs != item["start_snapshot"]["ticket_artifacts"],
+                  source_reason=comparison["reason"], historical_verdict=item.get("verdict"))
+    if not comparison["equivalent"] or metadata.get("status") != "completed":
+        result["state"] = "stale"
+    elif item.get("verdict") in {"pass", "pass_with_suggestions", "changes_recommended"}:
+        result.update(state="current", verdict="changes_recommended" if item["verdict"] == "changes_recommended" else "pass")
+    return result
+
+
+def cmd_freshness(args):
+    if args.dir:
+        if args.target or args.ticket:
+            raise CrosscheckError("--dir 不得与目标选择混用", exit_code=2, gate_id="target_identity")
+        return crosscheck_freshness(directory=args.dir)
+    # This resolver is read-only; deliberately never calls safe_crosscheck_root.
+    target, _metadata = resolve_target(args)
+    return crosscheck_freshness(target["ticket_dir"])
+
+
 def build_parser():
     parser = argparse.ArgumentParser(
         prog="icode_crosscheck.py",
         description="ICODE 独立交叉复评：项目内隔离、多轮追加、原工单零回写",
     )
     sub = parser.add_subparsers(dest="command")
+
+    freshness = sub.add_parser("freshness", help="只读派生可选复评新鲜度；不创建容器或轮次")
+    freshness.add_argument("target", nargs="?")
+    freshness.add_argument("--dir", help="已有crosscheck容器")
+    freshness.add_argument("--ticket")
+    freshness.add_argument("--workspace")
+    freshness.set_defaults(function=cmd_freshness)
 
     start = sub.add_parser("start", help="解析目标并开始或恢复一轮复评")
     start.add_argument("target", nargs="?", help="工单目录、metadata 或工单内产物路径")
@@ -1135,8 +1317,10 @@ def build_parser():
     inspection = sub.add_parser("inspection", help="仅在crosscheck隔离目录登记真实Read或检查清单")
     inspection.add_argument("--dir", required=True)
     inspection.add_argument("--round", required=True, type=int)
-    inspection.add_argument("--phase", required=True, choices=["read", "check"])
+    inspection.add_argument("--phase", required=True, choices=["read", "assess", "check"])
     inspection.add_argument("--path")
+    inspection.add_argument("--check-id")
+    inspection.add_argument("--assessment-json")
     inspection.set_defaults(function=cmd_inspection)
     return parser
 

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import math
 import os
@@ -45,6 +46,18 @@ METRIC_OPERATORS = {
 
 class VerificationDebtError(RuntimeError):
     """可向命令行安全展示的输入/文件错误。"""
+
+
+_EVIDENCE = None
+
+
+def evidence_module():
+    global _EVIDENCE
+    if _EVIDENCE is None:
+        spec = importlib.util.spec_from_file_location("debt_verification_evidence", Path(__file__).with_name("verification_evidence.py"))
+        _EVIDENCE = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(_EVIDENCE)
+    return _EVIDENCE
 
 
 def now_iso() -> str:
@@ -309,19 +322,10 @@ def required_dimensions(contract: Dict[str, Any]) -> Optional[Tuple[List[str], L
     return dimensions[0], dimensions[1], dimensions[2]
 
 
-def latest_matching_runs(metadata: Dict[str, Any]) -> Dict[Tuple[str, str, str], Dict[str, Any]]:
-    """与 lint_workflow_contract.py 一致：追加数组中最后一条匹配记录最新。"""
-    latest: Dict[Tuple[str, str, str], Dict[str, Any]] = {}
-    runs = metadata.get("verification_runs") or []
-    if not isinstance(runs, list):
-        return latest
-    for run in runs:
-        if not isinstance(run, dict):
-            continue
-        key = (run.get("layer"), run.get("consumer"), run.get("scenario"))
-        if all(nonempty_string(value) for value in key):
-            latest[key] = run
-    return latest
+def latest_matching_runs(metadata: Dict[str, Any], ticket_dir=None) -> Dict[Tuple[str, str, str], Dict[str, Any]]:
+    """Candidate/environment qualification is shared with the workflow linter."""
+    module = evidence_module()
+    return module.eligible_latest_runs(metadata, module.context(ticket_dir, metadata))["latest"]
 
 
 def explicit_required_cells(
@@ -352,41 +356,7 @@ def required_metric_settings(
     contract: Dict[str, Any],
     cells: List[Tuple[str, str, str]],
 ) -> Optional[Tuple[str, Optional[str], List[Dict[str, Any]]]]:
-    profile = contract.get("profile", "generic")
-    if profile not in {"generic", "embedded", "camera"}:
-        return None
-    metrics = contract.get("required_metrics", [])
-    if not isinstance(metrics, list):
-        return None
-    cell_set = set(cells)
-    required = {"name", "unit", "operator", "value", "layer", "consumer", "scenario"}
-    seen = set()
-    for metric in metrics:
-        if not isinstance(metric, dict) or not required.issubset(metric):
-            return None
-        string_fields = ("name", "unit", "operator", "layer", "consumer", "scenario")
-        if any(not nonempty_string(metric[field]) for field in string_fields):
-            return None
-        key = (metric["layer"], metric["consumer"], metric["scenario"], metric["name"])
-        value = metric["value"]
-        if key in seen or metric["operator"] not in METRIC_OPERATORS \
-                or key[:3] not in cell_set \
-                or not nonempty_string(metric["name"]) \
-                or not nonempty_string(metric["unit"]) \
-                or isinstance(value, bool) or not isinstance(value, (int, float)) \
-                or not math.isfinite(value):
-            return None
-        seen.add(key)
-    baseline_ref = contract.get("baseline_ref")
-    identity_required = profile in {"embedded", "camera"} or baseline_ref is not None
-    if identity_required and (
-        not isinstance(baseline_ref, str)
-        or not baseline_ref.startswith("sha256:")
-        or len(baseline_ref) != 71
-        or any(char not in "0123456789abcdef" for char in baseline_ref[7:])
-    ):
-        return None
-    return profile, baseline_ref, metrics
+    return evidence_module().metric_settings(contract, cells)
 
 
 def classify_unit(
@@ -471,7 +441,7 @@ def build_unit(
     }
 
 
-def analyze_ticket(metadata: Dict[str, Any], ticket_dir: Path) -> Dict[str, Any]:
+def analyze_ticket(metadata: Dict[str, Any], ticket_dir: Path, *, context=None) -> Dict[str, Any]:
     ticket_id = metadata.get("ticket_id")
     if not nonempty_string(ticket_id):
         ticket_id = ticket_dir.name
@@ -495,15 +465,32 @@ def analyze_ticket(metadata: Dict[str, Any], ticket_dir: Path) -> Dict[str, Any]
     contract = metadata.get("verification_contract")
     schema_version = metadata.get("schema_version")
     is_vnext = schema_version == 3 or schema_version == "3"
+    evidence_api = evidence_module()
+    # A report can share one live capture with review/evidence assessment.
+    # Context is local to this invocation; existing callers keep the same API.
+    ctx = evidence_api.context(ticket_dir, metadata) if context is None else context
+    selection = evidence_api.eligible_latest_runs(metadata, ctx)
+    base["current_candidate_id"] = (ctx["current"] or {}).get("candidate_id")
+    base["candidate_status"] = "blocked" if ctx["reasons"] else "enabled" if ctx["enabled"] else "legacy_untracked"
+    base["eligibility_reasons"] = selection["reasons"]
+    base["rejected_runs"] = selection["rejected"]
+    if ctx["enabled"] and selection["reasons"]:
+        base.update(ticket_blocked=True, blocking_reason=selection["reasons"][0])
+    if (isinstance(contract, dict) and contract.get("requirements_pending") is True) or \
+            (evidence_api.real_env_contract_required(metadata) and (not isinstance(contract, dict) or contract.get("required") is not True)):
+        base.update(tracking_status="requirements_pending", ticket_blocked=True, blocking_reason="requirements_pending")
+        return base
     if contract is None:
-        if is_vnext:
+        if base["ticket_blocked"] and ctx["enabled"]:
+            base["tracking_status"] = "blocked"
+        elif is_vnext and not (evidence_api.real_env_risk(metadata) and not ctx["enabled"]):
             base["tracking_status"] = "untracked"
         return base
     if not isinstance(contract, dict) or not isinstance(contract.get("required"), bool):
         base["tracking_status"] = "invalid_contract" if is_vnext else "legacy_untracked"
         return base
     if contract["required"] is False:
-        base["tracking_status"] = "not_required"
+        base["tracking_status"] = "blocked" if base["ticket_blocked"] and ctx["enabled"] else "not_required"
         return base
 
     dimensions = required_dimensions(contract)
@@ -521,7 +508,7 @@ def analyze_ticket(metadata: Dict[str, Any], ticket_dir: Path) -> Dict[str, Any]
         return base
     profile, baseline_ref, required_metrics = metric_settings
 
-    latest = latest_matching_runs(metadata)
+    latest = selection["latest"]
     units = [
         build_unit(
             layer,
@@ -539,6 +526,11 @@ def analyze_ticket(metadata: Dict[str, Any], ticket_dir: Path) -> Dict[str, Any]
         for layer, consumer, scenario in cells
     ]
     pending = sum(unit["blocking_verified"] for unit in units)
+    if ctx["reasons"]:
+        base.update(ticket_blocked=True, blocking_reason=ctx["reasons"][0])
+    if evidence_api.real_env_contract_required(metadata) and not any(key[0] == "physical" for key in cells):
+        base.update(tracking_status="invalid_contract", ticket_blocked=True, blocking_reason="real_env_physical_contract_required")
+        return base
     base.update(
         {
             "tracking_status": (
@@ -560,7 +552,7 @@ def aggregate_summary(tickets: Sequence[Dict[str, Any]]) -> Dict[str, int]:
         "tickets": len(tickets),
         "tracked_required": sum(
             ticket["tracking_status"]
-            in {"verification_pending", "satisfied", "invalid_contract", "blocked"}
+            in {"verification_pending", "satisfied", "invalid_contract", "blocked", "requirements_pending"}
             for ticket in tickets
         ),
         "not_required": sum(ticket["tracking_status"] == "not_required" for ticket in tickets),
@@ -629,7 +621,7 @@ def suggested_kind(layer: str) -> str:
     return "device_test"
 
 
-def build_record_command(ticket_dir: str, unit: Dict[str, Any]) -> List[str]:
+def build_record_command(ticket_dir: str, unit: Dict[str, Any], candidate_id=None, candidate_enabled=False) -> List[str]:
     kind = suggested_kind(unit["layer"])
     command = [
         "python3",
@@ -652,6 +644,9 @@ def build_record_command(ticket_dir: str, unit: Dict[str, Any]) -> List[str]:
         "--evidence",
         "<observable evidence pointer>",
     ]
+    if candidate_enabled:
+        command.extend(["--candidate-id", candidate_id or "<capture current candidate first>",
+                        "--environment", "physical" if unit["layer"] == "physical" else "<host|physical|simulated|unknown>"])
     if unit["profile"] in {"embedded", "camera"} or unit["baseline_ref"] is not None:
         command.extend([
             "--profile", unit["profile"],
@@ -708,7 +703,8 @@ def build_plan(ticket_dir_value: str, contract_file_value: Optional[str] = None)
             ),
             "required_baseline": "设备身份、制品身份及验证所用源码/构建基线",
             "required_metrics": unit["required_metrics"],
-            "record_command": build_record_command(str(ticket_dir), unit),
+            "record_command": build_record_command(str(ticket_dir), unit, ticket["current_candidate_id"],
+                                                    evidence_module().enabled(metadata)),
         }
         actions.append(action)
     return {

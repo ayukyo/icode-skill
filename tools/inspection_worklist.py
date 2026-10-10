@@ -5,6 +5,8 @@ are review prompts, not lint results; project LIMIT rules remain authoritative.
 No persistence, build, hooks, external diff drivers or LLM calls are performed.
 """
 import hashlib
+import copy
+import json
 import os
 from pathlib import Path
 import re
@@ -30,6 +32,22 @@ CONFIG = {".json", ".yaml", ".yml", ".toml", ".ini", ".conf", ".xml"}
 HASH = re.compile(r"^[0-9a-f]{64}$")
 FORBIDDEN = {".git", ".icode_output", ".ssh", ".gnupg", ".aws"}
 ASSOCIATED_SUFFIXES = set(LANGUAGE) | CONFIG | {".cc", ".cxx", ".hxx", ".rs", ".go", ".java", ".js", ".ts", ".tsx", ".jsx"}
+SOURCE_SUFFIXES = ASSOCIATED_SUFFIXES - CONFIG
+CHECKS_VERSION = 1
+CHECK_IDENTITY_KEYS = ("check_id", "kind", "version", "paths", "required_items")
+CHECK_ITEMS = {
+    "timestamp_contract": ["signedness", "domain", "unit", "epoch", "negative_zero_max", "sentinel",
+                           "overflow_underflow", "projection", "frame_window", "interval_fallback"],
+    "shared_variant_consumers": ["target", "sibling", "unknown", "supported", "unsupported",
+        "probe_failure", "read_failure", "stale", "consumers", "memory:mmap", "memory:dma",
+        "first_frame", "steady", "stop_start", "reconnect", "build_config:enabled", "build_config:disabled",
+        "fallback:old_semantics", "fallback:no_extra_probe", "fallback:error_isolation"],
+}
+# Deliberately bounded lexical prompts, not claims of automatic semantic analysis.
+# Source suffix filtering prevents prose about an SDK from becoming code findings.
+TIMESTAMP_SIGNAL = re.compile(r"timestamp|time_stamp|clock|duration|interval|epoch|(?:^|[^a-z0-9])(?:ns|us|ms)(?:[^a-z0-9]|$)", re.I)
+INTEGER_CONVERSION = re.compile(r"(?:static_cast\s*<\s*|\(\s*)(?:(?:u?int(?:8|16|32|64)_t)|(?:unsigned|signed)(?:\s+(?:long|short|int))*|(?:long|short)(?:\s+(?:long|int))*)\s*(?:>|\))")
+SHARED_SIGNAL = re.compile(r"shared|variant|sibling|product[_a-z0-9]*|device[_a-z0-9]*(?:pid|model)|capabilit|probe[_a-z0-9]*(?:support|fail)|backend", re.I)
 
 
 class InspectionError(ValueError):
@@ -52,7 +70,7 @@ def _workspace(workspace):
         raise InspectionError(f"invalid workspace: {exc}") from exc
 
 
-def _path(root, raw, *, directory=False):
+def _path(root, raw, *, directory=False, artifact=False):
     if not isinstance(raw, str) or not raw or "\x00" in raw or "\\" in raw:
         raise InspectionError("path must be a nonempty relative POSIX string")
     p = Path(raw)
@@ -60,7 +78,10 @@ def _path(root, raw, *, directory=False):
         raise InspectionError(f"unsafe path: {raw}")
     for part in p.parts:
         lower = part.lower()
-        if lower in FORBIDDEN or lower == ".env" or lower.startswith(".env.") or lower.startswith("id_rsa") or lower.startswith("id_ed25519") or lower in {"credentials", "credentials.json"} or lower.endswith((".pem", ".key", ".p12", ".pfx")):
+        # Review/test artifacts may live in ticket sidecars; source candidates
+        # still cannot. Private paths and Git internals remain blocked for both.
+        blocked = lower in FORBIDDEN and not (artifact and lower == ".icode_output")
+        if blocked or lower == ".env" or lower.startswith(".env.") or lower.startswith("id_rsa") or lower.startswith("id_ed25519") or lower in {"credentials", "credentials.json"} or lower.endswith((".pem", ".key", ".p12", ".pfx")):
             raise InspectionError(f"blocked private/control path: {raw}")
     target = root / p
     if any(x.is_symlink() for x in (target, *target.parents) if x == root or root in x.parents):
@@ -219,8 +240,47 @@ def _rules(path):
     return GENERAL + [extra]
 
 
-def _content(root, path, repo, baseline, max_bytes):
-    target = root / _path(root, path)
+def check_declarations(report):
+    """Return only frozen special-rule identity; assessment progress stays mutable."""
+    checks = report.get("checks", [])
+    if not isinstance(checks, list) or any(not isinstance(c, dict) for c in checks):
+        raise InspectionError("checks must be an array of objects")
+    return [{key: c.get(key) for key in CHECK_IDENTITY_KEYS} for c in checks]
+
+
+def _trigger_content(root, path, data, repo, baseline, max_bytes, debt):
+    text = data.decode("utf-8")
+    if repo is not None and baseline is not None:
+        # Only removed lines supplement current source. A removed clock/cast
+        # must retain its prompt, without importing unrelated historical code.
+        rel = (root / path).relative_to(repo).as_posix()
+        try:
+            diff, cut = _git(repo, ["diff", "--no-ext-diff", "--no-textconv", "--no-renames",
+                "--unified=0", baseline, "--", f":(literal){rel}"], max_bytes)
+            text += "\n" + "\n".join(line[1:] for line in diff.decode("utf-8").splitlines()
+                                    if line.startswith("-") and not line.startswith("---"))
+            if cut:
+                debt[path] = "special-rule trigger diff truncated; remaining source unobserved"
+        except (InspectionError, UnicodeError, OSError) as exc:
+            debt[path] = f"special-rule trigger baseline unobserved: {exc}"
+    return text
+
+
+def _derive_checks(source_groups):
+    checks = []
+    for label in sorted(source_groups, key=str):
+        entries = source_groups[label]
+        paths = sorted(entries)
+        kinds = set().union(*entries.values())
+        for kind in sorted(kinds):
+            identity = dict(kind=kind, version=CHECKS_VERSION, paths=paths, required_items=list(CHECK_ITEMS[kind]))
+            digest = hashlib.sha256(json.dumps(identity, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+            checks.append(dict(check_id=digest, **identity, results={}))
+    return checks
+
+
+def _content(root, path, repo, baseline, max_bytes, *, artifact=False):
+    target = root / _path(root, path, artifact=artifact)
     if target.exists():
         if not stat.S_ISREG(target.stat().st_mode):
             raise InspectionError("not a regular file")
@@ -270,7 +330,8 @@ def build_worklist(workspace, code_files, *, step, ticket_id, attempt, mode="ful
                   attempt=attempt, mode=mode, required_phases=["reverse"] if step == "deepcheck" and mode == "fast" else list(PHASES[step]),
                   code_files=seeds, related=related, scopes=scopes, baselines=baselines,
                   resolved_baselines={}, max_files=max_files, max_bytes=max_bytes,
-                  units=[], exclusions=[], unobserved=[], findings=[], coverage_status="complete_within_scope")
+                  units=[], exclusions=[], unobserved=[], findings=[], coverage_status="complete_within_scope",
+                  checks_version=CHECKS_VERSION, checks=[])
     debt, excluded = {}, {}
     required = {p: "code_files" for p in seeds}
     for p in related:
@@ -372,7 +433,7 @@ def build_worklist(workspace, code_files, *, step, ticket_id, attempt, mode="ful
         for path in sorted(candidates):
             if Path(path).suffix.lower() in ASSOCIATED_SUFFIXES and _stem(path) == _stem(seed) and _repo(root, path) == _repo(root, seed):
                 required.setdefault(path, "same_stem_or_test")
-    groups = {}
+    groups, source_groups = {}, {}
     ordered = seeds + sorted(set(required) - set(seeds))
     for index, path in enumerate(ordered):
         if index >= max_files:
@@ -386,11 +447,20 @@ def build_worklist(workspace, code_files, *, step, ticket_id, attempt, mode="ful
             debt[path] = str(exc)
             continue
         groups.setdefault((label, _stem(path)), []).append(dict(path=path, sha256=hashlib.sha256(data).hexdigest(), kind=kind, reason=required[path], rules=_rules(path), reads={}))
+        if Path(path).suffix.lower() in SOURCE_SUFFIXES:
+            text = _trigger_content(root, path, data, repo, report["resolved_baselines"].get(label), max_bytes, debt)
+            kinds = set()
+            if TIMESTAMP_SIGNAL.search(text) or INTEGER_CONVERSION.search(text):
+                kinds.add("timestamp_contract")
+            if SHARED_SIGNAL.search(text):
+                kinds.add("shared_variant_consumers")
+            source_groups.setdefault(label, {})[path] = kinds
     for key in sorted(groups, key=str):
         members = sorted(groups[key], key=lambda f: f["path"])
         unit_id = hashlib.sha256("\0".join(f["path"] for f in members).encode()).hexdigest()
         report["units"].append(dict(unit_id=unit_id, files=members))
     report["exclusions"] = [dict(path=p, reason=r) for p, r in sorted(excluded.items())]
+    report["checks"] = _derive_checks(source_groups)
     report["unobserved"] = [dict(path=p, debt_reason=r) for p, r in sorted(debt.items())]
     if debt:
         report["coverage_status"] = "partial"
@@ -403,7 +473,7 @@ def _rebuild(report, workspace, code_files=None):
     keys = ("code_files", "step", "ticket_id", "attempt", "mode", "related", "scopes", "baselines", "max_files", "max_bytes")
     if any(k not in report for k in keys):
         raise InspectionError("report missing identity/scope/budget fields")
-    allowed = set(keys) | {"schema_version", "workspace", "required_phases", "resolved_baselines", "units", "exclusions", "unobserved", "findings", "coverage_status", "debt_reason"}
+    allowed = set(keys) | {"schema_version", "workspace", "required_phases", "resolved_baselines", "units", "exclusions", "unobserved", "findings", "coverage_status", "debt_reason", "checks_version", "checks"}
     if set(report) - allowed:
         raise InspectionError("unknown report fields")
     pinned = report.get("resolved_baselines")
@@ -432,8 +502,127 @@ def _flatten(report):
     return result
 
 
+def _assessment_issues(assessment, check, report, root, required, *, allow_unfinished=False, cache=None):
+    """Validate each explicit cell and its source/artifact evidence without executing tests."""
+    if not isinstance(assessment, dict) or set(assessment) != {"cells"} or not isinstance(assessment["cells"], dict):
+        return ["assessment must contain only cells"]
+    cells = assessment["cells"]
+    issues, cache = [], {} if cache is None else cache
+    if set(cells) != set(check["required_items"]):
+        issues.append("assessment required cells differ")
+    for item, cell in cells.items():
+        if not isinstance(cell, dict) or set(cell) != {"status", "reason", "evidence"}:
+            issues.append(f"invalid assessment cell: {item}")
+            continue
+        status = cell["status"]
+        if status not in ("handled", "pass", "not_applicable", "pending", "fail"):
+            issues.append(f"invalid assessment status: {item}")
+        elif status in ("pending", "fail") and not allow_unfinished:
+            issues.append(f"unfinished assessment: {item}")
+        if not isinstance(cell["reason"], str) or not cell["reason"].strip():
+            issues.append(f"assessment reason required, including not_applicable: {item}")
+        refs = cell["evidence"]
+        if not isinstance(refs, list) or not refs:
+            issues.append(f"assessment evidence required: {item}")
+            continue
+        for ref in refs:
+            try:
+                if not isinstance(ref, dict):
+                    raise InspectionError("evidence must be an object")
+                kind = ref.get("kind")
+                path = _path(root, ref.get("path"), artifact=kind in ("test", "simulation", "runtime"))
+                if kind == "source":
+                    fields = {"kind", "path", "start_line", "end_line", "source_sha256", "excerpt"}
+                    if set(ref) != fields or path not in check["paths"] or path not in required:
+                        raise InspectionError("source evidence must locate a current check member")
+                    if (kind, path) not in cache:
+                        repo = _repo(root, path)
+                        label = repo.relative_to(root).as_posix() if repo else None
+                        data, _ = _content(root, path, repo, report["resolved_baselines"].get(label), report["max_bytes"])
+                        cache[kind, path] = (hashlib.sha256(data).hexdigest(), data.decode("utf-8").splitlines(keepends=True))
+                    digest, lines = cache[kind, path]
+                    start, end = ref["start_line"], ref["end_line"]
+                    if not _positive(start) or not _positive(end) or end < start or end > len(lines):
+                        raise InspectionError("invalid source evidence line range")
+                    if ref["source_sha256"] != digest or digest != required[path]["sha256"] or ref["excerpt"] != "".join(lines[start - 1:end]):
+                        raise InspectionError("source evidence hash/excerpt drift")
+                elif kind in ("test", "simulation", "runtime"):
+                    if set(ref) != {"kind", "path", "sha256", "simulated", "evidence_boundary"}:
+                        raise InspectionError("artifact evidence missing identity/boundary")
+                    if type(ref["simulated"]) is not bool or ref["simulated"] != (kind == "simulation"):
+                        raise InspectionError("simulation must be explicitly identified")
+                    if not isinstance(ref["evidence_boundary"], str) or not ref["evidence_boundary"].strip():
+                        raise InspectionError("artifact evidence requires a nonempty boundary")
+                    if (kind, path) not in cache:
+                        data, _ = _content(root, path, None, None, report["max_bytes"], artifact=True)
+                        cache[kind, path] = hashlib.sha256(data).hexdigest()
+                    if ref["sha256"] != cache[kind, path]:
+                        raise InspectionError("artifact evidence hash drift")
+                else:
+                    raise InspectionError("unknown evidence kind")
+            except (ValueError, OSError, TypeError, UnicodeError) as exc:
+                issues.append(f"invalid assessment evidence {item}: {exc}")
+    return issues
+
+
+def _checks_issues(report, expected, root, required, *, required_checks_version=None, allow_unfinished=False):
+    if required_checks_version is not None and (type(required_checks_version) is not int or required_checks_version != CHECKS_VERSION):
+        return ["unsupported required_checks_version"]
+    present = "checks_version" in report or "checks" in report
+    if not present and required_checks_version is None:
+        return []  # Genuine old v1 records can be explained read-only.
+    if type(report.get("checks_version")) is not int or report.get("checks_version") != CHECKS_VERSION:
+        return ["checks_version missing/unsupported; marked attempts cannot downgrade"]
+    checks = report.get("checks")
+    if not isinstance(checks, list) or any(not isinstance(c, dict) or set(c) != set(CHECK_IDENTITY_KEYS) | {"results"} for c in checks):
+        return ["invalid checks shape"]
+    declared, derived = check_declarations(report), check_declarations(expected)
+    if declared != derived or any(type(c[key]) is not type(target[key])
+                                  for c, target in zip(declared, derived) for key in CHECK_IDENTITY_KEYS):
+        return ["special checks derived identity drift"]
+    issues, cache = [], {}
+    for check in checks:
+        results = check["results"]
+        if not isinstance(results, dict) or set(results) - set(expected["required_phases"]):
+            issues.append(f"invalid assessment phases: {check['kind']}")
+            continue
+        for phase in expected["required_phases"]:
+            if phase not in results:
+                if not allow_unfinished:
+                    issues.append(f"missing assessment: {check['kind']}:{phase}")
+                continue
+            issues.extend(f"{check['kind']}:{phase}:{issue}" for issue in _assessment_issues(
+                results[phase], check, report, root, required, allow_unfinished=allow_unfinished, cache=cache))
+    return issues
+
+
+def apply_assessment(report, workspace, check_id, phase, assessment):
+    """Record one complete, independently assessed phase after its actual Read.
+
+    This shared API mutates only after successful validation. Callers retain
+    their own attempt/round lock, before_write and artifact receipt transaction.
+    Neither a handled record nor a lexical trigger proves semantic correctness.
+    """
+    pending = dict(report, coverage_status="partial", debt_reason="pending assessment")
+    issues = validate_worklist(pending, workspace, allow_incomplete=True, required_checks_version=CHECKS_VERSION)
+    if issues:
+        raise InspectionError(str(issues))
+    selected = [c for c in report["checks"] if c["check_id"] == check_id]
+    if len(selected) != 1 or phase not in report["required_phases"]:
+        raise InspectionError("assessment requires a unique check_id and required phase")
+    check = selected[0]
+    required = _flatten(report)
+    if any(required[path]["reads"].get(phase) != required[path]["sha256"] for path in check["paths"]):
+        raise InspectionError("assessment requires current Read for every check member in this phase")
+    issues = _assessment_issues(assessment, check, report, _workspace(workspace), required, allow_unfinished=True)
+    if issues:
+        raise InspectionError(str(issues))
+    check["results"][phase] = copy.deepcopy(assessment)
+    return report
+
+
 def validate_worklist(report, workspace, *, code_files=None, step=None,
-                      ticket_id=None, attempt=None, allow_incomplete=False):
+                      ticket_id=None, attempt=None, allow_incomplete=False, required_checks_version=None):
     try:
         expected = _rebuild(report, workspace, code_files)
         actual, required = _flatten(report), _flatten(expected)
@@ -470,6 +659,8 @@ def validate_worklist(report, workspace, *, code_files=None, step=None,
             issues.append("invalid coverage_status/debt combination")
         if status != "complete_within_scope" and not (allow_incomplete and incomplete):
             issues.append("inspection incomplete without accepted explicit debt")
+        issues.extend(_checks_issues(report, expected, _workspace(workspace), required,
+            required_checks_version=required_checks_version, allow_unfinished=allow_incomplete and incomplete))
         debt_paths = {d["path"] for d in unobserved}
         for path in sorted(set(actual) & set(required)):
             f, target = actual[path], required[path]

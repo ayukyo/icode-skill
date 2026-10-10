@@ -133,8 +133,12 @@ python3 "$CONTROL" step --dir "$TICKET" --step verify --phase start \
   --attempt verify-a --request verify-start-a >/dev/null
 python3 "$CONTROL" step --dir "$TICKET" --step verify --phase check \
   --attempt verify-a --boundary before_side_effect --request verify-check-side-effect >/dev/null
+CANDIDATE_ID=$(python3 "$CONTROL" candidate --dir "$TICKET" --phase inspect \
+  | python3 -c 'import json,sys; print(json.load(sys.stdin)["candidate_id"])')
 python3 "$CONTROL" record-verification --dir "$TICKET" --kind device_test \
-  --outcome pass --evidence 'fixture:device-pass' --request verify-record-a >/dev/null
+  --candidate-id "$CANDIDATE_ID" --environment simulated \
+  --outcome pass --evidence 'fixture:simulated-device-pass' --request verify-record-a \
+  | json_assert 'data["run"]["environment"] == "simulated" and len(data["run"]["candidate_id"]) == 64'
 python3 "$CONTROL" step --dir "$TICKET" --step verify --phase check \
   --attempt verify-a --boundary after_wait --request verify-check-wait >/dev/null
 if python3 "$CONTROL" step --dir "$TICKET" --step verify --phase finish \

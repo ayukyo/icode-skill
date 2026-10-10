@@ -9,7 +9,7 @@
 
 ## 阶段覆盖与合规结束（强制）
 
-先执行 [审查清单合同](../references/inspection_worklist.md)，生成 `audit_worklist.json`；独立联审真实实现/接口/调用方/测试，不复用 deepcheck 阅读。实际 Read 后逐文件登记 audit phase；源码 findings 校验行段/hash，无定位猜测保留 needs_more_evidence。清单与原有 coverage 并行必需，遗漏不能 success，审查不替代交付分层证据。
+先执行 [审查清单合同](../references/inspection_worklist.md)，生成 `audit_worklist.json`；独立联审真实实现/接口/调用方/测试，不复用 deepcheck 阅读。实际 Read 后逐文件登记 audit phase；触发共享变体/消费者或 timestamp 专项时，独立逐项评估完整 required_items，以 `inspection --phase assess --read-phase audit --check-id <ID> --assessment-json '<完整对象>'` 登记结论、理由与真实引用。缺项/阶段或 pending/fail 不得 success，N/A 也须具体理由；静态审查/模拟证据须说明边界，不能升级为实机已验证。源码 findings 校验行段/hash，无定位猜测保留 needs_more_evidence。清单与原有 coverage 并行必需，遗漏不能 success，审查不替代交付分层证据。
 
 执行前读取[审查证据合同](../references/inspection_evidence.md)。只有实际完成本轮各阶段Read后，才写阶段覆盖声明及实际源hash：deepcheck写 `deepcheck_coverage.json`，audit写 `audit_coverage.json`，登记本attempt真实artifact回执。声明必须覆盖metadata.code_files全部文件；按risk_profile.effective_mode（未声明时按mode）：full为Reverse/Fixed/Free，实际fast仅Reverse，audit为独立Audit；fast升级full不可省阶段。已有hash/工具调用/历史确认行均不代替本轮Read。
 

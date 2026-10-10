@@ -9,7 +9,7 @@
 
 ## 阶段覆盖与合规结束（强制）
 
-先执行 [审查清单合同](../references/inspection_worklist.md)：本轮 prepare 联审实现/头文件/调用方/测试；Reverse、Fixed、Free 各自实际重新 Read 后逐文件登记 phase（effective fast 仅 Reverse）。源码 findings 给校验后的行段/hash，遗漏保持债务，不可称全审完成。清单与原有 coverage 声明并行必需，修复改变源码后重新入轮审查。
+先执行 [审查清单合同](../references/inspection_worklist.md)：本轮 prepare 联审实现/头文件/调用方/测试；Reverse、Fixed、Free 各自实际重新 Read 后逐文件登记 phase（effective fast 仅 Reverse）。触发共享变体/消费者或 timestamp 专项时，各 required_phase 独立完成全部 required_items，并以 `inspection --phase assess --read-phase <reverse|fixed|free> --check-id <ID> --assessment-json '<完整对象>'` 登记具体结论、理由及真实引用；不得用上一阶段结论或 prepare/read 代替。N/A 须具体理由，漏项/未完成只留明确债务走 degraded。源码 findings 给校验后的行段/hash，遗漏保持债务，不可称全审完成。清单与原有 coverage 声明并行必需，修复改变源码后重新入轮审查。
 
 执行前读取[审查证据合同](../references/inspection_evidence.md)。只有实际完成本轮各阶段Read后，才写阶段覆盖声明及实际源hash：deepcheck写 `deepcheck_coverage.json`，audit写 `audit_coverage.json`，登记本attempt真实artifact回执。声明必须覆盖metadata.code_files全部文件；按risk_profile.effective_mode（未声明时按mode）：full为Reverse/Fixed/Free，实际fast仅Reverse，audit为独立Audit；fast升级full不可省阶段。已有hash/工具调用/历史确认行均不代替本轮Read。
 

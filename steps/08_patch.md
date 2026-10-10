@@ -29,6 +29,8 @@
 
 **对状态机的影响**：patch **不改变** `status` 和 `completed_steps`（completed 保持 completed，中途状态保持原状态）。patch 是横向追加，不是纵向推进——靠 `patch_count` / `patch_history` 字段记录（见「强制操作」段），主流程推进逻辑（以 `completed_steps` 最大编号推进）完全不受影响。
 
+**源码新鲜度与专项复审**：历史 `completed_steps` 保留不代表补丁后的当前源码已审查。[审查清单合同](../references/inspection_worklist.md) 的冻结源码 hash/receipt 在 source change 后 stale；新共享变体、消费者或 timestamp 信号（包括基线被删除行）须对当前候选复审，不能沿用旧 pass 或仅重填 hash。patch 不新增平行 inspection 状态机；交付前按既有 code/deepcheck/audit 入口重新审查受影响终态，实际 Read 后为各 required_phase 用 `inspection --phase assess` 记录完整专项结论与证据。旧 completed 历史不删除；未完成复审时保留审查债务，不能称当前候选已完整通过。
+
 **验证记录分离（verify 契约）**：`--listen` 仅用于 patch 修改后的自动监听；纯验证语义（不改代码）的独立入口是 `/icode verify`（显式触发使用 `/icode verify --test <target>`，见 [steps/verify.md](verify.md)）。**1.5 实机验证结果一律记入 metadata `verification_runs`**（与 `patch_history` 分离）：无文件 mutation 的验证轮**不新增** `patch_history` 条；验证通过**不自动升级** `delivery_verdict=verified`（终审判定）。字段结构见 [schemas/ticket-metadata.schema.json](../schemas/ticket-metadata.schema.json)。
 
 **completed 工单分流（lifecycle）**：`status=completed` 时区分两种情况——

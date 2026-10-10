@@ -145,6 +145,7 @@ AGENT_ADOPTION = {"yes", "partial", "no"}
 MAX_OPEN_AGENT_SPAWNS = 3
 MAX_EXECUTION_BINDING_ANCESTORS = 256
 CONTROLLED_BIRTH_FIELDS = {
+    "candidate_tracking", "review_receipts", "excluded_side_effects",
     "execution_binding",
     "schema_version", "ticket_id", "requirement", "created_at", "status",
     "completed_steps", "indexed", "debug", "project_path", "close_state",
@@ -1148,6 +1149,8 @@ def validate_event_semantics(events, meta):
     for event in events:
         binding_mirror.consume(event)
     problems.extend(binding_mirror.finish())
+    problems.extend(candidate_event_issues(events, meta))
+    problems.extend(verification_evidence_module().event_issues(events, meta, candidate_module()))
     return problems
 
 
@@ -1725,19 +1728,32 @@ def inspection_worklist_issues(out_dir, meta, step, attempt=None, allow_incomple
         return ["inspection_worklist:missing_or_symlink"]
     try:
         report = load_json(path, "inspection worklist")
+        if not isinstance(report, dict):
+            return ["inspection_worklist:invalid=report must be an object"]
         helper = inspection_module()
         workspace = execution_workspace(out_dir, meta)
+        events, chain_issues = verify_event_chain(out_dir, meta)
+        writers = [e for e in events if e.get("event_type") == "artifact_written"
+            and (e.get("payload") or {}).get("step") == step
+            and (e.get("payload") or {}).get("output") == "inspection_worklist"]
+        # A report cannot invent an old attempt to suppress a genuine writer's
+        # version marker, including during scope-only/read-only output checks.
+        current_attempt = attempt if attempt is not None else (writers[-1]["payload"].get("attempt") if writers else None)
+        required_version = 1 if inspection_requires_current_checks(events, step, current_attempt) else None
         issues = helper.validate_worklist(report, workspace, code_files=meta.get("code_files") or [],
-            step=step, ticket_id=meta.get("ticket_id"), attempt=attempt, allow_incomplete=allow_incomplete)
+            step=step, ticket_id=meta.get("ticket_id"), attempt=current_attempt, allow_incomplete=allow_incomplete,
+            required_checks_version=required_version)
+        if chain_issues:
+            issues.append("event chain invalid")
         profile = meta.get("risk_profile")
         effective = profile.get("effective_mode") if isinstance(profile, dict) else None
         effective = effective if effective in ("full", "fast") else meta.get("mode", "full")
         if report.get("mode") != effective:
             issues.append("effective_mode mismatch")
-        if attempt is not None:
-            events, chain_issues = verify_event_chain(out_dir, meta)
+        if current_attempt is not None:
             receipts = [e for e in events if e.get("event_type") == "artifact_written"
-                and (e.get("payload") or {}).get("attempt") == attempt
+                and (e.get("payload") or {}).get("attempt") == current_attempt
+                and (e.get("payload") or {}).get("step") == step
                 and (e.get("payload") or {}).get("output") == "inspection_worklist"
                 and (e.get("payload") or {}).get("inspection_declaration_hash")]
             if chain_issues or not receipts or any(e["payload"]["inspection_declaration_hash"] != inspection_declaration_hash(report) for e in receipts):
@@ -1752,8 +1768,22 @@ def inspection_worklist_issues(out_dir, meta, step, attempt=None, allow_incomple
 def inspection_declaration_hash(report):
     keys = ("schema_version", "workspace", "step", "ticket_id", "attempt", "mode", "required_phases",
             "code_files", "related", "scopes", "baselines", "resolved_baselines", "max_files", "max_bytes")
-    return hashlib.sha256(json.dumps({k: report.get(k) for k in keys}, sort_keys=True,
+    declaration = {k: report.get(k) for k in keys}
+    if "checks_version" in report or "checks" in report:
+        declaration.update(checks_version=report.get("checks_version"),
+                           checks=inspection_module().check_declarations(report))
+    return hashlib.sha256(json.dumps(declaration, sort_keys=True,
         ensure_ascii=False, separators=(",", ":")).encode("utf-8")).hexdigest()
+
+
+def inspection_requires_current_checks(events, step, attempt):
+    """Only verified writer events decide upgrade requirements, never report self-claims."""
+    return any(e.get("event_type") == "artifact_written"
+        and (e.get("payload") or {}).get("output") == "inspection_worklist"
+        and (e.get("payload") or {}).get("step") == step
+        and (e.get("payload") or {}).get("attempt") == attempt
+        and type((e.get("payload") or {}).get("inspection_checks_version")) is int
+        and e["payload"]["inspection_checks_version"] == 1 for e in events)
 
 
 def review_evidence_issues(out_dir, meta, events=None, start=None, allow_legacy=False):
@@ -2129,7 +2159,7 @@ def recover_pending_transaction(out_dir):
 
 
 def commit_metadata_and_event(out_dir, before, after, event_type, payload,
-                              request_id=None, actor="icode"):
+                              request_id=None, actor="icode", event_id=None):
     """调用方持锁。事务日志 + metadata 原子替换 + event 追加；普通 I/O 失败回滚旧 metadata。"""
     out_dir = Path(out_dir)
     require_valid_metadata(after)
@@ -2137,6 +2167,9 @@ def commit_metadata_and_event(out_dir, before, after, event_type, payload,
     event_payload["metadata_hash_after"] = metadata_hash(after)
     event = prepare_event(out_dir, after, event_type, event_payload,
                           request_id=request_id, actor=actor)
+    if event_id is not None:
+        event["event_id"] = event_id
+        event["event_hash"] = canonical_event_hash(event)
     txn_path = out_dir / TXN_NAME
     atomic_write_json(txn_path, {
         "schema_version": 1,
@@ -2299,6 +2332,10 @@ def cmd_create(args):
     }
     status, completed_steps, debug = birth[args.birth]
     meta = dict(seed)
+    if verification_evidence_module().real_env_risk(meta) and meta.get("verification_contract") is None:
+        meta["verification_contract"] = verification_evidence_module().pending_contract()
+    if verification_evidence_module().build_starts(meta):
+        raise ControlError("build-start receipts cannot be seeded at ticket creation", gate_id="build_start_writer")
     meta.update({
         "schema_version": 3,
         "ticket_id": args.ticket_id,
@@ -2317,10 +2354,24 @@ def cmd_create(args):
     elif meta.get("debug"):
         raise ControlError("非 debug 出生类型禁止 metadata.debug=true", exit_code=2,
                            gate_id="birth_kind_mismatch")
+    try:
+        repo_head = candidate_module().repository_head(workspace)
+    except (candidate_module().CandidateError, OSError, UnicodeError) as exc:
+        raise ControlError(f"Git工程候选绑定失败: {exc}", gate_id="candidate_capture") from exc
+    if repo_head:
+        limits = candidate_limits(getattr(args, "candidate_limits_json", None))
+        meta["excluded_side_effects"] = []
+        meta["review_receipts"] = []
+        candidate = candidate_snapshot(out_dir, meta, base=repo_head, limits=limits, events=[])
+        meta["candidate_tracking"] = {"version": 1, "mode": "enabled",
+                                      "base": repo_head, "current": candidate, "limits": limits}
     require_valid_metadata(meta)
     payload = {"birth_kind": args.birth,
                "execution_contract_version": 1,
                "requirement_summary": meta.get("requirement_summary") or args.requirement[:100]}
+    if "candidate_tracking" in meta:
+        payload["candidate_tracking"] = meta["candidate_tracking"]
+        payload["excluded_side_effects"] = []
     with DirLock(out_dir):
         recover_pending_transaction(out_dir)
         meta_path = out_dir / METADATA_NAME
@@ -3610,6 +3661,7 @@ def known_metadata_fields():
 
 
 METADATA_UPDATE_PROTECTED = {
+    "candidate_tracking", "review_receipts", "excluded_side_effects",
     "execution_binding",
     "schema_version", "ticket_id", "created_at", "status", "completed_steps",
     "indexed", "delivery_verdict", "claims", "verification_runs", "close_state",
@@ -3622,6 +3674,307 @@ CLOSE_BOOKKEEPING_FIELDS = {
     "wt_degraded", "sub_worktrees", "active_checkout", "checkout_history", "migration",
     "submitted_baseline", "submitted_baselines", "submission_contracts", "submission_audit",
 }
+
+
+_CANDIDATE_MODULE = None
+
+
+def candidate_module():
+    """Shared stdlib-only source identity backend; never persists on its own."""
+    global _CANDIDATE_MODULE
+    if _CANDIDATE_MODULE is None:
+        spec = importlib.util.spec_from_file_location("icode_candidate", SKILL_ROOT / "tools/icode_candidate.py")
+        _CANDIDATE_MODULE = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(_CANDIDATE_MODULE)
+    return _CANDIDATE_MODULE
+
+
+_VERIFICATION_EVIDENCE_MODULE = None
+
+
+def verification_evidence_module():
+    global _VERIFICATION_EVIDENCE_MODULE
+    if _VERIFICATION_EVIDENCE_MODULE is None:
+        spec = importlib.util.spec_from_file_location("verification_evidence", SKILL_ROOT / "tools/verification_evidence.py")
+        _VERIFICATION_EVIDENCE_MODULE = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(_VERIFICATION_EVIDENCE_MODULE)
+    return _VERIFICATION_EVIDENCE_MODULE
+
+
+def verification_context(out_dir, meta=None):
+    """Read-only live source/event context; never persists a refreshed candidate."""
+    meta = load_metadata(out_dir) if meta is None else meta
+    return verification_evidence_module().context(out_dir, meta, capture=candidate_snapshot,
+                verify=verify_event_chain, candidate_api=candidate_module())
+
+
+def verification_applicability(out_dir, meta=None):
+    """Small JSON-ready evidence verdict; query success is separate from ok."""
+    meta = load_metadata(out_dir) if meta is None else meta
+    return verification_evidence_module().assess(meta, verification_context(out_dir, meta))
+
+
+def candidate_inspection_scope(out_dir, meta=None, *, effective_base=None, events=None):
+    """Aggregate applicable declarations, without read progress or report text.
+
+    Review diff baselines are independent of the controlled candidate base.
+    Only genuine writer/start events identify a declaration's generation;
+    Unreceipted legacy declarations can use the scope bound by the first
+    controlled enable event; later scope additions remain conservative.
+    """
+    select_generations = ((meta or {}).get("candidate_tracking") or {}).get("mode") == "enabled"
+    attempts, finished, writers = {}, set(), {}
+    generation, controlled_base = 0, None
+    legacy_scope, legacy_generation = None, None
+    for event in events or []:
+        payload = event.get("payload") or {}
+        kind = event.get("event_type")
+        tracking = None
+        if kind == "ticket_created":
+            tracking = payload.get("candidate_tracking")
+        elif kind == "metadata_updated" and payload.get("candidate_control") == 1:
+            tracking = (payload.get("set") or {}).get("candidate_tracking")
+        if isinstance(tracking, dict) and tracking.get("mode") == "enabled":
+            if tracking.get("base") != controlled_base:
+                generation += 1
+                if controlled_base is None and kind == "metadata_updated":
+                    legacy_scope = tracking["current"]["inspection_scope"]
+                    legacy_generation = generation
+                controlled_base = tracking["base"]
+        key = (payload.get("step"), payload.get("attempt"))
+        if key[0] not in candidate_module().REVIEW_STEPS:
+            continue
+        if kind == "step_started" and payload.get("execution_model_version") == 1:
+            attempts[key] = generation
+        elif kind == "step_finished" and payload.get("execution_model_version") == 1:
+            finished.add(key)
+        elif kind == "artifact_written" and payload.get("output") == "inspection_worklist":
+            writers.setdefault(key[0], []).append(payload)
+    # Explicit capture B runs before metadata records B. It starts a new
+    # generation even if older history previously used that same base.
+    applicable_generation = generation + (effective_base != controlled_base)
+    if select_generations and effective_base is not None:
+        old_open = [attempt for (step, attempt), origin in attempts.items()
+                    if origin != applicable_generation and (step, attempt) not in finished]
+        if old_open:
+            raise ControlError("旧 candidate 代际仍有未终结 review attempt，先 blocked 终结再重入",
+                               gate_id="candidate_scope", open_attempts=old_open)
+    scopes, related, baselines = set(), set(), {}
+    for step in ("code", "deepcheck", "audit"):
+        path = Path(out_dir) / f"{step}_worklist.json"
+        if not path.exists():
+            continue
+        report = load_json(path, "candidate inspection declaration")
+        if not isinstance(report, dict):
+            raise ControlError("inspection declaration 必须是对象", gate_id="candidate_scope")
+        receipts = writers.get(step) or []
+        declaration_receipts = []
+        if receipts:
+            attempt = receipts[-1].get("attempt")
+            declaration_receipts = [receipt for receipt in receipts
+                                    if receipt.get("attempt") == attempt and receipt.get("inspection_declaration_hash")]
+            if declaration_receipts:
+                try:
+                    digest = inspection_declaration_hash(report)
+                except (ValueError, TypeError) as exc:
+                    raise ControlError(f"inspection declaration/receipt drift: {exc}", gate_id="candidate_scope") from exc
+                key = (step, attempt)
+                if report.get("attempt") != attempt or report.get("step") != step \
+                        or meta is not None and report.get("ticket_id") != meta.get("ticket_id") \
+                        or key not in attempts \
+                        or any(receipt["inspection_declaration_hash"] != digest for receipt in declaration_receipts):
+                    raise ControlError("inspection declaration/receipt drift", gate_id="candidate_scope")
+                if select_generations and effective_base is not None and attempts[key] != applicable_generation:
+                    continue  # Keep completed old-generation reports/receipts as history.
+        declaration = {}
+        for field in ("scopes", "related"):
+            values = report.get(field) or []
+            if not isinstance(values, list) or any(not isinstance(x, str) for x in values):
+                raise ControlError("inspection 范围必须是字符串数组", gate_id="candidate_scope")
+            declaration[field] = set(values)
+        values = report.get("resolved_baselines") or report.get("baselines") or {}
+        if not isinstance(values, dict):
+            raise ControlError("inspection baselines 必须是对象", gate_id="candidate_scope")
+        if select_generations and not declaration_receipts and legacy_scope is not None \
+                and legacy_generation != applicable_generation \
+                and declaration["scopes"].issubset(legacy_scope["scopes"]) \
+                and declaration["related"].issubset(legacy_scope["related"]) \
+                and all(key in legacy_scope["baselines"] and legacy_scope["baselines"][key] == value
+                        for key, value in values.items()):
+            # The genuine enable snapshot bounds this old declaration. New
+            # paths/repositories cannot self-identify as legacy to disappear.
+            continue
+        scopes.update(declaration["scopes"])
+        related.update(declaration["related"])
+        for key, value in values.items():
+            if key in baselines and baselines[key] != value:
+                raise ControlError("inspection baseline 合同不一致", gate_id="candidate_scope")
+            baselines[key] = value
+    return {"scopes": sorted(scopes), "related": sorted(related), "baselines": baselines}
+
+
+def candidate_limits(raw=None):
+    module = candidate_module()
+    try:
+        return module.normalize_limits(strict_json_loads(raw) if raw is not None else None)
+    except (ValueError, TypeError) as exc:
+        raise ControlError(f"候选预算无效: {exc}", exit_code=2, gate_id="candidate_limits") from exc
+
+
+def candidate_snapshot(out_dir, meta, *, base=None, excluded_side_effects=None, limits=None, events=None):
+    """Capture once; callers may reuse events verified against the controlled metadata."""
+    module = candidate_module()
+    tracking = meta.get("candidate_tracking") or {}
+    effective_base = base or tracking.get("base")
+    if events is None:
+        events, problems = verify_event_chain(out_dir, meta)
+        if problems:
+            raise ControlError("事件链不完整，拒绝建立候选声明", gate_id="event_chain", violations=problems)
+    try:
+        return module.capture_candidate(
+            execution_workspace(out_dir, meta), base=effective_base,
+            code_files=meta.get("code_files") or [], scope_contract=meta.get("scope_contract"),
+            inspection_scope=candidate_inspection_scope(out_dir, meta, effective_base=effective_base, events=events),
+            limits=tracking.get("limits") if limits is None else limits,
+            excluded_side_effects=(meta.get("excluded_side_effects") or [])
+                                  if excluded_side_effects is None else excluded_side_effects)
+    except (module.CandidateError, OSError, UnicodeError) as exc:
+        raise ControlError(f"候选身份无法完整建立: {exc}", gate_id="candidate_capture") from exc
+
+
+def delivery_freshness(out_dir, meta=None, *, required_steps=("code", "deepcheck", "audit")):
+    """Public read-only API for verification/submission/crosscheck consumers."""
+    meta = load_metadata(out_dir) if meta is None else meta
+    module = candidate_module()
+    if (meta.get("candidate_tracking") or {}).get("mode") != "enabled":
+        return module.delivery_freshness(meta, None, required_steps=required_steps)
+    events, problems = verify_event_chain(out_dir, meta)
+    if problems:
+        return {"ok": False, "state": "blocked", "reasons": ["event_chain"],
+                "violations": problems, "candidate_id": None, "applicable_receipts": [],
+                "required_steps": list(required_steps)}
+    try:
+        current = candidate_snapshot(out_dir, meta, events=events)
+    except ControlError as exc:
+        return {"ok": False, "state": "blocked", "reasons": ["candidate_capture"],
+                "detail": exc.message, "candidate_id": None, "applicable_receipts": [],
+                "required_steps": list(required_steps)}
+    return module.delivery_freshness(meta, current, events, required_steps)
+
+
+def candidate_tracking_shape_ok(tracking, exclusions):
+    if not isinstance(tracking, dict) or set(tracking) - {"version", "mode", "base", "current", "limits"} \
+            or type(tracking.get("version")) is not int or tracking["version"] != 1 \
+            or tracking.get("mode") != "enabled":
+        return False
+    candidate = tracking.get("current")
+    if not candidate_module().snapshot_identity_ok(candidate):
+        return False
+    if tracking.get("base") != candidate["base"] or exclusions != candidate["excluded_side_effects"]:
+        return False
+    try:
+        candidate_module().normalize_limits(tracking.get("limits"))
+    except candidate_module().CandidateError:
+        return False
+    return True
+
+
+def candidate_event_issues(events, meta):
+    """Mirror controlled candidate writes; old event chains remain unchanged."""
+    problems, tracking, exclusions, receipts = [], None, None, []
+    for event in events:
+        payload = event.get("payload") or {}
+        kind = event.get("event_type")
+        # Free events may use the same payload names without acquiring the
+        # semantics of a controlled step or candidate writer.
+        if kind == "step_started" and "candidate_input" in payload and \
+                not candidate_module().snapshot_identity_ok(payload["candidate_input"]):
+            problems.append("candidate_input_event_shape")
+        if kind == "ticket_created" and "candidate_tracking" in payload:
+            tracking = payload["candidate_tracking"]
+            exclusions = payload.get("excluded_side_effects")
+            if not candidate_tracking_shape_ok(tracking, exclusions):
+                problems.append("candidate_snapshot_identity")
+        if kind == "metadata_updated":
+            updates, appends = payload.get("set") or {}, payload.get("append") or {}
+            controlled = {"candidate_tracking", "review_receipts", "excluded_side_effects"}
+            if controlled.intersection(set(updates) | set(appends)) or "candidate_control" in payload:
+                if type(payload.get("candidate_control")) is not int or payload["candidate_control"] != 1 \
+                        or set(updates) != {"candidate_tracking", "excluded_side_effects"} or appends \
+                        or event.get("actor") != "icode" or not event.get("request_id"):
+                    problems.append("candidate_control_event_shape")
+                else:
+                    tracking = updates["candidate_tracking"]
+                    exclusions = updates["excluded_side_effects"]
+                    if not candidate_tracking_shape_ok(tracking, exclusions):
+                        problems.append("candidate_snapshot_identity")
+        receipt = payload.get("candidate_receipt")
+        if kind == "step_finished" and "candidate_receipt" in payload:
+            if payload.get("outcome") != "success" \
+                    or payload.get("step") not in candidate_module().REVIEW_STEPS \
+                    or not isinstance(receipt, dict) or receipt.get("event_id") != event.get("event_id") \
+                    or receipt.get("step") != payload.get("step") or receipt.get("attempt") != payload.get("attempt") \
+                    or not isinstance(tracking, dict):
+                problems.append("candidate_receipt_event_shape")
+                continue
+            candidate = receipt.get("candidate") or {}
+            if receipt.get("candidate_id") != candidate.get("candidate_id") \
+                    or not candidate_module().snapshot_identity_ok(candidate):
+                problems.append("candidate_receipt_identity")
+            receipts.append(receipt)
+            tracking = dict(tracking, current=candidate)
+    if tracking != meta.get("candidate_tracking") or exclusions != meta.get("excluded_side_effects"):
+        problems.append("candidate_tracking_event_mismatch")
+    if receipts != (meta.get("review_receipts") or []):
+        problems.append("candidate_receipt_event_mismatch")
+    return problems
+
+
+def cmd_candidate(args):
+    out_dir = Path(args.dir).resolve()
+    if args.phase == "inspect":
+        result = delivery_freshness(out_dir, required_steps=tuple(args.require_step or candidate_module().REVIEW_STEPS))
+        result["freshness_ok"] = result["ok"]
+        if not args.require_step:
+            result["ok"] = True
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        # Inspect is a query. --require-step turns it into an acceptance check.
+        return 0 if not args.require_step or result["ok"] else 1
+    if not isinstance(args.request_id, str) or not args.request_id.strip():
+        raise ControlError("candidate capture 需要 request-id", exit_code=2, gate_id="candidate_request")
+    with DirLock(out_dir):
+        recover_pending_transaction(out_dir)
+        meta = load_metadata(out_dir)
+        require_vnext(meta, out_dir)
+        require_valid_metadata(meta)
+        ensure_execution_writable(meta)
+        events, problems = verify_event_chain(out_dir, meta)
+        if problems:
+            raise ControlError("事件链不完整，拒绝绑定候选", gate_id="event_chain", violations=problems)
+        existing = meta.get("candidate_tracking") or {}
+        base = args.base or existing.get("base") or candidate_module().repository_head(execution_workspace(out_dir, meta))
+        exclusions = args.exclude if args.exclude is not None else meta.get("excluded_side_effects") or []
+        limits = candidate_limits(args.limits_json) if getattr(args, "limits_json", None) is not None \
+                 else candidate_module().normalize_limits(existing.get("limits"))
+        # Explicit enable/capture proposes this generation before the atomic
+        # metadata event exists. Do not promote legacy attempt declarations.
+        prospective = dict(meta, candidate_tracking=dict(existing, mode="enabled", base=base))
+        candidate = candidate_snapshot(out_dir, prospective, base=base, excluded_side_effects=exclusions, limits=limits, events=events)
+        tracking = {"version": 1, "mode": "enabled", "base": base, "current": candidate, "limits": limits}
+        updates = {"candidate_tracking": tracking, "excluded_side_effects": candidate["excluded_side_effects"]}
+        payload = {"candidate_control": 1, "set": updates, "append": {}}
+        prior = find_idempotent_event(events, args.request_id, "metadata_updated", payload,
+                                     actor="icode", payload_keys=("candidate_control", "set", "append"))
+        if prior:
+            print(json.dumps({"ok": True, "already_applied": True, "event_id": prior["event_id"],
+                              "candidate_id": candidate["candidate_id"]}, ensure_ascii=False, indent=2))
+            return 0
+        updated = dict(meta, **updates)
+        event = commit_metadata_and_event(out_dir, meta, updated, "metadata_updated", payload,
+                                          request_id=args.request_id)
+    print(json.dumps({"ok": True, "already_applied": False, "event_id": event["event_id"],
+                      "candidate_id": candidate["candidate_id"]}, ensure_ascii=False, indent=2))
+    return 0
 
 
 def cmd_bind_execution_root(args):
@@ -3734,9 +4087,12 @@ def cmd_metadata_update(args):
         if problems:
             raise ControlError("现有事件链不完整，拒绝更新 metadata", exit_code=1,
                                gate_id="event_chain", violations=problems)
+        replay = next((event for event in events if args.request_id and event.get("request_id") == args.request_id), None)
+        replay_payload = replay.get("payload") or {} if replay else {}
+        comparable_payload = {"metadata_update_request": payload} if "metadata_update_request" in replay_payload else payload
         prior = find_idempotent_event(
-            events, args.request_id, "metadata_updated", payload,
-            actor=args.actor, payload_keys=("set", "append"))
+            events, args.request_id, "metadata_updated", comparable_payload,
+            actor=args.actor, payload_keys=("metadata_update_request",) if "metadata_update_request" in replay_payload else ("set", "append"))
         if prior:
             print(json.dumps({"ok": True, "already_applied": True,
                               "request_id": args.request_id,
@@ -3764,6 +4120,14 @@ def cmd_metadata_update(args):
                     f"metadata.{key} 当前不是数组，不能 append",
                     exit_code=1, gate_id="metadata_append_target")
             updated[key] = list(current) + values
+        evidence_api = verification_evidence_module()
+        if evidence_api.build_starts(updated) != evidence_api.build_starts(meta):
+            raise ControlError("extensions.verification.build_starts 只能由 build-start 维护", gate_id="metadata_update_protected")
+        if "risk_profile" in touched and not evidence_api.real_env_risk(meta) and evidence_api.real_env_risk(updated) \
+                and updated.get("verification_contract") is None:
+            updated["verification_contract"] = evidence_api.pending_contract()
+            payload = {"set": dict(updates, verification_contract=updated["verification_contract"]), "append": appends,
+                       "metadata_update_request": {"set": updates, "append": appends}}
         current_skill_runs = ((((meta.get("extensions") or {}).get("skills") or {})
                                .get("runs")) or [])
         updated_skill_runs = ((((updated.get("extensions") or {}).get("skills") or {})
@@ -3872,6 +4236,77 @@ def cmd_record_claim(args):
     return 0
 
 
+def verification_json(raw, label):
+    if raw is None:
+        return None
+    try:
+        value = strict_json_loads(raw)
+    except (ValueError, json.JSONDecodeError) as exc:
+        raise ControlError(f"{label} 不是严格 JSON: {exc}", exit_code=2, gate_id="verification_evidence") from exc
+    if not isinstance(value, dict):
+        raise ControlError(f"{label} 必须是 JSON 对象", exit_code=2, gate_id="verification_evidence")
+    return value
+
+
+def cmd_build_start(args):
+    """Observe a dedicated build directory before execution, without clearing it."""
+    if not isinstance(args.request_id, str) or not args.request_id.strip():
+        raise ControlError("build-start requires a nonempty --request-id", exit_code=2)
+    out_dir = Path(args.dir).resolve()
+    parameters = verification_json(args.parameters_json, "--parameters-json")
+    if not isinstance(parameters, dict) or set(parameters) != {"configure_command", "build_command"}:
+        raise ControlError("build-start 参数必须且只能包含 configure_command/build_command argv 数组", exit_code=2)
+    for command in parameters.values():
+        if not isinstance(command, list) or not command or len(command) > 128 or \
+                any(not isinstance(arg, str) or not arg or len(arg) > 256 or "\n" in arg for arg in command):
+            raise ControlError("build-start commands must be bounded argv arrays, not complete shell text", exit_code=2)
+        if any(any(word in arg.lower() for word in ("password", "passwd", "api_key", "apikey", "secret", "token", "cookie", "authorization", "bearer")) for arg in command):
+            raise ControlError("build-start parameters must not contain credentials", exit_code=2, gate_id="verification_sensitive")
+        if command[0] in {"sh", "bash", "zsh", "cmd", "powershell"} and any(arg in {"-c", "/c", "-Command"} for arg in command[1:]):
+            raise ControlError("build-start does not store shell execution strings", exit_code=2)
+    with DirLock(out_dir):
+        recover_pending_transaction(out_dir)
+        meta = load_metadata(out_dir)
+        require_vnext(meta, out_dir)
+        require_valid_metadata(meta)
+        ensure_execution_writable(meta)
+        events, problems = verify_event_chain(out_dir, meta)
+        if problems:
+            raise ControlError("现有事件链不完整", gate_id="event_chain", violations=problems)
+        input_data = {"build_dir": str(Path(args.build_dir).absolute()), "candidate_id": args.candidate_id, "parameters": parameters}
+        prior = find_idempotent_event(events, args.request_id, "metadata_updated", {"build_start_input": input_data}, payload_keys=("build_start_input",))
+        if prior:
+            print(json.dumps({"ok": True, "already_applied": True, "event_id": prior["event_id"]}, ensure_ascii=False))
+            return 0
+        evidence_api = verification_evidence_module()
+        try:
+            candidate = candidate_snapshot(out_dir, meta, events=events)
+            if args.candidate_id != candidate["candidate_id"]:
+                raise evidence_api.EvidenceError("build-start must explicitly bind the live source candidate")
+            directory, info = evidence_api.safe_directory(args.build_dir, execution_workspace(out_dir, meta))
+            with os.scandir(directory) as entries:
+                empty = next(entries, None) is None
+        except (evidence_api.EvidenceError, OSError, ValueError) as exc:
+            raise ControlError(str(exc), gate_id="build_start_receipt") from exc
+        event_id = str(uuid.uuid4())
+        receipt = {"version": 1, "event_id": event_id, "observed_at": now_iso(), "observed_ns": time.time_ns(),
+                   "build_dir": str(directory), "directory": {"device": info.st_dev, "inode": info.st_ino,
+                       "mode": stat.S_IMODE(info.st_mode), "empty": empty}, "source_candidate": candidate,
+                   "candidate_id": candidate["candidate_id"], "parameters": parameters}
+        extensions = dict(meta.get("extensions") or {})
+        namespace = dict(extensions.get("verification") or {})
+        namespace["build_starts"] = [*evidence_api.build_starts(meta), receipt]
+        extensions["verification"] = namespace
+        updated = dict(meta, extensions=extensions)
+        payload = {"set": {"extensions": extensions}, "append": {}, "build_start_control": 1,
+                   "build_start_receipt": receipt, "build_start_input": input_data}
+        event = commit_metadata_and_event(out_dir, meta, updated, "metadata_updated", payload,
+                    request_id=args.request_id, event_id=event_id)
+    print(json.dumps({"ok": True, "event_id": event["event_id"], "candidate_id": receipt["candidate_id"],
+                      "directory_empty": empty, "build_dir": str(directory)}, ensure_ascii=False, indent=2))
+    return 0
+
+
 def cmd_record_verification(args):
     out_dir = Path(args.dir).resolve()
     if args.close_repair and not args.request_id:
@@ -3884,15 +4319,17 @@ def cmd_record_verification(args):
     if args.build_source == "reused" and not args.artifact_identity:
         raise ControlError("--build-source reused 必须提供 --artifact-identity 核对产物",
                            exit_code=2, gate_id="reused_artifact_identity")
+    meta_probe = load_metadata(out_dir)
+    candidate_enabled = verification_evidence_module().enabled(meta_probe)
     if args.kind == "build":
         # 构建不能借用 deploy/device_test 层级，也不能冒充复用产物后的重编。
         if args.device is not None or args.layer not in {None, "build"} \
-                or args.build_source in {"reused", "existing"}:
+                or args.build_source == "reused" or (args.build_source == "existing" and not candidate_enabled):
             raise ControlError(
                 "kind=build 只能记录 build 层级，不带 device，不复用既有构建",
                 exit_code=2, gate_id="build_verification_scope")
         if args.outcome == "pass" and (
-                args.build_source != "fresh"
+                args.build_source not in ({"fresh", "existing"} if candidate_enabled else {"fresh"})
                 or not (args.artifact_identity or "").strip()
                 or not (args.baseline or "").strip()):
             raise ControlError(
@@ -3935,6 +4372,11 @@ def cmd_record_verification(args):
         "evidence": args.evidence,
         "note": args.note,
     }
+    optional_fields = {"candidate_id": args.candidate_id, "environment": args.environment,
+                       "supersedes_run_id": args.supersedes_run_id}
+    for field in ("reuse", "build_provenance", "deploy_provenance", "runtime_provenance", "direct_test"):
+        optional_fields[field] = verification_json(getattr(args, field + "_json"), "--" + field.replace("_", "-") + "-json")
+    input_payload.update({key: value for key, value in optional_fields.items() if value is not None})
     with DirLock(out_dir):
         recover_pending_transaction(out_dir)
         meta = load_metadata(out_dir)
@@ -3956,6 +4398,30 @@ def cmd_record_verification(args):
         if problems:
             raise ControlError("现有事件链不完整，拒绝记录验证", exit_code=1,
                                gate_id="event_chain", violations=problems)
+        evidence_api = verification_evidence_module()
+        try:
+            if evidence_api.enabled(meta):
+                if args.environment is None:
+                    raise evidence_api.EvidenceError("enabled verification requires explicit --environment")
+                live = candidate_snapshot(out_dir, meta, events=events)
+                input_payload["candidate"] = evidence_api.resolve_candidate(args.candidate_id, meta, events, live, candidate_module())
+            elif args.candidate_id is not None:
+                raise evidence_api.EvidenceError("candidate-id requires an explicitly enabled candidate contract")
+            prior_runs = evidence_api.event_runs(events)
+            evidence_api.validate_supersedes(input_payload, prior_runs)
+            evidence_api.validate_reuse(input_payload, prior_runs, candidate_module())
+            evidence_api.validate_direct(input_payload)
+            # Idempotent replay checks stored inputs before re-reading outputs:
+            # a historic receipt remains a receipt after artifacts move away.
+            prior = find_idempotent_event(events, args.request_id, "verification_recorded", input_payload, payload_keys=tuple(input_payload))
+            if prior is None:
+                evidence_api.validate_provenance(input_payload, meta, events, execution_workspace(out_dir, meta), candidate_module(),
+                                                live_candidate=live if evidence_api.enabled(meta) else None)
+                if evidence_api.enabled(meta) and args.kind == "build" and args.build_source == "fresh" and args.outcome == "pass" \
+                        and not candidate_module().compare_candidates(input_payload["candidate"], candidate_snapshot(out_dir, meta, events=events))["equivalent"]:
+                    raise evidence_api.EvidenceError("source candidate changed while verifying build artifacts")
+        except (evidence_api.EvidenceError, OSError, ValueError, KeyError, TypeError) as exc:
+            raise ControlError(str(exc), exit_code=1, gate_id="verification_evidence") from exc
         prior = find_idempotent_event(
             events, args.request_id, "verification_recorded", input_payload,
             payload_keys=tuple(input_payload))
@@ -3974,7 +4440,7 @@ def cmd_record_verification(args):
         event = commit_metadata_and_event(
             out_dir, before_meta, meta, "verification_recorded", run,
             request_id=args.request_id)
-    print(json.dumps({"ok": True, "run": run, "event_id": event["event_id"]},
+    print(json.dumps({"ok": True, "run": {key: value for key, value in run.items() if key != "candidate"}, "event_id": event["event_id"]},
                      ensure_ascii=False, indent=2))
     return 0
 
@@ -4614,6 +5080,9 @@ def cmd_step(args):
                 "inputs": snapshot["inputs"],
                 "protected": snapshot["protected"],
             }
+            if args.step in ("deepcheck", "audit") and \
+                    (meta.get("candidate_tracking") or {}).get("mode") == "enabled":
+                payload["candidate_input"] = candidate_snapshot(out_dir, meta, events=events)
             prior = find_idempotent_event(events, args.request, "step_started", payload)
             if prior:
                 result = {"ok": True, "already_applied": True, "step": args.step,
@@ -4790,8 +5259,26 @@ def cmd_step(args):
         prior = find_idempotent_event(
             events, args.request, "step_finished", payload,
             payload_keys=["step", "attempt", "outcome", "checks", "outputs", "evidence"])
-        event = prior or append_event(out_dir, meta, "step_finished", payload,
-                                      request_id=args.request)
+        if not prior and args.outcome == "success" and args.step in candidate_module().REVIEW_STEPS \
+                and (meta.get("candidate_tracking") or {}).get("mode") == "enabled":
+            candidate = candidate_snapshot(out_dir, meta, events=events)
+            if args.step in ("deepcheck", "audit"):
+                proof = candidate_module().review_source_equivalence(start_payload.get("candidate_input"), candidate)
+                if not proof["equivalent"]:
+                    raise ControlError("复检期间候选源码漂移，先blocked终结再重新start",
+                                       gate_id="candidate_review_drift", proof=proof)
+            finish_id = str(uuid.uuid4())
+            receipt = {"version": 1, "step": args.step, "attempt": args.attempt,
+                       "event_id": finish_id, "candidate_id": candidate["candidate_id"],
+                       "candidate": candidate, "evidence": list(args.evidence)}
+            payload["candidate_receipt"] = receipt
+            updated = dict(meta, candidate_tracking=dict(meta["candidate_tracking"], current=candidate),
+                           review_receipts=[*(meta.get("review_receipts") or []), receipt])
+            event = commit_metadata_and_event(out_dir, meta, updated, "step_finished", payload,
+                                              request_id=args.request, event_id=finish_id)
+        else:
+            event = prior or append_event(out_dir, meta, "step_finished", payload,
+                                          request_id=args.request)
         print(json.dumps({"ok": True, "step": args.step, "phase": "finish",
                           "attempt": args.attempt, "outcome": args.outcome,
                           "duration_ms": payload["duration_ms"],
@@ -4801,7 +5288,7 @@ def cmd_step(args):
 
 
 def cmd_inspection(args):
-    """Prepare/reuse a bounded worklist; register reads only against its frozen version."""
+    """Prepare/read/assess through the same frozen declaration and artifact transaction."""
     out_dir = Path(args.dir).resolve()
     model = load_execution_model()
     contract = step_contract(model, args.step)
@@ -4855,6 +5342,8 @@ def cmd_inspection(args):
         try:
             if args.phase == "prepare" and not resumed:
                 baselines = strict_json_loads(args.baselines_json) if args.baselines_json else None
+                if baselines is None and (meta.get("candidate_tracking") or {}).get("mode") == "enabled":
+                    baselines = {".": meta["candidate_tracking"]["base"]}
                 report = helper.build_worklist(workspace, meta.get("code_files") or [], step=args.step,
                     ticket_id=meta["ticket_id"], attempt=args.attempt,
                     mode=(meta.get("risk_profile") or {}).get("effective_mode") or meta.get("mode", "full"),
@@ -4876,18 +5365,24 @@ def cmd_inspection(args):
             # Pending Read is expected during preparation. It must not relax source/identity checks.
             pending = dict(report, coverage_status="partial", debt_reason="pending Read")
             issues = helper.validate_worklist(pending, workspace, code_files=meta.get("code_files") or [],
-                step=args.step, ticket_id=meta["ticket_id"], attempt=args.attempt, allow_incomplete=True)
+                step=args.step, ticket_id=meta["ticket_id"], attempt=args.attempt, allow_incomplete=True,
+                required_checks_version=1)
             if issues:
                 raise ValueError(str(issues))
+            assessment = strict_json_loads(args.assessment_json) if args.phase == "assess" and args.assessment_json else None
             request_identity = dict(phase=args.phase,
                 read_phase=args.read_phase if args.phase == "read" else None,
                 source_path=args.path if args.phase == "read" else None,
                 related=sorted(set(args.related)) if args.related else None,
                 scopes=sorted(set(args.scope)) if args.scope else None,
                 baselines=strict_json_loads(args.baselines_json) if args.baselines_json else None)
+            if args.phase == "assess":
+                request_identity.update(check_id=args.check_id, assessment_phase=args.read_phase,
+                    assessment_sha256=canonical_digest(assessment))
             stable_payload = dict(execution_model_version=model["schema_version"], step=args.step,
                 attempt=args.attempt, output="inspection_worklist", scope="ticket", path=str(target),
-                inspection_declaration_hash=inspection_declaration_hash(report), inspection_request=request_identity)
+                inspection_declaration_hash=inspection_declaration_hash(report), inspection_checks_version=1,
+                inspection_request=request_identity)
             prior = find_idempotent_event(events, args.request, "artifact_written", stable_payload,
                 payload_keys=list(stable_payload))
             if prior:
@@ -4904,6 +5399,10 @@ def cmd_inspection(args):
                 if len(selected) != 1:
                     raise ValueError("路径不在唯一自查单元中")
                 selected[0]["reads"][args.read_phase] = selected[0]["sha256"]
+            elif args.phase == "assess":
+                if not args.check_id or not args.assessment_json or not args.read_phase:
+                    raise ValueError("assess 必须指定 --check-id/--read-phase/--assessment-json")
+                helper.apply_assessment(report, workspace, args.check_id, args.read_phase, assessment)
             if args.phase != "prepare" or not resumed:
                 # Reject a conflicting request before replacing any valid worklist.
                 encoded = (json.dumps(report, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
@@ -5552,6 +6051,7 @@ def build_parser():
     p.add_argument("--birth", required=True,
                    choices=["init", "plan", "log", "debug-init", "debug-log"])
     p.add_argument("--metadata-json", help="额外 metadata 字段 JSON 对象；受保护出生字段由工具覆盖")
+    p.add_argument("--candidate-limits-json", help="Git候选扫描预算JSON；超预算fail-closed，不降级")
     p.add_argument("--request-id", help="创建幂等键")
     p.set_defaults(func=cmd_create)
 
@@ -5561,6 +6061,17 @@ def build_parser():
     p.add_argument("--request-id", required=True, help="UI 创建工单幂等键")
     p.add_argument("--index", help="索引路径覆盖（测试用）")
     p.set_defaults(func=cmd_create_next)
+
+    p = sub.add_parser("candidate", help="候选绑定/只读交付新鲜度检查；历史工单须显式capture启用")
+    p.add_argument("--dir", required=True)
+    p.add_argument("--phase", required=True, choices=["capture", "inspect"])
+    p.add_argument("--base", help="明确Git完整commit oid基线；省略沿用候选基线")
+    p.add_argument("--exclude", action="append", default=None, help="用户明确排除的相对文件或目录")
+    p.add_argument("--request-id", help="capture 必需幂等键")
+    p.add_argument("--limits-json", help="显式扫描预算JSON；持久化并供后续只读检查复用，不改变源码身份")
+    p.add_argument("--require-step", action="append", default=[], choices=["code", "deepcheck", "audit"],
+                   help="inspect 作为验收检查时所需当前候选真实成功回执")
+    p.set_defaults(func=cmd_candidate)
 
     p = sub.add_parser("check-outputs", help="只读检查步骤产物与条件审查证据")
     p.add_argument("--dir", required=True)
@@ -5606,12 +6117,14 @@ def build_parser():
     p.add_argument("--dir", required=True)
     p.add_argument("--step", required=True, choices=["code", "deepcheck", "audit"])
     p.add_argument("--attempt", required=True)
-    p.add_argument("--phase", required=True, choices=["prepare", "read", "check"])
+    p.add_argument("--phase", required=True, choices=["prepare", "read", "assess", "check"])
     p.add_argument("--scope", action="append", default=None, help="有证据的项目内范围，重复增补")
     p.add_argument("--related", action="append", default=None, help="调用方/协议另一端/测试等关联路径")
     p.add_argument("--baselines-json", help="受影响仓库相对根到真实Git基线的映射")
-    p.add_argument("--read-phase", help="真实Read之后登记对应阶段")
+    p.add_argument("--read-phase", "--assessment-phase", dest="read_phase", help="真实Read/专项结论对应的必需阶段")
     p.add_argument("--path", help="read登记的项目相对文件")
+    p.add_argument("--check-id", help="assess 的清单派生专项检查 ID")
+    p.add_argument("--assessment-json", help="assess 本阶段全部 required_items 的 cells、理由和真实证据")
     p.add_argument("--allow-incomplete", action="store_true", help="check明确债务，仍不允许身份/源码漂移")
     p.add_argument("--request", help="artifact回执幂等键")
     p.set_defaults(func=cmd_inspection)
@@ -5693,11 +6206,27 @@ def build_parser():
     p.add_argument("--apply", action="store_true")
     p.set_defaults(func=cmd_migration)
 
+    p = sub.add_parser("build-start", help="构建前真实观察目录与候选；不执行、不清空构建目录")
+    p.add_argument("--dir", required=True)
+    p.add_argument("--build-dir", required=True)
+    p.add_argument("--candidate-id", required=True)
+    p.add_argument("--parameters-json", required=True)
+    p.add_argument("--request-id", required=True)
+    p.set_defaults(func=cmd_build_start)
+
     p = sub.add_parser("record-verification",
                        help="原子记录 verification_runs + verification_recorded 事件")
     p.add_argument("--dir", required=True)
     p.add_argument("--kind", required=True, choices=["deploy", "listen", "device_test", "build"])
     p.add_argument("--outcome", required=True, choices=["pass", "fail", "inconclusive"])
+    p.add_argument("--candidate-id", help="enabled 工单显式绑定完整可核验源码候选，与 baseline_ref 独立")
+    p.add_argument("--environment", choices=["host", "physical", "simulated", "unknown"])
+    p.add_argument("--supersedes-run-id")
+    p.add_argument("--reuse-json")
+    p.add_argument("--build-provenance-json")
+    p.add_argument("--deploy-provenance-json")
+    p.add_argument("--runtime-provenance-json")
+    p.add_argument("--direct-test-json")
     p.add_argument("--build-source", default="unknown",
                    choices=["fresh", "reused", "existing", "unknown"])
     p.add_argument("--device")

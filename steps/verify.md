@@ -13,6 +13,7 @@
 
 > **共享技能路由**：部署/监听前读取 [references/skill_routing.md](../references/skill_routing.md)，按设备、产物、多仓和消费者场景加载验证类技能。
 > **证据习惯真源**：验证 baseline、layer/consumer/scenario 记录和 verified 边界统一执行 [references/evidence_and_verification.md](../references/evidence_and_verification.md)。
+> **最终候选绑定**：`candidate_tracking.mode=enabled` 时，每次记录必须显式提供 `--candidate-id` 与 `--environment host|physical|simulated|unknown`；完整快照由控制面核验后保存。`baseline_ref` 仍表示 embedded/camera 合同摘要。旧未启用工单保持原语义，查询不自动迁移。
 > **嵌入式/摄像头 profile**：`device_config.verification_profile` 或工单内 `embedded_baseline.json` 命中时，先用 `tools/embedded_profile.py` 校验并生成只读场景计划，再按同一个 verify 入口执行；不新增公开命令。
 > **工程接入门**：读取 [references/project_intake.md](../references/project_intake.md)，验证必须绑定实际 Git 根、活动构建配置与制品身份；静态画像不运行构建/烧录命令。
 
@@ -42,7 +43,7 @@
 4. **确定并公示具体命令**：用户明确意图决定目标和范围，LIMIT 决定硬约束；已有 wrapper 优先，脚本内容与 README 用来核验是否真的满足意图。未指定范围时优先工程已有的增量目标，不默认全量/clean。给出实际 cwd、逐条命令、来源、预期产物和副作用后，对已授权的普通构建直接执行。若目标有歧义或命令与有效红线冲突，先报告具体冲突并询问，不悄悄换目标、忽略限制或扩大到刷机；继续不依赖答案的只读核查。不猜通用脚本参数，不把自然语言当 shell。
 5. **构建前门禁**：绑定本地 HEAD、工作区 diff、活动配置、工具链及预期源码特征。已有 upstream 时只读比较本地与已知跟踪提交，不能把 fetch 成功或提交日期当工作区已更新；落后则展示差异，按用户明确 baseline 构建，不能自行 pull/reset。检查嵌套 `nproc`/裸 `-j` 是否覆盖限制，环境与工具是否可用，避免跨 checkout wrapper 指错根；可能重打产物目录时先备份已有交付件。工单执行 `step check --boundary before_side_effect` 后记录构建 operation；无工单也保留同等检查证据。源码修改/删除/覆盖交付物和硬件写入仍遵守用户授权与工程红线。
 6. **实际执行与退出码**：顺序执行构建及必要 install，日志写独立 run 目录；捕获真实退出码，不能用管道最后一段或包校验成功冒充编译成功。长构建后台运行，按用户频率或持续工作进度回报；等待后工单执行 `after_wait` 回检，不盲重放不确定动作。失败最多沿同一目标增量排查，禁止为通过而更换验收目标；可修的用户级环境按权限处理，源码修改另走 patch。
-7. **核验产物并判定**：记录目标、路径、大小、SHA-256、构建标识、源码 baseline/配置与日志；对本次预期特征用符号/反汇编/构建输出等匹配实际 BIN。同名/新复制时间/旧包 sha256 全通过不算 fresh 构建证据；增量无重编仅在依赖和制品身份已匹配时可通过。单独打包、缺少预期产物、命令未执行或身份无法绑定均不能报构建通过。执行失败记 `fail`，取证/目标不明记 `inconclusive`；全部命令成功且产物核验通过才记 `pass`。
+7. **核验产物并判定**：记录目标、路径、大小、SHA-256、构建标识、源码 baseline/配置与日志；对本次预期特征用符号/反汇编/构建输出等匹配实际 BIN。同名/新复制时间/旧包 sha256 全通过不算 fresh 构建证据；增量无重编仅在依赖和制品身份已匹配时可通过，启用候选时记 build_source=existing，不能称 fresh。单独打包、缺少预期产物、命令未执行或身份无法绑定均不能报构建通过。执行失败记 `fail`，取证/目标不明记 `inconclusive`；全部命令成功且产物核验通过才记 `pass`。
 8. **报告与记录**：每次写 `build_run.json/.md`，包含 `raw_request`、解析意图、`execution_root`、`limit_refs`、`command_source_refs`、逐条命令/cwd/退出码/日志、实际源码基线、产物身份及结论。有工单放 `<ICODE_OUT_DIR>/build/<run_id>/` 并通过下述原子命令追加运行记录；无工单只写工程 build 报告。失败/inconclusive 也保留报告。不标记 deploy pass，不清除设备/物理验证债务，不自动升级交付结论。
 
    ```bash
@@ -54,7 +55,20 @@
      --evidence '<build_run.json及实际构建日志>' --request-id '<run_id>'
    ```
 
-   fail/inconclusive 如实替换 outcome，未启动编译时 build_source=unknown。`kind=build` 固定 layer=build，不带 device，不允许 reused/existing；pass 必须提供 fresh、非空产物身份及源码 baseline。显式验证合同需要 profile/baseline_ref 时仍按合同记录，不新增/覆盖合同来消债。
+   fail/inconclusive 如实替换 outcome，未启动编译时 build_source=unknown。`kind=build` 固定 layer=build，不带 device，不允许 reused；启用候选的非空/增量目录记 existing，fresh 必须有下述开始前回执。旧未启用工单仍按原 fresh 合同记录；pass 都须有非空产物身份及源码 baseline。显式验证合同需要 profile/baseline_ref 时仍按合同记录，不新增/覆盖合同来消债。
+
+**启用候选的构建回执**：开始 configure/build 前，调用 `build-start` 观察明确的构建目录，取得 `event_id`。目录必须真实存在；可在 Git 工程内、工单的构建输出目录或用户明确指定的外部目录，禁止源码根、Git/私密目录和符号链接。工具不执行命令、不创建或清空目录。参数只存无凭据的 argv 数组，不能存完整 shell 文本。
+
+```bash
+python3 tools/icode_control.py build-start --dir "{ICODE_OUT_DIR}" \
+  --build-dir '<实际构建目录>' --candidate-id '<本次源码候选ID>' \
+  --parameters-json '{"configure_command":["cmake","-S",".","-B","build"],"build_command":["cmake","--build","build"]}' \
+  --request-id '<build_run_id>:start'
+```
+
+构建结束的 `record-verification` 增加 `--candidate-id`、`--environment host` 和 `--build-provenance-json`，内容为 `{start_event_id,source_candidate_id,configure_command,build_command,compiler,architecture,artifacts:[{path,sha256}],evidence_refs}`。本地 SHA-256 必须与实际文件一致。仅开始前机器观察为空、产物生成在回执之后、目录身份未变且开始前后候选等价，才可记 `fresh`。非空/增量构建记 `existing`；不能事后补一句“empty”冒充回执。旧未启用工单的构建合同保持原行为。
+
+构建生成物未被 Git 忽略时，须由用户事先明确通过 `candidate --phase capture --exclude <输出目录>` 排除副作用；`build-start` 不会偷偷排除。否则产物进入候选导致漂移，fresh pass 被阻断。相同内容的正常线性提交可由 `compare_candidates` 证明等价；源码、范围或排除集合变化均需重新验证。
 
 **示例（由工程上下文确定实际命令）**：
 
