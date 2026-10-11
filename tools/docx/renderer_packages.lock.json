@@ -2,7 +2,7 @@
   "schema_version": 1,
   "packages": [
     {
-      "id": "linux-x86_64-lo26.8.0-poppler22.02.0-13",
+      "id": "linux-x86_64-lo26.8.0-poppler22.02.0-14",
       "os": "linux",
       "arch": "x86_64",
       "libc": "glibc",
@@ -36,22 +36,22 @@
           "provenance": "https://download.documentfoundation.org/libreoffice/stable/26.8.0/deb/x86_64/LibreOffice_26.8.0_Linux_x86-64_deb.tar.gz.mirrorlist"
         },
         {
-          "name": "poppler-utils_22.02.0-2ubuntu0.13_amd64.deb",
+          "name": "poppler-utils_22.02.0-2ubuntu0.14_amd64.deb",
           "kind": "deb",
-          "bytes": 185972,
-          "sha256": "4b29486f5293907402f7f1d3f4cf84622759903720c866f52f7de5a1dab914a5",
+          "bytes": 185976,
+          "sha256": "5e2579fac5478529967f7955283676906f2692419117c5a49d2439ec5bea2498",
           "urls": [
-            "https://security.ubuntu.com/ubuntu/pool/main/p/poppler/poppler-utils_22.02.0-2ubuntu0.13_amd64.deb"
+            "https://security.ubuntu.com/ubuntu/pool/main/p/poppler/poppler-utils_22.02.0-2ubuntu0.14_amd64.deb"
           ],
           "provenance": "Ubuntu jammy-security signed APT Packages metadata"
         },
         {
-          "name": "libpoppler118_22.02.0-2ubuntu0.13_amd64.deb",
+          "name": "libpoppler118_22.02.0-2ubuntu0.14_amd64.deb",
           "kind": "deb",
-          "bytes": 1081210,
-          "sha256": "a381c80d94c284d433ac014e40a3a98661d6e7e7e47e91d5aba26134be66d264",
+          "bytes": 1079142,
+          "sha256": "7cb48217cbd05e22248a801021410353b1e50d3cd6f864f907273c915ed78d2c",
           "urls": [
-            "https://security.ubuntu.com/ubuntu/pool/main/p/poppler/libpoppler118_22.02.0-2ubuntu0.13_amd64.deb"
+            "https://security.ubuntu.com/ubuntu/pool/main/p/poppler/libpoppler118_22.02.0-2ubuntu0.14_amd64.deb"
           ],
           "provenance": "Ubuntu jammy-security signed APT Packages metadata"
         }
