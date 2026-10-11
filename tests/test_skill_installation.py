@@ -145,7 +145,7 @@ class InstallationTests(unittest.TestCase):
         self.assertTrue(self.check(code=2)["errors"])
 
     def test_empty_source_resource_directory_is_invalid(self):
-        self.fixture.git("rm", "-f", "steps/01_plan.md")
+        self.fixture.git("rm", "-f", "references/docx_authoring.md")
         self.assertTrue(self.check(code=2)["errors"])
 
     def test_missing_or_non_directory_installation_fails(self):
@@ -194,7 +194,9 @@ class InstallationTests(unittest.TestCase):
             path.symlink_to(target)
         unsafe = self.check(code=1)["unsafe"]
         self.assertEqual({item["path"] for item in unsafe},
-                         {"steps/01_plan.md", "references/skill_routing.md", "tools/icode_control.py"})
+                         {"steps/01_plan.md", "references/skill_routing.md",
+                          "references/docx_authoring.md", "references/docx_revision.md",
+                          "tools/icode_control.py"})
 
     def test_parent_traversal_is_rejected_without_normalizing_it_away(self):
         self.assertTrue(self.check(source=self.source / ".." / "source", code=2)["errors"])
