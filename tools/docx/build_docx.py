@@ -26,7 +26,7 @@ from docx.oxml.ns import qn
 from docx.shared import Inches, Pt
 
 
-TOOL_VERSION = "1.0.0"
+TOOL_VERSION = "1.1.0"
 IMAGE_RE = re.compile(r"^!\[([^]]*)\]\(([^)]+)\)\s*$")
 HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*$")
 LIST_RE = re.compile(r"^(\s*)([-*+]|\d+[.)])\s+(.+?)\s*$")
@@ -102,58 +102,120 @@ def node_id_and_label(token: str) -> tuple[str, str]:
 def render_mermaid(source: str, destination: Path) -> tuple[bool, str]:
     """Render common flowchart syntax to a local PNG without Node or browser.
 
-    It purposely supports node/edge flowcharts only.  Unsupported Mermaid is
+    It purposely supports rectangular, solid-arrow linear flowcharts only.
+    Every statement must be understood before an image can be produced.
+    Unsupported Mermaid is
     retained as code in the DOCX, which is safer than producing a misleading
     pseudo-diagram.
     """
     from PIL import Image, ImageDraw
 
-    direction = "TB"
-    first = source.splitlines()[0].strip() if source.splitlines() else ""
-    direction_match = re.search(r"(?:flowchart|graph)\s+(LR|RL|TB|BT)\b", first, re.I)
-    if direction_match:
-        direction = direction_match.group(1).upper()
+    lines = [line.strip() for line in source.splitlines() if line.strip() and not line.strip().startswith("%%")]
+    first = lines[0] if lines else ""
+    direction_match = re.fullmatch(r"(?:flowchart|graph)\s+(LR|RL|TB|BT|TD)\s*;?", first, re.I)
+    if not direction_match:
+        return False, "内置渲染仅支持矩形节点、无标签实线箭头的线性 flowchart/graph；复杂图请用本地绘图能力"
+    direction = direction_match[1].upper().replace("TD", "TB")
     nodes: dict[str, str] = {}
     edges: list[tuple[str, str]] = []
-    for match in MERMAID_EDGE_RE.finditer(source):
-        left, right = node_id_and_label(match.group(1)), node_id_and_label(match.group(2))
-        nodes[left[0]] = left[1]
-        nodes[right[0]] = right[1]
-        edges.append((left[0], right[0]))
+    token = r'[A-Za-z][\w.-]*(?:\[[^\[\]]+\])?'
+    edge_pattern = re.compile(rf'({token})\s*-->\s*({token})')
+    for line in lines[1:]:
+        line = line.removesuffix(";").strip()
+        match = edge_pattern.fullmatch(line)
+        if match:
+            tokens = (match[1], match[2])
+        elif re.fullmatch(token, line):
+            tokens = (line,)
+        else:
+            return False, "包含内置渲染不支持的边标签、形状、样式或语法，整图保留源码以避免丢失含义"
+        for item in tokens:
+            key, label = node_id_and_label(item)
+            if "[" in item:
+                label = label.strip('"').replace("<br/>", "\n").replace("<br>", "\n")
+                if "<" in label or ">" in label:
+                    return False, "节点包含不支持的HTML标签"
+                if key in nodes and nodes[key] != key and nodes[key] != label:
+                    return False, "同一节点有冲突的说明文字"
+                nodes[key] = label
+            elif key not in nodes:
+                nodes[key] = label
+        if match:
+            edges.append((node_id_and_label(match[1])[0], node_id_and_label(match[2])[0]))
     if not edges:
         return False, "仅支持包含有向边的 Mermaid flowchart/graph"
-    node_keys = list(nodes)
+    successors, predecessors = {}, {}
+    for left, right in edges:
+        if left in successors or right in predecessors or left == right:
+            return False, "分支、重复边或环路需要专用绘图；不简化为线性图"
+        successors[left], predecessors[right] = right, left
+    starts = [key for key in nodes if key not in predecessors]
+    if len(starts) != 1:
+        return False, "非单一链路需要专用绘图"
+    node_keys = []
+    key = starts[0]
+    while key not in node_keys:
+        node_keys.append(key)
+        if key not in successors:
+            break
+        key = successors[key]
+    if len(node_keys) != len(nodes) or len(edges) != len(nodes) - 1:
+        return False, "包含环路或孤立节点，需要专用绘图"
     horizontal = direction in {"LR", "RL"}
-    columns = len(node_keys) if horizontal else min(3, len(node_keys))
-    rows = 1 if horizontal else (len(node_keys) + columns - 1) // columns
-    cell_w, cell_h, margin = 260, 110, 56
+    columns = len(node_keys) if horizontal else 1
+    rows = 1 if horizontal else len(node_keys)
+    if len(nodes) > (5 if horizontal else 10):
+        return False, "节点过多，嵌入Word后难读；请拆图或使用分段绘图"
+    cell_w, margin = 300, 56
+    font = font_for_mermaid()
+    wrapped = {}
+    for key, label in nodes.items():
+        parts = []
+        for line in label.splitlines():
+            current = ""
+            for character in line:
+                bbox = font.getbbox(current + character)
+                if current and bbox[2] - bbox[0] > cell_w - 72:
+                    parts.append(current)
+                    current = ""
+                current += character
+            parts.append(current)
+        wrapped[key] = "\n".join(parts)
+    line_count = max(len(label.splitlines()) for label in wrapped.values())
+    if line_count > 5:
+        return False, "节点文字过长；请精简说明或移到图注"
+    box_h = max(64, line_count * 36 + 24)
+    cell_h = box_h + 64
     width = max(640, columns * cell_w + margin * 2)
     height = max(280, rows * cell_h + margin * 2)
     image = Image.new("RGB", (width, height), "white")
     draw = ImageDraw.Draw(image)
-    font = font_for_mermaid()
     positions: dict[str, tuple[int, int, int, int]] = {}
     for index, key in enumerate(node_keys):
+        if direction in {"RL", "BT"}:
+            index = len(node_keys) - 1 - index
         column = index if horizontal else index % columns
         row = 0 if horizontal else index // columns
         x0, y0 = margin + column * cell_w + 8, margin + row * cell_h + 16
-        x1, y1 = x0 + cell_w - 32, y0 + 64
+        x1, y1 = x0 + cell_w - 32, y0 + box_h
         positions[key] = (x0, y0, x1, y1)
     for left, right in edges:
         x0, y0, x1, y1 = positions[left]
         rx0, ry0, rx1, ry1 = positions[right]
         if horizontal:
-            start, end = (x1, (y0 + y1) // 2), (rx0, (ry0 + ry1) // 2)
+            start, end = ((x0 if direction == "RL" else x1), (y0 + y1) // 2), ((rx1 if direction == "RL" else rx0), (ry0 + ry1) // 2)
         else:
-            start, end = ((x0 + x1) // 2, y1), ((rx0 + rx1) // 2, ry0)
+            start, end = ((x0 + x1) // 2, (y0 if direction == "BT" else y1)), ((rx0 + rx1) // 2, (ry1 if direction == "BT" else ry0))
         draw.line([start, end], fill="#2b6cb0", width=4)
         ex, ey = end
         if horizontal:
-            points = [(ex, ey), (ex - 12, ey - 7), (ex - 12, ey + 7)]
+            delta = 12 if direction == "RL" else -12
+            points = [(ex, ey), (ex + delta, ey - 7), (ex + delta, ey + 7)]
         else:
-            points = [(ex, ey), (ex - 7, ey - 12), (ex + 7, ey - 12)]
+            delta = 12 if direction == "BT" else -12
+            points = [(ex, ey), (ex - 7, ey + delta), (ex + 7, ey + delta)]
         draw.polygon(points, fill="#2b6cb0")
-    for key, label in nodes.items():
+    for key, label in wrapped.items():
         x0, y0, x1, y1 = positions[key]
         draw.rounded_rectangle((x0, y0, x1, y1), radius=12, fill="#edf6ff", outline="#2b6cb0", width=3)
         bbox = draw.multiline_textbbox((0, 0), label, font=font, spacing=4)
@@ -161,7 +223,7 @@ def render_mermaid(source: str, destination: Path) -> tuple[bool, str]:
         ty = y0 + max(4, ((y1 - y0) - (bbox[3] - bbox[1])) // 2)
         draw.multiline_text((tx, ty), label, font=font, fill="#17324d", spacing=4)
     image.save(destination, format="PNG")
-    return True, "built_in_flowchart"
+    return True, "built_in_linear_flowchart"
 
 
 def configure_styles(document: Document) -> None:
@@ -186,13 +248,32 @@ def add_table(document: Document, rows: list[list[str]]) -> None:
     table = document.add_table(rows=0, cols=width)
     table.style = "Table Grid"
     for row_index, row in enumerate(rows):
-        cells = table.add_row().cells
+        row_object = table.add_row()
+        cells = row_object.cells
+        if row_index == 0:
+            from docx.oxml import OxmlElement
+            row_object._tr.get_or_add_trPr().append(OxmlElement("w:tblHeader"))
         for index in range(width):
             value = row[index] if index < len(row) else ""
             cells[index].text = markdown_cell(value)
             if row_index == 0:
                 for run in cells[index].paragraphs[0].runs:
                     run.bold = True
+
+
+def add_image(document: Document, path: Path):
+    """Keep aspect ratio and fit inside the printable area, including tall diagrams."""
+    from PIL import Image
+    with Image.open(path) as image:
+        width, height = image.size
+    section = document.sections[-1]
+    available_w = min(Inches(6.25), section.page_width - section.left_margin - section.right_margin)
+    available_h = section.page_height - section.top_margin - section.bottom_margin - Inches(0.5)
+    scale = min(available_w / width, available_h / height)
+    paragraph = document.add_paragraph()
+    paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    paragraph.add_run().add_picture(str(path), width=int(width * scale), height=int(height * scale))
+    return paragraph
 
 
 def build(source: Path, output: Path, manifest_path: Path) -> dict[str, Any]:
@@ -225,9 +306,7 @@ def build(source: Path, output: Path, manifest_path: Path) -> dict[str, Any]:
                     image = assets / f"mermaid-{line_number}.png"
                     rendered, detail = render_mermaid(raw_code, image)
                     if rendered:
-                        paragraph = document.add_paragraph()
-                        paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                        paragraph.add_run().add_picture(str(image), width=Inches(6.25))
+                        add_image(document, image)
                         source_map.append({"lines": [line_number, index + 1], "kind": "mermaid", "rendered_as": "image", "detail": detail})
                     else:
                         add_code_paragraph(document, raw_code)
@@ -255,10 +334,9 @@ def build(source: Path, output: Path, manifest_path: Path) -> dict[str, Any]:
                 alt, target = image_match.groups()
                 candidate = (source.parent / target).resolve()
                 if candidate.is_file():
-                    paragraph = document.add_paragraph()
-                    paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                    paragraph.add_run().add_picture(str(candidate), width=Inches(6.25))
+                    image_paragraph = add_image(document, candidate)
                     if alt:
+                        image_paragraph.paragraph_format.keep_with_next = True
                         caption = document.add_paragraph(alt)
                         caption.alignment = WD_ALIGN_PARAGRAPH.CENTER
                     source_images.append({"source": str(candidate), "sha256": sha256_file(candidate)})

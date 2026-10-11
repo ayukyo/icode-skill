@@ -4,6 +4,8 @@ on:
   pull_request:
     paths:
       - 'tools/docx/**'
+      - 'steps/docx.md'
+      - 'references/docx_*.md'
       - 'install.sh'
       - 'scripts/sync-to-global.sh'
       - 'scripts/check-docx-renderer-release.py'
@@ -15,6 +17,8 @@ on:
     branches: [main]
     paths:
       - 'tools/docx/**'
+      - 'steps/docx.md'
+      - 'references/docx_*.md'
       - 'install.sh'
       - 'scripts/sync-to-global.sh'
       - 'scripts/check-docx-renderer-release.py'
@@ -62,6 +66,12 @@ jobs:
           python3 -m unittest discover -s tests -p test_skill_distribution.py -v
       - name: Public installer downloads and registers pinned owned renderer
         run: bash install.sh --client all --skip-mcp
+      - name: Managed DOCX authoring and revision regressions
+        shell: bash
+        run: |
+          RUNTIME_JSON="$(python3 tools/docx/bootstrap_runtime.py)"
+          DOCX_PYTHON="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["python"])' "$RUNTIME_JSON")"
+          "$DOCX_PYTHON" -m unittest discover -s tests -p test_docx_integrity.py -v
       - name: Sync does not erase renderer registration
         run: |
           bash scripts/sync-to-global.sh --apply --client all

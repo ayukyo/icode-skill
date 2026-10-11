@@ -59,7 +59,7 @@ description: ICODE 端到端编码工作流，适配 Claude Code、Codex、CodeB
 | `[学习]` `/icode learn [--project <path>] [--ticket <id>] [--since <ISO-8601>]` | 从项目内观测生成复用/组合/增强/新建/工具化/no-action 建议，不直接创建或发布 Skill（[steps/learn.md](steps/learn.md)） | 否（写 `.icode_output/learn/` 派生报告） |
 | `[学习]` `/icode study [--ticket <id>] [--library <目录>] [主题]` | 从已写代码提炼通用技术文章，按卷/章保存在用户自己的知识库；源码溯源留在库外（[steps/study.md](steps/study.md)） | 否（写用户配置的知识库） |
 | `[工程]` `/icode doc [自然语言]` | 工程级知识库生成/维护（`project_docs/`+`module_docs/`）；doc_worklist 防中断丢进度 | 否（写全局） |
-| `[交付]` `/icode docx [自然语言]` | DOCX 交付：明确 Markdown 忠实转换，或将已有工单/知识库组织为交付 Word；自管运行时、结构验收、兼容 renderer 视觉验收 | 否（P0 同级；P1 写 `<工程根>/.icode_output/docx/`） |
+| `[交付]` `/icode docx [自然语言]` | Markdown忠实转换、技术Word编写与修订；章节/文字/源码核对、复杂图示、排版、修订对照及最终页面检查（[步骤](steps/docx.md)） | 否（P0 同级；P1 默认 `.icode_output/docx/`，用户指定位置优先） |
 | `[配置]` `/icode limit [自然语言]` | 项目约束红线（主存+单 checkout 覆盖）；plan/log 前置硬基线 + `limit_checkpoint.md` 读留痕 | 否（写全局 limits/ + 工程根 limit.local/） |
 | `[交付]` `/icode ppt [自然语言]` | PPT 生成（4 类场景），8 套模板只换文字 | 否（写 `<工程根>/.icode_output/ppt/`） |
 | `[查询]` `/icode status` | 只读查状态；`--pending` 汇总验证债务；`--verdict` 可配 `--replacement`/`--dependency` 标注方向结论；`--scan` 批量扫证伪信号；`--validate` 产物集机器校验 | 否（仅 `--verdict` 写 metadata+索引；债务报告为派生产物） |

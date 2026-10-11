@@ -35,10 +35,59 @@ PYTHON="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["python"])'
 "$PYTHON" tools/docx/render_docx.py guide.docx preview --result-manifest guide.manifest.json
 ```
 
-The builder supports ICODE Markdown: headings, paragraphs, lists, tables,
-quotes, code blocks, local images, and common Mermaid flowcharts.  Mermaid
-flowcharts become PNG images embedded in DOCX.  Unsupported Mermaid stays as a
-code block and is recorded in the source map; it is never silently discarded.
+The builder supports headings, paragraphs, lists, tables, quotes, code blocks,
+local images and a deliberately narrow Mermaid subset: a single linear path,
+rectangular nodes and unlabeled solid arrows, in LR/RL/TB/BT/TD directions.
+Each statement is checked before drawing; branches, conditions, edge labels,
+styles and unsupported shapes retain the entire source as code with a warning.
+Use local diagram images for these cases rather than silently simplifying them.
+`inspect_docx.py --require-diagrams` rejects code fallbacks in authored deliveries.
+
+Inspection checks actual heading text/styles/order, image relationships and
+input/output/source-image hashes. Reusing an image in multiple places is valid.
+Syntax inside code fences is excluded from structural expectations. These
+checks verify artifact integrity, not the correctness of an explanation.
+
+## Authoring and existing Word revisions
+
+Read [the workflow](../../steps/docx.md), then load only the relevant
+[authoring/diagram guide](../../references/docx_authoring.md) or
+[revision guide](../../references/docx_revision.md). The host agent handles
+chapter planning, prose, source/call-chain review and diagram semantics.
+Complex figures or layout may use available document/drawing capabilities or
+local scripts using the managed Python's `python-docx` and Pillow. Retain the
+source, scripts, shared module palette and manifest; use the same final checks.
+Images are fitted to both printable width and height without changing aspect
+ratio; the agent still checks whether scaling makes diagram labels too small.
+
+```bash
+"$PYTHON" tools/docx/verify_sources.py sources.json --root /path/to/project --report sources.qa.json
+"$PYTHON" tools/docx/draw_sequence.py sequence.json sequence.png --palette palette.json --manifest sequence.manifest.json
+"$PYTHON" tools/docx/compare_docx.py before.docx candidate.docx \
+  --allow-section "5.1 Coordinate conversion" --allow-figure 5 --report revision.qa.json
+```
+
+Source records have a nonempty `files` list, each with a relative `path`, the
+reviewed file's lowercase `sha256`, and nonempty `anchors` containing 1-based
+`start`/`end` lines and literal `contains` text. Verification is read-only and
+confined to the selected root. It checks provenance, not code semantics.
+
+Comparison reports visible body/table/formula text, image occurrence hashes
+and header/footer text. Allowed sections must be exact unique headings in both
+versions; they do not implicitly permit replacing images. Figure numbers are
+1-based image occurrences, not caption numbers. Changes outside the specified
+scope fail; every removed text item is reported for review even inside scope.
+Use `--report-only` for deliberate full rewrites; exit 0 in that mode is not a
+preservation verdict. Formatting and image semantics still require page review.
+
+`draw_sequence.py` accepts `title`, `participants` (unique `id`, `label`, `role`)
+and `steps` (`from`, `to`, `text`, optional boolean `reply` and text `condition`).
+It renders numbered requests, dashed replies and self calls locally. The palette
+maps each declared role to explicit `fill`, `stroke` and `text` hex colors, so
+existing module colors are reused across diagrams. Unknown fields, participants
+or roles are rejected instead of guessed. The bounded 2–5 participants and
+1–10 steps keep single-stage diagrams readable; loops/parallel stages require
+an explicit custom drawing. See the authoring guide for a complete input example.
 
 ## Visual QA contract
 
@@ -73,4 +122,13 @@ snapshots through public install, sync, and real Word-to-page smoke rendering.
 The public-site artifact build depends on this reusable qualification workflow;
 failed renderer qualification prevents distribution upload and deployment.
 A local equivalent is `python3 scripts/check-docx-renderer-release.py --output-dir /new/report/dir`.
-Rendering success is separate from a human visual inspection of every page.
+Rendering records the current Word SHA-256 and each generated page SHA-256;
+`page_review` starts as `pending`. Rendering success is separate from actual
+inspection of every final saved page. Later edits require new rendering and
+page review; inspection rejects stale hashes in a successful render record.
+
+Offline regressions with the managed runtime:
+
+```bash
+"$PYTHON" -m unittest discover -s tests -p test_docx_integrity.py -v
+```

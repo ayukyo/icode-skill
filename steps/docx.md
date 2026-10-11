@@ -2,9 +2,11 @@
 
 **命令**：`/icode docx [自然语言]`
 
-**定位**：把已有真实材料交付为可编辑 `.docx`。这是和 `/icode ppt` 并列的独立交付步骤：**不创建工单目录、不写 `.ico_metadata.json`、不更新 `completed_steps` 或 `status`**。现有 `/icode doc` 仍只维护工程知识库，二者不可混用。
+**定位**：把真实材料写成便于阅读、可核对、可编辑的 `.docx`，包含章节规划、文字改写、源码核对、图示制作、Word 修订、排版和交付检查；明确要求忠实转换时保持原文。这是和 `/icode ppt` 并列的独立交付步骤：**不创建工单目录、不写 `.ico_metadata.json`、不更新 `completed_steps` 或 `status`**。现有 `/icode doc` 仍只维护工程知识库，二者不可混用。
 
 **产物**：P0（明确 Markdown 路径）把 `{source}.md` 输出为同目录 `{source}.docx` 和 `{source}.manifest.json`；P1（项目/模块/本次功能/本次 Bug）输出 `<project_root>/.icode_output/docx/{project}_{scenario}.docx`、同名 manifest 及可选 `preview/`。输入 Markdown 永不改写。
+
+用户指定的工程、文档集合、输出目录和禁做事项优先于默认值。修改已有 Word 时保留原文件备份，在候选文件完成检查后更新指定文档；不顺带修改项目代码、提交、推送、安装技能或发布。
 
 ## 0. L1 决策记录与前置
 
@@ -19,21 +21,34 @@
 
 | 用户表达 | 路由 | 必需来源 | 默认输出 |
 |---|---|---|---|
-| 指定 `.md` / `.markdown` 文件路径 | **P0 faithful** | 此文件及本地相对图片 | 源文件同目录 |
+| 指定 `.md` / `.markdown` 文件路径，仅转换格式 | **P0 faithful** | 此文件及本地相对图片 | 源文件同目录 |
 | “项目/工程/总体” | **P1 project** | `project_docs` + 仓库结构 + README；文档快照必须回读 Git 核实 | `.icode_output/docx/` |
 | “模块/组件 <名称>” | **P1 module** | 对应知识库章节 + 指定源码目录 | `.icode_output/docx/` |
 | “本次功能/需求/交付 Word” | **P1 feature** | 当前工程最近且唯一 ICODE 工单 + Git diff | `.icode_output/docx/` |
 | “本次 Bug/根因/修复报告” | **P1 bugfix** | `log_analysis.md`、patch、验证和引用证据 | `.icode_output/docx/` |
+| “按源码写原理/流程文档”“更好理解”“重排章节” | **P1 内容组织** | 指定当前源码、已有文档及用户反馈；不以知识库快照代替当前实现 | 用户指定目录，否则 `.icode_output/docx/` |
+| “改这份 Word”“第几章/图看不懂” | **已有 Word 修订** | 当前实际 DOCX、已有 Markdown/manifest（如有）、相关源码 | 原目录的候选与备份，检查后更新目标 |
 
-无路径的“生成交付 Word”默认最近且唯一工单；没有工程、没有工单或存在多个同等候选时，**只追问一次**，不得把普通 Markdown 猜成工单。P1 先在主会话把真实来源组织成临时 Markdown，再按 P0 构建；临时 Markdown 和 source map 必须保留在 `.icode_output/docx/`，不得凭印象补全事实。
+无路径的“生成交付 Word”默认最近且唯一工单；没有工程、没有工单或存在多个同等候选时，**只追问一次**，不得把普通 Markdown 猜成工单。P1 先在主会话把真实来源组织成 Markdown，再构建；源文和 source map 保留在指定交付目录的审计子目录，未指定时用 `.icode_output/docx/`，不得凭印象补全事实。
 
-## 2. 与现有 MCP 的边界
+指定文件并要求改写内容时，不误走忠实转换。已有 Word 没有配套 Markdown 时，直接读取 DOCX 的正文、表格和图片，按修订流程处理，不要求用户先重新提供源文。
+
+## 2. 内容组织、图示与修订
+
+- **P0 忠实转换**：保留内容、顺序及输入文件，只检查转换是否丢失内容；不主动精简、删源码索引或重写术语。
+- **P1 内容组织或重写**：先读 [docx_authoring.md](../references/docx_authoring.md)，据文档主题规划章节、核对实现及调用链、用短句解释原理，再选择图和必要接口。针对多份文档分配主题，避免每份都重复整个项目。
+- **已有 Word 修改**：先读 [docx_revision.md](../references/docx_revision.md)，记录修改范围与需要保留的内容；复用原图例、配色和排版，检查坐标、公式、单位、条件、接口及其它文档是否被误改。
+- **制作图示**：沿用 docx_authoring 的图示规则。标准构建器适合普通文字和简单线性图；复杂流程图、带条件的时序图、坐标图可使用宿主可用的文档/绘图能力，或自管 Python 中的 `python-docx`、Pillow 和专用本地脚本。保留绘图脚本或图源、模块配色及图注，统一进入下方检查。不得因构建器不能表达而删掉真实分支、标签、坐标或模块。
+
+局部改字不必重新规划整份文档；只加载本次相关指南。内容审阅由主会话完成，机器结构检查不能代替原理、术语和图文含义核对。
+
+## 3. 与现有 MCP 的边界
 
 - P0 单个本地 Markdown：不强制 MCP；文件路径、hash、相对图片由本地构建器记录。
 - P1 使用工单、日志、附件或知识库：按 `icode-mcp-policy` 的 `docx` 路由先用 **icode-evidence** 回读并记录 hash；语料超过常规 `rg` 范围时再使用 **icode-local-index** 找候选，命中仍须回读原文件。
 - 不新增 DOCX MCP，也不把本地文档内容发送到远程服务。`cheap-research`、vision、浏览器等只在其既有明确条件成立时使用，不能替代来源核验。
 
-## 3. 构建、结构验收与视觉验收
+## 4. 构建、结构验收与视觉验收
 
 ```bash
 # 1) 用 bootstrap JSON 取 ICODE 自管 Python
@@ -45,15 +60,32 @@ DOCX_PYTHON="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["pytho
 
 # 3) 必须结构验收；失败不得交付
 "$DOCX_PYTHON" tools/docx/inspect_docx.py "$OUTPUT" --source "$SOURCE" --manifest "$MANIFEST"
+# P1图文交付加 --require-diagrams，阻止把图示源码回退当作完成图示。
 
 # 4) 视觉验收仅使用 ICODE 所有的匹配 renderer；无匹配包会写 visual_qa_pending
 "$DOCX_PYTHON" tools/docx/render_docx.py "$OUTPUT" "$PREVIEW_DIR" --result-manifest "$MANIFEST"
 ```
 
-构建器支持标题、段落、清单、表格、引用、代码、本地图片和常见 Mermaid flowchart。Mermaid 成功时是嵌入 DOCX 的 PNG；不支持的 Mermaid 不会丢失，会保留源码代码块并在 manifest 标注 fallback。图片、代码、表格和每个来源块都写入 source map。
+构建器支持标题、段落、清单、表格、引用、代码、本地图片和简单 Mermaid 线性 flowchart。内置图仅支持矩形节点、无标签的实线有向边，支持 LR/RL/TB/BT/TD；不支持的语法整图保留源码代码块并在 manifest 标注 fallback，不再忽略边标签、条件、样式或分支后输出失真的图。忠实转换需报告 fallback；要求图示的内容交付应改用本地图片并通过 `--require-diagrams`。图片、代码、表格和每个来源块都写入 source map。
 
-`inspect_docx.py` 检查 OOXML 包、标题样式、表格、嵌入 media/drawing 和输入 hash。`render_docx.py` 的三种合法状态：`passed`、`visual_qa_pending`、`visual_qa_failed`；只有 `passed` 可以声称视觉渲染已验收。当前 OS/CPU/glibc/kernel 不匹配发行 recipe 时，结构验收通过仍可交付，但必须在收尾说明视觉验收待发行包补齐，禁止使用系统 LibreOffice 兜底。
+专用脚本修改 Word 时也必须用自管 Python，保留脚本、源文快照和同名 manifest，更新 `input/output` 的路径/hash、`source_images` 与 `source_map`。`source_map` 用构建器的块记录列表；已有手工 manifest 若格式不同，先保留旧版再规范化，将路由决策保留为独立字段，不删旧依据。源文与实际 Word 同步，不能仅更换 hash 来掩盖不同步。允许的构建手段不限于 `build_docx.py`，验收要求保持一致。
 
-## 4. 收尾
+按任务使用以下辅助检查；来源记录和对照报告保存在交付审计目录，不另塞到正文作为源码索引：
 
-输出：DOCX 路径、manifest 路径、路由（P0/P1）、来源清单、结构验收结果、视觉验收状态。P1 还说明关联工单/知识库/Git baseline。用户说“改 Word”时复用已有 source Markdown + manifest 增量修改，不重新编造或重收集来源。
+```bash
+# 有源码依据的技术文档：检查已审读源文件的hash和行范围内符号/片段
+"$DOCX_PYTHON" tools/docx/verify_sources.py "$SOURCE_RECORD" --root "$PROJECT_ROOT" --report "$SOURCE_REPORT"
+
+# 局部修订：仅允许指定章节正文和第5张嵌入图片改变（分别授权）
+"$DOCX_PYTHON" tools/docx/compare_docx.py "$BACKUP" "$OUTPUT" \
+  --allow-section "5.1 从像素到空间坐标" --allow-figure 5 --report "$DIFF_REPORT"
+# 全文重写改用 --report-only，审读删除项；退出码0不代表保持项全部通过。
+```
+
+`inspect_docx.py` 检查实际标题及顺序、表格、图片引用、源文/图片/输出 hash，排除代码块中的伪标题和伪图片；重复使用一张图不会误报。`verify_sources.py` 只证明引用与当前文件一致，不能代替实现逻辑审阅。`compare_docx.py` 检查正文/表格/公式文字、图像 hash 和页眉页脚文字，不能证明排版或图内文字正确。
+
+`render_docx.py` 的三种合法状态：`passed`、`visual_qa_pending`、`visual_qa_failed`；`passed` 仅证明渲染成功，报告绑定本次 Word 和页面 hash，`page_review` 初始为 `pending`。必须实际查看最终保存文件的每一页后才能记录页面审阅通过，任何后续修改都要重新渲染并审阅。不能把候选文件的预览当作最终文件的验收。当前 OS/CPU/glibc/kernel 不匹配发行 recipe 时，结构验收通过仍可交付，但必须说明视觉验收待发行包补齐，禁止使用系统 LibreOffice 兜底。
+
+## 5. 收尾
+
+输出：DOCX/manifest 路径、主要内容或图示变化、结构检查、内容核对范围、渲染和逐页审阅状态。P1 还说明关联来源/Git baseline；静态源码核对与设备实测分别说明，不把缺失固件或闭源逻辑写成已确认事实。多文件请求逐份列出完成或未完成项，不能以其中两份通过代表整批完成。备份、图源和审计保留在目录中，正文按用户要求保持简要。

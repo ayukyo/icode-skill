@@ -12,7 +12,7 @@ FAIL=0
 ok() { printf '  PASS %s\n' "$1"; PASS=$((PASS + 1)); }
 bad() { printf '  FAIL %s\n' "$1" >&2; FAIL=$((FAIL + 1)); }
 
-for file in requirements.lock bootstrap_runtime.py bootstrap_renderer.py renderer_support.py renderer_launch.py renderer_packages.lock.json build_docx.py inspect_docx.py resolve_renderer.py render_docx.py renderer_manifest.json README.md; do
+for file in requirements.lock bootstrap_runtime.py bootstrap_renderer.py renderer_support.py renderer_launch.py renderer_packages.lock.json build_docx.py inspect_docx.py compare_docx.py verify_sources.py draw_sequence.py resolve_renderer.py render_docx.py renderer_manifest.json README.md; do
   if [[ -f "$TOOLS/$file" ]]; then ok "bundled DOCX payload contains $file"; else bad "missing DOCX payload $file"; fi
 done
 
@@ -28,6 +28,12 @@ if [[ -x "$DOCX_PYTHON" ]] && "$DOCX_PYTHON" -c 'import docx, PIL'; then
   ok "self-managed DOCX runtime installs pinned dependencies"
 else
   bad "self-managed DOCX runtime installs pinned dependencies"
+fi
+
+if "$DOCX_PYTHON" -m unittest discover -s "$ROOT/tests" -p test_docx_integrity.py; then
+  ok "source integrity, diagrams, scoped revisions and render freshness regressions"
+else
+  bad "source integrity, diagrams, scoped revisions and render freshness regressions"
 fi
 
 SOURCE="$TMP/guide.md"

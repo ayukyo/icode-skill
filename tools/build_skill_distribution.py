@@ -26,7 +26,11 @@ REQUIRED = FILES | METADATA | {"skill-packs/manifest.json", "mcp/workflow-gate/g
                     "mcp/workflow-gate/skill-routes.json", "tools/icode_control.py",
                     "scripts/sync-to-global.sh", "tools/docx/bootstrap_renderer.py",
                     "tools/docx/renderer_support.py", "tools/docx/renderer_launch.py",
-                    "tools/docx/renderer_packages.lock.json"}
+                    "tools/docx/renderer_packages.lock.json", "steps/docx.md",
+                    "references/docx_authoring.md", "references/docx_revision.md",
+                    "tools/docx/build_docx.py", "tools/docx/inspect_docx.py",
+                    "tools/docx/render_docx.py", "tools/docx/compare_docx.py",
+                    "tools/docx/verify_sources.py", "tools/docx/draw_sequence.py"}
 
 
 def no_symlinks(path):

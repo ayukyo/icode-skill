@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import subprocess
 import sys
@@ -15,15 +16,22 @@ from bootstrap_renderer import bootstrap, CATALOG
 from renderer_support import runtime_root
 
 
-def update_manifest(path: Path, status: str, **extra: object) -> None:
+def update_manifest(path: Path, status: str, *, docx: Path | None = None, **extra: object) -> None:
     data = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+    if docx is not None:
+        extra["docx_sha256"] = hashlib.sha256(docx.read_bytes()).hexdigest()
+    if status == "passed":
+        extra["page_sha256"] = {str(page): hashlib.sha256(Path(page).read_bytes()).hexdigest()
+                                for page in extra.get("pages", [])}
+        # Rendering is a machine operation, not a claim that the pages were read.
+        extra["page_review"] = "pending"
     data["visual_qa"] = {"status": status, **extra}
     temporary = path.with_suffix(path.suffix + ".tmp")
     temporary.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     temporary.replace(path)
 
 
-def main() -> int:
+def run_cli() -> int:
     parser = argparse.ArgumentParser(description="render DOCX with ICODE-owned renderer")
     parser.add_argument("docx", type=Path)
     parser.add_argument("out_dir", type=Path)
@@ -33,6 +41,8 @@ def main() -> int:
     args = parser.parse_args()
     if not args.docx.is_file() or args.dpi <= 0:
         parser.error("DOCX must exist and DPI must be positive")
+    args.docx = args.docx.resolve()
+    initial_hash = hashlib.sha256(args.docx.read_bytes()).hexdigest()
     resolved = resolve(args.manifest)
     # First-use and public installation share the exact same locked installer.
     # Explicit manifests are hermetic (including unsupported-platform fixtures).
@@ -48,7 +58,7 @@ def main() -> int:
         failed = resolved["status"] != "unavailable"
         status = "visual_qa_failed" if failed else "visual_qa_pending"
         if args.result_manifest:
-            update_manifest(args.result_manifest, status, resolver=resolved)
+            update_manifest(args.result_manifest, status, docx=args.docx, resolver=resolved)
         print(json.dumps({"status": status, "resolver": resolved}, ensure_ascii=False))
         return 1 if failed else 0
     args.out_dir.mkdir(parents=True, exist_ok=True)
@@ -67,22 +77,32 @@ def main() -> int:
             for path in generated:
                 target = args.out_dir / path.name
                 target.write_bytes(path.read_bytes())
-                pages.append(str(target))
+                pages.append(str(target.resolve()))
         if not pages:
             raise RuntimeError("renderer did not produce PNG pages")
+        if hashlib.sha256(args.docx.read_bytes()).hexdigest() != initial_hash:
+            raise RuntimeError("DOCX changed while rendering; pages cannot be accepted")
     except (OSError, subprocess.SubprocessError, RuntimeError, ValueError) as exc:
         detail = str(exc)
         stderr = getattr(exc, "stderr", None)
         if stderr:
             detail += ": " + (stderr.decode("utf-8", errors="replace") if isinstance(stderr, bytes) else stderr)[-2000:]
         if args.result_manifest:
-            update_manifest(args.result_manifest, "visual_qa_failed", resolver=resolved, error=detail)
+            update_manifest(args.result_manifest, "visual_qa_failed", docx=args.docx, resolver=resolved, error=detail)
         print(f"ERROR: DOCX visual render failed: {detail}", file=sys.stderr)
         return 1
     if args.result_manifest:
-        update_manifest(args.result_manifest, "passed", renderer=renderer, pages=pages)
+        update_manifest(args.result_manifest, "passed", docx=args.docx, renderer=renderer, pages=pages)
     print(json.dumps({"status": "passed", "pages": pages, "renderer": renderer}, ensure_ascii=False))
     return 0
+
+
+def main() -> int:
+    try:
+        return run_cli()
+    except (OSError, UnicodeError, ValueError, KeyError, TypeError, AttributeError) as exc:
+        print(f"ERROR: DOCX render/manifest failed: {exc}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":

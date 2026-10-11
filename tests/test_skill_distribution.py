@@ -30,7 +30,10 @@ class DistributionTests(unittest.TestCase):
             ".gitignore": "__pycache__/\n",
             "install.sh": "#!/bin/sh\nexit 0\n",
             "steps/01_plan.md": "plan\n",
+            "steps/docx.md": "docx authoring and revision\n",
             "references/skill_routing.md": "routing\n",
+            "references/docx_authoring.md": "authoring\n",
+            "references/docx_revision.md": "revision\n",
             "schemas/metadata.schema.json": "{}\n",
             "templates/metadata.json": "{}\n",
             "tools/icode_control.py": "print('control')\n",
@@ -39,6 +42,12 @@ class DistributionTests(unittest.TestCase):
             "tools/docx/renderer_support.py": "# renderer validation\n",
             "tools/docx/renderer_launch.py": "# owned launch wrapper\n",
             "tools/docx/renderer_packages.lock.json": "{\"schema_version\":1,\"packages\":[]}\n",
+            "tools/docx/build_docx.py": "# docx builder\n",
+            "tools/docx/inspect_docx.py": "# integrity checks\n",
+            "tools/docx/render_docx.py": "# page renderer\n",
+            "tools/docx/compare_docx.py": "# scoped revision checks\n",
+            "tools/docx/verify_sources.py": "# source anchors\n",
+            "tools/docx/draw_sequence.py": "# palette-bound sequence diagrams\n",
             "scripts/sync-to-global.sh": "#!/bin/sh\nexit 0\n",
             "agent_runtime/README.md": "runtime\n",
             "agents/openai.yaml": "interface:\n  display_name: ICODE\n",
@@ -100,6 +109,8 @@ class DistributionTests(unittest.TestCase):
                      "agent_runtime/README.md", "scripts/sync-to-global.sh",
                      "agents/openai.yaml",
                      "tools/docx/requirements.lock", "mcp/example/config.example.json",
+                     "steps/docx.md", "references/docx_authoring.md", "references/docx_revision.md",
+                     "tools/docx/compare_docx.py", "tools/docx/verify_sources.py", "tools/docx/draw_sequence.py",
                      "integrations/codebuddy/commands/icode.md"):
             self.assertEqual((workflow / name).read_bytes(), (self.source / name).read_bytes())
         self.assertTrue(os.access(workflow / "install.sh", os.X_OK))
