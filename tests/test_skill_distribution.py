@@ -31,6 +31,9 @@ class DistributionTests(unittest.TestCase):
             "install.sh": "#!/bin/sh\nexit 0\n",
             "steps/01_plan.md": "plan\n",
             "steps/docx.md": "docx authoring and revision\n",
+            "steps/doc.md": "DOC worktree snapshots and exact binding\n",
+            "references/doc_snapshot_contract.md": "DOC storage contract\n",
+            "tools/doc_snapshot.py": "# DOC capture/publish/resolve runtime\n",
             "references/skill_routing.md": "routing\n",
             "references/docx_authoring.md": "authoring\n",
             "references/docx_revision.md": "revision\n",
@@ -110,6 +113,7 @@ class DistributionTests(unittest.TestCase):
                      "agents/openai.yaml",
                      "tools/docx/requirements.lock", "mcp/example/config.example.json",
                      "steps/docx.md", "references/docx_authoring.md", "references/docx_revision.md",
+                     "steps/doc.md", "references/doc_snapshot_contract.md", "tools/doc_snapshot.py",
                      "tools/docx/compare_docx.py", "tools/docx/verify_sources.py", "tools/docx/draw_sequence.py",
                      "integrations/codebuddy/commands/icode.md"):
             self.assertEqual((workflow / name).read_bytes(), (self.source / name).read_bytes())
@@ -184,6 +188,33 @@ class DistributionTests(unittest.TestCase):
         self.git("rm", "-f", "mcp/workflow-gate/gates.json")
         self.assert_rejected(self.build())
         self.assertFalse(self.output.exists())
+
+    def test_doc_runtime_must_be_tracked_before_packaging(self):
+        baseline_parent = self.base / "baseline"
+        baseline_parent.mkdir()
+        baseline = self.build(output=baseline_parent / "icode")
+        self.assertEqual(baseline.returncode, 0, baseline.stderr)
+        self.git("rm", "--cached", "tools/doc_snapshot.py")
+        result = self.build()
+        self.assert_rejected(result)
+        self.assertIn("tools/doc_snapshot.py", result.stderr)
+        self.assertFalse(self.output.exists())
+
+    def test_missing_doc_contract_fails_before_output(self):
+        self.git("rm", "-f", "references/doc_snapshot_contract.md")
+        result = self.build()
+        self.assert_rejected(result)
+        self.assertIn("references/doc_snapshot_contract.md", result.stderr)
+        self.assertFalse(self.output.exists())
+
+    def test_bundle_text_is_utf8_when_python_utf8_mode_is_disabled(self):
+        result = subprocess.run([
+            sys.executable, "-B", "-X", "utf8=0", str(BUILDER), "--source", str(self.source),
+            "--output", str(self.output),
+        ], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        for host in ("claude", "codex", "codebuddy"):
+            json.loads((self.output / f".{host}-plugin/plugin.json").read_text(encoding="utf-8"))
 
     def test_invalid_shared_manifest_is_rejected(self):
         self.put("skill-packs/manifest.json", "{broken")

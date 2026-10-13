@@ -14,6 +14,7 @@ for name in "${SERVERS[@]}"; do
 done
 
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest "$ROOT/tests/test_local_mcp_suite.py"
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest "$ROOT/tests/test_local_mcp_paths.py"
 python3 - "$ROOT" <<'PY'
 import json
 import sys

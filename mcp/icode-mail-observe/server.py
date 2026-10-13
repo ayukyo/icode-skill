@@ -30,6 +30,7 @@ import email_intake  # noqa: E402
 from local_mcp_common import (  # noqa: E402
     REMOTE_MANAGED_WRITE_ANNOTATIONS,
     REMOTE_READ_ONLY_ANNOTATIONS,
+    expand_path,
     fail,
     load_config,
     ok,
@@ -96,7 +97,7 @@ def _credential(config: dict[str, Any]) -> str:
     raw_path = config.get("credential_file", "")
     if not isinstance(raw_path, str) or not raw_path.strip():
         raise MailObserveError("credentials_unavailable", "未设置 ICODE_MAIL_OBSERVE_SECRET 或 credential_file")
-    path = Path(os.path.expandvars(os.path.expanduser(raw_path)))
+    path = expand_path(raw_path, resolve_symlinks=False)
     try:
         if path.is_symlink() or not path.is_file():
             raise MailObserveError("credentials_unavailable", "credential_file 必须是普通文件且不能是符号链接")
@@ -426,10 +427,7 @@ def save_attachment(mailbox: str, uid: str, part_id: str) -> dict[str, Any]:
         uid = _uid(uid)
         if not re.fullmatch(r"part-[1-9][0-9]*", part_id):
             raise MailObserveError("invalid_part_id", "part_id 格式无效")
-        download_root = Path(os.path.expandvars(os.path.expanduser(config["download_root"])))
-        if not download_root.is_absolute():
-            download_root = SERVER_DIR / download_root
-        download_root = Path(os.path.abspath(download_root))
+        download_root = expand_path(config["download_root"], base_dir=SERVER_DIR, resolve_symlinks=False)
         folder_component = re.sub(r"[^A-Za-z0-9._-]+", "_", mailbox).strip("._") or "mailbox"
         output = download_root / folder_component / uid
         with _connection(config) as client:

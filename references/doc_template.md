@@ -5,7 +5,7 @@
 <!-- 旧 v1 章节（无 template_version 字段）一律视为待升级；v2 章节享有段零注入优先级（见 dir_and_metadata.md「段零·工程文档检索·质量信号」段） -->
 <!-- v2.0.0 相对 v1 的破坏性变化：双视角必含元素清单（14 项）/ 业务流独立成章 / 英文首次中文备注 / 链路中文说明 / 质量审视机械可验证 -->
 
-> `/icode doc` 生成章节的模板规范，被 [steps/doc.md](../steps/doc.md) 引用。核心哲学见 [references/dir_and_metadata.md](dir_and_metadata.md)「project_docs 工程文档库」段：**零配置/零状态/零索引文件，章节前 50 行自带身份证**。
+> `/icode doc` 生成章节的模板规范，被 [steps/doc.md](../steps/doc.md) 引用。核心哲学见 [references/dir_and_metadata.md](dir_and_metadata.md)「project_docs 工程文档库」段：无需用户维护工程专属配置；前50行用于粗筛，源码身份、正文SHA和审计状态见元信息，版本契约见[doc_snapshot_contract.md](doc_snapshot_contract.md)。
 
 ## 〇、模板版本与双视角设计（v2 新增）
 
@@ -34,12 +34,13 @@
 > - Git 地址：git@example.com:user/myproject.git
 > - 分支/提交：main @ a3f2b1c (2026-07-06 12:30)
 > - 子模块（git submodule，v1 字段）：thirdparty/lib_algo → ...git @ c8d2f1a；thirdparty/lib_nav → ...git @ b9e4d3c
-> - 依赖子模块（按仓库+分支，段零跨仓库覆盖用）：module_a → module:module_a@main@a3f2b1c（module_docs/{key}/）；module_b → module:module_b@dev@b8c3d4e（module_docs/{key}/）
+> - 依赖子模块：module_a@main@完整HEAD/source_id → module_docs/{key}/snapshots/{snapshot_id}/；只列本工程已核的精确绑定
 > - 关联工程（姊妹/同族工程，段零跨工程检索用，优先填 project_id 即 project_docs 目录名；不知目录名可填工程名/产品代号，段零模糊匹配兜底；多个逗号分隔）：sister_project_a, sister_project_b（无关联则填"无"）
 > - 产品线/型号：{产品代号，无则填"未识别"}
 > - 章节归属模块：module_a
 > - 模板版本（v2 字段）：v2.0.0
 > - 章节生成时间：2026-07-06T15:30:00Z
+> - 源码身份：working-tree，完整HEAD + source_id（含内容指纹/声明依赖）；正文SHA由审计回执及_meta记录
 
 > **KEYS**（术语→小节锚点，便于段零定位）
 > - 核心类：[架构] MyBaseNode, [节点框架] initParam/handleData
@@ -79,7 +80,7 @@
 
 ### 14 项必含元素（按章节类型分级，机械可验证）
 
-> 每项标注"视角"（人/AI/双）和"验证方式"（grep 验证/表格行数/LLM 阅读）。AI 生成时每项必含，缺项视为偷工（与 [anti_laziness.md](anti_laziness.md) 一致）。
+> 每项标注"视角"（人/AI/双）和"验证方式"（grep 验证/表格行数/LLM 阅读）。逐项核验全部适用项，不适用须记录实际源码依据，不能凑字数/表格编造实现。90术语表和99审计章按自身内容类型核验，不机械套模块线程/业务链路要求；所有正式章节仍须具备前50行四块及真实来源。缺少适用必含项只能partial/待完善，评分不替代完成门禁。样例是字段示意，不能未经补全/实证当成正式成品（与 [anti_laziness.md](anti_laziness.md) 一致）。
 
 #### overview 章节（6 项必含）
 
@@ -244,7 +245,7 @@
 
 | 模块性质 | module_docs（仓库内部视角） | project_docs（工程视角） |
 | --- | --- | --- |
-| **独立仓库模块**（含工程核心同时也是独立仓库的双身份模块） | 生成：仓库内部架构 / API / 对外接口 / 使用约束，跨工程共享（按 url+branch key） | 生成该模块在工程 IPC 拓扑中的角色、与其他工程模块的关系、配置、启动（**不重复** module_docs 内部细节） |
+| **独立仓库模块**（含工程核心同时也是独立仓库的双身份模块） | 生成仓库内部架构/API/对外接口/使用约束；按族key与精确source_id/snapshot_id跨工程复用 | 生成该模块在工程IPC拓扑中的角色、关系、配置与启动，不重复模块正文 |
 | **工程内子目录模块**（非独立仓库） | 不生成 | 生成 project_docs 该模块章节 |
 | **第三方预编译库**（thirdparty 无 git 仓库） | 不生成 | 只在 project_docs 依赖列表记录，不单开章节 |
 
@@ -271,7 +272,8 @@
 > - 模块类型：git-submodule（或 repo / cmake / monorepo / vendor / user）
 > - Git 地址：git@example.com:user/myproject/module_a.git
 > - 分支/提交：main @ a3f2b1c (2026-07-06 12:30)
-> - 被工程引用（used_by）：myproject（git-root）, another_project（git-root）
+> - 被工程引用（used_by）：按父工程精确source_id/snapshot_id绑定核对，旧族列表仅作关联提示
+> - 源码身份：working-tree，完整HEAD/source_id；文档snapshot_id与正文SHA见_meta/审计回执
 > - 模板版本（v2 字段）：v2.0.0
 
 > **KEYS**（术语→小节锚点）
@@ -289,11 +291,11 @@
 
 - **`used_by`**：列出引用此模块的工程，按 `_meta.json` 的 `project_type` 区分（`git-root` / `repo-root` / `user`）
 - **段零来源标签**（段零命中模块章节时附，便于 AI 区分来源）：「来源：project:工程名」/「来源：module:module_a@branch@commit」
-- **`<key>/` 一致性**：元信息块展示的 `<key>/` 从 `_meta.json` 读（不重算 URL+branch），确保与 `module_docs/<key>/` 目录名一致（避免 URL 字符串微变如大小写、尾部 `/`、协议前缀导致不同 key）。key 格式 `<url_basename_sanitized>_<sha256[:12]>`（含模块名前缀便于人眼辨认，详见 [dir_and_metadata.md](dir_and_metadata.md)「module_docs key 计算」）
+- **族目录与快照一致性**：元信息块从工程`module_deps`读取已核`key`和`snapshot_id`，展示`module_docs/<key>/snapshots/<snapshot_id>/`；核快照_meta的module_key/source_id，不从旧族_meta选正文，不因URL大小写/尾斜杠/协议变化擅自合并族键。计算与兼容规则见[doc_snapshot_contract.md](doc_snapshot_contract.md)。
 
 ## 十、质量审视检查清单（v2 新增，机械可验证）
 
-> 本清单供 `/icode doc` 步骤 5「质量审视」子步骤调用。每次跑 doc 时，对现有每个章节执行本清单扫描，不达标项累计计数。**达标率 < 70% 的章节标记为"待升级"，触发全量重生成**（走确认门）。
+> 本清单供 `/icode doc` 步骤5调用。评分用于改进排序，不能替代全部适用必含项、来源/正文SHA和语义审计的完成门禁。低于70%列待升级，在stage按既有授权逐章合并审核；旧版本与人工内容保留，未通过章保持partial/待完善。
 
 ### 10.1 硬性指标（grep 验证，无需 LLM）
 
@@ -308,7 +310,7 @@
 
 ### 10.2 必含元素检查（按章节类型）
 
-#### overview 章节必含（6 项中至少 4 项达标即视为合格）
+#### overview 章节必含（6项逐项核验，全部适用项通过）
 
 - [ ] # 0. 新手导览段（grep `## 0\..*新手` + 段内字数 ≥ 500）
 - [ ] ASCII / mermaid 全栈图（grep ` ``` ` fenced code 数 ≥ 1 张大图）
@@ -317,14 +319,14 @@
 - [ ] 角色化阅读路径表（grep 表格行数 ≥ 5）
 - [ ] 故障现象索引表（grep 表格行数 ≥ 5）
 
-#### workflow 业务流章节必含（4 项中至少 3 项达标即视为合格）
+#### workflow 业务流章节必含（4项逐项核验，全部适用项通过）
 
 - [ ] # 0. 新手先看段（grep `## 0\..*新手`）
 - [ ] 业务流程 ASCII 时序图（grep `sequenceDiagram\|->.*->\|时序`）
 - [ ] 状态机入口枚举 + 关键状态转移表（grep 枚举 + 转移表行数 ≥ 6）
 - [ ] 故障排查表（grep 表格行数 ≥ 5）
 
-#### module 章节必含（4 项中至少 3 项达标即视为合格）
+#### module 章节必含（4项逐项核验，全部适用项通过）
 
 - [ ] # 0. 新手先看段（grep `## 0\..*新手`）
 - [ ] 关键类/文件表 + 调用链图（grep 表格 + 框图）
@@ -345,15 +347,17 @@
        + 必含元素达标数 / 必含元素总数 * 0.4
        + 软性指标 LLM 评分 * 0.2
 
-if 达标率 < 0.7:
-    标记章节为"待升级" → 走确认门 → 全量重生成
+if 有未通过的适用必含项或事实审计未通过:
+    标为待完善/partial，按已授权范围合并新修订，不推进全量完成
+elif 达标率 < 0.7:
+    标记章节为"待升级" → 沿用既有授权，必要时准备diff确认 → stage逐章合并
 elif 达标率 < 0.9:
     标记章节为"局部补全" → 增量补全缺失元素
 else:
     跳过，无需重生成
 ```
 
-**自举迁移机制**：`_meta.json.template_version < v2.0.0`（含缺失字段视为 v1）的章节**一律视为待升级**，强制触发全量重生成（不计算达标率），保证所有现有文档在首次升级时同步到新标准。
+**自举迁移机制**：模板版本按数字分量比较，不作字典序比较；缺版本旧章视为legacy待核。旧模板标待升级，在stage逐章合并并核验后产生新修订，保留旧内容与未知字段；跳过或失败保持旧章基线，不把部分迁移称全工程完成。
 
 详细执行流程见 [steps/doc.md](../steps/doc.md) 步骤 5「质量审视与模板版本迁移」子步骤。
 
@@ -389,8 +393,8 @@ else:
 **自动迁移（新加字段，旧章节零退化）**：
 
 - **旧 v1/v2 章节无 `## X. 结构摘要` 段** —— 自动迁移时不追加（与本附录"可选附加"性质一致——非强制）；段零检索按"前 50 行四块 + H2 清单"仍能命中（无退化）
-- **`/icode doc myproject` 增量更新时** —— 检测到模块章节缺此段时，**按需**追加（用户未禁用此优化项时启用），不影响 template_version
-- **用户手改过的章节正文**不会被覆盖——只在末尾追加新段
+- **增量更新已有章节时** —— 不因缺少可选段自动改稿；仅在本次已需重生成/合并的stage中按内容需要加入，不影响template_version
+- **用户手改章节**按既有保留/合并选择处理；不可变快照不原位追加，形成经审的新修订
 - 迁移幂等：再次跑 doc 不重复追加
 
 ### C.2 故障速查小节（推荐：workflow 章节用）
@@ -437,6 +441,6 @@ else:
 **迁移兼容**：
 
 - `/icode doc myproject` 在**已有章节**上检测到缺附录 C 段时，**不自动补全**（按"非强制、不 bump 版本"的设计）；只在**新生成的章节**里默认带
-- 用户**主动重跑全量**时才会补（走 `/icode doc 重新生成 myproject` 触发确认门）
+- 用户主动全量或本次已授权增量重生成/合并时，可在stage按需补可选段；沿用现有授权，不仅为缺可选段触发更新或重复确认
 - 段零检索对缺附录 C 段的旧章节**完全兼容**（旧章节按 v2.0.0 正常纳入 KEYS + H2 注入路径，无任何漏命中）
 

@@ -5,85 +5,28 @@
 **会话**: 主会话
 **定位**: **工程级知识库生成与维护，独立步骤**。不创建 `.icode_output_N/`、不写 `.ico_metadata.json`、不更新工单 `completed_steps`/`status`。知识库供 `/icode init`/`log`/`plan`/`start`/`fast` 启动时**段零检索**自动注入。
 
-> **核心设计哲学**（必须先 Read [references/dir_and_metadata.md](../references/dir_and_metadata.md)「project_docs 工程文档库」段 + [references/doc_template.md](../references/doc_template.md)）：**零配置/零状态/零索引文件**——只有章节 .md，前 50 行四块自带身份证，文件系统即数据库。
+> **核心设计哲学**（必须先 Read [references/dir_and_metadata.md](../references/dir_and_metadata.md)「project_docs 工程文档库」段 + [references/doc_template.md](../references/doc_template.md)）：不要求用户维护工程专属配置；章节前50行承载检索信息，源码身份、正文SHA和发布状态由元信息/工作清单核对。
 
 > **共享技能路由**：语料接入前读取 [references/skill_routing.md](../references/skill_routing.md)，只加载命中当前资料类型的技能；邮件正文、线程、表格、图片或附件先走 `email-evidence-intake`，再复用文档/媒体/表格/证据/原理图能力。
-> **工程接入门**：读取 [references/project_intake.md](../references/project_intake.md)。唯一嵌套仓的知识库绑定实际 Git 根；large/huge 仓先按 tracked paths、活动构建配置和目标模块建立 worklist，禁止默认全树内容扫描。
+> **工程接入门**：读取 [references/project_intake.md](../references/project_intake.md)。唯一嵌套仓的知识库绑定实际 Git 根；large/huge 仓先按 tracked paths、活动构建配置和目标模块建立 worklist，代码语义画像禁止默认全树内容扫描。版本捕获另按实际输入流式计算内容SHA，开销随未忽略输入总量增长，不把哈希扫描宣称为全树语义分析。
 
-## ⚠️ 多分支设计 · 反偷懒强约束（必读，防止误判"覆盖"）
+## 多工程、多分支与工作区版本（执行前必读）
 
-> **本段是 icode-skill doc 步骤对"多分支机制"的统一设计语义说明**——任何 AI 在执行 `/icode doc` 或解释用户"被覆盖"反馈前，**必须先 Read 本段全文**；只读概要不算。后续正文会把每个机制在某一行展开，本段只做**总览 + 索引**。
+读取 [doc_snapshot_contract.md](../references/doc_snapshot_contract.md) 全文；它是版本、存储、依赖绑定、缓存和续跑的唯一真源。正文模板另读 [doc_template.md](../references/doc_template.md)，不把存储版本当模板版本。
 
-### 1. 设计目标（为什么按分支隔离）
+| 维度 | 身份与行为 |
+|---|---|
+| 工程 | project_id与原始分支；实际checkout根用于源码读取，worktree不替换主工程身份 |
+| 模块族 | 原URL+分支复合key，保留既有目录键 |
+| 源码版本 | 完整HEAD+当前工作区内容指纹+已声明依赖身份；同HEAD的dirty变化也形成不同版本 |
+| 文档修订 | snapshots/<snapshot_id>/不可变正文与审核SHA；多个工程可分别绑定不同快照 |
+| 旧平铺库 | 保留正文和未知元信息，作为旧版概览/合并材料；不得自动当精确工作区快照 |
 
-工程代码在多分支并行开发时差异巨大。文档不按分支隔离会引发三种灾难：
+当前工作区是默认来源，不用git archive HEAD漏掉未提交改动。相同族键不同源码身份不去重；不匹配版本不注入正文。先读取旧基线，完成草稿、语义审计与发布，再回写工程依赖和done状态。用户已给定的全量、合并、跳过或暂停选择持续有效。
 
-1. **跨分支借鉴失真**——`main` 分支文档里说有模块 X，但当前在 `feature` 分支代码里 X 不存在或根本不一样，AI 借鉴工程文档会生成错误代码
-2. **跨分支增量判错**——`git diff` 上次 doc commit 与本次 commit 时，若没按分支过滤，diff 会把"跨分支差异"误报为"代码变了"，触发 doc 频繁全量重生成浪费 token
-3. **跨分支手动编辑丢失**——一个分支改了文档，另一分支 doc 全量重生成会把改动冲掉
+分支目录名保留可读sanitize结果；原始分支含需替换字符时追加原始分支SHA前8字符，避免feature/a与feature_a撞名。已有旧分支目录不删除；仅在其元信息原始分支精确匹配时作为legacy来源，不跨分支读取正文。detached与普通分支分开，并继续核对完整HEAD/内容身份。
 
-**核心契约**：`project_docs/<id>/<BRANCH_SAFE>/` 子目录天然隔离每个分支的工程文档；`module_docs/<url+branch> key/` 子目录天然隔离每个上游仓库+分支的模块文档；**段零检索只在当前 cwd HEAD 分支对应的子目录内读，不交叉**。
-
-### 2. 机制总览（3 层隔离，写作时必须知道在哪一层）
-
-| 维度 | 隔离粒度 | 存储位置 | 跨分支是否交集 |
-|------|----------|----------|----------------|
-| **工程文档** | `<project_id>/<BRANCH_SAFE>/` 两层目录 | `~/.claude/icode_data/project_docs/<id>/<branch>/*.md` | **不交集**（子目录天然隔离） |
-| **模块文档** | `<url_basename_sanitized>_<sha256(url+":"+branch)[:12]>/` 复合 key | `~/.claude/icode_data/module_docs/<key>/*.md` | **不交集**（同 url 不同 branch → 不同 key；同 url 同 branch → 同一 key 但 commit 可变） |
-| **段零检索** | 只读当前 cwd HEAD 分支对应的子目录 | `dir_and_metadata.md`「DOC_DIR 分支过滤」段实现 | **不交集**（不交叉读其他分支子目录正文，避免跨分支借鉴失真） |
-
-### 3. 五大边界（用户/AI 高频踩坑）
-
-| 边界 | 实际行为 | 详见 |
-|------|----------|------|
-| **v1 → v2 旧布局迁移** | v1（平铺 `project_docs/<id>/00_overview.md`）**确实会互相覆盖**（v1 无分支隔离）；v2 起天然隔离。**v1 → v2 仅在跑一次 `/icode doc` 时自动触发** | 正文 §5.0.6 / §5.1 |
-| **detached HEAD 工程** | 落到 `(detached)` 子目录单独记录，**不会与任何分支子目录混在一起** | 正文 §「project_id 解析」段 BRANCH 推导 |
-| **同名 fork 不同 URL** | `<url_basename_sanitized>` 相同但 hash(URL+branch)不同 → **不同 key**（自动区分，不要手动合并） | `dir_and_metadata.md`「module_docs 工程模块库」段 |
-| **同 url 同 branch 不同 commit** | key 不含 commit；`current_commit` 不一致时 doc 全量重生成覆盖（`dir_and_metadata.md`「module_docs key 计算」段：key 不含 commit；`dir_and_metadata.md`「段零·工程文档检索」段：commit 不匹配触发降级注入） | **有意行为**——"同一份代码不同 commit 只保留最新一份 doc"；要看历史 commit 外部 git 查看即可 |
-| **branch 字符串 sanitize 撞名** | branch 名含 sanitize 字符集（9 种字符：反斜杠/斜杠/冒号/星号/问号/双引号/小于号/大于号/竖线）任一字符时会被 sanitize 函数抹平，可能与同 sanitized 后的其他分支撞名（后者写覆盖前者） | 用户创建分支避免用这 9 种字符（git 常用斜杠 `/` 但 icode sanitize 时抹平） |
-
-### 4. 三大常见误解 × 正确理解（逐条对照，禁止误判）
-
-| 误解（用户/AI 反馈常见说法） | 实际行为 | 正确理解 |
-|------------------------------|----------|----------|
-| "切分支跑 doc，原分支的工程文档被覆盖成新分支的" | doc 写到 `<id>/<新分支>/` 子目录，**原分支子目录里章节仍在** | 工程按分支分子目录天然隔离，原分支 doc 是"看不到"而非"被覆盖"。`ls project_docs/<id>/` 应看到多个 `*/` 子目录 |
-| "切分支后段零检索只列新分支章节，原分支的不见了" | 段零按当前 cwd 分支过滤，**不交叉读其他分支子目录正文**（避免跨分支借鉴失真） | 这是**显式反交叉污染设计**，不是 bug。需要看其他分支章节，临时切换分支或 `ls project_docs/<id>/*/` 列举子目录 |
-| "同 url+同 branch 的模块 doc 被新 commit 覆盖了"（详见 §3 第 4 行同边界） | key 不含 commit；`current_commit` 不一致时 doc 全量重生成覆盖 | **有意行为**，语义是"同一份代码不同 commit 只保留最新一份 doc"。要看历史版本，外部 git 查看对应 commit 即可 |
-
-### 5. 反偷懒强制条款（违反一条即不合规）
-
-1. **执行前必读本段**——执行 doc 任何子步骤（尤其是"全量重生成""主动 stale 扫描""模板迁移""模块全量重生成"）前，**必须先 Read 本段全文**；不读就直接复述"被覆盖了"作为 bug → 反偷懒第 21 条违规
-2. **遇"被覆盖"反馈的处置**——永远先按本段"三大误解 × 正确理解"表 + "五大边界"表逐条排查，给出根因 + 诊断命令（`ls project_docs/<id>/` 看分支子目录布局、`cat project_docs/<id>/<branch>/_meta.json` 看工程元信息、`cat module_docs/<key>/_meta.json` 看模块元信息），**禁止默认就是 bug**
-3. **跨工程/跨模块上下文**——跨工程 doc 借鉴仅看 `00_overview.md`（`dir_and_metadata.md`「段零·工程文档检索」段），**不交叉读其他章节**，防止跨工程/跨分支借鉴失真
-4. **分支名边界两类单独走**：detached HEAD → `(detached)` 子目录；branch 名含 sanitize 字符（`\ / : * ? " < > |` 9 种）→ 被 `tr '/\\:*?"<>|' '_'` 抹平成同名 key，两个 git 分支合并到同一 BRANCH_SAFE 子目录，**后者写会覆盖前者**。**两种都落到独立子目录名，不会与正常分支子目录混**；用户反馈"看不到分支文档"时，先 `git -C "$GIT_ROOT" rev-parse --abbrev-ref HEAD` 看实际分支名 + 用 §3 表第 5 行的 sanitize 规则重算 BRANCH_SAFE 是否撞了别分支
-5. **commit / 祖先双源硬约束**（两场景语义独立，合并理解）：
-
-   - **`/icode doc` 生成时**：
-     - **模块层** — `module_docs/<key>/_meta.json.current_commit` 不等于当前模块 commit → 全量重生成覆盖（`doc.md` 步骤 5「模块全量重生成」）
-     - **工程层** — `git merge-base --is-ancestor <prev> HEAD` 退出 1（跨分支/分叉/fork）→ 按全量重生成处理（`<prev>` 与 `HEAD` 不在同一祖先链，`git diff` 不可信）
-   - **段零检索时**（`dir_and_metadata.md`「段零·工程文档检索」段，含 stale 检测 + 分支校验 + 祖先校验）：
-     - **分支不一致** — 整个工程文档 stale，降级注入只注摘要 + 警告，不读章节正文
-     - **commit 不匹配** — 模块层降级注入；工程层走"祖先 + diff"校验，不直接判 stale（`dir_and_metadata.md`「段零·工程文档检索」段）
-
-### 6. 正文索引（各机制在哪一行展开，需要时直接 Read）
-
-| 机制 | 所在位置 | 关键句 |
-|------|----------|--------|
-| 工程 doc 分支子目录公式 | 正文 §「project_id 解析」第 1 步 BRANCH_SAFE 推导 | `DOC_DIR = ~/.claude/icode_data/project_docs/<id>/<BRANCH_SAFE>/` |
-| 冲突检测（同名工程/分支实为不同 git_root） | 正文 §「project_id 解析」末尾 | 追加 hash 后缀，`PROJECT_ID` + `BRANCH_SAFE` + GIT_ROOT sha256 前 4 字符 |
-| v1 → v2 自动迁移 | 正文 §5.0.6、§5.1 | 7 步迁移流程 + `_meta.json.v1_migrated_from` 备份 |
-| 增量判定（跨分支按全量） | 正文 §3「增量判定」中祖先合法性校验 | `git merge-base --is-ancestor` 退出 1 → 按全量处理 |
-| 模块 key 计算 | `dir_and_metadata.md`「module_docs key 计算」段 | `key = <url_basename_sanitized> + "_" + sha256(repo_url + ":" + branch)[:12]` |
-| 模块 commit 推进触发覆盖 | `dir_and_metadata.md`「module_docs key 计算」段、正文 §5 模块全量重生成 | key 不含 commit，但 `current_commit` 不一致时按全量重生成覆盖 |
-| 段零 DOC_DIR 分支过滤 | `dir_and_metadata.md`「段零·工程文档检索」段 | "按 `resolve_project_id(cwd)` 算出 `BRANCH_SAFE`，只读 `<DOC_DIR>` 子目录，不交叉读其他分支子目录" |
-| 段零 stale 检测（分支+祖先双校验） | `dir_and_metadata.md`「段零·工程文档检索」段（stale 检测 + 分支校验 + 祖先校验） | 分支不一致 → 整个工程文档 stale；祖先不合法 → 走"祖先 + diff"校验，不直接判 stale |
-| 跨工程/跨分支上下文借鉴边界 | `dir_and_metadata.md`「段零·工程文档检索」段 | 跨工程借鉴仅看 `00_overview.md`，不读其他章节 |
-
-### 7. 嵌入式入口（写代码时随时可调用，别忘了）
-
-- **本文档「project_id 解析」段**（行 93-133，下方 `git -C "$GIT_ROOT" rev-parse --abbrev-ref HEAD` 立即拿到当前分支名 + BRANCH_SAFE 推导）
-- **`dir_and_metadata.md` 「project_docs 工程文档库」段 + 「module_docs 工程模块库」段 + 「段零·工程文档检索」段**
-- **`dir_and_metadata.md`「段零·工程文档检索」段**（段零 AI 必读）
+工程内部非独立Git模块写工程章节；独立Git模块先生成模块快照，再写它在工程拓扑中的角色。正文不重复，依赖身份不能省略。
 
 ## 前置校验
 
@@ -138,9 +81,15 @@ BRANCH=$(git -C "$GIT_ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null)
 [ -z "$BRANCH" ] && BRANCH="(no-git)"
 [ "$BRANCH" = "HEAD" ] && BRANCH="(detached)"
 # 分支名 sanitize（去除路径分隔符、特殊字符，避免破坏目录结构）
-BRANCH_SAFE=$(echo "$BRANCH" | tr '/\\:*?"<>|' '_')
+BRANCH_SAFE=$(printf '%s' "$BRANCH" | tr '/\\:*?"<>|' '_')
+if [ "$BRANCH_SAFE" != "$BRANCH" ] || printf '%s' "$BRANCH_SAFE" | grep -Eiq '^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(\..*)?$'; then
+  BRANCH_HASH=$(printf '%s' "$BRANCH" | sha256sum | cut -c1-8)
+  BRANCH_SAFE="${BRANCH_SAFE}_${BRANCH_HASH}"
+fi
 DOC_DIR="$HOME/.claude/icode_data/project_docs/$PROJECT_ID/$BRANCH_SAFE"
 ```
+
+以上Bash为算法示例；Windows宿主按PowerShell或Python等价执行，使用系统实际home，不要求设置HOME环境变量。分支目录采用同一跨平台规则，Windows设备名也追加原始分支指纹；保留原始分支字段，不把目录名当分支身份。
 
 **冲突检测**：`$DOC_DIR` 已存在时读其 `00_overview.md` 元信息块的 `project_path`——与当前 `GIT_ROOT` 一致则复用；不一致（同名分支但不同工程）则追加短 hash 后缀 `${PROJECT_ID}__${BRANCH_SAFE}__$(echo $GIT_ROOT|sha256sum|cut -c1-4)`，输出 ℹ️ 一行提示。**同一工程不同分支**（如 `myproject/main/` vs `myproject/feature/`）按分支目录天然隔离，**互不覆盖**；**detached HEAD / 非 git 工程**落到 `(detached)` / `(no-git)` 目录，单独记录。`PROJECT_TYPE`（`git-root`/`repo-root`）写进工程 _meta.json。
 
@@ -153,18 +102,13 @@ AI 解析自然语言的「目标工程」+「动作」：
 - **歧义必问**：目标明确无动作词但 git diff 命中 ≥50% 章节→问"全量/增量N个/仅列"；"加 X"但 X 已存在→问"覆盖/新建/合并"；完全模糊→列候选工程让选
 - **独立仓库模块默认不问**：模块名命中独立 git 仓库时，默认按 "module_docs + 工程上下文章节" 互补生成（见「目标」+ 步骤 5），**不强制三选一问询**（判定规则已定死 "独立仓库→两者互补"，问询徒增交互成本）；**仅当用户动作词明确表达 "只要模块本身"**（如 "只看/仅模块/不要工程上下文"）时→跳过工程上下文章节，只生成该模块 module_docs
 
-## 确认门（全量重生成必经）
+## 手工内容保护与生成范围
 
-全量覆盖前**必须先检测手动编辑**（读每章元信息块"章节生成时间" T_gen，对比文件 mtime；mtime 晚于 T_gen → 被手动改过）：
+先读所有将继承/合并的旧章节及元信息。已有正文SHA时按内容比较检测编辑；mtime只提示迁移/编辑可能性，无SHA时保守核查，不能把mtime较晚直接说成手改或声称N处修改。
 
-- 无手动编辑 → 确认"将全量重生成 N 个章节"→ 执行
-- 有手动编辑 → **禁止静默覆盖**，提示询问：
+新快照保留旧版本，不原位覆盖。旧人工备注仍须按用户既有选择逐章合并或保留；用户已授权全量/合并/跳过时不重复问同一事项。未有选择且新阅读版本会遗漏人工内容时，准备具体diff后询问合并/保留/跳过。模板升级同样先审旧内容，失败不推进旧基线。
 
-  ```text
-  ⚠️ 检测到以下章节有手动编辑（将丢失）：
-    - <章节名>（生成后 N 处修改）
-  选择：① 全量覆盖 ② diff 后人工合并 ③ 跳过这些章只更新其余
-  ```
+对工程平铺章节的更新：写前比较旧SHA、保留原内容和未知字段，逐章合并，临时文件原子替换；跳过章保留其源/模板版本，不能升级整个工程的last_generated_commit掩盖剩余待办。
 
 ## 执行流程
 
@@ -179,39 +123,24 @@ AI 解析自然语言的「目标工程」+「动作」：
 **Google `repo` 嵌套子项目路径推导**（dir_and_metadata 表未含，doc.md 步骤 2 独有）：当工程由 Google `repo` 工具管理时，子项目**不一定是 `${GIT_ROOT}/<module_name>` 字面路径** —— 部分模块会嵌套在业务父项目子目录下（如 `<业务父项目 A>/<模块 A1>` / `<业务父项目 B>/<模块 B1>` 等典型模式）。**禁止用字面 `${GIT_ROOT}/<module_name>` 判定 path**，否则会误判 `path_gone`。正确做法：
 
 ```bash
-# 1. 优先从 .repo/projects/*.git worktree 路径（不受 maxdepth 限制，最权威）
-#    .repo/projects/<name>.git 是 git bare 仓库，路径即 manifest <project path> 的真实位置
-worktree_path="${GIT_ROOT}/.repo/projects/<module_name>.git"
-if [ -d "$worktree_path" ]; then
-  realpath "$worktree_path"
-fi
-
-# 2. fallback: 从 manifest 解析 <project path="..."> 字段（manifest 缺 path 字段时无输出）
-python3 -c "
-import xml.etree.ElementTree as ET
-m = ET.parse('${GIT_ROOT}/.repo/manifest.xml').getroot()
-for p in m.findall('project'):
-    if p.get('name') == '<project_name>':
-        path = p.get('path')
-        print(path if path else 'NO_PATH_ATTR_FALLBACK_TO_FIND')
-"
-
-# 3. fallback: find -maxdepth 3 全局搜索（兼容 monorepo + 嵌套 >2 层场景）
-#    不建议用 maxdepth 1（漏检嵌套）+ 慎用 maxdepth 4+（易误中辅助目录）
-find "${GIT_ROOT}" -maxdepth 3 -name "<module_name>" -type d
+# manifest path是实际checkout位置；缺path按project name默认值解析。
+# .repo/projects/*.git是Git管理数据，不把它作为源码目录。
+python3 - "$GIT_ROOT" "<project_name>" <<'PY'
+import pathlib, sys, xml.etree.ElementTree as ET
+root = pathlib.Path(sys.argv[1]).resolve()
+manifest = ET.parse(root / ".repo/manifest.xml").getroot()
+for project in manifest.findall("project"):
+    if project.get("name") == sys.argv[2]:
+        checkout = root / project.get("path", project.get("name"))
+        print(checkout.resolve())
+PY
+# 再用git -C <实际checkout> rev-parse --show-toplevel验证；
+# 无法解析include/extend-project等manifest时记录未解析，不能假装得到源码路径。
 ```
 
-**优先级与回退**：
+**优先级与回退**：先解析manifest的真实path（缺path按name默认值）；可用`.repo/project.list`与各仓`git rev-parse --show-toplevel`交叉核对。`.repo/projects/*.git`只辅助确认仓库管理关系，不能直接当源码位置。include/extend-project等无法完整解析时列未解析原因，保留待办；人工指定路径须核实际Git根，多个候选不猜选。写入`module_deps[].path`使用相对repo根的真实checkout路径，不限定嵌套层数。
 
-1. **首选方案 1**：`.repo/projects/<name>.git` 是 git bare 仓库，路径即 manifest `<project path>` 字段的真实位置——**不受 maxdepth 限制、不依赖 manifest 字段、不依赖 grep/find 遍历**，是嵌套任意层都正确的终极 fallback
-2. **次选方案 2**：manifest 解析；若 manifest 缺 `path` 属性（早期 manifest.xml 简写模式可能省略），输出 `NO_PATH_ATTR_FALLBACK_TO_FIND` 提示，AI 立刻知道要跳到方案 3
-3. **末选方案 3**：`find -maxdepth 3` 兜底（覆盖嵌套 ≤3 层）；若仍找不到 → 报错"嵌套深度超 3 层或路径异常，请用户人工指定"
-
-**触发条件**：用户工程用 Google `repo` 管理，且业务上把多个 git 子项目按业务域分组到父项目目录（典型模式：`<业务域分组目录>/<模块名>`，如测试设备组 / 传感器组 / 网络管理组等业务分组容器）。`/icode doc` 检查 / 段零检索时遇到 "path_gone" 但 `find -maxdepth 3` 能找到 → 即嵌套场景，path 字段需补全为真实嵌套路径。
-
-若返回多条结果，优先取 `.repo/projects/*.git` 中同名 entry 的 worktree 路径（最权威）；若无 `.repo`（如纯 monorepo），按 README + `.gitignore` 综合判别。**写入 `_meta.json.module_deps[].path` 字段时必须用真实嵌套路径**（不是字面 `<module_name>`），否则后续段零检索 / git diff 锚点校验会因 path 不匹配而失效。
-
-**去重**：详见 dir_and_metadata.md 同段「去重」两步（先按归一化绝对路径合并 + 再按 `key = <url_basename_sanitized>_<sha256(url+":"+branch)[:12]>` 去重，key 格式含模块名前缀便于人眼辨认，见 [dir_and_metadata.md](../references/dir_and_metadata.md)「module_docs key 计算」）。输出 modules 列表（每个含 url+branch+key+commit+path+type），写进工程 _meta.json 的 `module_deps` 字段。
+**去重**：先合并同一真实路径的多来源检测，再按`(module_key, source_id)`去重；不同提交/dirty内容分别保留。用[doc_snapshot.py](../tools/doc_snapshot.py)捕获当前工作区和声明依赖。新modules列表先保存在本次工作目录，与旧module_deps比较，发布完成前不写回工程元信息。
 
 **代码特征扫描**（grep 优先）：用 Grep 扫描工程代码特征识别 entry 函数/导出 API/关键数据结构，结果作为 00_overview.md「核心模块清单」+「全栈图」输入，按本表「动态章节」段（doc_template.md「五」）决定追加哪些章节（AI 根据工程实际技术栈选 grep 模式，**不硬编码框架名**）。汇总「章节规划清单」：固定（00/10/90/99）+ 命中的动态章节。
 
@@ -219,7 +148,7 @@ find "${GIT_ROOT}" -maxdepth 3 -name "<module_name>" -type d
 
 **动机**：doc 全量/多模块生成耗时长，中断后重跑若靠"重扫模块→重判增量"恢复，会重复生成已完成的章节（浪费 token）或漏掉半成品。步骤 2 检测完成后把**候选清单固化为磁盘状态**，每次生成/跳过/更新都更新它——中断续跑 = 只处理未完成项。
 
-**位置**：`$DOC_DIR/doc_worklist.json`（与工程 `_meta.json` 同级，`$DOC_DIR = ~/.claude/icode_data/project_docs/<project_id>/`）。
+**位置**：`$DOC_DIR/doc_worklist.json`（与工程`_meta.json`同级；`$DOC_DIR=~/.claude/icode_data/project_docs/<project_id>/<BRANCH_SAFE>/`）。兼容已存在的`_doc_worklist.json`：复用同一文件，不并建两份状态。
 
 **结构**：
 
@@ -231,12 +160,14 @@ find "${GIT_ROOT}" -maxdepth 3 -name "<module_name>" -type d
   "generated_at": "date +%Y-%m-%dT%H:%M:%SZ",
   "items": [
     {
-      "id": "<章节名或 module_docs key>",
+      "id": "<章节名或 module_key@source_id>",
       "kind": "project_chapter | module_doc | fixed_chapter",
       "candidate": "<章节/模块显示名>",
       "reason": "候选原因：新依赖 / 代码特征命中 / 用户指定 / 增量 diff 命中 / 固定章节",
-      "baseline": "<current commit，或 prev..HEAD diff 摘要>",
-      "target": "<目标相对路径，如 00_overview.md 或 module_docs/<key>/>",
+      "baseline": "<完整HEAD与工作区/依赖指纹>",
+      "source_id": "<本项源码身份>",
+      "snapshot_id": "<已发布快照；发布前为null>",
+      "target": "<章节文件或 module_docs/<key>/snapshots/<snapshot_id>/>",
       "status": "pending | generated | verified | done | blocked | deferred | out_of_scope",
       "note": ""
     }
@@ -247,10 +178,10 @@ find "${GIT_ROOT}" -maxdepth 3 -name "<module_name>" -type d
 **状态机**：`pending`（候选待生成）→ `generated`（初稿已写）→ `verified`（99 章代码事实审计核验通过）→ `done`（收尾完成）；失败/无法生成 → `blocked`（附 `note` 原因）；本次跳过（用户点模块/不在本次范围）→ `deferred`；明确范围外（如 `C_follow_up` 型）→ `out_of_scope`。
 
 **读写契约**：
-- **步骤 2 末**：初始化/重建 worklist（保持已存在项，只补新增候选；`request_id` 更新为本次）
-- **每个模块/章节生成后**：更新对应 item `status`（generated/blocked）+ `note`；**99 章审计对单章节核验通过后** → `verified`
+- **步骤 2 末**：按源码身份合并旧项并补新增候选，保留既有结果与未完成原因；新调用更新request_id，显式暂停记录run状态且不改done计数。
+- **每个模块/章节生成后**：更新generated/blocked及note；99章语义核验绑定正文SHA后才verified，快照可见且工程绑定回读一致后才done。partial不能把整个module item置done。
 - **收尾（步骤 7）**：全部 item 达 `done`/`blocked`/`deferred`/`out_of_scope` 后置 `request_id` 保持 + 汇总
-- **幂等续跑**：doc 再次调用时读现有 worklist——`verified`/`done` 项跳过；`pending`/`generated`/`blocked` 项续跑（generated 重跑审计，blocked 重试或维持）；**同 `request_id` 续跑是幂等重放，不重复生成已验证项**
+- **幂等续跑**：先核本项当前source_id、精确绑定、输出正文SHA和审计范围；仅全部仍匹配的verified/done项可跳过。基线改变则新增/重置待办并保留旧记录；无指纹旧状态先核查，不能直接当done。generated重验，blocked重试或保留原因；同request_id也不能绕过源码/输出变化检测。
 - **写前重读合并 + 原子写**：与全局索引同契约（并发 doc 会话防丢项）
 - vNext 工单上下文下，每次状态迁移追加 `doc_module_status` 事件（`event --type doc_module_status --payload '{"module":"<id>","status":"<新状态>","request_id":"<id>"}'`）；doc 独立运行时无工单目录 → 状态记录以 worklist 本身为准，不强制事件
 
@@ -260,14 +191,14 @@ find "${GIT_ROOT}" -maxdepth 3 -name "<module_name>" -type d
 
 - `$DOC_DIR` 不存在 → 首次全量
 - 存在 → 读 `00_overview.md` 的 `generation_commit`，**先做祖先合法性校验**（关键，防跨分支误判增量）：
-  - **HEAD 与 prev 是同一 commit**→"已是最新"
+  - **HEAD相同且当前工作区/声明依赖指纹、正文SHA及审计范围都匹配**→可复用；同HEAD但内容变化仍要按文件清单/调用边界更新，旧无指纹记录不能直接称最新
   - **`git merge-base --is-ancestor <prev> HEAD` 退出 0**（prev 是 HEAD 祖先，正常前向演进）→`git diff <prev>..HEAD --name-only` 拿变更文件，命中某章 KEYS"文件位置"的章增量重生成，其余跳过；变更文件在未覆盖目录→提示"是否生成新章节"
   - **退出 1（HEAD 是 prev 的祖先/分叉 / prev 与 HEAD 在不同分支）**→**`git diff` 不可信，必须视为"另一版工程"，按全量重生成处理**（不分青红皂白继续增量会因 merge-base 远导致 diff 失真，把大部分文件当变更/漏判关键变更），提示用户「prev `<prev>` 与 HEAD `<HEAD>` 不在同一祖先链（分支切换/fork/换库），按新工程全量重生成」
   - **退出 128（prev 不可达，如 GC/换库）**→按全量重生成处理
-- **模块依赖变化检测**（关键，否则新增/删除依赖漏生成）：比较旧 `_meta.json.module_deps` 与步骤 2 检测的新 modules 列表 → 差异：
-  - 新加的 dep（key 不在旧列表）→ 触发对应 module_docs 生成
+- **模块依赖变化检测**：比较保留的旧`module_deps`与本次捕获的新列表，按族key、source_id和snapshot_id区分；同key换提交/dirty输入也是版本变化：
+  - 新增dep或同key源码身份变化→生成/审计对应快照，不覆盖其他工程的旧版本
   - 删除的 dep（旧列表有但新列表无）→ 提示「工程不再依赖 X，module_docs/{key}/ 是否保留（默认保留，需手动清理）」
-  - key 变化的 dep（url 或 branch 变）→ 触发新 key 的 module_docs 全量重生成 + 旧 key 提示是否清理
+  - URL或分支改变→新族key与精确快照；旧族/快照默认保留，清理须明确选择
 
 - **首次全量 + 模块名参数**（`$DOC_DIR` 不存在但用户给了模块名）-> 该模块名作为"聚焦生成目标"，而非"匹配已有章节"（首次无章节可匹配，原匹配语义悬空）：
   - 该模块是独立仓库 -> 生成该模块 module_docs + 工程固定章节（00/90/99）+ 命中动态章节，其中 `10_architecture` 描述该模块在工程拓扑中的角色（不重复 module_docs 内部）
@@ -290,58 +221,36 @@ find "${GIT_ROOT}" -maxdepth 3 -name "<module_name>" -type d
 
 **5.0.2 扫描现有章节**
 
-对 `$DOC_DIR` 与各 `$HOME/.claude/icode_data/module_docs/<key>/` 下所有 `*.md` 章节（不含 `_meta.json`）：
+对当前工程章节、当前绑定快照及计划继承的旧库章节做质量审视；不递归把其他版本正文按当前源码判stale，不原位重写已发布快照。
 
 1. 读每章 `_meta.json.template_version`（缺失视为 `v1`）
 2. 读每章正文元信息块 `template_version` 字段（缺失视为 `v1`，但若 `_meta.json` 有则取 `_meta.json`）
-3. 对比 SCHEMA_VERSION：
+3. 模板版本按数字分量对比SCHEMA_VERSION；下面评分只决定改进顺序，全部适用必含项、来源/正文SHA与事实审计未通过的章保持partial/待完善，不得因高分跳过：
 
 | 章节状态 | 动作 |
 |----------|------|
-| `template_version >= SCHEMA_VERSION` 且通过 [doc_template.md](../references/doc_template.md)「十、质量审视检查清单」达标率 ≥ 0.9 | 跳过，无需重生成 |
+| `template_version >= SCHEMA_VERSION`、适用必含项及事实/来源核验均通过，且评分 ≥ 0.9 | 可复用已核精确快照，无需重生成 |
 | `template_version >= SCHEMA_VERSION` 但达标率 0.7-0.9 | 标记"局部补全"，增量补全缺失元素（不重生成全文） |
-| `template_version < SCHEMA_VERSION`（含缺失/视为 v1） | 标记"待升级"，强制全量重生成（**不走"局部补全"路径**，模板大版本变更必须整体重生成） |
-| 达标率 < 0.7（任何版本） | 标记"待升级"，全量重生成 |
+| `template_version < SCHEMA_VERSION`（含缺失/视为 v1） | 标记待升级，在stage按新模板逐章合并审核，保留旧版本与未完成基线 |
+| 达标率 < 0.7（任何版本） | 标记待升级，沿用授权在stage合并审核，不原位覆盖 |
 
 **5.0.3 确认门（必经）**
 
-对所有标记为"待升级"的章节，**先检测手动编辑**（读每章元信息块"章节生成时间" T_gen，对比文件 mtime；mtime 晚于 T_gen → 被手动改过）：
-
-- 无手动编辑 → 直接重生成（无需询问用户，模板升级是 doc 步骤的常规行为）
-- 有手动编辑 → **禁止静默覆盖**，提示询问（同全量确认门三选一：全量覆盖 / diff 后人工合并 / 跳过这些章只升级其余）
+对待升级章按正文SHA检测内容变化，mtime只提示可能编辑/迁移；旧无SHA章节先完整读并核查。按用户既有合并/保留/跳过选择执行；未有选择且新稿可能遗漏人工内容时，准备具体diff再询问。旧版本保持可读，不原位覆盖快照。
 
 **5.0.4 升级后写新版本号**
 
 重生成完成的章节必须：
 - 正文元信息块写入 `template_version: v2.0.0`（或当前 SCHEMA_VERSION）
-- `_meta.json` 同步写入 `template_version` 字段
+- 已审章节/新快照元信息记当前template_version；工程部分升级按章记版本，未完成章及全工程基线不提前推进
 
 **5.0.5 进度输出**
 
 - 步骤 7 末尾输出"模板迁移汇总"表（见下文 §7 更新）
 
-**5.0.6 项目目录布局迁移（v1 → v2，仅升级时触发一次）**
+**5.0.6 旧布局与模板迁移**
 
-> **重要**：本节与 5.0 "模板版本迁移"是**两个不同维度**——
-> - 5.0 是章节**内容**升级（template_version v1 → v2，章节内容随之重生成）
-> - 5.0.6 是工程**目录布局**升级（`project_docs/<id>/00_overview.md` 平铺 → `project_docs/<id>/<branch>/` 多分支子目录），**整库只发生一次**（v1 → v2 升级时），完成后永久不再触发
->
-> **触发条件**：`ls project_docs/<id>/00_overview.md` 直接存在 + 无分支子目录
->
-> **迁移 7 步**：
-> 1. `mkdir -p project_docs/<id>/<BRANCH_SAFE>/` 创建新分支子目录
-> 2. `mv project_docs/<id>/00_overview.md project_docs/<id>/<BRANCH_SAFE>/` 移动所有章节
-> 3. 复制所有 `_meta.json` 字段到新位置（含 `module_deps` / `unresolved_modules` / `stale_files` / `project_id` / `project_type` / `git_root` 全集）
-> 4. 旧 `project_docs/<id>/_meta.json` 备份为 `_meta.json.v1_migrated_from`（**禁止直接覆盖**）
-> 5. 删旧空目录（`rmdir project_docs/<id>/`；如非空说明漏迁章节须重试）
-> 6. 输出 ℹ️ 提示行说明已迁移
-> 7. 段零检索时若 `<id>/<branch>/` 不存在但 `<id>/` 直接有 `00_overview.md`（v1 布局）→ **回退按 legacy 方式读** + 输出 ⚠️ 提示「v1→v2 迁移未完成，下次 `/icode doc` 自动迁移」
->
-> **禁止**：
-> - ①检测到 v1 旧布局但不迁移，直接写到新子目录 → 旧章节成孤儿
-> - ②迁移时丢字段（如漏 `module_deps`）→ 模块依赖信息丢失
-> - ③删旧目录不留备份 → 无法回退
-> - ④段零检索时 v1 布局不读 → 用户工程再也看不到旧章节
+按[快照契约§5](../references/doc_snapshot_contract.md#5-续跑旧库与人工编辑)保留旧正文、人工内容及完整未知元信息。在新stage完成生成/合并/审计再发布并切换绑定；用户拒绝迁移时旧数据仍可读，不移动、不删除。部分迁移按章记基线，不把未完成章模板或commit提前升级。v1→分支布局的父目录包含新子目录，不执行rmdir父目录。
 
 #### 5.1 正常生成流程（用户意图驱动）
 
@@ -349,38 +258,28 @@ find "${GIT_ROOT}" -maxdepth 3 -name "<module_name>" -type d
 
 **module_docs 生成范围（按用户意图聚焦，避免全量 token 爆炸）**：
 
-- **用户指定模块名** -> 聚焦该模块（其余检测到的独立仓库模块标 `generated: false` 写入 `module_deps`，不生成文档，末尾汇总提示"其余 N 个模块未生成 module_docs，可 `/icode doc <name>` 按需生成"）：该模块是独立仓库 -> 生成该模块 module_docs；该模块非独立仓库 -> 不生成 module_docs（该模块走下方「再生成工程自身章节」生成 project_docs 章节）
-- **无模块名（全量）**→ 检测到的所有模块写入 `module_deps`（可读模块 `generated: true`）；module_docs 只生成"代码已本地化可读"的（git submodule / `repo` 子项目 / monorepo / vendor），不可读的（如 CMake FetchContent build 目录未下载）标 `unresolved_modules`
+- **用户指定模块名**→聚焦该模块：独立Git模块生成module_docs快照；非独立Git目录生成project_docs章节。其余已发现依赖保留真实事实与既有精确绑定，先重核后保留可读full快照的generated=true；未生成、失配或不可读依赖记false并列原因，不能因本次未聚焦就抹去旧有效绑定。末尾汇总其余待生成模块，可按需继续。
+- **无模块名（全量）**→ 检测到的全部真实依赖进入计划；可读模块逐版本生成/审计/发布并绑定后才generated=true，未完成或不可读保持false并列原因。非独立Git子目录写工程章节，不伪造模块仓库身份。
 - **反例（禁止）**：**不得因数量大而全部降级、把模块内容塞进 `project_docs` 章节替代 module_docs**（历史 bug：某工程 34 个 `repo` 子项目时 AI 把模块塞进 project_docs 章节，module_docs 一个没生成）；全量时可读模块数量过多（如超过 10 个）时，应**分批生成或提示用户分次 `/icode doc <name>` 聚焦**，而非降级塞 project_docs
 
 - 对每个**待生成**的 module（按上述范围筛后的列表，非全量 modules）：
   - 有远程 URL 的模块（git submodule / `repo` 子项目）：先调 `mcp__cheap-research__fetch_remote` 拉取其远程 README（从模块 `repo_url` 推导 raw 文件 URL，如 GitHub 类平台 `{repo_url_raw}/HEAD/README.md`；**SSH 格式 `git@` 需转为 HTTPS**）。返回内容作为模块文档生成的参考输入。**降级**（fetch_remote 不可用/URL 格式不兼容/SSRF 拦截）：跳过，仅靠本地代码生成，不阻塞。**不接管决策**：模块文档内容仍由主代理基于本地代码 + 远程 README 参考综合生成，fetch_remote 只提供额外参考源。
-  - 克隆/读取该 module 的代码到临时目录（git submodule 用 `git submodule foreach 'git archive HEAD | tar -x -C $tmp/<name>'`；repo 子仓库用 `cd <submodule_path> && git archive HEAD | tar -x -C $tmp`；monorepo/vendor 直接读子目录；CMake FetchContent 通常 build 目录未下载，fallback 警告）
+  - 读取解析后的实际工作区；先capture完整HEAD、实际内容与声明依赖，再基于该工作区写隔离stage。不用archive HEAD代替dirty代码，不自动克隆/下载不可读依赖；读取失败记录unresolved。
   - 按 [doc_template.md](../references/doc_template.md)「九、模块章节模板」+「十四项必含元素」生成章节（前 50 行四块 + 必含元素清单 + 模板自适应 grep 表；KEYS 按 doc_template.md「七」提取）
-  - Write 到 `$HOME/.claude/icode_data/module_docs/<key>/<NN>_<topic>.md`（十位桶）
-  - **读 `module_docs/<key>/_meta.json`（如存在）→ 提取现有 `used_by` → 与本工程（按 `project_id` 标识）合并去重**（避免 B 工程生成时覆盖 A 工程的引用）
-  - 写 `_meta.json`（`repo_url` / `branch` / `current_commit` / `used_by` = 合并去重后的列表 + **`template_version: v2.0.0`**）
-  - 检查 `<key>/_meta.json` 的 `current_commit` 与当前模块 commit 是否一致：一致跳过（已是最新），不一致→**该 module 全量重生成**（单 module 文档量小，全量合理；不需增量 diff，简化逻辑）
-- 拉取失败→**不写**该 dep 到工程 `_meta.json.module_deps`（避免段零检索时查不到对应 `module_docs/<key>/` 漏匹配）；在工程 `_meta.json.unresolved_modules` 数组里记录 `{name, type, reason, attempt_at}`（`reason` 如"CMake FetchContent build 目录未下载"）；不拖垮（其他 module 继续）
+  - 先写本次隔离stage/<NN>_<topic>.md（十位桶），不在旧族正文或已发布快照内原位改稿
+  - 源码身份已有匹配full快照且正文SHA/模板/审计范围未变→复用该snapshot_id；否则生成新stage逐章合并。既有未知元信息与人工内容保留。
+  - 审计通过后用doc_snapshot.py publish重新核源码/依赖和正文SHA，只发布不可变快照；失败/变化不推进旧commit或done。
+  - 发布可见后用doc_snapshot.py bind将精确版本及真实相对path合并回源码工程之外的父工程文档_meta.json（参数见快照契约§3）。工具保留未知字段和工程整体基线，full才generated=true，partial保持待办；锁忙/内容冲突重读后重试，回读确认绑定成功才推进done。
+- 不可读/未发布dep→保留已知依赖事实并标generated=false，在unresolved_modules记录name/type/reason/attempt_at；不能因失败把工程真实依赖从列表丢掉。其他模块独立继续。
 
 **再生成工程自身章节**（依赖者引用依赖者，含"依赖子模块"字段）：
 
-- **v1 → v2 自动迁移（关键，兼容现有旧数据）**：写入 `$DOC_DIR/_meta.json` 前先检测旧 v1 单级布局：
-  - 若 `~/.claude/icode_data/project_docs/<PROJECT_ID>/` 目录下**直接平铺** `00_overview.md` / `*.md` / `_meta.json`（无分支子目录）→ 是 v1 旧布局，**必须先迁移再写**：
-    1. `mkdir -p $DOC_DIR`（即 `<project_id>/<BRANCH_SAFE>/`）
-    2. 把旧 `<project_id>/*.md` 全部 `mv` 到 `$DOC_DIR/`
-    3. 把旧 `<project_id>/_meta.json` `mv` 到 `$DOC_DIR/`
-    4. 读旧 `_meta.json` 的 `project_type` + `git_root` + `module_deps` + `unresolved_modules` + `stale_files`（**全部字段不丢**），按 [dir_and_metadata.md](../references/dir_and_metadata.md)「工程 _meta.json 模板」格式重写到 `$DOC_DIR/_meta.json`（字段集：`project_id` + `project_type` + `git_root` + `branch` + `head_commit` + `module_deps` + `unresolved_modules` + `stale_files` + `template_version`）
-    5. 旧 `<project_id>/` 目录留空后 `rmdir` 删除
-    6. **留迁移追踪**：删旧 `_meta.json` 前先 cp 到 `$DOC_DIR/_meta.json.v1_migrated_from`（防回退）
-    7. 输出 ℹ️「v1→v2 迁移完成：`<id>/` 单级布局 → `<id>/<branch>/` 多分支布局，N 个章节迁移成功，旧数据备份在 `_meta.json.v1_migrated_from`」
-  - 若 `$DOC_DIR` 已存在（即分支子目录已建）→ 跳过迁移，走正常生成路径
-  - **v1+v2 混合布局边缘**（罕见：用户已手动 mkdir 创建 `<id>/<branch>/` 但旧 `<id>/` 还有平铺章节）：检测到**同时存在**两个布局 → **不静默决定**：①自动备份 v1 平铺的 `<id>/*.md` + `<id>/_meta.json` 到 `<id>/_v1_legacy_backup_<timestamp>/`；②询问用户「检测到混合布局：v1 平铺的章节会被移到 `v1_legacy_backup_<timestamp>/` 子目录且不在段零检索范围，**v2 `<id>/<branch>/` 才是新主目录**。确认迁移？」→ 用户确认后按 v1→v2 路径正常处理；用户拒绝则按 v2 已存在路径处理（v1 数据进 backup 目录不参与检索）
-  - **禁止**：直接写入新布局但**不迁移旧布局**——会让旧章节留在 `<id>/` 目录孤立、再下次 `/icode doc` 时被强制清空或判为"未迁移的孤儿"，数据丢失
-- 对每个待生成章节：读相关代码（Read/Grep）→ 按模板写正文（含十四项必含元素）→ 生成前 50 行四块（含「依赖子模块」+「关联工程」字段 + **`template_version`**）→ Write 到 `$DOC_DIR/<NN>_<module>_<topic>.md`（十位桶，新增取 `max(NN)+1`）
-- **00_overview「关联工程」字段必填**（工程级，其他章节元信息块填同值）：从「工程定位与产品族」章节提炼姊妹/同族工程标识，优先填 project_id（即 `project_docs/` 目录名），不知目录名可填工程名/产品代号（段零模糊匹配兜底）；无关联填"无"
-- 写 `_meta.json`（`project_id` / `project_type` / `git_root` / **`branch = git rev-parse --abbrev-ref HEAD`** / **`head_commit = git rev-parse --short HEAD`** 显式持久化分支与提交，**下游段零借鉴时用这两个字段比对当前 cwd 的 HEAD/分支是否还匹配，跨分支直接 stale 不注入正文，避免误导** / `module_deps` 含所有检测到的可读模块（已生成 `generated: true`、按需未生成 `generated: false`，见上「module_docs 生成范围」）/ `unresolved_modules` 含拉取失败的模块 / **`template_version: v2.0.0`** / **`stale_files`** —— **保留既有 stale_files 字段**，步骤 8 主动 stale 扫描会刷新；不要因为新增 template_version 而丢失 stale_files 数据，导致段零 stale 检测失效）
-- 单章失败→标记不拖垮
+- **旧布局迁移**：先备份旧全文与完整元信息，在新分支位置生成/合并、逐章审计。新位置可读且基线核对通过后切换检索；旧布局继续保留。用户已拒绝迁移时不移动旧数据。具体保护/部分完成规则以快照契约§5为准。
+
+- 对每个待生成工程章，Read/Grep当前实际源码→按模板与十四项必含元素生成四块、正文及精确依赖绑定→在stage逐章合并旧内容；审核绑定正文SHA后才原子写入$DOC_DIR/<NN>_<module>_<topic>.md。新增编号留既有兼容章名，不用当前模块版覆盖其他工程版。
+- 00_overview的关联工程必填，优先用真实project_id，无关联填“无”；其余工程章填同一已核值，作为概览定位线索。
+- 工程_meta写前重读并核旧SHA，保留project_id/project_type/git_root、原始branch、完整head_commit、未知字段、真实module_deps、unresolved_modules和stale_files。逐章记录source_id、template_version和正文SHA；只有全部规划章与依赖绑定完成，才推进全工程last_generated_commit。
+- 单章失败/用户跳过记录原因和旧基线，其他章可独立完成；部分完成不称工程全量完成。
 
 ### 6. 代码事实审计（`99_code_facts_audit.md`，永远生成）
 
@@ -400,7 +299,7 @@ find "${GIT_ROOT}" -maxdepth 3 -name "<module_name>" -type d
 | 章节 | 状态 | 模板版本 | 备注 |
 |------|------|---------|------|
 | 00_overview.md | 新增 | v2.0.0 | - |
-| <章节名> | 模板升级 | v1 → v2.0.0 | 14 项必含清单检查：12/14 通过 |
+| <章节名> | 模板升级 | v1 → v2.0.0 | 适用必含清单全部通过；未通过章列为待完善 |
 | <章节名> | 增量更新 | v2.0.0 | 3 处 file:line 重验 |
 | 99_code_facts_audit.md | 失败 | v2.0.0 | 子代理超时，重跑 |
 
@@ -423,7 +322,7 @@ find "${GIT_ROOT}" -maxdepth 3 -name "<module_name>" -type d
 对比 index.json 的主动 stale 扫描（见 [dir_and_metadata.md](../references/dir_and_metadata.md)「索引淘汰规则·主动 stale 扫描」），project_docs 章节此前只有段零命中前被动检测，长期不跑 /icode doc 的工程过时章节无机制标记。本步骤补第二道清理（详见 [dir_and_metadata.md](../references/dir_and_metadata.md)「project_docs 主动 stale 扫描」段）：
 
 - **时机**：步骤7 进度输出后（章节已生成 + 99 章审计完成）
-- **范围**：全库章节（project_docs 章节量可控，每章 Grep 锚点 <1K token，全量可控）
+- **范围**：当前工程分支目录的章节，以每章记录的实际源码根/依赖身份核查；扫描其他工程时先切换其真实源码上下文，不用当前cwd判全局其他版本的锚点
 - **方法**：逐章读其前 50 行 KEYS「文件位置」列出的源码路径，用 Grep 确认锚点代码仍存在（方法同 99 章审计的 exists 校验，但只验存在性不验描述属实，更轻）
 - **结果写工程 _meta.json.stale_files**：锚点失效（文件已删/路径已改/符号已重命名）→ 章节文件名加入 stale_files；锚点恢复存在（无论本次是否重生成，如代码恢复或重生成）→ 从 stale_files 移除；**stale_files 每次全量重算**（步骤8 执行后反映当前所有锚点失效章节，非增量累加）
 - **输出**：步骤7 汇总表之后独立输出 stale_files 结果（不并入步骤7 表，避免时序冲突；N=0 写"无过时章节"；N>0 列出章节名 + 锚点失效原因，建议重跑 /icode doc 或确认锚点）
@@ -440,8 +339,8 @@ find "${GIT_ROOT}" -maxdepth 3 -name "<module_name>" -type d
 - **分支/提交**：`git rev-parse --abbrev-ref HEAD` + `git rev-parse --short HEAD` + `git log -1 --format=%ci`
 - **项目类型 / 模块类型**：`PROJECT_TYPE`（`git-root` 或 `repo-root`），或模块的 `MODULE_TYPE`（`git-submodule`/`repo`/`cmake`/`monorepo`/`vendor`/`user`）
 - **子模块（git submodule，v1 字段）**：读 `.gitmodules`（无则"无子模块"）+ `git submodule status`，每行 `path → url @ commit`
-- **依赖子模块（按仓库+分支）**：从工程 _meta.json 的 `module_deps` 列表取，章节元信息块格式 `module_a → module:module_a@main@a3f2b1c（module_docs/<key>/）`
-- **被工程引用（模块章节 used_by）**：从模块 _meta.json 的 `used_by` 列表取（如 `myproject（git-root）, another_project（repo-root）`）
+- **依赖子模块**：从工程module_deps的精确绑定取；元信息写module_a@branch@完整HEAD/source_id及module_docs/<key>/snapshots/<snapshot_id>/，不只列族目录。
+- **被工程引用**：按父工程实际source_id/snapshot_id绑定核对；旧族used_by仅提示关联，不能证明所有工程使用该版本正文。
 - **产品线/型号**：grep 工程的产品型号宏/配置，推断不出填"未识别"
 - **关联工程（段零跨工程检索用）**：从工程「产品线/型号」+「工程定位与产品族」章节提炼姊妹/同族工程的 project_id（即 git 仓库根 basename，对应 `project_docs/` 目录名），多个逗号分隔；推断不出填"无"。段零据此检索关联工程 00_overview 作为参考候选
 - **章节归属模块**：与文件名 `<module>` 一致；跨模块章节填 `null`
@@ -464,9 +363,9 @@ find "${GIT_ROOT}" -maxdepth 3 -name "<module_name>" -type d
 
 - 规划章节已生成（固定 00/90/99 + 命中的动态章节）
 - 每章前 50 行四块齐全 + `template_version: v2.0.0` 字段写入
-- 14 项必含元素（按章节类型）达标率 ≥ 70%
-- `00_overview.md` 元信息块含当前 HEAD 的 `generation_commit` + 完整子模块列表 + `template_version`
-- `99_code_facts_audit.md` 已生成（部分失败也标明）
+- 按章节类型全部适用的必含元素通过；不适用项须有实际源码依据。质量评分只用于改进排序，不能豁免缺少的必含内容
+- 章节元信息包含完整generation_commit、source_id、正文SHA与精确依赖快照；只有所有规划章/绑定完成才推进全工程基线
+- `99_code_facts_audit.md` 已生成并对完整范围核验通过；部分失败保留partial/待办，不能把未验证章算全量完成
 - 工程 _meta.json.stale_files 已刷新（步骤8 主动 stale 扫描，段零检索据此跳过过时章节）
 - 模板迁移汇总表输出（v2 新增，详见步骤 7 末尾）
 - 末尾汇总表输出
@@ -474,7 +373,7 @@ find "${GIT_ROOT}" -maxdepth 3 -name "<module_name>" -type d
 ## 衔接与可重复
 
 - **段零消费**：`/icode init`/`log`/`plan`/`start`/`fast` 启动时段零自动检索（见 [dir_and_metadata.md](../references/dir_and_metadata.md)「段零·工程文档检索」段）；**doc 自身不写 `_inject_cache.json`**（工单目录缓存，doc 不创建工单）
-- **可重复**：多次 `/icode doc` 覆盖更新，手动编辑受确认门保护
+- **可重复**：匹配快照幂等复用；新源码/审稿修订保存新快照，旧版和人工内容保留；续跑、缓存按源码与正文身份重新核验。
 ## MCP 推荐（强证据二元化）
 | MCP | 推荐级别 | 用途 |
 |-----|----------|------|

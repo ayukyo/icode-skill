@@ -31,6 +31,7 @@ REQUIRED = FILES | METADATA | {"skill-packs/manifest.json", "mcp/workflow-gate/g
                     "tools/docx/build_docx.py", "tools/docx/inspect_docx.py",
                     "tools/docx/render_docx.py", "tools/docx/compare_docx.py",
                     "tools/docx/verify_sources.py", "tools/docx/draw_sequence.py"}
+REQUIRED |= {"steps/doc.md", "references/doc_snapshot_contract.md", "tools/doc_snapshot.py"}
 
 
 def no_symlinks(path):
@@ -124,7 +125,7 @@ def build(source, output):
             shutil.copyfile(source / rel, target)
             target.chmod(0o755 if (source / rel).stat().st_mode & 0o111 else 0o644)
         version = re.search(r"^\*\*版本\*\*:\s*v(\d+\.\d+\.\d+)\s*$",
-                            (workflow / "SKILL.md").read_text(), re.MULTILINE)
+                            (workflow / "SKILL.md").read_text(encoding="utf-8"), re.MULTILINE)
         if not version:
             raise ValueError("root SKILL.md must declare a release version")
         rows = validate_skills(workflow / "skill-packs/manifest.json")
@@ -139,16 +140,16 @@ def build(source, output):
                 shutil.copyfile(origin, target)
                 target.chmod(origin.stat().st_mode & 0o777)
         for host in HOSTS:
-            manifest = json.loads((templates / f"{host}.plugin.json.template").read_text())
+            manifest = json.loads((templates / f"{host}.plugin.json.template").read_text(encoding="utf-8"))
             manifest["version"] = version.group(1)
             target = package / f".{host}-plugin/plugin.json"
             target.parent.mkdir()
-            target.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n")
+            target.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         shutil.copyfile(templates / "README.md", package / "README.md")
         shutil.copyfile(workflow / "LICENSE", package / "LICENSE")
         sums = [f"{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.relative_to(package).as_posix()}"
                 for p in sorted(package.rglob("*")) if p.is_file()]
-        (package / "SHA256SUMS").write_text("\n".join(sums) + "\n")
+        (package / "SHA256SUMS").write_text("\n".join(sums) + "\n", encoding="utf-8")
         # Exclusive creation; no overwrite/merge option. A disk failure leaves
         # an incomplete new output for inspection, never deletes user data.
         output.mkdir()
