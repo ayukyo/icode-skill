@@ -32,5 +32,8 @@
   "timeout": 120,
 
   "_video_frames_doc": "可选: 视频抽帧数, 默认 8。需 ffmpeg/ffprobe。",
-  "video_frames": 8
+  "video_frames": 8,
+
+  "_ffmpeg_dir_doc": "可选: ffmpeg/ffprobe 所在目录。留空则用 PATH;安装脚本探测到非 PATH 位置(winget/choco/scoop/便携安装)时自动写入。也可用环境变量 VISION_BRIDGE_FFMPEG_DIR 覆盖。",
+  "ffmpeg_dir": ""
 }

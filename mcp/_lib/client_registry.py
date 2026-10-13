@@ -261,11 +261,23 @@ def _atomic_write_static_config(cfg_path: Path, data: dict) -> None:
             os.fsync(stream.fileno())
         os.chmod(temporary, 0o600)
         os.replace(temporary, cfg_path)
-        directory_fd = os.open(cfg_path.parent, os.O_RDONLY)
+        # 目录 fsync 让 rename 元数据持久化。Windows 上对部分目录(如
+        # ~/.codebuddy)的 FlushFileBuffers / open(O_RDONLY) 可能抛
+        # PermissionError (Errno 13);NTFS 不保证目录 entry fsync 的语义,
+        # 但数据已经通过 os.replace 落地。跨平台把目录 fsync 视为 best-effort,
+        # 避免 Windows 平台限制把成功的写入误报为失败。
         try:
-            os.fsync(directory_fd)
-        finally:
-            os.close(directory_fd)
+            directory_fd = os.open(cfg_path.parent, os.O_RDONLY)
+            try:
+                os.fsync(directory_fd)
+            except OSError:
+                # 目录 fsync 在本平台不可用;不影响本次写入的语义。
+                pass
+            finally:
+                os.close(directory_fd)
+        except OSError:
+            # 目录句柄获取失败;不影响本次写入的语义。
+            pass
     finally:
         try:
             os.unlink(temporary)

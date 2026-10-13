@@ -40,6 +40,8 @@ class OpenAICompatProvider(MediaProvider):
         timeout:                HTTP 超时秒 (默认 120)
         video_frames:           视频抽帧数 (默认 8)
         max_images_per_message: 单条请求的图片上限 (默认 4)
+        ffmpeg_dir:             ffmpeg/ffprobe 所在目录 (默认空=用 PATH);
+                                安装脚本探测到非 PATH 位置时自动写入
     """
 
     name = "openai_compat"
@@ -71,10 +73,31 @@ class OpenAICompatProvider(MediaProvider):
             raise ValueError("video_frames 必须是 1..120")
         if not 1 <= self.max_images_per_message <= 120:
             raise ValueError("max_images_per_message 必须是 1..120")
-        self.supports_video = bool(shutil.which("ffmpeg") and shutil.which("ffprobe"))
+        # ffmpeg/ffprobe 定位: config.ffmpeg_dir / VISION_BRIDGE_FFMPEG_DIR 优先,
+        # 回退 PATH(shutil.which)。安装脚本探测到非 PATH 位置时会写入 ffmpeg_dir,
+        # 使运行时无需把 ffmpeg 加进客户端进程的 PATH。
+        self._ffmpeg, self._ffprobe = self._resolve_ffmpeg_tools(
+            config.get("ffmpeg_dir") or os.environ.get("VISION_BRIDGE_FFMPEG_DIR"))
+        self.supports_video = bool(self._ffmpeg and self._ffprobe)
         self.profile_version = config.get("profile_version")
         self.declared_capabilities = config.get("declared_capabilities", [])
         self.quality_profile = config.get("quality_profile", {})
+
+    @staticmethod
+    def _resolve_tool(name: str, ffmpeg_dir: str | None) -> str | None:
+        """定位单个 ffmpeg 系工具: ffmpeg_dir 优先, 回退 PATH。"""
+        if ffmpeg_dir:
+            candidate = os.path.join(
+                ffmpeg_dir, name + (".exe" if os.name == "nt" else ""))
+            if os.path.isfile(candidate):
+                return candidate
+        return shutil.which(name)
+
+    def _resolve_ffmpeg_tools(
+        self, ffmpeg_dir: str | None) -> tuple[str | None, str | None]:
+        """返回 (ffmpeg, ffprobe) 绝对路径; 找不到的项为 None。"""
+        return (self._resolve_tool("ffmpeg", ffmpeg_dir),
+                self._resolve_tool("ffprobe", ffmpeg_dir))
 
     # ---------- 辅助:本地文件转 data URL ----------
 
@@ -93,9 +116,11 @@ class OpenAICompatProvider(MediaProvider):
 
     def _extract_video_frames(self, video_path: str) -> list[str]:
         """ffmpeg 均匀抽帧成临时图片,返回 [data_url, ...]。"""
-        if not shutil.which("ffmpeg") or not shutil.which("ffprobe"):
+        if not self._ffmpeg or not self._ffprobe:
             raise RuntimeError(
-                "video 需要 ffmpeg/ffprobe。请先安装: sudo apt install ffmpeg"
+                "video 需要 ffmpeg/ffprobe。请先安装: winget install Gyan.FFmpeg "
+                "(Windows) / brew install ffmpeg (macOS) / "
+                "sudo apt install ffmpeg (Debian/Ubuntu)"
             )
         frames = []
         with tempfile.TemporaryDirectory() as tmp:
@@ -104,7 +129,7 @@ class OpenAICompatProvider(MediaProvider):
             try:
                 probe = subprocess.run(
                     [
-                        "ffprobe", "-v", "error",
+                        self._ffprobe, "-v", "error",
                         "-show_entries", "format=duration",
                         "-of", "default=noprint_wrappers=1:nokey=1",
                         video_path,
@@ -115,7 +140,7 @@ class OpenAICompatProvider(MediaProvider):
                 interval = max(duration / self.video_frames, 0.1)
                 subprocess.run(
                     [
-                        "ffmpeg", "-y", "-i", video_path,
+                        self._ffmpeg, "-y", "-i", video_path,
                         "-vf", f"fps=1/{interval}",
                         "-frames:v", str(self.video_frames),
                         pattern,

@@ -40,6 +40,17 @@ fi
 # command -v 在 PATH 上查找,优先匹配用户实际安装的二进制。
 NODE_BIN="$(command -v node 2>/dev/null || command -v nodejs 2>/dev/null || true)"
 NPX_BIN="$(command -v npx 2>/dev/null || true)"
+# PATH 上找不到时回退到共享探测: 常见安装根(Program Files/nvm/scoop/choco)
+# 与自动 provision 的运行时(如 ~/.workbuddy/binaries/node/versions/*)。
+# 亦可用 ICODE_NODE_BIN / ICODE_NPX_BIN 显式指定绝对路径。
+if [ -z "$NODE_BIN" ] || [ -z "$NPX_BIN" ]; then
+  _detected="$("$PYTHON_BIN" "$HERE/../_lib/find_node.py" 2>/dev/null || true)"
+  if [ -n "$_detected" ]; then
+    IFS=$'\t' read -r _d_node _d_npx <<<"$_detected"
+    [ -n "$NODE_BIN" ] || NODE_BIN="$_d_node"
+    [ -n "$NPX_BIN" ] || NPX_BIN="$_d_npx"
+  fi
+fi
 if [ -z "$NODE_BIN" ]; then
   echo "❌ 未找到 node 命令。请安装 Node.js (https://nodejs.org)"
   exit 1

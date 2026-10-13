@@ -678,6 +678,26 @@ reap_transaction_leftovers() {
   done
 }
 
+# cp 引擎的提交是"整体目录替换"(stage -> dst, 旧 dst 移入备份后删除), git 载荷
+# 之外的运行时产物会被摧毁。托管技能树内由 MCP 安装流程创建的 .venv、用户
+# config.json(含 KEY)、__pycache__/.cache 属于目标独有数据, 必须在提交前保留
+# 进 stage, 与 rsync 引擎(--delete 不删除 --exclude 匹配项)的行为对齐。
+# 只保留这四类已知运行时路径, 不恢复任意目标独有文件(避免历史累积问题复发)。
+preserve_runtime_artifacts() {
+  local stage="$1" dst="$2" rel
+  [[ -d "$dst" ]] || return 0
+  same_path "$DEV_REPO" "$dst" && return 0
+  while IFS= read -r rel; do
+    [[ -n "$rel" ]] || continue
+    mkdir -p "$stage/$(dirname "$rel")"
+    cp -a "$dst/$rel" "$stage/$rel" 2>/dev/null || true
+  done < <(cd "$dst" 2>/dev/null && find . \
+      \( -type d \( -name '.venv' -o -name '__pycache__' -o -name '.cache' \) \
+         -print -prune \) \
+      -o \( -type f -name 'config.json' -not -path '*/.git/*' -print \) \
+      | sed 's|^\./||')
+}
+
 prepare_icode_stage() {
   local dst="$1"
   local parent stage
@@ -694,9 +714,14 @@ prepare_icode_stage() {
   # destination-only files, those artifacts accumulated across syncs (the
   # Claude target grew past 25k files / 552MB). Skipping the copy makes a
   # committed destination mirror the source exactly, matching rsync --delete.
+  # Installer-created runtime artifacts (.venv, config.json, __pycache__,
+  # .cache) are re-attached by preserve_runtime_artifacts below, so a sync
+  # cannot destroy MCP servers installed inside the managed tree; arbitrary
+  # destination-only files are still dropped.
   sync_icode_payload "$stage" "$dst" || return 1
   remove_legacy_entrypoints "$stage" || return 1
   write_icode_marker "$stage" || return 1
+  preserve_runtime_artifacts "$stage" "$dst" || return 1
   if ! has_icode_frontmatter "$stage/SKILL.md"; then
     echo "❌ ICODE 暂存结果缺少有效入口: $stage/SKILL.md" >&2
     return 1

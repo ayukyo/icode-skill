@@ -104,26 +104,47 @@ pip_install() {
 }
 pip_install -r "$TARGET/requirements.txt"
 
-# 2.5. ffmpeg 检测（视频抽关键帧依赖，非硬性阻断）
-echo ""
-if command -v ffmpeg >/dev/null 2>&1; then
-  echo "✅ ffmpeg 已安装 ($(ffmpeg -version 2>&1 | head -1))"
-else
-  echo "⚠️ ffmpeg 未安装。视频分析不可用；vision-bridge 不会绕过本地抽帧直接上传视频。"
-  echo "   安装方法:"
-  echo "     • sudo apt install ffmpeg          # Debian/Ubuntu"
-  echo "     • brew install ffmpeg              # macOS"
-  echo "     • winget install ffmpeg            # Windows"
-  echo "   装好后如需视频抽帧功能,重新跑 ./install.sh 即可。"
-fi
-
-# 3. 引导 config
+# 3. 引导 config (提前到 ffmpeg 落盘之前, 便于把探测到的 ffmpeg_dir 写进去)
 if [ ! -f "$TARGET/config.json" ]; then
   cp "$TARGET/config.example.json" "$TARGET/config.json"
   echo ""
   echo "⚠️ 首次安装：已生成 $TARGET/config.json 模板"
   echo "👉 请编辑 $TARGET/config.json 填 base_url / api_key / model 后重启 Claude Code"
   echo ""
+fi
+
+# 2.5. ffmpeg 检测（视频抽关键帧依赖，非硬性阻断）
+# PATH 上找不到时回退共享探测: 常见安装根(winget Links/Packages、choco、scoop、
+# Program Files、自动 provision 运行时)。探测到的目录写入 config.json 的
+# ffmpeg_dir, 运行时据此定位, 不依赖客户端进程的 PATH。
+echo ""
+FFMPEG_DIR=""
+if command -v ffmpeg >/dev/null 2>&1 && command -v ffprobe >/dev/null 2>&1; then
+  echo "✅ ffmpeg 已安装 ($(ffmpeg -version 2>&1 | head -1))"
+else
+  FFMPEG_DIR="$("$PYTHON_BIN" "$HERE/../_lib/find_ffmpeg.py" 2>/dev/null || true)"
+  if [ -n "$FFMPEG_DIR" ]; then
+    echo "✅ ffmpeg 已定位到非 PATH 目录: $FFMPEG_DIR"
+    "$PYTHON_BIN" - "$TARGET/config.json" "$FFMPEG_DIR" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+cfg_path = Path(sys.argv[1])
+data = json.loads(cfg_path.read_text(encoding="utf-8"))
+data["ffmpeg_dir"] = sys.argv[2]
+cfg_path.write_text(
+    json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+PY
+    echo "   (已写入 config.json 的 ffmpeg_dir, 运行时据此调用)"
+  else
+    echo "⚠️ ffmpeg 未安装。视频分析不可用；vision-bridge 不会绕过本地抽帧直接上传视频。"
+    echo "   安装方法:"
+    echo "     • winget install Gyan.FFmpeg      # Windows"
+    echo "     • brew install ffmpeg              # macOS"
+    echo "     • sudo apt install ffmpeg          # Debian/Ubuntu"
+    echo "   装好后重跑 ./install.sh 即可(也可用 ICODE_FFMPEG_DIR 指定已装目录)。"
+  fi
 fi
 
 # 4. 注册到 ~/.claude.json
