@@ -14,6 +14,9 @@ import selectors
 import stat
 import subprocess
 import time
+from abc import ABC, abstractmethod
+from dataclasses import dataclass
+from enum import Enum
 from queue import Empty, Full, Queue
 from threading import Event, Thread
 
@@ -52,6 +55,94 @@ SHARED_SIGNAL = re.compile(r"shared|variant|sibling|product[_a-z0-9]*|device[_a-
 
 class InspectionError(ValueError):
     """Invalid input or an unsafe/inaccessible inspection boundary."""
+
+
+class GitOperation(Enum):
+    RESOLVE_COMMIT = "resolve_commit"
+    DIFF_NAMES = "diff_names"
+    LIST_FILES = "list_files"
+    HISTORICAL_BLOB = "historical_blob"
+    TRIGGER_DIFF = "trigger_diff"
+
+@dataclass(frozen=True)
+class GitQuery:
+    operation: GitOperation
+    ref: str = ""
+    oid: str = ""
+    path: str = ""
+    scopes: tuple[str, ...] = ()
+    kind: str = ""
+
+@dataclass(frozen=True)
+class GitQueryResult:
+    data: bytes
+    exit_code: int
+    truncated: bool
+    error: str | None = None
+
+class InspectionGitProvider(ABC):
+    workspace: Path
+
+    @abstractmethod
+    def query(self, request: GitQuery, *, limit: int) -> GitQueryResult:
+        """Return bounded fixed-query bytes; this ABI grants no host authority."""
+
+def _provider_query(root, provider, request, limit):
+    if not isinstance(provider, InspectionGitProvider) or provider.workspace != root:
+        raise InspectionError("provider workspace/type mismatch")
+    if not isinstance(request, GitQuery) or not isinstance(request.operation, GitOperation):
+        raise InspectionError("invalid typed Git query")
+    if any(type(getattr(request, field)) is not str
+           for field in ("ref", "oid", "path", "kind")):
+        raise InspectionError("invalid provider query field type")
+    if not _positive(limit) or type(request.scopes) is not tuple:
+        raise InspectionError("invalid provider query budget/scopes")
+    op = request.operation
+    if op == GitOperation.RESOLVE_COMMIT:
+        if not isinstance(request.ref, str) or not request.ref or request.ref.startswith("-"):
+            raise InspectionError("invalid provider baseline")
+        if request.oid or request.path or request.scopes or request.kind:
+            raise InspectionError("unexpected resolve fields")
+    else:
+        if request.ref:
+            raise InspectionError("unexpected query ref")
+        if op != GitOperation.LIST_FILES and not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", request.oid):
+            raise InspectionError("invalid provider commit OID")
+        if op == GitOperation.LIST_FILES:
+            if request.oid or request.path or request.kind not in ("others", "association"):
+                raise InspectionError("invalid list_files kind/fields")
+        elif op == GitOperation.DIFF_NAMES:
+            if request.path or request.kind:
+                raise InspectionError("unexpected diff fields")
+        elif op in (GitOperation.HISTORICAL_BLOB, GitOperation.TRIGGER_DIFF):
+            _path(root, request.path)
+            if request.scopes or request.kind:
+                raise InspectionError("unexpected content fields")
+        for scope in request.scopes:
+            _path(root, scope, directory=True)
+    result = provider.query(request, limit=limit)
+    if not isinstance(result, GitQueryResult) or type(result.data) is not bytes:
+        raise InspectionError("invalid provider result type")
+    if type(result.exit_code) is not int or type(result.truncated) is not bool:
+        raise InspectionError("invalid provider result status")
+    if result.error is not None or result.exit_code != 0 or result.truncated or len(result.data) > limit:
+        raise InspectionError("provider query failed/incomplete")
+    if op == GitOperation.RESOLVE_COMMIT:
+        try:
+            resolved = result.data.decode("ascii").strip()
+        except UnicodeError as exc:
+            raise InspectionError("invalid provider commit bytes") from exc
+        if not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", resolved):
+            raise InspectionError("invalid provider commit output")
+    elif op in (GitOperation.DIFF_NAMES, GitOperation.LIST_FILES):
+        if result.data and not result.data.endswith(b"\0"):
+            raise InspectionError("unterminated provider names")
+        for raw in result.data.split(b"\0")[:-1]:
+            try:
+                _path(root, raw.decode("utf-8"))
+            except UnicodeError as exc:
+                raise InspectionError("nonUTF8 provider name") from exc
+    return result.data, False
 
 
 def _positive(value):
@@ -216,8 +307,18 @@ def _git(repo, args, limit=8192):
         raise InspectionError(f"git unavailable/timeout: {exc}") from exc
 
 
-def _repo(root, path):
+def _repo(root, path, *, git_provider=None):
     current = (root / path).parent
+    if git_provider is not None:
+        if not isinstance(git_provider, InspectionGitProvider) or git_provider.workspace != root:
+            raise InspectionError("provider workspace/type mismatch")
+        while current == root or root in current.parents:
+            if (current / ".git").exists() and current != root:
+                raise InspectionError("nested repository unsupported by provider")
+            if current == root:
+                return root
+            current = current.parent
+        raise InspectionError("provider path outside workspace")
     while current == root or root in current.parents:
         if (current / ".git").exists():
             return current
@@ -248,15 +349,19 @@ def check_declarations(report):
     return [{key: c.get(key) for key in CHECK_IDENTITY_KEYS} for c in checks]
 
 
-def _trigger_content(root, path, data, repo, baseline, max_bytes, debt):
+def _trigger_content(root, path, data, repo, baseline, max_bytes, debt, *, git_provider=None):
     text = data.decode("utf-8")
     if repo is not None and baseline is not None:
         # Only removed lines supplement current source. A removed clock/cast
         # must retain its prompt, without importing unrelated historical code.
         rel = (root / path).relative_to(repo).as_posix()
         try:
-            diff, cut = _git(repo, ["diff", "--no-ext-diff", "--no-textconv", "--no-renames",
-                "--unified=0", baseline, "--", f":(literal){rel}"], max_bytes)
+            if git_provider is None:
+                diff, cut = _git(repo, ["diff", "--no-ext-diff", "--no-textconv", "--no-renames",
+                    "--unified=0", baseline, "--", f":(literal){rel}"], max_bytes)
+            else:
+                diff, cut = _provider_query(root, git_provider,
+                    GitQuery(GitOperation.TRIGGER_DIFF, oid=baseline, path=rel), max_bytes)
             text += "\n" + "\n".join(line[1:] for line in diff.decode("utf-8").splitlines()
                                     if line.startswith("-") and not line.startswith("---"))
             if cut:
@@ -279,7 +384,7 @@ def _derive_checks(source_groups):
     return checks
 
 
-def _content(root, path, repo, baseline, max_bytes, *, artifact=False):
+def _content(root, path, repo, baseline, max_bytes, *, artifact=False, git_provider=None):
     target = root / _path(root, path, artifact=artifact)
     if target.exists():
         if not stat.S_ISREG(target.stat().st_mode):
@@ -291,7 +396,11 @@ def _content(root, path, repo, baseline, max_bytes, *, artifact=False):
         if repo is None or baseline is None:
             raise InspectionError("missing historical baseline content")
         rel = target.relative_to(repo).as_posix()
-        data, cut = _git(repo, ["show", "--no-ext-diff", "--no-textconv", f"{baseline}:{rel}"], max_bytes)
+        if git_provider is None:
+            data, cut = _git(repo, ["show", "--no-ext-diff", "--no-textconv", f"{baseline}:{rel}"], max_bytes)
+        else:
+            data, cut = _provider_query(root, git_provider,
+                GitQuery(GitOperation.HISTORICAL_BLOB, oid=baseline, path=rel), max_bytes)
         if cut:
             raise InspectionError("historical content exceeds max_bytes")
         kind = "deleted"
@@ -308,7 +417,7 @@ def _content(root, path, repo, baseline, max_bytes, *, artifact=False):
 
 def build_worklist(workspace, code_files, *, step, ticket_id, attempt, mode="full",
                    related=None, scopes=None, baselines=None, max_files=200,
-                   max_bytes=1048576):
+                   max_bytes=1048576, git_provider=None):
     root = _workspace(workspace)
     if not isinstance(step, str) or step not in PHASES or mode not in ("full", "fast"):
         raise InspectionError("invalid step/mode")
@@ -336,14 +445,19 @@ def build_worklist(workspace, code_files, *, step, ticket_id, attempt, mode="ful
     required = {p: "code_files" for p in seeds}
     for p in related:
         required.setdefault(p, "explicit_related")
-    repos = sorted({r for p in seeds + related for r in [_repo(root, p)] if r is not None})
+    repos = sorted({r for p in seeds + related for r in [_repo(root, p, git_provider=git_provider)] if r is not None})
     if set(baselines) - {r.relative_to(root).as_posix() for r in repos}:
         raise InspectionError("baseline key is not an affected repository")
 
-    def names(repo, args, *, required_scan=True):
+    def names(repo, args, *, required_scan=True, request=None):
         label = repo.relative_to(root).as_posix()
-        data, cut = _git(repo, args, max_files * 4096)
-        chunks = data.split(b"\0")[:-1]  # Ignore any truncated terminal filename.
+        if git_provider is None:
+            data, cut = _git(repo, args, max_files * 4096)
+        else:
+            data, cut = _provider_query(root, git_provider, request, max_files * 4096)
+        chunks = data.split(b"\0")[:-1]
+        if git_provider is not None and len(chunks) > max_files:
+            raise InspectionError("provider names exceed max_files")
         if required_scan and (cut or len(chunks) > max_files):
             debt[label] = "candidate budget truncated; remaining paths unobserved"
         return [os.fsdecode(c) for c in chunks[:max_files]]
@@ -355,7 +469,11 @@ def build_worklist(workspace, code_files, *, step, ticket_id, attempt, mode="ful
         if not isinstance(ref, str) or not ref or ref.startswith("-"):
             raise InspectionError(f"invalid baseline: {label}")
         try:
-            oid, cut = _git(repo, ["rev-parse", "--verify", "--end-of-options", ref + "^{commit}"])
+            if git_provider is None:
+                oid, cut = _git(repo, ["rev-parse", "--verify", "--end-of-options", ref + "^{commit}"])
+            else:
+                oid, cut = _provider_query(root, git_provider,
+                    GitQuery(GitOperation.RESOLVE_COMMIT, ref=ref), 8192)
             if cut:
                 raise InspectionError("baseline output truncated")
         except InspectionError as exc:
@@ -369,14 +487,19 @@ def build_worklist(workspace, code_files, *, step, ticket_id, attempt, mode="ful
         # of enumeration itself (not merely filtered after consuming budgets).
         excluded_specs = [":(glob,exclude)**/.icode_output/**"]
         pathspecs = [f":(literal){s}" for s in local_scopes] + excluded_specs
-        changed = set(names(repo, diff + pathspecs)) if local_scopes else set()
-        untracked = set(names(repo, ["ls-files", "--others", "--exclude-standard", "-z", "--", *pathspecs])) if local_scopes else set()
+        changed = set(names(repo, diff + pathspecs,
+            request=GitQuery(GitOperation.DIFF_NAMES, oid=baseline, scopes=tuple(Path(s).as_posix() for s in local_scopes)))) if local_scopes else set()
+        untracked = set(names(repo, ["ls-files", "--others", "--exclude-standard", "-z", "--", *pathspecs],
+            request=GitQuery(GitOperation.LIST_FILES, kind="others", scopes=tuple(Path(s).as_posix() for s in local_scopes)))) if local_scopes else set()
         association_scopes = sorted(set(local_scopes) | {os.path.relpath((root / p).parent, repo)
-            for p in related if _repo(root, p) == repo})
+            for p in related if _repo(root, p, git_provider=git_provider) == repo})
         association_specs = [f":(literal){s}" for s in association_scopes] + excluded_specs
-        scoped = set(names(repo, ["ls-files", "--cached", "--others", "--exclude-standard", "-z", "--", *association_specs]))
-        outside = set(names(repo, diff + excluded_specs, required_scan=False)) | set(names(repo,
-            ["ls-files", "--others", "--exclude-standard", "-z", "--", *excluded_specs], required_scan=False))
+        scoped = set(names(repo, ["ls-files", "--cached", "--others", "--exclude-standard", "-z", "--", *association_specs],
+            request=GitQuery(GitOperation.LIST_FILES, kind="association", scopes=tuple(Path(s).as_posix() for s in association_scopes))))
+        outside = set(names(repo, diff + excluded_specs, required_scan=False,
+            request=GitQuery(GitOperation.DIFF_NAMES, oid=baseline))) | set(names(repo,
+            ["ls-files", "--others", "--exclude-standard", "-z", "--", *excluded_specs], required_scan=False,
+            request=GitQuery(GitOperation.LIST_FILES, kind="others")))
         for local in sorted(changed | untracked | scoped | outside):
             path = (repo / local).relative_to(root).as_posix()
             # Ticket sidecars are never source candidates. Their normal growth
@@ -401,14 +524,14 @@ def build_worklist(workspace, code_files, *, step, ticket_id, attempt, mode="ful
                 if local in changed | untracked:
                     debt[path] = str(exc)
                 continue
-            if _repo(root, path) != repo:  # Never absorb a nested repository through its parent.
+            if _repo(root, path, git_provider=git_provider) != repo:  # Never absorb a nested repository through its parent.
                 excluded[path] = "different_repository"
                 continue
             candidates.add(path)
             if local in changed | untracked:
                 required.setdefault(path, "git_change")
     for seed in seeds + related:
-        if _repo(root, seed) is None:
+        if _repo(root, seed, git_provider=git_provider) is None:
             debt[seed] = "no affected Git repository; diff/association coverage unavailable"
             parent = (root / seed).parent
             try:
@@ -431,7 +554,7 @@ def build_worklist(workspace, code_files, *, step, ticket_id, attempt, mode="ful
             except OSError as exc:
                 debt[seed] = f"no Git; association directory unreadable: {exc}"
         for path in sorted(candidates):
-            if Path(path).suffix.lower() in ASSOCIATED_SUFFIXES and _stem(path) == _stem(seed) and _repo(root, path) == _repo(root, seed):
+            if Path(path).suffix.lower() in ASSOCIATED_SUFFIXES and _stem(path) == _stem(seed) and _repo(root, path, git_provider=git_provider) == _repo(root, seed, git_provider=git_provider):
                 required.setdefault(path, "same_stem_or_test")
     groups, source_groups = {}, {}
     ordered = seeds + sorted(set(required) - set(seeds))
@@ -439,16 +562,16 @@ def build_worklist(workspace, code_files, *, step, ticket_id, attempt, mode="ful
         if index >= max_files:
             debt[path] = "required file exceeds max_files budget"
             continue
-        repo = _repo(root, path)
+        repo = _repo(root, path, git_provider=git_provider)
         label = repo.relative_to(root).as_posix() if repo else None
         try:
-            data, kind = _content(root, path, repo, report["resolved_baselines"].get(label), max_bytes)
+            data, kind = _content(root, path, repo, report["resolved_baselines"].get(label), max_bytes, git_provider=git_provider)
         except (InspectionError, OSError) as exc:
             debt[path] = str(exc)
             continue
         groups.setdefault((label, _stem(path)), []).append(dict(path=path, sha256=hashlib.sha256(data).hexdigest(), kind=kind, reason=required[path], rules=_rules(path), reads={}))
         if Path(path).suffix.lower() in SOURCE_SUFFIXES:
-            text = _trigger_content(root, path, data, repo, report["resolved_baselines"].get(label), max_bytes, debt)
+            text = _trigger_content(root, path, data, repo, report["resolved_baselines"].get(label), max_bytes, debt, git_provider=git_provider)
             kinds = set()
             if TIMESTAMP_SIGNAL.search(text) or INTEGER_CONVERSION.search(text):
                 kinds.add("timestamp_contract")
@@ -467,7 +590,7 @@ def build_worklist(workspace, code_files, *, step, ticket_id, attempt, mode="ful
     return report
 
 
-def _rebuild(report, workspace, code_files=None):
+def _rebuild(report, workspace, code_files=None, *, git_provider=None):
     if not isinstance(report, dict):
         raise InspectionError("report must be an object")
     keys = ("code_files", "step", "ticket_id", "attempt", "mode", "related", "scopes", "baselines", "max_files", "max_bytes")
@@ -483,7 +606,7 @@ def _rebuild(report, workspace, code_files=None):
     # symbolic branch/tag. No fallback to a different HEAD is permitted.
     options = {k: report[k] for k in keys if k not in ("code_files", "baselines")}
     expected = build_worklist(workspace, report["code_files"] if code_files is None else code_files,
-                              baselines=pinned, **options)
+                              baselines=pinned, git_provider=git_provider, **options)
     expected["baselines"] = report["baselines"]
     return expected
 
@@ -502,7 +625,7 @@ def _flatten(report):
     return result
 
 
-def _assessment_issues(assessment, check, report, root, required, *, allow_unfinished=False, cache=None):
+def _assessment_issues(assessment, check, report, root, required, *, allow_unfinished=False, cache=None, git_provider=None):
     """Validate each explicit cell and its source/artifact evidence without executing tests."""
     if not isinstance(assessment, dict) or set(assessment) != {"cells"} or not isinstance(assessment["cells"], dict):
         return ["assessment must contain only cells"]
@@ -536,9 +659,9 @@ def _assessment_issues(assessment, check, report, root, required, *, allow_unfin
                     if set(ref) != fields or path not in check["paths"] or path not in required:
                         raise InspectionError("source evidence must locate a current check member")
                     if (kind, path) not in cache:
-                        repo = _repo(root, path)
+                        repo = _repo(root, path, git_provider=git_provider)
                         label = repo.relative_to(root).as_posix() if repo else None
-                        data, _ = _content(root, path, repo, report["resolved_baselines"].get(label), report["max_bytes"])
+                        data, _ = _content(root, path, repo, report["resolved_baselines"].get(label), report["max_bytes"], git_provider=git_provider)
                         cache[kind, path] = (hashlib.sha256(data).hexdigest(), data.decode("utf-8").splitlines(keepends=True))
                     digest, lines = cache[kind, path]
                     start, end = ref["start_line"], ref["end_line"]
@@ -554,7 +677,7 @@ def _assessment_issues(assessment, check, report, root, required, *, allow_unfin
                     if not isinstance(ref["evidence_boundary"], str) or not ref["evidence_boundary"].strip():
                         raise InspectionError("artifact evidence requires a nonempty boundary")
                     if (kind, path) not in cache:
-                        data, _ = _content(root, path, None, None, report["max_bytes"], artifact=True)
+                        data, _ = _content(root, path, None, None, report["max_bytes"], artifact=True, git_provider=git_provider)
                         cache[kind, path] = hashlib.sha256(data).hexdigest()
                     if ref["sha256"] != cache[kind, path]:
                         raise InspectionError("artifact evidence hash drift")
@@ -565,7 +688,7 @@ def _assessment_issues(assessment, check, report, root, required, *, allow_unfin
     return issues
 
 
-def _checks_issues(report, expected, root, required, *, required_checks_version=None, allow_unfinished=False):
+def _checks_issues(report, expected, root, required, *, required_checks_version=None, allow_unfinished=False, git_provider=None):
     if required_checks_version is not None and (type(required_checks_version) is not int or required_checks_version != CHECKS_VERSION):
         return ["unsupported required_checks_version"]
     present = "checks_version" in report or "checks" in report
@@ -592,11 +715,11 @@ def _checks_issues(report, expected, root, required, *, required_checks_version=
                     issues.append(f"missing assessment: {check['kind']}:{phase}")
                 continue
             issues.extend(f"{check['kind']}:{phase}:{issue}" for issue in _assessment_issues(
-                results[phase], check, report, root, required, allow_unfinished=allow_unfinished, cache=cache))
+                results[phase], check, report, root, required, allow_unfinished=allow_unfinished, cache=cache, git_provider=git_provider))
     return issues
 
 
-def apply_assessment(report, workspace, check_id, phase, assessment):
+def apply_assessment(report, workspace, check_id, phase, assessment, *, git_provider=None):
     """Record one complete, independently assessed phase after its actual Read.
 
     This shared API mutates only after successful validation. Callers retain
@@ -604,7 +727,7 @@ def apply_assessment(report, workspace, check_id, phase, assessment):
     Neither a handled record nor a lexical trigger proves semantic correctness.
     """
     pending = dict(report, coverage_status="partial", debt_reason="pending assessment")
-    issues = validate_worklist(pending, workspace, allow_incomplete=True, required_checks_version=CHECKS_VERSION)
+    issues = validate_worklist(pending, workspace, allow_incomplete=True, required_checks_version=CHECKS_VERSION, git_provider=git_provider)
     if issues:
         raise InspectionError(str(issues))
     selected = [c for c in report["checks"] if c["check_id"] == check_id]
@@ -614,7 +737,7 @@ def apply_assessment(report, workspace, check_id, phase, assessment):
     required = _flatten(report)
     if any(required[path]["reads"].get(phase) != required[path]["sha256"] for path in check["paths"]):
         raise InspectionError("assessment requires current Read for every check member in this phase")
-    issues = _assessment_issues(assessment, check, report, _workspace(workspace), required, allow_unfinished=True)
+    issues = _assessment_issues(assessment, check, report, _workspace(workspace), required, allow_unfinished=True, git_provider=git_provider)
     if issues:
         raise InspectionError(str(issues))
     check["results"][phase] = copy.deepcopy(assessment)
@@ -622,9 +745,9 @@ def apply_assessment(report, workspace, check_id, phase, assessment):
 
 
 def validate_worklist(report, workspace, *, code_files=None, step=None,
-                      ticket_id=None, attempt=None, allow_incomplete=False, required_checks_version=None):
+                      ticket_id=None, attempt=None, allow_incomplete=False, required_checks_version=None, git_provider=None):
     try:
-        expected = _rebuild(report, workspace, code_files)
+        expected = _rebuild(report, workspace, code_files, git_provider=git_provider)
         actual, required = _flatten(report), _flatten(expected)
         issues = []
         for key in ("schema_version", "workspace", "step", "ticket_id", "attempt", "mode", "required_phases", "code_files", "related", "scopes", "baselines", "resolved_baselines", "max_files", "max_bytes"):
@@ -660,7 +783,7 @@ def validate_worklist(report, workspace, *, code_files=None, step=None,
         if status != "complete_within_scope" and not (allow_incomplete and incomplete):
             issues.append("inspection incomplete without accepted explicit debt")
         issues.extend(_checks_issues(report, expected, _workspace(workspace), required,
-            required_checks_version=required_checks_version, allow_unfinished=allow_incomplete and incomplete))
+            required_checks_version=required_checks_version, allow_unfinished=allow_incomplete and incomplete, git_provider=git_provider))
         debt_paths = {d["path"] for d in unobserved}
         for path in sorted(set(actual) & set(required)):
             f, target = actual[path], required[path]
@@ -684,10 +807,10 @@ def validate_worklist(report, workspace, *, code_files=None, step=None,
         return [f"invalid worklist: {exc}"]
 
 
-def validate_findings(findings, report, workspace):
+def validate_findings(findings, report, workspace, *, git_provider=None):
     try:
         root = _workspace(workspace)
-        expected = _rebuild(report, root)
+        expected = _rebuild(report, root, git_provider=git_provider)
         actual, required = _flatten(report), _flatten(expected)
         if report.get("workspace") != str(root) or set(actual) != set(required):
             raise InspectionError("finding worklist scope/workspace drift")
@@ -730,9 +853,9 @@ def validate_findings(findings, report, workspace):
                     start, end = loc["start_line"], loc["end_line"]
                     if not _positive(start) or not _positive(end) or end < start:
                         raise InspectionError("invalid 1-based line range")
-                    repo = _repo(root, path)
+                    repo = _repo(root, path, git_provider=git_provider)
                     label = repo.relative_to(root).as_posix() if repo else None
-                    data, _ = _content(root, path, repo, expected["resolved_baselines"].get(label), expected["max_bytes"])
+                    data, _ = _content(root, path, repo, expected["resolved_baselines"].get(label), expected["max_bytes"], git_provider=git_provider)
                     if loc["source_sha256"] != hashlib.sha256(data).hexdigest():
                         raise InspectionError("source_sha256 drift")
                     lines = data.decode("utf-8").splitlines(keepends=True)
