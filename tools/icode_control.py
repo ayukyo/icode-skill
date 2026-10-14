@@ -4438,8 +4438,10 @@ def cmd_build_start(args, *, git_provider=None, require_git_provider=False):
     return 0
 
 
-def cmd_record_verification(args):
+def cmd_record_verification(args, *, git_provider=None, require_git_provider=False):
     out_dir = Path(args.dir).resolve()
+    access = ({"git_provider": git_provider, "require_git_provider": require_git_provider}
+              if _candidate_access_requested(git_provider, require_git_provider) else {})
     if args.close_repair and not args.request_id:
         raise ControlError(
             "--close-repair 必须提供 --request-id，避免关闭恢复记录被重复追加",
@@ -4509,6 +4511,14 @@ def cmd_record_verification(args):
         optional_fields[field] = verification_json(getattr(args, field + "_json"), "--" + field.replace("_", "-") + "-json")
     input_payload.update({key: value for key, value in optional_fields.items() if value is not None})
     with DirLock(out_dir):
+        if access:
+            probe = load_metadata(out_dir)
+            _candidate_context_guard(out_dir, probe, git_provider, require_git_provider)
+            if not verification_evidence_module().enabled(probe):
+                raise ControlError("candidate tracking required", gate_id="candidate_provider_context")
+            if (out_dir / TXN_NAME).exists():
+                raise ControlError("provider transaction recovery is not enabled",
+                                   gate_id="candidate_transaction_pending")
         recover_pending_transaction(out_dir)
         meta = load_metadata(out_dir)
         require_vnext(meta, out_dir)
@@ -4525,7 +4535,7 @@ def cmd_record_verification(args):
             raise ControlError(
                 "--close-repair 仅用于 close_state=close_planned 的归档前证据恢复",
                 exit_code=1, gate_id="close_repair_state")
-        events, problems = verify_event_chain(out_dir, meta)
+        events, problems = verify_event_chain(out_dir, meta, **access)
         if problems:
             raise ControlError("现有事件链不完整，拒绝记录验证", exit_code=1,
                                gate_id="event_chain", violations=problems)
@@ -4534,7 +4544,7 @@ def cmd_record_verification(args):
             if evidence_api.enabled(meta):
                 if args.environment is None:
                     raise evidence_api.EvidenceError("enabled verification requires explicit --environment")
-                live = candidate_snapshot(out_dir, meta, events=events)
+                live = candidate_snapshot(out_dir, meta, events=events, **access)
                 input_payload["candidate"] = evidence_api.resolve_candidate(args.candidate_id, meta, events, live, candidate_module())
             elif args.candidate_id is not None:
                 raise evidence_api.EvidenceError("candidate-id requires an explicitly enabled candidate contract")
@@ -4553,7 +4563,7 @@ def cmd_record_verification(args):
                     input_payload["test_summary"] = report_api.summarize_report(report, workspace)
             prior_runs = evidence_api.event_runs(events)
             evidence_api.validate_supersedes(input_payload, prior_runs)
-            evidence_api.validate_reuse(input_payload, prior_runs, candidate_module())
+            evidence_api.validate_reuse(input_payload, prior_runs, candidate_module(), **access)
             evidence_api.validate_direct(input_payload)
             evidence_api.validate_test_summary(input_payload)
             # Idempotent replay checks stored inputs before re-reading outputs:
@@ -4564,16 +4574,32 @@ def cmd_record_verification(args):
                 # Exact replay is a historical receipt, not a new observation.
                 evidence_api.validate_direct(input_payload, strict_outcome=True)
                 evidence_api.validate_provenance(input_payload, meta, events, execution_workspace(out_dir, meta), candidate_module(),
-                                                live_candidate=live if evidence_api.enabled(meta) else None)
-                if evidence_api.enabled(meta) and args.kind == "build" and args.build_source == "fresh" and args.outcome == "pass" \
-                        and not candidate_module().compare_candidates(input_payload["candidate"], candidate_snapshot(out_dir, meta, events=events))["equivalent"]:
-                    raise evidence_api.EvidenceError("source candidate changed while verifying build artifacts")
+                                                live_candidate=live if evidence_api.enabled(meta) else None, **access)
+                if evidence_api.enabled(meta) and args.kind == "build" and args.build_source == "fresh" and args.outcome == "pass":
+                    if access:
+                        proof = evidence_api._compare_candidates(
+                            input_payload["candidate"], candidate_snapshot(out_dir, meta, events=events, **access),
+                            candidate_module(), **access)
+                    else:
+                        proof = candidate_module().compare_candidates(
+                            input_payload["candidate"], candidate_snapshot(out_dir, meta, events=events))
+                    if not proof["equivalent"]:
+                        raise evidence_api.EvidenceError("source candidate changed while verifying build artifacts")
         except (evidence_api.EvidenceError, OSError, ValueError, KeyError, TypeError) as exc:
             raise ControlError(str(exc), exit_code=1, gate_id="verification_evidence") from exc
         prior = find_idempotent_event(
             events, args.request_id, "verification_recorded", input_payload,
             payload_keys=(*input_payload, "test_summary"))
+        def before_publish():
+            # Bind this invocation's live source, not a permitted historical origin.
+            current = candidate_snapshot(out_dir, meta, events=events, **access)
+            if current["candidate_id"] != live["candidate_id"]:
+                raise ControlError("source candidate changed before verification publication",
+                                   gate_id="verification_evidence")
+            _candidate_context_guard(out_dir, meta, git_provider, require_git_provider)
         if prior:
+            if access:
+                before_publish()
             print(json.dumps({"ok": True, "already_applied": True,
                               "request_id": args.request_id,
                               "run_id": prior["payload"].get("run_id"),
@@ -4587,7 +4613,8 @@ def cmd_record_verification(args):
         meta["verification_runs"] = runs
         event = commit_metadata_and_event(
             out_dir, before_meta, meta, "verification_recorded", run,
-            request_id=args.request_id)
+            request_id=args.request_id,
+            **(dict(access, before_publish=before_publish) if access else {}))
     print(json.dumps({"ok": True, "run": {key: value for key, value in run.items() if key != "candidate"}, "event_id": event["event_id"]},
                      ensure_ascii=False, indent=2))
     return 0
@@ -6508,7 +6535,8 @@ def main(*, git_provider=None, require_git_provider=False):
         access = ({"git_provider": git_provider, "require_git_provider": require_git_provider}
                   if _candidate_access_requested(git_provider, require_git_provider) else {})
         if access and not ((args.cmd == "candidate" and args.func is cmd_candidate) or
-                           (args.cmd == "build-start" and args.func is cmd_build_start)):
+                           (args.cmd == "build-start" and args.func is cmd_build_start) or
+                           (args.cmd == "record-verification" and args.func is cmd_record_verification)):
             raise ControlError("B1 command dispatch is not enabled", gate_id="candidate_business_propagation_pending")
         # 捕获子命令输出：业务失败（ok=false）时子命令仍可能返回 0，
         # 会让 shell 的 `&&` / `set -e` 误判为成功。此处统一纠正为退出码 1。
