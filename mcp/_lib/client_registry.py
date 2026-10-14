@@ -124,7 +124,9 @@ def codex_register(name: str) -> tuple[str, bool]:
     不自动 remove（避免破坏性更新），给出人工处理指引。
     """
     if not CODEX_BIN:
-        return f"未检测到 codex CLI（不在 PATH），跳过注册（{name}）", False
+        # 宿主 CLI 未安装 = 无注册目标,属预期跳过(与 mcp/install.sh 对
+        # CodeBuddy/WorkBuddy 的"未检测到宿主保持不写"同语义),不是失败。
+        return f"未检测到 codex CLI（不在 PATH），跳过注册（{name}）", True
     entry = _read_entry(name)
     status = codex_inspect(name)
     if status == "match":

@@ -36,8 +36,13 @@ if command -v rsync >/dev/null 2>&1; then
     "$HERE/" "$TARGET/"
 else
   cd "$HERE"
+  # 从已安装位置运行时 HERE 与 TARGET 同路径,同步是恒等操作:跳过同文件
+  # cp,否则 `cp a a` 报 "are the same file" 使 set -e 中断安装。
   for f in $(find . -type f -not -path './.venv/*' -not -path '*/__pycache__/*' -not -path './config.json'); do
     dst="$TARGET/${f#./}"
+    if [ "$HERE/${f#./}" = "$dst" ]; then
+      continue
+    fi
     mkdir -p "$(dirname "$dst")"
     cp "$f" "$dst"
   done

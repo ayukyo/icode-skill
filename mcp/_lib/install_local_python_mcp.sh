@@ -31,15 +31,24 @@ if command -v rsync >/dev/null 2>&1; then
   rsync -a --delete --exclude='.venv/' --exclude='__pycache__/' --exclude='config.json' "$SOURCE_DIR/" "$TARGET/"
   rsync -a --delete --exclude='__pycache__/' "$LIB_SOURCE/" "$LIB_TARGET/"
 else
+  # 从已安装位置运行时 SOURCE_DIR 与 TARGET 可能同路径(顶层 install.sh
+  # 调用的是已安装副本),此时同步是恒等操作:跳过同文件 cp,否则
+  # `cp a a` 报 "are the same file" 使 set -e 中断安装。
   while IFS= read -r -d '' source; do
     relative="${source#"$SOURCE_DIR"/}"
     destination="$TARGET/$relative"
+    if [ "$source" = "$destination" ]; then
+      continue
+    fi
     mkdir -p "$(dirname "$destination")"
     cp "$source" "$destination"
   done < <(find "$SOURCE_DIR" -type f -not -path '*/.venv/*' -not -path '*/__pycache__/*' -not -name config.json -print0)
   while IFS= read -r -d '' source; do
     relative="${source#"$LIB_SOURCE"/}"
     destination="$LIB_TARGET/$relative"
+    if [ "$source" = "$destination" ]; then
+      continue
+    fi
     mkdir -p "$(dirname "$destination")"
     cp "$source" "$destination"
   done < <(find "$LIB_SOURCE" -type f -not -path '*/__pycache__/*' -print0)
