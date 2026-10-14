@@ -2174,9 +2174,21 @@ def recover_pending_transaction(out_dir):
 
 
 def commit_metadata_and_event(out_dir, before, after, event_type, payload,
-                              request_id=None, actor="icode", event_id=None):
+                              request_id=None, actor="icode", event_id=None, *,
+                              git_provider=None, require_git_provider=False, before_publish=None):
     """调用方持锁。事务日志 + metadata 原子替换 + event 追加；普通 I/O 失败回滚旧 metadata。"""
     out_dir = Path(out_dir)
+    access = ({"git_provider": git_provider, "require_git_provider": require_git_provider}
+              if _candidate_access_requested(git_provider, require_git_provider) else {})
+    if access:
+        _candidate_context_guard(out_dir, before, git_provider, require_git_provider)
+        if (out_dir / TXN_NAME).exists():
+            raise ControlError("provider transaction recovery is not enabled", gate_id="candidate_transaction_pending")
+        if not callable(before_publish):
+            raise ControlError("candidate publication check missing", gate_id="candidate_provider_context")
+        _events, problems = verify_event_chain(out_dir, before, **access)
+        if problems:
+            raise ControlError("candidate transaction event chain invalid", gate_id="event_chain", violations=problems)
     require_valid_metadata(after)
     event_payload = dict(payload)
     event_payload["metadata_hash_after"] = metadata_hash(after)
@@ -2185,6 +2197,10 @@ def commit_metadata_and_event(out_dir, before, after, event_type, payload,
     if event_id is not None:
         event["event_id"] = event_id
         event["event_hash"] = canonical_event_hash(event)
+    # Full before-state semantics were checked above; prepare_event only builds
+    # the existing hash/schema envelope against the after-state, without access.
+    if access:
+        _candidate_context_guard(out_dir, before, git_provider, require_git_provider)
     txn_path = out_dir / TXN_NAME
     atomic_write_json(txn_path, {
         "schema_version": 1,
@@ -2194,7 +2210,12 @@ def commit_metadata_and_event(out_dir, before, after, event_type, payload,
         "event": event,
     })
     try:
+        if access:
+            _candidate_context_guard(out_dir, before, git_provider, require_git_provider)
         atomic_write_json(out_dir / METADATA_NAME, after)
+        if access:
+            before_publish()
+            _candidate_context_guard(out_dir, before, git_provider, require_git_provider)
         append_prepared_event(out_dir, event)
     except BaseException:
         # append 的 write 已成功但 fsync/返回失败时，事件可能已落盘。
@@ -3883,24 +3904,50 @@ def candidate_snapshot(out_dir, meta, *, base=None, excluded_side_effects=None, 
         raise ControlError(f"候选身份无法完整建立: {exc}", gate_id="candidate_capture") from exc
 
 
-def delivery_freshness(out_dir, meta=None, *, required_steps=("code", "deepcheck", "audit")):
-    """Public read-only API for verification/submission/crosscheck consumers."""
+def delivery_freshness(out_dir, meta=None, *, required_steps=("code", "deepcheck", "audit"),
+                       git_provider=None, require_git_provider=False):
+    """Read-only query; freshness acceptance remains distinct from query success."""
     meta = load_metadata(out_dir) if meta is None else meta
     module = candidate_module()
-    if (meta.get("candidate_tracking") or {}).get("mode") != "enabled":
-        return module.delivery_freshness(meta, None, required_steps=required_steps)
-    events, problems = verify_event_chain(out_dir, meta)
-    if problems:
-        return {"ok": False, "state": "blocked", "reasons": ["event_chain"],
-                "violations": problems, "candidate_id": None, "applicable_receipts": [],
-                "required_steps": list(required_steps)}
+    access = ({"git_provider": git_provider, "require_git_provider": require_git_provider}
+              if _candidate_access_requested(git_provider, require_git_provider) else {})
+    if not access:
+        if (meta.get("candidate_tracking") or {}).get("mode") != "enabled":
+            return module.delivery_freshness(meta, None, required_steps=required_steps)
+        events, problems = verify_event_chain(out_dir, meta)
+        if problems:
+            return {"ok": False, "state": "blocked", "reasons": ["event_chain"],
+                    "violations": problems, "candidate_id": None, "applicable_receipts": [],
+                    "required_steps": list(required_steps)}
+        try:
+            current = candidate_snapshot(out_dir, meta, events=events)
+        except ControlError as exc:
+            return {"ok": False, "state": "blocked", "reasons": ["candidate_capture"],
+                    "detail": exc.message, "candidate_id": None, "applicable_receipts": [],
+                    "required_steps": list(required_steps)}
+        return module.delivery_freshness(meta, current, events, required_steps)
     try:
-        current = candidate_snapshot(out_dir, meta, events=events)
+        if access:
+            _candidate_context_guard(out_dir, meta, git_provider, require_git_provider)
+        if (meta.get("candidate_tracking") or {}).get("mode") != "enabled":
+            if access:
+                raise ControlError("candidate tracking required", gate_id="candidate_provider_context")
+            return module.delivery_freshness(meta, None, required_steps=required_steps)
+        events, problems = verify_event_chain(out_dir, meta, **access)
+        if problems:
+            return {"ok": False, "state": "blocked", "reasons": ["event_chain"],
+                    "violations": problems, "candidate_id": None, "applicable_receipts": [],
+                    "required_steps": list(required_steps)}
+        current = candidate_snapshot(out_dir, meta, events=events, **access)
+        result = module.delivery_freshness(meta, current, events, required_steps, **access)
+        if access:
+            _candidate_context_guard(out_dir, meta, git_provider, require_git_provider)
+        return result
     except ControlError as exc:
-        return {"ok": False, "state": "blocked", "reasons": ["candidate_capture"],
+        return {"ok": False, "state": "blocked",
+                "reasons": ["candidate_provider_context" if access else "candidate_capture"],
                 "detail": exc.message, "candidate_id": None, "applicable_receipts": [],
                 "required_steps": list(required_steps)}
-    return module.delivery_freshness(meta, current, events, required_steps)
 
 
 def candidate_tracking_shape_ok(tracking, exclusions):
@@ -3971,10 +4018,14 @@ def candidate_event_issues(events, meta):
     return problems
 
 
-def cmd_candidate(args):
+def cmd_candidate(args, *, git_provider=None, require_git_provider=False):
     out_dir = Path(args.dir).resolve()
+    access = ({"git_provider": git_provider, "require_git_provider": require_git_provider}
+              if _candidate_access_requested(git_provider, require_git_provider) else {})
+    if access and args.phase not in {"inspect", "capture"}:
+        raise ControlError("candidate phase is not enabled", gate_id="candidate_business_propagation_pending")
     if args.phase == "inspect":
-        result = delivery_freshness(out_dir, required_steps=tuple(args.require_step or candidate_module().REVIEW_STEPS))
+        result = delivery_freshness(out_dir, required_steps=tuple(args.require_step or candidate_module().REVIEW_STEPS), **access)
         result["freshness_ok"] = result["ok"]
         if not args.require_step:
             result["ok"] = True
@@ -3984,35 +4035,55 @@ def cmd_candidate(args):
     if not isinstance(args.request_id, str) or not args.request_id.strip():
         raise ControlError("candidate capture 需要 request-id", exit_code=2, gate_id="candidate_request")
     with DirLock(out_dir):
+        if access:
+            _candidate_context_guard(out_dir, load_metadata(out_dir), git_provider, require_git_provider)
+            if (out_dir / TXN_NAME).exists():
+                raise ControlError("provider transaction recovery is not enabled", gate_id="candidate_transaction_pending")
         recover_pending_transaction(out_dir)
         meta = load_metadata(out_dir)
         require_vnext(meta, out_dir)
         require_valid_metadata(meta)
         ensure_execution_writable(meta)
-        events, problems = verify_event_chain(out_dir, meta)
+        events, problems = verify_event_chain(out_dir, meta, **access)
         if problems:
             raise ControlError("事件链不完整，拒绝绑定候选", gate_id="event_chain", violations=problems)
         existing = meta.get("candidate_tracking") or {}
-        base = args.base or existing.get("base") or candidate_module().repository_head(execution_workspace(out_dir, meta))
+        try:
+            base = args.base or existing.get("base") or candidate_module().repository_head(execution_workspace(out_dir, meta), **access)
+        except (candidate_module().CandidateError, OSError, UnicodeError) as exc:
+            if not access:
+                raise
+            raise ControlError("candidate base unavailable: " + str(exc), gate_id="candidate_capture") from exc
         exclusions = args.exclude if args.exclude is not None else meta.get("excluded_side_effects") or []
         limits = candidate_limits(args.limits_json) if getattr(args, "limits_json", None) is not None \
                  else candidate_module().normalize_limits(existing.get("limits"))
         # Explicit enable/capture proposes this generation before the atomic
         # metadata event exists. Do not promote legacy attempt declarations.
         prospective = dict(meta, candidate_tracking=dict(existing, mode="enabled", base=base))
-        candidate = candidate_snapshot(out_dir, prospective, base=base, excluded_side_effects=exclusions, limits=limits, events=events)
+        candidate = candidate_snapshot(out_dir, prospective, base=base, excluded_side_effects=exclusions, limits=limits, events=events, **access)
         tracking = {"version": 1, "mode": "enabled", "base": base, "current": candidate, "limits": limits}
         updates = {"candidate_tracking": tracking, "excluded_side_effects": candidate["excluded_side_effects"]}
         payload = {"candidate_control": 1, "set": updates, "append": {}}
         prior = find_idempotent_event(events, args.request_id, "metadata_updated", payload,
                                      actor="icode", payload_keys=("candidate_control", "set", "append"))
+        if access:
+            _candidate_context_guard(out_dir, meta, git_provider, require_git_provider)
         if prior:
             print(json.dumps({"ok": True, "already_applied": True, "event_id": prior["event_id"],
                               "candidate_id": candidate["candidate_id"]}, ensure_ascii=False, indent=2))
             return 0
         updated = dict(meta, **updates)
+        def before_publish():
+            # A bounded software checkpoint, not an atomic snapshot/epoch proof.
+            fresh = candidate_snapshot(out_dir, prospective, base=base, excluded_side_effects=exclusions,
+                                       limits=limits, events=events, **access)
+            if fresh["candidate_id"] != candidate["candidate_id"]:
+                raise ControlError("candidate changed before publication", gate_id="candidate_capture")
+            _candidate_context_guard(out_dir, meta, git_provider, require_git_provider)
+
+        publication = dict(before_publish=before_publish, **access) if access else {}
         event = commit_metadata_and_event(out_dir, meta, updated, "metadata_updated", payload,
-                                          request_id=args.request_id)
+                                          request_id=args.request_id, **publication)
     print(json.dumps({"ok": True, "already_applied": False, "event_id": event["event_id"],
                       "candidate_id": candidate["candidate_id"]}, ensure_ascii=False, indent=2))
     return 0
@@ -6415,13 +6486,15 @@ def main(*, git_provider=None, require_git_provider=False):
         ap.print_help()
         return 2
     try:
-        if _candidate_access_requested(git_provider, require_git_provider):
+        access = ({"git_provider": git_provider, "require_git_provider": require_git_provider}
+                  if _candidate_access_requested(git_provider, require_git_provider) else {})
+        if access and (args.cmd != "candidate" or args.func is not cmd_candidate):
             raise ControlError("B1 command dispatch is not enabled", gate_id="candidate_business_propagation_pending")
         # 捕获子命令输出：业务失败（ok=false）时子命令仍可能返回 0，
         # 会让 shell 的 `&&` / `set -e` 误判为成功。此处统一纠正为退出码 1。
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
-            code = args.func(args)
+            code = cmd_candidate(args, **access) if access else args.func(args)
         out = buf.getvalue()
         sys.stdout.write(out)
         sys.stdout.flush()

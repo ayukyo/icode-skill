@@ -60,6 +60,8 @@ jobs:
         run: python -B -c "import unittest; s=unittest.defaultTestLoader.discover('tests', pattern='test_candidate_context_unit.py'); assert s.countTestCases()==9, s.countTestCases(); r=unittest.TextTestRunner(verbosity=2).run(s); raise SystemExit(not r.wasSuccessful() or bool(r.skipped))"
       - name: Candidate B2 history software contract
         run: python -B -c "import unittest; s=unittest.defaultTestLoader.discover('tests', pattern='test_candidate_history_unit.py'); assert s.countTestCases()==12, s.countTestCases(); r=unittest.TextTestRunner(verbosity=2).run(s); raise SystemExit(not r.wasSuccessful() or bool(r.skipped))"
+      - name: Candidate B3a candidate dispatch software contract
+        run: python -B -c "import unittest; s=unittest.defaultTestLoader.discover('tests', pattern='test_candidate_dispatch_unit.py'); assert s.countTestCases()==12, s.countTestCases(); r=unittest.TextTestRunner(verbosity=2).run(s); raise SystemExit(not r.wasSuccessful() or bool(r.skipped))"
       - name: Syntax
         run: python -B -m py_compile tools/icode_candidate.py tests/test_candidate_git_provider_unit.py
       - name: Collect complete related legacy contract

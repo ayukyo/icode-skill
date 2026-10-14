@@ -247,7 +247,9 @@ class CandidateContextTests(unittest.TestCase):
     def test_command_dispatch_stays_unenabled(self):
         self.bind()
         before, output = self.frozen(), io.StringIO()
-        with patch("sys.argv", ["icode_control.py", "candidate", "--dir", str(self.ticket), "--phase", "inspect"]), \
+        with patch("sys.argv", ["icode_control.py", "build-start", "--dir", str(self.ticket),
+                               "--build-dir", str(self.code / "build"), "--candidate-id", "0" * 64,
+                               "--parameters-json", "{}", "--request-id", "unsupported"]), \
                 contextlib.redirect_stdout(output):
             result = invoke(ctl.main, provider=self.provider, required=True)
         self.assertEqual(result, 1)
