@@ -1523,7 +1523,53 @@ def completion_receipt_issues(out_dir, meta, events, step):
     return missing
 
 
-def resolve_port(out_dir, meta, port):
+def resolve_port(out_dir, meta, port, *, git_provider=None, require_git_provider=False):
+    if not _candidate_access_requested(git_provider, require_git_provider):
+        return _resolve_port_legacy(out_dir, meta, port)
+    module = candidate_module()
+    deadline = time.monotonic() + module.DEFAULT_LIMITS["timeout_seconds"]
+    _candidate_context_guard(out_dir, meta, git_provider, require_git_provider)
+    workspace = execution_workspace(out_dir, meta)
+    try:
+        module._candidate_provider(workspace, git_provider, require_git_provider, deadline=deadline)
+        if port.get("kind") == "workspace_git_head":
+            targets = [port_path(workspace, port_value(out_dir, meta, port) or ".")]
+            for field, keys in (
+                ("sub_worktrees", ("worktree_path", "path")),
+                ("submission_contracts", ("repo_path", "worktree_path")),
+            ):
+                if field not in meta:
+                    continue
+                declarations = meta[field]
+                if not isinstance(declarations, list):
+                    raise module.CandidateError("unsupported provider port roots")
+                for item in declarations:
+                    if not isinstance(item, dict):
+                        raise module.CandidateError("unsupported provider port roots")
+                    raw_paths = [item[key] for key in keys if key in item]
+                    if not raw_paths or any(not isinstance(raw, str) or not raw.strip()
+                                            or not Path(raw).is_absolute() for raw in raw_paths):
+                        raise module.CandidateError("unsupported provider port roots")
+                    targets.extend(Path(raw).expanduser().resolve() for raw in raw_paths)
+            if any(target != workspace for target in targets):
+                raise module.CandidateError("unsupported provider port roots")
+            # Same bounded FACTS contract used by capture_candidate, not raw Git.
+            facts = module._candidate_facts(
+                workspace, git_provider, min(8192, module.DEFAULT_LIMITS["max_git_bytes"]),
+                deadline=deadline)
+            roots = [{"root": str(workspace), "head": facts["head"]}]
+            result = {"id": port.get("id"), "kind": "workspace_git_head", "exists": True,
+                      "roots": roots, "digest": canonical_digest(roots)}
+        else:
+            result = _resolve_port_legacy(out_dir, meta, port)
+        _candidate_context_guard(out_dir, meta, git_provider, require_git_provider)
+        module._candidate_provider(workspace, git_provider, require_git_provider, deadline=deadline)
+    except (module.CandidateError, OSError, UnicodeError, ValueError, TypeError, RuntimeError) as exc:
+        raise ControlError(str(exc), gate_id="candidate_provider_context") from exc
+    return result
+
+
+def _resolve_port_legacy(out_dir, meta, port):
     """把静态端口解析为不含正文的事实摘要，供漂移比较和输出校验。"""
     kind = port.get("kind")
     value = port_value(out_dir, meta, port)
@@ -1696,9 +1742,15 @@ def step_contract(model, step):
     return contract
 
 
-def capture_step_inputs(out_dir, meta, model, step):
+def capture_step_inputs(out_dir, meta, model, step, *, git_provider=None, require_git_provider=False):
+    access = ({"git_provider": git_provider, "require_git_provider": require_git_provider}
+              if _candidate_access_requested(git_provider, require_git_provider) else {})
+    module = candidate_module() if access else None
+    deadline = time.monotonic() + module.DEFAULT_LIMITS["timeout_seconds"] if access else None
+    if access:
+        _candidate_context_guard(out_dir, meta, git_provider, require_git_provider)
     contract = step_contract(model, step)
-    facts = [resolve_port(out_dir, meta, port) for port in contract["inputs"]]
+    facts = [resolve_port(out_dir, meta, port, **access) for port in contract["inputs"]]
     by_id = {fact["id"]: fact for fact in facts}
     missing = [port["id"] for port in contract["inputs"]
                if port.get("required", False) and not by_id[port["id"]]["exists"]]
@@ -1706,12 +1758,20 @@ def capture_step_inputs(out_dir, meta, model, step):
                      if port.get("protected", False)]
     protected = {port_id: by_id[port_id] for port_id in protected_ids}
     contract_digest = canonical_digest(contract)
-    return {
+    captured = {
         "contract_digest": contract_digest,
         "inputs": facts,
         "protected": protected,
         "input_digest": canonical_digest(protected),
     }, missing
+    if access:
+        _candidate_context_guard(out_dir, meta, git_provider, require_git_provider)
+        try:
+            module._candidate_provider(execution_workspace(out_dir, meta), git_provider,
+                                       require_git_provider, deadline=deadline)
+        except (module.CandidateError, OSError, UnicodeError) as exc:
+            raise ControlError(str(exc), gate_id="candidate_provider_context") from exc
+    return captured
 
 
 def validate_step_outputs(out_dir, meta, model, step, allow_incomplete=False):

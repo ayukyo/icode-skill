@@ -12,6 +12,10 @@ on:
       - 'scripts/submission_guard.py'
       - 'tests/test_candidate*'
       - 'tests/test_delivery*'
+      - 'tests/test_execution_root_binding.py'
+      - 'tests/test_review_followup.py'
+      - 'tests/test_workflow_evidence_gaps.py'
+      - 'tests/test_execution_model_contract.sh'
       - '.github/workflows/candidate-provider-software.yml'
   workflow_dispatch:
 permissions:
@@ -66,6 +70,10 @@ jobs:
         run: python -B -c "import unittest; s=unittest.defaultTestLoader.discover('tests', pattern='test_candidate_build_start_provider_unit.py'); assert s.countTestCases()==12, s.countTestCases(); r=unittest.TextTestRunner(verbosity=2).run(s); raise SystemExit(not r.wasSuccessful() or bool(r.skipped))"
       - name: Candidate B3c record-verification software contract
         run: python -B -c "import unittest; s=unittest.defaultTestLoader.discover('tests', pattern='test_candidate_record_verification_provider_unit.py'); assert s.countTestCases()==15, s.countTestCases(); r=unittest.TextTestRunner(verbosity=2).run(s); raise SystemExit(not r.wasSuccessful() or bool(r.skipped))"
+      - name: Candidate B3d port primitives software contract
+        run: python -B -c "import unittest; s=unittest.defaultTestLoader.discover('tests', pattern='test_candidate_port_provider_unit.py'); assert s.countTestCases()==21, s.countTestCases(); r=unittest.TextTestRunner(verbosity=2).run(s); raise SystemExit(not r.wasSuccessful() or bool(r.skipped))"
+      - name: Existing port root, delivery and output consumer regressions
+        run: python -m pytest -p no:anyio tests/test_execution_root_binding.py::BindingTests::test_real_cli_projection_and_subprocess_replay tests/test_review_followup.py::test_delivery_paths_are_single_source_and_keep_legacy_defaults tests/test_workflow_evidence_gaps.py::test_audit_final_check_fails_without_first_review_json_and_is_read_only -q
       - name: Syntax
         run: python -B -m py_compile tools/icode_candidate.py tests/test_candidate_git_provider_unit.py
       - name: Collect complete related legacy contract
@@ -78,3 +86,4 @@ jobs:
         run: |
           bash tests/test_inspection_worklist_contract.sh
           bash tests/test_crosscheck_contract.sh
+          bash tests/test_execution_model_contract.sh
