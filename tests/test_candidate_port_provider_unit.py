@@ -379,7 +379,12 @@ class PortProviderTests(unittest.TestCase):
             result = ctl.main(git_provider=provider, require_git_provider=True)
         self.assertEqual(result, 1)
         self.assertEqual(json.loads(output.getvalue())["gate_id"], "candidate_business_propagation_pending")
-        self.assertNotIn("git_provider", inspect.signature(ctl.validate_step_outputs).parameters)
+        before = self.f.frozen()
+        with self.assertRaises(ctl.ControlError) as caught:
+            invoke(ctl.validate_step_outputs, self.f.ticket, self.meta, ctl.load_execution_model(),
+                   "code", provider=provider, required=True)
+        self.assertEqual(caught.exception.report()["gate_id"], "candidate_provider_context")
+        self.assertEqual(before, self.f.frozen())
 
 
 if __name__ == "__main__":

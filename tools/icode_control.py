@@ -891,10 +891,19 @@ def append_prepared_event(out_dir, event):
                            gate_id="event_log_io")
 
 
-def append_event(out_dir, meta, event_type, payload, request_id=None, actor="icode"):
+def append_event(out_dir, meta, event_type, payload, request_id=None, actor="icode",
+                 *, git_provider=None, require_git_provider=False, inspection_provider_factory=None, inspection_deadline=None):
     """兼容事件-only 写入；调用方必须已持有 DirLock。"""
+    access = _code_access("code", git_provider, require_git_provider, inspection_provider_factory, inspection_deadline)
+    if access:
+        _code_guard(out_dir, meta, **access)
     event = prepare_event(out_dir, meta, event_type, payload, request_id=request_id, actor=actor)
+    if access:
+        _code_guard(out_dir, meta, **access)
     append_prepared_event(out_dir, event)
+    if access:
+        # A late refusal does not erase an event already appended.
+        _code_guard(out_dir, meta, **access)
     return event
 
 
@@ -1774,9 +1783,13 @@ def capture_step_inputs(out_dir, meta, model, step, *, git_provider=None, requir
     return captured
 
 
-def validate_step_outputs(out_dir, meta, model, step, allow_incomplete=False):
+def validate_step_outputs(out_dir, meta, model, step, allow_incomplete=False,
+                          *, git_provider=None, require_git_provider=False, inspection_provider_factory=None, inspection_deadline=None):
+    access = _code_access(step, git_provider, require_git_provider, inspection_provider_factory, inspection_deadline)
+    if access:
+        _code_inspection_provider(out_dir, meta, **access)
     contract = step_contract(model, step)
-    facts = [resolve_port(out_dir, meta, port) for port in contract["outputs"]]
+    facts = [resolve_port(out_dir, meta, port, **_code_candidate_access(access)) for port in contract["outputs"]]
     by_id = {fact["id"]: fact for fact in facts}
     missing = [port["id"] for port in contract["outputs"]
                if port.get("required", True) and not by_id[port["id"]]["exists"]]
@@ -1785,8 +1798,75 @@ def validate_step_outputs(out_dir, meta, model, step, allow_incomplete=False):
     if step in ("deepcheck", "audit") and by_id.get("inspection_coverage", {}).get("exists"):
         missing.extend(inspection_coverage_issues(out_dir, meta, step, allow_incomplete=allow_incomplete))
     if by_id.get("inspection_worklist", {}).get("exists"):
-        missing.extend(inspection_worklist_issues(out_dir, meta, step, allow_incomplete=allow_incomplete))
+        missing.extend(inspection_worklist_issues(out_dir, meta, step, allow_incomplete=allow_incomplete, **access))
+    if access:
+        _code_guard(out_dir, meta, **access)
     return facts, missing
+
+
+
+def _code_access(step, provider, required, factory, deadline=None):
+    if not (_candidate_access_requested(provider, required) or factory is not None):
+        return {}
+    if step != "code":
+        raise ControlError("only code inspection is enabled", gate_id="candidate_business_propagation_pending")
+    return dict(git_provider=provider, require_git_provider=required,
+                inspection_provider_factory=factory,
+                inspection_deadline=deadline if deadline is not None else
+                    time.monotonic() + candidate_module().DEFAULT_LIMITS["timeout_seconds"])
+
+
+def _code_candidate_access(access):
+    return {key: access[key] for key in ("git_provider", "require_git_provider")} if access else {}
+
+
+def _code_guard(out_dir, meta, *, git_provider, require_git_provider,
+                inspection_provider_factory, inspection_deadline):
+    if git_provider is None or not callable(inspection_provider_factory):
+        raise ControlError("complete code provider pair required", gate_id="candidate_provider_context")
+    _candidate_context_guard(out_dir, meta, git_provider, require_git_provider)
+    try:
+        candidate_module()._candidate_provider(execution_workspace(out_dir, meta), git_provider,
+            require_git_provider, deadline=inspection_deadline)
+    except (candidate_module().CandidateError, OSError, UnicodeError) as exc:
+        raise ControlError(str(exc), gate_id="candidate_provider_context") from exc
+
+
+def _code_inspection_provider(out_dir, meta, **access):
+    _code_guard(out_dir, meta, **access)
+    helper = inspection_module()  # Per invocation owner; None keeps the legacy loader.
+    workspace = execution_workspace(out_dir, meta)
+    try:
+        transport = access["inspection_provider_factory"](helper, workspace)
+        _code_guard(out_dir, meta, **access)
+        if not isinstance(transport, helper.InspectionGitProvider) or transport.workspace != workspace:
+            raise helper.InspectionError("inspection provider workspace/type mismatch")
+    except ControlError:
+        raise
+    except Exception as exc:
+        raise ControlError(str(exc), gate_id="candidate_provider_context") from exc
+
+    class BoundProvider(helper.InspectionGitProvider):
+        def __init__(self):
+            self.workspace = workspace
+
+        def query(self, request, *, limit):
+            _code_guard(out_dir, meta, **access)
+            try:
+                # Validate the actual transport result in this same API universe.
+                data, _ = helper._provider_query(workspace, transport, request, limit)
+            except Exception as exc:
+                raise ControlError(str(exc), gate_id="candidate_provider_context") from exc
+            _code_guard(out_dir, meta, **access)
+            return helper.GitQueryResult(data, 0, False)
+
+    return helper, BoundProvider()
+
+
+def _code_output(encoded, out_dir, meta, access):
+    if access:
+        _code_guard(out_dir, meta, **access)
+    print(encoded)
 
 
 def inspection_module():
@@ -1797,7 +1877,11 @@ def inspection_module():
     return module
 
 
-def inspection_worklist_issues(out_dir, meta, step, attempt=None, allow_incomplete=False):
+def inspection_worklist_issues(out_dir, meta, step, attempt=None, allow_incomplete=False,
+                               *, git_provider=None, require_git_provider=False, inspection_provider_factory=None, inspection_deadline=None):
+    access = _code_access(step, git_provider, require_git_provider, inspection_provider_factory, inspection_deadline)
+    if access:
+        _code_guard(out_dir, meta, **access)
     path = Path(out_dir) / f"{step}_worklist.json"
     if path.is_symlink() or not path.is_file():
         return ["inspection_worklist:missing_or_symlink"]
@@ -1805,9 +1889,10 @@ def inspection_worklist_issues(out_dir, meta, step, attempt=None, allow_incomple
         report = load_json(path, "inspection worklist")
         if not isinstance(report, dict):
             return ["inspection_worklist:invalid=report must be an object"]
-        helper = inspection_module()
+        helper, provider = _code_inspection_provider(out_dir, meta, **access) if access else (inspection_module(), None)
+        inspection_access = dict(git_provider=provider) if access else {}
         workspace = execution_workspace(out_dir, meta)
-        events, chain_issues = verify_event_chain(out_dir, meta)
+        events, chain_issues = verify_event_chain(out_dir, meta, **_code_candidate_access(access))
         writers = [e for e in events if e.get("event_type") == "artifact_written"
             and (e.get("payload") or {}).get("step") == step
             and (e.get("payload") or {}).get("output") == "inspection_worklist"]
@@ -1817,7 +1902,7 @@ def inspection_worklist_issues(out_dir, meta, step, attempt=None, allow_incomple
         required_version = 1 if inspection_requires_current_checks(events, step, current_attempt) else None
         issues = helper.validate_worklist(report, workspace, code_files=meta.get("code_files") or [],
             step=step, ticket_id=meta.get("ticket_id"), attempt=current_attempt, allow_incomplete=allow_incomplete,
-            required_checks_version=required_version)
+            required_checks_version=required_version, **inspection_access)
         if chain_issues:
             issues.append("event chain invalid")
         profile = meta.get("risk_profile")
@@ -1834,9 +1919,13 @@ def inspection_worklist_issues(out_dir, meta, step, attempt=None, allow_incomple
             if chain_issues or not receipts or any(e["payload"]["inspection_declaration_hash"] != inspection_declaration_hash(report) for e in receipts):
                 issues.append("declaration/receipt drift")
         findings = report.get("findings") if isinstance(report, dict) else None
-        issues.extend(helper.validate_findings(findings, report, workspace))
+        issues.extend(helper.validate_findings(findings, report, workspace, **inspection_access))
+        if access:
+            _code_guard(out_dir, meta, **access)
         return ["inspection_worklist:" + str(item) for item in issues]
     except (ControlError, ValueError, OSError, TypeError) as exc:
+        if access and isinstance(exc, ControlError):
+            raise
         return [f"inspection_worklist:invalid={exc}"]
 
 
@@ -2042,13 +2131,17 @@ def inspection_coverage_issues(out_dir, meta, step, attempt=None, allow_incomple
     return issues
 
 
-def cmd_check_outputs(args):
+def cmd_check_outputs(args, *, git_provider=None, require_git_provider=False, inspection_provider_factory=None):
     """Single read-only final product check; historical receipts are not invented."""
     out_dir = Path(args.dir).resolve()
+    access = _code_access(args.step, git_provider, require_git_provider, inspection_provider_factory)
+    candidate_access = _code_candidate_access(access)
     meta = load_metadata(out_dir)
     require_vnext(meta, out_dir)
     require_valid_metadata(meta)
-    events, problems = verify_event_chain(out_dir, meta)
+    if access:
+        _code_inspection_provider(out_dir, meta, **access)
+    events, problems = verify_event_chain(out_dir, meta, **candidate_access)
     model = load_execution_model()
     steps = ["plan", "review", "merge", "code", "deepcheck", "audit"] if args.step == "audit" else [args.step]
     warnings = []
@@ -2068,7 +2161,7 @@ def cmd_check_outputs(args):
         if old_contract and not historical:
             problems.append(f"{step}:contract_drift_reenter")
         degraded = bool(finished and (finished.get("payload") or {}).get("outcome") == "degraded")
-        facts, missing = validate_step_outputs(out_dir, meta, model, step, allow_incomplete=degraded)
+        facts, missing = validate_step_outputs(out_dir, meta, model, step, allow_incomplete=degraded, **access)
         # New evidence ports apply to new attempts, not completed old contracts.
         if historical:
             new_ports = {"review_manifest", "inspection_coverage", "inspection_worklist"}
@@ -2079,7 +2172,7 @@ def cmd_check_outputs(args):
             problems.extend(review_evidence_issues(out_dir, meta, None if historical else events,
                                                    allow_legacy=historical))
         if step in ("code", "deepcheck", "audit") and not historical:
-            problems.extend(inspection_worklist_issues(out_dir, meta, step, attempt, allow_incomplete=degraded))
+            problems.extend(inspection_worklist_issues(out_dir, meta, step, attempt, allow_incomplete=degraded, **access))
             if latest_start is None:
                 problems.append(f"{step}:inspection_worklist:missing_step_start")
             else:
@@ -2092,7 +2185,7 @@ def cmd_check_outputs(args):
         if step in ("deepcheck", "audit"):
             coverage_exists = any(f["id"] == "inspection_coverage" and f["exists"] for f in facts)
             if not historical and coverage_exists:
-                problems.extend(inspection_coverage_issues(out_dir, meta, step, attempt, allow_incomplete=degraded))
+                problems.extend(inspection_coverage_issues(out_dir, meta, step, attempt, allow_incomplete=degraded, **access))
                 if latest_start is None:
                     problems.append(f"{step}:inspection_coverage:missing_step_start")
                 else:
@@ -2106,7 +2199,7 @@ def cmd_check_outputs(args):
             _, missing_inputs = capture_step_inputs(out_dir, meta, model, step)
             problems.extend(f"{step}:input={item}" for item in missing_inputs)
     result = dict(ok=not problems, step=args.step, read_only=True, violations=problems, warnings=warnings)
-    print(json.dumps(result, ensure_ascii=False, indent=2))
+    _code_output(json.dumps(result, ensure_ascii=False, indent=2), out_dir, meta, access)
     return 0 if result["ok"] else 1
 
 
@@ -2235,11 +2328,14 @@ def recover_pending_transaction(out_dir):
 
 def commit_metadata_and_event(out_dir, before, after, event_type, payload,
                               request_id=None, actor="icode", event_id=None, *,
-                              git_provider=None, require_git_provider=False, before_publish=None):
+                              git_provider=None, require_git_provider=False, before_publish=None,
+                              before_append=None):
     """调用方持锁。事务日志 + metadata 原子替换 + event 追加；普通 I/O 失败回滚旧 metadata。"""
     out_dir = Path(out_dir)
     access = ({"git_provider": git_provider, "require_git_provider": require_git_provider}
               if _candidate_access_requested(git_provider, require_git_provider) else {})
+    if before_append is not None and not callable(before_append):
+        raise ControlError("candidate pre-append check must be callable", gate_id="candidate_provider_context")
     if access:
         _candidate_context_guard(out_dir, before, git_provider, require_git_provider)
         if (out_dir / TXN_NAME).exists():
@@ -2276,6 +2372,8 @@ def commit_metadata_and_event(out_dir, before, after, event_type, payload,
         if access:
             before_publish()
             _candidate_context_guard(out_dir, before, git_provider, require_git_provider)
+        if before_append is not None:
+            before_append()
         append_prepared_event(out_dir, event)
     except BaseException:
         # append 的 write 已成功但 fsync/返回失败时，事件可能已落盘。
@@ -5282,25 +5380,33 @@ def derived_attempt(prefix, request_id):
     return str(uuid.uuid4())
 
 
-def cmd_step(args):
+def cmd_step(args, *, git_provider=None, require_git_provider=False, inspection_provider_factory=None):
     """步骤端口快照、Reactive 边界复检和终结回执。"""
     out_dir = Path(args.dir).resolve()
+    access = _code_access(args.step, git_provider, require_git_provider, inspection_provider_factory)
+    candidate_access = _code_candidate_access(access)
+    if access and args.phase not in {"start", "check", "finish"}:
+        raise ControlError("code step phase is not enabled", gate_id="candidate_business_propagation_pending")
     model = load_execution_model()
     contract = step_contract(model, args.step)
     with DirLock(out_dir):
+        if access:
+            _code_inspection_provider(out_dir, load_metadata(out_dir), **access)
+            if (out_dir / TXN_NAME).exists():
+                raise ControlError("provider recovery is not enabled", gate_id="candidate_transaction_pending")
         recover_pending_transaction(out_dir)
         meta = load_metadata(out_dir)
         require_vnext(meta, out_dir)
         require_valid_metadata(meta)
         ensure_execution_writable(meta)
-        events, problems = verify_event_chain(out_dir, meta)
+        events, problems = verify_event_chain(out_dir, meta, **candidate_access)
         if problems:
             raise ControlError("现有事件链不完整，拒绝记录步骤", exit_code=1,
                                gate_id="event_chain", violations=problems)
 
         if args.phase == "start":
             attempt = args.attempt or derived_attempt("step", args.request)
-            snapshot, missing = capture_step_inputs(out_dir, meta, model, args.step)
+            snapshot, missing = capture_step_inputs(out_dir, meta, model, args.step, **candidate_access)
             if missing:
                 raise ControlError(
                     f"步骤 {args.step!r} 必填输入端口缺失: {missing}", exit_code=1,
@@ -5317,13 +5423,13 @@ def cmd_step(args):
             }
             if args.step in ("deepcheck", "audit") and \
                     (meta.get("candidate_tracking") or {}).get("mode") == "enabled":
-                payload["candidate_input"] = candidate_snapshot(out_dir, meta, events=events)
+                payload["candidate_input"] = candidate_snapshot(out_dir, meta, events=events, **candidate_access)
             prior = find_idempotent_event(events, args.request, "step_started", payload)
             if prior:
                 result = {"ok": True, "already_applied": True, "step": args.step,
                           "attempt": attempt, "event_id": prior["event_id"],
                           "input_digest": payload["input_digest"]}
-                print(json.dumps(result, ensure_ascii=False, indent=2))
+                _code_output(json.dumps(result, ensure_ascii=False, indent=2), out_dir, meta, access)
                 return 0
             open_same_step = []
             for event in events:
@@ -5343,12 +5449,12 @@ def cmd_step(args):
                 raise ControlError(f"attempt={attempt!r} 已被使用", exit_code=1,
                                    gate_id="attempt_conflict")
             event = append_event(out_dir, meta, "step_started", payload,
-                                 request_id=args.request)
-            print(json.dumps({"ok": True, "step": args.step, "phase": "start",
+                                 request_id=args.request, **access)
+            _code_output(json.dumps({"ok": True, "step": args.step, "phase": "start",
                               "attempt": attempt, "event_id": event["event_id"],
                               "input_digest": payload["input_digest"],
                               "required_checks": contract["required_checks"]},
-                             ensure_ascii=False, indent=2))
+                             ensure_ascii=False, indent=2), out_dir, meta, access)
             return 0
 
         if not args.attempt:
@@ -5367,7 +5473,7 @@ def cmd_step(args):
             if args.boundary not in model["boundaries"]:
                 raise ControlError(f"--boundary 非法: {args.boundary!r}", exit_code=2,
                                    allowed=model["boundaries"])
-            current, missing = capture_step_inputs(out_dir, meta, model, args.step)
+            current, missing = capture_step_inputs(out_dir, meta, model, args.step, **candidate_access)
             old_protected = start_payload.get("protected") or {}
             changed = sorted(
                 key for key in set(old_protected) | set(current["protected"])
@@ -5397,14 +5503,14 @@ def cmd_step(args):
                 payload_keys=["step", "attempt", "boundary", "result", "changed_inputs",
                               "missing_inputs", "captured_digest", "current_digest", "route"])
             event = prior or append_event(out_dir, meta, "gate_checked", payload,
-                                          request_id=args.request)
+                                          request_id=args.request, **access)
             result = {"ok": result_name == "pass", "step": args.step,
                       "phase": "check", "attempt": args.attempt,
                       "boundary": args.boundary, "result": result_name,
                       "changed_inputs": changed, "missing_inputs": missing,
                       "route": payload["route"], "event_id": event["event_id"],
                       "already_applied": bool(prior)}
-            print(json.dumps(result, ensure_ascii=False, indent=2))
+            _code_output(json.dumps(result, ensure_ascii=False, indent=2), out_dir, meta, access)
             return 0 if result["ok"] else 1
 
         if args.phase != "finish":
@@ -5417,11 +5523,11 @@ def cmd_step(args):
             if args.request and finished.get("request_id") == args.request \
                     and expected.get("outcome") == args.outcome \
                     and expected.get("evidence") == args.evidence:
-                print(json.dumps({"ok": True, "already_applied": True,
+                _code_output(json.dumps({"ok": True, "already_applied": True,
                                   "step": args.step, "attempt": args.attempt,
                                   "outcome": expected.get("outcome"),
                                   "event_id": finished["event_id"]},
-                                 ensure_ascii=False, indent=2))
+                                 ensure_ascii=False, indent=2), out_dir, meta, access)
                 return 0
             if args.request and finished.get("request_id") == args.request:
                 raise ControlError(
@@ -5439,14 +5545,14 @@ def cmd_step(args):
             latest_checks[gate_payload.get("boundary")] = gate_payload.get("result")
         missing_checks = [boundary for boundary in contract["required_checks"]
                           if latest_checks.get(boundary) != "pass"]
-        outputs, missing_outputs = validate_step_outputs(out_dir, meta, model, args.step)
+        outputs, missing_outputs = validate_step_outputs(out_dir, meta, model, args.step, **access)
         missing_receipts = missing_output_receipts(
             out_dir, meta, contract, events, start)
         if args.step == "review":
             missing_receipts.extend(review_evidence_issues(out_dir, meta, events, start))
         if args.step in ("code", "deepcheck", "audit"):
             worklist_issues = inspection_worklist_issues(out_dir, meta, args.step, args.attempt,
-                                                        allow_incomplete=args.outcome == "degraded")
+                                                        allow_incomplete=args.outcome == "degraded", **access)
             missing_receipts.extend(worklist_issues)
             if args.outcome == "degraded" and (worklist_issues or any(
                     item.startswith("inspection_worklist:") for item in missing_receipts)):
@@ -5454,7 +5560,7 @@ def cmd_step(args):
                                    violations=missing_receipts)
         if args.step in ("deepcheck", "audit"):
             coverage_issues = inspection_coverage_issues(out_dir, meta, args.step, args.attempt,
-                                                         allow_incomplete=args.outcome == "degraded")
+                                                         allow_incomplete=args.outcome == "degraded", **access)
             missing_receipts.extend(coverage_issues)
             if args.outcome == "degraded" and (coverage_issues or any(
                     item.startswith("inspection_coverage:") for item in missing_receipts)):
@@ -5477,6 +5583,8 @@ def cmd_step(args):
                 and args.step in model.get("finish_gate_steps", []):
             # Standalone steps have no completed-state transition to run these
             # checks. Keep one authoritative completion boundary for them too.
+            if access:
+                raise ControlError("code final linter is not enabled", gate_id="candidate_business_propagation_pending")
             failed = [g for g in run_gate_linters(out_dir, step=args.step) if not g["ok"]]
             if failed:
                 raise ControlError("独立步骤完成门禁未通过", gate_id="step_gates",
@@ -5496,7 +5604,7 @@ def cmd_step(args):
             payload_keys=["step", "attempt", "outcome", "checks", "outputs", "evidence"])
         if not prior and args.outcome == "success" and args.step in candidate_module().REVIEW_STEPS \
                 and (meta.get("candidate_tracking") or {}).get("mode") == "enabled":
-            candidate = candidate_snapshot(out_dir, meta, events=events)
+            candidate = candidate_snapshot(out_dir, meta, events=events, **candidate_access)
             if args.step in ("deepcheck", "audit"):
                 proof = candidate_module().review_source_equivalence(start_payload.get("candidate_input"), candidate)
                 if not proof["equivalent"]:
@@ -5509,22 +5617,38 @@ def cmd_step(args):
             payload["candidate_receipt"] = receipt
             updated = dict(meta, candidate_tracking=dict(meta["candidate_tracking"], current=candidate),
                            review_receipts=[*(meta.get("review_receipts") or []), receipt])
+            def before_publish():
+                fresh = candidate_snapshot(out_dir, meta, events=events, **candidate_access)
+                if fresh["candidate_id"] != candidate["candidate_id"]:
+                    raise ControlError("code source changed before publication", gate_id="candidate_capture")
+                _, issues = validate_step_outputs(out_dir, meta, model, args.step, **access)
+                issues += missing_output_receipts(out_dir, meta, contract, events, start)
+                if issues:
+                    raise ControlError("code outputs changed before publication", gate_id="step_receipt", violations=issues)
+                _code_guard(out_dir, meta, **access)
+            publication = dict(before_publish=before_publish,
+                               before_append=lambda: _code_guard(out_dir, meta, **access),
+                               **candidate_access) if access else {}
             event = commit_metadata_and_event(out_dir, meta, updated, "step_finished", payload,
-                                              request_id=args.request, event_id=finish_id)
+                                              request_id=args.request, event_id=finish_id, **publication)
         else:
             event = prior or append_event(out_dir, meta, "step_finished", payload,
-                                          request_id=args.request)
-        print(json.dumps({"ok": True, "step": args.step, "phase": "finish",
+                                          request_id=args.request, **access)
+        _code_output(json.dumps({"ok": True, "step": args.step, "phase": "finish",
                           "attempt": args.attempt, "outcome": args.outcome,
                           "duration_ms": payload["duration_ms"],
                           "event_id": event["event_id"],
-                          "already_applied": bool(prior)}, ensure_ascii=False, indent=2))
+                          "already_applied": bool(prior)}, ensure_ascii=False, indent=2), out_dir, meta, access)
         return 0
 
 
-def cmd_inspection(args):
+def cmd_inspection(args, *, git_provider=None, require_git_provider=False, inspection_provider_factory=None):
     """Prepare/read/assess through the same frozen declaration and artifact transaction."""
     out_dir = Path(args.dir).resolve()
+    access = _code_access(args.step, git_provider, require_git_provider, inspection_provider_factory)
+    candidate_access = _code_candidate_access(access)
+    if access and args.phase not in {"prepare", "read", "assess", "check"}:
+        raise ControlError("code inspection phase is not enabled", gate_id="candidate_business_propagation_pending")
     model = load_execution_model()
     contract = step_contract(model, args.step)
     target = out_dir / f"{args.step}_worklist.json"
@@ -5534,36 +5658,43 @@ def cmd_inspection(args):
         meta = load_metadata(out_dir)
         require_vnext(meta, out_dir)
         require_valid_metadata(meta)
-        events, problems = verify_event_chain(out_dir, meta)
+        if access:
+            _code_inspection_provider(out_dir, meta, **access)
+        events, problems = verify_event_chain(out_dir, meta, **candidate_access)
         if problems:
             raise ControlError("事件链不完整", gate_id="event_chain", violations=problems)
         start = find_step_start(events, args.attempt)
         if start["payload"].get("step") != args.step:
             raise ControlError("工作清单与执行步骤不一致", gate_id="inspection_worklist")
         issues = inspection_worklist_issues(out_dir, meta, args.step, args.attempt,
-                                            allow_incomplete=args.allow_incomplete)
-        print(json.dumps(dict(ok=not issues, read_only=True, path=str(target), violations=issues), ensure_ascii=False))
+                                            allow_incomplete=args.allow_incomplete, **access)
+        _code_output(json.dumps(dict(ok=not issues, read_only=True, path=str(target), violations=issues), ensure_ascii=False), out_dir, meta, access)
         return 0 if not issues else 1
     with DirLock(out_dir):
+        if access:
+            _code_inspection_provider(out_dir, load_metadata(out_dir), **access)
+            if (out_dir / TXN_NAME).exists():
+                raise ControlError("provider recovery is not enabled", gate_id="candidate_transaction_pending")
         recover_pending_transaction(out_dir)
         meta = load_metadata(out_dir)
         require_vnext(meta, out_dir)
         require_valid_metadata(meta)
         ensure_execution_writable(meta)
-        events, problems = verify_event_chain(out_dir, meta)
+        events, problems = verify_event_chain(out_dir, meta, **candidate_access)
         if problems:
             raise ControlError("事件链不完整", gate_id="event_chain", violations=problems)
         start = find_step_start(events, args.attempt)
         if start["payload"].get("step") != args.step or step_attempt_finished(events, args.attempt):
             raise ControlError("工作清单须关联同一步骤的未终结 attempt", gate_id="inspection_worklist")
-        current, missing = capture_step_inputs(out_dir, meta, model, args.step)
+        current, missing = capture_step_inputs(out_dir, meta, model, args.step, **candidate_access)
         if missing or current["protected"] != start["payload"].get("protected") or current["contract_digest"] != start["payload"].get("contract_digest"):
             raise ControlError("执行合同或受保护输入漂移，先 blocked 重入", gate_id="inspection_worklist")
         if not any(e.get("event_type") == "gate_checked" and (e.get("payload") or {}).get("attempt") == args.attempt
                    and (e.get("payload") or {}).get("boundary") == "before_write"
                    and (e.get("payload") or {}).get("result") == "pass" for e in events):
             raise ControlError("写工作清单前须真实 before_write check", gate_id="inspection_worklist")
-        helper = inspection_module()
+        helper, provider = _code_inspection_provider(out_dir, meta, **access) if access else (inspection_module(), None)
+        inspection_access = dict(git_provider=provider) if access else {}
         workspace = execution_workspace(out_dir, meta)
         resumed = False
         if target.exists():
@@ -5582,7 +5713,7 @@ def cmd_inspection(args):
                 report = helper.build_worklist(workspace, meta.get("code_files") or [], step=args.step,
                     ticket_id=meta["ticket_id"], attempt=args.attempt,
                     mode=(meta.get("risk_profile") or {}).get("effective_mode") or meta.get("mode", "full"),
-                    related=args.related, scopes=args.scope, baselines=baselines)
+                    related=args.related, scopes=args.scope, baselines=baselines, **inspection_access)
                 report.setdefault("findings", [])
             elif args.phase == "prepare" and resumed:
                 options = (("related", sorted(set(args.related)) if args.related else None),
@@ -5601,7 +5732,7 @@ def cmd_inspection(args):
             pending = dict(report, coverage_status="partial", debt_reason="pending Read")
             issues = helper.validate_worklist(pending, workspace, code_files=meta.get("code_files") or [],
                 step=args.step, ticket_id=meta["ticket_id"], attempt=args.attempt, allow_incomplete=True,
-                required_checks_version=1)
+                required_checks_version=1, **inspection_access)
             if issues:
                 raise ValueError(str(issues))
             assessment = strict_json_loads(args.assessment_json) if args.phase == "assess" and args.assessment_json else None
@@ -5623,9 +5754,9 @@ def cmd_inspection(args):
             if prior:
                 # A later Read may have expanded the artifact. Replaying this
                 # operation must return its original receipt, not erase progress.
-                print(json.dumps(dict(ok=True, output="inspection_worklist", path=str(target), resumed=True,
+                _code_output(json.dumps(dict(ok=True, output="inspection_worklist", path=str(target), resumed=True,
                     event_id=prior["event_id"], sha256=prior["payload"]["sha256"],
-                    current_sha256=file_sha256(target), already_applied=True), ensure_ascii=False))
+                    current_sha256=file_sha256(target), already_applied=True), ensure_ascii=False), out_dir, meta, access)
                 return 0
             if args.phase == "read":
                 if args.read_phase not in report["required_phases"] or not args.path:
@@ -5637,20 +5768,24 @@ def cmd_inspection(args):
             elif args.phase == "assess":
                 if not args.check_id or not args.assessment_json or not args.read_phase:
                     raise ValueError("assess 必须指定 --check-id/--read-phase/--assessment-json")
-                helper.apply_assessment(report, workspace, args.check_id, args.read_phase, assessment)
+                helper.apply_assessment(report, workspace, args.check_id, args.read_phase, assessment, **inspection_access)
             if args.phase != "prepare" or not resumed:
                 # Reject a conflicting request before replacing any valid worklist.
                 encoded = (json.dumps(report, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
                 prospective = dict(stable_payload, sha256=hashlib.sha256(encoded).hexdigest(), size=len(encoded))
                 find_idempotent_event(events, args.request, "artifact_written", prospective)
+                if access:
+                    _code_guard(out_dir, meta, **access)
                 atomic_write_json(target, report)
+                if access:
+                    _code_guard(out_dir, meta, **access)
         except (ValueError, TypeError, OSError) as exc:
             raise ControlError(f"工作清单准备/版本校验失败: {exc}", gate_id="inspection_worklist")
         payload = dict(stable_payload, sha256=file_sha256(target), size=target.stat().st_size)
         prior = find_idempotent_event(events, args.request, "artifact_written", payload)
-        event = prior or append_event(out_dir, meta, "artifact_written", payload, request_id=args.request)
-    print(json.dumps(dict(ok=True, output="inspection_worklist", path=str(target), resumed=resumed,
-                          event_id=event["event_id"], sha256=payload["sha256"], already_applied=bool(prior)), ensure_ascii=False))
+        event = prior or append_event(out_dir, meta, "artifact_written", payload, request_id=args.request, **access)
+    _code_output(json.dumps(dict(ok=True, output="inspection_worklist", path=str(target), resumed=resumed,
+                          event_id=event["event_id"], sha256=payload["sha256"], already_applied=bool(prior)), ensure_ascii=False), out_dir, meta, access)
     return 0
 
 
@@ -5684,17 +5819,23 @@ def declared_output_path(out_dir, meta, contract, target):
     return None
 
 
-def cmd_artifact(args):
+def cmd_artifact(args, *, git_provider=None, require_git_provider=False, inspection_provider_factory=None):
     out_dir = Path(args.dir).resolve()
+    access = _code_access(args.step, git_provider, require_git_provider, inspection_provider_factory)
+    candidate_access = _code_candidate_access(access)
     model = load_execution_model()
     contract = step_contract(model, args.step)
     with DirLock(out_dir):
+        if access:
+            _code_inspection_provider(out_dir, load_metadata(out_dir), **access)
+            if (out_dir / TXN_NAME).exists():
+                raise ControlError("provider recovery is not enabled", gate_id="candidate_transaction_pending")
         recover_pending_transaction(out_dir)
         meta = load_metadata(out_dir)
         require_vnext(meta, out_dir)
         require_valid_metadata(meta)
         ensure_execution_writable(meta)
-        events, problems = verify_event_chain(out_dir, meta)
+        events, problems = verify_event_chain(out_dir, meta, **candidate_access)
         if problems:
             raise ControlError("事件链不完整，拒绝记录产物", exit_code=1,
                                gate_id="event_chain", violations=problems)
@@ -5735,11 +5876,11 @@ def cmd_artifact(args):
             payload["round_digests"] = {str(row["round"]): canonical_digest(row) for row in data["rounds"]}
         prior = find_idempotent_event(events, args.request, "artifact_written", payload)
         event = prior or append_event(out_dir, meta, "artifact_written", payload,
-                                      request_id=args.request)
-    print(json.dumps({"ok": True, "step": args.step, "attempt": args.attempt,
+                                      request_id=args.request, **access)
+    _code_output(json.dumps({"ok": True, "step": args.step, "attempt": args.attempt,
                       "output": output_id, "path": str(target),
                       "sha256": payload["sha256"], "event_id": event["event_id"],
-                      "already_applied": bool(prior)}, ensure_ascii=False, indent=2))
+                      "already_applied": bool(prior)}, ensure_ascii=False, indent=2), out_dir, meta, access)
     return 0
 
 
@@ -6601,7 +6742,7 @@ def build_parser():
     return ap
 
 
-def main(*, git_provider=None, require_git_provider=False):
+def main(*, git_provider=None, require_git_provider=False, inspection_provider_factory=None):
     import contextlib
     import io
 
@@ -6613,13 +6754,23 @@ def main(*, git_provider=None, require_git_provider=False):
     try:
         access = ({"git_provider": git_provider, "require_git_provider": require_git_provider}
                   if _candidate_access_requested(git_provider, require_git_provider) else {})
-        if access and not ((args.cmd == "candidate" and args.func is cmd_candidate) or
-                           (args.cmd == "build-start" and args.func is cmd_build_start) or
-                           (args.cmd == "record-verification" and args.func is cmd_record_verification) or
-                           (args.cmd == "action-policy" and args.func is cmd_action_policy)):
+        if inspection_provider_factory is not None:
+            access = dict(git_provider=git_provider, require_git_provider=require_git_provider,
+                          inspection_provider_factory=inspection_provider_factory)
+        ordinary = inspection_provider_factory is None and (
+            (args.cmd == "candidate" and args.func is cmd_candidate) or
+            (args.cmd == "build-start" and args.func is cmd_build_start) or
+            (args.cmd == "record-verification" and args.func is cmd_record_verification) or
+            (args.cmd == "action-policy" and args.func is cmd_action_policy))
+        code_entry = inspection_provider_factory is not None and getattr(args, "step", None) == "code" and (
+            (args.cmd == "step" and args.func is cmd_step and getattr(args, "phase", None) in {"start", "check", "finish"}) or
+            (args.cmd == "inspection" and args.func is cmd_inspection and getattr(args, "phase", None) in {"prepare", "read", "assess", "check"}) or
+            (args.cmd == "artifact" and args.func is cmd_artifact) or
+            (args.cmd == "check-outputs" and args.func is cmd_check_outputs))
+        if access and not (ordinary or code_entry):
             raise ControlError("B1 command dispatch is not enabled", gate_id="candidate_business_propagation_pending")
         policy_deadline = (time.monotonic() + candidate_module().DEFAULT_LIMITS["timeout_seconds"]
-                           if access and args.cmd == "action-policy" else None)
+                           if access and (args.cmd == "action-policy" or code_entry) else None)
         # 捕获子命令输出：业务失败（ok=false）时子命令仍可能返回 0，
         # 会让 shell 的 `&&` / `set -e` 误判为成功。此处统一纠正为退出码 1。
         buf = io.StringIO()

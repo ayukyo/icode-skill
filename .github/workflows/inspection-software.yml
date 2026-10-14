@@ -37,6 +37,7 @@ on:
       - 'tests/test_candidate_git_provider_unit.py'
       - '.github/workflows/candidate-provider-software.yml'
       - 'tests/test_candidate_workflow_triggers.py'
+      - 'tests/test_candidate_code_inspection_provider_unit.py'
   workflow_dispatch:
 permissions:
   contents: read
