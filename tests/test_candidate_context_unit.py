@@ -174,7 +174,7 @@ class CandidateContextTests(unittest.TestCase):
                     invoke(ctl.candidate_snapshot, self.ticket, meta, events=[], provider=self.provider, required=True)
         self.assertEqual(before, self.frozen())
 
-    def test_context_trio_one_verify_and_business_blocked(self):
+    def test_context_trio_one_verify_and_business_eligible(self):
         self.bind()
         before = self.frozen()
         with patch.object(ctl, "verify_event_chain", wraps=ctl.verify_event_chain) as verify, \
@@ -184,8 +184,9 @@ class CandidateContextTests(unittest.TestCase):
         self.assertIsNotNone(ctx["current"], ctx)
         self.assertEqual(verify.call_count, 1)
         self.assertEqual(capture.call_count, 1)
-        self.assertIn(PENDING, ctx["reasons"])
-        self.assertFalse(ctl.verification_evidence_module().assess(self.meta(), ctx)["ok"])
+        self.assertEqual(ctx["reasons"], [])
+        self.assertTrue(ctl.verification_evidence_module().assess(self.meta(), ctx,
+                        git_provider=self.provider, require_git_provider=True)["ok"])
         self.assertEqual(before, self.frozen())
 
     def test_partial_or_foreign_trio_never_reloads(self):
@@ -224,7 +225,7 @@ class CandidateContextTests(unittest.TestCase):
         self.assertEqual(observed, [False])
         self.assertTrue(any("candidate_provider_context" in issue for issue in problems), problems)
 
-    def test_history_preserves_hash_schema_then_blocks_b2(self):
+    def test_history_preserves_hash_schema_and_rejects_foreign_root(self):
         candidate = self.meta()["candidate_tracking"]["current"]["candidate_id"]
         self.command("record-verification", "--dir", self.ticket, "--kind", "device_test", "--outcome", "pass",
                      "--environment", "host", "--candidate-id", candidate, "--layer", "host", "--consumer", "test",
@@ -232,7 +233,7 @@ class CandidateContextTests(unittest.TestCase):
         self.bind()
         path, before = self.ticket / ctl.EVENTS_NAME, self.frozen()
         _events, problems = invoke(ctl.verify_event_chain, self.ticket, self.meta(), provider=self.provider, required=True)
-        self.assertIn(PENDING, problems)
+        self.assertTrue(any("candidate_provider_context" in issue for issue in problems), problems)
         self.assertEqual(before, self.frozen())
         events = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
         events[-1]["schema_version"] = 2
@@ -240,7 +241,8 @@ class CandidateContextTests(unittest.TestCase):
         _events, problems = invoke(ctl.verify_event_chain, self.ticket, self.meta(), provider=self.provider, required=True)
         self.assertTrue(any("event_schema" in issue for issue in problems), problems)
         self.assertTrue(any("event_hash" in issue for issue in problems), problems)
-        self.assertIn(PENDING, problems)
+        self.assertTrue(any("candidate_provider_context" in issue for issue in problems), problems)
+        self.assertNotIn(PENDING, problems)
 
     def test_command_dispatch_stays_unenabled(self):
         self.bind()

@@ -80,21 +80,82 @@ def event_runs(events):
             for event in events if event.get("event_type") == "verification_recorded"]
 
 
-B1_CANDIDATE_PENDING = "candidate_business_propagation_pending"
+def _provider_requested(provider, required):
+    return provider is not None or type(required) is not bool or required
+
+
+def _candidate_guard(candidate_api, provider, required, root=None):
+    """Canonical C1a validation; only the explicit object grants software access."""
+    if not _provider_requested(provider, required):
+        return
+    try:
+        if root is None:
+            root = provider.workspace if provider is not None else Path(".")
+        candidate_api._candidate_provider(Path(root).resolve(), provider, required)
+    except (AttributeError, TypeError, ValueError, OSError) as exc:
+        raise EvidenceError("candidate_provider_context: " + str(exc)) from exc
+
+
+def _compare_candidates(recorded, current, candidate_api, *, git_provider=None, require_git_provider=False):
+    if not _provider_requested(git_provider, require_git_provider):
+        return candidate_api.compare_candidates(recorded, current)
+    _candidate_guard(candidate_api, git_provider, require_git_provider)
+    try:
+        result = candidate_api.compare_candidates(recorded, current, git_provider=git_provider,
+                                                  require_git_provider=require_git_provider)
+    except (TypeError, ValueError, OSError) as exc:
+        raise EvidenceError("candidate_proof_unavailable: " + str(exc)) from exc
+    _candidate_guard(candidate_api, git_provider, require_git_provider)
+    ordinary = {"candidate_invalid", "source_or_contract_drift", "index_or_manifest_drift",
+                "commit_tree_not_reviewed_content"}
+    success = {"identical_candidate", "same_content_commit"}
+    if not isinstance(result, dict) or type(result.get("equivalent")) is not bool or \
+            type(result.get("reason")) is not str or \
+            result.get("reason") not in (success if result["equivalent"] else ordinary):
+        # Query/parser/timeout/budget failures can leave assert_context healthy.
+        # They must not reach documentation or reused-origin fallbacks.
+        raise EvidenceError("candidate_proof_unavailable: " + str(result.get("reason") if isinstance(result, dict) else None))
+    return result
+
+
+def _context_guard(ctx, provider, required):
+    if not _provider_requested(provider, required):
+        if isinstance(ctx, dict) and (ctx.get("git_provider") is not None or "require_git_provider" in ctx):
+            raise EvidenceError("candidate_provider_context: explicit context parameters required")
+        return
+    if not isinstance(ctx, dict) or ctx.get("git_provider") is not provider or \
+            ctx.get("require_git_provider") is not required or ctx.get("enabled") is not True:
+        raise EvidenceError("candidate_provider_context: context binding mismatch")
+    required_fields = {"enabled", "current", "events", "reasons", "candidate_api",
+                       "git_provider", "require_git_provider"}
+    if not required_fields.issubset(ctx) or not isinstance(ctx["events"], list) or \
+            not isinstance(ctx["reasons"], list) or any(not isinstance(reason, str) for reason in ctx["reasons"]):
+        raise EvidenceError("candidate_provider_context: invalid context shape")
+    candidate_api = ctx.get("candidate_api")
+    _candidate_guard(candidate_api, provider, required)
+    if ctx.get("current") is not None:
+        if not candidate_api.snapshot_identity_ok(ctx["current"]):
+            raise EvidenceError("candidate_provider_context: invalid current snapshot")
+        _candidate_guard(candidate_api, provider, required, ctx["current"]["identity"]["checkout_realpath"])
+    elif not ctx.get("reasons"):
+        raise EvidenceError("candidate_provider_context: current snapshot missing")
+
+
+def _blocked_selection(exc):
+    return {"latest": {}, "rejected": [], "reasons": ["candidate_provider_context"], "detail": str(exc)}
 
 
 def context(out_dir, meta, *, capture=None, verify=None, candidate_api=None,
             git_provider=None, require_git_provider=False):
     """Read-only context. Enabled tickets without a live root fail closed."""
     result = {"enabled": enabled(meta), "current": None, "events": [], "reasons": [], "candidate_api": candidate_api}
-    if git_provider is not None or type(require_git_provider) is not bool or require_git_provider:
-        result["_candidate_b1_pending"] = True
+    if _provider_requested(git_provider, require_git_provider):
+        result.update(git_provider=git_provider, require_git_provider=require_git_provider)
         try:
             if not callable(capture) or not callable(verify) or candidate_api is None:
                 raise EvidenceError("complete canonical callback triple required")
             def guard():
-                root = Path(git_provider.workspace).resolve() if git_provider is not None else Path(out_dir).resolve()
-                candidate_api._candidate_provider(root, git_provider, require_git_provider)
+                _candidate_guard(candidate_api, git_provider, require_git_provider)
             guard()
             if not result["enabled"]:
                 raise EvidenceError("candidate_tracking_required")
@@ -107,7 +168,7 @@ def context(out_dir, meta, *, capture=None, verify=None, candidate_api=None,
             result["events"] = events
             result["current"] = capture(out_dir, meta, events=events, **access)
             guard()
-            result["reasons"] = [B1_CANDIDATE_PENDING]
+            _context_guard(result, git_provider, require_git_provider)
         except Exception as exc:
             result["current"] = None
             result["reasons"] = ["candidate_capture_unavailable"]
@@ -189,7 +250,7 @@ def validate_source_claim(run, tracked, source_runs):
     raise EvidenceError("fresh_claim_requires_controlled_build_source")
 
 
-def eligible_latest_runs(meta, ctx, *, source_runs=None):
+def eligible_latest_runs(meta, ctx, *, source_runs=None, git_provider=None, require_git_provider=False):
     """Filter candidate and environment BEFORE selecting the latest cell.
 
     A runner-only pass cannot supersede a direct executable or report-backed
@@ -197,8 +258,10 @@ def eligible_latest_runs(meta, ctx, *, source_runs=None):
     failures before an executable can run or emit a report.
     """
     latest, rejected, candidates = {}, [], []
-    if ctx.get("_candidate_b1_pending") is True:
-        return {"latest": {}, "rejected": [], "reasons": list(ctx["reasons"]) or [B1_CANDIDATE_PENDING]}
+    try:
+        _context_guard(ctx, git_provider, require_git_provider)
+    except EvidenceError as exc:
+        return _blocked_selection(exc)
     runs = meta.get("verification_runs") or []
     if not isinstance(runs, list):
         return {"latest": {}, "rejected": [], "reasons": ["verification_runs_invalid"]}
@@ -213,10 +276,16 @@ def eligible_latest_runs(meta, ctx, *, source_runs=None):
             snapshot = run.get("candidate")
             if run.get("candidate_id") != (snapshot or {}).get("candidate_id"):
                 reason = "candidate_identity_missing"
-            elif not ctx["candidate_api"].compare_candidates(snapshot, ctx["current"])["equivalent"]:
-                reason = "candidate_drift"
-            elif run.get("environment") not in ENVIRONMENTS:
-                reason = "environment_missing"
+            else:
+                try:
+                    equivalent = _compare_candidates(snapshot, ctx["current"], ctx["candidate_api"],
+                        git_provider=git_provider, require_git_provider=require_git_provider)["equivalent"]
+                except EvidenceError as exc:
+                    return _blocked_selection(exc)
+                if not equivalent:
+                    reason = "candidate_drift"
+                elif run.get("environment") not in ENVIRONMENTS:
+                    reason = "environment_missing"
             if reason is None:
                 try:
                     validate_source_claim(run, True, source_runs)
@@ -251,6 +320,10 @@ def eligible_latest_runs(meta, ctx, *, source_runs=None):
             rejected.append({"run_id": run.get("run_id"), "reason": "test_report_required"})
             continue
         latest[key] = run
+    try:
+        _context_guard(ctx, git_provider, require_git_provider)
+    except EvidenceError as exc:
+        return _blocked_selection(exc)
     return {"latest": latest, "rejected": rejected, "reasons": []}
 
 
@@ -329,9 +402,10 @@ def unit_state(run, profile="generic", metrics=(), baseline_ref=None):
     return "satisfied"
 
 
-def assess(meta, ctx):
-    selected = eligible_latest_runs(meta, ctx)
-    result = {"ok": False, "state": "verification_pending", "current_candidate_id": (ctx["current"] or {}).get("candidate_id"),
+def assess(meta, ctx, *, git_provider=None, require_git_provider=False):
+    selected = eligible_latest_runs(meta, ctx, git_provider=git_provider, require_git_provider=require_git_provider)
+    current = ctx.get("current") if isinstance(ctx, dict) else None
+    result = {"ok": False, "state": "verification_pending", "current_candidate_id": current.get("candidate_id") if isinstance(current, dict) else None,
               "reasons": list(selected["reasons"]), "eligible_runs": [{key: value for key, value in run.items() if key != "candidate"}
                        for run in selected["latest"].values()], "rejected_runs": selected["rejected"]}
     if result["reasons"]:
@@ -394,18 +468,21 @@ def validate_documentation_scope(previous, current, paths, digest, candidate_api
         raise EvidenceError("reuse scope_hash does not match unchanged verified scope")
 
 
-def reuse_source_related(previous, later, reuse, candidate_api):
+def reuse_source_related(previous, later, reuse, candidate_api, *, git_provider=None, require_git_provider=False):
     # Equivalence is directional: the later commit extends the origin HEAD.
-    if candidate_api.compare_candidates(previous, later)["equivalent"]:
+    if _compare_candidates(previous, later, candidate_api, git_provider=git_provider,
+                           require_git_provider=require_git_provider)["equivalent"]:
         return True
     try:
         validate_documentation_scope(previous, later, reuse["scope_paths"], reuse["scope_hash"], candidate_api)
-        return True
     except EvidenceError:
         return False
+    _candidate_guard(candidate_api, git_provider, require_git_provider)
+    return True
 
 
-def validate_reuse(run, runs, candidate_api):
+def validate_reuse(run, runs, candidate_api, *, git_provider=None, require_git_provider=False):
+    _candidate_guard(candidate_api, git_provider, require_git_provider)
     reuse = run.get("reuse")
     if reuse is None:
         return
@@ -427,13 +504,19 @@ def validate_reuse(run, runs, candidate_api):
     history = []
     for item in runs:
         if item.get("environment") == origin.get("environment") and cell(item) == cell(origin) \
-                and reuse_source_related(previous, item.get("candidate"), reuse, candidate_api):
+                and reuse_source_related(previous, item.get("candidate"), reuse, candidate_api,
+                    git_provider=git_provider, require_git_provider=require_git_provider):
             # Keep stored snapshots intact. This in-memory normalization only
             # lets the common environment/direct qualification filter run after
             # source association has been proven in the correct direction.
             history.append(dict(item, candidate=previous, candidate_id=previous["candidate_id"]))
     source_context = {"enabled": True, "current": previous, "events": [], "reasons": [], "candidate_api": candidate_api}
-    selection = eligible_latest_runs({"verification_runs": history}, source_context, source_runs=runs)
+    if _provider_requested(git_provider, require_git_provider):
+        source_context.update(git_provider=git_provider, require_git_provider=require_git_provider)
+    selection = eligible_latest_runs({"verification_runs": history}, source_context, source_runs=runs,
+                                    git_provider=git_provider, require_git_provider=require_git_provider)
+    if selection["reasons"]:
+        raise EvidenceError("reuse source context unavailable: " + ",".join(selection["reasons"]))
     rejected = {item["run_id"] for item in selection["rejected"]}
     if origin["run_id"] in rejected:
         raise EvidenceError("reuse_origin_no_longer_eligible")
@@ -442,6 +525,7 @@ def validate_reuse(run, runs, candidate_api):
     for later in runs[origin_index + 1:]:
         if later.get("run_id") in related and later.get("run_id") not in rejected and later.get("outcome") != "pass":
             raise EvidenceError("reuse_origin_invalidated_by_later_" + str(later.get("outcome")))
+    _candidate_guard(candidate_api, git_provider, require_git_provider)
 
 
 def validate_supersedes(run, runs):
@@ -607,7 +691,9 @@ def artifact_facts(artifacts, workspace, *, build_dir=None, observed_ns=None, bu
     return hashes
 
 
-def validate_provenance(run, meta, events, workspace, candidate_api, *, check_files=True, live_candidate=None):
+def validate_provenance(run, meta, events, workspace, candidate_api, *, check_files=True, live_candidate=None,
+                        git_provider=None, require_git_provider=False):
+    _candidate_guard(candidate_api, git_provider, require_git_provider, workspace)
     validate_source_claim(run, enabled(meta), event_runs(events))
     budget = artifact_read_budget(candidate_api, (meta.get("candidate_tracking") or {}).get("limits")) if check_files else None
     for field in PROVENANCE_FIELDS:
@@ -625,7 +711,7 @@ def validate_provenance(run, meta, events, workspace, candidate_api, *, check_fi
         provenance_candidate = run.get("candidate")
         if source_id != run.get("candidate_id"):
             provenance_candidate = resolve_candidate(source_id, meta, events, None, candidate_api)
-            equivalent = candidate_api.compare_candidates(provenance_candidate, run.get("candidate"))["equivalent"]
+            equivalent = _compare_candidates(provenance_candidate, run.get("candidate"), candidate_api, git_provider=git_provider, require_git_provider=require_git_provider)["equivalent"]
             origin = next((item for item in event_runs(events) if item.get("run_id") == (run.get("reuse") or {}).get("origin_run_id")), None)
             reused_origin = origin is not None and origin.get(field) == provenance
             if not equivalent and not reused_origin:
@@ -633,7 +719,7 @@ def validate_provenance(run, meta, events, workspace, candidate_api, *, check_fi
         directory, observed_ns = None, None
         if field == "build_provenance":
             if run.get("build_source") == "fresh" and run.get("outcome") == "pass" and live_candidate is not None \
-                    and not candidate_api.compare_candidates(run.get("candidate"), live_candidate)["equivalent"]:
+                    and not _compare_candidates(run.get("candidate"), live_candidate, candidate_api, git_provider=git_provider, require_git_provider=require_git_provider)["equivalent"]:
                 raise EvidenceError("fresh source candidate drifted since build-start")
             for key in ("configure_command", "build_command", "compiler", "architecture"):
                 if not provenance.get(key):
@@ -643,7 +729,7 @@ def validate_provenance(run, meta, events, workspace, candidate_api, *, check_fi
             if start is None:
                 raise EvidenceError("build provenance has no controlled start_event_id")
             receipt = (start["payload"].get("build_start_receipt") or {})
-            if not candidate_api.compare_candidates(receipt.get("source_candidate"), provenance_candidate)["equivalent"]:
+            if not _compare_candidates(receipt.get("source_candidate"), provenance_candidate, candidate_api, git_provider=git_provider, require_git_provider=require_git_provider)["equivalent"]:
                 raise EvidenceError("source candidate drifted since build-start")
             for key in ("configure_command", "build_command"):
                 if provenance[key] != (receipt.get("parameters") or {}).get(key):
@@ -659,7 +745,7 @@ def validate_provenance(run, meta, events, workspace, candidate_api, *, check_fi
         else:
             origin = next((item for item in event_runs(events) if item.get("run_id") == provenance.get("origin_build_run_id") and item.get("kind") == "build" and item.get("outcome") == "pass"), None)
             if origin is None or not origin.get("build_provenance") or artifact_hashes(origin["build_provenance"]["artifacts"]) != artifact_hashes(provenance["artifacts"]) \
-                    or not candidate_api.compare_candidates(origin.get("candidate"), provenance_candidate)["equivalent"]:
+                    or not _compare_candidates(origin.get("candidate"), provenance_candidate, candidate_api, git_provider=git_provider, require_git_provider=require_git_provider)["equivalent"]:
                 raise EvidenceError(field + " does not match a real build artifact/source event")
         hashes = artifact_facts(provenance["artifacts"], workspace, build_dir=directory, observed_ns=observed_ns, budget=budget) if check_files and field != "runtime_provenance" else artifact_hashes(provenance["artifacts"])
         # Remote runtime hashes are event/evidence claims; no device access is
@@ -667,9 +753,10 @@ def validate_provenance(run, meta, events, workspace, candidate_api, *, check_fi
         identity = run.get("artifact_identity")
         if len(hashes) == 1 and identity != "sha256:" + str(hashes[0]):
             raise EvidenceError("artifact_identity disagrees with structured artifact SHA256")
+    _candidate_guard(candidate_api, git_provider, require_git_provider, workspace)
 
 
-def event_issues(events, meta, candidate_api):
+def event_issues(events, meta, candidate_api, *, git_provider=None, require_git_provider=False):
     """Offline mirror checking, including writer-only build-start markers."""
     problems, starts, runs, tracking_enabled = [], [], [], False
     for position, event in enumerate(events):
@@ -702,15 +789,20 @@ def event_issues(events, meta, candidate_api):
             problems.append("verification_candidate_identity")
         try:
             validate_supersedes(run, runs)
-            validate_reuse(run, runs, candidate_api)
+            validate_reuse(run, runs, candidate_api, git_provider=git_provider, require_git_provider=require_git_provider)
             validate_direct(run)
             validate_test_summary(run)
             if run.get("candidate") is not None:
                 historical_meta = dict(meta, candidate_tracking={"mode": "enabled"})
-                validate_provenance(run, historical_meta, events[:position], run["candidate"]["identity"]["checkout_realpath"], candidate_api, check_files=False)
+                validate_provenance(run, historical_meta, events[:position], run["candidate"]["identity"]["checkout_realpath"], candidate_api,
+                                    check_files=False, git_provider=git_provider, require_git_provider=require_git_provider)
         except (EvidenceError, TypeError, KeyError, ValueError) as exc:
             problems.append("verification_evidence: " + str(exc))
         runs.append(run)
     if starts != build_starts(meta):
         problems.append("build_start_event_mismatch")
+    try:
+        _candidate_guard(candidate_api, git_provider, require_git_provider)
+    except EvidenceError as exc:
+        problems.append(str(exc))
     return problems

@@ -924,14 +924,10 @@ def verify_event_chain(out_dir, meta=None, semantic=True, *, git_provider=None, 
             _candidate_context_guard(out_dir, meta, git_provider, require_git_provider)
             if semantic is not True:
                 raise ControlError("B1 requires semantic event validation", gate_id="candidate_provider_context")
-            evidence_api = verification_evidence_module()
-            event_api = _B1EventCandidateView(candidate_module(), evidence_api,
-                lambda: _candidate_context_guard(out_dir, meta, git_provider, require_git_provider))
             if meta is not None and is_vnext(meta):
                 problems.extend(f"event_semantics: {item}"
-                                for item in validate_event_semantics(events, meta, candidate_api=event_api))
-            if any(event.get("event_type") == "verification_recorded" for event in events):
-                problems.append(evidence_api.B1_CANDIDATE_PENDING)
+                                for item in validate_event_semantics(events, meta, candidate_api=candidate_module(),
+                                    git_provider=git_provider, require_git_provider=require_git_provider))
             _candidate_context_guard(out_dir, meta, git_provider, require_git_provider)
         except ControlError as exc:
             problems.append("candidate_provider_context: " + exc.message)
@@ -1035,7 +1031,7 @@ class ExecutionBindingMirror:
         return sorted(self.issues)
 
 
-def validate_event_semantics(events, meta, *, candidate_api=None):
+def validate_event_semantics(events, meta, *, candidate_api=None, git_provider=None, require_git_provider=False):
     """校验控制事件的顺序和 payload 语义，防止自洽 hash 掩盖伪造生命周期。"""
     problems = []
     sm = load_state_machine()
@@ -1167,7 +1163,9 @@ def validate_event_semantics(events, meta, *, candidate_api=None):
     problems.extend(binding_mirror.finish())
     problems.extend(candidate_event_issues(events, meta))
     event_candidate_api = candidate_module() if candidate_api is None else candidate_api
-    problems.extend(verification_evidence_module().event_issues(events, meta, event_candidate_api))
+    access = ({"git_provider": git_provider, "require_git_provider": require_git_provider}
+              if _candidate_access_requested(git_provider, require_git_provider) else {})
+    problems.extend(verification_evidence_module().event_issues(events, meta, event_candidate_api, **access))
     return problems
 
 
@@ -3720,19 +3718,6 @@ def _candidate_context_guard(out_dir, meta, provider, required):
         raise ControlError(str(exc), gate_id="candidate_provider_context") from exc
 
 
-class _B1EventCandidateView:
-    """Shape validation only; historical business comparisons await B2."""
-    def __init__(self, candidate_api, evidence_api, guard):
-        self.candidate_api, self.evidence_api, self.guard = candidate_api, evidence_api, guard
-
-    def snapshot_identity_ok(self, snapshot):
-        return self.candidate_api.snapshot_identity_ok(snapshot)
-
-    def compare_candidates(self, recorded, current):
-        self.guard()
-        raise self.evidence_api.EvidenceError(self.evidence_api.B1_CANDIDATE_PENDING)
-
-
 _VERIFICATION_EVIDENCE_MODULE = None
 
 
@@ -3759,7 +3744,7 @@ def verification_applicability(out_dir, meta=None, *, git_provider=None, require
     meta = load_metadata(out_dir) if meta is None else meta
     access = ({"git_provider": git_provider, "require_git_provider": require_git_provider}
               if _candidate_access_requested(git_provider, require_git_provider) else {})
-    return verification_evidence_module().assess(meta, verification_context(out_dir, meta, **access))
+    return verification_evidence_module().assess(meta, verification_context(out_dir, meta, **access), **access)
 
 
 def candidate_inspection_scope(out_dir, meta=None, *, effective_base=None, events=None):

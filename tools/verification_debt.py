@@ -322,10 +322,26 @@ def required_dimensions(contract: Dict[str, Any]) -> Optional[Tuple[List[str], L
     return dimensions[0], dimensions[1], dimensions[2]
 
 
-def latest_matching_runs(metadata: Dict[str, Any], ticket_dir=None) -> Dict[Tuple[str, str, str], Dict[str, Any]]:
-    """Candidate/environment qualification is shared with the workflow linter."""
+def _source_selection(metadata, ticket_dir, context, capture, verify, candidate_api, provider, required):
     module = evidence_module()
-    return module.eligible_latest_runs(metadata, module.context(ticket_dir, metadata))["latest"]
+    access = ({"git_provider": provider, "require_git_provider": required}
+              if provider is not None or type(required) is not bool or required else {})
+    if context is None:
+        context = module.context(ticket_dir, metadata, capture=capture, verify=verify,
+                                 candidate_api=candidate_api, **access)
+    selection = module.eligible_latest_runs(metadata, context, **access)
+    if access and selection["reasons"]:
+        # Preserve a total blocked report even for a missing/foreign context.
+        context = {"enabled": True, "current": None, "reasons": list(selection["reasons"])}
+    return context, selection
+
+
+def latest_matching_runs(metadata: Dict[str, Any], ticket_dir=None, *, context=None,
+                         capture=None, verify=None, candidate_api=None,
+                         git_provider=None, require_git_provider=False) -> Dict[Tuple[str, str, str], Dict[str, Any]]:
+    """Candidate/environment qualification is shared with the workflow linter."""
+    return _source_selection(metadata, ticket_dir, context, capture, verify, candidate_api,
+                             git_provider, require_git_provider)[1]["latest"]
 
 
 def explicit_required_cells(
@@ -441,7 +457,9 @@ def build_unit(
     }
 
 
-def analyze_ticket(metadata: Dict[str, Any], ticket_dir: Path, *, context=None) -> Dict[str, Any]:
+def analyze_ticket(metadata: Dict[str, Any], ticket_dir: Path, *, context=None,
+                   capture=None, verify=None, candidate_api=None,
+                   git_provider=None, require_git_provider=False) -> Dict[str, Any]:
     ticket_id = metadata.get("ticket_id")
     if not nonempty_string(ticket_id):
         ticket_id = ticket_dir.name
@@ -468,14 +486,18 @@ def analyze_ticket(metadata: Dict[str, Any], ticket_dir: Path, *, context=None) 
     evidence_api = evidence_module()
     # A report can share one live capture with review/evidence assessment.
     # Context is local to this invocation; existing callers keep the same API.
-    ctx = evidence_api.context(ticket_dir, metadata) if context is None else context
-    selection = evidence_api.eligible_latest_runs(metadata, ctx)
+    ctx, selection = _source_selection(metadata, ticket_dir, context, capture, verify, candidate_api,
+                                       git_provider, require_git_provider)
     base["current_candidate_id"] = (ctx["current"] or {}).get("candidate_id")
     base["candidate_status"] = "blocked" if ctx["reasons"] else "enabled" if ctx["enabled"] else "legacy_untracked"
     base["eligibility_reasons"] = selection["reasons"]
     base["rejected_runs"] = selection["rejected"]
-    if ctx["enabled"] and selection["reasons"]:
+    if selection["reasons"] and (ctx["enabled"] or git_provider is not None
+                                 or type(require_git_provider) is not bool or require_git_provider):
         base.update(ticket_blocked=True, blocking_reason=selection["reasons"][0])
+        if git_provider is not None or type(require_git_provider) is not bool or require_git_provider:
+            base["tracking_status"] = "blocked"
+            return base
     if (isinstance(contract, dict) and contract.get("requirements_pending") is True) or \
             (evidence_api.real_env_contract_required(metadata) and (not isinstance(contract, dict) or contract.get("required") is not True)):
         base.update(tracking_status="requirements_pending", ticket_blocked=True, blocking_reason="requirements_pending")
