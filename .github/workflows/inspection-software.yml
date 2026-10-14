@@ -33,6 +33,10 @@ on:
       - 'tests/test_candidate_freshness.py'
       - 'tests/inspection_windows_diagnostic.py'
       - '.github/workflows/inspection-software.yml'
+      - 'tools/icode_candidate.py'
+      - 'tests/test_candidate_git_provider_unit.py'
+      - '.github/workflows/candidate-provider-software.yml'
+      - 'tests/test_candidate_workflow_triggers.py'
   workflow_dispatch:
 permissions:
   contents: read

@@ -45,6 +45,8 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install --no-install-recommends -y ripgrep
+      - name: Candidate inspection trigger contract
+        run: python -B -c "import unittest; s=unittest.defaultTestLoader.discover('tests', pattern='test_candidate_workflow_triggers.py'); assert s.countTestCases()==3; r=unittest.TextTestRunner(verbosity=2).run(s); raise SystemExit(not r.wasSuccessful() or bool(r.skipped))"
       - name: Typed candidate stdlib contract
         run: python -B -m unittest discover -s tests -p test_candidate_git_provider_unit.py -v
       - name: Count required candidate provider cases
