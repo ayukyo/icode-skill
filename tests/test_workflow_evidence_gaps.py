@@ -20,7 +20,7 @@ def load(name):
 
 control = load("icode_control")
 coverage = load("lint_mcp_coverage")
-CATALOG = json.loads((ROOT / "mcp/cheap-research/gates.json").read_text())
+CATALOG = json.loads((ROOT / "mcp/cheap-research/gates.json").read_text(encoding="utf-8"))
 GATE = next(g for g in CATALOG["gates"] if g["id"] == "deepcheck.dedup")
 
 

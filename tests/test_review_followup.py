@@ -24,7 +24,7 @@ def load(name, relative):
 
 control = load("followup_control", "tools/icode_control.py")
 coverage = load("followup_coverage", "tools/lint_mcp_coverage.py")
-CATALOG = json.loads((ROOT / "mcp/cheap-research/gates.json").read_text())
+CATALOG = json.loads((ROOT / "mcp/cheap-research/gates.json").read_text(encoding="utf-8"))
 
 
 @pytest.fixture
