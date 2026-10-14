@@ -8,16 +8,16 @@ from test_inspection_checks import CLOCK_SOURCE, assessment
 
 
 def prepare(root, out, source=CLOCK_SOURCE):
-    (root / "src/a.c").write_text(source)
+    (root / "src/a.c").write_text(source, encoding="utf-8", newline="\n")
     cli(out, "inspection", "--step", "code", "--phase", "prepare", "--attempt", "inspect-a", "--request", "prep")
     path = out / "code_worklist.json"
-    report = json.loads(path.read_text())
+    report = json.loads(path.read_text(encoding="utf-8"))
     for unit in report["units"]:
         for item in unit["files"]:
-            (root / item["path"]).read_text()
+            (root / item["path"]).read_text(encoding="utf-8")
             cli(out, "inspection", "--step", "code", "--phase", "read", "--attempt", "inspect-a",
                 "--read-phase", "code_review", "--path", item["path"])
-    return path, json.loads(path.read_text())
+    return path, json.loads(path.read_text(encoding="utf-8"))
 
 
 def assess(out, item, payload, request="assess-1", ok=True):
@@ -30,7 +30,7 @@ def test_prepare_writer_marks_attempt_even_without_trigger(inspected):
     root, out = inspected
     _, report = prepare(root, out, "int a(void) { return 1; }\n")
     assert report.get("checks_version") == 1
-    events = [json.loads(line) for line in (out / ".ico_events.jsonl").read_text().splitlines()]
+    events = [json.loads(line) for line in (out / ".ico_events.jsonl").read_text(encoding="utf-8").splitlines()]
     prepares = [e for e in events if e.get("request_id") == "prep"]
     assert len(prepares) == 1
     assert prepares[0]["payload"].get("inspection_checks_version") == 1
@@ -61,7 +61,7 @@ def test_new_writer_receipt_prevents_field_deletion_downgrade(inspected, source)
     path, report = prepare(root, out, source)
     report.pop("checks_version", None)
     report.pop("checks", None)
-    path.write_text(json.dumps(report))
+    path.write_text(json.dumps(report), encoding="utf-8", newline="\n")
     result = cli(out, "inspection", "--step", "code", "--phase", "check", "--attempt", "inspect-a", ok=False)
     assert any("checks" in issue or "declaration" in issue for issue in result["violations"])
     failed = cli(out, "inspection", "--step", "code", "--phase", "prepare", "--attempt", "inspect-a", ok=False)
@@ -101,7 +101,7 @@ def test_declaration_hash_binds_special_identity_but_not_results(inspected):
 def test_malformed_top_level_worklist_returns_structured_rejection(inspected):
     _, out = inspected
     cli(out, "inspection", "--step", "code", "--phase", "prepare", "--attempt", "inspect-a")
-    (out / "code_worklist.json").write_text("[]\n")
+    (out / "code_worklist.json").write_text("[]\n", encoding="utf-8", newline="\n")
     result = cli(out, "inspection", "--step", "code", "--phase", "check", "--attempt", "inspect-a", ok=False)
     assert result["violations"]
 
@@ -117,5 +117,5 @@ def test_read_only_helper_uses_real_writer_attempt_not_report_legacy_claim(inspe
     report.pop("checks_version")
     report.pop("checks")
     report["attempt"] = "invented-old-attempt"
-    path.write_text(json.dumps(report))
+    path.write_text(json.dumps(report), encoding="utf-8", newline="\n")
     assert module.inspection_worklist_issues(out, module.load_metadata(out), "code")

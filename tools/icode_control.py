@@ -6382,4 +6382,7 @@ def main():
 
 
 if __name__ == "__main__":
+    # Native CLI stdout is a UTF-8 wire; importing/capturing main stays text-only.
+    if isinstance(sys.stdout, io.TextIOWrapper):
+        sys.stdout.reconfigure(encoding="utf-8")
     sys.exit(main())

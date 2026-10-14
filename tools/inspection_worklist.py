@@ -429,7 +429,7 @@ def build_worklist(workspace, code_files, *, step, ticket_id, attempt, mode="ful
     if not seeds:
         raise InspectionError("code_files must contain mandatory seeds")
     related = _paths(root, [] if related is None else related)
-    scopes = _paths(root, sorted({str(Path(s).parent) for s in seeds}) if scopes is None else scopes, directory=True)
+    scopes = _paths(root, sorted({Path(s).parent.as_posix() for s in seeds}) if scopes is None else scopes, directory=True)
     if not scopes or any(not _inside(s, scopes) for s in seeds):
         raise InspectionError("scopes must contain all code_files")
     if baselines is not None and not isinstance(baselines, dict):
@@ -481,7 +481,7 @@ def build_worklist(workspace, code_files, *, step, ticket_id, attempt, mode="ful
         baseline = oid.decode("ascii").strip()
         report["resolved_baselines"][label] = baseline
         diff = ["diff", "--no-ext-diff", "--no-textconv", "--no-renames", "--name-only", "-z", baseline, "--"]
-        local_scopes = [os.path.relpath(root / s, repo) for s in scopes if _inside(s, [label]) or _inside(label, [s])]
+        local_scopes = [Path(os.path.relpath(root / s, repo)).as_posix() for s in scopes if _inside(s, [label]) or _inside(label, [s])]
         local_scopes = [s if not s.startswith("..") else "." for s in local_scopes]
         # Literal user scopes, plus fixed exclusions, keep ticket sidecars out
         # of enumeration itself (not merely filtered after consuming budgets).
@@ -491,7 +491,7 @@ def build_worklist(workspace, code_files, *, step, ticket_id, attempt, mode="ful
             request=GitQuery(GitOperation.DIFF_NAMES, oid=baseline, scopes=tuple(Path(s).as_posix() for s in local_scopes)))) if local_scopes else set()
         untracked = set(names(repo, ["ls-files", "--others", "--exclude-standard", "-z", "--", *pathspecs],
             request=GitQuery(GitOperation.LIST_FILES, kind="others", scopes=tuple(Path(s).as_posix() for s in local_scopes)))) if local_scopes else set()
-        association_scopes = sorted(set(local_scopes) | {os.path.relpath((root / p).parent, repo)
+        association_scopes = sorted(set(local_scopes) | {Path(os.path.relpath((root / p).parent, repo)).as_posix()
             for p in related if _repo(root, p, git_provider=git_provider) == repo})
         association_specs = [f":(literal){s}" for s in association_scopes] + excluded_specs
         scoped = set(names(repo, ["ls-files", "--cached", "--others", "--exclude-standard", "-z", "--", *association_specs],

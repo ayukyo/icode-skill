@@ -8,8 +8,16 @@
 
 import argparse
 import contextlib
-import fcntl
+try:
+    import fcntl as _fcntl_mod
+except ImportError:
+    _fcntl_mod = None
+try:
+    import msvcrt as _msvcrt_mod
+except ImportError:
+    _msvcrt_mod = None
 import hashlib
+import io
 import importlib.util
 import json
 import os
@@ -163,11 +171,12 @@ def atomic_write(path, data):
             stream.flush()
             os.fsync(stream.fileno())
         os.replace(temporary, path)
-        directory_fd = os.open(path.parent, os.O_RDONLY)
-        try:
-            os.fsync(directory_fd)
-        finally:
-            os.close(directory_fd)
+        if os.name != "nt":
+            directory_fd = os.open(path.parent, os.O_RDONLY)
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
     except BaseException:
         with contextlib.suppress(FileNotFoundError):
             os.unlink(temporary)
@@ -185,12 +194,33 @@ class DirectoryLock:
 
     def __enter__(self):
         self.stream = self.path.open("a+", encoding="utf-8")
-        fcntl.flock(self.stream.fileno(), fcntl.LOCK_EX)
+        try:
+            if _fcntl_mod is not None:
+                _fcntl_mod.flock(self.stream.fileno(), _fcntl_mod.LOCK_EX)
+            elif _msvcrt_mod is not None:
+                self.stream.seek(0, 2)
+                if self.stream.tell() < 1:
+                    self.stream.write("\0")
+                    self.stream.flush()
+                self.stream.seek(0)
+                # LK_LOCK retries are bounded by the Windows Python primitive.
+                _msvcrt_mod.locking(self.stream.fileno(), _msvcrt_mod.LK_LOCK, 1)
+            else:
+                raise CrosscheckError("No supported platform lock", gate_id="crosscheck_lock")
+        except BaseException:
+            self.stream.close()
+            raise
         return self
 
     def __exit__(self, exc_type, exc, traceback):
-        fcntl.flock(self.stream.fileno(), fcntl.LOCK_UN)
-        self.stream.close()
+        try:
+            if _fcntl_mod is not None:
+                _fcntl_mod.flock(self.stream.fileno(), _fcntl_mod.LOCK_UN)
+            elif _msvcrt_mod is not None:
+                self.stream.seek(0)
+                _msvcrt_mod.locking(self.stream.fileno(), _msvcrt_mod.LK_UNLCK, 1)
+        finally:
+            self.stream.close()
 
 
 def path_within(path, root):
@@ -241,7 +271,7 @@ def resolve_with_control(ticket_id, workspace):
     ]
     try:
         process = subprocess.run(
-            command, text=True, capture_output=True, timeout=60, check=False,
+            command, text=True, encoding="utf-8", capture_output=True, timeout=60, check=False,
         )
     except (OSError, subprocess.SubprocessError) as exc:
         raise CrosscheckError(f"工单解析器不可用: {exc}", gate_id="target_resolution")
@@ -1347,4 +1377,7 @@ def main():
 
 
 if __name__ == "__main__":
+    # Native CLI stdout is a UTF-8 wire; importing/capturing main stays text-only.
+    if isinstance(sys.stdout, io.TextIOWrapper):
+        sys.stdout.reconfigure(encoding="utf-8")
     sys.exit(main())

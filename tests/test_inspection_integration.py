@@ -15,7 +15,7 @@ CONTROL = ROOT / "tools/icode_control.py"
 def cli(out, *args, ok=True):
     proc = subprocess.run([sys.executable, str(CONTROL), *args, "--dir", str(out)],
                           env=dict(os.environ, ICODE_CONTROL_TEST_MODE="1"),
-                          capture_output=True, text=True)
+                          capture_output=True, text=True, encoding="utf-8")
     assert (proc.returncode == 0) == ok, (proc.stdout, proc.stderr)
     return json.loads(proc.stdout)
 
@@ -23,16 +23,17 @@ def cli(out, *args, ok=True):
 @pytest.fixture
 def inspected(tmp_path):
     (tmp_path / "src").mkdir()
-    (tmp_path / "src/a.c").write_text("int a(void) { return 1; }\n")
-    (tmp_path / "src/a.h").write_text("int a(void);\n")
+    (tmp_path / "src/a.c").write_text("int a(void) { return 1; }\n", encoding="utf-8", newline="\n")
+    (tmp_path / "src/a.h").write_text("int a(void);\n", encoding="utf-8", newline="\n")
     subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    subprocess.run(["git", "-C", str(tmp_path), "config", "core.autocrlf", "false"], check=True)
     subprocess.run(["git", "-C", str(tmp_path), "add", "src"], check=True)
     subprocess.run(["git", "-C", str(tmp_path), "-c", "user.name=Test", "-c",
                     "user.email=test@example.invalid", "commit", "-qm", "base"], check=True)
     out = tmp_path / ".icode_output/.icode_output_1"
     cli(out, "create", "--ticket-id", "inspect-1", "--requirement", "inspection",
         "--birth", "plan", "--metadata-json", json.dumps({"code_files": ["src/a.c"]}))
-    (out / "03_plan_final.md").write_text("# final\n")
+    (out / "03_plan_final.md").write_text("# final\n", encoding="utf-8", newline="\n")
     cli(out, "step", "--step", "code", "--phase", "start", "--attempt", "inspect-a")
     cli(out, "step", "--step", "code", "--phase", "check", "--attempt", "inspect-a",
         "--boundary", "before_write")
@@ -41,7 +42,7 @@ def inspected(tmp_path):
 
 @pytest.mark.parametrize("step", ["code", "deepcheck", "audit"])
 def test_new_contract_requires_inspection_worklist(step):
-    gates = json.loads((ROOT / "mcp/workflow-gate/gates.json").read_text())
+    gates = json.loads((ROOT / "mcp/workflow-gate/gates.json").read_text(encoding="utf-8"))
     outputs = gates["execution_model"]["step_contracts"][step]["outputs"]
     assert any(p["id"] == "inspection_worklist" and p.get("required", True) for p in outputs)
 
@@ -50,7 +51,7 @@ def test_prepare_does_not_fabricate_read_and_receipts_are_valid(inspected):
     _, out = inspected
     result = cli(out, "inspection", "--step", "code", "--phase", "prepare",
                  "--attempt", "inspect-a", "--request", "prepare-1")
-    report = json.loads(Path(result["path"]).read_text())
+    report = json.loads(Path(result["path"]).read_text(encoding="utf-8"))
     assert all(not f["reads"] for u in report["units"] for f in u["files"])
     assert result["output"] == "inspection_worklist"
     cli(out, "inspection", "--step", "code", "--phase", "check", "--attempt", "inspect-a", ok=False)
@@ -76,7 +77,7 @@ def test_prepare_reuses_pending_work_without_erasing_reads(inspected):
 def test_read_cannot_accept_source_drift(inspected):
     root, out = inspected
     cli(out, "inspection", "--step", "code", "--phase", "prepare", "--attempt", "inspect-a")
-    (root / "src/a.c").write_text("int a(void) { return 2; }\n")
+    (root / "src/a.c").write_text("int a(void) { return 2; }\n", encoding="utf-8", newline="\n")
     result = cli(out, "inspection", "--step", "code", "--phase", "read", "--attempt", "inspect-a",
                  "--read-phase", "code_review", "--path", "src/a.c", ok=False)
     assert result["gate_id"] == "inspection_worklist"
@@ -105,9 +106,9 @@ def test_scope_declaration_cannot_shrink_after_receipt(inspected):
     _, out = inspected
     cli(out, "inspection", "--step", "code", "--phase", "prepare", "--attempt", "inspect-a")
     path = out / "code_worklist.json"
-    report = json.loads(path.read_text())
+    report = json.loads(path.read_text(encoding="utf-8"))
     report["max_files"] = 1
-    path.write_text(json.dumps(report))
+    path.write_text(json.dumps(report), encoding="utf-8", newline="\n")
     failed = cli(out, "inspection", "--step", "code", "--phase", "read", "--attempt", "inspect-a",
         "--read-phase", "code_review", "--path", "src/a.c", ok=False)
     assert failed["gate_id"] == "inspection_worklist"
@@ -140,13 +141,13 @@ def test_read_replay_preserves_later_progress_and_binds_source_path(inspected):
 
 def complete_code(out):
     result = cli(out, "inspection", "--step", "code", "--phase", "prepare", "--attempt", "inspect-a")
-    report = json.loads(Path(result["path"]).read_text())
+    report = json.loads(Path(result["path"]).read_text(encoding="utf-8"))
     for unit in report["units"]:
         for item in unit["files"]:
-            (Path(report["workspace"]) / item["path"]).read_text()
+            (Path(report["workspace"]) / item["path"]).read_text(encoding="utf-8")
             cli(out, "inspection", "--step", "code", "--phase", "read", "--attempt", "inspect-a",
                 "--read-phase", "code_review", "--path", item["path"])
-    (out / "04_code_review_fix.md").write_text("# Actual fixture review\n")
+    (out / "04_code_review_fix.md").write_text("# Actual fixture review\n", encoding="utf-8", newline="\n")
     for path, scope in (("src/a.c", "workspace"), ("04_code_review_fix.md", "ticket")):
         cli(out, "artifact", "--step", "code", "--attempt", "inspect-a", "--path", path, "--scope", scope)
     for boundary in ("after_wait", "before_transition"):
@@ -160,9 +161,9 @@ def test_real_finish_and_tampered_hash_receipt(inspected):
         "--outcome", "success", "--evidence", "actual fixture review")
     assert cli(out, "check-outputs", "--step", "code")["ok"]
     path = out / "code_worklist.json"
-    report = json.loads(path.read_text())
+    report = json.loads(path.read_text(encoding="utf-8"))
     report["findings"] = [{"finding_id": "F1", "locations": [], "category": "design", "evidence_boundary": "new unreceipted suggestion"}]
-    path.write_text(json.dumps(report))
+    path.write_text(json.dumps(report), encoding="utf-8", newline="\n")
     failed = cli(out, "check-outputs", "--step", "code", ok=False)
     assert any("receipt" in item for item in failed["violations"])
 
@@ -170,7 +171,7 @@ def test_real_finish_and_tampered_hash_receipt(inspected):
 def test_degraded_does_not_allow_source_drift(inspected):
     root, out = inspected
     complete_code(out)
-    (root / "src/a.c").write_text("int a(void) { return 2; }\n")
+    (root / "src/a.c").write_text("int a(void) { return 2; }\n", encoding="utf-8", newline="\n")
     failed = cli(out, "step", "--step", "code", "--phase", "finish", "--attempt", "inspect-a",
         "--outcome", "degraded", "--evidence", "budget", ok=False)
     assert failed["gate_id"] == "inspection_worklist"
@@ -186,9 +187,9 @@ def test_archive_cannot_drop_new_worklist_after_source_is_gone(inspected, tmp_pa
     shutil.copytree(out, archive)
     cli(out, "archive-manifest", "--archive-dir", str(archive), "--write", "--skip-linters")
     path = archive / "archive_manifest.json"
-    manifest = json.loads(path.read_text())
+    manifest = json.loads(path.read_text(encoding="utf-8"))
     manifest["files"] = [f for f in manifest["files"] if f["path"] != "code_worklist.json"]
-    path.write_text(json.dumps(manifest))
+    path.write_text(json.dumps(manifest), encoding="utf-8", newline="\n")
     (archive / "code_worklist.json").unlink()
     shutil.rmtree(out)
     failed = cli(archive, "archive-manifest", "--archive-dir", str(archive), ok=False)
@@ -197,4 +198,4 @@ def test_archive_cannot_drop_new_worklist_after_source_is_gone(inspected, tmp_pa
 
 @pytest.mark.parametrize("step", ["04_code.md", "05_deepcheck.md", "06_audit.md", "crosscheck.md"])
 def test_all_entry_points_use_shared_inspection_contract(step):
-    assert "inspection_worklist.md" in (ROOT / "steps" / step).read_text()
+    assert "inspection_worklist.md" in (ROOT / "steps" / step).read_text(encoding="utf-8")

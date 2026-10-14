@@ -14,12 +14,12 @@ TOOL = ROOT / "tools" / "icode_crosscheck.py"
 
 def write_json(path: Path, value: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    path.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
 
 
 def write_fresh(path, value, env):
     """Real fixture Read declarations, separate from writing a result JSON."""
-    report = json.loads(path.with_name(path.name.replace(".fresh.json", ".worklist.json")).read_text())
+    report = json.loads(path.with_name(path.name.replace(".fresh.json", ".worklist.json")).read_text(encoding="utf-8"))
     for unit in report["units"]:
         for entry in unit["files"]:
             data = (Path(report["workspace"]) / entry["path"]).read_bytes()
@@ -52,8 +52,9 @@ def workspace(tmp_path: Path) -> tuple[Path, Path, dict[str, str]]:
     ticket.mkdir(parents=True)
     source = root / "src" / "feature.c"
     source.parent.mkdir(parents=True)
-    source.write_text("int feature(void) { return 1; }\n", encoding="utf-8")
+    source.write_text("int feature(void) { return 1; }\n", encoding="utf-8", newline="\n")
     subprocess.run(["git", "init", "-q", str(root)], check=True)
+    subprocess.run(["git", "-C", str(root), "config", "core.autocrlf", "false"], check=True)
     subprocess.run(["git", "-C", str(root), "add", "src"], check=True)
     subprocess.run(["git", "-C", str(root), "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
                     "commit", "-qm", "fixture baseline"], check=True)
@@ -70,8 +71,8 @@ def workspace(tmp_path: Path) -> tuple[Path, Path, dict[str, str]]:
             "patch_count": 0,
         },
     )
-    (ticket / "03_plan_final.md").write_text("# Plan\n\nImplement feature.\n", encoding="utf-8")
-    (ticket / "04_code_review_fix.md").write_text("# Code\n\nReviewed.\n", encoding="utf-8")
+    (ticket / "03_plan_final.md").write_text("# Plan\n\nImplement feature.\n", encoding="utf-8", newline="\n")
+    (ticket / "04_code_review_fix.md").write_text("# Code\n\nReviewed.\n", encoding="utf-8", newline="\n")
     index = tmp_path / "home" / ".claude" / "icode_data" / "index.json"
     write_json(index, {"schema_version": 3, "tickets": []})
     env = {
@@ -91,7 +92,7 @@ def run_tool(env: dict[str, str], *args: str, expected: int = 0) -> dict:
         text=True,
         capture_output=True,
         check=False,
-    )
+    encoding="utf-8")
     assert proc.returncode == expected, proc.stdout + proc.stderr
     payload = json.loads(proc.stdout)
     assert payload["ok"] is (expected == 0)
@@ -132,7 +133,7 @@ def test_new_round_requires_independent_worklist(workspace):
     assert "inspection_worklist" in started
     directory = Path(started["crosscheck_dir"])
     # A result JSON alone must not satisfy a real new round's Read worklist.
-    (directory / "crosscheck_round_1.fresh.json").write_text(json.dumps(fresh_payload(1)))
+    (directory / "crosscheck_round_1.fresh.json").write_text(json.dumps(fresh_payload(1)), encoding="utf-8", newline="\n")
     failed = run_tool(env, "freeze", "--dir", directory, "--round", "1", expected=1)
     assert failed["gate_id"] == "inspection_worklist"
 
@@ -140,12 +141,12 @@ def test_new_round_requires_independent_worklist(workspace):
 def test_related_source_drift_reenters_a_new_round(workspace):
     root, _, env = workspace
     header = root / "src/feature.h"
-    header.write_text("int feature(void);\n")
+    header.write_text("int feature(void);\n", encoding="utf-8", newline="\n")
     started = run_tool(env, "start", "--workspace", root, "--ticket", "demo-1")
-    header.write_text("int feature(void); /* newer source, same untracked status */\n")
+    header.write_text("int feature(void); /* newer source, same untracked status */\n", encoding="utf-8", newline="\n")
     restarted = run_tool(env, "start", "--workspace", root, "--ticket", "demo-1")
     assert restarted["round"] == 2 and not restarted["resumed"]
-    manifest = json.loads((Path(started["crosscheck_dir"]) / "crosscheck_manifest.json").read_text())
+    manifest = json.loads((Path(started["crosscheck_dir"]) / "crosscheck_manifest.json").read_text(encoding="utf-8"))
     assert manifest["rounds"][0]["state"] == "stale_input"
 
 
@@ -171,7 +172,7 @@ def test_start_rejects_frozen_worklist_tampering_without_manifest_write(workspac
     run_tool(env, "freeze", "--dir", directory, "--round", "1")
     before = (directory / "crosscheck_manifest.json").read_bytes()
     path = Path(started["inspection_worklist"])
-    report = json.loads(path.read_text())
+    report = json.loads(path.read_text(encoding="utf-8"))
     report["units"][0]["files"][0]["sha256"] = "0" * 64
     write_json(path, report)
     failed = run_tool(env, "start", "--workspace", root, "--ticket", "demo-1", expected=1)
@@ -191,17 +192,17 @@ def test_finding_position_and_frozen_worklist_are_enforced(workspace):
     path = directory / "crosscheck_round_1.fresh.json"
     write_fresh(path, fresh, env)
     assert run_tool(env, "freeze", "--dir", directory, "--round", "1", expected=1)["gate_id"] == "inspection_worklist"
-    finding["locations"][0]["excerpt"] = source.read_text()
+    finding["locations"][0]["excerpt"] = source.read_bytes().decode("utf-8")
     write_json(path, fresh)
     run_tool(env, "freeze", "--dir", directory, "--round", "1")
     write_json(directory / "crosscheck_round_1.json", fresh)
     run_tool(env, "finish", "--dir", directory, "--round", "1")
     # Historic immutable evidence remains valid after a later source update.
-    source.write_text("int feature(void) { return 2; }\n")
+    source.write_text("int feature(void) { return 2; }\n", encoding="utf-8", newline="\n")
     run_tool(env, "validate", "--dir", directory)
     run_tool(env, "freeze", "--dir", directory, "--round", "1")
     worklist = Path(started["inspection_worklist"])
-    report = json.loads(worklist.read_text())
+    report = json.loads(worklist.read_text(encoding="utf-8"))
     report["units"][0]["files"][0]["reads"] = {}
     write_json(worklist, report)
     assert run_tool(env, "finish", "--dir", directory, "--round", "1", expected=1)["gate_id"] == "inspection_worklist"
@@ -217,7 +218,7 @@ def test_new_round_does_not_reuse_old_reads_or_allow_scope_rewrite(workspace):
     run_tool(env, "finish", "--dir", directory, "--round", "1")
     second = run_tool(env, "start", "--workspace", root, "--ticket", "demo-1")
     path = Path(second["inspection_worklist"])
-    report = json.loads(path.read_text())
+    report = json.loads(path.read_text(encoding="utf-8"))
     assert all(f["reads"] == {} for u in report["units"] for f in u["files"])
     report["max_files"] = 1
     write_json(path, report)
@@ -300,7 +301,7 @@ def test_stale_input_is_preserved_and_next_round_can_start(workspace):
     run_tool(env, "freeze", "--dir", crosscheck_dir, "--round", "1")
     write_json(crosscheck_dir / "crosscheck_round_1.json", fresh_payload(1))
 
-    (ticket / "03_plan_final.md").write_text("# Plan\n\nChanged during review.\n", encoding="utf-8")
+    (ticket / "03_plan_final.md").write_text("# Plan\n\nChanged during review.\n", encoding="utf-8", newline="\n")
     stale = run_tool(env, "finish", "--dir", crosscheck_dir, "--round", "1", expected=1)
     assert stale["state"] == "stale_input"
     assert (crosscheck_dir / "crosscheck_round_1.json").is_file()
@@ -323,7 +324,7 @@ def test_rejects_ineligible_ambiguous_and_escaping_targets(workspace):
     first_dir = Path(first["crosscheck_dir"])
     duplicate = first_dir.parent / ".icode_output_99"
     duplicate.mkdir()
-    write_json(duplicate / "crosscheck_manifest.json", json.loads((first_dir / "crosscheck_manifest.json").read_text()))
+    write_json(duplicate / "crosscheck_manifest.json", json.loads((first_dir / "crosscheck_manifest.json").read_text(encoding="utf-8")))
     ambiguous = run_tool(env, "start", "--workspace", root, "--ticket", "demo-1", expected=1)
     assert "多个 crosscheck" in ambiguous["error"]
 
@@ -389,7 +390,7 @@ def test_history_compare_skips_stale_rounds(workspace):
     write_fresh(directory / "crosscheck_round_2.fresh.json", fresh_payload(2), env)
     run_tool(env, "freeze", "--dir", directory, "--round", "2")
     write_json(directory / "crosscheck_round_2.json", fresh_payload(2))
-    (ticket / "04_code_review_fix.md").write_text("# changed\n", encoding="utf-8")
+    (ticket / "04_code_review_fix.md").write_text("# changed\n", encoding="utf-8", newline="\n")
     run_tool(env, "finish", "--dir", directory, "--round", "2", expected=1)
 
     third = run_tool(env, "start", "--workspace", root, "--ticket", "demo-1")
@@ -426,7 +427,7 @@ def test_validate_detects_tampered_derived_report(workspace):
     run_tool(env, "freeze", "--dir", directory, "--round", "1")
     write_json(directory / "crosscheck_round_1.json", fresh_payload(1))
     run_tool(env, "finish", "--dir", directory, "--round", "1")
-    (directory / "crosscheck_report.md").write_text("tampered\n", encoding="utf-8")
+    (directory / "crosscheck_report.md").write_text("tampered\n", encoding="utf-8", newline="\n")
     denied = run_tool(env, "validate", "--dir", directory, expected=1)
     assert "report" in denied["error"].lower() or "报告" in denied["error"]
 
@@ -439,7 +440,7 @@ def test_validate_detects_tampered_stale_final(workspace):
     run_tool(env, "freeze", "--dir", directory, "--round", "1")
     final_path = directory / "crosscheck_round_1.json"
     write_json(final_path, fresh_payload(1))
-    (ticket / "03_plan_final.md").write_text("changed\n", encoding="utf-8")
+    (ticket / "03_plan_final.md").write_text("changed\n", encoding="utf-8", newline="\n")
     run_tool(env, "finish", "--dir", directory, "--round", "1", expected=1)
     changed = fresh_payload(1)
     changed["summary"] = "tampered stale draft"

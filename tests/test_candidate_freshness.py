@@ -22,10 +22,11 @@ class CandidateTests(unittest.TestCase):
         self.repo = Path(self.temp.name) / "repo"
         self.repo.mkdir()
         self.git("init", "-q")
+        self.git("config", "core.autocrlf", "false")
         self.git("config", "user.email", "test@example.invalid")
         self.git("config", "user.name", "Candidate Test")
-        (self.repo / ".gitignore").write_text(".icode_output/\n", encoding="utf-8")
-        (self.repo / "source.py").write_text("value = 1\n", encoding="utf-8")
+        (self.repo / ".gitignore").write_text(".icode_output/\n", encoding="utf-8", newline="\n")
+        (self.repo / "source.py").write_text("value = 1\n", encoding="utf-8", newline="\n")
         self.git("add", ".")
         self.git("commit", "-qm", "base")
         self.base = self.git("rev-parse", "HEAD").strip()
@@ -39,7 +40,7 @@ class CandidateTests(unittest.TestCase):
 
     def call(self, *args, ok=True):
         proc = subprocess.run([sys.executable, "-B", str(ROOT / "tools/icode_control.py"),
-                               *map(str, args)], capture_output=True, text=True, timeout=20)
+                               *map(str, args)], capture_output=True, text=True, timeout=20, encoding="utf-8")
         self.assertEqual(proc.returncode == 0, ok, (proc.stdout, proc.stderr))
         return json.loads(proc.stdout)
 
@@ -65,14 +66,14 @@ class CandidateTests(unittest.TestCase):
     def finish_review(self, step, attempt=None, *, scope=".", after_reads=None, ok=True):
         """Real start/check/inspection/artifact/finish ports, no gate mocking."""
         attempt = attempt or step + "-1"
-        (self.ticket / "03_plan_final.md").write_text("fixture plan\n", encoding="utf-8")
+        (self.ticket / "03_plan_final.md").write_text("fixture plan\n", encoding="utf-8", newline="\n")
         self.call("step", "--dir", self.ticket, "--step", step, "--phase", "start",
                   "--attempt", attempt, "--request", attempt + ":start")
         self.call("step", "--dir", self.ticket, "--step", step, "--phase", "check",
                   "--attempt", attempt, "--boundary", "before_write")
         self.call("inspection", "--dir", self.ticket, "--step", step, "--phase", "prepare",
                   "--attempt", attempt, "--scope", scope, "--baselines-json", json.dumps({".": self.base}))
-        report = json.loads((self.ticket / (step + "_worklist.json")).read_text())
+        report = json.loads((self.ticket / (step + "_worklist.json")).read_text(encoding="utf-8"))
         for phase in report["required_phases"]:
             for unit in report["units"]:
                 for row in unit["files"]:
@@ -81,7 +82,7 @@ class CandidateTests(unittest.TestCase):
         if after_reads:
             after_reads()
         report_name = {"code": "04_code_review_fix.md", "deepcheck": "05_deepcheck.md", "audit": "06_audit.md"}[step]
-        (self.ticket / report_name).write_text("fixture review report\n", encoding="utf-8")
+        (self.ticket / report_name).write_text("fixture review report\n", encoding="utf-8", newline="\n")
         self.call("artifact", "--dir", self.ticket, "--step", step, "--attempt", attempt, "--path", report_name)
         if step == "code":
             self.call("artifact", "--dir", self.ticket, "--step", step, "--attempt", attempt,
@@ -94,7 +95,7 @@ class CandidateTests(unittest.TestCase):
                         "dedup_reason": "single fixture", "read_phases": {
                             phase: {"source.py": ctl.file_sha256(self.repo / "source.py")} for phase in phases}}
             name = step + "_coverage.json"
-            (self.ticket / name).write_text(json.dumps(coverage), encoding="utf-8")
+            (self.ticket / name).write_text(json.dumps(coverage), encoding="utf-8", newline="\n")
             self.call("artifact", "--dir", self.ticket, "--step", step, "--attempt", attempt, "--path", name)
             self.call("step", "--dir", self.ticket, "--step", step, "--phase", "check",
                       "--attempt", attempt, "--boundary", "after_wait")
@@ -115,7 +116,7 @@ class CandidateTests(unittest.TestCase):
         frozen = ctl.load_metadata(self.ticket)
         reports = (self.ticket / "06_audit.md").read_bytes()
         self.call("step", "--dir", self.ticket, "--step", "patch", "--phase", "start", "--attempt", "patch-1")
-        (self.repo / "source.py").write_text("value = 2\n", encoding="utf-8")
+        (self.repo / "source.py").write_text("value = 2\n", encoding="utf-8", newline="\n")
         self.call("step", "--dir", self.ticket, "--step", "patch", "--phase", "finish",
                   "--attempt", "patch-1", "--outcome", "blocked", "--evidence", "fixture changed")
         stale = ctl.delivery_freshness(self.ticket)
@@ -141,13 +142,13 @@ class CandidateTests(unittest.TestCase):
     def test_inspection_scope_contract_is_bound_and_natural_phase_growth_is_stable(self):
         self.create()
         report = {"scopes": ["src"], "related": ["tests"], "resolved_baselines": {".": self.base}}
-        (self.ticket / "code_worklist.json").write_text(json.dumps(report), encoding="utf-8")
+        (self.ticket / "code_worklist.json").write_text(json.dumps(report), encoding="utf-8", newline="\n")
         old = ctl.candidate_snapshot(self.ticket, ctl.load_metadata(self.ticket))
-        (self.ticket / "deepcheck_worklist.json").write_text(json.dumps(report), encoding="utf-8")
+        (self.ticket / "deepcheck_worklist.json").write_text(json.dumps(report), encoding="utf-8", newline="\n")
         same = ctl.candidate_snapshot(self.ticket, ctl.load_metadata(self.ticket))
         self.assertEqual(old["candidate_id"], same["candidate_id"])
         report["related"] = ["other"]
-        (self.ticket / "deepcheck_worklist.json").write_text(json.dumps(report), encoding="utf-8")
+        (self.ticket / "deepcheck_worklist.json").write_text(json.dumps(report), encoding="utf-8", newline="\n")
         different = ctl.candidate_snapshot(self.ticket, ctl.load_metadata(self.ticket))
         self.assertNotEqual(same["candidate_id"], different["candidate_id"])
 
@@ -155,10 +156,10 @@ class CandidateTests(unittest.TestCase):
         import hashlib
         data = b"\x00raw-lfs-payload"
         digest = hashlib.sha256(data).hexdigest()
-        (self.repo / "large.bin").write_text(f"version https://git-lfs.github.com/spec/v1\noid sha256:{digest}\nsize {len(data)}\n")
+        (self.repo / "large.bin").write_text(f"version https://git-lfs.github.com/spec/v1\noid sha256:{digest}\nsize {len(data)}\n", encoding="utf-8", newline="\n")
         self.git("add", "large.bin")
         self.git("commit", "-qm", "LFS pointer")
-        (self.repo / ".gitattributes").write_text("large.bin filter=trap diff=trap\n")
+        (self.repo / ".gitattributes").write_text("large.bin filter=trap diff=trap\n", encoding="utf-8", newline="\n")
         marker = self.repo / ".git/filter-called"
         self.git("config", "filter.trap.clean", "touch " + str(marker))
         self.git("config", "filter.trap.smudge", "touch " + str(marker))
@@ -175,15 +176,15 @@ class CandidateTests(unittest.TestCase):
 
     def test_same_content_commit_reuses_real_receipt_but_intermediate_other_content_does_not(self):
         self.create()
-        (self.repo / "source.py").write_text("value = 2\n", encoding="utf-8")
+        (self.repo / "source.py").write_text("value = 2\n", encoding="utf-8", newline="\n")
         self.finish_review("audit")
         self.git("add", "source.py")
         self.git("commit", "-qm", "reviewed final source")
         fresh = ctl.delivery_freshness(self.ticket, required_steps=("audit",))
         self.assertTrue(fresh["ok"], fresh)
-        (self.repo / "source.py").write_text("value = 3\n", encoding="utf-8")
+        (self.repo / "source.py").write_text("value = 3\n", encoding="utf-8", newline="\n")
         self.git("commit", "-qam", "other source")
-        (self.repo / "source.py").write_text("value = 2\n", encoding="utf-8")
+        (self.repo / "source.py").write_text("value = 2\n", encoding="utf-8", newline="\n")
         self.git("commit", "-qam", "restore reviewed source")
         result = ctl.delivery_freshness(self.ticket, required_steps=("audit",))
         self.assertFalse(result["ok"], result)
@@ -230,9 +231,9 @@ class CandidateTests(unittest.TestCase):
         module = self.module()
         before = self.capture()
         (self.repo / ".icode_output/nested").mkdir(parents=True)
-        (self.repo / ".icode_output/nested/report.md").write_text("sidecar")
+        (self.repo / ".icode_output/nested/report.md").write_text("sidecar", encoding="utf-8", newline="\n")
         (self.repo / "demo/.icode_output/nested").mkdir(parents=True)
-        (self.repo / "demo/.icode_output/nested/report.md").write_text("nested sidecar")
+        (self.repo / "demo/.icode_output/nested/report.md").write_text("nested sidecar", encoding="utf-8", newline="\n")
         self.assertEqual(before["candidate_id"], self.capture()["candidate_id"])
         with self.assertRaisesRegex(module.CandidateError, "truncation"):
             self.capture(limits={"max_git_bytes": 10})
@@ -291,13 +292,13 @@ class CandidateTests(unittest.TestCase):
         self.assertFalse(self.module().compare_candidates(old, new)["equivalent"])
 
     def test_source_outside_review_scope_cannot_drift_during_audit(self):
-        (self.repo / "elsewhere.txt").write_text("initial", encoding="utf-8")
+        (self.repo / "elsewhere.txt").write_text("initial", encoding="utf-8", newline="\n")
         self.git("add", "elsewhere.txt")
         self.git("commit", "-qm", "outside scope")
         self.base = self.git("rev-parse", "HEAD").strip()
         self.create()
         result = self.finish_review("audit", scope="source.py", after_reads=lambda:
-                   (self.repo / "elsewhere.txt").write_text("changed during audit", encoding="utf-8"), ok=False)
+                   (self.repo / "elsewhere.txt").write_text("changed during audit", encoding="utf-8", newline="\n"), ok=False)
         self.assertEqual(result["gate_id"], "candidate_review_drift")
         self.assertEqual(ctl.load_metadata(self.ticket)["review_receipts"], [])
 
@@ -332,12 +333,12 @@ class CandidateTests(unittest.TestCase):
 
     def test_untracked_scope_exclusions_checkout_and_base_drift(self):
         old = self.capture()
-        (self.repo / "new.txt").write_text("new", encoding="utf-8")
+        (self.repo / "new.txt").write_text("new", encoding="utf-8", newline="\n")
         new = self.capture()
         self.assertFalse(self.module().compare_candidates(old, new)["equivalent"])
         excluded = self.capture(excluded_side_effects=["new.txt"])
         self.assertFalse(self.module().compare_candidates(new, excluded)["equivalent"])
-        (self.repo / "new.txt").write_text("changed exclusion", encoding="utf-8")
+        (self.repo / "new.txt").write_text("changed exclusion", encoding="utf-8", newline="\n")
         self.assertTrue(self.module().compare_candidates(excluded, self.capture(excluded_side_effects=["new.txt"]))["equivalent"])
         for kwargs in ({"code_files": ["renamed.py"]}, {"scope_contract": {"scopes": ["src"]}},
                        {"inspection_scope": {"audit": {"scopes": ["src"], "related": ["test.py"]}}}):
@@ -349,7 +350,7 @@ class CandidateTests(unittest.TestCase):
         self.assertFalse(self.module().compare_candidates(old, other)["equivalent"])
 
     def test_same_content_commit_equivalence_and_rebase_merge_rejection(self):
-        (self.repo / "source.py").write_text("value = 2\n", encoding="utf-8")
+        (self.repo / "source.py").write_text("value = 2\n", encoding="utf-8", newline="\n")
         old = self.capture()
         self.git("add", "source.py")
         self.git("commit", "-qm", "same final source")
@@ -372,13 +373,13 @@ class CandidateTests(unittest.TestCase):
         self.git("init", "-q", cwd=nested)
         self.git("config", "user.email", "test@example.invalid", cwd=nested)
         self.git("config", "user.name", "Candidate Test", cwd=nested)
-        (nested / "x").write_text("x", encoding="utf-8")
+        (nested / "x").write_text("x", encoding="utf-8", newline="\n")
         self.git("add", ".", cwd=nested)
         self.git("commit", "-qm", "sub", cwd=nested)
         self.git("-c", "protocol.file.allow=always", "submodule", "add", "-q", str(nested), "sub")
         self.git("commit", "-qam", "add submodule")
         self.capture()
-        (self.repo / "sub/x").write_text("dirty", encoding="utf-8")
+        (self.repo / "sub/x").write_text("dirty", encoding="utf-8", newline="\n")
         with self.assertRaisesRegex(module.CandidateError, "submodule"):
             self.capture()
 
@@ -386,7 +387,7 @@ class CandidateTests(unittest.TestCase):
         self.ticket.mkdir(parents=True)
         old = {"ticket_id": "old", "status": "completed", "completed_steps": ["4", "5", "6"],
                "project_path": str(self.repo)}
-        (self.ticket / ctl.METADATA_NAME).write_text(json.dumps(old), encoding="utf-8")
+        (self.ticket / ctl.METADATA_NAME).write_text(json.dumps(old), encoding="utf-8", newline="\n")
         before = (self.ticket / ctl.METADATA_NAME).read_bytes()
         result = self.call("candidate", "--dir", self.ticket, "--phase", "inspect")
         self.assertEqual(result["state"], "legacy_untracked")

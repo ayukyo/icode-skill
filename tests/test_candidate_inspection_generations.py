@@ -19,7 +19,7 @@ def candidate():
 
 
 def start_review(candidate, step, attempt, *, scope=".", related=(), baselines=None):
-    (candidate.ticket / "03_plan_final.md").write_text("fixture plan\n", encoding="utf-8")
+    (candidate.ticket / "03_plan_final.md").write_text("fixture plan\n", encoding="utf-8", newline="\n")
     candidate.call("step", "--dir", candidate.ticket, "--step", step, "--phase", "start",
                    "--attempt", attempt, "--request", attempt + ":start")
     candidate.call("step", "--dir", candidate.ticket, "--step", step, "--phase", "check",
@@ -31,7 +31,7 @@ def start_review(candidate, step, attempt, *, scope=".", related=(), baselines=N
     if baselines is not None:
         args.extend(["--baselines-json", json.dumps(baselines)])
     candidate.call(*args)
-    return json.loads((candidate.ticket / (step + "_worklist.json")).read_text())
+    return json.loads((candidate.ticket / (step + "_worklist.json")).read_text(encoding="utf-8"))
 
 
 def finish_review(candidate, step, attempt, **options):
@@ -43,7 +43,7 @@ def finish_review(candidate, step, attempt, **options):
             candidate.call("inspection", "--dir", candidate.ticket, "--step", step, "--phase", "read",
                            "--attempt", attempt, "--read-phase", phase, "--path", path)
     name = {"code": "04_code_review_fix.md", "deepcheck": "05_deepcheck.md", "audit": "06_audit.md"}[step]
-    (candidate.ticket / name).write_text("fixture review report\n", encoding="utf-8")
+    (candidate.ticket / name).write_text("fixture review report\n", encoding="utf-8", newline="\n")
     candidate.call("artifact", "--dir", candidate.ticket, "--step", step, "--attempt", attempt, "--path", name)
     if step == "code":
         candidate.call("artifact", "--dir", candidate.ticket, "--step", step, "--attempt", attempt,
@@ -56,7 +56,7 @@ def finish_review(candidate, step, attempt, **options):
                         phase: {path: ctl.file_sha256(candidate.repo / path) for path in paths}
                         for phase in report["required_phases"]}}
         coverage_name = step + "_coverage.json"
-        (candidate.ticket / coverage_name).write_text(json.dumps(coverage), encoding="utf-8")
+        (candidate.ticket / coverage_name).write_text(json.dumps(coverage), encoding="utf-8", newline="\n")
         candidate.call("artifact", "--dir", candidate.ticket, "--step", step, "--attempt", attempt,
                        "--path", coverage_name)
         candidate.call("step", "--dir", candidate.ticket, "--step", step, "--phase", "check",
@@ -79,7 +79,7 @@ def capture_base(candidate, base, request, *, ok=True):
 
 
 def test_new_base_default_sequential_reviews_close_and_preserve_history(candidate):
-    (candidate.repo / "retired.py").write_text("value = 1\n", encoding="utf-8")
+    (candidate.repo / "retired.py").write_text("value = 1\n", encoding="utf-8", newline="\n")
     candidate.git("add", "retired.py")
     candidate.git("commit", "-qm", "legacy related source")
     candidate.base = candidate.git("rev-parse", "HEAD").strip()
@@ -96,8 +96,8 @@ def test_new_base_default_sequential_reviews_close_and_preserve_history(candidat
     assert tracking["current"]["inspection_scope"] == {"scopes": [], "related": [], "baselines": {}}
     stale = ctl.delivery_freshness(candidate.ticket)
     assert stale["state"] == "stale" and stale["applicable_receipts"] == []
-    (candidate.repo / "source.py").write_text("value = 2\n", encoding="utf-8")
-    (candidate.repo / "retired.py").write_text("value = 2\n", encoding="utf-8")
+    (candidate.repo / "source.py").write_text("value = 2\n", encoding="utf-8", newline="\n")
+    (candidate.repo / "retired.py").write_text("value = 2\n", encoding="utf-8", newline="\n")
     for index, step in enumerate(("code", "deepcheck", "audit")):
         finish_review(candidate, step, step + "-B")
         meta = ctl.load_metadata(candidate.ticket)
@@ -125,7 +125,7 @@ def test_old_open_attempt_blocks_base_change_without_mutation(candidate, prepare
     if prepared:
         start_review(candidate, "code", "code-A")
     else:
-        (candidate.ticket / "03_plan_final.md").write_text("fixture plan\n", encoding="utf-8")
+        (candidate.ticket / "03_plan_final.md").write_text("fixture plan\n", encoding="utf-8", newline="\n")
         candidate.call("step", "--dir", candidate.ticket, "--step", "code", "--phase", "start",
                        "--attempt", "code-A", "--request", "code-A:start")
     base_b = next_base(candidate)
@@ -157,7 +157,7 @@ def dependency_repository(candidate):
     candidate.git("init", "-q", cwd=dependency)
     candidate.git("config", "user.email", "test@example.invalid", cwd=dependency)
     candidate.git("config", "user.name", "Candidate Test", cwd=dependency)
-    (dependency / "helper.py").write_text("answer = 7\n", encoding="utf-8")
+    (dependency / "helper.py").write_text("answer = 7\n", encoding="utf-8", newline="\n")
     candidate.git("add", ".", cwd=dependency)
     candidate.git("commit", "-qm", "dependency base", cwd=dependency)
     dep_a = candidate.git("rev-parse", "HEAD", cwd=dependency).strip()
@@ -231,7 +231,7 @@ def test_report_cannot_claim_an_old_attempt_to_hide_current_declaration(candidat
     capture_base(candidate, next_base(candidate), "bind-B")
     report = start_review(candidate, "code", "code-B")
     report.update(attempt="code-A", resolved_baselines={".": candidate.base})
-    (candidate.ticket / "code_worklist.json").write_text(json.dumps(report), encoding="utf-8")
+    (candidate.ticket / "code_worklist.json").write_text(json.dumps(report), encoding="utf-8", newline="\n")
     with pytest.raises(ctl.ControlError, match="declaration/receipt drift"):
         ctl.candidate_snapshot(candidate.ticket, ctl.load_metadata(candidate.ticket))
 
@@ -280,14 +280,14 @@ def migrate_old_completed(candidate):
                 "created_at": "2026-09-14T08:00:00", "status": "completed",
                 "completed_steps": ["0", "1", "2", "3", "4", "5", "6"],
                 "project_path": str(candidate.repo), "code_files": ["source.py"], "patch_count": 0}
-    (candidate.ticket / ctl.METADATA_NAME).write_text(json.dumps(metadata), encoding="utf-8")
+    (candidate.ticket / ctl.METADATA_NAME).write_text(json.dumps(metadata), encoding="utf-8", newline="\n")
     helper = ctl.inspection_module()
     for step in ("code", "deepcheck", "audit"):
         report = helper.build_worklist(candidate.repo, code_files=["source.py"], ticket_id="candidate-1",
                                        step=step, attempt="legacy-" + step, mode="full")
         # Historical v1 reports predate special checks and v3 writer events.
         del report["checks_version"], report["checks"]
-        (candidate.ticket / (step + "_worklist.json")).write_text(json.dumps(report), encoding="utf-8")
+        (candidate.ticket / (step + "_worklist.json")).write_text(json.dumps(report), encoding="utf-8", newline="\n")
     candidate.call("migration", "--dir", candidate.ticket, "--apply")
     capture_base(candidate, candidate.base, "enable-legacy-A")
 
@@ -319,11 +319,11 @@ def test_unreceipted_new_scope_is_not_hidden_by_legacy_boundary(candidate, field
     capture_base(candidate, next_base(candidate), "legacy-bind-B")
     finish_review(candidate, "code", "code-B")
     path = candidate.ticket / "audit_worklist.json"
-    report = json.loads(path.read_text())
+    report = json.loads(path.read_text(encoding="utf-8"))
     if field == "resolved_baselines":
         report[field]["dep"] = dep_b
     else:
         report[field].append("source.py")
-    path.write_text(json.dumps(report), encoding="utf-8")
+    path.write_text(json.dumps(report), encoding="utf-8", newline="\n")
     with pytest.raises(ctl.ControlError, match="baseline 合同不一致"):
         ctl.candidate_snapshot(candidate.ticket, ctl.load_metadata(candidate.ticket))

@@ -51,7 +51,7 @@ def assessment(report, item, root):
     """Every cell cites the real, read fixture and states the static evidence limit."""
     path = item["paths"][0]
     entry = files(report)[path]
-    text = (root / path).read_text()
+    text = (root / path).read_bytes().decode("utf-8")
     location = dict(kind="source", path=path, start_line=1, end_line=len(text.splitlines()),
                     source_sha256=entry["sha256"], excerpt=text)
     cells = {}
@@ -260,7 +260,7 @@ def test_control_sidecar_artifact_is_valid_evidence_but_not_source(api, repo, ki
         evidence_boundary="Fixture artifact boundary only; no physical validation inferred.")]
     assert api.validate_worklist(report, repo) == []
     cell["evidence"] = [dict(kind="source", path=".icode_output/review/clock.txt", start_line=1, end_line=1,
-        source_sha256=hashlib.sha256(artifact.read_bytes()).hexdigest(), excerpt=artifact.read_text())]
+        source_sha256=hashlib.sha256(artifact.read_bytes()).hexdigest(), excerpt=artifact.read_text(encoding="utf-8"))]
     assert api.validate_worklist(report, repo)
 
 

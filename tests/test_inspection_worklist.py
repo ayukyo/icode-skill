@@ -46,7 +46,7 @@ def git(root, *args):
 def put(root, path, text="int feature(void) { return 1; }\n"):
     target = root / path
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(text)
+    target.write_text(text, encoding="utf-8", newline="\n")
     return target
 
 
@@ -55,6 +55,7 @@ def init(root):
     git(root, "init", "-q")
     git(root, "config", "user.email", "fixture@example.invalid")
     git(root, "config", "user.name", "fixture")
+    git(root, "config", "core.autocrlf", "false")
 
 
 def commit(root):
@@ -260,7 +261,7 @@ def test_malformed_input_never_keyerror(api, repo, report):
 
 
 def test_schema_documents_actual_report(api, repo):
-    schema = json.loads((TOOL.parents[1] / "schemas/inspection-worklist.schema.json").read_text())
+    schema = json.loads((TOOL.parents[1] / "schemas/inspection-worklist.schema.json").read_text(encoding="utf-8"))
     report = build(api, repo)
     assert schema["properties"]["schema_version"]["const"] == 1
     assert set(schema["required"]) <= report.keys()
