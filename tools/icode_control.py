@@ -4360,7 +4360,7 @@ def verification_json(raw, label):
     return value
 
 
-def cmd_build_start(args):
+def cmd_build_start(args, *, git_provider=None, require_git_provider=False):
     """Observe a dedicated build directory before execution, without clearing it."""
     if not isinstance(args.request_id, str) or not args.request_id.strip():
         raise ControlError("build-start requires a nonempty --request-id", exit_code=2)
@@ -4376,23 +4376,34 @@ def cmd_build_start(args):
             raise ControlError("build-start parameters must not contain credentials", exit_code=2, gate_id="verification_sensitive")
         if command[0] in {"sh", "bash", "zsh", "cmd", "powershell"} and any(arg in {"-c", "/c", "-Command"} for arg in command[1:]):
             raise ControlError("build-start does not store shell execution strings", exit_code=2)
+    access = ({"git_provider": git_provider, "require_git_provider": require_git_provider}
+              if _candidate_access_requested(git_provider, require_git_provider) else {})
     with DirLock(out_dir):
+        if access:
+            _candidate_context_guard(out_dir, load_metadata(out_dir), git_provider, require_git_provider)
+            if (out_dir / TXN_NAME).exists():
+                raise ControlError("provider transaction recovery is not enabled", gate_id="candidate_transaction_pending")
         recover_pending_transaction(out_dir)
         meta = load_metadata(out_dir)
         require_vnext(meta, out_dir)
         require_valid_metadata(meta)
         ensure_execution_writable(meta)
-        events, problems = verify_event_chain(out_dir, meta)
+        events, problems = verify_event_chain(out_dir, meta, **access)
         if problems:
             raise ControlError("现有事件链不完整", gate_id="event_chain", violations=problems)
         input_data = {"build_dir": str(Path(args.build_dir).absolute()), "candidate_id": args.candidate_id, "parameters": parameters}
         prior = find_idempotent_event(events, args.request_id, "metadata_updated", {"build_start_input": input_data}, payload_keys=("build_start_input",))
         if prior:
+            if access:
+                live = candidate_snapshot(out_dir, meta, events=events, **access)
+                if live["candidate_id"] != args.candidate_id:
+                    raise ControlError("build-start source changed before replay", gate_id="build_start_receipt")
+                _candidate_context_guard(out_dir, meta, git_provider, require_git_provider)
             print(json.dumps({"ok": True, "already_applied": True, "event_id": prior["event_id"]}, ensure_ascii=False))
             return 0
         evidence_api = verification_evidence_module()
         try:
-            candidate = candidate_snapshot(out_dir, meta, events=events)
+            candidate = candidate_snapshot(out_dir, meta, events=events, **access)
             if args.candidate_id != candidate["candidate_id"]:
                 raise evidence_api.EvidenceError("build-start must explicitly bind the live source candidate")
             directory, info = evidence_api.safe_directory(args.build_dir, execution_workspace(out_dir, meta))
@@ -4412,8 +4423,16 @@ def cmd_build_start(args):
         updated = dict(meta, extensions=extensions)
         payload = {"set": {"extensions": extensions}, "append": {}, "build_start_control": 1,
                    "build_start_receipt": receipt, "build_start_input": input_data}
+        def before_publish():
+            # Recheck the live source at this software checkpoint, not an atomic epoch.
+            fresh = candidate_snapshot(out_dir, meta, events=events, **access)
+            if fresh["candidate_id"] != candidate["candidate_id"]:
+                raise ControlError("build-start source changed before publication", gate_id="build_start_receipt")
+            _candidate_context_guard(out_dir, meta, git_provider, require_git_provider)
+
+        publication = dict(before_publish=before_publish, **access) if access else {}
         event = commit_metadata_and_event(out_dir, meta, updated, "metadata_updated", payload,
-                    request_id=args.request_id, event_id=event_id)
+                    request_id=args.request_id, event_id=event_id, **publication)
     print(json.dumps({"ok": True, "event_id": event["event_id"], "candidate_id": receipt["candidate_id"],
                       "directory_empty": empty, "build_dir": str(directory)}, ensure_ascii=False, indent=2))
     return 0
@@ -6488,13 +6507,14 @@ def main(*, git_provider=None, require_git_provider=False):
     try:
         access = ({"git_provider": git_provider, "require_git_provider": require_git_provider}
                   if _candidate_access_requested(git_provider, require_git_provider) else {})
-        if access and (args.cmd != "candidate" or args.func is not cmd_candidate):
+        if access and not ((args.cmd == "candidate" and args.func is cmd_candidate) or
+                           (args.cmd == "build-start" and args.func is cmd_build_start)):
             raise ControlError("B1 command dispatch is not enabled", gate_id="candidate_business_propagation_pending")
         # 捕获子命令输出：业务失败（ok=false）时子命令仍可能返回 0，
         # 会让 shell 的 `&&` / `set -e` 误判为成功。此处统一纠正为退出码 1。
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
-            code = cmd_candidate(args, **access) if access else args.func(args)
+            code = args.func(args, **access) if access else args.func(args)
         out = buf.getvalue()
         sys.stdout.write(out)
         sys.stdout.flush()

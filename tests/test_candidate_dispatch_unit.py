@@ -209,9 +209,8 @@ class CandidateDispatchTests(unittest.TestCase):
     def test_unconnected_handler_unknown_handler_and_phase_reject(self):
         f = self.fixture()
         provider, before = self.seal(f), f.frozen()
-        parsed = ctl.build_parser().parse_args(["build-start", "--dir", str(f.ticket),
-            "--build-dir", str(f.code / "build"), "--candidate-id", "0" * 64,
-            "--parameters-json", "{}", "--request-id", "blocked"])
+        parsed = ctl.build_parser().parse_args(["step", "--dir", str(f.ticket),
+            "--step", "code", "--phase", "start", "--request", "blocked"])
         output = io.StringIO()
         with patch.object(ctl, "build_parser") as parser, contextlib.redirect_stdout(output):
             parser.return_value.parse_args.return_value = parsed
