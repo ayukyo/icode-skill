@@ -69,7 +69,21 @@ def test_wide_inspection_scope_does_not_authorize_generated_binary(inventory_rep
     assert "lib.so" in {r["path"] for r in result["unknown"]} and not result["ok"]
 
 
-def test_inventory_preserves_z_rename_delete_mode_binary_and_both_status_columns(inventory_repo):
+def test_inventory_preserves_space_rename_delete_binary_and_both_status_columns(inventory_repo):
+    repo, path, meta = inventory_repo
+    special = "renamed name.py"
+    git(repo, "mv", "source.py", special)
+    (repo / special).write_text("value = 2\n")
+    git(repo, "rm", "lib.so")
+    meta["code_files"] = ["source.py", special, "lib.so"]
+    rows = {r["path"]: r for r in inventory(path, meta)["intended"]}
+    assert rows[special]["original_path"] == "source.py"
+    assert rows[special]["staged"] == "R" and rows[special]["unstaged"] == "M"
+    assert rows["lib.so"]["staged"] == "D" and rows["lib.so"]["binary"] is True
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX newline filename and executable mode require a POSIX filesystem")
+def test_inventory_preserves_posix_newline_mode_binary_and_both_status_columns(inventory_repo):
     repo, path, meta = inventory_repo
     special = "renamed\n name.py"
     git(repo, "mv", "source.py", special)

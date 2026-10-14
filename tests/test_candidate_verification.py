@@ -574,6 +574,7 @@ class VerificationTests(unittest.TestCase):
         with self.assertRaises(module.EvidenceError):
             module.validate_reuse(payload, self.meta()["verification_runs"], ctl.candidate_module())
 
+    @unittest.skipIf(os.name == "nt", "real POSIX FIFO capture requires os.mkfifo; portable propagation runs separately")
     def test_candidate_capture_failure_never_reuses_historical_pass(self):
         self.record(request="prior-pass")
         # Git's untracked listing omits FIFOs; replace a tracked source path so
@@ -726,6 +727,7 @@ class VerificationTests(unittest.TestCase):
         self.assertTrue(ctl.candidate_module().snapshot_identity_ok(snapshot))
         self.assertTrue(lint.scan_sensitive(snapshot), "known inspection keys must not exempt free evidence text")
 
+    @unittest.skipIf(os.name == "nt", "real POSIX FIFO capture requires os.mkfifo; portable propagation runs separately")
     def test_enabled_capture_failure_blocks_debt_linter_without_required_contract(self):
         import os
         debt_spec = importlib.util.spec_from_file_location("unrequired_debt", ROOT / "tools/verification_debt.py")

@@ -313,7 +313,7 @@ class CandidateTests(unittest.TestCase):
         self.assertEqual(result["state"], "review_required")
         self.assertEqual(before, self.bytes())
 
-    def test_binary_mode_rename_delete_staged_and_unstaged_are_bound(self):
+    def test_binary_rename_delete_staged_and_unstaged_are_bound(self):
         old = self.capture()
         (self.repo / "source.py").write_bytes(b"\x00\xff staged")
         self.git("add", "source.py")
@@ -323,14 +323,19 @@ class CandidateTests(unittest.TestCase):
         for other in (staged, unstaged):
             self.assertFalse(self.module().compare_candidates(old, other)["equivalent"])
         self.assertNotEqual(staged["candidate_id"], unstaged["candidate_id"])
+        self.git("mv", "source.py", "renamed.py")
+        rename = self.capture()
+        self.assertNotEqual(rename["candidate_id"], unstaged["candidate_id"])
+        (self.repo / "renamed.py").unlink()
+        self.assertNotEqual(self.capture()["candidate_id"], rename["candidate_id"])
+
+    @unittest.skipIf(os.name == "nt", "POSIX executable mode bits are not supported by Windows chmod")
+    def test_posix_executable_mode_changes_are_bound(self):
+        os.chmod(self.repo / "source.py", 0o644)
+        unstaged = self.capture()
         os.chmod(self.repo / "source.py", 0o755)
         mode = self.capture()
         self.assertNotEqual(mode["candidate_id"], unstaged["candidate_id"])
-        self.git("mv", "source.py", "renamed.py")
-        rename = self.capture()
-        self.assertNotEqual(rename["candidate_id"], mode["candidate_id"])
-        (self.repo / "renamed.py").unlink()
-        self.assertNotEqual(self.capture()["candidate_id"], rename["candidate_id"])
 
     def test_untracked_scope_exclusions_checkout_and_base_drift(self):
         old = self.capture()
