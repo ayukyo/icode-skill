@@ -42,6 +42,7 @@ lint_workflow_contract.py —— workflow gate（工作流硬门禁）运行时�
     python3 tools/lint_workflow_contract.py <out_dir> --json
 """
 import sys
+import io
 import json
 import argparse
 import math
@@ -819,4 +820,7 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    # Native CLI stdout is a UTF-8 wire; imported/captured main stays text-only.
+    if isinstance(sys.stdout, io.TextIOWrapper):
+        sys.stdout.reconfigure(encoding="utf-8")
     sys.exit(main())

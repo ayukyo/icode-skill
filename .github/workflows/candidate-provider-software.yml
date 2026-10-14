@@ -3,6 +3,7 @@ on:
   push:
     branches: [main]
     paths:
+      - 'tools/lint_workflow_contract.py'
       - 'tools/icode_candidate.py'
       - 'tools/icode_control.py'
       - 'tools/verification_evidence.py'
@@ -51,6 +52,8 @@ jobs:
         run: python -B -m unittest discover -s tests -p test_candidate_git_provider_unit.py -v
       - name: Count required candidate provider cases
         run: python -B -c "import unittest; suite=unittest.defaultTestLoader.discover('tests', pattern='test_candidate_git_provider_unit.py'); assert suite.countTestCases()==20, suite.countTestCases()"
+      - name: Standalone linter UTF-8 wire contract
+        run: python -B -c "import unittest; s=unittest.defaultTestLoader.discover('tests', pattern='test_candidate_linter_utf8_unit.py'); assert s.countTestCases()==3, s.countTestCases(); r=unittest.TextTestRunner(verbosity=2).run(s); raise SystemExit(not r.wasSuccessful() or bool(r.skipped))"
       - name: Syntax
         run: python -B -m py_compile tools/icode_candidate.py tests/test_candidate_git_provider_unit.py
       - name: Collect complete related legacy contract
