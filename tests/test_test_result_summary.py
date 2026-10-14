@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -162,7 +163,10 @@ class ReportTests(unittest.TestCase):
         self.assert_rejected('<testsuite tests="2"/>', "test count", limits={"max_tests": 1})
 
     def test_timeout_and_invalid_budgets_are_controlled_errors(self):
-        self.assert_rejected('<testsuite/>', "timeout", limits={"timeout_seconds": 1e-12})
+        api = load_tool("test_result_summary")
+        # Exercise elapsed time explicitly, independent of the host clock resolution.
+        with patch.object(api.time, "monotonic", side_effect=(0.0, 2.0)):
+            self.assert_rejected('<testsuite/>', "timeout", limits={"timeout_seconds": 1.0})
         for limits in ({"max_bytes": 0}, {"max_depth": True}, {"timeout_seconds": float("nan")}, {"other": 1}):
             with self.subTest(limits=limits):
                 self.assert_rejected('<testsuite/>', "limit", limits=limits)
