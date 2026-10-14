@@ -82,7 +82,7 @@ class PortProviderTests(unittest.TestCase):
         self.assertEqual(facts[1]["sha256"], hashlib.sha256(b"ticket input\n").hexdigest())
         self.assertEqual(facts[3]["items"][0]["sha256"],
                          hashlib.sha256((self.f.code / "source.py").read_bytes()).hexdigest())
-        self.assertEqual(facts[4]["roots"], [{"root": str(self.f.code), "head": self.f.base}])
+        self.assertEqual(facts[4]["roots"], [{"root": self.f.code.as_posix(), "head": self.f.base}])
         model = self.model(self.ports())
         result, missing = self.capture(self.ports())
         self.assertEqual(missing, [])
@@ -112,8 +112,8 @@ class PortProviderTests(unittest.TestCase):
         meta = dict(self.meta, sub_worktrees=[{"path": str(other)}],
                     submission_contracts=[{"repo_path": str(self.f.code)}])
         fact = self.resolve(dict(self.ports()[4], value="nested"), meta=meta)
-        expected = sorted([{"root": str(original), "head": self.f.base},
-                           {"root": str(other), "head": other_head}], key=lambda item: item["root"])
+        expected = sorted([{"root": original.as_posix(), "head": self.f.base},
+                           {"root": other.as_posix(), "head": other_head}], key=lambda item: item["root"])
         self.assertEqual(fact["roots"], expected)
         self.assertEqual(fact["digest"], ctl.canonical_digest(expected))
 
@@ -121,7 +121,7 @@ class PortProviderTests(unittest.TestCase):
         provider = self.seal()
         before = self.f.frozen()
         actual = self.resolve(self.ports()[4], provider, True)
-        expected = [{"root": str(self.f.code), "head": provider.facts["head"]}]
+        expected = [{"root": self.f.code.as_posix(), "head": provider.facts["head"]}]
         self.assertEqual(actual, {"id": "head", "kind": "workspace_git_head", "exists": True,
                                   "roots": expected, "digest": ctl.canonical_digest(expected)})
         self.assertEqual(provider.calls, ["facts"])
@@ -312,7 +312,7 @@ class PortProviderTests(unittest.TestCase):
         meta = dict(self.meta, sub_worktrees=[{"path": str(self.f.code)}],
                     submission_contracts=[{"repo_path": str(self.f.code)}])
         result = self.resolve(self.ports()[4], provider, True, meta)
-        self.assertEqual(result["roots"], [{"root": str(self.f.code), "head": provider.facts["head"]}])
+        self.assertEqual(result["roots"], [{"root": self.f.code.as_posix(), "head": provider.facts["head"]}])
 
     def test_multiroot_and_malformed_declarations_never_partial_success(self):
         provider = self.seal()

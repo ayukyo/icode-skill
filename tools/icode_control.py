@@ -1557,7 +1557,7 @@ def resolve_port(out_dir, meta, port, *, git_provider=None, require_git_provider
             facts = module._candidate_facts(
                 workspace, git_provider, min(8192, module.DEFAULT_LIMITS["max_git_bytes"]),
                 deadline=deadline)
-            roots = [{"root": str(workspace), "head": facts["head"]}]
+            roots = [{"root": workspace.as_posix(), "head": facts["head"]}]
             result = {"id": port.get("id"), "kind": "workspace_git_head", "exists": True,
                       "roots": roots, "digest": canonical_digest(roots)}
         else:
