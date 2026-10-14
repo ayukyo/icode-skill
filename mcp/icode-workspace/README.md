@@ -9,4 +9,6 @@
 
 平台目录只作为候选边界，不会自动排除；真正修改范围仍须结合 README、工程约束和当前需求确认。超大仓默认先枚举 tracked paths，再对目标模块做限量内容检索。
 
-默认允许 `$HOME`，可在安装后的 `config.json` 收窄范围。
+默认允许 `$HOME`（当前用户目录）。Windows 未设置 `HOME` 时会使用系统用户目录，通常由 `USERPROFILE` 决定；无需手动设置 `HOME`。
+
+工程在用户目录以外时，需要在安装后的 `config.json` 的 `allowed_roots` 中显式添加工程根目录，例如 `"D:/Projects"` 或 `"/srv/projects"`。路径列表只允许访问这些目录及其子目录，不会自动开放整个磁盘。共享路径规则见 [配置路径说明](../_lib/README.md)。

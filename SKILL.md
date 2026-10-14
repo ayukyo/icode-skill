@@ -70,6 +70,8 @@ description: ICODE 端到端编码工作流，适配 Claude Code、Codex、CodeB
 | `[生命周期]` `/icode worktree --reopen [--ticket <id>] [--target <ref>]` | 显式恢复已 close 工单（归档控制根受控解冻，先 reopen 再 patch） | 否 |
 | `[生命周期]` `/icode worktree --merge` | 刷新线上目标、全仓冲突预检、安全合并和复检；不自动 commit/push | 否（更新 remote refs；可 fast-forward 或保留未提交 merge） |
 
+DOC按当前工作区生成；模块族与精确版本快照、旧库保护及段零匹配规则见[references/doc_snapshot_contract.md](references/doc_snapshot_contract.md)，执行入口仍为steps/doc.md。
+
 > **目录复用规则**（start/plan/fast 启动时）：检查最新 `.icode_output/.icode_output_N/`——入口态（`init_in_progress`/`log_done`）**有歧义一律问用户**（带参可能是补充旧需求也可能是新需求）；非入口态带参 → 直接新建；无参且无入口态可复用 → 报错提示。完整脚本与 `REUSE=2/0` 语义见 [references/dir_and_metadata.md](references/dir_and_metadata.md)「复用 / 创建新目录决策」。
 
 > **`init --guide` 显式覆盖**：复用当前工作区最新合格初稿，不询问、不新建、不改状态，刷新 `deliverables/guide.md` 与审计；详见 [guide_contract.md](references/guide_contract.md)。

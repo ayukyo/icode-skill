@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -13,7 +12,7 @@ LIB_DIR = SERVER_DIR.parent / "_lib"
 if str(LIB_DIR) not in sys.path:
     sys.path.insert(0, str(LIB_DIR))
 
-from local_mcp_common import READ_ONLY_ANNOTATIONS, describe, fail, load_config, ok  # noqa: E402
+from local_mcp_common import READ_ONLY_ANNOTATIONS, describe, expand_path, fail, load_config, ok  # noqa: E402
 from mcp.server.fastmcp import FastMCP  # noqa: E402
 
 SERVER_NAME = "icode-mcp-policy"
@@ -28,10 +27,7 @@ def _config() -> dict[str, Any]:
 
 def _load_policy() -> tuple[Path, dict[str, Any]]:
     raw = str(_config().get("policy_file", SERVER_DIR / "policy.json"))
-    path = Path(os.path.expandvars(os.path.expanduser(raw)))
-    if not path.is_absolute():
-        path = SERVER_DIR / path
-    path = path.resolve()
+    path = expand_path(raw, base_dir=SERVER_DIR)
     data = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(data, dict):
         raise ValueError("policy 顶层必须是 object")

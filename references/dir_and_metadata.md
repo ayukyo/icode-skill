@@ -242,6 +242,8 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
 
 > **⚠️ Git 操作安全白名单（强制，违反即不合规）**：本段所有 git 调用必须**只读**，仅允许：`git rev-parse HEAD` / `git rev-parse --abbrev-ref HEAD` / `git rev-parse --git-dir` / `git merge-base --is-ancestor <A> <B>`（仅取退出码 0/1）/ `git status --porcelain` / `git log --oneline -1` / `git log --oneline --since=<N>.days -- <路径>`（只读；重复模式确定性佐证统计模块提交频次用，`--since`+路径过滤限定范围防大仓慢扫；**相对日期须用 `<N>.days` 格式**——`<N>d`/中文单位在此类 git 静默失效为不过滤，禁用；见 [thinking_detail.md](thinking_detail.md)「重复模式检测」段第 3 步） / `git log --oneline <commit>..HEAD -- <file>`（只读；结论级时效校验第 5 项列出某文件在 `created_commit` 之后的演进 commit，见「过时校验」段第 5 步；`<commit>..HEAD` 限定范围防大仓慢扫） / `git log -S <string> -- <file>`（只读；pickaxe 值演进追踪——按"某行关键值/哨兵值被增删"定位演进 commit，结论级时效校验第 5 步用） / `git cat-file -e <sha>` / `git show <hash>:<path>`（只读；现场运行版本基线门按现场 Hash 读取历史源码用，见「metadata 三基线字段」段；仅 blob 只读展示，不改工作树/索引） / `git diff <commit>..HEAD -- <path>`（只读；现场 Hash→当前 HEAD 相关文件演进对照用，`<commit>..HEAD`+路径限定范围防大仓慢扫） / `git blame <commit> -- <path>`（只读；对指定历史版本做行归因，设计意图证据采集与版本演进对照用） / `git worktree list --porcelain`（只读；resolve_project_id F1 worktree 归一化用，见「project_id 与 branch 语义」段）。**禁止** `checkout`/`switch`/`reset`/`stash`/`clean`/`commit`/`add`/`rm`/`rebase`/`merge`/`cherry-pick`/`push`/`fetch`/`pull`/`branch -D`/`tag -d` 等一切写操作与网络操作。stale 检测**只读工作树现状，绝不改工作树/索引/提交**--"checkout 变化时重评"指检测到**用户外部**改了 HEAD 后只读重评，**绝不由技能主动 checkout**。`-C {project_path}` 前缀用于跨工程工单切换目录执行只读命令，必需且允许；全部本地完成，离线可用。
 
+**DOC工作区身份捕获补充白名单**：允许固定只读参数`rev-parse --verify HEAD`、`rev-parse --show-toplevel`、`symbolic-ref --short HEAD`、`ls-files --stage -z`、`ls-files --others --exclude-standard -z`；工具加`--no-optional-locks -c core.fsmonitor=false -C <实际根>`，不写索引、不运行用户fsmonitor。此补充不允许网络或写类Git操作。
+
 **校验方法**（对 top-N 命中工单，注入前逐条；`H = git -C {project_path} rev-parse HEAD`（该工单工程的当前 HEAD，每候选取一次；非 git 仓库/失败→`null` 走纯锚点兜底））：
 1. **项目路径校验**：`test -d {project_path}` 失败→置 `stale=true`+`stale_reason=path_gone`+`stale_checked_commit=H`，**跳过注入**（即使 hit_count 高也不注入），避免对已删除工程的引用注入。**worktree 场景（预期行为，非故障）**：`project_path` 指向 worktree 路径时，工单回流 `git worktree remove` 后 `test -d` 失败 → `path_gone` 属预期（工单已交付，索引留档即可，别当工程被删排查）；**复活路径** = 重新 `git worktree add` 同分支 → `project_path` 恢复存在 → 自动重入「可复活规则」再走锚点校验。**归档工单（archived 活跃态，worktree 工单）**：`archive_path` 非 null 时**跳过本步 project_path 校验**，改查 `test -d {archive_path}`（如 `~/.claude/icode_data/worktree_archive/<project_id>/<ticket_id>/`）——有效→该工单为 archived 活跃历史工单，**不标 stale**，产物源=archive_path（读 `01_plan.md` ADR/风险或 `log_analysis.md` 根因/结论），**跳过第 2/3/4/5 步**（无代码可校验，注入走历史参考语义——作启发、非当前代码事实，须 Grep/Read 实证，见「不盲信约束」），命中**正常续期 + 按 verdict 分流**（归档工单 `disproved`/`superseded` **降级**：`project_path` 失效无法 Grep/Read 当前代码验证证伪前提、`verdict_review_needed` 主动检测亦不可执行 → 改注 `verdict_reason`+`correct_direction` 作历史避坑提示 + ⚠️ 标注『基于已交付历史代码，未经当前代码实证，须用户判断前提是否仍适用』），待遇与主仓工单一致；archive_path 失效（归档也被删）→ 才置 `stale=true`+`stale_reason=path_gone`+跳过注入（真病态）。归档见 [worktree_isolation.md](worktree_isolation.md)「产物归档」。**备份工单（backup 活跃态，`/icode bak` 产物）**：`backup_path` 非 null 且 `test -d {backup_path}` 有效（如 `~/.claude/icode_data/project_backup/<project_id>/<快照>/.icode_output_N/`）的工单，`project_path` 失效（工程被删）时**重置 `stale=false`+`stale_reason=null`+`stale_checked_commit=null`**（backup 活跃态——即使此前标过 stale，备份是唯一可读快照，旧判据作废），产物源=backup_path（读完整工单产物：`01_plan.md` ADR/风险、`log_analysis.md` 根因/结论、`06_audit.md` 终审等），**跳过第 2/3/4/5 步**（历史快照，无当前代码可校验，注入走历史参考语义——作启发、非当前代码事实，须 Grep/Read 实证，见「不盲信约束」），命中**正常续期 + 按 verdict 分流**（`disproved`/`superseded` 降级注避坑提示 + ⚠️『基于备份历史代码，未经当前代码实证，须用户判断前提是否仍适用』），待遇与主仓工单一致；**工程优先**：`test -d {project_path}` 有效（工程恢复/重克隆）永远优先走工程，备份仅兜底。backup_path 失效（备份也被删）→ 才置 `stale=true`+`stale_reason=path_gone`+跳过注入（真病态）。**与归档工单并行**：`archive_path`（worktree 归档）与 `backup_path`（手动备份）任一有效即活跃态，互不排斥。备份命令见 [steps/bak.md](../steps/bak.md)
 2. **commit 上下文校验**（`created_commit` 非 null 时；为 null 跳过本步进第3步纯锚点兜底）：
@@ -596,7 +598,7 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
 
 ### 去重规则（核心）
 
-**注入前查缓存**——对每个准备注入的项，按 `(source, ref_id, slice)` 三元组查 `injections` 数组：
+**先校验版本，再查缓存**——历史源仍按`(source, ref_id, slice)`；DOC源的ref_id必须绑定族键+snapshot_id，或工程章节source_id+正文SHA，slice区分正文/摘要/锚点。实际source与正文SHA不匹配时不复用旧缓存，详见[DOC快照契约§4](doc_snapshot_contract.md#4-段零检索与缓存)。
 
 - **三元组已存在** → **跳过注入**（不重复进思考输入）+ **跳过续期**（历史源不重复 `+1` hit_count）
 - **三元组不存在** → 注入 + 追加一条缓存记录
@@ -628,7 +630,7 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
 
 ## project_docs 工程文档库（icode doc 步骤用）
 
-> `/icode doc` 生成的工程级知识库。**零配置、零状态文件、零索引文件**——只有章节 .md 文件，每个自带身份证（前 50 行三合一）。详见 [steps/doc.md](../steps/doc.md) 与 [references/doc_template.md](doc_template.md)。
+> `/icode doc`生成工程知识库，无需用户维护工程专属配置。章节前50行用于检索；实际源码身份、正文SHA、审核及状态另由元信息和worklist核对。详见[DOC快照契约](doc_snapshot_contract.md)、[步骤](../steps/doc.md)与[模板](doc_template.md)。
 
 ### 目录布局
 
@@ -660,7 +662,7 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
   - 同工程不同分支（如 `myproject/main/` vs `myproject/feature/`）→ 天然隔离互不覆盖
   - **detached HEAD** → 落到 `(detached)` 子目录
   - **非 git 仓库** → 落到 `(no-git)` 子目录
-  - 分支名 sanitize：路径分隔符 `/`、`\` 与文件名非法字符 `: * ? " < > |` 替换为 `_`，避免破坏目录结构
+  - 分支名sanitize后若与原始分支不同或命中Windows设备名，追加sha256(原始分支)前8字符，避免替换字符导致目录碰撞；旧目录只按原始branch精确匹配作为legacy材料，保留不删
 - 子目录（如 `myrepo/module_a/`）是同一 project 下的**章节模块**（章节名带模块前缀 `20_module_a_overview.md`），不是独立 project
 - **冲突处理**：若 `~/.claude/icode_data/project_docs/<project_id>/<branch>/` 已存在且其 `00_overview.md` 元信息块的 `project_path` 与当前 `git_root` 不同 → 自动追加 hash 后缀 `${PROJECT_ID}__${BRANCH_SAFE}__$(echo $GIT_ROOT|sha256sum|cut -c1-4)`，AI 靠元信息块的 git remote 区分同名工程同名分支
 - **零配置**：不引入任何配置文件，工程名、分支等可配信息全在章节元信息块
@@ -672,11 +674,11 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
 
 ### 章节前 50 行三合一（自带身份证）
 
-每个章节前 50 行承载项目元信息块（工程名/git/提交/子模块/产品线/模块/时间）+ KEYS 块（检索词带 `[小节锚点]`，段零按小节注入不灌全章）+ 简要说明（50~100 字），完整结构见 [references/doc_template.md](doc_template.md)。**元信息块替代 config + state + index 三个文件**——文件系统即数据库（`ls` 枚举、元信息查状态、KEYS 做检索）。
+每章前50行承载工程/源码版本、依赖、KEYS与简要说明，结构见[doc_template.md](doc_template.md)。无需用户维护工程专属配置；版本身份、正文SHA、审计和进度还须读_meta/worklist，不能只凭前50行或文件存在称完成。
 
 ### 段零·工程文档检索（init/log/plan/start/fast 共用）
 
-五入口启动时，与历史检索复用并行做段零检索，**候选合并后统一排序**注入（不分来源，最相关者胜）。除工程自身章节（`project_docs/`）外，自动覆盖工程依赖的模块共享文档（`module_docs/`，按仓库+分支 key 跨工程共享，详见「module_docs 工程模块库」段）。
+五入口启动时与历史检索并行；先读[doc_snapshot_contract.md](doc_snapshot_contract.md)全文核当前工作区、依赖绑定及正文SHA，再把合格候选排序。工程章节按当前原始分支隔离，模块正文按族键+精确snapshot_id读取，相关度不能覆盖版本不匹配。
 
 **段零步骤速查**（执行前必读导航；入口摘要仅索引到此 7 步，**不得凭摘要执行**，须读下文各步骤全文）：
 1. `resolve_project_id(cwd)` -> project_id + branch（步骤 1）
@@ -696,21 +698,15 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
      ├─ 不存在（且无 legacy 回退命中）→ 段零零命中（输出一行 ℹ️ 提示"本工程当前分支 `<branch>` 尚未生成知识库，可运行 `/icode doc`，或切换到已建分支"，不阻塞，不写缓存）
      └─ 存在 → 逐章读前 50 行 → KEYS 匹配 + 简要说明语义打分 → project 候选集
    - **粗筛 0 命中早返回**：`project` 或 `module` 候选集任一为 0 条 → 不调 LLM 精读打分，直接合并入总候选集（节省 1-3K token，语义等价——粗筛 0 命中 LLM 精读也是 0）
-3. 读 `<DOC_DIR>/_meta.json` → `module_deps` 列表（**注意**：不是 `project_docs/<project_id>/_meta.json`，是按分支子目录里的；每个分支独立 _meta.json，互不继承）
-   对每个 dep：ls ~/.claude/icode_data/module_docs/<dep.key>/*.md
-   ├─ 目录不存在或无 .md：
-   │   - dep.generated == false（按需未生成，见 doc.md 步骤5「module_docs 生成范围」用户指定模块名场景）-> 不报缺失，提示"可 `/icode doc <name>` 按需生成"，跳过该 dep
-   │   - dep.generated 缺省或 true（本应生成却缺失）-> 收集到「缺失模块」列表（末尾汇总警告），跳过该 dep
-   └─ 存在 → 读前 50 行 → KEYS 匹配 → module 候选集
-      **commit 一致性校验（防跨工程 commit 漂移误导）**：比对工程 `_meta.json.module_deps[].commit`（本工程 pin 的 commit）与 `module_docs/<key>/_meta.json.current_commit`：
-      - 一致 → 正常注入（模块文档版本与本工程代码版本匹配）
-      - 不一致（同分支不同 commit，跨工程 /icode doc 互相覆盖所致，见「module_docs key 计算」）→ **降级注入**：注入正文但附警告「⚠️ 模块 `<name>` 文档基于 commit `<current_commit>`，本工程 pin `<dep.commit>`，API/行为以本工程代码为准，须 Read 实证」，提示下游不得直接采信模块文档的 file:line / 接口描述
-      - key 只含 url+branch 不含 commit，同分支不同 commit 共用同一 key 无法靠目录隔离，段零必须运行时比对 commit 兜底；`/icode doc` 生成时的全量重生成覆盖（见 [doc.md](../steps/doc.md) 步骤5）只把文档更新到"最后一次跑 doc 的工程"的 commit，不能消除跨工程漂移
+3. 读当前分支<DOC_DIR>/_meta.json的module_deps，保留原始分支和真实path。
+   对每个dep重新capture当前本地模块及声明依赖，用doc_snapshot.py resolve核dep.snapshot_id、当前source_id和模板。
+   - status=match：读返回目录前50行KEYS再精读相关小节，source_id/snapshot_id写来源标签与注入缓存。
+   - source_mismatch/modified/partial/template_mismatch/missing/ambiguous：不注正文，只给不含file:line的概览、原因和更新提示；不存在的正文不编造概览。
+   - 旧dep无快照绑定或旧平铺库无内容指纹：按legacy_summary_only处理，不凭相同commit自动认作工作区匹配。
+   - generated=false区分按需未生成/partial/失败；保留依赖事实，汇总待办，不能只看族目录存在就认为generated=true。
+   快照路径和校验细则见doc_snapshot_contract.md；旧库和不同工程的版本继续保留，不由当前工程覆盖。
 3.5 **反查父项目**（子仓库内工作时）：如果 cwd 在 git-root 模式 → 计算 `cwd_relative = realpath(cwd) 相对 realpath(.repo 所在目录)`（**注意：是相对 .repo 根，不是相对 git_root**——例如 cwd 在 `myproject/module_a/`、.repo 在 `myproject/.repo/` 时，cwd_relative = `module_a/`）→ 若 `.repo/manifest.xml` 存在且 `cwd_relative` 精确匹配或为某 `<project path>` 的子路径 → 该 manifest project 的"父 repo 根"=`.repo/` 所在目录；把父 project（repo-root）也纳入检索（读 `project_docs/<父 project_id>/<父 branch>/_meta.json` + 章节，**按父 repo 自身分支子目录读**，勿读错的分支），候选合并排序时一并参与打分（来源标签标「来源：project:父 project_id」）
-3.6 **关联工程检索（跨工程参考，只读 overview）**：读步骤 2 本工程 `00_overview.md` 元信息块的「关联工程」字段（v2 字段，缺失则跳过此步不阻塞） -> 对每个关联标识（优先 project_id，也可能是工程名/产品代号）：
-   ├─ 先精确 ls `~/.claude/icode_data/project_docs/<关联 project_id>/<branch_safe>/00_overview.md`
-   ├─ 精确不存在且标识疑似工程名/代号 -> 遍历 `project_docs/*/<branch_safe>/00_overview.md` 元信息块的「工程名」「产品线/型号」字段模糊匹配关联标识，命中取其路径
-   └─ 命中路径 -> 读前 50 行 -> KEYS 匹配 + 简要说明语义打分 -> 关联工程候选集（**只取 00_overview，不读其他章节**，控 token 且防跨工程失真）；**强制 stale 校验**（分支 + 祖先双校验，同步骤 5 project 章节）+ ⚠️ 跨工程警告「关联工程 `<id>` 文档为快照，代码可能已分叉，下游须 Read 实证」；来源标签「来源：project:关联 `<id>`」；无任何命中 -> ℹ️ 提示「关联工程 `<标识>` 未生成知识库或分支 `<branch>` 不匹配，可提示用户 `/icode doc`」，跳过
+3.6 **关联工程检索（跨工程参考，只读 overview）**：读当前00_overview「关联工程」字段；优先按声明的project_id与其明确来源分支定位overview。关联工程分支不要求与当前工程同名；没有明确分支时仅枚举其元信息作概览候选，不混入当前工程正文，来源标其真实project/branch/source_id。多个关联版本只给不含file:line的说明及版本标签，不擅选一个当当前代码；始终不注关联工程正文。以该关联工程自己的实际源码根/分支核stale，无法定位则明示未经当前源码验证。无命中提示未生成，不因当前分支名不同抹去关联工程线索。
    - **3.6 源码路径定位**（为下游 Read 实证关联工程源码提供线索；仅给工程根路径不注正文 file:line，防跨工程失真）：对每个命中的关联工程，读其 00_overview 元信息块的 `project_path` + `Git 地址`，三级定位本机源码根：
      (a) **project_path 校验**：`project_path` 缺失/空（旧 v1 章节无此字段）则跳过本项进 (b)；`test -d <关联 project_path>` 有效 -> 取为源码线索（同机有效；绝对路径可能因换机器/换 clone 位置失效，故必校验）
      (b) **manifest 匹配**（当前工程 repo-root 模式 + `.repo/manifest.xml` 存在时）：按关联工程 `Git 地址` 精确匹配 manifest `<project name="<git 地址>" path="<本地路径>" />`，命中取 `path`（相对 .repo 根，拼绝对路径）-- 同 repo 关联工程最可靠定位（manifest 是本机源码权威映射）
@@ -724,7 +720,7 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
 4. 合并排序：project 候选 + module 候选 + 反查父项目章节 + 关联工程候选 + 历史检索段一/二候选 → 统一按相关度排序 → top-N（强相关≤2 + 弱相关≤1，总量≤3 条）
 5. 对每个 top-N 项（注入策略按来源区分）：
    - **project 章节**：stale 判定（查 `_meta.json.stale_files` + 运行时 `git diff` 兜底，见「stale 检测」）-- stale → slice=`section:<file>#stale-summary`，按「stale 章节降级注入」只注简要说明+警告（不读正文小节）；非 stale → 检查 template_version（见下文「质量信号」）：v2 → slice=`section:<file>#<anchor>` 正常注入；v1 → slice=`section:<file>#v1-summary` 降级注入摘要+升级提示不注正文（v1 章节模板过旧，注入质量不可控）。按 KEYS [小节锚点] 定点读对应小节（不读全章，≤1K token/条）→ 注入思考输入「历史参考」节
-   - **module 章节**：按步骤3 commit 校验结果 -- 一致 → slice=`section:<file>#<anchor>` 注正文；不一致 → 降级注正文+警告（步骤3，须 Read 实证）
+   - **module章节**：仅步骤3精确快照与当前工作区、正文SHA、模板、审计范围均匹配时注正文；任何不匹配只概览/警告。ref_id含族键与snapshot_id，不复用仅文件名旧缓存。
    - **关联工程章节**：注 00_overview 的「简要说明」+ ⚠️ 跨工程警告 + **本地源码路径线索**（步骤 3.6 源码定位结果：`project_path` 或 manifest path，`test -d` 校验有效才给；源码不在本机则注明「未定位」+ 提示用户给路径）（**不注正文小节**，防跨工程代码分叉失真），slice=`section:<file>#cross-project-summary`；stale 则按「stale 章节降级注入」只注摘要+警告+源码路径线索
    - 查 _inject_cache.json → 已注入的同 slice 跳过；否则注入并写缓存
    - 命中附来源标签：「来源：project:myproject」或「来源：module:module_a@main@a3f2b1c」
@@ -742,6 +738,8 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
   - `git merge-base --is-ancestor <prev> HEAD` 退出 0（正常前向演进）→ HEAD 变更且 `git diff <commit>..HEAD --name-only` 命中该章 KEYS「文件位置」**或命中章节正文涉及的目录前缀**（应对 KEYS 文件位置不完整 / 新增文件 / 重构改路径导致漏判的假阴性）→ 判定该章 stale
   - 退出 1（HEAD 是 prev 的祖先/分叉 / prev 与 HEAD 在不同分支，如工程切了分支或重置）→ **`git diff` 不可信**（merge-base 可能很远导致 diff 失真/巨变），**直接判定该章 stale**（不留余地跨分支增量判定，避免误把"几乎全章变更"当增量）
   - 退出 128（prev 不可达，如 GC/换库）→ 同上直接判定 stale
+
+**工作区补充校验**：先比较当前capture的source_id/声明依赖与章节基线、实际正文SHA。HEAD相同也可能有dirty变化；旧无内容指纹记录只能概览，不按HEAD相同判新鲜。工程章节按实际输入清单差异和关联调用核验，部分刷新保留各章基线；详情见doc_snapshot_contract.md。
 
 **两源合一**：先查工程 `_meta.json.stale_files`（主动扫描持久化结果，见下文「project_docs 主动 stale 扫描」）快速识别 stale 章节（降级注入摘要不注正文，见下文「stale 章节降级注入」），再运行时 `git diff` 兜底（`_meta.json` 可能比最新 HEAD 旧）。判定宁可放宽（假阳性仅触发降级，假阴性才会误导）。
 
@@ -774,167 +772,59 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
 - ⚠️ **未生成模块警告**（若工程 `_meta.json.unresolved_modules` 非空）：输出「工程有 N 个未生成模块（拉取失败）：\`{name1}\`(\`{reason1}\`), \`{name2}\`(\`{reason2}\`)... — 子仓库代码本地化后重跑 /icode doc 时自动恢复」
 - ℹ️ **按需未生成模块提示**（若步骤 3 收集到 `generated == false` 的模块）：输出「工程有 N 个模块未生成 module_docs（按需未生成，上次 /icode doc 指定了其他模块聚焦）：\`{name1}\`, \`{name2}\`... - 可 \`/icode doc <name>\` 按需生成」
 
-**工程隔离**：段零严格按当前 cwd 的 project_id 检索**工程自身章节**（不跨 project 注入 `project_docs/` 正文），但**自动跨仓库跨分支覆盖依赖的 `module_docs/`**（多个 project 引用同一上游仓库同分支只一份，自动复用）。**关联工程**（姊妹/同族）通过 00_overview 元信息块「关联工程」字段显式声明，段零只检索其 00_overview「简要说明」+ ⚠️ 跨工程警告 + **源码路径线索**（步骤 3.6 源码路径定位：project_path/manifest/兜底）作为参考候选（**不注正文小节**，防跨工程代码分叉失真），不自动跨库注入全章。
+**工程隔离**：工程正文只查当前project与原始分支；模块依赖只查父工程精确快照绑定。同族仅当source_id/正文SHA/模板与审计范围匹配才复用，多提交与dirty版本可以并存。**关联工程**（姊妹/同族）通过 00_overview 元信息块「关联工程」字段显式声明，段零只检索其 00_overview「简要说明」+ ⚠️ 跨工程警告 + **源码路径线索**（步骤 3.6 源码路径定位：project_path/manifest/兜底）作为参考候选（**不注正文小节**，防跨工程代码分叉失真），不自动跨库注入全章。
 
 
 
-### 检索结果缓存（5 分钟 TTL，可选 token 优化）
+### 检索结果缓存（可选）
 
-> **目的**：5 分钟内连续触发同一入口（init/log/plan/start/fast）+ 相同关键词的检索时，跳过 LLM 精读打分，直接复用上次结果。**单工单节省 0.5-2K token**（仅命中场景，多入口连续触发时）。
->
-> **完全可选**：以下规则让 AI 自主遵循即可，**不强制 icode-skill 命令实施**（避免破坏现有命令链路）。Claude 等 LLM 看到本段会自然在连续调用间检查缓存。
+缓存规则以[doc_snapshot_contract.md§4](doc_snapshot_contract.md#4-段零检索与缓存)为准。每次先验证当前工作区/依赖source_id、绑定snapshot_id和实际正文SHA，再查缓存；300秒TTL或index mtime都不能替代版本校验。
 
-**缓存机制**（AI 自主执行，5 分钟内）：
-
-1. **缓存位置**：`~/.claude/icode_data/_search_cache.json`
-2. **缓存键**：`{cwd_absolute}:{sorted_keywords_joined_by_pipe}`（cwd 必须绝对路径，关键词按字典序排序确保等价输入命中同 key）
-3. **缓存值**：`{"results": [...], "created_at": <unix_timestamp>, "index_mtime": <index.json mtime>}`
-4. **TTL**：300 秒（5 分钟）
-5. **失效条件**（任一命中即跳过缓存）：
-   - TTL 过期 → 重跑
-   - cwd 变化 → 不复用（不同工程的检索不能跨）
-   - `~/.claude/icode_data/index.json` 的 mtime 变化 → 强制失效（索引有更新）
-
-**AI 自主执行**（五入口启动时）：
-
-```
-1. 解析 cwd 绝对路径 + 本次关键词列表
-2. 构造缓存键（如 /home/.../myproject:mcu|sensor|i2c）
-3. 读 _search_cache.json → 命中键的 entry
-4. 若 entry 存在 + created_at < now-300s 内 + index_mtime 一致 → 直接复用 results
-5. 否则正常跑段一粗筛 + 段二 LLM 精读 → 写回 entry.created_at + index_mtime
-```
-
-**不降能力保证**：
-
-- TTL 5 分钟足够短，任何"工程变化"必然超出窗口（commit 间隔通常 ≥30s 但完整 doc 重建 ≥分钟级）
-- 失效条件 3 个（TTL/cwd/mtime）覆盖了所有相关性破坏场景
-- 语义等价：相同 key 相同结果（LLM 精读本身有随机性，结果可能略变——缓存牺牲微弱随机性换 0.5-2K token）
-
+位置仍为~/.claude/icode_data/_search_cache.json。键包含cwd、排序关键词、当前source_id、精确依赖绑定与模板；值保存文档SHA和已校验来源。旧cwd+关键词键不复用。切提交、dirty变化、依赖版本、模板/正文修改即失效，哪怕发生在TTL内。可调用doc_snapshot.py的cache_key生成身份键；缓存仅省精读排序，不绕过版本与人工编辑检查。
 
 ### project_docs 主动 stale 扫描（`/icode doc` 末尾执行，防过时章节堆积）
 
 对比 index.json 的主动 stale 扫描，project_docs 章节此前只有"段零命中前被动检测"一条路径--长期不跑 `/icode doc` 的工程，过时章节无机制标记，首次段零命中才被动检测（且只降级注入，不清理）。本机制补第二道清理（与 index.json「主动 stale 扫描」对齐，见上文「索引淘汰规则·主动 stale 扫描」）：
 
 - **触发时机**：`/icode doc` 执行末尾（见 [doc.md](../steps/doc.md) 步骤8）
-- **扫描范围**：全库章节（project_docs 章节量可控，每章 Grep 锚点 <1K token，全量可控；不像 index.json 只扫最旧 K 条）
-- **校验方法**：逐章读其 KEYS「文件位置」列出的文件路径，用 Grep 确认锚点代码仍存在（方法同 index.json「过时校验」）
+- **扫描范围**：当前工程分支目录章节；扫描其他工程时分别解析其实际源码根/分支/逐章身份，不把全局不同版本放在当前cwd下判定
+- **校验方法**：逐章核其来源上下文，再在对应实际源码根检查KEYS文件路径/锚点。源码不可读列未解析，不编造stale结论；锚点存在仅证明存在性，不把源码身份不匹配或未审计的正文恢复为新鲜
 - **结果写 `_meta.json.stale_files`**：失效的章节文件名写入工程 `_meta.json.stale_files` 数组；章节重生成（锚点恢复）后从此数组移除
 - **段零消费**：段零检索时先读 `stale_files` 快速跳过（无需每章 git diff，控 token），再运行时 `git diff` 兜底（见上文「stale 检测」两源合一）
 
-## module_docs 工程模块库（按仓库+分支共享）
+## module_docs 工程模块库（模块族与工作区快照）
 
-> **核心思想**：工程依赖的"独立模块"（git submodule / `repo` 管理 / CMake FetchContent / monorepo 子目录 / vendor / 用户配置）按"上游仓库 + 分支"为粒度共享文档。**多个工程引用同一上游仓库同一分支只生成一份**，段零自动覆盖，开发时快速定位关联模块的文档。
+模块族仍按URL+原始有效分支计算可读key；正文保存在snapshots/<snapshot_id>/。具体算法、元信息和发布/检索命令以[doc_snapshot_contract.md](doc_snapshot_contract.md)为唯一真源，实际辅助工具为[doc_snapshot.py](../tools/doc_snapshot.py)。
 
-> **工程分支切换 vs 模块分支切换（颗粒度独立）**：工程分支（`project_docs/<project_id>/<branch>/`）和模块分支（`module_docs/<url+branch>/`）是**两层独立维度**，互不绑定：
->
-> - **工程分支切换 + 模块不动**（如 `myproject` 从 `main` 切到 `feature`，但 `.gitmodules` 里所有 submodule 还 pin 在 `main`）：工程文档落到 `myproject/feature/` 新分支子目录；模块文档 `module_a@main` 等**自动复用**旧目录 `module_docs/<module_a+mainhash>/`，不重新生成（`dep.key` 不变 → 步骤 3 模块依赖变化检测走"key 不在旧列表的差集"是空集 → 跳过生成）
-> - **工程分支切换 + 部分模块也切分支**（如 `myproject` 切 `feature`，同时 submodule 里 `module_c` 切到 `c-feature`）：未切分支的模块共用旧目录；切分支的模块按新 `url+branch` key 落到新目录，**新旧目录并存**不覆盖；提示旧 key 是否清理
-> - **同分支跨工程引用**（工程 A 和工程 B 都依赖 `module_a@main`）：依旧共用一份 `module_docs/<module_a+mainhash>/`，`used_by` 字段记录两个工程
-> - **detached HEAD 工程** + 同一 url+branch 的模块：模块按 url+branch 复用，工程的"另一份文档"和模块文档**互不冲突**（模块 key 是模块的 url+branch，与工程 HEAD 无关）
->
-> **禁止误读**：不得把"工程分支切换 → 必须全量重生成 module_docs"——这是错的，只有该模块本身 url 或 branch 变化才重生成对应模块；其它没变的模块按 key 直接复用。
-
-> **「独立模块」判定澄清**："独立模块"指**该模块本身是独立 git 仓库**（无论它是否同时是工程核心模块）。`repo` 管理的子项目（如某任务控制中枢模块，是工程核心但同时是独立子仓库）判定为独立模块 -> 生成 module_docs；其工程视角（在工程 IPC 拓扑中的角色）写在 project_docs。**"是否独立 git 仓库"是唯一判定标准，与"是否工程核心"无关**--核心模块同时是独立仓库时，两者都生成，互补不重复（职责划分见 [doc_template.md](doc_template.md)「九 · 职责划分」）。
+工程切分支与模块切分支互相独立，但复用还须核实际源码内容；同URL/分支不同commit或dirty内容分别保留。detached需完整HEAD及内容身份，不用“HEAD”标签合并所有版本。旧平铺正文和_meta不删除/覆盖，不自动转换成可信快照。
 
 ### 目录布局（module_docs 层）
 
 ```text
-~/.claude/icode_data/
-├── project_docs/                          # 工程级（v1 已有）
-│   └── <project_id>/
-│       ├── _meta.json                    # 工程元信息（含 module_deps 列表）
-│       ├── 00_overview.md
-│       └── .../*.md
-└── module_docs/                          # 模块级（按仓库+分支 key）
-    └── <url_basename_sanitized>_<sha256(repo_url+":"+branch)[:12]>/   # 如 module_a@main → module_a_9f3a2b1c4d8e
-        ├── _meta.json                    # 模块元信息（url/branch/commit/used_by）
-        ├── 00_overview.md
-        └── .../*.md
+icode_data/
+  project_docs/<project_id>/<branch_safe>/_meta.json  # 精确module_deps与逐章基线
+  module_docs/<module_key>/
+    *.md / _meta.json                              # 旧平铺库保持原样
+    snapshots/<snapshot_id>/*.md / _meta.json       # storage_schema=2，不可变审稿修订
 ```
 
 ### `module_docs` key 计算
 
-```text
-key = <url_basename_sanitized> + "_" + sha256(repo_url + ":" + branch)[:12]
-```
+族键仍为<url_basename_sanitized>_sha256(url+":"+branch)[:12]，不含commit；**它是族身份，不是可直接复用正文的版本身份**。正文定位另用source_id和snapshot_id。两不同URL不擅自合并，已用旧key继续保留。
 
-- **`url_basename_sanitized`**：url 去掉末尾 `.git` 取最后一段（`basename`），非 `[a-zA-Z0-9_-]` 字符替换为 `_`（防边界情况，如 url basename 含 `.` `@` `:` 等）
-- **人眼可读**：目录名以模块名开头（如 `module_a_9f3a2b1c4d8e`），`ls module_docs/` 一眼看出是哪个模块的文档，不用反查 hash
-- **保留 hash 去重**：同 basename 不同 fork（不同 url，如协议/用户名不同）→ basename 相同但 hash 不同 → 不同 key（如 `module_a_aaaa` vs `module_a_bbbb`）
-- **例**：`git@example.com:user/myproject/module_a.git` @ `main` → basename `module_a` → key `module_a_9f3a2b1c4d8e`
-- 不同仓库（不同 URL）→ basename 或 hash 至少一个不同 → 不同 key
-- 同仓库不同分支（main vs dev）→ hash 包含 branch → 不同 key
-- 同仓库同分支不同 commit → 同一 key（key 不含 commit）。**段零检索时**比对工程 pin 的 commit 与 `module_docs/<key>/_meta.json.current_commit`，不一致→降级注入+警告（见「段零·工程文档检索」步骤 3 commit 一致性校验）；`/icode doc` 生成时 commit 不一致→全量重生成覆盖（见 [doc.md](../steps/doc.md) 步骤5）。两者不矛盾：生成时覆盖更新文档版本，检索时校验是否匹配当前工程 pin 的 commit
+### `_meta.json` 与工程依赖
 
-### `_meta.json` 模板（工程与模块各一份）
+工程保留project_id/project_type/git_root/原始branch、真实模块path及未知字段。module_deps每条除key/commit外记录source_mode、source_fingerprint、source_id、snapshot_id、doc_path、generated。发布前新依赖只是计划；快照可见后用doc_snapshot.py bind更新源码外的父元信息，并回读成功后才算完成。已知但不可读依赖仍保留generated=false，同时列unresolved_modules及失败原因。
 
-**工程 _meta.json**（`project_docs/<project_id>/<branch>/_meta.json`，**每个分支子目录独立一份**，互不继承；切换工程分支后写入对应分支子目录的 `_meta.json`）：
-
-```json
-{
-  "project_id": "myproject",
-  "project_type": "repo-root",
-  "git_root": "/home/user/myproject",
-  "branch": "main",
-  "head_commit": "a3f2b1c",
-  "module_deps": [
-    {
-      "type": "repo",
-      "name": "module_a",
-      "url": "git@example.com:user/myproject/module_a.git",
-      "branch": "main",
-      "key": "<url_basename_sanitized>_<sha256[:12]>",
-      "commit": "a3f2b1c",
-      "path": "module_a/",
-      "generated": true
-    }
-  ],
-  "unresolved_modules": [
-    {
-      "name": "lib_b",
-      "type": "cmake",
-      "reason": "CMake FetchContent build 目录未下载，无法本地读取",
-      "attempt_at": "2026-07-06T15:30:00Z"
-    }
-  ],
-  "stale_files": [],
-  "template_version": "v2.0.0"
-}
-```
-
-**模块 _meta.json**（`module_docs/<key>/_meta.json`）：
-
-```json
-{
-  "repo_url": "git@example.com:user/myproject/module_a.git",
-  "branch": "main",
-  "current_commit": "a3f2b1c",
-  "used_by": ["myproject", "another_project"],
-  "last_generated_at": "2026-07-06T15:30:00Z",
-  "last_generated_commit": "a3f2b1c",
-  "generation_trigger": "auto"
-}
-```
+快照_meta记录storage_schema、完整source_identity、snapshot_id、source_id、commit、source_fingerprint、正文SHA、template_version、scope和review。partial不能充full，旧元信息无指纹不能直接强绑。模板升级/手改合并产生新文档修订；各工程明确绑定需要的snapshot_id。used_by按父工程实际绑定核对，仅是关联信息，不能替代版本选择。
 
 ### 工程元信息块"依赖子模块"字段规范
 
-`00_overview.md` 元信息块加：
-
-```markdown
-> **项目元信息**
-> - 工程名：myproject
-> - 项目类型：repo-root（.repo/manifest.xml 管理）
-> - Git 地址：git@example.com:user/myproject.git
-> - 分支/提交：main @ a3f2b1c
-> - 依赖子模块（按仓库+分支）：
->   - module_a → module:module_a@main@a3f2b1c（module_docs/<key>/）
->   - module_b → module:module_b@dev@b8c3d4e（module_docs/<key>/）
-> - 章节归属模块：myproject
-> - 章节生成时间：2026-07-06T15:30:00Z
-```
+元信息写module_a@有效分支@完整HEAD/source_id，并指向module_docs/<key>/snapshots/<snapshot_id>/；使用当前实际checkout源码核事实。工程正文只写模块在工程拓扑的角色，内部实现放在对应版本模块正文。完整字段例见doc_snapshot_contract.md§3，避免重复维护模板。
 
 ### 6 级模块检测（按优先级，`/icode doc` 执行）
+
+本表识别候选，不保证存在独立Git版本。实际Git根才能capture并发布module_docs快照；monorepo/vendor等无独立Git根的目录写工程章节，记录真实文件输入与SHA，不编造URL/HEAD。repo聚合根无HEAD时按实际子仓库身份及工程清单记录来源，不强造单仓库提交身份。
 
 | # | 方式 | 识别 | 提取 URL + branch | commit 获取 |
 | --- | --- | --- | --- | --- |
@@ -947,42 +837,17 @@ key = <url_basename_sanitized> + "_" + sha256(repo_url + ":" + branch)[:12]
 
 **去重**（两步，避免单一目录被多种方式识别导致重复生成）：
 1. **先按"归一化绝对路径"合并**——归一化绝对路径 = `realpath <path>` 解析（处理符号链接 + 路径规范化）后**去尾部 `/`**；同一归一化路径被多种方式识别（如 vendor + monorepo 都识别某路径）→ 合并到 type 列表，type 字段记录多标签如 `"vendor,monorepo"`
-2. **再按 `key = <url_basename_sanitized>_<sha256(url+":"+branch)[:12]>` 去重**（同一上游仓库同分支只一份，key 格式含模块名前缀便于人眼辨认，详见本段「module_docs key 计算」）
+2. 再按(module_key, source_id)去重，同族不同提交/dirty内容不合并；记录所有同身份的本地副本路径，逐副本核验。
 
 ### 子仓库代码获取
 
-- **git submodule**：`git submodule foreach 'git archive HEAD | tar -x -C $tmp/<name>'`（或逐个 `cd <submodule> && git archive HEAD | tar -x -C $tmp`）
-- **`repo` 子仓库**：`cd <submodule_path> && git archive HEAD | tar -x -C $tmp`
+- **git submodule/repo子仓库**：解析真实checkout路径后capture实际工作区，再Read当前源码；不以archive HEAD丢掉未提交输入。缺失仓库记录unresolved，不自行同步/checkout。
 
-**`repo` 嵌套子项目路径推导（与 doc.md 步骤 2 联动）**：`<submodule_path>` **必须从 manifest `<project path="...">` 字段取**，**禁止用字面 `${GIT_ROOT}/<project name>`**——业务上常把多个 git 子项目按业务域分组到父项目目录（典型模式：`<业务域分组目录>/<模块名>`，如测试设备组 / 传感器组 / 网络管理组等业务分组容器），路径可能是 `<业务父项目 A>/<模块 A1>` 等嵌套形式。错误推导会把这些模块误判为 `path_gone`。推荐：
-
-```bash
-# 1. 首选 .repo/projects/*.git worktree 路径（最权威、不受 maxdepth 限制）
-worktree_path="${GIT_ROOT}/.repo/projects/<project_name>.git"
-if [ -d "$worktree_path" ]; then
-  realpath "$worktree_path"
-fi
-
-# 2. fallback: 从 manifest 取 path（manifest 缺 path 字段时输出 NO_PATH_ATTR 提示）
-python3 -c "
-import xml.etree.ElementTree as ET
-m = ET.parse('${GIT_ROOT}/.repo/manifest.xml').getroot()
-for p in m.findall('project'):
-    if p.get('name') == '<project_name>':
-        path = p.get('path')
-        print(path if path else 'NO_PATH_ATTR_FALLBACK_TO_FIND')
-"
-
-# 3. 末选: find -maxdepth 3 兼容 monorepo + 嵌套 >2 层场景
-find "${GIT_ROOT}" -maxdepth 3 -name "<project_name>" -type d
-```
-
-- **monorepo/vendor**：直接读子目录文件（不需 archive）
-- **CMake FetchContent**：通常 build 目录未下载，fallback 警告「依赖模块代码未本地化，跳过生成」
+**`repo` 嵌套子项目路径推导**：从manifest project的真实path取checkout，缺path按name默认值；用`.repo/project.list`与实际Git根交叉核对，`.repo/projects/*.git`是管理数据，不能当源码目录。include/extend-project解析不完整时保留unresolved，不猜字面module_name或任意find结果。实际生成与读取路径相同，不受目录嵌套层数限制；具体示例见[doc.md](../steps/doc.md)步骤2。
 
 ### 段零跨仓库自动覆盖（关键收益）
 
-- 同一上游仓库（如 `module_a@main`）被多个工程都引用 → 段零都查同一份 `module_docs/<key>/`，**只生成一次、复用**
+- 多工程仅在源码身份和已审正文快照匹配时复用；同族的不同版本分别绑定，各版本并存。
 - 详见「段零·工程文档检索」段步骤 3（module_deps 检索）+ 步骤 3.5（反查父项目）
 
 **生成时不省 token**（用户闲时跑，模块文档可详细完整生成），**检索时省 token**（段零只读前 50 行粗筛 + 命中按小节锚点读，不灌全章）。

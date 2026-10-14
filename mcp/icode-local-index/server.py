@@ -17,7 +17,7 @@ LIB_DIR = SERVER_DIR.parent / "_lib"
 if str(LIB_DIR) not in sys.path:
     sys.path.insert(0, str(LIB_DIR))
 
-from local_mcp_common import MANAGED_WRITE_ANNOTATIONS, READ_ONLY_ANNOTATIONS, describe, fail, load_config, ok, resolve_allowed_path  # noqa: E402
+from local_mcp_common import MANAGED_WRITE_ANNOTATIONS, READ_ONLY_ANNOTATIONS, describe, expand_path, fail, load_config, ok, resolve_allowed_path  # noqa: E402
 from mcp.server.fastmcp import FastMCP  # noqa: E402
 
 SERVER_NAME = "icode-local-index"
@@ -39,7 +39,7 @@ def _config() -> dict[str, Any]:
 
 
 def _db_path(root: Path, config: dict[str, Any], *, create_dir: bool = False) -> Path:
-    data_dir = Path(os.path.expandvars(os.path.expanduser(str(config["data_dir"])))).resolve()
+    data_dir = expand_path(str(config["data_dir"]))
     if create_dir:
         data_dir.mkdir(parents=True, exist_ok=True)
     key = hashlib.sha256(str(root).encode()).hexdigest()[:20]
