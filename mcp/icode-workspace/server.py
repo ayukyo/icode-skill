@@ -16,7 +16,7 @@ LIB_DIR = SERVER_DIR.parent / "_lib"
 if str(LIB_DIR) not in sys.path:
     sys.path.insert(0, str(LIB_DIR))
 
-from local_mcp_common import READ_ONLY_ANNOTATIONS, describe, fail, load_config, ok, resolve_allowed_path, run_command, sha256_file  # noqa: E402
+from local_mcp_common import READ_ONLY_ANNOTATIONS, LocalPathPolicyError, describe, fail, load_config, ok, resolve_allowed_path, run_command, sha256_file  # noqa: E402
 from mcp.server.fastmcp import FastMCP  # noqa: E402
 
 SERVER_NAME = "icode-workspace"
@@ -30,7 +30,7 @@ TOOLS = [
     "inspect_artifact",
 ]
 DEFAULTS = {
-    "allowed_roots": ["$HOME"],
+    "allowed_roots": None,
     "max_repo_depth": 5,
     "max_repos": 100,
     "max_scan_dirs": 5000,
@@ -84,11 +84,14 @@ def _git_text(path: Path, *args: str) -> str | None:
 
 @mcp.tool(annotations=READ_ONLY_ANNOTATIONS)
 def describe_capabilities() -> dict[str, Any]:
-    return describe(
-        SERVER_NAME,
-        TOOLS,
-        "工程根安全解析、超大仓静态画像、多 Git 根/worktree/构建输入与二进制来源观测",
-    )
+    try:
+        return describe(
+            SERVER_NAME, TOOLS,
+            "工程根安全解析、超大仓静态画像、多 Git 根/worktree/构建输入与二进制来源观测",
+            config=_config(), config_env="ICODE_WORKSPACE_CONFIG",
+        )
+    except (OSError, ValueError) as exc:
+        return fail("workspace_failed", str(exc), exc=exc, config_env="ICODE_WORKSPACE_CONFIG")
 
 
 def _repo_snapshot(path: Path) -> dict[str, Any]:
@@ -118,7 +121,7 @@ def inspect_workspace(path: str) -> dict[str, Any]:
         target = resolve_allowed_path(path, _config())
         return ok(_repo_snapshot(target))
     except (OSError, ValueError, PermissionError) as exc:
-        return fail("workspace_failed", str(exc))
+        return fail("workspace_failed", str(exc), exc=exc, config_env="ICODE_WORKSPACE_CONFIG")
 
 
 def _discover_project_roots(
@@ -214,12 +217,13 @@ def resolve_project(path: str, max_depth: int = 2) -> dict[str, Any]:
             return fail("project_resolution_failed", f"工程路径不是目录: {target}")
         return ok(_resolve_project(target, max_depth))
     except (OSError, ValueError, PermissionError) as exc:
-        return fail("project_resolution_failed", str(exc))
+        return fail("project_resolution_failed", str(exc), exc=exc, config_env="ICODE_WORKSPACE_CONFIG")
 
 
 def _tracked_paths(root: Path, max_paths: int) -> tuple[list[str], int, bool]:
     completed = subprocess.run(
         ["git", "-C", str(root), "ls-files", "-z"],
+        stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         timeout=30,
@@ -258,6 +262,10 @@ def _inspect_entrypoint(root: Path, relative: str, max_bytes: int) -> dict[str, 
         }
     if not resolved.is_file():
         return {"path": relative, "readable": False, "reason": "not_regular_file"}
+    try:
+        resolve_allowed_path(resolved, _config())
+    except LocalPathPolicyError:
+        return {"path": relative, "readable": False, "reason": "read_policy_denied"}
     raw = resolved.read_bytes()
     truncated = len(raw) > max_bytes
     text = raw[:max_bytes].decode("utf-8", errors="replace")
@@ -366,7 +374,7 @@ def inspect_project_profile(path: str, max_depth: int = 2) -> dict[str, Any]:
         resolution = _resolve_project(target, max_depth)
         return ok(_project_profile(resolution))
     except (OSError, ValueError, PermissionError, subprocess.TimeoutExpired) as exc:
-        return fail("project_profile_failed", str(exc))
+        return fail("project_profile_failed", str(exc), exc=exc, config_env="ICODE_WORKSPACE_CONFIG")
 
 
 @mcp.tool(annotations=READ_ONLY_ANNOTATIONS)
@@ -388,7 +396,7 @@ def inspect_repo_matrix(root: str, max_depth: int = 4) -> dict[str, Any]:
             "scan": {"scanned_dirs": scanned_dirs, "truncated": truncated},
         })
     except (OSError, ValueError, PermissionError) as exc:
-        return fail("repo_matrix_failed", str(exc))
+        return fail("repo_matrix_failed", str(exc), exc=exc, config_env="ICODE_WORKSPACE_CONFIG")
 
 
 @mcp.tool(annotations=READ_ONLY_ANNOTATIONS)
@@ -398,6 +406,7 @@ def inspect_build_inputs(path: str) -> dict[str, Any]:
         compile_db = target if target.is_file() else target / "compile_commands.json"
         if not compile_db.is_file():
             return fail("compile_db_missing", f"未找到 compile_commands.json: {compile_db}")
+        compile_db = resolve_allowed_path(compile_db, _config())
         rows = json.loads(compile_db.read_text(encoding="utf-8"))
         if not isinstance(rows, list):
             return fail("invalid_compile_db", "compile_commands.json 顶层必须是数组")
@@ -406,7 +415,7 @@ def inspect_build_inputs(path: str) -> dict[str, Any]:
         digest, _, _ = sha256_file(compile_db)
         return ok({"path": str(compile_db), "sha256": digest, "entry_count": len(rows), "source_count": len(files), "directories": directories[:200], "sources_sample": files[:500], "truncated": len(files) > 500})
     except (OSError, ValueError, PermissionError, json.JSONDecodeError) as exc:
-        return fail("build_inputs_failed", str(exc))
+        return fail("build_inputs_failed", str(exc), exc=exc, config_env="ICODE_WORKSPACE_CONFIG")
 
 
 @mcp.tool(annotations=READ_ONLY_ANNOTATIONS)
@@ -439,7 +448,7 @@ def inspect_artifact(path: str, include_symbols: bool = False, include_strings: 
                 answer["strings"] = {"unavailable": True, "reason": str(exc)}
         return ok(answer)
     except (OSError, ValueError, PermissionError) as exc:
-        return fail("artifact_failed", str(exc))
+        return fail("artifact_failed", str(exc), exc=exc, config_env="ICODE_WORKSPACE_CONFIG")
 
 
 if __name__ == "__main__":

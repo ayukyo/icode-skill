@@ -25,7 +25,7 @@ from mcp.server.fastmcp import FastMCP  # noqa: E402
 SERVER_NAME = "icode-mcp-health"
 TOOLS = ["describe_capabilities", "inventory_servers", "validate_manifest", "probe_python_server", "scan_sensitive_payload"]
 DEFAULTS = {
-    "allowed_roots": ["$HOME"],
+    "allowed_roots": None,
     "trusted_server_roots": ["$HOME/.claude/skills/icode/mcp"],
     "max_servers": 100,
     "probe_timeout_seconds": 10,
@@ -41,7 +41,10 @@ def _config() -> dict[str, Any]:
 
 @mcp.tool(annotations=READ_ONLY_ANNOTATIONS)
 def describe_capabilities() -> dict[str, Any]:
-    return describe(SERVER_NAME, TOOLS, "MCP 安装清单、工具 manifest、入口语法与敏感数据静态健康检查")
+    try:
+        return describe(SERVER_NAME, TOOLS, "MCP 安装清单、工具 manifest、入口语法与敏感数据静态健康检查", config=_config(), config_env="ICODE_MCP_HEALTH_CONFIG")
+    except (OSError, ValueError) as exc:
+        return fail("config_failed", str(exc), exc=exc, config_env="ICODE_MCP_HEALTH_CONFIG")
 
 
 @mcp.tool(annotations=READ_ONLY_ANNOTATIONS)
@@ -63,7 +66,7 @@ def inventory_servers(mcp_root: str) -> dict[str, Any]:
                 break
         return ok({"root": str(root), "servers": servers, "count": len(servers)})
     except (OSError, ValueError, PermissionError) as exc:
-        return fail("inventory_failed", str(exc))
+        return fail("inventory_failed", str(exc), exc=exc, config_env="ICODE_MCP_HEALTH_CONFIG")
 
 
 def _validate_manifest_file(path: Path) -> tuple[list[str], dict[str, Any] | None]:
@@ -101,10 +104,12 @@ def validate_manifest(path: str) -> dict[str, Any]:
     try:
         target = resolve_allowed_path(path, _config())
         manifest = target / "tools_manifest.json" if target.is_dir() else target
+        if manifest.exists():
+            manifest = resolve_allowed_path(manifest, _config())
         errors, data = _validate_manifest_file(manifest)
         return ok({"path": str(manifest), "valid": not errors, "errors": errors, "server": data.get("server") if data else None})
     except (OSError, ValueError, PermissionError) as exc:
-        return fail("manifest_failed", str(exc))
+        return fail("manifest_failed", str(exc), exc=exc, config_env="ICODE_MCP_HEALTH_CONFIG")
 
 
 @mcp.tool(annotations=READ_ONLY_ANNOTATIONS)
@@ -130,6 +135,7 @@ async def probe_python_server(server_dir: str) -> dict[str, Any]:
         manifest_tools: list[str] = []
         manifest_errors: list[str] = []
         if manifest_path.exists():
+            manifest_path = resolve_allowed_path(manifest_path, config)
             manifest_errors, data = _validate_manifest_file(manifest_path)
             if data and isinstance(data.get("tools"), list):
                 manifest_tools = [tool["name"] for tool in data["tools"] if isinstance(tool, dict) and "name" in tool]
@@ -163,10 +169,10 @@ async def probe_python_server(server_dir: str) -> dict[str, Any]:
             "tools_match": sorted(tool_names) == sorted(manifest_tools) == protocol_names,
         })
     except (OSError, ValueError, PermissionError, SyntaxError, TimeoutError) as exc:
-        return fail("probe_failed", str(exc))
+        return fail("probe_failed", str(exc), exc=exc, config_env="ICODE_MCP_HEALTH_CONFIG")
     except Exception as exc:
         # stdio_client 进程提前退出时 anyio 会包装为 ExceptionGroup；MCP 工具应返回结构化失败。
-        return fail("probe_failed", str(exc))
+        return fail("probe_failed", str(exc), exc=exc, config_env="ICODE_MCP_HEALTH_CONFIG")
 
 
 def _scan(value: Any, path: str, findings: list[dict[str, str]]) -> None:

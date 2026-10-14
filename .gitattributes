@@ -1,0 +1,3 @@
+# Keep scripts executable by Linux/WSL even with Windows core.autocrlf=true.
+*.sh text eol=lf
+*.py text eol=lf

@@ -7,7 +7,7 @@ import json
 import os
 import re
 import subprocess
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Any, TypedDict
 
 from mcp.types import ToolAnnotations
@@ -19,6 +19,20 @@ class ToolResponse(TypedDict, total=False):
     error: str
     confidence: float | None
     truncation: dict[str, Any]
+    diagnostic: dict[str, Any]
+
+
+class LocalPathPolicyError(PermissionError):
+    """可辨识的访问策略拒绝；普通文件权限错误不属于此类型。"""
+
+    def __init__(self, message: str, path: Path, policy: dict[str, Any], kind: str) -> None:
+        super().__init__(message)
+        self.diagnostic = {**policy, "kind": kind, "resolved_path": str(path)}
+
+
+class AllowedRootsError(LocalPathPolicyError):
+    def __init__(self, path: Path, policy: dict[str, Any]) -> None:
+        super().__init__(f"路径不在 allowed_roots 内: {path}", path, policy, "mcp_allowed_roots")
 
 
 READ_ONLY_ANNOTATIONS = ToolAnnotations(
@@ -53,8 +67,13 @@ def ok(answer: Any, *, confidence: float | None = 1.0, **extra: Any) -> ToolResp
     return result
 
 
-def fail(code: str, message: str) -> ToolResponse:
-    return {"error_code": code, "error": message, "confidence": None}
+def fail(code: str, message: str, *, exc: Exception | None = None, config_env: str | None = None) -> ToolResponse:
+    result: ToolResponse = {"error_code": code, "error": message, "confidence": None}
+    if isinstance(exc, LocalPathPolicyError):
+        result["diagnostic"] = dict(exc.diagnostic)
+        if config_env is not None:
+            result["diagnostic"]["config_env"] = config_env
+    return result
 
 
 def load_config(env_name: str, server_dir: Path, defaults: dict[str, Any]) -> dict[str, Any]:
@@ -99,14 +118,104 @@ def expand_path(value: str | Path, *, base_dir: Path | None = None, resolve_syml
     return path.resolve() if resolve_symlinks else Path(os.path.abspath(path))
 
 
-def allowed_roots(config: dict[str, Any]) -> list[Path]:
-    roots = config.get("allowed_roots", ["$HOME"])
+def _windows_platform() -> bool:
+    # 独立可替换的平台探针，测试无需修改 os.name 并破坏 pathlib 的路径类型。
+    return os.name == "nt"
+
+
+def _windows_local_roots() -> list[Path]:
+    """枚举本地逻辑盘根，不扫描磁盘；排除网络盘和不可用类型。"""
+    import ctypes
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.GetLogicalDrives.restype = ctypes.c_uint32
+    kernel.GetDriveTypeW.argtypes = [ctypes.c_wchar_p]
+    kernel.GetDriveTypeW.restype = ctypes.c_uint32
+    mask = kernel.GetLogicalDrives()
+    if not mask:
+        raise OSError(ctypes.get_last_error(), "无法枚举 Windows 本地磁盘")
+    roots = []
+    for index in range(26):
+        if mask & (1 << index):
+            root = f"{chr(ord('A') + index)}:\\"
+            # DRIVE_REMOVABLE=2, DRIVE_FIXED=3, DRIVE_RAMDISK=6。
+            if kernel.GetDriveTypeW(root) in {2, 3, 6}:
+                roots.append(Path(root))
+    return roots
+
+
+def _wsl_unc_root(value: str | Path) -> str | None:
+    drive = PureWindowsPath(str(value)).drive
+    if not drive.startswith("\\\\"):
+        return None
+    parts = drive[2:].split("\\")
+    if len(parts) == 2 and parts[0].casefold() in {"wsl.localhost", "wsl$"} and parts[1]:
+        return drive + "\\"
+    return None
+
+
+def allowed_roots(config: dict[str, Any], *, requested_path: Path | None = None) -> list[Path]:
+    roots = config.get("allowed_roots")
+    if roots is None:
+        if not _windows_platform():
+            return [expand_path("$HOME")]
+        local = _windows_local_roots()
+        if requested_path is not None:
+            wsl_root = _wsl_unc_root(requested_path)
+            if wsl_root is not None:
+                local = [*local, Path(wsl_root)]
+        if not local:
+            raise ValueError("未发现可用的 Windows 本地磁盘，请显式配置 allowed_roots")
+        return local
     if not isinstance(roots, list) or not roots:
         raise ValueError("allowed_roots 必须是非空数组")
     expanded = [expand_path(item) for item in roots if isinstance(item, str) and item.strip()]
     if not expanded:
         raise ValueError("allowed_roots 必须至少包含一个非空字符串路径")
+    if len(expanded) != len(roots):
+        raise ValueError("allowed_roots 的每一项都必须是非空路径字符串")
     return expanded
+
+
+def access_policy(config: dict[str, Any], *, config_env: str | None = None, requested_path: Path | None = None) -> dict[str, Any]:
+    default = config.get("allowed_roots") is None
+    policy = {
+        "configured_allowed_roots": config.get("allowed_roots"),
+        "allowed_roots": [str(root) for root in allowed_roots(config, requested_path=requested_path)],
+        "scope": "platform_default" if default else "explicit",
+        "auto_expand_allowed_roots": False,
+        "protect_sensitive_paths": default and _windows_platform(),
+        "wsl_local_unc": "on_request" if default and _windows_platform() else "explicit_only",
+        "remediation": "可显式配置 allowed_roots 为所需目录列表；此拒绝不表示工程不存在。",
+    }
+    if config_env is not None:
+        policy["config_env"] = config_env
+    return policy
+
+
+def _sensitive_path(path: Path) -> bool:
+    parts = tuple(part.casefold() for part in path.parts)
+    if any(part in {".ssh", ".aws", ".azure", ".gnupg"} for part in parts):
+        return True
+    name = path.name.casefold()
+    if name in {".git-credentials", ".netrc", "_netrc", ".npmrc", ".pypirc", ".env"}:
+        return True
+    if name.startswith(".env.") and name not in {".env.example", ".env.sample", ".env.template", ".env.dist"}:
+        return True
+    protected_sequences = (
+        (".codex", "auth.json"), (".claude", ".credentials.json"),
+        (".config", "gh", "hosts.yml"), (".config", "gcloud"), (".docker", "config.json"),
+        ("microsoft", "credentials"), ("microsoft", "protect"), ("microsoft", "vault"),
+    )
+    if any(parts[index:index + len(sequence)] == sequence
+           for sequence in protected_sequences for index in range(len(parts))):
+        return True
+    chromium_profile = any(parts[index:index + 3] in {
+        ("google", "chrome", "user data"), ("microsoft", "edge", "user data"),
+    } for index in range(len(parts)))
+    firefox_profile = any(parts[index:index + 2] == ("firefox", "profiles") for index in range(len(parts)))
+    return (chromium_profile and name in {"login data", "cookies", "web data"}) or (
+        firefox_profile and name in {"cookies.sqlite", "key4.db", "logins.json"}
+    )
 
 
 def resolve_allowed_path(
@@ -115,10 +224,17 @@ def resolve_allowed_path(
     *,
     must_exist: bool = True,
 ) -> Path:
+    if config.get("allowed_roots") is None and _windows_platform():
+        # 普通远端 UNC 在解析/访问文件系统前拒绝；WSL 的标准本地视图按请求处理。
+        lexical = expand_path(value, resolve_symlinks=False)
+        if PureWindowsPath(str(lexical)).drive.startswith("\\\\") and _wsl_unc_root(lexical) is None:
+            raise AllowedRootsError(lexical, access_policy(config, requested_path=lexical))
     path = expand_path(value)
-    roots = allowed_roots(config)
+    roots = allowed_roots(config, requested_path=path)
     if not any(path == root or root in path.parents for root in roots):
-        raise PermissionError(f"路径不在 allowed_roots 内: {path}")
+        raise AllowedRootsError(path, access_policy(config, requested_path=path))
+    if config.get("allowed_roots") is None and _windows_platform() and _sensitive_path(path):
+        raise LocalPathPolicyError(f"默认本地读取策略拒绝敏感凭据路径: {path}", path, access_policy(config, requested_path=path), "sensitive_path")
     if must_exist and not path.exists():
         raise FileNotFoundError(str(path))
     return path
@@ -170,6 +286,8 @@ def run_command(
     completed = subprocess.run(
         args,
         cwd=str(cwd) if cwd else None,
+        # Fixed probes must not consume or wait on the MCP protocol pipe.
+        stdin=subprocess.DEVNULL,
         text=True,
         encoding="utf-8",
         errors="replace",
@@ -188,8 +306,8 @@ def run_command(
     }
 
 
-def describe(server: str, tools: list[str], purpose: str, *, managed_writes: list[str] | None = None) -> ToolResponse:
-    return ok(
+def describe(server: str, tools: list[str], purpose: str, *, managed_writes: list[str] | None = None, config: dict[str, Any] | None = None, config_env: str | None = None) -> ToolResponse:
+    result = ok(
         {
             "server": server,
             "purpose": purpose,
@@ -201,3 +319,6 @@ def describe(server: str, tools: list[str], purpose: str, *, managed_writes: lis
             "decision_authority": "none",
         }
     )
+    if config is not None:
+        result["answer"]["access_policy"] = access_policy(config, config_env=config_env)
+    return result

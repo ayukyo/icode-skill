@@ -183,6 +183,10 @@ WorkBuddy uses its own skill root `~/.workbuddy/skills/` and its own command bri
 
 The installer writes an ownership marker into managed skills. An identical unmanaged same-name skill is adopted safely; a different unmanaged same-name skill is refused before either host is modified. Runtime configuration and caches are preserved.
 
+The shared [local path policy](references/mcp_path_access.md) uses platform defaults when `allowed_roots` is null: request-scoped local-drive reads with known credential-path protection on Windows, and the user home on Linux. Explicit root lists remain restrictions; existing configuration is preserved during synchronization. Executable-server trust, remote device roots and managed writes remain separate permissions.
+
+[WSL builds](references/wsl_build.md) reuse the existing workflow with verified distribution, path mappings, source/snapshot, cache, toolchain and artifacts. [Test report evidence](references/evidence_and_verification.md#测试报告证据) distinguishes actual passing cases from zero/all-skipped runs. Public-library changes reuse the cross-layer audit for API, binary ABI and consumer compatibility.
+
 Evidence intake, email export intake (`tools/email_intake.py`), technical-document intake (`tools/document_intake.py`), media routing/evidence (`tools/media_router.py`), the project-local debug catalog, runtime baseline resolution, verification debt, the multi-repo handoff matrix, and `/icode learn` are **bundled ICODE tools/steps**. They are copied with the ICODE directory to Claude Code and Codex by `--client all`; CodeBuddy reuses the Claude skill root. They are not standalone entries in `skill-packs/manifest.json`. The sixteen reusable cross-project Skills—including `email-evidence-intake`, `technical-document-intake`, `hardware-spec-contract-audit`, `schematic-interface-audit`, `mcu-hardware-software-contract-audit`, and the embedded/camera capabilities—remain separately installed from that manifest with the same ownership/hash collision protection.
 
 The historical direct-Claude clone remains supported as a compatibility path. After Claude Code discovers ICODE, run the same unified command:

@@ -19,7 +19,7 @@ from mcp.server.fastmcp import FastMCP  # noqa: E402
 
 SERVER_NAME = "icode-device-observe"
 TOOLS = ["describe_capabilities", "list_profiles", "observe_device", "collect_log_window", "compare_artifact"]
-DEFAULTS = {"allowed_roots": ["$HOME"], "profiles": {}, "timeout_seconds": 10, "max_output_chars": 30000}
+DEFAULTS = {"allowed_roots": None, "profiles": {}, "timeout_seconds": 10, "max_output_chars": 30000}
 CHECKS = {
     "kernel": ["uname", "-a"],
     "uptime": ["uptime"],
@@ -96,16 +96,17 @@ def _fixture_path(profile: dict[str, Any], remote_path: str, config: dict[str, A
     target = (root / relative).resolve()
     if target != root and root not in target.parents:
         raise PermissionError("fixture 路径越界")
-    if not target.exists():
-        raise FileNotFoundError(str(target))
-    return target
+    return resolve_allowed_path(target, config)
 
 
 @mcp.tool(annotations=READ_ONLY_ANNOTATIONS)
 def describe_capabilities() -> dict[str, Any]:
-    result = describe(SERVER_NAME, TOOLS, "命名设备 profile 的固定只读检查、日志窗口与制品哈希对比")
-    result["answer"].update({"transports": ["fixture", "ssh", "adb"], "forbidden": ["arbitrary_command", "deploy", "flash", "reboot", "kill", "write"]})
-    return result
+    try:
+        result = describe(SERVER_NAME, TOOLS, "命名设备 profile 的固定只读检查、日志窗口与制品哈希对比", config=_config(), config_env="ICODE_DEVICE_OBSERVE_CONFIG")
+        result["answer"].update({"transports": ["fixture", "ssh", "adb"], "forbidden": ["arbitrary_command", "deploy", "flash", "reboot", "kill", "write"]})
+        return result
+    except (OSError, ValueError) as exc:
+        return fail("config_failed", str(exc), exc=exc, config_env="ICODE_DEVICE_OBSERVE_CONFIG")
 
 
 @mcp.tool(annotations=READ_ONLY_ANNOTATIONS)
@@ -114,7 +115,7 @@ def list_profiles() -> dict[str, Any]:
         profiles = _config().get("profiles", {})
         return ok({"profiles": [{"name": name, "transport": value.get("transport")} for name, value in profiles.items() if isinstance(value, dict)]})
     except (OSError, ValueError) as exc:
-        return fail("config_failed", str(exc))
+        return fail("config_failed", str(exc), exc=exc, config_env="ICODE_DEVICE_OBSERVE_CONFIG")
 
 
 @mcp.tool(annotations=REMOTE_READ_ONLY_ANNOTATIONS)
@@ -129,13 +130,14 @@ def observe_device(profile: str, checks: list[str] | None = None) -> dict[str, A
             fixture = root / "device.json"
             if not fixture.is_file():
                 return fail("fixture_missing", f"fixture profile 缺少 {fixture}")
+            fixture = resolve_allowed_path(fixture, config)
             import json
             data = json.loads(fixture.read_text(encoding="utf-8"))
             return ok({"profile": profile, "transport": "fixture", "checks": {item: data.get(item) for item in requested}})
         results = {item: _remote(selected, CHECKS[item], config) for item in requested}
         return ok({"profile": profile, "transport": selected["transport"], "checks": results})
     except (OSError, ValueError, PermissionError, subprocess.TimeoutExpired) as exc:
-        return fail("observe_failed", str(exc))
+        return fail("observe_failed", str(exc), exc=exc, config_env="ICODE_DEVICE_OBSERVE_CONFIG")
 
 
 @mcp.tool(annotations=REMOTE_READ_ONLY_ANNOTATIONS)
@@ -163,7 +165,7 @@ def collect_log_window(profile: str, path: str, patterns: list[str] | None = Non
         selected_lines = [line for line in raw if not compiled or any(pattern.search(line) for pattern in compiled)]
         return ok({"profile": profile, "path": safe_path, "lines": selected_lines, "line_count": len(selected_lines), "source_sha256": digest, "truncated": truncated})
     except (OSError, ValueError, PermissionError, re.error, subprocess.TimeoutExpired) as exc:
-        return fail("log_failed", str(exc))
+        return fail("log_failed", str(exc), exc=exc, config_env="ICODE_DEVICE_OBSERVE_CONFIG")
 
 
 @mcp.tool(annotations=REMOTE_READ_ONLY_ANNOTATIONS)
@@ -185,7 +187,7 @@ def compare_artifact(profile: str, remote_path: str, local_path: str) -> dict[st
             remote_digest = match.group(1).lower()
         return ok({"profile": profile, "remote_path": safe_path, "local_path": str(local), "remote_sha256": remote_digest, "local_sha256": local_digest, "matches": remote_digest == local_digest})
     except (OSError, ValueError, PermissionError, subprocess.TimeoutExpired) as exc:
-        return fail("compare_failed", str(exc))
+        return fail("compare_failed", str(exc), exc=exc, config_env="ICODE_DEVICE_OBSERVE_CONFIG")
 
 
 if __name__ == "__main__":

@@ -201,14 +201,17 @@
      | `package.json` 的 `scripts.test` 非空 | `npm test` |
      | `pytest.ini` / `setup.cfg` 含 `[tool:pytest]` | `pytest` |
      | `go.mod` | `go test ./...` |
-     | `CMakeLists.txt` + `build/` 目录 | `ctest --test-dir build --output-on-failure` |
+     | `CMakeLists.txt` + 已核实的测试构建目录 | `ctest --test-dir <实际测试构建目录> --output-on-failure` |
      | `Cargo.toml` | `cargo test` |
      | `pom.xml` | `mvn test` |
      | 都没有 | `test_cmd=null`，跳过测试验证（不阻塞，设 `test_outcome=skipped`） |
      - **可疑命令防护**：探测到或用户配的 test_cmd 含 `deploy`/`prod`/`rm -rf`/`>` 重定向等危险模式 → **不自动跑**，提示用户确认
+     - **执行环境与路径**：构建、测试 cwd 与产物目录按 [工程接入合同](../references/project_intake.md) 核验；Windows 经 WSL 执行时先固定发行版、Linux 执行根和路径映射，不默认工程的 `build/`，不把 Windows 路径直接传给 Linux 命令。
    - **测试验证**（`test_cmd` 非空时，编译通过后执行）：跑 `test_cmd`（超时 `metadata.test_timeout` 秒，默认 120，可配）
      - **退出码捕获（防管道误判，实测踩坑）**：跑 `test_cmd` 时**重定向输出到临时文件**（`test_cmd > {ICODE_OUT_DIR}/.test_output.tmp 2>&1`）再读退出码，或用 bash `${PIPESTATUS[0]}`--**禁止直接 `test_cmd | tail` 后取 `$?`**（管道末尾命令退出码会覆盖 test_cmd 的，实测 `make test && false | tail` 时 make 退出码 2 被 tail 的 0 覆盖，导致测试失败误判为通过）
-     - **测试通过**（退出码 0）→ 设 `metadata.test_outcome=pass`，进入 Code Review Fix
+     - **测试结果真实性**：退出码 0 还须核对实际用例结果，复用 [测试报告证据合同](../references/evidence_and_verification.md#测试报告证据)。优先让已确认的 runner 将本轮 JUnit XML 写到独立结果目录，再通过既有 `record-verification --test-report <实际报告路径>` 固定机器摘要。报告中的失败/错误仍为 `fail`；零用例或全部跳过为 `inconclusive`。没有 JUnit 时从 runner 原始输出或直接用例断言确认真实执行范围，不自报 `test_summary`；只有退出码或无法确认用例执行时不得判 pass。
+     - **测试通过**（真实退出码 0，且有实际执行的通过用例、无失败/错误）→ 设 `metadata.test_outcome=pass`，只描述本次测试范围，进入 Code Review Fix
+     - **测试不确定**（零用例、全部跳过、报告缺失/畸形/计数冲突/超限且没有独立失败证据）→ 设 `metadata.test_outcome=inconclusive`，保留原始退出码、报告和原因，交付维持 `verification_pending`；进入 Code Review Fix。已观察到非零退出码、超时或失败断言时仍记 `fail`，不能因报告无效而降为不确定。
      - **测试失败**（非 0 退出码或超时）→ 把失败输出（尾部 ≤50 行，防 token 爆）加入上下文 → AI 修复 → 重跑（最多 3 次，复用编译验证的重试机制）
      - **3 次仍失败** → 设 `metadata.test_failures=true` + `metadata.test_outcome=fail`，代码仍写入（**不阻断**，L3 警告，与 `code_compile_failed` 同级），进入 Code Review Fix
      - **test_cmd=null** → 设 `metadata.test_outcome=skipped`，跳过测试验证，进入 Code Review Fix
@@ -234,10 +237,10 @@
      - 1.5 复检通过 → `status = code_done`，`completed_steps` 追加 `"4"`（**`code_review_fix_with_issues = false`**）
      - 1.5 复检失败（轻/重度） → `status` 保持 `code_in_progress`，`completed_steps` **不**追加 `"4"`（**`code_review_fix_with_issues = true`**）
      - 编译失败（1.5 未执行） → `status = code_in_progress`，`code_compile_failed = true`，`completed_steps` **不**追加 `"4"`
-   - **写入测试字段**：`test_cmd`（探测/配置的测试命令，null 表示无测试套件）、`test_outcome`（`pass`/`fail`/`skipped`）、`test_failures`（3 次重试仍失败置 true）。**测试失败不阻断流程**（与编译失败同级 L3），步骤5/6 入口检测 `test_failures=true` 时输出警告
+   - **写入测试字段**：`test_cmd`（探测/配置的测试命令，null 表示无测试套件）、`test_outcome`（`pass`/`fail`/`inconclusive`/`skipped`）、`test_failures`（3 次重试仍失败置 true）。零用例/全部跳过属 inconclusive，不冒充未配置套件的 skipped。**测试失败不阻断流程**（与编译失败同级 L3），步骤5/6 入口检测 `test_failures=true` 时输出警告
    - **写入 `code_deviations`**：若有主动偏离（见硬性要求第8条），将偏离记录数组写入 metadata `code_deviations`（每条含 plan_said / actual_done / reason），供步骤6 汇总；无偏离则写空数组 `[]`
    - **写入 `code_review_fix_with_issues`**（v1.x 新增，可选，默认 `false`）：4 维度复检未通过标记。`true` 时步骤 5/6 入口输出警告，audit 终审会看到此标记（**不阻断流程**，仅作可见性提示）
-3. 全流程模式：编译通过 + 测试通过（或 `test_cmd=null` 跳过）+ 1.5 复检通过则**立即继续执行步骤5**；编译失败或 1.5 复检失败则中止，提示用户修复。**测试失败（`test_failures=true`）不中止**（L3 警告，步骤5 继续复检）
+3. 全流程模式：编译通过 + 测试通过（或 `test_cmd=null` 跳过）+ 1.5 复检通过则**立即继续执行步骤5**；编译失败或 1.5 复检失败则中止，提示用户修复。**测试失败（`test_failures=true`）或不确定（`test_outcome=inconclusive`）不中止**（步骤5 继续复检并保留验证债务，不得升级已验证）
 ## 决策锚点（步骤4 完成后写）
 
 步骤4 编码+测试验证后，若 `metadata.anchors_enabled != false`，刷新 `.decision_anchors.json`：追加 `deviations`（同步 `code_deviations`）+ 刷新 `open_risks`。详见 [references/decision_anchors.md](../references/decision_anchors.md)。

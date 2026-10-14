@@ -3,9 +3,30 @@ on:
   push:
     branches: [main]
     paths:
+      - '.gitattributes'
       - 'tools/inspection_worklist.py'
       - 'tools/icode_control.py'
       - 'tools/icode_crosscheck.py'
+      - 'tools/test_result_summary.py'
+      - 'tools/verification_evidence.py'
+      - 'tools/icode_delivery.py'
+      - 'tools/build_skill_distribution.py'
+      - 'mcp/icode-local-index/**'
+      - 'mcp/_lib/local_mcp_common.py'
+      - 'mcp/icode-workspace/**'
+      - 'mcp/icode-evidence/**'
+      - 'mcp/icode-device-observe/**'
+      - 'mcp/icode-mcp-health/**'
+      - 'tests/test_local_mcp_suite.py'
+      - 'tests/test_local_index_lifecycle.py'
+      - 'tests/test_local_mcp_paths.py'
+      - 'tests/test_local_mcp_access_policy.py'
+      - 'tests/test_workspace_access_policy.py'
+      - 'tests/test_test_result_summary.py'
+      - 'tests/test_delivery_report.py'
+      - 'tests/test_skill_distribution.py'
+      - 'skill-packs/cross-layer-contract-audit/**'
+      - 'mcp/workflow-gate/skill-routes.json'
       - 'tests/test_inspection*'
       - 'tests/test_crosscheck*'
       - 'tests/test_candidate_inspection_generations.py'
@@ -19,6 +40,32 @@ concurrency:
   group: inspection-software-${{ github.sha }}
   cancel-in-progress: false
 jobs:
+  generic-verification:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    env:
+      PYTHONUTF8: '1'
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.10'
+      - name: Install declared MCP and test dependencies
+        run: python -m pip install --disable-pip-version-check --no-cache-dir -r mcp/icode-local-index/requirements.txt pytest==9.0.3
+      - name: Index lifetime, local MCP and test report regressions
+        run: python -m pytest -p no:anyio tests/test_local_index_lifecycle.py tests/test_local_mcp_suite.py tests/test_local_mcp_paths.py tests/test_local_mcp_access_policy.py tests/test_workspace_access_policy.py tests/test_test_result_summary.py tests/test_delivery_report.py -q
+      - name: Shared skill and route contract
+        run: python tools/validate_skill_pack.py --manifest skill-packs/manifest.json --routes mcp/workflow-gate/skill-routes.json --list
+      - name: Offline distribution resource contract
+        if: runner.os == 'Linux'
+        run: python -m pytest -p no:anyio tests/test_skill_distribution.py -q
   software:
     strategy:
       fail-fast: false

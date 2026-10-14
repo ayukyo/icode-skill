@@ -1,5 +1,5 @@
 {
-  "allowed_roots": ["$HOME"],
+  "allowed_roots": null,
   "max_repo_depth": 5,
   "max_repos": 100,
   "max_scan_dirs": 5000,

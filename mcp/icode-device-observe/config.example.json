@@ -1,5 +1,5 @@
 {
-  "allowed_roots": ["$HOME"],
+  "allowed_roots": null,
   "timeout_seconds": 10,
   "max_output_chars": 30000,
   "profiles": {

@@ -1,13 +1,13 @@
 ---
 name: cross-layer-contract-audit
-description: Use when a value, command, status, property, structure, versioned library, or behavior crosses module or repository boundaries and the failure may be a protocol, enum-semantic, property-chain, Broker-routing, closed-library-version, or fake-gate contract mismatch.
+description: Use when a value, command, status, property, structure, public library API/ABI, versioned library, or behavior crosses module or repository boundaries and the failure may involve protocol, enum semantics, property consumption, Broker routing, exported interfaces, binary compatibility, closed-library versions, or fake gates.
 ---
 
 # Cross-Layer Contract Audit
 
 ## Purpose
 
-Classify the contract boundary, preserve each side's semantic space, and route the investigation to existing narrow skills. This skill coordinates; it does not duplicate their protocol, enum, property, Broker, or closed-library procedures.
+Classify the contract boundary, preserve each side's semantic space, and route the investigation to existing narrow skills. Keep public library API/ABI checks bounded to the exposed interface within this skill; do not duplicate protocol, enum, property, Broker, or closed-library procedures.
 
 ## Contract dimensions
 
@@ -15,7 +15,7 @@ At each boundary compare:
 
 - producer and consumer ownership;
 - raw type, field, unit, range, sentinel, enum value, and temporal meaning;
-- schema or ABI version and compatibility rule;
+- schema or ABI version and compatibility rule, including source compatibility, binary ABI compatibility, and runtime behavior as separate claims;
 - serialization, normalization, persistence, routing, and acknowledgement semantics;
 - write, read, effective consumption, error, retry, restart, and physical behavior;
 - runtime artifacts and repository versions on both sides.
@@ -36,10 +36,11 @@ Choose all applicable routes, but assign each distinct problem one primary route
 | Broker communication mode | `broker-two-communication-modes` | It is unclear whether the path is direct internal communication or RoutingCenter-based external forwarding. |
 | Closed-library version difference | `closed-lib-version-feature-diff-comparison` | Same-named APIs or nodes behave differently across coexisting binary/header variants or products. |
 | Closed-source fake gate | `closed-source-upstream-flag-fake-gate` | An upper wrapper flag claims to gate behavior whose real start or accumulation occurs inside a closed SDK. |
+| Public library API/ABI | Bounded audit in this skill | Installed headers, language bindings, exports, layout, ownership, or external-consumer compatibility are in question; combine with a narrow route only for a distinct problem. |
 | Embedded runtime identity | `embedded-runtime-provenance` | DTS/Kconfig/DTB, kernel module, rootfs, firmware, tuning, model, slot, or runtime-loaded object may not match the intended board or build. |
 | Camera pipeline boundary | `camera-pipeline-contract-audit` | Sensor/power/I2C/MIPI/media/V4L2/ISP/DMA/consumer contracts, formats, timestamps, or buffer ownership may diverge. |
 
-Related concerns such as artifact provenance, full-chain proof, or state lifecycle should be routed to `multi-repo-artifact-provenance`, `end-to-end-functional-chain-audit`, or `state-lifecycle-replay-audit` rather than expanding this skill.
+Related concerns such as artifact provenance, full-chain proof, state lifecycle, or terminal acceptance should be routed to `multi-repo-artifact-provenance`, `end-to-end-functional-chain-audit`, `state-lifecycle-replay-audit`, or `field-verification-boundary` rather than expanding this skill.
 
 For embedded boundaries, do not collapse build selection and runtime identity: trace source DTS and Kconfig through the compiled DTB and boot selection, then bind kernel driver/subdev behavior to UAPI and user-space ABI. For camera data, preserve resolution, pixel format, stride, colorspace, timestamp domain, DMA/cache ownership, error propagation, and terminal consumer evidence at every edge.
 
@@ -47,11 +48,26 @@ For embedded boundaries, do not collapse build selection and runtime identity: t
 
 ### 1. Draw the exact boundary
 
-Name producer, adapter, transport or persistence boundary, consumer, runtime versions, and expected semantic contract. Preserve the original raw value alongside any normalized value.
+Name producer, adapter, transport or persistence boundary, consumer, runtime versions, and expected semantic contract. Preserve the original raw value alongside any normalized value. State whether a public library interface is affected before selecting library-specific checks.
 
 ### 2. Build the contract matrix
 
 Compare both sides field by field. Include value meaning, unit, range, sentinel, enum temporal nature, schema/ABI version, default, error behavior, acknowledgement, lifecycle, and actual consumer.
+
+#### Public library interface, when applicable
+
+Use this profile for an exposed C/C++ library interface or an equivalent reusable library/binding boundary. Ordinary application changes and document edits do not require ABI tools or consumer builds unless they change that boundary. Select checks from the actual language, platform, affected surface, supported consumers, and compatibility promise; do not require every project to test an arbitrary matrix of languages, compilers, or architectures.
+
+For equivalent non-native boundaries, use the language's published API metadata and package/dependency-resolution evidence. Native symbol, packing, or calling-convention checks may be not applicable; record the reason instead of adding unrelated tools.
+
+1. **Bind the comparison baseline.** Record baseline and candidate revisions, installed public header/package identity, actual library artifact identity/hash, compiler/runtime ABI, target architecture, and relevant build options. Confirm which headers and library the consumer really resolves. If the claimed compatible baseline, header/artifact pair, compiler, or architecture is unknown or mismatched, preserve the gap rather than inventing a comparison.
+2. **Start at the customer-visible signature.** Record the exact declaration in the public header or binding, including language linkage, namespace, overload, export macro, calling convention, qualifiers, defaults, and exception specification where relevant. Trace public wrappers to the implementation and exported symbol; distinguish the preferred interface, deprecated compatibility wrapper, and internal helper. A deprecated wrapper still needs its promised compatibility; an internal replacement is not automatically customer-callable.
+3. **Inspect the actual exported surface.** Check symbol name or mangling, visibility, linkage, version, and platform export rules against the selected artifact, including static-library availability where relevant. Use the available platform tooling, for example symbol inspection through `nm`/`readelf`/`objdump` or `dumpbin`; record the artifact and command output. Header declarations and in-tree tests do not prove that an external consumer can resolve a symbol.
+4. **Compare representation and ownership.** Check exposed struct/class layout, field size/alignment/offset, enum value and underlying representation, packing, calling convention, and C++ ABI details only where the boundary exposes them. Trace allocation/deallocation pairing, owner, lifetime, buffer validity, and callback lifetime/thread constraints. Retain raw enum semantics, and route distinct enum, property, or lifecycle problems to their existing skills instead of copying those procedures here.
+5. **Compare behavior promised by the interface.** Check units, ranges, sentinels, null/optional inputs, defaults, error codes/results, exception translation, and failure cleanup. Do not permit an exception to cross a C boundary whose contract prohibits it. Recheck deprecated wrappers for parameter conversion, units, defaults, ownership, and error semantics; signature equality alone does not preserve behavior.
+6. **Exercise the smallest external consumer.** Build outside the library's internal target against the public installed/package interface and selected artifact, using the actual public headers for C/C++ consumers. Compile and link a minimal consumer that actually references the affected entry and follows its ownership contract; C and C++ consumers are examples only when those languages are supported and relevant. Record compilation, linking, dependency resolution, and execution separately. If backward binary compatibility is promised, run a preserved old consumer binary against the candidate library without recompiling it, with a scenario that exercises the changed boundary and cleanup. If the old binary or required target environment is unavailable, keep binary/runtime compatibility unresolved; a fresh build or host run cannot replace that observation.
+
+Record declaration comparison, exported-symbol inspection, external-consumer compilation, linking, and old-binary execution as distinct evidence layers in `contract_matrix`. State source compatibility, binary ABI compatibility, and runtime behavior separately, each scoped to the measured baseline, environment, and affected entries. Passing one layer cannot promote another. If a compiler, symbol/ABI tool, package, baseline artifact, or runtime is unavailable, name the missing capability, preserve the checks completed, and specify the smallest check needed; do not mark the unobserved layer passed.
 
 ### 3. Classify before fixing
 
@@ -59,7 +75,7 @@ Assign a primary classification to each mismatch. Do not combine separate defect
 
 ### 4. Route to narrow skills
 
-For each classification select the narrow skill, state the trigger evidence, inputs it needs, output expected, and fallback if the skill is unavailable. Load and follow the selected skill completely through the active host. Do not reconstruct it from memory.
+For each classification select the narrow skill, state the trigger evidence, inputs it needs, output expected, and fallback if the skill is unavailable. Load and follow the selected skill completely through the active host. Do not reconstruct it from memory. Public library API/ABI checks above remain in this skill, without recursively invoking it; route distinct artifact, lifecycle, or consumer-verification gaps through the existing related skills.
 
 ### 5. Rejoin results at the contract boundary
 
@@ -73,12 +89,14 @@ Use `supported`, `candidate`, `refuted`, or `unresolved` for each classification
 
 ### `boundary`
 
-Producer, adapter, transport/persistence, consumer, runtime versions, raw representation, normalized representation, and expected behavior.
+Producer, adapter, transport/persistence, consumer, runtime versions, raw representation, normalized representation, and expected behavior. For a public library boundary, include its applicability, compatibility promise, and baseline/header/artifact/compiler/architecture identity; otherwise mark the library profile not applicable.
 
 ### `contract_matrix`
 
 | Dimension | Producer contract | Consumer contract | Adapter/current behavior | Evidence | Match status |
 |---|---|---|---|---|---|
+
+For applicable library interfaces, use separate rows for public signature/wrappers, exported symbols, representation/ownership, behavior, external compilation, external linking, and any required old-binary run. Identify the observed evidence layer and compatible baseline in each row; mark missing checks unobserved rather than folding them into a source-only pass.
 
 ### `classification`
 
@@ -92,11 +110,11 @@ Producer, adapter, transport/persistence, consumer, runtime versions, raw repres
 
 ### `gaps`
 
-List missing upstream/downstream definitions, runtime versions, raw observations, consumers, outputs, or verification evidence; include impact and next action.
+List missing upstream/downstream definitions, runtime versions, raw observations, consumers, outputs, or verification evidence; include impact and next action. Include unavailable library tooling, missing baseline/old binary, mismatched public headers/artifacts, and unsupported runtime environments when applicable.
 
 ### `verdict`
 
-For each problem state supported/candidate/refuted/unresolved, repair boundary owner, allowed claim, prohibited overclaim, and independent verification needed. Then state an aggregate conclusion without merging distinct fixes.
+For each problem state supported/candidate/refuted/unresolved, repair boundary owner, allowed claim, prohibited overclaim, and independent verification needed. For library interfaces, state source compatibility, binary ABI compatibility, and runtime behavior separately with their evidence scope. Then state an aggregate conclusion without merging distinct fixes.
 
 ## Anti-patterns
 
@@ -105,6 +123,9 @@ For each problem state supported/candidate/refuted/unresolved, repair boundary o
 - Declaring a property effective because it was serialized, stored, or printed.
 - Assuming all Broker traffic uses one routing mode.
 - Treating same-named APIs from different binary variants as equivalent.
+- Publishing an internal helper as the public API, or treating a deprecated public wrapper as dispensable despite a compatibility promise.
+- Treating a matching declaration, exported symbol, or freshly compiled consumer as proof of binary ABI compatibility and runtime behavior.
+- Adding ABI-tool or compiler dependencies to ordinary application/document work without an exposed library boundary.
 - Treating a source DTS/Kconfig option as proof that the intended DTB or driver is running.
 - Treating a compatible ioctl number or struct name as proof of UAPI/ABI, layout, lifetime, and ownership compatibility.
 - Copying narrow-skill instructions into this router and allowing them to drift.

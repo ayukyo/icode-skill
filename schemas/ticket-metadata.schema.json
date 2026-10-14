@@ -687,7 +687,7 @@
       "additionalProperties": false
     },
     "test_cmd": { "type": ["string", "null"] },
-    "test_outcome": { "enum": ["pass", "fail", "skipped", null] },
+    "test_outcome": { "enum": ["pass", "fail", "inconclusive", "skipped", null] },
     "test_failures": { "type": ["boolean", "null"] },
     "test_timeout": { "type": ["integer", "null"] },
     "code_review_fix_with_issues": { "type": ["boolean", "null"] },
@@ -1323,6 +1323,32 @@
               }
             },
             "additionalProperties": false
+          },
+          "test_summary": {
+            "description": "可选的机器读取 JUnit 报告摘要；只证明已观察报告范围，不证明当前执行或完整覆盖。旧无字段记录保留未跟踪用例计数边界。",
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["version", "format", "report", "total", "passed", "failed", "errors", "skipped", "outcome"],
+            "properties": {
+              "version": {"type": "integer", "const": 1},
+              "format": {"type": "string", "const": "junit"},
+              "report": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["path", "sha256", "bytes"],
+                "properties": {
+                  "path": {"type": "string", "minLength": 1},
+                  "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                  "bytes": {"type": "integer", "minimum": 1}
+                }
+              },
+              "total": {"type": "integer", "minimum": 0},
+              "passed": {"type": "integer", "minimum": 0},
+              "failed": {"type": "integer", "minimum": 0},
+              "errors": {"type": "integer", "minimum": 0},
+              "skipped": {"type": "integer", "minimum": 0},
+              "outcome": {"enum": ["pass", "fail", "inconclusive"]}
+            }
           },
           "direct_test": {
             "type": "object",

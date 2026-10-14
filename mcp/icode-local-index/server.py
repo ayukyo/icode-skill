@@ -8,6 +8,7 @@ import os
 import sqlite3
 import sys
 import tempfile
+from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
@@ -17,13 +18,13 @@ LIB_DIR = SERVER_DIR.parent / "_lib"
 if str(LIB_DIR) not in sys.path:
     sys.path.insert(0, str(LIB_DIR))
 
-from local_mcp_common import MANAGED_WRITE_ANNOTATIONS, READ_ONLY_ANNOTATIONS, describe, expand_path, fail, load_config, ok, resolve_allowed_path  # noqa: E402
+from local_mcp_common import MANAGED_WRITE_ANNOTATIONS, READ_ONLY_ANNOTATIONS, LocalPathPolicyError, access_policy, describe, expand_path, fail, load_config, ok, resolve_allowed_path  # noqa: E402
 from mcp.server.fastmcp import FastMCP  # noqa: E402
 
 SERVER_NAME = "icode-local-index"
 TOOLS = ["describe_capabilities", "build_index", "query_index", "index_status"]
 DEFAULTS = {
-    "allowed_roots": ["$HOME"],
+    "allowed_roots": None,
     "data_dir": "$HOME/.claude/icode_data/local-index",
     "max_files": 5000,
     "max_file_bytes": 524288,
@@ -58,6 +59,10 @@ def _iter_files(root: Path, config: dict[str, Any]) -> Iterable[Path]:
             if path.is_symlink():
                 continue
             if path.suffix.lower() in extensions or name in {"CMakeLists.txt", "Makefile"}:
+                try:
+                    resolve_allowed_path(path, config)
+                except LocalPathPolicyError:
+                    continue
                 yield path
 
 
@@ -74,7 +79,10 @@ def _schema(connection: sqlite3.Connection) -> str:
 
 @mcp.tool(annotations=READ_ONLY_ANNOTATIONS)
 def describe_capabilities() -> dict[str, Any]:
-    return describe(SERVER_NAME, TOOLS, "大型本地源码/日志/文档的可重建 SQLite 全文索引", managed_writes=["configured data_dir/*.sqlite3"])
+    try:
+        return describe(SERVER_NAME, TOOLS, "大型本地源码/日志/文档的可重建 SQLite 全文索引", managed_writes=["configured data_dir/*.sqlite3"], config=_config(), config_env="ICODE_LOCAL_INDEX_CONFIG")
+    except (OSError, ValueError) as exc:
+        return fail("config_failed", str(exc), exc=exc, config_env="ICODE_LOCAL_INDEX_CONFIG")
 
 
 @mcp.tool(annotations=MANAGED_WRITE_ANNOTATIONS)
@@ -93,45 +101,47 @@ def build_index(root: str, max_files: int = 2000) -> dict[str, Any]:
         total_bytes = 0
         skipped_large = 0
         truncated = False
+        sensitive_paths_excluded = access_policy(config)["protect_sensitive_paths"]
         try:
-            connection = sqlite3.connect(temp)
-            mode = _schema(connection)
-            for path in _iter_files(base, config):
-                if count >= limit:
-                    truncated = True
-                    break
-                stat = path.stat()
-                if stat.st_size > int(config["max_file_bytes"]):
-                    skipped_large += 1
-                    continue
-                if total_bytes + stat.st_size > int(config["max_total_bytes"]):
-                    truncated = True
-                    break
-                content = path.read_text(encoding="utf-8", errors="replace")
-                relative = str(path.relative_to(base))
-                connection.execute("INSERT INTO files VALUES (?, ?, ?, ?)", (relative, stat.st_mtime_ns, stat.st_size, content))
-                connection.execute("INSERT INTO search VALUES (?, ?)", (relative, content))
-                count += 1
-                total_bytes += stat.st_size
-            meta = {
-                "root": str(base),
-                "built_at": datetime.now(timezone.utc).isoformat(),
-                "mode": mode,
-                "file_count": count,
-                "total_bytes": total_bytes,
-                "skipped_large": skipped_large,
-                "truncated": truncated,
-            }
-            connection.executemany("INSERT INTO meta VALUES (?, ?)", [(key, json.dumps(value, ensure_ascii=False)) for key, value in meta.items()])
-            connection.commit()
-            connection.close()
+            # SQLite 的事务上下文不会关闭连接；替换或清理前必须显式释放句柄。
+            with closing(sqlite3.connect(temp)) as connection:
+                mode = _schema(connection)
+                for path in _iter_files(base, config):
+                    if count >= limit:
+                        truncated = True
+                        break
+                    stat = path.stat()
+                    if stat.st_size > int(config["max_file_bytes"]):
+                        skipped_large += 1
+                        continue
+                    if total_bytes + stat.st_size > int(config["max_total_bytes"]):
+                        truncated = True
+                        break
+                    content = path.read_text(encoding="utf-8", errors="replace")
+                    relative = str(path.relative_to(base))
+                    connection.execute("INSERT INTO files VALUES (?, ?, ?, ?)", (relative, stat.st_mtime_ns, stat.st_size, content))
+                    connection.execute("INSERT INTO search VALUES (?, ?)", (relative, content))
+                    count += 1
+                    total_bytes += stat.st_size
+                meta = {
+                    "root": str(base),
+                    "built_at": datetime.now(timezone.utc).isoformat(),
+                    "mode": mode,
+                    "file_count": count,
+                    "total_bytes": total_bytes,
+                    "skipped_large": skipped_large,
+                    "truncated": truncated,
+                    "sensitive_paths_excluded": sensitive_paths_excluded,
+                }
+                connection.executemany("INSERT INTO meta VALUES (?, ?)", [(key, json.dumps(value, ensure_ascii=False)) for key, value in meta.items()])
+                connection.commit()
             os.replace(temp, destination)
         finally:
             if temp.exists():
                 temp.unlink()
-        return ok({"root": str(base), "database": str(destination), "file_count": count, "total_bytes": total_bytes, "skipped_large": skipped_large, "truncated": truncated})
+        return ok({"root": str(base), "database": str(destination), "file_count": count, "total_bytes": total_bytes, "skipped_large": skipped_large, "truncated": truncated, "sensitive_paths_excluded": sensitive_paths_excluded})
     except (OSError, ValueError, PermissionError, sqlite3.Error) as exc:
-        return fail("index_build_failed", str(exc))
+        return fail("index_build_failed", str(exc), exc=exc, config_env="ICODE_LOCAL_INDEX_CONFIG")
 
 
 def _metadata(connection: sqlite3.Connection) -> dict[str, Any]:
@@ -183,10 +193,10 @@ def index_status(root: str) -> dict[str, Any]:
         database = _db_path(base, config)
         if not database.exists():
             return ok({"root": str(base), "exists": False, "stale": True})
-        with sqlite3.connect(database) as connection:
+        with closing(sqlite3.connect(database)) as connection:
             return ok({"root": str(base), "database": str(database), "exists": True, "metadata": _metadata(connection), **_stale_summary(base, connection, config)})
     except (OSError, ValueError, PermissionError, sqlite3.Error) as exc:
-        return fail("index_status_failed", str(exc))
+        return fail("index_status_failed", str(exc), exc=exc, config_env="ICODE_LOCAL_INDEX_CONFIG")
 
 
 @mcp.tool(annotations=READ_ONLY_ANNOTATIONS)
@@ -201,7 +211,7 @@ def query_index(root: str, query: str, limit: int = 20) -> dict[str, Any]:
         database = _db_path(base, config)
         if not database.exists():
             return fail("index_missing", "索引不存在，请先 build_index")
-        with sqlite3.connect(database) as connection:
+        with closing(sqlite3.connect(database)) as connection:
             meta = _metadata(connection)
             if meta.get("mode") == "fts5":
                 try:
@@ -215,6 +225,11 @@ def query_index(root: str, query: str, limit: int = 20) -> dict[str, Any]:
         results = []
         for relative, snippet in rows:
             source = base / relative
+            # 旧索引可能由更宽的显式策略构建；当前策略须在返回缓存内容前再次检查。
+            try:
+                resolve_allowed_path(source, config, must_exist=False)
+            except LocalPathPolicyError:
+                continue
             line = 1
             try:
                 content = source.read_text(encoding="utf-8", errors="replace")
@@ -227,7 +242,7 @@ def query_index(root: str, query: str, limit: int = 20) -> dict[str, Any]:
             results.append({"path": str(source), "relative_path": relative, "line": line, "source_ref": f"{source}:{line}", "snippet": snippet})
         return ok({"root": str(base), "query": query, "results": results, "count": len(results), **stale})
     except (OSError, ValueError, PermissionError, sqlite3.Error) as exc:
-        return fail("index_query_failed", str(exc))
+        return fail("index_query_failed", str(exc), exc=exc, config_env="ICODE_LOCAL_INDEX_CONFIG")
 
 
 if __name__ == "__main__":

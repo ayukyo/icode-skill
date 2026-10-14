@@ -1,5 +1,5 @@
 {
-  "allowed_roots": ["$HOME"],
+  "allowed_roots": null,
   "data_dir": "$HOME/.claude/icode_data/local-index",
   "max_files": 5000,
   "max_file_bytes": 524288,

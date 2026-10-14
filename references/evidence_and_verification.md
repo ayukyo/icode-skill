@@ -41,6 +41,15 @@
 - fresh 本地产物的 ctime 必须不早于开始回执；可复现构建允许归一化 mtime，但核验前后 inode、大小、mtime、ctime 必须稳定。同一个 run 的所有本地 build/deploy 制品读取共享 `candidate_tracking.limits` 的 `max_files/max_bytes/timeout_seconds`；超限拒绝追加，可通过既有 candidate capture 显式提高预算。
 - 直接执行测试分别记录 `target_built`、`binary_executed`、`test_runner_discovered`、`ci_registered` 和实际 `binary_exit_code`。直接执行通过但未发现 runner/未登记 CI 就按这些字段如实报告；runner-only pass 不能替代同 cell 当前直接执行的失败。
 
+### 测试报告证据
+
+- Runner 退出码、实际测试用例结果和覆盖范围分别核对。退出码 0 可能是零用例或全部跳过；这些情况记 `inconclusive`，报告含失败/错误记 `fail`，实际非零退出码/超时/失败断言不能被有效或无效报告降级。存在通过用例且无失败/错误，只支持该报告列出的范围，不自动证明全部测试、CI 登记或物理行为。
+- 复用既有 `record-verification --test-report <实际JUnit-XML路径>`，不新增 `/icode` 公开命令。相对路径基于已绑定执行工程根；每个新 run 机器读取真实本地常规文件，保存可选 `test_summary={version:1,format:junit,report:{path,sha256,bytes},total,passed,failed,errors,skipped,outcome}`。不接受 `--test-summary-json` 或口述计数。报告应来自本轮已核实 runner 的独立输出目录，生成命令、真实退出码与原始输出仍存 evidence；单凭 XML/hash 不能证明 runner 在本轮执行或报告自身声明真实。
+- 标准库解析按实际 testcase 计数，父/子 suite 的聚合属性仅校验、不重复累加；命名空间可解析。`status=notrun` 或 `result=suppressed|skipped` 也计为未通过执行的 skipped；运行时 skipped 精确核对，disabled 标记数须介于 suppressed 用例数和总数之间，不能据此覆盖 testcase 实际执行结果。未知/冲突状态受控拒绝。缺 testcase 的正计数、计数冲突、畸形 XML、DTD/实体声明、符号链接/重解析点或超限输入拒绝追加，不把不完整报告猜成通过。默认限额：8 MiB、100000 个 XML 元素、64 层、100000 个用例、5 秒；不执行内容或获取外部资源。
+  GoogleTest 状态与 disabled 标记的区别依据其 [XML 输出实现](https://github.com/google/googletest/blob/main/googletest/src/gtest.cc)；解析器只支持以上明确状态，其它方言先保留原报告与不确定边界。
+- 零用例/全部跳过摘要不能配 pass，含失败/错误不能配 pass 或 inconclusive；报告范围 pass 可配整体 fail/inconclusive，保留原有 `direct_test.binary_exit_code` 的独立失败证据。解析失败时保存原始日志与原因；已有独立失败证据仍通过现有入口记 fail，不伪造摘要。
+- 事件语义检查和只读 applicability 核对保存的计数、结果与 path/hash 身份，不重读历史文件。报告后来移动、删除或改变不抹掉历史观察；新的 request 必须重新读取所选文件。相同 request_id 的精确重放返回原始回执，不代表重新测试。先筛选候选/环境资格再选择最新结果；同 cell 已有有效报告证据后，无摘要 pass 不能替代它，后续 fail/inconclusive 仍保留。文档变更复用必须完整保留原始 `test_summary`，不能丢弃或换成另一个报告；旧完全无字段的 cell 保留原有未跟踪用例计数边界，不迁移、不把历史 pass 升为已机器核对计数。
+
 真实 USB/驱动设备证据可使用下列身份模板；仅在相关 physical 场景要求，不给普通 host 任务强加这些字段：
 
 ```json

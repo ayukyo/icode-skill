@@ -33,6 +33,9 @@ class DistributionTests(unittest.TestCase):
             "steps/docx.md": "docx authoring and revision\n",
             "steps/doc.md": "DOC worktree snapshots and exact binding\n",
             "references/doc_snapshot_contract.md": "DOC storage contract\n",
+            "references/wsl_build.md": "WSL build contract\n",
+            "references/mcp_path_access.md": "Local MCP path contract\n",
+            "tools/test_result_summary.py": "# bounded JUnit report summary\n",
             "tools/doc_snapshot.py": "# DOC capture/publish/resolve runtime\n",
             "references/skill_routing.md": "routing\n",
             "references/docx_authoring.md": "authoring\n",
@@ -114,6 +117,7 @@ class DistributionTests(unittest.TestCase):
                      "tools/docx/requirements.lock", "mcp/example/config.example.json",
                      "steps/docx.md", "references/docx_authoring.md", "references/docx_revision.md",
                      "steps/doc.md", "references/doc_snapshot_contract.md", "tools/doc_snapshot.py",
+                     "references/wsl_build.md", "references/mcp_path_access.md", "tools/test_result_summary.py",
                      "tools/docx/compare_docx.py", "tools/docx/verify_sources.py", "tools/docx/draw_sequence.py",
                      "integrations/codebuddy/commands/icode.md"):
             self.assertEqual((workflow / name).read_bytes(), (self.source / name).read_bytes())
@@ -199,6 +203,16 @@ class DistributionTests(unittest.TestCase):
         self.assert_rejected(result)
         self.assertIn("tools/doc_snapshot.py", result.stderr)
         self.assertFalse(self.output.exists())
+
+    def test_generic_verification_resources_must_be_tracked(self):
+        for name in ("tools/test_result_summary.py", "references/wsl_build.md", "references/mcp_path_access.md"):
+            with self.subTest(resource=name):
+                self.git("rm", "--cached", name)
+                result = self.build()
+                self.assert_rejected(result)
+                self.assertIn(name, result.stderr)
+                self.assertFalse(self.output.exists())
+                self.git("add", name)
 
     def test_missing_doc_contract_fails_before_output(self):
         self.git("rm", "-f", "references/doc_snapshot_contract.md")
