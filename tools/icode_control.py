@@ -6036,11 +6036,14 @@ def cmd_trace(args):
     return 0
 
 
-def cmd_action_policy(args):
+def cmd_action_policy(args, *, git_provider=None, require_git_provider=False):
     """生成轻量、一致的 UI/Agent 动作投影，并用 revision 防止过期执行。"""
     if getattr(args, "verify_action", None) and args.action != "verify":
         raise ControlError("--verify-action 只能与 --action verify 一起使用", exit_code=2)
     out_dir = Path(args.dir).resolve()
+    access = ({"git_provider": git_provider, "require_git_provider": require_git_provider}
+              if _candidate_access_requested(git_provider, require_git_provider) else {})
+    deadline = time.monotonic() + candidate_module().DEFAULT_LIMITS["timeout_seconds"] if access else None
     sm = load_state_machine()
     policy = sm.get("action_policy")
     if not isinstance(policy, dict) or policy.get("schema_version") != 1 \
@@ -6052,7 +6055,14 @@ def cmd_action_policy(args):
     meta = load_metadata(out_dir)
     require_vnext(meta, out_dir)
     require_valid_metadata(meta)
-    events, problems = verify_event_chain(out_dir, meta)
+    if access:
+        _candidate_context_guard(out_dir, meta, git_provider, require_git_provider)
+        try:
+            candidate_module()._candidate_provider(execution_workspace(out_dir, meta), git_provider,
+                require_git_provider, deadline=deadline)
+        except (candidate_module().CandidateError, OSError, UnicodeError) as exc:
+            raise ControlError(str(exc), gate_id="candidate_provider_context") from exc
+    events, problems = verify_event_chain(out_dir, meta, **access)
     if problems:
         raise ControlError(
             "事件链不完整，拒绝生成动作策略",
@@ -6129,7 +6139,7 @@ def cmd_action_policy(args):
         model = load_execution_model()
         if args.action in model.get("step_contracts", {}):
             _snapshot, missing = capture_step_inputs(
-                out_dir, meta, model, args.action)
+                out_dir, meta, model, args.action, **access)
             if missing:
                 raise ControlError(
                     f"动作 {args.action!r} 缺少必填输入",
@@ -6155,7 +6165,16 @@ def cmd_action_policy(args):
         result.update({"action": args.action, "action_allowed": True})
         if args.action == "verify":
             result.update(verify_action=variant, side_effect=contract["side_effect"])
-    print(json.dumps(result, ensure_ascii=False, indent=2))
+    encoded = json.dumps(result, ensure_ascii=False, indent=2)
+    if access:
+        # Check after real reads and serialization, not a host epoch/rollback proof.
+        _candidate_context_guard(out_dir, meta, git_provider, require_git_provider)
+        try:
+            candidate_module()._candidate_provider(execution_workspace(out_dir, meta), git_provider,
+                require_git_provider, deadline=deadline)
+        except (candidate_module().CandidateError, OSError, UnicodeError) as exc:
+            raise ControlError(str(exc), gate_id="candidate_provider_context") from exc
+    print(encoded)
     return 0
 
 
@@ -6596,14 +6615,27 @@ def main(*, git_provider=None, require_git_provider=False):
                   if _candidate_access_requested(git_provider, require_git_provider) else {})
         if access and not ((args.cmd == "candidate" and args.func is cmd_candidate) or
                            (args.cmd == "build-start" and args.func is cmd_build_start) or
-                           (args.cmd == "record-verification" and args.func is cmd_record_verification)):
+                           (args.cmd == "record-verification" and args.func is cmd_record_verification) or
+                           (args.cmd == "action-policy" and args.func is cmd_action_policy)):
             raise ControlError("B1 command dispatch is not enabled", gate_id="candidate_business_propagation_pending")
+        policy_deadline = (time.monotonic() + candidate_module().DEFAULT_LIMITS["timeout_seconds"]
+                           if access and args.cmd == "action-policy" else None)
         # 捕获子命令输出：业务失败（ok=false）时子命令仍可能返回 0，
         # 会让 shell 的 `&&` / `set -e` 误判为成功。此处统一纠正为退出码 1。
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
             code = args.func(args, **access) if access else args.func(args)
         out = buf.getvalue()
+        if policy_deadline is not None:
+            # Inner handler success is not yet acceptance by the outer caller.
+            out_dir = Path(args.dir).resolve()
+            meta = load_metadata(out_dir)
+            _candidate_context_guard(out_dir, meta, git_provider, require_git_provider)
+            try:
+                candidate_module()._candidate_provider(execution_workspace(out_dir, meta), git_provider,
+                    require_git_provider, deadline=policy_deadline)
+            except (candidate_module().CandidateError, OSError, UnicodeError) as exc:
+                raise ControlError(str(exc), gate_id="candidate_provider_context") from exc
         sys.stdout.write(out)
         sys.stdout.flush()
         if code == 0:

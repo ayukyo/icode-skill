@@ -13,6 +13,10 @@ on:
       - 'tests/test_candidate*'
       - 'tests/test_delivery*'
       - 'tests/test_execution_root_binding.py'
+      - 'tests/test_ui_action_policy.py'
+      - 'mcp/workflow-gate/gates.json'
+      - 'schemas/ticket-metadata.schema.json'
+      - 'schemas/ticket-event.schema.json'
       - 'tests/test_review_followup.py'
       - 'tests/test_workflow_evidence_gaps.py'
       - 'tests/test_execution_model_contract.sh'
@@ -72,6 +76,10 @@ jobs:
         run: python -B -c "import unittest; s=unittest.defaultTestLoader.discover('tests', pattern='test_candidate_record_verification_provider_unit.py'); assert s.countTestCases()==15, s.countTestCases(); r=unittest.TextTestRunner(verbosity=2).run(s); raise SystemExit(not r.wasSuccessful() or bool(r.skipped))"
       - name: Candidate B3d port primitives software contract
         run: python -B -c "import unittest; s=unittest.defaultTestLoader.discover('tests', pattern='test_candidate_port_provider_unit.py'); assert s.countTestCases()==21, s.countTestCases(); r=unittest.TextTestRunner(verbosity=2).run(s); raise SystemExit(not r.wasSuccessful() or bool(r.skipped))"
+      - name: Candidate B3e action-policy software contract
+        run: python -B -c "import unittest; s=unittest.defaultTestLoader.discover('tests', pattern='test_candidate_action_policy_provider_unit.py'); assert s.countTestCases()==22, s.countTestCases(); r=unittest.TextTestRunner(verbosity=2).run(s); raise SystemExit(not r.wasSuccessful() or bool(r.skipped))"
+      - name: Existing action-policy and verify intent consumers
+        run: python -X utf8 -m pytest -p no:anyio tests/test_ui_action_policy.py::test_action_policy_is_control_plane_truth_and_revision_guard tests/test_ui_action_policy.py::test_exclusive_agent_spawn_is_cross_process_lock tests/test_ui_action_policy.py::test_closed_and_debug_tickets_do_not_receive_main_actions tests/test_review_followup.py::test_early_verify_only_build_and_plan -q
       - name: Existing port root, delivery and output consumer regressions
         run: python -m pytest -p no:anyio tests/test_execution_root_binding.py::BindingTests::test_real_cli_projection_and_subprocess_replay tests/test_review_followup.py::test_delivery_paths_are_single_source_and_keep_legacy_defaults tests/test_workflow_evidence_gaps.py::test_audit_final_check_fails_without_first_review_json_and_is_read_only -q
       - name: Syntax
