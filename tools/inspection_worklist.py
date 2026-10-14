@@ -165,7 +165,7 @@ def _path(root, raw, *, directory=False, artifact=False):
     if not isinstance(raw, str) or not raw or "\x00" in raw or "\\" in raw:
         raise InspectionError("path must be a nonempty relative POSIX string")
     p = Path(raw)
-    if p.is_absolute() or ".." in raw.split("/"):
+    if raw.startswith("/") or p.is_absolute() or ".." in raw.split("/"):
         raise InspectionError(f"unsafe path: {raw}")
     for part in p.parts:
         lower = part.lower()

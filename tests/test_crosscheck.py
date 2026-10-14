@@ -81,6 +81,8 @@ def workspace(tmp_path: Path) -> tuple[Path, Path, dict[str, str]]:
         "LANG": os.environ.get("LANG", "C.UTF-8"),
         "PYTHONDONTWRITEBYTECODE": "1",
     }
+    if os.name == "nt" and os.environ.get("SystemRoot"):
+        env["SystemRoot"] = os.environ["SystemRoot"]
     return root, ticket, env
 
 

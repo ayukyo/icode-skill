@@ -49,6 +49,12 @@ class CompatibilityTests(unittest.TestCase):
     def report(self, path="nested/src/a.c", **kwargs):
         return self.api.build_worklist(self.root, [path], step="code", ticket_id="t", attempt=1, **kwargs)
 
+    def test_rooted_posix_paths_rejected_on_every_platform(self):
+        for raw in ("/etc/passwd", "//server/share"):
+            with self.subTest(raw=raw), self.assertRaises(self.api.InspectionError):
+                self.api._path(self.root, raw)
+        self.assertEqual(self.api._path(self.root, "src/file.py"), "src/file.py")
+
     def test_default_nested_scopes_and_legacy_none(self):
         self.put("nested/src/a.c", b"int a;\n")
         git(self.root, "add", ".")

@@ -21,6 +21,7 @@ class CandidateTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.repo = Path(self.temp.name) / "repo"
         self.repo.mkdir()
+        self.repo = self.repo.resolve(strict=True)
         self.git("init", "-q")
         self.git("config", "core.autocrlf", "false")
         self.git("config", "user.email", "test@example.invalid")

@@ -196,6 +196,7 @@ class InstallationTests(unittest.TestCase):
         self.assertEqual({item["path"] for item in unsafe},
                          {"steps/01_plan.md", "references/skill_routing.md",
                           "references/docx_authoring.md", "references/docx_revision.md",
+                          "references/doc_snapshot_contract.md",
                           "tools/icode_control.py"})
 
     def test_parent_traversal_is_rejected_without_normalizing_it_away(self):
