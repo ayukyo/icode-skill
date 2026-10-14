@@ -236,9 +236,9 @@ class VerificationTests(unittest.TestCase):
         old = self.snapshot()
         origin = self.record(request="origin-pass")["run"]
         self.record("fail", "simulated", request="simulated-fail")
-        (self.repo / "source.py").write_text("value = 2\n")
+        (self.repo / "source.py").write_text("value = 2\n", encoding="utf-8", newline="\n")
         self.record("fail", request="different-source-fail")
-        (self.repo / "source.py").write_text("value = 1\n")
+        (self.repo / "source.py").write_text("value = 1\n", encoding="utf-8", newline="\n")
         (self.repo / "README.md").write_text("Documentation clarified\n")
         reuse = {"origin_run_id": origin["run_id"], "reason": "Only docs changed", "scope_paths": ["source.py"],
                  "scope_hash": ctl.verification_evidence_module().scope_hash(old, ["source.py"]), "comparison_ref": "README.md"}
