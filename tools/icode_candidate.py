@@ -5,9 +5,12 @@ establish source identity; only real successful step receipts establish review.
 """
 import hashlib
 import importlib.util
+from abc import ABC, abstractmethod
+from dataclasses import dataclass
+from enum import Enum
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 import re
 import stat
 import time
@@ -23,6 +26,193 @@ class CandidateError(ValueError):
 
 
 _INSPECTION = None
+
+
+class CandidateRead(Enum):
+    FACTS = "facts"
+    TREE = "tree"
+    INDEX = "index"
+    OTHERS = "others"
+    BLOB = "blob"
+    LINEAR = "linear"
+
+
+@dataclass(frozen=True)
+class CandidateReadQuery:
+    operation: CandidateRead
+    oid: str = ""
+    old_oid: str = ""
+    kind: str = ""
+
+
+@dataclass(frozen=True)
+class CandidateReadResult:
+    data: bytes
+    exit_code: int
+    truncated: bool
+    error: str | None = None
+
+
+class CandidateGitProvider(ABC):
+    workspace: Path
+
+    @abstractmethod
+    def assert_context(self):
+        """Validate this invocation; None means valid, not native proof here."""
+
+    @abstractmethod
+    def query(self, request: CandidateReadQuery, *, limit: int) -> CandidateReadResult:
+        """Return bounded closed-read bytes; never accepts argv or paths."""
+
+
+def _candidate_provider(root, provider, required, *, deadline=None):
+    if deadline is not None and time.monotonic() > deadline:
+        raise CandidateError("candidate provider deadline exceeded")
+    if type(required) is not bool:
+        raise CandidateError("invalid provider requirement")
+    if provider is None:
+        if required:
+            raise CandidateError("host-bound candidate provider missing")
+        return
+    if not isinstance(provider, CandidateGitProvider) or provider.workspace != root:
+        raise CandidateError("candidate provider workspace/type mismatch")
+    if provider.assert_context() is not None:
+        raise CandidateError("candidate context check did not complete")
+    if deadline is not None and time.monotonic() > deadline:
+        raise CandidateError("candidate provider deadline exceeded")
+
+
+def _candidate_provider_name(name):
+    if _paths([name]) != [name] or name == ".":
+        raise CandidateError("noncanonical candidate provider path")
+    if os.name == "nt":
+        windows = PureWindowsPath(name)
+        if windows.drive or windows.root or ":" in name:
+            raise CandidateError("unsafe Windows candidate provider path")
+        for part in windows.parts:
+            if part.lower() == ".git" or PureWindowsPath(part).is_reserved() or part.endswith((" ", ".")) or \
+                    any(ord(character) < 32 or character in '<>"|?*' for character in part):
+                raise CandidateError("unsafe Windows candidate provider component")
+    return name
+
+
+def _candidate_provider_paths(values):
+    if not isinstance(values, (tuple, list)):
+        raise CandidateError("candidate paths must be an array")
+    return _paths([_candidate_provider_name(name) for name in values])
+
+
+def _candidate_read(root, provider, operation, *, oid="", old_oid="", kind="", limit, deadline=None):
+    _candidate_provider(root, provider, True, deadline=deadline)
+    if not isinstance(operation, CandidateRead) or type(limit) is not int or limit < 1:
+        raise CandidateError("invalid candidate read operation/budget")
+    if type(oid) is not str or type(old_oid) is not str or type(kind) is not str:
+        raise CandidateError("invalid candidate read OID type")
+    with_oid = operation in (CandidateRead.TREE, CandidateRead.BLOB, CandidateRead.LINEAR)
+    if (with_oid and re.fullmatch(r"[0-9a-f]{40}", oid) is None) or (not with_oid and oid):
+        raise CandidateError("invalid candidate read OID")
+    if operation == CandidateRead.LINEAR:
+        if re.fullmatch(r"[0-9a-f]{40}", old_oid) is None or old_oid == oid:
+            raise CandidateError("invalid candidate proof endpoint")
+    elif old_oid:
+        raise CandidateError("unexpected candidate old OID")
+    if (operation == CandidateRead.BLOB and kind not in ("size", "content")) or \
+            (operation != CandidateRead.BLOB and kind):
+        raise CandidateError("invalid candidate read kind")
+    result = provider.query(CandidateReadQuery(operation, oid, old_oid, kind), limit=limit)
+    if not isinstance(result, CandidateReadResult) or type(result.data) is not bytes or \
+            type(result.exit_code) is not int or type(result.truncated) is not bool or \
+            result.error is not None or result.exit_code != 0 or result.truncated or len(result.data) > limit:
+        raise CandidateError("candidate provider failed/incomplete")
+    _candidate_provider(root, provider, True, deadline=deadline)
+    data = result.data
+    if operation in (CandidateRead.TREE, CandidateRead.INDEX, CandidateRead.OTHERS):
+        if data and not data.endswith(b"\0"):
+            raise CandidateError("unterminated candidate manifest")
+        names = []
+        try:
+            for row in data.split(b"\0")[:-1]:
+                if operation == CandidateRead.OTHERS:
+                    raw_path = row
+                else:
+                    info, raw_path = row.split(b"\t", 1)
+                    mode, middle, third = info.decode("ascii").split()
+                    if mode not in ("100644", "100755", "120000"):
+                        raise CandidateError("unsupported candidate provider mode/gitlink")
+                    blob_oid = third if operation == CandidateRead.TREE else middle
+                    if re.fullmatch(r"[0-9a-f]{40}", blob_oid) is None:
+                        raise CandidateError("invalid manifest blob OID")
+                    if (operation == CandidateRead.TREE and middle != "blob") or \
+                            (operation == CandidateRead.INDEX and third != "0"):
+                        raise CandidateError("invalid tree kind/unmerged index")
+                name = raw_path.decode("utf-8")
+                names.append(_candidate_provider_name(name))
+        except (UnicodeError, ValueError) as error:
+            raise CandidateError("invalid candidate manifest") from error
+        if len(set(names)) != len(names):
+            raise CandidateError("duplicate candidate manifest path")
+    elif operation == CandidateRead.BLOB and kind == "size":
+        if re.fullmatch(rb"0|[1-9][0-9]{0,19}", data) is None:
+            raise CandidateError("invalid candidate blob size")
+    elif operation == CandidateRead.BLOB:
+        actual = hashlib.sha1(b"blob " + str(len(data)).encode("ascii") + b"\0" + data).hexdigest()
+        if actual != oid:
+            raise CandidateError("candidate blob OID mismatch")
+    elif operation == CandidateRead.LINEAR:
+        try:
+            records = data.decode("ascii").splitlines()
+            commits = []
+            for record in records:
+                parts = record.split()
+                if len(parts) != 2 or any(re.fullmatch(r"[0-9a-f]{40}", x) is None for x in parts):
+                    raise CandidateError("invalid linear parent record")
+                commits.append(parts[0])
+            if not records or len(records) > 64 or len(set(commits)) != len(commits) or old_oid in commits:
+                raise CandidateError("invalid/budget-exceeded candidate proof")
+        except UnicodeError as error:
+            raise CandidateError("invalid linear proof bytes") from error
+    if deadline is not None and time.monotonic() > deadline:
+        raise CandidateError("candidate provider deadline exceeded")
+    return data
+
+
+def _candidate_json_object(pairs):
+    value = {}
+    for key, item in pairs:
+        if key in value:
+            raise CandidateError("duplicate candidate facts key")
+        value[key] = item
+    return value
+
+
+def _candidate_facts(root, provider, limit, *, deadline=None):
+    raw = _candidate_read(root, provider, CandidateRead.FACTS, limit=limit, deadline=deadline)
+    try:
+        value = json.loads(raw.decode("utf-8"), object_pairs_hook=_candidate_json_object)
+        identity_keys = {"common_git_dir", "checkout_realpath", "object_format", "common_git_device",
+                         "common_git_inode", "checkout_device", "checkout_inode"}
+        if type(value) is not dict or set(value) != {"identity", "head", "head_tree", "base"}:
+            raise CandidateError("invalid candidate facts shape")
+        identity = value["identity"]
+        if type(identity) is not dict or set(identity) != identity_keys or identity["object_format"] != "sha1":
+            raise CandidateError("invalid candidate facts identity")
+        if any(type(identity[k]) is not str or not Path(identity[k]).is_absolute() for k in
+               ("common_git_dir", "checkout_realpath")) or identity["checkout_realpath"] != str(root):
+            raise CandidateError("candidate facts root mismatch")
+        if any(type(identity[k]) is not int or identity[k] < 0 for k in
+               ("common_git_device", "common_git_inode", "checkout_device", "checkout_inode")):
+            raise CandidateError("invalid candidate facts stat")
+        actual = root.stat()
+        if (identity["checkout_device"], identity["checkout_inode"]) != (actual.st_dev, actual.st_ino):
+            raise CandidateError("candidate CODE identity changed")
+        if any(type(value[k]) is not str or re.fullmatch(r"[0-9a-f]{40}", value[k]) is None
+               for k in ("head", "head_tree", "base")):
+            raise CandidateError("invalid candidate facts commit")
+    except (UnicodeError, TypeError, ValueError, KeyError) as error:
+        raise CandidateError("invalid candidate facts") from error
+    if deadline is not None and time.monotonic() > deadline:
+        raise CandidateError("candidate provider deadline exceeded")
+    return value
 
 
 def _git(root, args, limit):
@@ -146,9 +336,13 @@ def _excluded(path, exclusions):
                (x in CONTROL_DIRS and x in Path(path).parts) for x in exclusions)
 
 
-def repository_head(workspace):
+def repository_head(workspace, *, git_provider=None, require_git_provider=False):
     """Return an existing checkout's HEAD, or None for a non-Git/unborn fixture."""
     root = Path(workspace).resolve()
+    deadline = (time.monotonic() + DEFAULT_LIMITS["timeout_seconds"] if git_provider is not None else None)
+    _candidate_provider(root, git_provider, require_git_provider, deadline=deadline)
+    if git_provider is not None:
+        return _candidate_facts(root, git_provider, 8192, deadline=deadline)["head"]
     if not (root / ".git").exists():
         return None
     top = _git(root, ["rev-parse", "--show-toplevel"], 8192).decode().strip()
@@ -177,7 +371,8 @@ def normalize_limits(limits=None):
 
 
 def capture_candidate(workspace, *, base, code_files=None, scope_contract=None,
-                      excluded_side_effects=None, inspection_scope=None, limits=None):
+                      excluded_side_effects=None, inspection_scope=None, limits=None,
+                      git_provider=None, require_git_provider=False):
     """Capture all tracked final bytes and visible untracked files, fail closed.
 
     Git-ignored untracked files and ICODE control artifacts are outside this
@@ -190,39 +385,57 @@ def capture_candidate(workspace, *, base, code_files=None, scope_contract=None,
     deadline = time.monotonic() + bounds["timeout_seconds"]
     root = Path(workspace).resolve()
     git_limit = bounds["max_git_bytes"]
+    _candidate_provider(root, git_provider, require_git_provider,
+                        deadline=deadline if git_provider is not None else None)
 
     def git(args, limit=git_limit):
+        if git_provider is not None:
+            raise CandidateError("raw Git forbidden for candidate provider")
         if time.monotonic() > deadline:
             raise CandidateError("candidate capture timeout")
         return _git(root, args, limit)
 
-    top = git(["rev-parse", "--show-toplevel"], 8192).decode().strip()
-    if Path(top).resolve() != root:
-        raise CandidateError("candidate workspace must be a Git checkout root")
-    common_raw = git(["rev-parse", "--git-common-dir"], 8192).decode().strip()
-    common = (root / common_raw).resolve()
-    common_stat, checkout_stat = common.stat(), root.stat()
-    head = git(["rev-parse", "--verify", "HEAD^{commit}"], 256).decode().strip()
+    facts = None
+    if git_provider is None:
+        top = git(["rev-parse", "--show-toplevel"], 8192).decode().strip()
+        if Path(top).resolve() != root:
+            raise CandidateError("candidate workspace must be a Git checkout root")
+        common_raw = git(["rev-parse", "--git-common-dir"], 8192).decode().strip()
+        common = (root / common_raw).resolve()
+        common_stat, checkout_stat = common.stat(), root.stat()
+        head = git(["rev-parse", "--verify", "HEAD^{commit}"], 256).decode().strip()
+    else:
+        facts = _candidate_facts(root, git_provider, min(8192, git_limit), deadline=deadline)
+        head = facts["head"]
     if not isinstance(base, str) or re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", base) is None:
         raise CandidateError("candidate base must be a resolved full commit oid")
-    resolved_base = git(["rev-parse", "--verify", base + "^{commit}"], 256).decode().strip()
+    resolved_base = (git(["rev-parse", "--verify", base + "^{commit}"], 256).decode().strip()
+                     if git_provider is None else facts["base"])
     if resolved_base != base:
         raise CandidateError("candidate base is not a commit")
-    object_format = git(["rev-parse", "--show-object-format"], 256).decode().strip()
+    object_format = (git(["rev-parse", "--show-object-format"], 256).decode().strip()
+                     if git_provider is None else facts["identity"]["object_format"])
     if object_format not in ("sha1", "sha256"):
         raise CandidateError("unsupported Git object format")
-    exclusions = _paths(excluded_side_effects or [])
+    exclusions = (_paths(excluded_side_effects or []) if git_provider is None else
+                  _candidate_provider_paths([] if excluded_side_effects is None else excluded_side_effects))
     if "." in exclusions:
         raise CandidateError("excluding the entire candidate is prohibited")
-    files = _paths(code_files or [])
+    files = (_paths(code_files or []) if git_provider is None else
+             _candidate_provider_paths([] if code_files is None else code_files))
     if "." in files:
         raise CandidateError("code_files must name files")
     if any(_excluded(x, [*CONTROL_DIRS, *exclusions]) for x in files):
         raise CandidateError("code_files overlap excluded/control artifacts")
     # Trees/index are plumbing manifests. No diff drivers, textconv or filters.
-    head_raw = git(["ls-tree", "-rz", "--full-tree", "HEAD"])
-    index_raw = git(["ls-files", "--stage", "-z"])
-    others_raw = git(["ls-files", "--others", "--exclude-standard", "-z"])
+    if git_provider is None:
+        head_raw = git(["ls-tree", "-rz", "--full-tree", "HEAD"])
+        index_raw = git(["ls-files", "--stage", "-z"])
+        others_raw = git(["ls-files", "--others", "--exclude-standard", "-z"])
+    else:
+        head_raw = _candidate_read(root, git_provider, CandidateRead.TREE, oid=head, limit=git_limit, deadline=deadline)
+        index_raw = _candidate_read(root, git_provider, CandidateRead.INDEX, limit=git_limit, deadline=deadline)
+        others_raw = _candidate_read(root, git_provider, CandidateRead.OTHERS, limit=git_limit, deadline=deadline)
     head_entries, index_entries = {}, {}
     for row in head_raw.split(b"\0"):
         if row:
@@ -242,7 +455,10 @@ def capture_candidate(workspace, *, base, code_files=None, scope_contract=None,
         raise CandidateError("candidate scan exceeds max_files")
     manifest, total_bytes = [], 0
     for name in names:
-        _paths([name])
+        if git_provider is None:
+            _paths([name])
+        else:
+            _candidate_provider_name(name)
         if _excluded(name, [*CONTROL_DIRS, *exclusions]):
             continue
         path = root / name
@@ -256,6 +472,8 @@ def capture_candidate(workspace, *, base, code_files=None, scope_contract=None,
             continue  # Deleted paths are bound by absence in the final manifest.
         index = index_entries.get(name) or head_entries.get(name) or {}
         if index.get("mode") == "160000":
+            if git_provider is not None:
+                raise CandidateError("host-bound candidate gitlink unsupported")
             if not stat.S_ISDIR(before.st_mode):
                 raise CandidateError(f"submodule unavailable: {name}")
             remaining = dict(bounds, max_bytes=max(1, bounds["max_bytes"] - total_bytes),
@@ -316,43 +534,75 @@ def capture_candidate(workspace, *, base, code_files=None, scope_contract=None,
         # permits proving commit tree equivalence without invoking its filter.
         oid = index.get("oid")
         if oid and oid != row["git_oid"]:
-            try:
-                pointer = git(["cat-file", "blob", oid], 4096)
-            except CandidateError:
-                pointer = b""
+            if git_provider is None:
+                try:
+                    pointer = git(["cat-file", "blob", oid], 4096)
+                except CandidateError:
+                    pointer = b""
+            else:
+                blob_size = int(_candidate_read(root, git_provider, CandidateRead.BLOB, oid=oid,
+                    kind="size", limit=min(32, git_limit), deadline=deadline))
+                pointer = (_candidate_read(root, git_provider, CandidateRead.BLOB, oid=oid,
+                    kind="content", limit=min(4096, git_limit), deadline=deadline) if blob_size <= 4096 else b"")
             match = re.fullmatch(rb"version https://git-lfs.github.com/spec/v1\noid sha256:([0-9a-f]{64})\nsize ([0-9]+)\n", pointer)
             if match and match[1].decode() == row["sha256"] and int(match[2]) == size:
                 row["git_oid"] = oid
         manifest.append(row)
     # Check Git identities again, so concurrent index/HEAD changes never yield a
     # mixed snapshot. Every file is race checked above; this is not a FS lock.
-    if head != git(["rev-parse", "HEAD"], 256).decode().strip() or \
-            index_raw != git(["ls-files", "--stage", "-z"]) or \
-            others_raw != git(["ls-files", "--others", "--exclude-standard", "-z"]):
-        raise CandidateError("candidate Git state changed during capture")
-    identity = {"common_git_dir": str(common), "checkout_realpath": str(root),
-                "object_format": object_format,
-                "common_git_device": common_stat.st_dev, "common_git_inode": common_stat.st_ino,
-                "checkout_device": checkout_stat.st_dev, "checkout_inode": checkout_stat.st_ino}
+    if git_provider is None:
+        if head != git(["rev-parse", "HEAD"], 256).decode().strip() or \
+                index_raw != git(["ls-files", "--stage", "-z"]) or \
+                others_raw != git(["ls-files", "--others", "--exclude-standard", "-z"]):
+            raise CandidateError("candidate Git state changed during capture")
+        identity = {"common_git_dir": str(common), "checkout_realpath": str(root),
+                    "object_format": object_format,
+                    "common_git_device": common_stat.st_dev, "common_git_inode": common_stat.st_ino,
+                    "checkout_device": checkout_stat.st_dev, "checkout_inode": checkout_stat.st_ino}
+    else:
+        if time.monotonic() > deadline:
+            raise CandidateError("candidate capture timeout")
+        if facts != _candidate_facts(root, git_provider, min(8192, git_limit), deadline=deadline) or \
+                index_raw != _candidate_read(root, git_provider, CandidateRead.INDEX, limit=git_limit, deadline=deadline) or \
+                others_raw != _candidate_read(root, git_provider, CandidateRead.OTHERS, limit=git_limit, deadline=deadline):
+            raise CandidateError("candidate provider state changed during capture")
+        identity = dict(facts["identity"])
     content = {"identity": identity, "base": base, "code_files": files,
                "scope_contract": scope_contract, "inspection_scope": inspection_scope or {},
                "excluded_side_effects": exclusions, "control_artifact_exclusions": list(CONTROL_DIRS),
                "manifest": manifest}
     snapshot = {"version": 1, **content, "head": head,
-                "head_tree": git(["rev-parse", "HEAD^{tree}"], 256).decode().strip(),
+                "head_tree": (git(["rev-parse", "HEAD^{tree}"], 256).decode().strip()
+                              if git_provider is None else facts["head_tree"]),
                 "index_manifest": [{"path": k, **v} for k, v in sorted(index_entries.items())
                                    if not _excluded(k, [*CONTROL_DIRS, *exclusions])],
                 "untracked_manifest": [row for row in manifest if row["path"] in untracked],
                 "content_id": _digest(content)}
     snapshot["candidate_id"] = _digest(snapshot)
+    if git_provider is not None:
+        _candidate_provider(root, git_provider, True, deadline=deadline)
+        if time.monotonic() > deadline:
+            raise CandidateError("candidate capture timeout")
     return snapshot
 
 
-def compare_candidates(recorded, current):
+def compare_candidates(recorded, current, *, git_provider=None, require_git_provider=False):
     """Exact equality or strict linear same-final-content commit proof."""
+    deadline = (time.monotonic() + DEFAULT_LIMITS["timeout_seconds"] if git_provider is not None else None)
     if not snapshot_identity_ok(recorded) or not snapshot_identity_ok(current):
         return {"equivalent": False, "reason": "candidate_invalid"}
+    try:
+        _candidate_provider(Path(current["identity"]["checkout_realpath"]), git_provider,
+                            require_git_provider, deadline=deadline)
+    except CandidateError:
+        return {"equivalent": False, "reason": "commit_equivalence_unproven"}
     if recorded.get("candidate_id") == current.get("candidate_id"):
+        if git_provider is not None:
+            try:
+                _candidate_provider(Path(current["identity"]["checkout_realpath"]), git_provider,
+                                    True, deadline=deadline)
+            except CandidateError:
+                return {"equivalent": False, "reason": "commit_equivalence_unproven"}
         return {"equivalent": True, "reason": "identical_candidate"}
     if recorded.get("content_id") != current.get("content_id"):
         return {"equivalent": False, "reason": "source_or_contract_drift"}
@@ -361,8 +611,13 @@ def compare_candidates(recorded, current):
     root = Path(current["identity"]["checkout_realpath"])
     old_head, new_head = recorded["head"], current["head"]
     try:
-        ancestors = _git(root, ["rev-list", "--parents", "--ancestry-path", f"{old_head}..{new_head}"],
-                         DEFAULT_LIMITS["max_git_bytes"]).decode().splitlines()
+        if git_provider is None:
+            ancestors = _git(root, ["rev-list", "--parents", "--ancestry-path", f"{old_head}..{new_head}"],
+                             DEFAULT_LIMITS["max_git_bytes"]).decode().splitlines()
+        else:
+            ancestors = _candidate_read(root, git_provider, CandidateRead.LINEAR,
+                oid=new_head, old_oid=old_head, limit=DEFAULT_LIMITS["max_git_bytes"],
+                deadline=deadline).decode("ascii").splitlines()
         # Require the whole new history to extend the reviewed HEAD linearly.
         # Cherry-pick/rebase/amend/merge with identical bytes still need review.
         expected_parent = old_head
@@ -380,19 +635,29 @@ def compare_candidates(recorded, current):
         exclusions = current["excluded_side_effects"] + current["control_artifact_exclusions"]
         reviewed = {row["path"]: {"mode": row["mode"], "oid": row["git_oid"]}
                     for row in recorded["manifest"]}
-        deadline = time.monotonic() + DEFAULT_LIMITS["timeout_seconds"]
+        if git_provider is None:
+            deadline = time.monotonic() + DEFAULT_LIMITS["timeout_seconds"]
         for line in ancestors:
             if time.monotonic() > deadline:
                 raise CandidateError("commit equivalence timeout")
-            tree = _git(root, ["ls-tree", "-rz", "--full-tree", line.split()[0]], DEFAULT_LIMITS["max_git_bytes"])
+            if git_provider is None:
+                tree = _git(root, ["ls-tree", "-rz", "--full-tree", line.split()[0]], DEFAULT_LIMITS["max_git_bytes"])
+            else:
+                tree = _candidate_read(root, git_provider, CandidateRead.TREE,
+                    oid=line.split()[0], limit=DEFAULT_LIMITS["max_git_bytes"], deadline=deadline)
             if _tree_entries(tree, exclusions) != reviewed:
                 return {"equivalent": False, "reason": "commit_tree_not_reviewed_content"}
     except (CandidateError, KeyError, UnicodeError):
         return {"equivalent": False, "reason": "commit_equivalence_unproven"}
+    if git_provider is not None:
+        try:
+            _candidate_provider(root, git_provider, True, deadline=deadline)
+        except CandidateError:
+            return {"equivalent": False, "reason": "commit_equivalence_unproven"}
     return {"equivalent": True, "reason": "same_content_commit", "from_head": old_head, "to_head": new_head}
 
 
-def review_source_equivalence(recorded, current):
+def review_source_equivalence(recorded, current, *, git_provider=None, require_git_provider=False):
     """A review may establish its declaration, but may not silently change source."""
     if not snapshot_identity_ok(recorded) or not snapshot_identity_ok(current):
         return {"equivalent": False, "reason": "review_candidate_missing"}
@@ -401,10 +666,12 @@ def review_source_equivalence(recorded, current):
             "excluded_side_effects", "control_artifact_exclusions", "manifest")
     normalized["content_id"] = _digest({k: normalized[k] for k in keys})
     normalized["candidate_id"] = _digest({k: v for k, v in normalized.items() if k != "candidate_id"})
-    return compare_candidates(recorded, normalized)
+    return compare_candidates(recorded, normalized, git_provider=git_provider,
+                              require_git_provider=require_git_provider)
 
 
-def delivery_freshness(meta, current, events=None, required_steps=REVIEW_STEPS):
+def delivery_freshness(meta, current, events=None, required_steps=REVIEW_STEPS, *,
+                       git_provider=None, require_git_provider=False):
     """Read-only applicability; history/status alone never establish a pass."""
     tracking = meta.get("candidate_tracking") or {}
     if tracking.get("mode") != "enabled":
@@ -415,6 +682,13 @@ def delivery_freshness(meta, current, events=None, required_steps=REVIEW_STEPS):
         return {"ok": False, "state": "blocked", "reasons": ["candidate_capture_unavailable"],
                 "candidate_id": None, "applicable_receipts": [], "required_steps": list(required_steps)}
     finished = {e.get("event_id"): e for e in events or [] if e.get("event_type") == "step_finished"}
+    if git_provider is not None or type(require_git_provider) is not bool or require_git_provider:
+        try:
+            _candidate_provider(Path(current["identity"]["checkout_realpath"]), git_provider, require_git_provider)
+        except (CandidateError, KeyError, TypeError):
+            return {"ok": False, "state": "blocked", "reasons": ["candidate_provider_context"],
+                    "candidate_id": current.get("candidate_id"), "applicable_receipts": [],
+                    "required_steps": list(required_steps)}
     latest = {}
     for event in events or []:
         payload = event.get("payload") or {}
@@ -433,7 +707,8 @@ def delivery_freshness(meta, current, events=None, required_steps=REVIEW_STEPS):
         # when the source bytes have not changed.
         if latest.get(receipt.get("step"), {}).get("event_id") != receipt.get("event_id"):
             continue
-        proof = compare_candidates(receipt.get("candidate"), current)
+        proof = compare_candidates(receipt.get("candidate"), current, git_provider=git_provider,
+                                   require_git_provider=require_git_provider)
         if proof["equivalent"]:
             applicable.append({"step": receipt["step"], "attempt": receipt["attempt"],
                                "event_id": receipt["event_id"], "candidate_id": receipt["candidate_id"],

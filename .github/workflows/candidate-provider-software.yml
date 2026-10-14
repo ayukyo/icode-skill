@@ -1,0 +1,63 @@
+name: Candidate provider software
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'tools/icode_candidate.py'
+      - 'tools/icode_control.py'
+      - 'tools/verification_evidence.py'
+      - 'tools/verification_debt.py'
+      - 'tools/icode_delivery.py'
+      - 'scripts/submission_guard.py'
+      - 'tests/test_candidate*'
+      - 'tests/test_delivery*'
+      - '.github/workflows/candidate-provider-software.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: candidate-provider-software-${{ github.sha }}
+  cancel-in-progress: false
+jobs:
+  software:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.10'
+      - name: Record actual source and tools
+        run: |
+          git rev-parse HEAD
+          python --version
+          git --version
+      - name: Install legacy test runner
+        run: python -m pip install --disable-pip-version-check --no-cache-dir pytest==9.0.3
+      - name: Install Linux shell contract dependency
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y ripgrep
+      - name: Typed candidate stdlib contract
+        run: python -B -m unittest discover -s tests -p test_candidate_git_provider_unit.py -v
+      - name: Count required candidate provider cases
+        run: python -B -c "import unittest; suite=unittest.defaultTestLoader.discover('tests', pattern='test_candidate_git_provider_unit.py'); assert suite.countTestCases()==20, suite.countTestCases()"
+      - name: Syntax
+        run: python -B -m py_compile tools/icode_candidate.py tests/test_candidate_git_provider_unit.py
+      - name: Collect complete related legacy contract
+        run: python -m pytest -p no:anyio tests/test_candidate_freshness.py tests/test_candidate_inspection_generations.py tests/test_candidate_verification.py tests/test_delivery_inventory.py tests/test_delivery_report.py --collect-only -q
+      - name: Complete related legacy contract
+        run: python -m pytest -p no:anyio tests/test_candidate_freshness.py tests/test_candidate_inspection_generations.py tests/test_candidate_verification.py tests/test_delivery_inventory.py tests/test_delivery_report.py -q
+      - name: Existing Linux shell contracts
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          bash tests/test_inspection_worklist_contract.sh
+          bash tests/test_crosscheck_contract.sh
