@@ -83,6 +83,8 @@ def workspace(tmp_path: Path) -> tuple[Path, Path, dict[str, str]]:
     }
     if os.name == "nt" and os.environ.get("SystemRoot"):
         env["SystemRoot"] = os.environ["SystemRoot"]
+        # pathlib uses USERPROFILE on Windows; never inherit the real user home.
+        env["USERPROFILE"] = env["HOME"]
     return root, ticket, env
 
 
