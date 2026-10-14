@@ -898,7 +898,7 @@ def append_event(out_dir, meta, event_type, payload, request_id=None, actor="ico
     return event
 
 
-def verify_event_chain(out_dir, meta=None, semantic=True):
+def verify_event_chain(out_dir, meta=None, semantic=True, *, git_provider=None, require_git_provider=False):
     events, _ = read_events(out_dir)
     problems = []
     prev = GENESIS_HASH
@@ -919,7 +919,23 @@ def verify_event_chain(out_dir, meta=None, semantic=True):
         if ev.get("event_hash") != canonical_event_hash(ev):
             problems.append(f"第 {i} 行 event_hash 与内容不符（疑似篡改/局部修改）")
         prev = ev.get("event_hash", prev)
-    if semantic and meta is not None and is_vnext(meta):
+    if _candidate_access_requested(git_provider, require_git_provider):
+        try:
+            _candidate_context_guard(out_dir, meta, git_provider, require_git_provider)
+            if semantic is not True:
+                raise ControlError("B1 requires semantic event validation", gate_id="candidate_provider_context")
+            evidence_api = verification_evidence_module()
+            event_api = _B1EventCandidateView(candidate_module(), evidence_api,
+                lambda: _candidate_context_guard(out_dir, meta, git_provider, require_git_provider))
+            if meta is not None and is_vnext(meta):
+                problems.extend(f"event_semantics: {item}"
+                                for item in validate_event_semantics(events, meta, candidate_api=event_api))
+            if any(event.get("event_type") == "verification_recorded" for event in events):
+                problems.append(evidence_api.B1_CANDIDATE_PENDING)
+            _candidate_context_guard(out_dir, meta, git_provider, require_git_provider)
+        except ControlError as exc:
+            problems.append("candidate_provider_context: " + exc.message)
+    elif semantic and meta is not None and is_vnext(meta):
         problems.extend(f"event_semantics: {item}"
                         for item in validate_event_semantics(events, meta))
     return events, problems
@@ -1019,7 +1035,7 @@ class ExecutionBindingMirror:
         return sorted(self.issues)
 
 
-def validate_event_semantics(events, meta):
+def validate_event_semantics(events, meta, *, candidate_api=None):
     """校验控制事件的顺序和 payload 语义，防止自洽 hash 掩盖伪造生命周期。"""
     problems = []
     sm = load_state_machine()
@@ -1150,7 +1166,8 @@ def validate_event_semantics(events, meta):
         binding_mirror.consume(event)
     problems.extend(binding_mirror.finish())
     problems.extend(candidate_event_issues(events, meta))
-    problems.extend(verification_evidence_module().event_issues(events, meta, candidate_module()))
+    event_candidate_api = candidate_module() if candidate_api is None else candidate_api
+    problems.extend(verification_evidence_module().event_issues(events, meta, event_candidate_api))
     return problems
 
 
@@ -3689,6 +3706,33 @@ def candidate_module():
     return _CANDIDATE_MODULE
 
 
+def _candidate_access_requested(provider, required):
+    return provider is not None or type(required) is not bool or required
+
+
+def _candidate_context_guard(out_dir, meta, provider, required):
+    module = candidate_module()
+    try:
+        if not isinstance(meta, dict):
+            raise module.CandidateError("candidate metadata missing")
+        module._candidate_provider(execution_workspace(out_dir, meta), provider, required)
+    except (module.CandidateError, OSError, UnicodeError) as exc:
+        raise ControlError(str(exc), gate_id="candidate_provider_context") from exc
+
+
+class _B1EventCandidateView:
+    """Shape validation only; historical business comparisons await B2."""
+    def __init__(self, candidate_api, evidence_api, guard):
+        self.candidate_api, self.evidence_api, self.guard = candidate_api, evidence_api, guard
+
+    def snapshot_identity_ok(self, snapshot):
+        return self.candidate_api.snapshot_identity_ok(snapshot)
+
+    def compare_candidates(self, recorded, current):
+        self.guard()
+        raise self.evidence_api.EvidenceError(self.evidence_api.B1_CANDIDATE_PENDING)
+
+
 _VERIFICATION_EVIDENCE_MODULE = None
 
 
@@ -3701,17 +3745,21 @@ def verification_evidence_module():
     return _VERIFICATION_EVIDENCE_MODULE
 
 
-def verification_context(out_dir, meta=None):
+def verification_context(out_dir, meta=None, *, git_provider=None, require_git_provider=False):
     """Read-only live source/event context; never persists a refreshed candidate."""
     meta = load_metadata(out_dir) if meta is None else meta
+    access = ({"git_provider": git_provider, "require_git_provider": require_git_provider}
+              if _candidate_access_requested(git_provider, require_git_provider) else {})
     return verification_evidence_module().context(out_dir, meta, capture=candidate_snapshot,
-                verify=verify_event_chain, candidate_api=candidate_module())
+                verify=verify_event_chain, candidate_api=candidate_module(), **access)
 
 
-def verification_applicability(out_dir, meta=None):
+def verification_applicability(out_dir, meta=None, *, git_provider=None, require_git_provider=False):
     """Small JSON-ready evidence verdict; query success is separate from ok."""
     meta = load_metadata(out_dir) if meta is None else meta
-    return verification_evidence_module().assess(meta, verification_context(out_dir, meta))
+    access = ({"git_provider": git_provider, "require_git_provider": require_git_provider}
+              if _candidate_access_requested(git_provider, require_git_provider) else {})
+    return verification_evidence_module().assess(meta, verification_context(out_dir, meta, **access))
 
 
 def candidate_inspection_scope(out_dir, meta=None, *, effective_base=None, events=None):
@@ -3821,23 +3869,31 @@ def candidate_limits(raw=None):
         raise ControlError(f"候选预算无效: {exc}", exit_code=2, gate_id="candidate_limits") from exc
 
 
-def candidate_snapshot(out_dir, meta, *, base=None, excluded_side_effects=None, limits=None, events=None):
+def candidate_snapshot(out_dir, meta, *, base=None, excluded_side_effects=None, limits=None, events=None,
+                       git_provider=None, require_git_provider=False):
     """Capture once; callers may reuse events verified against the controlled metadata."""
     module = candidate_module()
     tracking = meta.get("candidate_tracking") or {}
     effective_base = base or tracking.get("base")
+    access = ({"git_provider": git_provider, "require_git_provider": require_git_provider}
+              if _candidate_access_requested(git_provider, require_git_provider) else {})
+    if access:
+        _candidate_context_guard(out_dir, meta, git_provider, require_git_provider)
     if events is None:
-        events, problems = verify_event_chain(out_dir, meta)
+        events, problems = verify_event_chain(out_dir, meta, **access)
         if problems:
             raise ControlError("事件链不完整，拒绝建立候选声明", gate_id="event_chain", violations=problems)
     try:
-        return module.capture_candidate(
+        candidate = module.capture_candidate(
             execution_workspace(out_dir, meta), base=effective_base,
-            code_files=meta.get("code_files") or [], scope_contract=meta.get("scope_contract"),
+            code_files=meta.get("code_files") if access else meta.get("code_files") or [], scope_contract=meta.get("scope_contract"),
             inspection_scope=candidate_inspection_scope(out_dir, meta, effective_base=effective_base, events=events),
             limits=tracking.get("limits") if limits is None else limits,
-            excluded_side_effects=(meta.get("excluded_side_effects") or [])
-                                  if excluded_side_effects is None else excluded_side_effects)
+            excluded_side_effects=(meta.get("excluded_side_effects") if access else meta.get("excluded_side_effects") or [])
+                                  if excluded_side_effects is None else excluded_side_effects, **access)
+        if access:
+            _candidate_context_guard(out_dir, meta, git_provider, require_git_provider)
+        return candidate
     except (module.CandidateError, OSError, UnicodeError) as exc:
         raise ControlError(f"候选身份无法完整建立: {exc}", gate_id="candidate_capture") from exc
 
@@ -6364,7 +6420,7 @@ def build_parser():
     return ap
 
 
-def main():
+def main(*, git_provider=None, require_git_provider=False):
     import contextlib
     import io
 
@@ -6374,6 +6430,8 @@ def main():
         ap.print_help()
         return 2
     try:
+        if _candidate_access_requested(git_provider, require_git_provider):
+            raise ControlError("B1 command dispatch is not enabled", gate_id="candidate_business_propagation_pending")
         # 捕获子命令输出：业务失败（ok=false）时子命令仍可能返回 0，
         # 会让 shell 的 `&&` / `set -e` 误判为成功。此处统一纠正为退出码 1。
         buf = io.StringIO()

@@ -80,9 +80,39 @@ def event_runs(events):
             for event in events if event.get("event_type") == "verification_recorded"]
 
 
-def context(out_dir, meta, *, capture=None, verify=None, candidate_api=None):
+B1_CANDIDATE_PENDING = "candidate_business_propagation_pending"
+
+
+def context(out_dir, meta, *, capture=None, verify=None, candidate_api=None,
+            git_provider=None, require_git_provider=False):
     """Read-only context. Enabled tickets without a live root fail closed."""
     result = {"enabled": enabled(meta), "current": None, "events": [], "reasons": [], "candidate_api": candidate_api}
+    if git_provider is not None or type(require_git_provider) is not bool or require_git_provider:
+        result["_candidate_b1_pending"] = True
+        try:
+            if not callable(capture) or not callable(verify) or candidate_api is None:
+                raise EvidenceError("complete canonical callback triple required")
+            def guard():
+                root = Path(git_provider.workspace).resolve() if git_provider is not None else Path(out_dir).resolve()
+                candidate_api._candidate_provider(root, git_provider, require_git_provider)
+            guard()
+            if not result["enabled"]:
+                raise EvidenceError("candidate_tracking_required")
+            access = {"git_provider": git_provider, "require_git_provider": require_git_provider}
+            events, problems = verify(out_dir, meta, **access)
+            guard()
+            if problems:
+                result["reasons"] = list(problems)
+                return result
+            result["events"] = events
+            result["current"] = capture(out_dir, meta, events=events, **access)
+            guard()
+            result["reasons"] = [B1_CANDIDATE_PENDING]
+        except Exception as exc:
+            result["current"] = None
+            result["reasons"] = ["candidate_capture_unavailable"]
+            result["detail"] = str(exc)
+        return result
     if not result["enabled"]:
         return result
     if out_dir is None:
@@ -167,6 +197,8 @@ def eligible_latest_runs(meta, ctx, *, source_runs=None):
     failures before an executable can run or emit a report.
     """
     latest, rejected, candidates = {}, [], []
+    if ctx.get("_candidate_b1_pending") is True:
+        return {"latest": {}, "rejected": [], "reasons": list(ctx["reasons"]) or [B1_CANDIDATE_PENDING]}
     runs = meta.get("verification_runs") or []
     if not isinstance(runs, list):
         return {"latest": {}, "rejected": [], "reasons": ["verification_runs_invalid"]}
