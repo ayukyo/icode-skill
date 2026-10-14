@@ -4407,14 +4407,31 @@ def cmd_record_verification(args):
                 input_payload["candidate"] = evidence_api.resolve_candidate(args.candidate_id, meta, events, live, candidate_module())
             elif args.candidate_id is not None:
                 raise evidence_api.EvidenceError("candidate-id requires an explicitly enabled candidate contract")
+            if getattr(args, "test_report", None) is not None:
+                report_api = evidence_api.test_result_module()
+                workspace = execution_workspace(out_dir, meta)
+                report = report_api.report_path(args.test_report, workspace)
+                previous = next((event for event in events if args.request_id and event.get("request_id") == args.request_id
+                                 and event.get("event_type") == "verification_recorded"), None)
+                stored = (previous.get("payload") or {}).get("test_summary") if previous else None
+                # An exact request replay returns the immutable observation;
+                # every new record reads its explicitly selected report bytes.
+                if isinstance(stored, dict) and (stored.get("report") or {}).get("path") == str(report):
+                    input_payload["test_summary"] = stored
+                else:
+                    input_payload["test_summary"] = report_api.summarize_report(report, workspace)
             prior_runs = evidence_api.event_runs(events)
             evidence_api.validate_supersedes(input_payload, prior_runs)
             evidence_api.validate_reuse(input_payload, prior_runs, candidate_module())
             evidence_api.validate_direct(input_payload)
+            evidence_api.validate_test_summary(input_payload)
             # Idempotent replay checks stored inputs before re-reading outputs:
             # a historic receipt remains a receipt after artifacts move away.
-            prior = find_idempotent_event(events, args.request_id, "verification_recorded", input_payload, payload_keys=tuple(input_payload))
+            prior = find_idempotent_event(events, args.request_id, "verification_recorded", input_payload,
+                                          payload_keys=(*input_payload, "test_summary"))
             if prior is None:
+                # Exact replay is a historical receipt, not a new observation.
+                evidence_api.validate_direct(input_payload, strict_outcome=True)
                 evidence_api.validate_provenance(input_payload, meta, events, execution_workspace(out_dir, meta), candidate_module(),
                                                 live_candidate=live if evidence_api.enabled(meta) else None)
                 if evidence_api.enabled(meta) and args.kind == "build" and args.build_source == "fresh" and args.outcome == "pass" \
@@ -4424,7 +4441,7 @@ def cmd_record_verification(args):
             raise ControlError(str(exc), exit_code=1, gate_id="verification_evidence") from exc
         prior = find_idempotent_event(
             events, args.request_id, "verification_recorded", input_payload,
-            payload_keys=tuple(input_payload))
+            payload_keys=(*input_payload, "test_summary"))
         if prior:
             print(json.dumps({"ok": True, "already_applied": True,
                               "request_id": args.request_id,
@@ -6227,6 +6244,7 @@ def build_parser():
     p.add_argument("--deploy-provenance-json")
     p.add_argument("--runtime-provenance-json")
     p.add_argument("--direct-test-json")
+    p.add_argument("--test-report", help="只读解析实际 JUnit XML，机器记录用例数和原始报告 path/SHA256；相对执行工程根")
     p.add_argument("--build-source", default="unknown",
                    choices=["fresh", "reused", "existing", "unknown"])
     p.add_argument("--device")

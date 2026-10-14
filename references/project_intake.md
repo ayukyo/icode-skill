@@ -11,6 +11,7 @@
 - 工程包含 SDK、内核、bootloader、RTOS、rootfs、工具链或固件镜像；
 - 跟踪文件数超过 50,000，或普通全仓检索明显超时/输出截断；
 - 构建、打包、烧录、OTA、清理命令的副作用边界未知。
+- 用户要求在 Windows/WSL 间执行构建，源码、工具链或制品的路径/平台视图尚未核验。
 
 ## 2. 工程根解析（fail-closed）
 
@@ -73,6 +74,8 @@ review/deepcheck/audit统一使用 `review_scope`：受影响模块 + caller/imp
 画像命中嵌入式层时复用 `embedded-runtime-provenance`；命中厂商 SDK/工具链/镜像来源时复用 `multi-repo-artifact-provenance`；命中传感器/ISP/media/V4L2 时再路由 camera 类技能。静态画像只能触发路由，不能替代这些技能的证据合同。
 
 ## 6. 构建与清理安全
+
+Windows 宿主的 Linux/WSL 构建按需先读 [WSL 构建合同](wsl_build.md)，固定发行版、路径转换、源码候选/快照、工具链、缓存和制品边界；普通原生构建不加载该专项。MCP 的访问拒绝先按 [路径访问合同](mcp_path_access.md) 区分平台默认、显式白名单与文件不存在，不把权限问题误报为工程缺失。
 
 - 编译命令真源顺序：工程 limit → 根 README/构建说明 → 活动配置与脚本静态阅读 → 用户确认/受控执行。
 - 任何 `clean/cleanall/distclean/rm -rf`、镜像重打包、配置同步、符号链接生成、烧录、OTA、设备重启都登记副作用和影响路径。

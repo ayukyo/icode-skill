@@ -187,6 +187,10 @@ python3 tools/lint_mcp_coverage.py <out_dir> --step review --strict
 
 这 7 个本地服务不新增 `/icode` 公开命令，机器路由见 [mcp/icode-mcp-policy/policy.json](mcp/icode-mcp-policy/policy.json)。每个 MCP 都有显式强证据触发条件 + 声明的优雅降级路径（详见 [SKILL.md「MCP 工具集」](SKILL.md)）；缺失任一都不阻断工作流。
 
+共享本地路径检查使用[平台默认与显式白名单](references/mcp_path_access.md)：`allowed_roots: null` 时，Windows 按请求读取本地磁盘并保护已知凭据路径，Linux 保持用户目录默认；非空数组保持显式限制。旧安装的 `$HOME` 白名单仍生效，普通同步不覆盖真实配置。服务执行信任、设备远端根和受管写入权限单独管理。
+
+Windows 上使用 Linux 工具链时复用 [WSL 构建合同](references/wsl_build.md)，固定发行版、路径映射、源码/快照、缓存、工具链和制品。测试验证按[真实报告证据](references/evidence_and_verification.md#测试报告证据)记录实际用例，零用例/全部跳过不记通过；公共库变更复用跨层合同审查比较 API/ABI 与实际消费者。
+
 ## 快速开始
 
 不必背命令，可以直接点名 ICODE，说清想做什么和不要做什么：

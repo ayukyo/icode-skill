@@ -15,7 +15,7 @@
 > **证据习惯真源**：验证 baseline、layer/consumer/scenario 记录和 verified 边界统一执行 [references/evidence_and_verification.md](../references/evidence_and_verification.md)。
 > **最终候选绑定**：`candidate_tracking.mode=enabled` 时，每次记录必须显式提供 `--candidate-id` 与 `--environment host|physical|simulated|unknown`；完整快照由控制面核验后保存。`baseline_ref` 仍表示 embedded/camera 合同摘要。旧未启用工单保持原语义，查询不自动迁移。
 > **嵌入式/摄像头 profile**：`device_config.verification_profile` 或工单内 `embedded_baseline.json` 命中时，先用 `tools/embedded_profile.py` 校验并生成只读场景计划，再按同一个 verify 入口执行；不新增公开命令。
-> **工程接入门**：读取 [references/project_intake.md](../references/project_intake.md)，验证必须绑定实际 Git 根、活动构建配置与制品身份；静态画像不运行构建/烧录命令。
+> **工程接入门**：读取 [references/project_intake.md](../references/project_intake.md)，验证必须绑定实际 Git 根、活动构建配置与制品身份；静态画像不运行构建/烧录命令。Windows 经 WSL 构建时先固定发行版、Linux 执行根与路径映射，不默认工程的 `build/`，不把 Windows 路径直接传给 Linux 命令。
 
 > verify 是**独立构建/验证入口**：不承载源码修改语义（构建允许生成文件与日志），因此**不写 `patch_history`**（patch_history 只记录有变更的 Patch）；验证结果单独记 `verification_runs`。**验证通过不自动升级 `delivery_verdict=verified`**——delivery_verdict 是交付分层结论（`verified`/`verification_pending`/`blocked`/`not_applicable`），由 06_audit 终审结合全部验证证据（含本步骤记录）人工判定（见 [SKILL.md「可选字段」段](../SKILL.md)）。设备侧身份核对、轮询监听、三态判定和行为证据闭合复用 [08_patch.md §1.5](08_patch.md) 的对应子段；其“编译前置”和“部署”子段**只在 verify 显式选择相应阶段时执行**，不得从 patch 的合并流程继承隐式动作。
 
@@ -120,6 +120,7 @@ python3 tools/icode_control.py build-start --dir "{ICODE_OUT_DIR}" \
    - `--deploy`：只部署已核验产物并核对设备当前版本；单独执行时选择已有唯一产物，组合 `--build --deploy` 时使用本次构建的产物。记录真实 `artifact_identity` 和构建来源，不重复编译；若设备配置的 deploy 意图内还含编译指令，展示冲突并停止，不能隐式补编译
    - `--listen` / `--test`：对已部署的设备按 [08_patch.md §1.5](08_patch.md) 轮询监听/三态判定（含特征可见性核查 + 证据双通道标注）；`--test` 走空转确认节奏。不运行构建或部署脚本；组合时使用前一部署阶段核验过的设备版本
 4. **三态判定**（监听/测试取证）：`pass`（验收证据满足）/ `fail`（有明确失败证据，例如已触发场景中的失败断言或可定位链路错误）/ `inconclusive`（未触发 / 特征不可见且无等效行为证据 / 证据模糊）。**未触发 ≠ 失败**，如实记 `inconclusive` 并标注触发条件未发生；反之，**不得将已证失败降为 `inconclusive`**。实际失败与尚未查明失败根因是两回事；完全未执行则报告阻塞、不伪造运行。
+   测试 runner 另按 [测试报告证据合同](../references/evidence_and_verification.md#测试报告证据) 核对实际用例数；退出码 0 不能独自证明测试通过。零用例/全部跳过记 inconclusive，失败/错误或实际非零退出码仍记 fail。JUnit 解析只读已取得的报告，不连接设备、不执行 XML 中的字符串；成功只证明报告范围。
 5. **记录 verification_runs**（metadata，实际执行的阶段按真实 pass/fail/inconclusive 追加，不是仅成功才追加；完全未执行只报阻塞、不伪造 run。schema 见 [schemas/ticket-metadata.schema.json](../schemas/ticket-metadata.schema.json)）：
    ```json
    {
@@ -148,6 +149,7 @@ python3 tools/icode_control.py build-start --dir "{ICODE_OUT_DIR}" \
      [--profile <generic|embedded|camera>] \
      [--baseline-ref <sha256:与合同完全一致的64位小写十六进制摘要>] \
      [--metrics-json '{"fps":29.7}'] \
+     [--test-report <已取得的本轮JUnit-XML路径>] \
      [--note <text>] [--request-id <key>]
    ```
 6. **输出**：验证结论（三态）+ 证据 + 是否待后续验证；**明确标注「本次验证通过 ≠ delivery_verdict=verified」**（后者由终审按交付分层判定）

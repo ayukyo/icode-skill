@@ -5,10 +5,12 @@ import asyncio
 import importlib.util
 import json
 import os
+import errno
 import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 REPO = Path(__file__).resolve().parents[1]
@@ -61,6 +63,18 @@ class LocalMcpSuiteTest(unittest.TestCase):
         os.environ[env_name] = str(path)
         return path
 
+    def symlink_or_skip(self, link: Path, target: str | Path):
+        try:
+            link.symlink_to(target)
+        except NotImplementedError as exc:
+            self.skipTest(f"symbolic links are unavailable: {exc}")
+        except OSError as exc:
+            if getattr(exc, "winerror", None) == 1314 or exc.errno in {
+                errno.EPERM, errno.EACCES, errno.ENOSYS, errno.ENOTSUP,
+            }:
+                self.skipTest(f"symbolic link creation is unavailable: {exc}")
+            raise
+
     def test_every_manifest_matches_declared_tools_and_is_keyless(self):
         for name, module in self.modules.items():
             manifest = json.loads((REPO / "mcp" / name / "tools_manifest.json").read_text())
@@ -83,14 +97,22 @@ class LocalMcpSuiteTest(unittest.TestCase):
         second_log = self.root / "second.log"
         second_log.write_text("another\n", encoding="utf-8")
         self.assertTrue(module.inspect_corpus(str(self.root), ["log"], max_files=1)["answer"]["truncated"])
-        outside = Path(self.temp.name).parent / f"outside-{Path(self.temp.name).name}.log"
-        try:
-            outside.write_text("outside", encoding="utf-8")
-            (self.root / "escape.log").symlink_to(outside)
-            corpus = module.inspect_corpus(str(self.root), ["log"])["answer"]
-            self.assertEqual(corpus["file_count"], 2)
-        finally:
-            outside.unlink(missing_ok=True)
+        corpus = module.inspect_corpus(str(self.root), ["log"])["answer"]
+        self.assertEqual(corpus["file_count"], 2)
+
+    def test_evidence_corpus_excludes_symlink_outside_allowed_root(self):
+        module = self.modules["icode-evidence"]
+        allowed = self.root / "allowed"
+        allowed.mkdir()
+        (allowed / "sample.log").write_text("allowed\n", encoding="utf-8")
+        outside = self.root / "outside.log"
+        outside.write_text("outside\n", encoding="utf-8")
+        self.symlink_or_skip(allowed / "escape.log", outside)
+        self.write_config("ICODE_EVIDENCE_CONFIG", {
+            "allowed_roots": [str(allowed)], "max_read_bytes": 10000, "max_corpus_files": 20,
+        })
+        corpus = module.inspect_corpus(str(allowed), ["log"])["answer"]
+        self.assertEqual(corpus["file_count"], 1)
 
     def test_evidence_timeline_orders_offsets_and_reports_source_truncation(self):
         module = self.modules["icode-evidence"]
@@ -165,7 +187,6 @@ class LocalMcpSuiteTest(unittest.TestCase):
             "fastboot flash boot boot.img\n",
             encoding="utf-8",
         )
-        (repo / "linked-build.sh").symlink_to("build.sh")
         for relative in (
             "sdk/kernel/main.c", "rtos/task.c", "one.c", "two.c", "three.c",
         ):
@@ -194,10 +215,6 @@ class LocalMcpSuiteTest(unittest.TestCase):
         risks = profile["build_entrypoints"][0]["risk_categories"]
         self.assertIn("source_or_config_mutation", risks)
         self.assertIn("device_or_flash_mutation", risks)
-        linked = next(item for item in profile["build_entrypoints"] if item["path"] == "linked-build.sh")
-        self.assertTrue(linked["symlink"])
-        self.assertEqual(linked["resolved_path"], "build.sh")
-        self.assertIn("device_or_flash_mutation", linked["risk_categories"])
         self.assertFalse(sentinel.exists())
 
         second = container / "second"
@@ -205,6 +222,50 @@ class LocalMcpSuiteTest(unittest.TestCase):
         ambiguous = module.resolve_project(str(container))
         self.assertEqual(ambiguous["error_code"], "project_resolution_failed")
         self.assertIn("多个 Git 根", ambiguous["error"])
+
+    def test_workspace_profiles_symlinked_build_entrypoint_without_execution(self):
+        module = self.modules["icode-workspace"]
+        repo = self.root / "linked-project"
+        repo.mkdir()
+        sentinel = repo / "must-not-exist"
+        (repo / "build.sh").write_text(
+            f"#!/bin/sh\ntouch {sentinel}\nfastboot flash boot boot.img\n",
+            encoding="utf-8",
+        )
+        self.symlink_or_skip(repo / "linked-build.sh", "build.sh")
+        subprocess.run(["git", "init", "-q", str(repo)], check=True)
+        subprocess.run(["git", "-C", str(repo), "add", "."], check=True)
+        self.write_config("ICODE_WORKSPACE_CONFIG", {"allowed_roots": [str(self.root)]})
+        profile = module.inspect_project_profile(str(repo))["answer"]
+        linked = next(item for item in profile["build_entrypoints"] if item["path"] == "linked-build.sh")
+        self.assertTrue(linked["symlink"])
+        self.assertEqual(linked["resolved_path"], "build.sh")
+        self.assertIn("device_or_flash_mutation", linked["risk_categories"])
+        self.assertFalse(profile["probe_policy"]["execute_build_entrypoint_for_discovery"])
+        self.assertFalse(sentinel.exists())
+
+    def test_missing_symlink_permission_keeps_ordinary_checks_active(self):
+        ordinary = (
+            "test_evidence_hash_read_timeline_and_corpus",
+            "test_workspace_resolves_nested_project_and_profiles_without_execution",
+        )
+        linked = (
+            "test_evidence_corpus_excludes_symlink_outside_allowed_root",
+            "test_workspace_profiles_symlinked_build_entrypoint_without_execution",
+        )
+        results = unittest.TestResult()
+        cases = unittest.TestSuite(type(self)(name) for name in ordinary + linked)
+        with mock.patch.object(Path, "symlink_to", side_effect=PermissionError(errno.EPERM, "unavailable")):
+            cases.run(results)
+        self.assertEqual(results.testsRun, 4)
+        self.assertEqual(results.errors, [])
+        self.assertEqual(results.failures, [])
+        self.assertEqual({case._testMethodName for case, _ in results.skipped}, set(linked))
+
+    def test_symlink_creation_does_not_hide_unexpected_io_errors(self):
+        with mock.patch.object(Path, "symlink_to", side_effect=OSError(errno.EIO, "unexpected I/O error")):
+            with self.assertRaisesRegex(OSError, "unexpected I/O error"):
+                self.symlink_or_skip(self.root / "link", "target")
 
     def test_device_fixture_is_profile_bound_and_read_only(self):
         module = self.modules["icode-device-observe"]

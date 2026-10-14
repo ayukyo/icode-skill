@@ -32,7 +32,7 @@ def run_summary(run):
     # Retain structured origins; omit the large source manifest/candidate.
     fields = ("run_id", "kind", "outcome", "candidate_id", "environment", "layer", "consumer", "scenario",
               "artifact_identity", "build_source", "baseline", "evidence", "device", "window",
-              "supersedes_run_id", "reuse", "build_provenance", "deploy_provenance", "runtime_provenance")
+              "supersedes_run_id", "reuse", "build_provenance", "deploy_provenance", "runtime_provenance", "test_summary")
     result = {key: run[key] for key in fields if key in run}
     direct = run.get("direct_test")
     if isinstance(direct, dict):
@@ -111,6 +111,10 @@ def markdown_report(report):
         reuse = run.get("reuse") or {}
         if reuse:
             lines.append(f"  - 复用来源：`{reuse.get('origin_run_id')}`；原因：{reuse.get('reason')}")
+        summary = run.get("test_summary")
+        if isinstance(summary, dict):
+            # Keep the observed counts and original report identity together.
+            lines.append("  - 测试报告：" + json.dumps(summary, ensure_ascii=True, separators=(',', ':')))
         for kind in ("build", "deploy", "runtime"):
             origin = run.get(kind + "_provenance")
             if isinstance(origin, dict):

@@ -18,6 +18,7 @@ PENDING_CONTRACT = {"required": True, "requirements_pending": True,
                     "required_layers": [], "required_consumers": [], "required_scenarios": []}
 PROVENANCE_FIELDS = ("build_provenance", "deploy_provenance", "runtime_provenance")
 _CONTROL = None
+_TEST_RESULT = None
 
 
 class EvidenceError(ValueError):
@@ -31,6 +32,15 @@ def control_module():
         _CONTROL = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(_CONTROL)
     return _CONTROL
+
+
+def test_result_module():
+    global _TEST_RESULT
+    if _TEST_RESULT is None:
+        spec = importlib.util.spec_from_file_location("test_result_summary_reader", Path(__file__).with_name("test_result_summary.py"))
+        _TEST_RESULT = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(_TEST_RESULT)
+    return _TEST_RESULT
 
 
 def enabled(meta):
@@ -152,9 +162,9 @@ def validate_source_claim(run, tracked, source_runs):
 def eligible_latest_runs(meta, ctx, *, source_runs=None):
     """Filter candidate and environment BEFORE selecting the latest cell.
 
-    A runner-only pass cannot supersede a direct executable result in that
-    same cell. Later negative evidence is kept, including failures before an
-    executable can run. A real direct execution can supersede its failure.
+    A runner-only pass cannot supersede a direct executable or report-backed
+    result in that same cell. Later negative evidence is kept, including
+    failures before an executable can run or emit a report.
     """
     latest, rejected, candidates = {}, [], []
     runs = meta.get("verification_runs") or []
@@ -188,16 +198,25 @@ def eligible_latest_runs(meta, ctx, *, source_runs=None):
         if reason is None and real_env_contract_required(meta) and run.get("layer") == "physical" and \
                 (not concrete(run.get("device")) or not concrete(run.get("scenario"))):
             reason = "concrete_device_scenario_required"
+        if reason is None:
+            try:
+                validate_test_summary(run)
+            except EvidenceError as exc:
+                reason = str(exc)
         if reason:
             rejected.append({"run_id": run.get("run_id"), "reason": reason})
         else:
             candidates.append(run)
     direct_cells = {cell(run) for run in candidates if (run.get("direct_test") or {}).get("binary_executed") is True}
+    report_cells = {cell(run) for run in candidates if "test_summary" in run}
     for run in candidates:
         key = cell(run)
         direct = run.get("direct_test") or {}
         if key in direct_cells and run.get("outcome") == "pass" and direct.get("binary_executed") is not True:
             rejected.append({"run_id": run.get("run_id"), "reason": "direct_execution_required"})
+            continue
+        if key in report_cells and run.get("outcome") == "pass" and "test_summary" not in run:
+            rejected.append({"run_id": run.get("run_id"), "reason": "test_report_required"})
             continue
         latest[key] = run
     return {"latest": latest, "rejected": rejected, "reasons": []}
@@ -365,7 +384,7 @@ def validate_reuse(run, runs, candidate_api):
     origin = next((item for item in runs if item.get("run_id") == reuse["origin_run_id"]), None)
     if origin is None or cell(origin) != cell(run) or origin.get("outcome") != "pass":
         raise EvidenceError("reuse origin must be an existing successful same-cell event")
-    for field in ("outcome", "metrics", "artifact_identity", "environment", "device", "window", "profile", "baseline_ref", *PROVENANCE_FIELDS, "direct_test"):
+    for field in ("outcome", "metrics", "artifact_identity", "environment", "device", "window", "profile", "baseline_ref", *PROVENANCE_FIELDS, "direct_test", "test_summary"):
         if origin.get(field) != run.get(field):
             raise EvidenceError("reuse origin identity/outcome/metrics/provenance mismatch: " + field)
     previous, current = origin.get("candidate"), run.get("candidate")
@@ -399,7 +418,7 @@ def validate_supersedes(run, runs):
         raise EvidenceError("supersedes_run_id must reference an existing same-cell run")
 
 
-def validate_direct(run):
+def validate_direct(run, *, strict_outcome=False):
     direct = run.get("direct_test")
     if direct is None:
         return
@@ -410,10 +429,24 @@ def validate_direct(run):
     if direct["binary_executed"]:
         if not direct["target_built"] or type(code) is not int:
             raise EvidenceError("executed binary requires built target and observed integer exit code")
-        if run.get("outcome") == "pass" and code != 0:
-            raise EvidenceError("runner pass cannot override a failing directly executed binary")
+        # Old no-report events allowed inconclusive with a nonzero exit. Keep
+        # them readable; new writes and report-backed evidence cannot do so.
+        strict = strict_outcome or "test_summary" in run
+        outcome = run.get("outcome")
+        if code != 0 and (outcome == "pass" or strict and outcome != "fail"):
+            raise EvidenceError("nonzero directly executed binary exit requires outcome=fail")
     elif code is not None:
         raise EvidenceError("unexecuted binary cannot claim an exit code")
+
+
+def validate_test_summary(run):
+    if "test_summary" not in run:
+        return  # Older evidence retains its existing untracked count boundary.
+    api = test_result_module()
+    try:
+        api.validate_summary(run["test_summary"], run.get("outcome"))
+    except api.ReportError as exc:
+        raise EvidenceError(str(exc)) from exc
 
 
 def safe_directory(raw, workspace):
@@ -639,6 +672,7 @@ def event_issues(events, meta, candidate_api):
             validate_supersedes(run, runs)
             validate_reuse(run, runs, candidate_api)
             validate_direct(run)
+            validate_test_summary(run)
             if run.get("candidate") is not None:
                 historical_meta = dict(meta, candidate_tracking={"mode": "enabled"})
                 validate_provenance(run, historical_meta, events[:position], run["candidate"]["identity"]["checkout_realpath"], candidate_api, check_files=False)

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import importlib.util
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -16,6 +17,25 @@ from local_mcp_common import allowed_roots, expand_path, load_config, resolve_al
 
 
 class LocalMcpPathsTest(unittest.TestCase):
+    def test_fixed_command_does_not_inherit_open_protocol_stdin(self):
+        script = (
+            f"import sys; sys.path.insert(0, {str(REPO / 'mcp' / '_lib')!r}); "
+            "from local_mcp_common import run_command; "
+            "result = run_command([sys.executable, '-c', 'import sys; print(repr(sys.stdin.read()))'], timeout=2); "
+            "assert result['returncode'] == 0 and result['stdout'].strip() == \"''\", result"
+        )
+        # Keep the caller's protocol pipe open while the fixed child runs.
+        # communicate() would close stdin and conceal the inheritance defect.
+        with subprocess.Popen([sys.executable, "-B", "-c", script], stdin=subprocess.PIPE,
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE) as process:
+            try:
+                process.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait()
+                self.fail("fixed command waited for the caller's protocol stdin")
+            self.assertEqual(process.returncode, 0, process.stderr.read().decode("utf-8", errors="replace"))
+
     @staticmethod
     def load_server(name):
         spec = importlib.util.spec_from_file_location("path_test_" + name.replace("-", "_"), REPO / "mcp" / name / "server.py")
@@ -75,7 +95,7 @@ class LocalMcpPathsTest(unittest.TestCase):
                 self.assertEqual(expand_path(folder), Path(folder).resolve())
                 self.assertEqual(expand_path("~/docs"), (Path.home() / "docs").resolve())
 
-    def test_default_allowed_root_admits_home_and_rejects_escape(self):
+    def test_explicit_home_allowed_root_admits_home_and_rejects_escape(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder).resolve()
             home = root / "home"
@@ -85,12 +105,13 @@ class LocalMcpPathsTest(unittest.TestCase):
             outside.write_text("outside", encoding="utf-8")
             with patch.dict(os.environ), patch("local_mcp_common.Path.home", return_value=home):
                 os.environ.pop("HOME", None)
-                self.assertEqual(allowed_roots({}), [home])
-                self.assertEqual(resolve_allowed_path("$HOME/inside.txt", {}), home / "inside.txt")
+                config = {"allowed_roots": ["$HOME"]}
+                self.assertEqual(allowed_roots(config), [home])
+                self.assertEqual(resolve_allowed_path("$HOME/inside.txt", config), home / "inside.txt")
                 with self.assertRaises(PermissionError):
-                    resolve_allowed_path("$HOME/../outside.txt", {})
+                    resolve_allowed_path("$HOME/../outside.txt", config)
                 with self.assertRaises(PermissionError):
-                    resolve_allowed_path(str(outside), {})
+                    resolve_allowed_path(str(outside), config)
 
     def test_config_environment_path_uses_same_home_resolution(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -106,7 +127,7 @@ class LocalMcpPathsTest(unittest.TestCase):
         with patch.dict(os.environ), patch("local_mcp_common.Path.home", side_effect=RuntimeError("no home")):
             os.environ.pop("HOME", None)
             try:
-                allowed_roots({})
+                allowed_roots({"allowed_roots": ["$HOME"]})
             except Exception as exc:
                 self.assertIsInstance(exc, ValueError)
             else:
@@ -116,7 +137,7 @@ class LocalMcpPathsTest(unittest.TestCase):
         with patch.dict(os.environ), patch("local_mcp_common.Path.home", return_value=Path(".")):
             os.environ.pop("HOME", None)
             with self.assertRaises(ValueError):
-                allowed_roots({})
+                allowed_roots({"allowed_roots": ["$HOME"]})
 
     @unittest.skipUnless(os.name == "posix", "POSIX account lookup safety regression")
     def test_empty_home_with_unknown_system_account_fails_with_config_error(self):

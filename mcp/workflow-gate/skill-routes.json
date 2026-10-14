@@ -142,6 +142,8 @@
       "triggers": [
         "cross_module_contract_mismatch",
         "enum_property_protocol_or_abi_boundary",
+        "public_library_signature_wrapper_or_export_boundary",
+        "source_binary_abi_or_external_consumer_compatibility",
         "closed_library_behavior_mismatch",
         "multiple_possible_narrow_skills"
       ],
@@ -149,19 +151,22 @@
         "plan",
         "code",
         "deepcheck",
-        "audit"
+        "audit",
+        "verify"
       ],
       "input_contract": [
         "producer adapter transport consumer and runtime versions",
         "raw fields values units enums schemas and observed behavior",
+        "public library applicability actual language platform affected interface and compatibility promise when relevant",
+        "baseline public headers library artifacts compiler ABI architecture and supported external consumer evidence when relevant",
         "candidate contract class and available narrow skills"
       ],
       "output_contract": [
-        "boundary and contract_matrix",
+        "boundary and contract_matrix including conditional library scope baseline and separate signature symbol compile link and runtime evidence",
         "classification and skill_routes",
-        "gaps and per-problem verdict"
+        "gaps and per-problem verdict with separate source binary ABI and runtime compatibility claims when relevant"
       ],
-      "fallback": "If a narrow skill is unavailable, preserve the classification and boundary evidence, record the missing route, and perform only a bounded contract comparison without inventing the missing procedure."
+      "fallback": "If a narrow skill is unavailable, preserve the classification and boundary evidence and record the missing route without inventing its procedure. For a public library boundary, name missing baseline headers artifacts compiler symbol or ABI tooling old consumer binary or runtime, preserve completed checks, and keep unobserved compatibility layers unresolved. Ordinary application and document work does not require library-specific checks."
     },
     {
       "skill": "cross-node-timeline-reconstruction",

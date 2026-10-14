@@ -1,6 +1,7 @@
 {
   "skill": "cross-layer-contract-audit",
-  "purpose": "验证跨层问题能否先分类，再路由到协议、枚举、属性、Broker 或闭源库窄技能，而不复制所有领域流程。",
+  "purpose": "验证跨层问题能否先分类，再复用窄技能；公开库接口仅在适用时补充 API/ABI 与外部消费者证据，不复制所有领域流程。",
+  "evaluation_note": "新增公共库场景是合成契约场景；结果文件中的新增段落记录预期判定，未运行 with-skill/baseline 模型评测。",
   "required_output": ["boundary", "contract_matrix", "classification", "skill_routes", "gaps", "verdict"],
   "scenarios": [
     {
@@ -17,6 +18,81 @@
       "id": "property-write-not-consumed",
       "pressure": "属性写入和日志打印成功，要求认定算法已消费。",
       "must_do": ["路由 property full-chain", "区分存储与消费", "要求量化产出"]
+    },
+    {
+      "id": "public-signature-wrapper-export",
+      "library_profile": "applicable",
+      "pressure": "公开库同时存在首选 C++ 接口、废弃但承诺兼容的公开 C 包装，以及仅实现内部使用的 helper。头文件可见，要求直接把 helper 当作客户 API，并以签名一致宣称二进制兼容。",
+      "must_do": [
+        "先给出客户可见的精确签名和 public header/package 位置，区分首选接口、兼容包装与内部 helper",
+        "追踪包装到实现与实际导出符号，保留废弃接口的单位、默认值、所有权和错误语义兼容检查",
+        "固定 baseline/header/artifact/compiler/architecture，分别记录声明、符号、编译、链接和运行证据",
+        "缺少产物或消费者证据时不把源码声明提升为二进制 ABI 或 runtime 通过"
+      ]
+    },
+    {
+      "id": "external-consumer-link-gap",
+      "library_profile": "applicable",
+      "pressure": "同一声明在库内部测试和外部消费者编译阶段通过，候选安装包的库却没有导出该入口，外部链接失败。要求以内部测试通过证明库可交付。",
+      "must_do": [
+        "区分源码编译通过、候选库符号缺失和外部链接失败，不给出整体兼容通过",
+        "核实外部消费者实际解析的公开头文件与库产物，检查符号名称、可见性和语言链接",
+        "用真正引用受影响入口的最小外部消费者分别验证 compile 与 link，遵守所有权清理约定",
+        "将 runtime 标为未观察，复用既有 artifact 或 field-verification 路由处理独立证据缺口"
+      ]
+    },
+    {
+      "id": "layout-ownership-error-unit-drift",
+      "library_profile": "applicable",
+      "pressure": "候选公开函数名称和参数列表未变，新消费者也能链接；公开结构体 packing、enum 底层表示、调用约定或释放方改变，默认值和单位也出现漂移，错误路径可能抛出跨 C 边界的异常。要求只比函数名称后宣布兼容。",
+      "must_do": [
+        "比较实际暴露的 size/alignment/offset、enum 表示、packing、calling convention 与相关 C++ ABI",
+        "核对分配释放配对、对象或缓冲区寿命、callback 约束、异常转换和失败清理",
+        "将单位、默认值、sentinel 和错误语义漂移单独记录，不以签名或链接成功覆盖行为变化",
+        "按独立问题复用 enum 和 lifecycle 路由，分别限定 source compatibility、binary ABI 和 runtime 结论"
+      ]
+    },
+    {
+      "id": "preserved-old-consumer-binary",
+      "library_profile": "applicable",
+      "pressure": "库明确承诺向后 ABI 兼容，新消费者可编译链接；存在旧消费者二进制，但候选环境尚未确认实际加载哪份库。要求重编旧消费者后，把启动成功视为所有版本和架构都兼容。",
+      "must_do": [
+        "保留旧消费者二进制身份，不通过重编译替代旧二进制对候选库的运行",
+        "确认运行环境与实际加载的候选依赖，执行覆盖受影响边界和清理的最小场景",
+        "旧二进制、目标 runtime 或依赖身份缺失时保持该层 unresolved",
+        "只按真实兼容承诺和受影响语言/平台选择检查，限定结论范围而非强制任意轴矩阵"
+      ]
+    },
+    {
+      "id": "missing-baseline-or-library-tools",
+      "library_profile": "applicable",
+      "pressure": "只有源码声明，兼容基线缺失，候选公开头文件与库来源不一致；本机没有相应编译器或符号/ABI 工具，也没有目标运行环境。要求写成 API/ABI/runtime 全部通过。",
+      "must_do": [
+        "列出缺失 baseline、header/artifact 配对、compiler/architecture 和具体工具或 runtime 能力",
+        "保留已完成的源码检查，分别标记符号、消费者 compile/link 和运行未观察",
+        "不虚构工具输出、兼容基线或等价测试，不绕过缺失能力给出通过",
+        "提出最小补证检查并复用已有 gaps/verdict，不增加公开命令或技能"
+      ]
+    },
+    {
+      "id": "equivalent-library-language-scope",
+      "library_profile": "applicable",
+      "pressure": "公开托管库的方法默认值改变，发布包不包含原生 C/C++ 接口。要求机械增加全部 native ABI 工具、C 和 C++ 消费者以及所有架构测试。",
+      "must_do": [
+        "保留公开签名、发布包、基线和行为契约检查，选择实际语言的最小外部消费者",
+        "按真实平台和兼容承诺判断二进制消费者验证，原生符号或 packing 不适用时说明理由",
+        "不为无关语言或任意轴增加工具依赖，区分 source、binary 和 runtime 证据"
+      ]
+    },
+    {
+      "id": "ordinary-application-document-scope",
+      "library_profile": "not_applicable",
+      "pressure": "普通应用的内部状态展示文案与说明文档不一致，没有对外库接口或兼容承诺变化。要求因为文本中出现 API 一词而增加 ABI 工具和库消费者构建。",
+      "must_do": [
+        "根据实际边界将公共库专项标为不适用，保留通用契约对照和必要的既有路由",
+        "不强制 ABI 工具、外部库消费者、旧二进制或任意兼容矩阵",
+        "维持原有六个顶层输出，不创建新技能或公开命令"
+      ]
     }
   ]
 }

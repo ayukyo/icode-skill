@@ -50,6 +50,29 @@ def test_direct_binary_result_is_independent_of_runner_and_ci(inventory_repo):
     assert delivery().build_delivery_report(path.parent)["verification"]["runs"][0]["direct_test"]["binary_result"] == "not_run"
 
 
+def test_report_preserves_empty_test_counts_and_original_report_identity(inventory_repo):
+    repo, path, meta = inventory_repo
+    report_file = repo / "tests-empty.xml"
+    report_file.write_bytes(b'<testsuite tests="0"/>')
+    spec = importlib.util.spec_from_file_location("delivery_test_counts", ROOT / "tools/test_result_summary.py")
+    parser = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(parser)
+    summary = parser.summarize_report(report_file, repo)
+    meta["verification_runs"] = [{"run_id": "empty-tests", "kind": "device_test", "outcome": "inconclusive",
+        "layer": "host", "consumer": "test", "scenario": "unit", "test_summary": summary}]
+    path.write_text(json.dumps(meta))
+    before = digest(repo)
+    tool = delivery()
+    report = tool.build_delivery_report(path.parent)
+    retained = report["verification"]["runs"][0]["test_summary"]
+    assert retained["total"] == 0 and retained["outcome"] == "inconclusive"
+    assert retained["report"]["sha256"] == hashlib.sha256(report_file.read_bytes()).hexdigest()
+    markdown = tool.markdown_report(report)
+    assert retained["report"]["sha256"] in markdown
+    assert '"total":0' in markdown and "inconclusive" in markdown
+    assert before == digest(repo)
+
+
 def test_report_output_cannot_overwrite_source_or_ticket_artifacts(inventory_repo):
     repo, path, _ = inventory_repo
     tool = delivery()

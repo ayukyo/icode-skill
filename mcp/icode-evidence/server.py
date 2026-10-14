@@ -16,6 +16,7 @@ if str(LIB_DIR) not in sys.path:
 
 from local_mcp_common import (  # noqa: E402
     READ_ONLY_ANNOTATIONS,
+    LocalPathPolicyError,
     describe,
     fail,
     load_config,
@@ -28,7 +29,7 @@ from mcp.server.fastmcp import FastMCP  # noqa: E402
 
 SERVER_NAME = "icode-evidence"
 TOOLS = ["describe_capabilities", "inspect_file", "read_evidence", "verify_digest", "build_timeline", "inspect_corpus"]
-DEFAULTS = {"allowed_roots": ["$HOME"], "max_read_bytes": 1048576, "max_corpus_files": 2000}
+DEFAULTS = {"allowed_roots": None, "max_read_bytes": 1048576, "max_corpus_files": 2000}
 mcp = FastMCP(SERVER_NAME)
 
 
@@ -38,7 +39,10 @@ def _config() -> dict[str, Any]:
 
 @mcp.tool(annotations=READ_ONLY_ANNOTATIONS)
 def describe_capabilities() -> dict[str, Any]:
-    return describe(SERVER_NAME, TOOLS, "文件取证、摘要校验、日志时间线与文档语料清单")
+    try:
+        return describe(SERVER_NAME, TOOLS, "文件取证、摘要校验、日志时间线与文档语料清单", config=_config(), config_env="ICODE_EVIDENCE_CONFIG")
+    except (OSError, ValueError) as exc:
+        return fail("config_failed", str(exc), exc=exc, config_env="ICODE_EVIDENCE_CONFIG")
 
 
 @mcp.tool(annotations=READ_ONLY_ANNOTATIONS)
@@ -58,7 +62,7 @@ def inspect_file(path: str) -> dict[str, Any]:
             answer["sha256"] = sha256_file(target)[0]
         return ok(answer)
     except (OSError, ValueError, PermissionError) as exc:
-        return fail("inspect_failed", str(exc))
+        return fail("inspect_failed", str(exc), exc=exc, config_env="ICODE_EVIDENCE_CONFIG")
 
 
 @mcp.tool(annotations=READ_ONLY_ANNOTATIONS)
@@ -78,7 +82,7 @@ def read_evidence(path: str, start_line: int = 1, max_lines: int = 200) -> dict[
         window.update({"path": str(target), "sha256": digest, "source_ref": f"{target}:{start_line}"})
         return ok(window)
     except (OSError, ValueError, PermissionError) as exc:
-        return fail("read_failed", str(exc))
+        return fail("read_failed", str(exc), exc=exc, config_env="ICODE_EVIDENCE_CONFIG")
 
 
 @mcp.tool(annotations=READ_ONLY_ANNOTATIONS)
@@ -91,7 +95,7 @@ def verify_digest(path: str, sha256: str) -> dict[str, Any]:
             return fail("invalid_digest", "sha256 必须是 64 位十六进制字符串")
         return ok({"path": str(target), "expected": expected, "actual": actual, "matches": actual == expected})
     except (OSError, ValueError, PermissionError) as exc:
-        return fail("digest_failed", str(exc))
+        return fail("digest_failed", str(exc), exc=exc, config_env="ICODE_EVIDENCE_CONFIG")
 
 
 def _timestamp_key(value: str) -> tuple[int, str]:
@@ -140,7 +144,7 @@ def build_timeline(paths: list[str], timestamp_regex: str = r"(?P<timestamp>\d{4
             "truncated": truncated,
         })
     except (OSError, ValueError, PermissionError, re.error) as exc:
-        return fail("timeline_failed", str(exc))
+        return fail("timeline_failed", str(exc), exc=exc, config_env="ICODE_EVIDENCE_CONFIG")
 
 
 @mcp.tool(annotations=READ_ONLY_ANNOTATIONS)
@@ -154,10 +158,17 @@ def inspect_corpus(root: str, extensions: list[str] | None = None, max_files: in
         suffixes = {item.lower() if item.startswith(".") else f".{item.lower()}" for item in (extensions or ["md", "txt", "pdf", "docx", "pptx", "xlsx", "csv", "log"])}
         files: list[dict[str, Any]] = []
         truncated = False
+        skipped_sensitive = 0
+        skipped_policy = 0
         for candidate in sorted(base.rglob("*")):
             if candidate.is_symlink() or not candidate.is_file() or candidate.suffix.lower() not in suffixes:
                 continue
-            resolved = candidate.resolve()
+            try:
+                resolved = resolve_allowed_path(candidate, config)
+            except LocalPathPolicyError as exc:
+                skipped_policy += 1
+                skipped_sensitive += int(exc.diagnostic["kind"] == "sensitive_path")
+                continue
             if resolved != base and base not in resolved.parents:
                 continue
             if len(files) >= limit:
@@ -166,9 +177,9 @@ def inspect_corpus(root: str, extensions: list[str] | None = None, max_files: in
             digest, _, _ = sha256_file(resolved)
             files.append({"path": str(resolved), "relative_path": str(candidate.relative_to(base)), "size": resolved.stat().st_size, "sha256": digest})
         manifest_digest = __import__("hashlib").sha256(json.dumps(files, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
-        return ok({"root": str(base), "files": files, "file_count": len(files), "manifest_sha256": manifest_digest, "truncated": truncated})
+        return ok({"root": str(base), "files": files, "file_count": len(files), "manifest_sha256": manifest_digest, "truncated": truncated, "skipped_sensitive": skipped_sensitive, "skipped_policy": skipped_policy})
     except (OSError, ValueError, PermissionError) as exc:
-        return fail("corpus_failed", str(exc))
+        return fail("corpus_failed", str(exc), exc=exc, config_env="ICODE_EVIDENCE_CONFIG")
 
 
 if __name__ == "__main__":
