@@ -79,7 +79,9 @@ def default_runtime_root() -> Path:
 
 
 def venv_python(runtime: Path) -> Path:
-    return runtime / ("Scripts/python.exe" if os.name == "nt" else "venv/bin/python")
+    # The venv is always created at <runtime>/venv (see install()); on Windows
+    # its interpreter lives under venv/Scripts, on POSIX under venv/bin.
+    return runtime / "venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
 
 
 def locked_versions() -> dict[str, str]:

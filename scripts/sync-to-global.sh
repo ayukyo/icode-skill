@@ -501,6 +501,7 @@ import json
 import os
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 source = Path(sys.argv[1])
@@ -524,7 +525,19 @@ def atomic_publish_bytes(path: Path, payload: bytes, mode: int) -> None:
             stream.flush()
             os.fsync(stream.fileno())
         os.chmod(temporary, mode)
-        os.replace(temporary, path)
+        # Windows 实时防护(Defender/AV)可能短暂锁定目标文件,使 os.replace
+        # 抛 PermissionError (WinError 5)。与 retry_move_dir 同思路:有界
+        # 延时重试(约 72s)兜底瞬时锁,重试耗尽仍失败才真正报错。
+        last_error = None
+        for attempt in range(24):
+            try:
+                os.replace(temporary, path)
+                break
+            except PermissionError as exc:
+                last_error = exc
+                time.sleep(3)
+        else:
+            raise last_error
         # 目录 fsync 让 rename 元数据持久化。Windows 上对目录的
         # FlushFileBuffers / open(O_RDONLY) 可能抛 PermissionError
         # (Errno 13);NTFS 不保证目录 entry fsync 的语义,但数据已经
