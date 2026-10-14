@@ -46,7 +46,7 @@ class VerificationTests(unittest.TestCase):
 
     def call(self, *args, ok=True):
         result = subprocess.run([sys.executable, "-B", str(ROOT / "tools/icode_control.py"), *map(str, args)],
-                                capture_output=True, text=True, timeout=30)
+                                capture_output=True, text=True, timeout=30, encoding="utf-8")
         self.assertEqual(result.returncode == 0, ok, (result.stdout, result.stderr))
         return json.loads(result.stdout) if result.stdout.strip().startswith("{") else {}
 

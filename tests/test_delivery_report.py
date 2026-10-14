@@ -162,7 +162,7 @@ def test_markdown_output_contains_independent_direct_and_provenance_facts(invent
     proc = subprocess.run([sys.executable, "-B", str(ROOT / "tools/icode_delivery.py"), "--dir", str(path.parent),
                            "--output", str(output), "--markdown", str(markdown)], capture_output=True, text=True)
     assert proc.returncode == 0, proc.stdout + proc.stderr
-    content = markdown.read_text()
+    content = markdown.read_text(encoding="utf-8")
     assert all(value in content for value in ("Target built", "Binary executed", "original-source", "artifact-sha", "SN=fixture", "source.log", "not_run"))
 
 
