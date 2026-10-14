@@ -24,13 +24,15 @@ class VerificationTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.repo = Path(self.temp.name) / "repo"
         self.repo.mkdir()
+        self.repo = self.repo.resolve(strict=True)
         self.git("init", "-q")
+        self.git("config", "core.autocrlf", "false")
         self.git("config", "user.email", "test@example.invalid")
         self.git("config", "user.name", "Evidence Test")
-        (self.repo / ".gitignore").write_text(".icode_output/\nbuild/\n")
-        (self.repo / "source.py").write_text("value = 1\n")
-        (self.repo / "README.md").write_text("Initial documentation\n")
-        (self.repo / "cookie_reader.py").write_text("value = 0\n")
+        (self.repo / ".gitignore").write_text(".icode_output/\nbuild/\n", encoding="utf-8", newline="\n")
+        (self.repo / "source.py").write_text("value = 1\n", encoding="utf-8", newline="\n")
+        (self.repo / "README.md").write_text("Initial documentation\n", encoding="utf-8", newline="\n")
+        (self.repo / "cookie_reader.py").write_text("value = 0\n", encoding="utf-8", newline="\n")
         self.git("add", ".")
         self.git("commit", "-qm", "base")
         self.ticket = self.repo / ".icode_output/.icode_output_1"
@@ -374,23 +376,25 @@ class VerificationTests(unittest.TestCase):
 
     def test_reproducible_compiled_artifact_new_ctime_old_mtime_is_fresh(self):
         source = self.repo / "hello.c"
-        source.write_text("int main(void) { return 0; }\n")
+        source.write_text("int main(void) { return 0; }\n", encoding="utf-8", newline="\n")
         build = self.repo / "build"
         build.mkdir()
-        parameters = {"configure_command": ["cc", "--version"], "build_command": ["cc", "hello.c", "-o", "build/hello"]}
+        binary = build / ("hello.exe" if os.name == "nt" else "hello")
+        binary_relative = binary.relative_to(self.repo).as_posix()
+        parameters = {"configure_command": ["cc", "--version"], "build_command": ["cc", "hello.c", "-o", binary_relative]}
         candidate = self.snapshot()["candidate_id"]
         start = self.call("build-start", "--dir", self.ticket, "--build-dir", build, "--candidate-id", candidate,
                           "--parameters-json", json.dumps(parameters), "--request-id", "compile-start")
         self.assertEqual(subprocess.run(["cc", "--version"], capture_output=True).returncode, 0)
-        compiled = subprocess.run(["cc", str(source), "-o", str(build / "hello")], capture_output=True, text=True)
+        compiled = subprocess.run(["cc", str(source), "-o", str(binary)], capture_output=True, text=True)
         self.assertEqual(compiled.returncode, 0, compiled.stderr)
-        self.assertEqual(subprocess.run([str(build / "hello")]).returncode, 0)
-        os.utime(build / "hello", (1, 1))
+        self.assertEqual(subprocess.run([str(binary)]).returncode, 0)
+        os.utime(binary, (1, 1))
         receipt = self.meta()["extensions"]["verification"]["build_starts"][-1]
-        self.assertLess((build / "hello").stat().st_mtime_ns, receipt["observed_ns"])
-        self.assertGreaterEqual((build / "hello").stat().st_ctime_ns, receipt["observed_ns"])
-        sha = hashlib.sha256((build / "hello").read_bytes()).hexdigest()
-        provenance = dict(self.binary_provenance(start, [{"path": "build/hello", "sha256": sha}]), **parameters, compiler="cc")
+        self.assertLess(binary.stat().st_mtime_ns, receipt["observed_ns"])
+        self.assertGreaterEqual(binary.stat().st_ctime_ns, receipt["observed_ns"])
+        sha = hashlib.sha256(binary.read_bytes()).hexdigest()
+        provenance = dict(self.binary_provenance(start, [{"path": binary_relative, "sha256": sha}]), **parameters, compiler="cc")
         self.record_artifacts(provenance, request="reproducible-artifact")
 
     def test_artifact_byte_budget_rejects_before_append_and_can_be_explicitly_raised(self):
