@@ -13,6 +13,7 @@
 
 > **共享技能路由**：部署/监听前读取 [references/skill_routing.md](../references/skill_routing.md)，按设备、产物、多仓和消费者场景加载验证类技能。
 > **证据习惯真源**：验证 baseline、layer/consumer/scenario 记录和 verified 边界统一执行 [references/evidence_and_verification.md](../references/evidence_and_verification.md)。
+> **条件硬门**：`type=serial`、`evidence_contract`、视觉目标或阶段计划命中时，先完整读取 [串口、证据与阶段验收真源](../references/serial_evidence_stages.md)。串口 listen 零 TX，exec 另需真实受控 operation；原始证据通过既有 record-verification 的互斥 bundle 参数登记。设备阶段、构建和恢复均重核阶段资格，多帧实际查看及用户确认不能互相替代。
 > **最终候选绑定**：`candidate_tracking.mode=enabled` 时，每次记录必须显式提供 `--candidate-id` 与 `--environment host|physical|simulated|unknown`；完整快照由控制面核验后保存。`baseline_ref` 仍表示 embedded/camera 合同摘要。旧未启用工单保持原语义，查询不自动迁移。
 > **嵌入式/摄像头 profile**：`device_config.verification_profile` 或工单内 `embedded_baseline.json` 命中时，先用 `tools/embedded_profile.py` 校验并生成只读场景计划，再按同一个 verify 入口执行；不新增公开命令。
 > **工程接入门**：读取 [references/project_intake.md](../references/project_intake.md)，验证必须绑定实际 Git 根、活动构建配置与制品身份；静态画像不运行构建/烧录命令。Windows 经 WSL 构建时先固定发行版、Linux 执行根与路径映射，不默认工程的 `build/`，不把 Windows 路径直接传给 Linux 命令。
@@ -96,7 +97,8 @@ python3 tools/icode_control.py build-start --dir "{ICODE_OUT_DIR}" \
      --baseline "{BASELINE_MANIFEST}"
    python3 tools/embedded_profile.py plan \
      --baseline "{BASELINE_MANIFEST}" \
-     --output "{ICODE_OUT_DIR}/embedded_verification_plan.json"
+     --output "{ICODE_OUT_DIR}/embedded_verification_plan.json" \
+     --markdown "{ICODE_OUT_DIR}/embedded_verification_plan.md"
    ```
 
    profile 工具只解释数据并生成计划，不连接设备、执行输入字符串或自动注入故障。
@@ -150,6 +152,7 @@ python3 tools/icode_control.py build-start --dir "{ICODE_OUT_DIR}" \
      [--baseline-ref <sha256:与合同完全一致的64位小写十六进制摘要>] \
      [--metrics-json '{"fps":29.7}'] \
      [--test-report <已取得的本轮JUnit-XML路径>] \
+     [--evidence-bundle <本地证据包路径> | --evidence-bundle-json <path和sha256引用JSON>] \
      [--note <text>] [--request-id <key>]
    ```
 6. **输出**：验证结论（三态）+ 证据 + 是否待后续验证；**明确标注「本次验证通过 ≠ delivery_verdict=verified」**（后者由终审按交付分层判定）

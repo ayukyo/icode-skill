@@ -1,0 +1,29 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "stage-program.schema.json",
+  "title": "ICODE authorized stage program v1",
+  "description": "有序阶段计划；动作名称仅为声明数据。动作授权覆盖、阶段顺序、工单绑定和验收回执由控制面阶段 helper 验证。",
+  "type": "object",
+  "required": ["schema_version", "program_id", "project_root", "authorized_actions", "stages"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "type": "integer", "const": 1 },
+    "program_id": { "type": "string", "minLength": 1 },
+    "project_root": { "type": "string", "minLength": 1 },
+    "authorized_actions": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "stages": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["id", "title", "required_actions"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "title": { "type": "string", "minLength": 1 },
+          "required_actions": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+        }
+      }
+    }
+  }
+}

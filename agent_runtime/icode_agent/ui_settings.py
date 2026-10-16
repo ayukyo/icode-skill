@@ -79,11 +79,15 @@ class UISettingsStore:
                 os.fsync(handle.fileno())
             os.chmod(temp, 0o600)
             os.replace(temp, self.path)
-            directory_fd = os.open(str(self.path.parent), os.O_RDONLY)
-            try:
-                os.fsync(directory_fd)
-            finally:
-                os.close(directory_fd)
+            # Windows does not support opening a directory through os.open.
+            # The file was flushed before the atomic replacement; retain the
+            # additional directory durability barrier on POSIX platforms.
+            if os.name != "nt":
+                directory_fd = os.open(str(self.path.parent), os.O_RDONLY)
+                try:
+                    os.fsync(directory_fd)
+                finally:
+                    os.close(directory_fd)
         except OSError as exc:
             try:
                 temp.unlink(missing_ok=True)

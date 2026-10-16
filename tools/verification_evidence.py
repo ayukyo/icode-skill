@@ -19,10 +19,43 @@ PENDING_CONTRACT = {"required": True, "requirements_pending": True,
 PROVENANCE_FIELDS = ("build_provenance", "deploy_provenance", "runtime_provenance")
 _CONTROL = None
 _TEST_RESULT = None
+_BUNDLE = None
 
 
 class EvidenceError(ValueError):
     pass
+
+
+def bundle_module():
+    global _BUNDLE
+    if _BUNDLE is None:
+        spec = importlib.util.spec_from_file_location("raw_verification_evidence", Path(__file__).with_name("evidence_bundle.py"))
+        _BUNDLE = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(_BUNDLE)
+    return _BUNDLE
+
+
+def validate_bundle(run, meta, evidence_root, *, review_validator=None):
+    """Re-read raw bytes on every current qualification; legacy has no new gate.
+
+    Negative outcomes remain eligible even if no complete evidence was captured,
+    so missing artifacts cannot resurrect an earlier pass in the same cell.
+    """
+    contract = meta.get("verification_contract")
+    if not isinstance(contract, dict) or "evidence_contract" not in contract:
+        return None
+    if run.get("outcome") != "pass" and run.get("evidence_bundle") is None:
+        return None
+    api = bundle_module()
+    stage = ((meta.get("extensions") or {}).get("stage_binding") or {}).get("stage_id")
+    bound_run = dict(run, stage_id=stage)
+    try:
+        return api.validate_bundle(run.get("evidence_bundle"), contract, bound_run,
+                                   ticket_id=meta.get("ticket_id"), evidence_root=evidence_root,
+                                   review_validator=review_validator)
+    except (ValueError, OSError, TypeError, KeyError, RecursionError) as exc:
+        detail = str(exc)
+        raise EvidenceError(detail if detail.startswith("evidence_bundle:") else "evidence_bundle: " + detail) from exc
 
 
 def control_module():
@@ -148,7 +181,11 @@ def _blocked_selection(exc):
 def context(out_dir, meta, *, capture=None, verify=None, candidate_api=None,
             git_provider=None, require_git_provider=False):
     """Read-only context. Enabled tickets without a live root fail closed."""
-    result = {"enabled": enabled(meta), "current": None, "events": [], "reasons": [], "candidate_api": candidate_api}
+    result = {"enabled": enabled(meta), "current": None, "events": [], "reasons": [], "candidate_api": candidate_api,
+              "evidence_root": str(out_dir) if out_dir is not None else None}
+    if out_dir is not None:
+        result["review_validator"] = protected_review_validator(out_dir, meta, verify=verify,
+            git_provider=git_provider, require_git_provider=require_git_provider)
     if _provider_requested(git_provider, require_git_provider):
         result.update(git_provider=git_provider, require_git_provider=require_git_provider)
         try:
@@ -196,6 +233,23 @@ def context(out_dir, meta, *, capture=None, verify=None, candidate_api=None,
         result["reasons"] = ["candidate_capture_unavailable"]
         result["detail"] = str(exc)
     return result
+
+
+def protected_review_validator(out_dir, meta, *, verify=None, git_provider=None, require_git_provider=False):
+    """Receipt JSON is usable only after validating its dedicated ledger mirror."""
+    def validate(ref):
+        api = control_module()
+        current = api.load_metadata(out_dir)
+        if api.stage_module().protected_values(current) != api.stage_module().protected_values(meta):
+            raise EvidenceError("trusted review metadata changed")
+        check = verify or api.verify_event_chain
+        access = ({"git_provider": git_provider, "require_git_provider": require_git_provider}
+                  if _provider_requested(git_provider, require_git_provider) else {})
+        _events, issues = check(out_dir, current, **access)
+        if issues:
+            raise EvidenceError("trusted review event chain invalid")
+        return api.stage_module().review_validator(current)(ref)
+    return validate
 
 
 def resolve_candidate(candidate_id, meta, events, live, candidate_api):
@@ -258,6 +312,7 @@ def eligible_latest_runs(meta, ctx, *, source_runs=None, git_provider=None, requ
     failures before an executable can run or emit a report.
     """
     latest, rejected, candidates = {}, [], []
+    bundle_failures, positions = {}, {}
     try:
         _context_guard(ctx, git_provider, require_git_provider)
     except EvidenceError as exc:
@@ -268,9 +323,10 @@ def eligible_latest_runs(meta, ctx, *, source_runs=None, git_provider=None, requ
     if ctx["enabled"] and ctx["reasons"]:
         return {"latest": {}, "rejected": [], "reasons": list(ctx["reasons"])}
     source_runs = event_runs(ctx.get("events") or []) if source_runs is None else source_runs
-    for run in runs:
+    for position, run in enumerate(runs):
         if not isinstance(run, dict):
             continue
+        positions[id(run)] = position
         reason = None
         if ctx["enabled"]:
             snapshot = run.get("candidate")
@@ -302,6 +358,14 @@ def eligible_latest_runs(meta, ctx, *, source_runs=None, git_provider=None, requ
         if reason is None:
             try:
                 validate_test_summary(run)
+                if run.get("outcome") == "pass":
+                    try:
+                        validate_bundle(run, meta, ctx.get("evidence_root"), review_validator=ctx.get("review_validator"))
+                    except EvidenceError:
+                        # Reject this pass and block older same-cell passes.
+                        # A later valid observation can still close the cell.
+                        bundle_failures[cell(run)] = position
+                        raise
             except EvidenceError as exc:
                 reason = str(exc)
         if reason:
@@ -320,6 +384,9 @@ def eligible_latest_runs(meta, ctx, *, source_runs=None, git_provider=None, requ
             rejected.append({"run_id": run.get("run_id"), "reason": "test_report_required"})
             continue
         latest[key] = run
+    for key, position in bundle_failures.items():
+        if key in latest and positions[id(latest[key])] <= position:
+            del latest[key]
     try:
         _context_guard(ctx, git_provider, require_git_provider)
     except EvidenceError as exc:
@@ -376,11 +443,16 @@ def metric_settings(contract, cells):
     return profile, baseline_ref, metrics
 
 
-def unit_state(run, profile="generic", metrics=(), baseline_ref=None):
+def unit_state(run, profile="generic", metrics=(), baseline_ref=None, *, meta=None, evidence_root=None, review_validator=None):
     if run is None:
         return "run_missing"
     if run.get("outcome") != "pass":
         return "latest_outcome_" + str(run.get("outcome", "unknown"))
+    if meta is not None:
+        try:
+            validate_bundle(run, meta, evidence_root, review_validator=review_validator)
+        except EvidenceError as exc:
+            return str(exc)
     if not isinstance(run.get("evidence"), str) or not run["evidence"].strip():
         return "evidence_missing"
     if not isinstance(run.get("baseline"), str) or not run["baseline"].strip():
@@ -433,7 +505,8 @@ def assess(meta, ctx, *, git_provider=None, require_git_provider=False):
     profile, baseline_ref, required_metrics = settings
     for key in cells:
         metrics = [metric for metric in required_metrics if cell(metric) == key]
-        state = unit_state(selected["latest"].get(key), profile, metrics, baseline_ref)
+        state = unit_state(selected["latest"].get(key), profile, metrics, baseline_ref,
+                           meta=meta, evidence_root=ctx.get("evidence_root"), review_validator=ctx.get("review_validator"))
         if state != "satisfied":
             result["reasons"].append(state)
     result["ok"] = not result["reasons"]

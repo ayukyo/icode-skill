@@ -806,6 +806,63 @@
             "additionalProperties": false
           }
         },
+        "evidence_contract": {
+          "type": "object",
+          "required": ["schema_version", "required_items", "required_identity", "visual"],
+          "additionalProperties": false,
+          "properties": {
+            "schema_version": { "type": "integer", "const": 1 },
+            "required_items": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "required": ["id", "kind", "layer", "consumer", "scenario", "min_count", "complete", "method"],
+                "additionalProperties": false,
+                "properties": {
+                  "id": { "type": "string", "minLength": 1 },
+                  "kind": { "enum": ["log", "measurement", "artifact_identity", "frame_set", "visual_review"] },
+                  "layer": { "enum": ["static", "unit", "build", "host", "deploy", "delivery", "consumption", "settings_preview", "operation_view", "closed_client", "physical"] },
+                  "consumer": { "type": "string", "minLength": 1 },
+                  "scenario": { "type": "string", "minLength": 1 },
+                  "min_count": { "type": "integer", "minimum": 1 },
+                  "complete": { "type": "boolean" },
+                  "method": { "enum": ["machine", "ai_review", "human_observation"] },
+                  "expected_mode": {
+                    "type": "object", "additionalProperties": false,
+                    "required": ["width", "height", "fourcc"],
+                    "properties": {
+                      "width": { "type": "integer", "minimum": 1 },
+                      "height": { "type": "integer", "minimum": 1 },
+                      "fourcc": { "type": "string", "minLength": 1 }
+                    }
+                  }
+                }
+              }
+            },
+            "required_identity": {
+              "type": "array",
+              "items": { "type": "string", "minLength": 1 }
+            },
+            "visual": {
+              "type": ["object", "null"],
+              "required": ["required", "min_frames", "sample_fractions", "tolerance_fraction", "require_display"],
+              "additionalProperties": false,
+              "properties": {
+                "required": { "type": "boolean", "const": true },
+                "min_frames": { "type": "integer", "minimum": 2, "default": 5 },
+                "sample_fractions": {
+                  "type": "array",
+                  "minItems": 2,
+                  "items": { "type": "number", "minimum": 0, "maximum": 1 },
+                  "default": [0, 0.25, 0.5, 0.75, 1]
+                },
+                "tolerance_fraction": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.15 },
+                "require_display": { "type": "boolean", "default": false }
+              }
+            }
+          }
+        },
         "required_metrics": {
           "type": "array",
           "items": {
@@ -1381,6 +1438,15 @@
             },
             "additionalProperties": false
           },
+          "evidence_bundle": {
+            "type": "object",
+            "required": ["path", "sha256"],
+            "additionalProperties": false,
+            "properties": {
+              "path": { "type": "string", "minLength": 1 },
+              "sha256": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}(?![\\s\\S])" }
+            }
+          },
           "run_id": { "type": "string" },
           "at": { "type": "string" },
           "kind": { "enum": ["deploy", "listen", "device_test", "build"] },
@@ -1427,12 +1493,14 @@
       "type": "object",
       "propertyNames": { "pattern": "^[a-z][a-z0-9_]*$" },
       "properties": {
+        "stage_program": { "type": "object", "additionalProperties": true },
+        "stage_binding": { "type": "object", "additionalProperties": true },
         "verification": {
           "type": "object",
-          "required": [
-            "build_starts"
-          ],
           "properties": {
+            "serial_claims": { "type": "array", "items": { "type": "object" } },
+            "visual_reviews": { "type": "array", "items": { "type": "object" } },
+            "evidence_reviews": { "type": "array", "items": { "type": "object" } },
             "build_starts": {
               "type": "array",
               "items": {
@@ -1824,6 +1892,7 @@
                   "spawn_id": { "type": "string", "minLength": 1 },
                   "at": { "type": "string", "minLength": 1 },
                   "task_scope": { "type": "string", "minLength": 1 },
+                  "stage_action": { "type": "string", "minLength": 1 },
                   "expected_artifact": { "type": "string", "minLength": 1 },
                   "evidence_boundary": { "type": "string", "minLength": 1 },
                   "join_condition": { "type": "string", "minLength": 1 },

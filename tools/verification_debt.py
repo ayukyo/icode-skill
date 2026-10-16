@@ -329,6 +329,10 @@ def _source_selection(metadata, ticket_dir, context, capture, verify, candidate_
     if context is None:
         context = module.context(ticket_dir, metadata, capture=capture, verify=verify,
                                  candidate_api=candidate_api, **access)
+    elif isinstance(context, dict) and "evidence_root" not in context:
+        # A caller may share a protected candidate context. Bind only the
+        # explicit ticket root, preserving every provider object/guard field.
+        context = dict(context, evidence_root=str(ticket_dir) if ticket_dir is not None else None)
     selection = module.eligible_latest_runs(metadata, context, **access)
     if access and selection["reasons"]:
         # Preserve a total blocked report even for a missing/foreign context.

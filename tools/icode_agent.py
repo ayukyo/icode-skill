@@ -3,8 +3,8 @@
 
 import argparse
 import errno
-import fcntl
 import http.client
+import importlib.util
 import json
 import os
 import subprocess
@@ -123,7 +123,8 @@ def bind_ui_server(server_factory, create_kwargs, *, preferred_port: int,
     try:
         return server_factory(port=preferred_port, **create_kwargs), False
     except OSError as exc:
-        if explicit_port or preferred_port == 0 or exc.errno != errno.EADDRINUSE:
+        address_in_use = exc.errno in {errno.EADDRINUSE, getattr(errno, "WSAEADDRINUSE", errno.EADDRINUSE)}
+        if explicit_port or preferred_port == 0 or not address_in_use:
             raise
         return server_factory(port=0, **create_kwargs), True
 
@@ -131,15 +132,20 @@ def bind_ui_server(server_factory, create_kwargs, *, preferred_port: int,
 @contextmanager
 def ui_startup_lock(data_dir: Path):
     """串行化短暂启动窗口；锁不覆盖 UI 的整个运行期。"""
+    # Reuse the control plane's POSIX flock / Windows msvcrt implementation.
+    # Resolve by this checkout's path so imports cannot pick another install.
+    spec = importlib.util.spec_from_file_location("icode_ui_lock_control", ROOT / "tools" / "icode_control.py")
+    control = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(control)
     data_dir.mkdir(parents=True, exist_ok=True)
     lock_path = data_dir / UI_START_LOCK_NAME
     with lock_path.open("a+", encoding="utf-8") as handle:
         os.chmod(lock_path, 0o600)
-        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        control._acquire_exclusive_lock(handle)
         try:
             yield
         finally:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+            control._release_exclusive_lock(handle)
 
 
 def read_ui_instance(path: Path):
@@ -211,11 +217,14 @@ def write_ui_instance(path: Path, payload) -> None:
             os.fsync(handle.fileno())
         os.chmod(temp, 0o600)
         os.replace(temp, path)
-        directory_fd = os.open(str(path.parent), os.O_RDONLY)
-        try:
-            os.fsync(directory_fd)
-        finally:
-            os.close(directory_fd)
+        # File fsync and atomic replace apply on both platforms. Windows cannot
+        # open directories with os.open; keep the extra durability barrier on POSIX.
+        if os.name != "nt":
+            directory_fd = os.open(str(path.parent), os.O_RDONLY)
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
     except OSError:
         try:
             temp.unlink(missing_ok=True)

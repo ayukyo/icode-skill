@@ -16,6 +16,8 @@
 
 ## 模式一：默认只读查询（`/icode status`）
 
+严格证据或阶段计划命中时按 [串口、证据与阶段验收真源](../references/serial_evidence_stages.md)展示当前文件重核结果、阶段报告/challenge 和阻断原因；阶段信息读取 `icode_control.stage_projection`，不从普通 metadata 猜接受状态。坏引用保留 blocked，查询不确认、不重放动作、不写第二套阶段状态。
+
 1. 执行目录管理中的「检测最新目录」逻辑，确定 `ICODE_OUT_DIR`
 2. 读取 `.ico_metadata.json`
 3. 运行 `python3 tools/icode_control.py trace --dir {ICODE_OUT_DIR} --limit 10`；成功时把开放 step/operation 与最近轨迹并入摘要，失败时明确标「执行轨迹不可验证」，不得用猜测补齐。

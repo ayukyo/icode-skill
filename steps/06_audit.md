@@ -6,6 +6,7 @@
 
 > **共享技能路由**：终审证据收集前读取 [references/skill_routing.md](../references/skill_routing.md)，复核已命中技能的输出与实际代码/验证记录一致。
 > **证据习惯真源**：主代理决定性证据复核、claim ledger 和交付分层统一执行 [references/evidence_and_verification.md](../references/evidence_and_verification.md)。
+> **条件验收**：严格原始证据、视觉目标或阶段计划按 [串口、证据与阶段验收真源](../references/serial_evidence_stages.md)复查当前文件和实际多帧回执；provider success 不等于图像通过。终审报告与阶段报告分别履行既有职责，AI 必需项全通过后才生成当前阶段待确认快照，用户确认不能把 fail/inconclusive 改为 pass。
 
 ## 阶段覆盖与合规结束（强制）
 

@@ -1,6 +1,9 @@
 """ICODE Agent Runtime 的本地、单工单 Web UI 服务。"""
 
+import importlib.util
 import json
+import os
+import re
 import secrets
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -21,6 +24,7 @@ from .ui_settings import SettingsError, UISettingsStore
 MAX_REQUEST_BYTES = 64 * 1024
 MAX_IMAGE_REFERENCES = 4
 MAX_OUTPUT_TOKENS = 32768
+MAX_STAGE_PREVIEWS = 5
 LOOPBACK_HOST = "127.0.0.1"
 ALLOWED_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 ALLOWED_BACKENDS = frozenset({"fake", "openai-responses"})
@@ -54,6 +58,10 @@ STEP_RUN_FIELDS = frozenset({
     "ticket_id", "step", "note", "request_id", "expected_revision",
 })
 CREATE_TICKET_FIELDS = frozenset({"project_id", "requirement", "request_id"})
+STAGE_DECISION_REQUIRED = frozenset({
+    "ticket_id", "program_id", "stage_id", "challenge_id", "facts_digest",
+    "report_sha256", "revision", "decision", "request_id",
+})
 COCKPIT_ARTIFACTS = frozenset({
     "00_init.md", "log_analysis.md", "01_plan.md", "02_review.md",
     "03_plan_final.md", "04_code_review_fix.md", "05_deepcheck.md",
@@ -101,7 +109,7 @@ STATIC_ASSETS = {
 }
 CONTENT_SECURITY_POLICY = (
     "default-src 'none'; script-src 'self'; style-src 'self'; "
-    "img-src 'self' data:; connect-src 'self'; base-uri 'none'; "
+    "img-src 'self' data: blob:; connect-src 'self'; base-uri 'none'; "
     "form-action 'self'; frame-ancestors 'none'"
 )
 
@@ -234,6 +242,22 @@ def normalize_create_ticket_payload(payload) -> Dict:
     }
 
 
+def normalize_stage_decision_payload(payload) -> Dict:
+    if not isinstance(payload, dict):
+        raise UIRequestError("请求 JSON 根必须是对象")
+    if set(payload) - (STAGE_DECISION_REQUIRED | {"reason"}):
+        raise UIRequestError("阶段确认请求含未登记字段")
+    if STAGE_DECISION_REQUIRED - set(payload):
+        raise UIRequestError("阶段确认请求缺字段")
+    normalized = {key: _require_text(payload, key) for key in STAGE_DECISION_REQUIRED}
+    if normalized["decision"] not in {"confirm", "reject", "revoke"}:
+        raise UIRequestError("阶段动作必须是 confirm/reject/revoke")
+    normalized["reason"] = _optional_text(payload, "reason")
+    if any(len(value) > 8000 for value in normalized.values()):
+        raise UIRequestError("阶段请求字段过长")
+    return normalized
+
+
 class AgentUIService:
     """兼容固定工单模式，并为 v2 提供全局只读目录册和受控步骤执行。"""
 
@@ -248,6 +272,8 @@ class AgentUIService:
                  instance_id: str | None = None):
         self.ticket_dir = Path(ticket_dir).resolve() if ticket_dir else None
         self.coordinator = AgentCoordinator(control_path=control_path)
+        self._stage_module = None
+        self._preview_visual_module = None
         self.backend_factory = backend_factory or _default_backend_factory
         self.token = secrets.token_urlsafe(32)
         self.catalog = TicketCatalog(
@@ -429,7 +455,152 @@ class AgentUIService:
             **public,
             **self._public_policy(policy),
             "cockpit": self._cockpit_projection(target),
+            "stage": self._stage_projection(target),
         }
+
+    def _stage_control(self):
+        # The executable comes from the existing server startup configuration,
+        # never from a browser path. A Python adapter is required here because
+        # an ordinary CLI flag must not manufacture human confirmation origin.
+        if self._stage_module is None:
+            try:
+                spec = importlib.util.spec_from_file_location(
+                    "icode_ui_stage_control", self.coordinator.control_path)
+                module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(module)
+                if not callable(getattr(module, "stage_projection", None)) \
+                        or not callable(getattr(module, "confirm_stage", None)):
+                    raise ValueError("stage control adapter unavailable")
+            except Exception as exc:
+                raise ControlPlaneError("阶段控制适配器不可用") from exc
+            self._stage_module = module
+        return self._stage_module
+
+    def _stage_projection(self, target: ResolvedTicket) -> Dict:
+        try:
+            result = self._stage_control().stage_projection(target.out_dir)
+        except Exception as exc:
+            raise ControlPlaneError("阶段状态不可验证") from exc
+        report = result.get("report")
+        if isinstance(report, dict) and report.get("report_sha256"):
+            try:
+                entries, _reader = self._stage_preview_entries(target, report["report_sha256"])
+                report["previews"] = [entry["public"] for entry in entries]
+            except Exception:
+                # Retain readable report text, but never offer confirmation
+                # when its frozen preview references cannot be established.
+                report["previews"] = []
+                result["preview_error"] = "报告预览已失效，请刷新并重新审核。"
+                result["can_confirm"] = False
+        return result
+
+    def _stage_preview_entries(self, target: ResolvedTicket, report_sha256: str):
+        """Resolve only protected, report-bound indices; never Markdown links."""
+        if not isinstance(report_sha256, str) or not re.fullmatch(r"[0-9a-f]{64}", report_sha256):
+            raise UIRequestError("report_sha256 必须是 SHA-256 摘要")
+        control = self._stage_control()
+        stage = control.stage_module()
+        state = stage._resolve(target.out_dir)
+        if state is None or not state.get("stage_id"):
+            raise ControlPlaneError("没有可查看的阶段报告")
+        review = stage._latest_review(state["program"], state["stage_id"])
+        if not review or review.get("report_sha256") != report_sha256:
+            raise ControlPlaneError("阶段报告已变化，请刷新")
+        stage._check_report(target.out_dir, review)
+        snapshot = review["snapshot"]
+        reader = control.verification_evidence_module().bundle_module().Reader(target.out_dir)
+        receipts = snapshot["evidence_metadata"]["extensions"]["verification"].get("visual_reviews") or []
+        entries = []
+        for run in snapshot["accepted_runs"]:
+            ref = run.get("evidence_bundle")
+            if ref is None:
+                continue
+            if not isinstance(ref.get("sha256"), str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", ref["sha256"]):
+                raise ControlPlaneError("阶段证据包摘要无效")
+            bundle = reader.json(reader.read(ref["path"], ref["sha256"]))
+            if any(bundle.get(key) != run.get(key) for key in ("run_id", "candidate_id")):
+                raise ControlPlaneError("阶段证据包来源不匹配")
+            items = {item["id"]: item for item in bundle["items"]}
+            if len(items) != len(bundle["items"]):
+                raise ControlPlaneError("阶段预览索引不明确")
+            for group in (bundle.get("visual") or {}).get("frame_sets") or []:
+                for frame in group["frames"]:
+                    item = items[frame["preview_item_id"]]
+                    if not isinstance(item.get("sha256"), str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", item["sha256"]):
+                        raise ControlPlaneError("阶段预览摘要无效")
+                    # Validate the protected path without reading every image.
+                    # The selected image is hashed on each binary GET below.
+                    reader.path(item["path"])
+                    observations = []
+                    review_ids = {ref["review_id"] for ref in frame.get("review_refs") or []}
+                    for receipt in receipts:
+                        if receipt.get("review_id") not in review_ids or any(
+                                receipt.get(key) != run.get(key) for key in ("run_id", "candidate_id")):
+                            continue
+                        for row in receipt.get("frame_results") or []:
+                            if row.get("frame_set_id") == group["id"] and row.get("frame_id") == frame["id"]:
+                                if row.get("input_sha256") != item["sha256"]:
+                                    raise ControlPlaneError("逐帧结论与预览摘要不一致")
+                                observations.append(f"{row.get('channel', '')}：{row.get('outcome', '')}；{row.get('conclusion', '')}")
+                    title = f"{group['id']} / {frame['id']} · {frame.get('monotonic', '未知')} s · " + (
+                        "；".join(observations) if observations else "尚无已冻结的逐帧结论")
+                    entries.append({"item": item, "public": {
+                        "index": len(entries), "title": title[:8000],
+                        "sha256": item["sha256"], "report_sha256": report_sha256}})
+                    if len(entries) == MAX_STAGE_PREVIEWS:
+                        reader.finish()
+                        return entries, reader
+        reader.finish()
+        return entries, reader
+
+    def stage_preview(self, ticket_id: str, index: int, report_sha256: str):
+        target = self.catalog.resolve(ticket_id)
+        try:
+            entries, reader = self._stage_preview_entries(target, report_sha256)
+            if type(index) is not int or not 0 <= index < len(entries):
+                raise UIRequestError("阶段预览序号无效")
+            item = entries[index]["item"]
+            if type(item.get("bytes")) is not int or item["bytes"] <= 0:
+                raise ControlPlaneError("阶段预览大小无效")
+            data = reader.read(item["path"], item["sha256"], item["bytes"])
+            if data.startswith(b"\x89PNG\r\n\x1a\n"):
+                fourcc, content_type = "PNG", "image/png"
+            elif data.startswith(b"\xff\xd8"):
+                fourcc, content_type = "JPEG", "image/jpeg"
+            else:
+                raise ControlPlaneError("仅支持 PNG/JPEG 阶段预览")
+            if self._preview_visual_module is None:
+                # Reuse the bounded compressed-image parser from the trusted
+                # control installation. This never runs FFmpeg or a provider.
+                spec = importlib.util.spec_from_file_location(
+                    "icode_ui_preview_visual", self.coordinator.control_path.with_name("visual_evidence.py"))
+                module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(module)
+                self._preview_visual_module = module
+            self._preview_visual_module._dimensions(data, fourcc)
+            reader.finish()
+            # A concurrent review replacement must not bind this image to the
+            # report the browser loaded before that replacement.
+            stage = self._stage_control().stage_module()
+            state = stage._resolve(target.out_dir)
+            review = stage._latest_review(state["program"], state["stage_id"])
+            if review is None or review.get("report_sha256") != report_sha256:
+                raise ControlPlaneError("阶段报告已变化，请刷新")
+            stage._check_report(target.out_dir, review)
+            return data, content_type
+        except UIRequestError:
+            raise
+        except Exception as exc:
+            raise ControlPlaneError("阶段预览或报告已失效，请刷新报告") from exc
+
+    def decide_stage(self, payload, *, trusted_confirmation) -> Dict:
+        normalized = normalize_stage_decision_payload(payload)
+        target = self.catalog.resolve(normalized.pop("ticket_id"))
+        try:
+            return self._stage_control().confirm_stage(
+                target.out_dir, normalized, trusted_confirmation=trusted_confirmation)
+        except Exception as exc:
+            raise ControlPlaneError("阶段快照或确认来源已失效，请刷新报告") from exc
 
     def create_ticket(self, payload) -> Dict:
         normalized = normalize_create_ticket_payload(payload)
@@ -527,7 +698,8 @@ class AgentUIService:
 
 class AgentUIHTTPServer(ThreadingHTTPServer):
     daemon_threads = True
-    allow_reuse_address = True
+    # Winsock address reuse differs from POSIX and can mask a live port owner.
+    allow_reuse_address = os.name != "nt"
 
     def __init__(self, server_address, service: AgentUIService):
         self.service = service
@@ -736,6 +908,17 @@ class AgentUIRequestHandler(BaseHTTPRequestHandler):
                 )
                 self._send_json(200, {"ok": True, **result})
                 return
+            if path.startswith("/api/v1/stage-previews/"):
+                segments = unquote(path[len("/api/v1/stage-previews/"):]).split("/")
+                query = parse_qs(parsed.query, keep_blank_values=True)
+                if len(segments) != 2 or not segments[0] or not re.fullmatch(r"0|[1-9][0-9]{0,2}", segments[1]):
+                    raise UIRequestError("阶段预览路径必须包含工单和序号")
+                if set(query) != {"report_sha256"} or len(query["report_sha256"]) != 1:
+                    raise UIRequestError("阶段预览只接受唯一 report_sha256")
+                body, content_type = self.server.service.stage_preview(
+                    segments[0], int(segments[1]), query["report_sha256"][0])
+                self._send_bytes(200, body, content_type)
+                return
             if path.startswith("/api/v1/tickets/"):
                 ticket_id = unquote(path[len("/api/v1/tickets/"):])
                 if not ticket_id or "/" in ticket_id:
@@ -783,12 +966,16 @@ class AgentUIRequestHandler(BaseHTTPRequestHandler):
         path = urlsplit(self.path).path
         known_path = path in {
             "/api/v1/run", "/api/v1/steps/run", "/api/v1/tickets/create",
+            "/api/v1/stages/decision",
         } \
             or (path.startswith("/api/v1/jobs/") and path.endswith("/cancel"))
         if not known_path:
             self._send_error_json(404, "UIRequestError", "路径不存在")
             return
         if not self._check_api_access(write=True):
+            return
+        if path == "/api/v1/stages/decision" and not self.headers.get("Origin"):
+            self._send_error_json(403, "UIAccessError", "阶段确认必须来自当前 UI 页面")
             return
         try:
             payload = self._read_json_body()
@@ -801,6 +988,20 @@ class AgentUIRequestHandler(BaseHTTPRequestHandler):
             elif path == "/api/v1/tickets/create":
                 response = self.server.service.create_ticket(payload)
                 response_status = 200 if response["already_applied"] else 201
+            elif path == "/api/v1/stages/decision":
+                # No actor/source/path is accepted from JSON. This callback is
+                # constructed only after loopback Host, explicit Origin and
+                # session-token checks. It audits this UI action, not a claim
+                # of cryptographic human identity against same-user programs.
+                def confirmation_source(request):
+                    intents = {"confirm": "确认本阶段验收", "reject": "拒绝本阶段验收",
+                               "revoke": "撤销本阶段验收"}
+                    return {"source": "ui", "source_id": (
+                        f"ui:{self.server.ui_instance_id}:{request['request_id']}"),
+                        "intent": intents[request["decision"]]}
+                response = self.server.service.decide_stage(
+                    payload, trusted_confirmation=confirmation_source)
+                response_status = 200
             else:
                 suffix = "/cancel"
                 job_id = unquote(path[len("/api/v1/jobs/"):-len(suffix)])

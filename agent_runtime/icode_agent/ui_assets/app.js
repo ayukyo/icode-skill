@@ -80,6 +80,11 @@
     timer: null,
     eventTimer: null,
     noticeAction: null,
+    stagePreviewKey: null,
+    stagePreviewEpoch: 0,
+    stagePreviewPending: false,
+    stagePreviewFailed: false,
+    stagePreviewURLs: [],
   };
 
   const setText = (id, value) => {
@@ -138,6 +143,7 @@
     byId("stale-banner").hidden = !stale || !state.selectedTicketId;
     const run = byId("run-step-button");
     run.disabled = stale || !state.ticket || !state.ticket.revision || !selectedStep();
+    renderStage(state.ticket && state.ticket.stage);
     if (message) {
       showNotice(message, "danger", "refresh");
     }
@@ -322,6 +328,124 @@
     renderCockpit(ticket.cockpit);
     renderAllowedActions(ticket.allowed_actions || []);
     renderStepSelect(ticket);
+    renderStage(ticket.stage);
+  };
+
+  const resetStagePreviews = () => {
+    state.stagePreviewEpoch += 1;
+    state.stagePreviewURLs.forEach((url) => URL.revokeObjectURL(url));
+    state.stagePreviewURLs = [];
+    state.stagePreviewKey = null;
+    state.stagePreviewPending = false;
+    state.stagePreviewFailed = false;
+    byId("stage-previews").replaceChildren();
+  };
+
+  const renderStagePreviews = (stage) => {
+    const report = stage.report || {};
+    const previews = report.previews || [];
+    const ticketId = state.ticket.ticket_id;
+    const key = JSON.stringify([ticketId, report.report_sha256, previews, stage.preview_error]);
+    if (state.stagePreviewKey === key) return;
+    resetStagePreviews();
+    state.stagePreviewKey = key;
+    state.stagePreviewFailed = Boolean(stage.preview_error);
+    const container = byId("stage-previews");
+    container.hidden = !previews.length && !stage.preview_error;
+    if (stage.preview_error) {
+      container.textContent = stage.preview_error;
+      return;
+    }
+    if (!previews.length) return;
+    state.stagePreviewPending = true;
+    const epoch = state.stagePreviewEpoch;
+    // Titles and observations are evidence text, never executable markup.
+    // Binary images require the session header; tokens never enter an img URL.
+    Promise.all(previews.map(async (preview) => {
+      const figure = document.createElement("figure");
+      const image = document.createElement("img");
+      const caption = document.createElement("figcaption");
+      const status = document.createElement("p");
+      image.alt = preview.title;
+      image.width = 480;
+      caption.textContent = preview.title;
+      status.textContent = "正在核对并载入代表性帧…";
+      figure.append(image, caption, status);
+      container.append(figure);
+      try {
+        if (preview.report_sha256 !== report.report_sha256) throw new Error("报告摘要不匹配");
+        const path = `/api/v1/stage-previews/${encodeURIComponent(ticketId)}/${preview.index}?report_sha256=${encodeURIComponent(report.report_sha256)}`;
+        const response = await fetch(path, { headers: { "X-ICODE-UI-Token": token } });
+        if (!response.ok || !["image/png", "image/jpeg"].includes(response.headers.get("Content-Type"))) {
+          throw new Error("代表性帧已失效");
+        }
+        const blob = await response.blob();
+        if (epoch !== state.stagePreviewEpoch) return;
+        const objectURL = URL.createObjectURL(blob);
+        state.stagePreviewURLs.push(objectURL);
+        await new Promise((resolve, reject) => {
+          image.onload = resolve;
+          image.onerror = () => reject(new Error("代表性帧无法显示"));
+          image.src = objectURL;
+        });
+        if (epoch !== state.stagePreviewEpoch) return;
+        status.textContent = "当前报告的预览已载入。";
+      } catch (_error) {
+        if (epoch !== state.stagePreviewEpoch) return;
+        state.stagePreviewFailed = true;
+        image.hidden = true;
+        status.textContent = "预览或报告已失效，请刷新并重新审核。";
+        showNotice("代表性帧载入失败，已暂停阶段确认。请刷新报告。", "danger", "refresh");
+      }
+    })).finally(() => {
+      if (epoch !== state.stagePreviewEpoch) return;
+      state.stagePreviewPending = false;
+      renderStage(state.ticket && state.ticket.stage);
+    });
+  };
+
+  const renderStage = (stage) => {
+    const panel = byId("stage-panel");
+    panel.hidden = !stage || !stage.enabled;
+    if (panel.hidden) {
+      resetStagePreviews();
+      return;
+    }
+    setText("stage-state", `${stage.stage_id || stage.program_id} · ${stage.state || "待检查"}${stage.reasons && stage.reasons.length ? ` · ${stage.reasons.join("；")}` : ""}`);
+    // Reports contain untrusted evidence/model text. Never interpret it as HTML.
+    byId("stage-report").textContent = stage.report_markdown || (stage.report && stage.report.text) || "尚无可确认的验收报告。";
+    renderStagePreviews(stage);
+    const hasChallenge = Boolean(stage.challenge && stage.challenge.challenge_id);
+    const canConfirm = stage.can_confirm === true && hasChallenge;
+    byId("stage-confirm-button").disabled = state.stale || stage.blocked || !canConfirm || state.stagePreviewPending || state.stagePreviewFailed;
+    byId("stage-reject-button").disabled = state.stale || !canConfirm;
+    byId("stage-revoke-button").hidden = !stage.can_revoke;
+    byId("stage-revoke-button").disabled = state.stale || !stage.acceptance_snapshot;
+  };
+
+  const decideStage = async (decision) => {
+    const ticket = state.ticket;
+    const stage = ticket && ticket.stage;
+    if (state.stale || !stage || !stage.enabled) return;
+    if (decision === "confirm" && (state.stagePreviewPending || state.stagePreviewFailed)) return;
+    const challenge = decision === "revoke" ? stage.acceptance_snapshot : stage.challenge;
+    if (!challenge || (decision === "revoke" ? !stage.can_revoke : !stage.can_confirm)) return;
+    const labels = { confirm: "确认本阶段验收", reject: "要求修改本阶段报告", revoke: "撤销本阶段验收" };
+    if (!globalThis.confirm(`${labels[decision]}？本次操作只针对页面显示的这份报告。`)) return;
+    const reason = decision === "revoke" ? globalThis.prompt("请说明撤销原因或新的反证：", "") : "";
+    if (decision === "revoke" && (!reason || !reason.trim())) return;
+    setStale(true);
+    try {
+      await postJson("/api/v1/stages/decision", {
+        ticket_id: ticket.ticket_id, program_id: stage.program_id, stage_id: stage.stage_id,
+        challenge_id: challenge.challenge_id, facts_digest: challenge.facts_digest,
+        report_sha256: challenge.report_sha256, revision: stage.revision,
+        decision, reason, request_id: makeRequestId(),
+      });
+      await refresh(true);
+    } catch (error) {
+      showNotice(error.message, "danger", "refresh");
+    }
   };
 
   const renderCockpit = (cockpit) => {
@@ -458,6 +582,7 @@
       state.tickets = payload.tickets;
       state.jobs = payload.jobs;
       state.hosts = payload.hosts;
+      resetStagePreviews();
       state.ticket = payload.ticket;
       if (state.selectedTicketId && !state.ticket) state.selectedTicketId = null;
       setText("last-refresh", formatTime(payload.observed_at));
@@ -707,6 +832,9 @@
   byId("new-ticket-cancel").addEventListener("click", closeNewTicket);
   byId("new-ticket-form").addEventListener("submit", createTicket);
   byId("run-step-button").addEventListener("click", runStep);
+  byId("stage-confirm-button").addEventListener("click", () => decideStage("confirm"));
+  byId("stage-reject-button").addEventListener("click", () => decideStage("reject"));
+  byId("stage-revoke-button").addEventListener("click", () => decideStage("revoke"));
   byId("step-select").addEventListener("change", () => renderStepSelect(state.ticket));
   byId("settings-button").addEventListener("click", openSettings);
   byId("settings-close").addEventListener("click", closeSettings);

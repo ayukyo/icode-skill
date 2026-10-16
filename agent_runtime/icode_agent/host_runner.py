@@ -36,6 +36,14 @@ def parse_verify_note(note, ticket_id=None):
     return parsed
 
 
+def _stage_host_action(step, verify_actions):
+    if step == "verify" and verify_actions in (["intent"], ["plan"]):
+        return "plan"
+    if step in {"init", "log", "plan", "status", "code", "patch", "fast", "verify"}:
+        return step
+    return "review"
+
+
 ALLOWED_STEPS = frozenset({
     "init", "start", "fast", "log", "plan", "review", "merge", "code",
     "deepcheck", "audit", "readme", "patch", "verify", "status", "doc",
@@ -116,6 +124,7 @@ class ControlLifecycle:
 
     def __init__(self, control_path):
         self.control_path = str(control_path)
+        self._stage_module = None
 
     def _control(self, args: List[str]) -> Dict:
         proc = subprocess.run(
@@ -151,7 +160,7 @@ class ControlLifecycle:
             args += ["--verify-action", verify_action]
         return self._control(args)
 
-    def record_spawn(self, ticket, *, step, host, model, request_id):
+    def record_spawn(self, ticket, *, step, host, model, request_id, stage_action=None):
         return self._control([
             "record-agent-spawn", "--dir", str(ticket.out_dir),
             "--task-scope", f"UI /icode {step}",
@@ -162,9 +171,40 @@ class ControlLifecycle:
             "--model", model or "host-default",
             "--capability", "text", "--capability", "tools",
             "--exclusive-key", "ui-step-run",
+            "--stage-action", stage_action or _stage_host_action(step, []),
             "--request-id", f"{request_id}:spawn",
             "--actor", "system",
         ])
+
+    def before_spawn(self, ticket, *, step, spawn_id, stage_snapshot, verify_actions):
+        """Recheck immediately before Popen, without rejecting our own open agent.
+
+        The normal action-policy revision necessarily changed when record_spawn
+        was committed. The shared stage guard still re-reads predecessor raw
+        evidence and the program generation; no old policy is an execution lease.
+        """
+        try:
+            if self._stage_module is None:
+                spec = importlib.util.spec_from_file_location("icode_host_stage_control", self.control_path)
+                module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(module)
+                self._stage_module = module
+            module = self._stage_module
+            current = module.stage_projection(ticket.out_dir)
+            previous = stage_snapshot or {"enabled": False}
+            if bool(current.get("enabled")) != bool(previous.get("enabled")):
+                raise ValueError("stage registration changed")
+            if not current.get("enabled"):
+                return
+            if not spawn_id or any(current.get(key) != previous.get(key)
+                                   for key in ("program_id", "stage_id", "generation")):
+                raise ValueError("stage identity/generation changed")
+            actions = ["plan" if action in {"plan", "intent"} else action for action in verify_actions] \
+                if step == "verify" else [_stage_host_action(step, [])]
+            for action in actions:
+                module.require_stage_action(ticket.out_dir, action, expected_generation=previous["generation"])
+        except Exception as exc:
+            raise HostRunnerError("阶段资格在启动前已失效，未启动宿主进程", code="stage_gate") from exc
 
     def record_result(self, ticket, *, spawn_id, result, adopted,
                       reason, evidence_ref, summary, request_id,
@@ -440,16 +480,21 @@ class HostJobRunner:
             if len(self._jobs) >= self.max_jobs:
                 raise HostRunnerError("任务历史已满且仍在运行", code="job_capacity")
             host, executable = self._choose_host(settings)
-            policy_options = {"verify_action": parse_verify_note(note, ticket.ticket_id)["action"]} \
-                if step == "verify" else {}
-            policy = self.lifecycle.action_policy(ticket, step, expected_revision, **policy_options)
+            verify_actions = (parse_verify_note(note, ticket.ticket_id)["actions"] or ["intent"]) \
+                if step == "verify" else []
+            # A combined request must authorize build AND deploy AND test.
+            # Checking only its final variant can hide an unauthorized action.
+            for variant in verify_actions or [None]:
+                policy_options = {"verify_action": variant} if variant is not None else {}
+                policy = self.lifecycle.action_policy(ticket, step, expected_revision, **policy_options)
             execution_root = policy.get("execution_root")
             if not isinstance(execution_root, str) or not execution_root:
                 raise HostRunnerError(
                     "控制面未返回可信执行根", code="execution_root_topology")
             job_id = f"job-{uuid.uuid4()}"
             spawn_payload = self.lifecycle.record_spawn(
-                ticket, step=step, host=host, model=model, request_id=request_id)
+                ticket, step=step, host=host, model=model, request_id=request_id,
+                stage_action=_stage_host_action(step, verify_actions))
             if spawn_payload.get("already_applied"):
                 raise HostRunnerError(
                     "控制面已记录相同调用，拒绝重放模型请求",
@@ -459,6 +504,25 @@ class HostJobRunner:
             if not isinstance(spawn_id, str) or not spawn_id:
                 raise HostRunnerError(
                     "控制面 spawn 回执缺身份", code="control_plane_error")
+            try:
+                checker = getattr(self.lifecycle, "before_spawn", None)
+                if callable(checker):
+                    checker(ticket, step=step, spawn_id=spawn_id,
+                            stage_snapshot=policy.get("stage"), verify_actions=verify_actions)
+                elif (policy.get("stage") or {}).get("enabled"):
+                    raise HostRunnerError("阶段执行缺少启动前复核适配器", code="stage_gate")
+            except Exception as exc:
+                self._request_ids.add(request_id)
+                try:
+                    self.lifecycle.record_result(
+                        ticket, spawn_id=spawn_id, result="failed", adopted="no",
+                        reason="Stage preflight rejected before host process creation",
+                        evidence_ref=f"ui-job:{job_id}", summary="Host process was not started",
+                        request_id=request_id, error_class="stage_gate")
+                except HostRunnerError as receipt_error:
+                    raise HostRunnerError("阶段复核拒绝启动，且终态回执失败；未重放",
+                                          code="stage_preflight_receipt_failed") from receipt_error
+                raise HostRunnerError("阶段复核拒绝启动；未创建宿主进程", code="stage_gate") from exc
             argv = self._command(host, executable, model, execution_root)
             try:
                 process = self.process_factory(

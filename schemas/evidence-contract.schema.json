@@ -1,0 +1,61 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "evidence-contract.schema.json",
+  "title": "ICODE evidence contract v1",
+  "description": "通用原始证据要求；只描述数据。跨项唯一性、采样覆盖和实际证据完整性由证据校验 helper 验证。内置校验器不解析 $ref，ticket/baseline 内联副本由一致性测试约束。",
+  "type": "object",
+  "required": ["schema_version", "required_items", "required_identity", "visual"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "type": "integer", "const": 1 },
+    "required_items": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["id", "kind", "layer", "consumer", "scenario", "min_count", "complete", "method"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "kind": { "enum": ["log", "measurement", "artifact_identity", "frame_set", "visual_review"] },
+          "layer": { "enum": ["static", "unit", "build", "host", "deploy", "delivery", "consumption", "settings_preview", "operation_view", "closed_client", "physical"] },
+          "consumer": { "type": "string", "minLength": 1 },
+          "scenario": { "type": "string", "minLength": 1 },
+          "min_count": { "type": "integer", "minimum": 1 },
+          "complete": { "type": "boolean" },
+          "method": { "enum": ["machine", "ai_review", "human_observation"] },
+          "expected_mode": {
+            "type": "object", "additionalProperties": false,
+            "required": ["width", "height", "fourcc"],
+            "properties": {
+              "width": { "type": "integer", "minimum": 1 },
+              "height": { "type": "integer", "minimum": 1 },
+              "fourcc": { "type": "string", "minLength": 1 }
+            }
+          }
+        }
+      }
+    },
+    "required_identity": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "visual": {
+      "type": ["object", "null"],
+      "required": ["required", "min_frames", "sample_fractions", "tolerance_fraction", "require_display"],
+      "additionalProperties": false,
+      "properties": {
+        "required": { "type": "boolean", "const": true },
+        "min_frames": { "type": "integer", "minimum": 2, "default": 5 },
+        "sample_fractions": {
+          "type": "array",
+          "minItems": 2,
+          "items": { "type": "number", "minimum": 0, "maximum": 1 },
+          "default": [0, 0.25, 0.5, 0.75, 1]
+        },
+        "tolerance_fraction": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.15 },
+        "require_display": { "type": "boolean", "default": false }
+      }
+    }
+  }
+}

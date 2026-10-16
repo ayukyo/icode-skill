@@ -1,0 +1,2 @@
+# Optional only; regular ICODE usage has no serial dependency.
+pyserial==3.5

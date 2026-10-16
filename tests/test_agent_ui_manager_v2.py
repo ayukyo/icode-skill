@@ -1,10 +1,12 @@
 import http.client
 import io
 import json
+import os
 import subprocess
 import sys
 import threading
 import time
+import pytest
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -238,7 +240,7 @@ def dashboard(tmp_path: Path):
             "control_schema_version": 3,
             "ticket_id": "M2-UI-1",
             "project_path": str(project),
-            "out_dir": str(out_dir.relative_to(project)),
+            "out_dir": out_dir.relative_to(project).as_posix(),
             "status": "init_in_progress",
             "requirement_summary": "manager cockpit",
             "updated_at": "2026-09-14T00:00:00+00:00",
@@ -311,7 +313,12 @@ def test_cockpit_shows_registered_delivery_without_unlisted_or_symlink_files(tmp
             check=True, capture_output=True, text=True)
         (out / "feature.md").write_text("# Report")
         (out / "private.md").write_text("Private material")
-        (out / "feature_brief.md").symlink_to(out / "private.md")
+        try:
+            (out / "feature_brief.md").symlink_to(out / "private.md")
+        except OSError as exc:
+            if os.name == "nt" and getattr(exc, "winerror", None) == 1314:
+                pytest.skip("Windows symlink privilege unavailable; real link case runs on Linux")
+            raise
         status, payload = request(server, "GET", "/api/v1/tickets/M2-UI-1")
         assert status == 200
         names = {item["name"] for item in payload["ticket"]["cockpit"]["artifacts"]}

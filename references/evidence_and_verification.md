@@ -2,6 +2,8 @@
 
 本文件是 log / plan / deepcheck / audit / verify 共用真源。各步骤只保留触发点，不复制规则正文。
 
+串口、`verification_contract.evidence_contract`、视觉目标或阶段计划命中时，再读 [串口、证据与阶段验收](serial_evidence_stages.md)：严格 bundle、原始指标重算、真实多帧回执和阶段报告/确认规则集中于该真源。其当前文件复查与下文 JUnit 历史摘要可读性是不同合同；普通旧票不自动升级。
+
 ## 1. 现场事实优先
 
 - 当前源码、历史提交、现场运行包、修复验证包是不同对象；先建立关系，再用代码解释日志。

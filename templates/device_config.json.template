@@ -29,10 +29,38 @@
       {
         "name": "serial_debug",
         "type": "serial",
-        "port": "/dev/ttyUSB0",
-        "baud": 115200,
+        "port": "<serial_port>",
+        "baud": "<serial_baud>",
+        "bytesize": 8,
+        "parity": "N",
+        "stopbits": 1,
+        "xonxoff": false,
+        "rtscts": false,
+        "dsrdtr": false,
+        "dtr": false,
+        "rts": false,
+        "console_type": "unknown",
+        "ready_pattern": "",
+        "identity": {
+          "script": "",
+          "pattern": ""
+        },
+        "budgets": {
+          "listen_seconds": 15,
+          "exec_seconds": 30,
+          "read_timeout": 0.1,
+          "write_timeout": 0.5,
+          "ready_timeout": 5,
+          "identity_timeout": 5,
+          "matcher_poll_seconds": 0.02,
+          "matcher_cleanup_seconds": 0.5,
+          "shutdown_grace_seconds": 2,
+          "max_raw_bytes": 16777216,
+          "max_script_bytes": 1048576
+        },
         "deploy": "",
-        "log": "minicom -D <port> -b <baud>"
+        "log": "python3 tools/serial_session.py listen --config <device-config> --connection serial_debug --output-dir <new-evidence-dir>",
+        "serial_note": "串口是可选能力，仅按需安装 tools/serial-requirements.txt。port 必须显式填写，工具不猜端口。listen 只接收，不发回车/登录/Ctrl-C/BREAK，不清空输入；DTR/RTS=false 不保证 OS/驱动无瞬时变化。exec 仅在 console_type=posix_shell、显式 ready_pattern 与 identity.script/pattern 校验通过后执行；不内置任何设备身份命令，建议 pattern 使用整行精确匹配。budgets 为唯一预算配置入口（时间单位秒），默认值真源在 tools/serial_transport.py；read/write 单次调用还受退出宽限一半及总剩余时间限制。exec 另需脚本文件和真实受控 operation-ref，绑定输入用 serial_session.operation_input 的规范字符串（见该模块说明），不能用 authorized 布尔值代替授权。原始 RX/TX 可能包含敏感数据，应保存在受控新目录；无结束标记、超时、断线、取消均不证明远端已经停止。"
       }
     ]
   }

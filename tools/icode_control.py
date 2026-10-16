@@ -106,6 +106,8 @@ import sys
 import tempfile
 import time
 import uuid
+import copy
+import types
 from datetime import datetime, timedelta
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
@@ -897,9 +899,13 @@ def append_event(out_dir, meta, event_type, payload, request_id=None, actor="ico
     access = _code_access("code", git_provider, require_git_provider, inspection_provider_factory, inspection_deadline)
     if access:
         _code_guard(out_dir, meta, **access)
+    stage_token = _stage_write_guard(out_dir, event_type, payload, git_provider=git_provider, require_git_provider=require_git_provider)
+    if stage_token is not None and event_type in {"step_started", "operation_started"}:
+        payload = dict(payload, stage_generation=stage_token["generation"], stage_id=stage_token["stage_id"])
     event = prepare_event(out_dir, meta, event_type, payload, request_id=request_id, actor=actor)
     if access:
         _code_guard(out_dir, meta, **access)
+    _stage_publication_check(stage_token, git_provider=git_provider, require_git_provider=require_git_provider)
     append_prepared_event(out_dir, event)
     if access:
         # A late refusal does not erase an event already appended.
@@ -1171,6 +1177,7 @@ def validate_event_semantics(events, meta, *, candidate_api=None, git_provider=N
         binding_mirror.consume(event)
     problems.extend(binding_mirror.finish())
     problems.extend(candidate_event_issues(events, meta))
+    problems.extend(stage_module().event_issues(events, meta))
     event_candidate_api = candidate_module() if candidate_api is None else candidate_api
     access = ({"git_provider": git_provider, "require_git_provider": require_git_provider}
               if _candidate_access_requested(git_provider, require_git_provider) else {})
@@ -2273,6 +2280,10 @@ def find_idempotent_event(events, request_id, event_type, payload, actor=None,
         comparable_existing = dict(existing_payload)
         if "metadata_hash_after" not in payload:
             comparable_existing.pop("metadata_hash_after", None)
+        if event_type in {"step_started", "operation_started"}:
+            for key in ("stage_generation", "stage_id"):
+                if key not in payload:
+                    comparable_existing.pop(key, None)
         same_payload = comparable_existing == payload
         if payload_keys is not None:
             same_payload = all(existing_payload.get(key) == payload.get(key)
@@ -2345,6 +2356,11 @@ def commit_metadata_and_event(out_dir, before, after, event_type, payload,
         _events, problems = verify_event_chain(out_dir, before, **access)
         if problems:
             raise ControlError("candidate transaction event chain invalid", gate_id="event_chain", violations=problems)
+    if event_type == "ticket_created":
+        stage_module().protect_update({}, after)
+    elif event_type == "metadata_updated" and not any(payload.get(key) for key in ("stage_control", "serial_claim_control", "visual_review_control", "evidence_review_control")):
+        stage_module().protect_update(before or {}, after)
+    stage_token = _stage_write_guard(out_dir, event_type, payload, git_provider=git_provider, require_git_provider=require_git_provider)
     require_valid_metadata(after)
     event_payload = dict(payload)
     event_payload["metadata_hash_after"] = metadata_hash(after)
@@ -2374,6 +2390,7 @@ def commit_metadata_and_event(out_dir, before, after, event_type, payload,
             _candidate_context_guard(out_dir, before, git_provider, require_git_provider)
         if before_append is not None:
             before_append()
+        _stage_publication_check(stage_token, git_provider=git_provider, require_git_provider=require_git_provider)
         append_prepared_event(out_dir, event)
     except BaseException:
         # append 的 write 已成功但 fsync/返回失败时，事件可能已落盘。
@@ -2493,7 +2510,7 @@ def cmd_resolve_ticket(args):
     return 0
 
 
-def cmd_create(args):
+def _cmd_create_plain(args):
     out_dir = Path(args.dir).resolve()
     workspace, path_is_debug = classify_ticket_dir(out_dir)
     birth_is_debug = args.birth.startswith("debug-")
@@ -2563,6 +2580,8 @@ def cmd_create(args):
     payload = {"birth_kind": args.birth,
                "execution_contract_version": 1,
                "requirement_summary": meta.get("requirement_summary") or args.requirement[:100]}
+    if getattr(args, "stage_id", None):
+        payload["stage_birth"] = {"stage_id": args.stage_id, "input_digest": _stage_birth_digest(args)}
     if "candidate_tracking" in meta:
         payload["candidate_tracking"] = meta["candidate_tracking"]
         payload["excluded_side_effects"] = []
@@ -2604,6 +2623,55 @@ def cmd_create(args):
                       "status": status, "event_id": event["event_id"],
                       "out_dir": str(out_dir)}, ensure_ascii=False, indent=2))
     return 0
+
+
+def _stage_birth_digest(args):
+    return canonical_digest({"ticket_id": args.ticket_id, "requirement": args.requirement, "birth": args.birth,
+        "stage_id": args.stage_id, "metadata": strict_json_loads(args.metadata_json) if args.metadata_json else {},
+        "candidate_limits": strict_json_loads(args.candidate_limits_json) if args.candidate_limits_json else None})
+
+
+def cmd_create(args):
+    """A staged project's new ordinary ticket must name its planned binding."""
+    out_dir = Path(args.dir).resolve()
+    workspace, _debug = classify_ticket_dir(out_dir)
+    locator = stage_module().locator_path(workspace)
+    if not locator.parent.exists():
+        if stage_module().discover_stage_history(workspace) is not None:
+            raise ControlError("stage: project locator directory missing; recover it with stage register on the authenticated coordinator",
+                               gate_id="stage_gate")
+        return _cmd_create_plain(args)
+    if not locator.is_file():
+        raise ControlError("stage: enabled project locator missing; refusing ordinary birth", gate_id="stage_gate")
+    ref = load_json(locator, "stage locator")
+    stage_id = getattr(args, "stage_id", None)
+    if not stage_id:
+        raise ControlError("stage: enabled project create requires --stage-id", gate_id="stage_gate")
+    coordinator = ref.get("coordinator_root")
+    state = stage_module()._resolve(coordinator)
+    if state is None or stage_id not in [row["id"] for row in state["program"]["plan"]["stages"]]:
+        raise ControlError("stage: unknown planned stage", gate_id="stage_gate")
+    existing = state["program"]["bindings"].get(stage_id)
+    if existing is not None and existing["control_root"] != str(out_dir):
+        raise ControlError("stage: stage already bound to another ticket", gate_id="stage_gate")
+    if args.request_id and (out_dir / METADATA_NAME).is_file():
+        current, events = stage_module()._verified(out_dir)
+        prior = next((event for event in events if event.get("event_type") == "ticket_created" and event.get("request_id") == args.request_id), None)
+        if prior is not None:
+            expected_birth = {"stage_id": stage_id, "input_digest": _stage_birth_digest(args)}
+            if current["ticket_id"] != args.ticket_id or (prior.get("payload") or {}).get("stage_birth") != expected_birth:
+                raise ControlError("stage: create request_id conflicts with another birth payload", gate_id="idempotency_conflict")
+            bind_stage(coordinator, stage_id, out_dir, request_id=args.request_id + ":stage-bind")
+            print(json.dumps({"ok": True, "already_applied": True, "ticket_id": args.ticket_id,
+                "event_id": prior["event_id"], "out_dir": str(out_dir), "stage_binding": stage_id}, ensure_ascii=False, indent=2))
+            return 0
+    with contextlib.redirect_stdout(io.StringIO()) as stream:
+        code = _cmd_create_plain(args)
+    result = json.loads(stream.getvalue())
+    bind_stage(coordinator, stage_id, out_dir, request_id=(args.request_id or str(uuid.uuid4())) + ":stage-bind")
+    result["stage_binding"] = stage_id
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    return code
 
 
 def _find_ui_create_request(output_root, request_id):
@@ -2966,6 +3034,9 @@ def cmd_event(args):
 
 def cmd_transition(args):
     out_dir = Path(args.dir).resolve()
+    stage_action = _stage_write_action("state_changed", {"to": args.to})
+    if stage_action is not None:
+        require_stage_action(out_dir, stage_action)
     sm = load_state_machine()
     to_status = args.to
     if to_status not in sm["states"]:
@@ -3871,6 +3942,381 @@ CLOSE_BOOKKEEPING_FIELDS = {
 
 
 _CANDIDATE_MODULE = None
+_STAGE_MODULE = None
+
+
+def stage_module():
+    global _STAGE_MODULE
+    if _STAGE_MODULE is None:
+        spec = importlib.util.spec_from_file_location("icode_stage_acceptance", SKILL_ROOT / "tools/stage_acceptance.py")
+        _STAGE_MODULE = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(_STAGE_MODULE)
+    # Preserve this control module's exception identity and protected provider.
+    _STAGE_MODULE._CONTROL = types.SimpleNamespace(**globals())
+    return _STAGE_MODULE
+
+
+def stage_projection(out_dir, *, git_provider=None, require_git_provider=False):
+    return stage_module().projection(out_dir, git_provider=git_provider, require_git_provider=require_git_provider)
+
+
+def require_stage_action(out_dir, action, *, expected_generation=None, git_provider=None, require_git_provider=False):
+    return stage_module().require_action(out_dir, action, expected_generation=expected_generation,
+                                         git_provider=git_provider, require_git_provider=require_git_provider)
+
+
+def register_stage_program(out_dir, plan, **kwargs):
+    return stage_module().register_program(out_dir, plan, **kwargs)
+
+
+def bind_stage(coordinator, stage_id, out_dir, **kwargs):
+    return stage_module().bind_stage(coordinator, stage_id, out_dir, **kwargs)
+
+
+def review_stage(out_dir, **kwargs):
+    return stage_module().review_stage(out_dir, **kwargs)
+
+
+def confirm_stage(out_dir, request, *, trusted_confirmation=None, git_provider=None, require_git_provider=False):
+    return stage_module().confirm_stage(out_dir, request, trusted_confirmation=trusted_confirmation,
+                                        git_provider=git_provider, require_git_provider=require_git_provider)
+
+
+def _stage_write_action(event_type, payload):
+    if event_type == "agent_spawned":
+        return payload.get("stage_action") or "agent"
+    if event_type == "step_started":
+        step = payload.get("step")
+        return step if step in {"code", "patch", "fast", "verify", "deploy"} else "review"
+    if event_type == "operation_started":
+        return None if payload.get("class") == "read_only" else payload.get("stage_action", "operation")
+    if event_type == "verification_recorded" and payload.get("outcome") == "pass":
+        return "verify"
+    if event_type == "state_changed":
+        target = payload.get("to") or ""
+        if target in {"code_in_progress", "code_done"}:
+            return "code"
+        if target in {"deepcheck_in_progress", "deepcheck_done", "audit_in_progress", "verify_in_progress", "completed", "debug_done"}:
+            return "transition"
+    if event_type == "metadata_updated":
+        if payload.get("stage_control") or payload.get("serial_claim_control") or payload.get("visual_review_control") or payload.get("evidence_review_control"):
+            return None
+        if payload.get("build_start_control"):
+            return "build"
+        if payload.get("candidate_control"):
+            return "candidate"
+        if payload.get("execution_root_binding"):
+            return "execution_root"
+        return "metadata"
+    return None
+
+
+def _stage_write_guard(out_dir, event_type, payload, *, git_provider=None, require_git_provider=False):
+    action = _stage_write_action(event_type, payload)
+    if action is None:
+        return None
+    if event_type == "metadata_updated" and set(payload.get("set") or {}) | set(payload.get("append") or {}):
+        fields = set(payload.get("set") or {}) | set(payload.get("append") or {})
+        if fields.issubset({"requirement", "requirement_summary", "keywords"}):
+            meta = load_metadata(out_dir)
+            events, _ = read_events(out_dir)
+            implemented = any(event["event_type"] == "verification_recorded" or
+                (event["event_type"] == "step_started" and (event.get("payload") or {}).get("step") in {"code", "patch", "fast", "verify", "deploy", "deepcheck", "audit"}) or
+                (event["event_type"] == "operation_started" and (event.get("payload") or {}).get("class") != "read_only") for event in events)
+            if not implemented and meta.get("status") in {"init_in_progress", "log_in_progress", "log_done", "plan_done", "review_in_progress", "review_done", "plan_finalized"}:
+                return None
+    view = require_stage_action(out_dir, action, git_provider=git_provider, require_git_provider=require_git_provider)
+    if not view["enabled"]:
+        return None
+    return _stage_token(out_dir, view, action)
+
+
+def _stage_token(out_dir, view, action, meta=None):
+    if not view["enabled"]:
+        return None
+    if not view.get("coordinator_root") or not view.get("stage_id"):
+        raise ControlError("stage: writer requires an intact bound coordinator reference", gate_id="stage_gate", stage=view)
+    return {"coordinator_root": view["coordinator_root"], "generation": view["generation"], "action": action,
+            "child_root": str(Path(out_dir).resolve()), "metadata": copy.deepcopy(load_metadata(out_dir) if meta is None else meta),
+            "stage_id": view["stage_id"], "program_id": view["program_id"]}
+
+
+def _stage_publication_check(token, *, git_provider=None, require_git_provider=False):
+    if token is None:
+        return
+    view = stage_projection(token["coordinator_root"], git_provider=git_provider, require_git_provider=require_git_provider)
+    if view["blocked"] or view.get("generation") != token["generation"] or view.get("program_id") != token["program_id"]:
+        raise ControlError("stage: generation changed before result publication", gate_id="stage_gate", stage=view)
+    stage_module().require_action(token["child_root"], token["action"], expected_generation=token["generation"],
+        git_provider=git_provider, require_git_provider=require_git_provider,
+        _metadata_override=token["metadata"], _allow_pending=True)
+
+
+def cmd_stage(args, *, git_provider=None, require_git_provider=False):
+    access = {"git_provider": git_provider, "require_git_provider": require_git_provider}
+    if args.phase == "register" and not args.plan_json:
+        raise ControlError("stage register requires --plan-json", exit_code=2, gate_id="stage_gate")
+    if args.phase == "bind" and (not args.stage_id or not args.ticket_dir):
+        raise ControlError("stage bind requires --stage-id/--ticket-dir", exit_code=2, gate_id="stage_gate")
+    if args.phase in {"register", "bind", "review"} and not args.request_id:
+        raise ControlError("stage writer requires --request-id", exit_code=2, gate_id="stage_gate")
+    if args.phase == "register":
+        result = register_stage_program(args.dir, verification_json(args.plan_json, "--plan-json"), request_id=args.request_id, **access)
+    elif args.phase == "bind":
+        result = bind_stage(args.dir, args.stage_id, args.ticket_dir, request_id=args.request_id, **access)
+    elif args.phase == "review":
+        result = review_stage(args.dir, request_id=args.request_id, **access)
+    elif args.phase == "check":
+        result = stage_projection(args.dir, **access)
+        result["ok"] = not result["blocked"]
+    else:
+        raise ControlError("stage: trusted host/UI confirmation required; CLI actor or JSON cannot attest a user", gate_id="stage_gate")
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    return 0
+
+
+def _stage_writer_locks(out_dir, view):
+    """Return a context manager with the global coordinator -> child order."""
+    stack = contextlib.ExitStack()
+    try:
+        if view.get("enabled") and view.get("coordinator_root") and Path(view["coordinator_root"]).resolve() != Path(out_dir).resolve():
+            stack.enter_context(DirLock(view["coordinator_root"]))
+        stack.enter_context(DirLock(out_dir))
+        return stack
+    except BaseException:
+        stack.close()
+        raise
+
+
+def claim_serial_operation(proof, session_info, *, git_provider=None, require_git_provider=False):
+    """Consume a real open external operation before any serial TX, once only."""
+    required = {"dir", "attempt", "event_id", "ticket_id", "input_digest", "operation_class"}
+    if not isinstance(proof, dict) or set(proof) != required or any(not isinstance(proof[k], str) or not proof[k] for k in required):
+        raise ControlError("serial operation proof shape invalid", gate_id="serial_claim")
+    if not isinstance(session_info, dict) or set(session_info) != {"session_id", "output_dir", "operation_input"} \
+            or any(not isinstance(session_info[k], str) or not session_info[k] for k in session_info):
+        raise ControlError("serial session info shape invalid", gate_id="serial_claim")
+    out_dir = Path(proof["dir"]).resolve(strict=True)
+    access = {"git_provider": git_provider, "require_git_provider": require_git_provider}
+    view = require_stage_action(out_dir, "serial_exec", **access)
+    try:
+        operation_input = strict_json_loads(session_info["operation_input"])
+    except (ValueError, TypeError) as exc:
+        raise ControlError("serial canonical input invalid", gate_id="serial_claim") from exc
+    if not isinstance(operation_input, dict) or operation_input.get("action") != "serial_exec" \
+            or operation_input.get("operation_class") != "external_side_effect" \
+            or any(not isinstance(operation_input.get(key), str) or re.fullmatch(r"[0-9a-f]{64}", operation_input[key]) is None
+                   for key in ("script_sha256", "config_sha256")) \
+            or canonical_digest(session_info["operation_input"]) != proof["input_digest"]:
+        raise ControlError("serial script/config input digest mismatch", gate_id="serial_claim")
+    with _stage_writer_locks(out_dir, view):
+        recover_pending_transaction(out_dir)
+        meta = load_metadata(out_dir)
+        require_vnext(meta, out_dir)
+        ensure_execution_writable(meta)
+        events, issues = verify_event_chain(out_dir, meta, **access)
+        if issues:
+            raise ControlError("serial operation event chain invalid", gate_id="serial_claim", violations=issues)
+        fresh = require_stage_action(out_dir, "serial_exec", expected_generation=view.get("generation"), **access)
+        event = find_operation_start(events, proof["attempt"])
+        payload = event.get("payload") or {}
+        if str(out_dir) != proof["dir"] or meta["ticket_id"] != proof["ticket_id"] \
+                or event["event_id"] != proof["event_id"] or payload.get("class") != "external_side_effect" \
+                or proof["operation_class"] != "external_side_effect" or payload.get("input_digest") != proof["input_digest"] \
+                or operation_finished(events, proof["attempt"]) is not None:
+            raise ControlError("serial operation is not the referenced open authorized attempt", gate_id="serial_claim")
+        if fresh["enabled"] and payload.get("stage_generation") != fresh["generation"]:
+            raise ControlError("serial operation stage generation is stale; refusing TX", gate_id="serial_claim")
+        after = copy.deepcopy(meta)
+        verification = after.setdefault("extensions", {}).setdefault("verification", {})
+        claims = verification.setdefault("serial_claims", [])
+        if any(row.get("attempt") == proof["attempt"] or row.get("session_id") == session_info["session_id"] for row in claims):
+            raise ControlError("serial operation was already claimed; unknown remote outcome cannot be replayed", gate_id="serial_claim")
+        claim = {"claim_id": str(uuid.uuid4()), "attempt": proof["attempt"], "operation_event_id": event["event_id"],
+                 "ticket_id": meta["ticket_id"], "input_digest": proof["input_digest"], "operation_class": "external_side_effect",
+                 "session_id": session_info["session_id"], "output_dir": str(Path(session_info["output_dir"]).resolve()),
+                 "claimed_at": now_iso(), "stage_generation": fresh.get("generation")}
+        claims.append(claim)
+        record = {"serial_claim_control": 1, "serial_claim": claim, "set": {"extensions": after["extensions"]}, "append": {}}
+        publication = {}
+        if _candidate_access_requested(git_provider, require_git_provider):
+            publication = dict(access, before_publish=lambda: _candidate_context_guard(out_dir, meta, git_provider, require_git_provider))
+        token = _stage_token(out_dir, fresh, "serial_exec", meta)
+        committed = commit_metadata_and_event(out_dir, meta, after, "metadata_updated", record,
+            request_id="serial-claim:" + claim["claim_id"], before_append=lambda: _stage_publication_check(token, **access), **publication)
+    return {"ok": True, "claim_id": claim["claim_id"], "event_id": committed["event_id"], "stage_generation": fresh.get("generation")}
+
+
+def _review_start(out_dir, run, action, access):
+    view = require_stage_action(out_dir, action, **access)
+    meta, events = stage_module()._verified(out_dir, **access)
+    if not isinstance(run, dict) or not isinstance(run.get("run_id"), str) or not run["run_id"].strip():
+        raise ControlError("review requires a stable run_id", gate_id="evidence_review")
+    if (meta.get("candidate_tracking") or {}).get("mode") != "enabled":
+        raise ControlError("review requires tracked current candidate identity", gate_id="evidence_review")
+    current = candidate_snapshot(out_dir, meta, events=events, **access)
+    if run.get("candidate_id") != current["candidate_id"]:
+        raise ControlError("review run candidate differs from current source", gate_id="evidence_review")
+    return meta, view, current
+
+
+def _review_replay(out_dir, meta, namespace, request_id, request_digest):
+    events, _ = read_events(out_dir)
+    prior = next((event for event in events if event.get("request_id") == request_id), None)
+    if prior is None:
+        return None
+    receipts = ((meta.get("extensions") or {}).get("verification") or {}).get(namespace) or []
+    receipt = next((row for row in receipts if row.get("request_id") == request_id), None)
+    if receipt is None or receipt.get("request_digest") != request_digest:
+        raise ControlError("review request_id conflicts with another input or writer", gate_id="evidence_review")
+    return {"ok": True, "already_applied": True, "review_id": receipt["review_id"], "outcome": receipt["outcome"],
+            "event_id": prior["event_id"], "receipt": copy.deepcopy(receipt)}
+
+
+def _publish_review(out_dir, meta, view, current, receipt, namespace, request_id, check_files, access):
+    with _stage_writer_locks(out_dir, view):
+        fresh_meta, events = stage_module()._verified(out_dir, **access)
+        if metadata_hash(fresh_meta) != metadata_hash(meta):
+            raise ControlError("review metadata changed during provider execution", gate_id="evidence_review")
+        fresh_view = require_stage_action(out_dir, "record_visual_review", expected_generation=view.get("generation"), **access)
+        fresh_candidate = candidate_snapshot(out_dir, fresh_meta, events=events, **access)
+        if fresh_candidate["candidate_id"] != current["candidate_id"]:
+            raise ControlError("source changed during review execution", gate_id="evidence_review")
+        check_files()
+        after = copy.deepcopy(fresh_meta)
+        reviews = after.setdefault("extensions", {}).setdefault("verification", {}).setdefault(namespace, [])
+        reviews.append(receipt)
+        marker = "visual_review" if namespace == "visual_reviews" else "evidence_review"
+        payload = {marker + "_control": 1, marker: receipt, "set": {"extensions": after["extensions"]}, "append": {}}
+        token = _stage_token(out_dir, fresh_view, "record_visual_review", fresh_meta)
+        def before_append():
+            check_files()
+            _stage_publication_check(token, **access)
+        def check_candidate():
+            actual = candidate_snapshot(out_dir, fresh_meta, events=events, **access)
+            if actual["candidate_id"] != current["candidate_id"]:
+                raise ControlError("source changed before review publication", gate_id="evidence_review")
+            if access:
+                _candidate_context_guard(out_dir, fresh_meta, access["git_provider"], access["require_git_provider"])
+        original_before_append = before_append
+        def final_check():
+            check_candidate()
+            original_before_append()
+        publication = dict(access, before_publish=check_candidate) if access else {}
+        event = commit_metadata_and_event(out_dir, fresh_meta, after, "metadata_updated", payload,
+            request_id=request_id, before_append=final_check, **publication)
+    return {"ok": True, "review_id": receipt["review_id"], "outcome": receipt["outcome"], "event_id": event["event_id"], "receipt": receipt}
+
+
+def record_evidence_review(out_dir, *, item, run, requirement_id, method, trusted_reviewer=None,
+                           request_id, git_provider=None, require_git_provider=False):
+    """Read the actual item and invoke a trusted AI/observation adapter ourselves.
+
+    A host callback is executable authority; ordinary CLI/JSON cannot install it.
+    Human observation is a separate explicit receipt, never the final acceptance.
+    """
+    if not callable(trusted_reviewer) or method not in {"ai_review", "human_observation"}:
+        raise ControlError("trusted evidence review/observation adapter required", gate_id="evidence_review")
+    if not isinstance(request_id, str) or not request_id.strip():
+        raise ControlError("review requires request_id", gate_id="evidence_review")
+    out_dir = Path(out_dir).resolve()
+    access = ({"git_provider": git_provider, "require_git_provider": require_git_provider}
+              if _candidate_access_requested(git_provider, require_git_provider) else {})
+    meta, view, current = _review_start(out_dir, run, "record_visual_review", access)
+    contract = meta.get("verification_contract") or {}
+    requirements = verification_evidence_module().bundle_module().validate_contract(contract)["required_items"]
+    selected = next((row for row in requirements if row["id"] == requirement_id), None)
+    if selected is None or selected["method"] != method or any(selected[key] != run.get(key) for key in ("layer", "consumer", "scenario")):
+        raise ControlError("review method/cell differs from frozen requirement", gate_id="evidence_review")
+    if not isinstance(item, dict) or not {"path", "sha256", "bytes"}.issubset(item):
+        raise ControlError("review requires the bounded original item reference", gate_id="evidence_review")
+    bundle_api = verification_evidence_module().bundle_module()
+    request_digest = canonical_digest({"item": item, "run": run, "requirement_id": requirement_id, "method": method,
+                                       "contract": bundle_api.contract_digest(contract)})
+    replay = _review_replay(out_dir, meta, "evidence_reviews", request_id, request_digest)
+    if replay is not None:
+        return replay
+    def read():
+        reader = bundle_api.Reader(out_dir)
+        raw = reader.read(item["path"], item["sha256"], item["bytes"])
+        reader.finish()
+        return raw
+    raw = read()
+    binding = {"method": method, "item_sha256": item["sha256"], "run_id": run["run_id"], "candidate_id": run["candidate_id"]}
+    try:
+        response = trusted_reviewer({**binding, "item": copy.deepcopy(item), "content": raw,
+                                     "requirement": copy.deepcopy(selected), "contract_digest": bundle_api.contract_digest(contract)})
+        encoded = json.dumps(response, ensure_ascii=False, allow_nan=False).encode("utf-8")
+        if len(encoded) > bundle_api.DEFAULT_LIMITS["max_json_bytes"]:
+            raise ValueError("review response exceeds JSON budget")
+    except Exception as exc:
+        raise ControlError("trusted reviewer failed: " + type(exc).__name__, gate_id="evidence_review") from exc
+    if not isinstance(response, dict) or any(response.get(key) != value for key, value in binding.items()) \
+            or response.get("outcome") not in {"pass", "fail", "inconclusive"} \
+            or not isinstance(response.get("conclusion"), str) or not response["conclusion"].strip() \
+            or not isinstance(response.get("limitations"), list) or any(not isinstance(v, str) for v in response["limitations"]) \
+            or not isinstance(response.get("source_id"), str) or not response["source_id"].strip() \
+            or (method == "ai_review" and any(not isinstance(response.get(k), str) or not response[k].strip() for k in ("provider", "model"))) \
+            or (method == "human_observation" and response.get("source") != "host_observation"):
+        raise ControlError("trusted evidence review returned incomplete or mismatched receipt", gate_id="evidence_review")
+    receipt = {**copy.deepcopy(response), "review_id": str(uuid.uuid4()), "at": now_iso(), "requirement_id": requirement_id,
+               "cell": {key: run[key] for key in ("layer", "consumer", "scenario")},
+               "item": {key: item[key] for key in ("path", "sha256", "bytes")},
+               "contract_digest": bundle_api.contract_digest(contract), "request_id": request_id, "request_digest": request_digest}
+    return _publish_review(out_dir, meta, view, current, receipt, "evidence_reviews", request_id, read, access)
+
+
+def record_visual_review(out_dir, *, frames, route, run, prompt_version, adapters=None, prompt="", request_id,
+                         git_provider=None, require_git_provider=False):
+    """Execute the selected media providers, then atomically protect their report.
+
+    Each frame additionally supplies source_path so this writer hashes the
+    original source itself. Paths stay under this explicit ticket evidence root.
+    """
+    if not isinstance(request_id, str) or not request_id.strip():
+        raise ControlError("visual review requires request_id", gate_id="visual_review")
+    out_dir = Path(out_dir).resolve()
+    access = ({"git_provider": git_provider, "require_git_provider": require_git_provider}
+              if _candidate_access_requested(git_provider, require_git_provider) else {})
+    meta, view, current = _review_start(out_dir, run, "record_visual_review", access)
+    bundle_api = verification_evidence_module().bundle_module()
+    contract = bundle_api.validate_contract(meta.get("verification_contract"))
+    if contract.get("visual") is None or contract["visual"].get("required") is not True:
+        raise ControlError("visual review requires a frozen visual contract", gate_id="visual_review")
+    if not isinstance(frames, list) or not frames:
+        raise ControlError("visual review requires actual frame sources", gate_id="visual_review")
+    normalized = copy.deepcopy(frames)
+    request_digest = canonical_digest({"frames": normalized, "route": route, "run": run,
+        "prompt_version": prompt_version, "prompt_digest": canonical_digest(prompt),
+        "contract": bundle_api.contract_digest(meta["verification_contract"])})
+    replay = _review_replay(out_dir, meta, "visual_reviews", request_id, request_digest)
+    if replay is not None:
+        return replay
+    def check_files():
+        reader = bundle_api.Reader(out_dir)
+        for frame in normalized:
+            reader.read(frame["source_path"], frame["source_sha256"])
+            reader.read(frame["preview_path"], frame["input_sha256"])
+        reader.finish()
+    try:
+        reader = bundle_api.Reader(out_dir)
+        for frame in normalized:
+            frame["source_path"] = str(reader.path(frame["source_path"]))
+            frame["preview_path"] = str(reader.path(frame["preview_path"]))
+        check_files()
+    except (KeyError, TypeError, ValueError, OSError) as exc:
+        raise ControlError("visual source/preview evidence invalid: " + str(exc), gate_id="visual_review") from exc
+    spec = importlib.util.spec_from_file_location("controlled_visual_evidence", SKILL_ROOT / "tools/visual_evidence.py")
+    visual = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(visual)
+    report = visual.execute_visual_review(normalized, route, run=run, prompt_version=prompt_version,
+                                          adapters=adapters, prompt=prompt)
+    receipt = {**report, "review_id": str(uuid.uuid4()), "at": now_iso(), "request_id": request_id,
+               "cell": {key: run.get(key) for key in ("layer", "consumer", "scenario")},
+               "frames": normalized, "prompt_version": prompt_version, "prompt_sha256": canonical_digest(prompt),
+               "route_digest": canonical_digest(route), "contract_digest": bundle_api.contract_digest(meta["verification_contract"])}
+    receipt["request_digest"] = request_digest
+    return _publish_review(out_dir, meta, view, current, receipt, "visual_reviews", request_id, check_files, access)
 
 
 def candidate_module():
@@ -3914,8 +4360,9 @@ def verification_context(out_dir, meta=None, *, git_provider=None, require_git_p
     meta = load_metadata(out_dir) if meta is None else meta
     access = ({"git_provider": git_provider, "require_git_provider": require_git_provider}
               if _candidate_access_requested(git_provider, require_git_provider) else {})
-    return verification_evidence_module().context(out_dir, meta, capture=candidate_snapshot,
+    context = verification_evidence_module().context(out_dir, meta, capture=candidate_snapshot,
                 verify=verify_event_chain, candidate_api=candidate_module(), **access)
+    return context
 
 
 def verification_applicability(out_dir, meta=None, *, git_provider=None, require_git_provider=False):
@@ -4178,6 +4625,8 @@ def candidate_event_issues(events, meta):
 
 def cmd_candidate(args, *, git_provider=None, require_git_provider=False):
     out_dir = Path(args.dir).resolve()
+    if args.phase != "inspect":
+        require_stage_action(out_dir, "candidate", git_provider=git_provider, require_git_provider=require_git_provider)
     access = ({"git_provider": git_provider, "require_git_provider": require_git_provider}
               if _candidate_access_requested(git_provider, require_git_provider) else {})
     if access and args.phase not in {"inspect", "capture"}:
@@ -4249,6 +4698,7 @@ def cmd_candidate(args, *, git_provider=None, require_git_provider=False):
 
 def cmd_bind_execution_root(args):
     out_dir = Path(args.dir).resolve()
+    require_stage_action(out_dir, "execution_root")
     if not isinstance(args.request_id, str) or not args.request_id.strip():
         raise ControlError("绑定需要非空 request-id", exit_code=2,
                            gate_id="execution_binding_request")
@@ -4523,6 +4973,7 @@ def cmd_build_start(args, *, git_provider=None, require_git_provider=False):
     if not isinstance(args.request_id, str) or not args.request_id.strip():
         raise ControlError("build-start requires a nonempty --request-id", exit_code=2)
     out_dir = Path(args.dir).resolve()
+    require_stage_action(out_dir, "build", git_provider=git_provider, require_git_provider=require_git_provider)
     parameters = verification_json(args.parameters_json, "--parameters-json")
     if not isinstance(parameters, dict) or set(parameters) != {"configure_command", "build_command"}:
         raise ControlError("build-start 参数必须且只能包含 configure_command/build_command argv 数组", exit_code=2)
@@ -4598,6 +5049,8 @@ def cmd_build_start(args, *, git_provider=None, require_git_provider=False):
 
 def cmd_record_verification(args, *, git_provider=None, require_git_provider=False):
     out_dir = Path(args.dir).resolve()
+    if args.outcome == "pass":
+        require_stage_action(out_dir, "verify", git_provider=git_provider, require_git_provider=require_git_provider)
     access = ({"git_provider": git_provider, "require_git_provider": require_git_provider}
               if _candidate_access_requested(git_provider, require_git_provider) else {})
     if args.close_repair and not args.request_id:
@@ -4706,6 +5159,25 @@ def cmd_record_verification(args, *, git_provider=None, require_git_provider=Fal
                 input_payload["candidate"] = evidence_api.resolve_candidate(args.candidate_id, meta, events, live, candidate_module())
             elif args.candidate_id is not None:
                 raise evidence_api.EvidenceError("candidate-id requires an explicitly enabled candidate contract")
+            raw_bundle = getattr(args, "evidence_bundle_json", None)
+            bundle_path = getattr(args, "evidence_bundle", None)
+            if raw_bundle is not None or bundle_path is not None:
+                contract = meta.get("verification_contract")
+                if not isinstance(contract, dict) or "evidence_contract" not in contract:
+                    raise evidence_api.EvidenceError("evidence_bundle requires an explicit evidence_contract")
+                input_payload["evidence_bundle"] = (
+                    verification_json(raw_bundle, "--evidence-bundle-json") if raw_bundle is not None else
+                    evidence_api.bundle_module().make_reference(bundle_path, out_dir))
+            validated_bundle = evidence_api.validate_bundle(input_payload, meta, out_dir,
+                                                           review_validator=stage_module().review_validator(meta))
+            if validated_bundle is not None:
+                # A bundle is captured before registration; preserve its verified
+                # run identity rather than generating an unrelated run UUID.
+                input_payload["run_id"] = validated_bundle["bundle"]["run_id"]
+                existing = next((event for event in events if event.get("event_type") == "verification_recorded"
+                                 and (event.get("payload") or {}).get("run_id") == input_payload["run_id"]), None)
+                if existing is not None and (not args.request_id or existing.get("request_id") != args.request_id):
+                    raise evidence_api.EvidenceError("duplicate evidence bundle run_id")
             if getattr(args, "test_report", None) is not None:
                 report_api = evidence_api.test_result_module()
                 workspace = execution_workspace(out_dir, meta)
@@ -4880,6 +5352,9 @@ def cmd_record_agent_spawn(args):
         "model": _require_agent_text(args.model, "--model"),
         "capabilities": capabilities,
     }
+    if getattr(args, "stage_action", None) is not None:
+        input_payload["stage_action"] = _require_agent_text(args.stage_action, "--stage-action")
+    require_stage_action(out_dir, input_payload.get("stage_action", "agent"))
     exclusive_key = (args.exclusive_key or "").strip()
     if exclusive_key:
         if len(exclusive_key) > 80:
@@ -5383,6 +5858,14 @@ def derived_attempt(prefix, request_id):
 def cmd_step(args, *, git_provider=None, require_git_provider=False, inspection_provider_factory=None):
     """步骤端口快照、Reactive 边界复检和终结回执。"""
     out_dir = Path(args.dir).resolve()
+    if args.phase == "start" or args.phase == "check" or (args.phase == "finish" and args.outcome == "success"):
+        expected = None
+        if args.phase != "start" and args.attempt:
+            start = find_step_start(read_events(out_dir)[0], args.attempt)
+            expected = (start.get("payload") or {}).get("stage_generation")
+        require_stage_action(out_dir, args.step if args.step in {"code", "patch", "fast", "verify", "deploy"} else "review",
+                             expected_generation=expected,
+                             git_provider=git_provider, require_git_provider=require_git_provider)
     access = _code_access(args.step, git_provider, require_git_provider, inspection_provider_factory)
     candidate_access = _code_candidate_access(access)
     if access and args.phase not in {"start", "check", "finish"}:
@@ -5426,6 +5909,8 @@ def cmd_step(args, *, git_provider=None, require_git_provider=False, inspection_
                 payload["candidate_input"] = candidate_snapshot(out_dir, meta, events=events, **candidate_access)
             prior = find_idempotent_event(events, args.request, "step_started", payload)
             if prior:
+                require_stage_action(out_dir, args.step if args.step in {"code", "patch", "fast", "verify", "deploy"} else "review",
+                    expected_generation=(prior.get("payload") or {}).get("stage_generation"), **candidate_access)
                 result = {"ok": True, "already_applied": True, "step": args.step,
                           "attempt": attempt, "event_id": prior["event_id"],
                           "input_digest": payload["input_digest"]}
@@ -5953,6 +6438,12 @@ def operation_finished(events, attempt):
 
 def cmd_operation(args):
     out_dir = Path(args.dir).resolve()
+    if args.phase == "start" and args.opclass != "read_only":
+        try:
+            declared = strict_json_loads(args.input or "{}")
+        except (ValueError, TypeError):
+            declared = {}
+        require_stage_action(out_dir, declared.get("action", "operation") if isinstance(declared, dict) else "operation")
     model = load_execution_model()
     problems = validate_execution_catalog(model)
     if problems:
@@ -6000,8 +6491,17 @@ def cmd_operation(args):
                 "input_digest": canonical_digest(args.input or ""),
                 "idempotency_provided": bool(args.request),
             }
+            try:
+                operation_input = strict_json_loads(args.input or "{}")
+                if isinstance(operation_input, dict) and isinstance(operation_input.get("action"), str):
+                    payload["stage_action"] = operation_input["action"]
+            except (ValueError, TypeError):
+                pass
             prior = find_idempotent_event(events, args.request, "operation_started", payload)
             if prior:
+                if args.opclass != "read_only":
+                    require_stage_action(out_dir, payload.get("stage_action", "operation"),
+                        expected_generation=(prior.get("payload") or {}).get("stage_generation"))
                 print(json.dumps({"ok": True, "already_applied": True,
                                   "name": args.name, "attempt": attempt,
                                   "event_id": prior["event_id"]},
@@ -6209,6 +6709,12 @@ def cmd_action_policy(args, *, git_provider=None, require_git_provider=False):
             "事件链不完整，拒绝生成动作策略",
             exit_code=1, gate_id="event_chain", violations=problems)
     execution = execution_trace(events)
+    stage = stage_projection(out_dir, **access)
+    requested_verify_variant = getattr(args, "verify_action", None) or "intent"
+    if requested_verify_variant == "default":
+        requested_verify_variant = "intent"
+    if args.action == "verify":
+        require_stage_action(out_dir, "plan" if requested_verify_variant in {"intent", "plan"} else requested_verify_variant, **access)
     last_event_hash = events[-1]["event_hash"] if events else GENESIS_HASH
     meta_digest = metadata_hash(meta)
     revision_base = {
@@ -6216,6 +6722,7 @@ def cmd_action_policy(args, *, git_provider=None, require_git_provider=False):
         "metadata_hash": meta_digest,
         "last_event_hash": last_event_hash,
         "event_count": len(events),
+        "stage_revision": stage.get("revision"),
     }
     revision = {**revision_base, "token": canonical_digest(revision_base)}
 
@@ -6254,6 +6761,15 @@ def cmd_action_policy(args, *, git_provider=None, require_git_provider=False):
             or execution["open_agents"]:
         allowed = [name for name in allowed if name in read_only]
         blocked_reason = "open_execution"
+    if stage["enabled"]:
+        if stage["blocked"] or not stage.get("stage_id") or stage["state"] == "accepted":
+            allowed = [name for name in allowed if name in read_only or name == "verify"]
+            blocked_reason = "stage_gate"
+        else:
+            allowed = [name for name in allowed if name in read_only or name == "verify" or name in stage["available_actions"]
+                       or name in {"deepcheck", "audit", "plan", "init", "log"}]
+            if (meta.get("candidate_tracking") or {}).get("mode") != "enabled":
+                allowed = [name for name in allowed if name not in {"code", "patch", "fast"}]
     allowed = sorted(allowed)
     recommended = (policy.get("recommended_by_status") or {}).get(status)
     if recommended not in allowed:
@@ -6301,6 +6817,7 @@ def cmd_action_policy(args, *, git_provider=None, require_git_provider=False):
         "open_steps": execution["open_steps"],
         "open_operations": execution["open_operations"],
         "open_agents": execution["open_agents"],
+        "stage": stage,
     }
     if args.action:
         result.update({"action": args.action, "action_allowed": True})
@@ -6425,6 +6942,15 @@ def build_parser():
                                  description="icode 工单控制面（vNext schema v3）")
     sub = ap.add_subparsers(dest="cmd")
 
+    p = sub.add_parser("stage", help="受控顺序阶段计划、绑定、AI报告与验收投影")
+    p.add_argument("--dir", required=True)
+    p.add_argument("--phase", required=True, choices=["register", "bind", "review", "check", "confirm", "reject", "revoke"])
+    p.add_argument("--plan-json")
+    p.add_argument("--stage-id")
+    p.add_argument("--ticket-dir")
+    p.add_argument("--request-id")
+    p.set_defaults(func=cmd_stage)
+
     p = sub.add_parser("resolve-ticket", help="工单身份解析（--dir/--ticket/--latest，可按状态/产物过滤）")
     selector = p.add_mutually_exclusive_group(required=True)
     selector.add_argument("--dir")
@@ -6447,6 +6973,7 @@ def build_parser():
                    choices=["init", "plan", "log", "debug-init", "debug-log"])
     p.add_argument("--metadata-json", help="额外 metadata 字段 JSON 对象；受保护出生字段由工具覆盖")
     p.add_argument("--candidate-limits-json", help="Git候选扫描预算JSON；超预算fail-closed，不降级")
+    p.add_argument("--stage-id", help="已启用阶段项目必须显式指定计划内 stage id")
     p.add_argument("--request-id", help="创建幂等键")
     p.set_defaults(func=cmd_create)
 
@@ -6623,6 +7150,9 @@ def build_parser():
     p.add_argument("--runtime-provenance-json")
     p.add_argument("--direct-test-json")
     p.add_argument("--test-report", help="只读解析实际 JUnit XML，机器记录用例数和原始报告 path/SHA256；相对执行工程根")
+    bundle_input = p.add_mutually_exclusive_group()
+    bundle_input.add_argument("--evidence-bundle", help="证据包路径；相对工单控制目录，只读计算实际 SHA256")
+    bundle_input.add_argument("--evidence-bundle-json", help="结构化证据引用 JSON {path,sha256}；写入前复核当前原始字节")
     p.add_argument("--build-source", default="unknown",
                    choices=["fresh", "reused", "existing", "unknown"])
     p.add_argument("--device")
@@ -6693,6 +7223,7 @@ def build_parser():
     p.add_argument("--model", required=True)
     p.add_argument("--capability", action="append", required=True,
                    choices=sorted(AGENT_CAPABILITIES))
+    p.add_argument("--stage-action", help="显式宿主步骤；未声明的自由任务必须属于当前实施阶段")
     p.add_argument("--request-id", required=True, help="调用前幂等键")
     p.add_argument("--exclusive-key",
                    help="可选跨进程独占域；同工单同 key 仅允许一个开放 spawn")
@@ -6761,6 +7292,7 @@ def main(*, git_provider=None, require_git_provider=False, inspection_provider_f
             (args.cmd == "candidate" and args.func is cmd_candidate) or
             (args.cmd == "build-start" and args.func is cmd_build_start) or
             (args.cmd == "record-verification" and args.func is cmd_record_verification) or
+            (args.cmd == "stage" and args.func is cmd_stage) or
             (args.cmd == "action-policy" and args.func is cmd_action_policy))
         code_entry = inspection_provider_factory is not None and getattr(args, "step", None) == "code" and (
             (args.cmd == "step" and args.func is cmd_step and getattr(args, "phase", None) in {"start", "check", "finish"}) or

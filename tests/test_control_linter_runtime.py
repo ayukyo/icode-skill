@@ -40,6 +40,7 @@ class ControlLinterRuntimeTests(unittest.TestCase):
         # The child gets only runtime necessities, never model credentials.
         environment = {key: os.environ[key] for key in (
             "SystemRoot", "WINDIR", "TEMP", "TMP", "PATH", "LANG", "LC_ALL",
+            "HOME", "USERPROFILE", "HOMEDRIVE", "HOMEPATH",
         ) if key in os.environ}
         if empty_path:
             environment["PATH"] = ""

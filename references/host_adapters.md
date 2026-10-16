@@ -2,6 +2,8 @@
 
 共享 SKILL 描述“要完成的操作”，ICODE 在运行时映射到当前宿主可用工具。方法论只有一份，工具语法不进入共享技能正文。
 
+严格视觉与阶段确认按 [串口、证据与阶段验收](serial_evidence_stages.md)接入：native 必须有可信 host callback 的实际调用来源，bridge 使用实际 provider 回执；保护 writer 不授信导入 JSON。用户确认由真实 UI/host 输入适配器核验明确意图及当前报告快照，普通 CLI actor、模型文本与任意 JSON 不能代签；缺适配器只阻断对应功能。
+
 | 抽象操作 | Claude Code 适配 | Codex 适配 | CodeBuddy 适配 | WorkBuddy 适配 | 无能力时 |
 |---|---|---|---|---|---|
 | 读文件/文本检索 | Read、Grep、Glob 或 shell `rg` | 文件读取工具或 shell `rg` | `read_file` / `search_content` / `search_file` 或 shell `rg` | 以当前会话实际暴露的内置工具为准；无命中时走 shell `rg` | 使用当前宿主最窄只读命令 |

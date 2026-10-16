@@ -193,7 +193,8 @@ def test_settings_defaults_roundtrip_and_atomic_replacement(tmp_path):
     assert saved["refresh_interval_seconds"] == 60
     assert store.load() == saved
     assert not path.with_suffix(".json.tmp").exists()
-    assert os.stat(path).st_mode & 0o077 == 0
+    if os.name != "nt":
+        assert os.stat(path).st_mode & 0o077 == 0
 
 
 @pytest.mark.parametrize(

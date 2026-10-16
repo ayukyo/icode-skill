@@ -56,7 +56,7 @@ def write_index(path: Path, project: Path, out_dir: Path, ticket_id: str,
             "control_schema_version": 3,
             "ticket_id": ticket_id,
             "project_path": str(project),
-            "out_dir": str(out_dir.relative_to(project)),
+            "out_dir": out_dir.relative_to(project).as_posix(),
             "status": status,
             "requirement_summary": f"requirement {ticket_id}",
             "updated_at": "2026-09-13T10:00:00+08:00",
@@ -161,18 +161,27 @@ def isolated_ui_home(tmp_path: Path, preferred_port: int) -> tuple[Path, Path]:
 def start_isolated_ui(home: Path):
     env = dict(os.environ)
     env["HOME"] = str(home)
+    if os.name == "nt":
+        env["USERPROFILE"] = str(home)
+    env["PYTHONUTF8"] = "1"
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
     return subprocess.Popen(
-        [sys.executable, str(ROOT / "tools" / "icode_agent.py"),
+        [getattr(sys, "_base_executable", sys.executable) if os.name == "nt" else sys.executable,
+         "-X", "utf8", "-B", str(ROOT / "tools" / "icode_agent.py"),
          "ui", "--no-browser"],
         cwd=ROOT, env=env, text=True,
         stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
 
 
 def stop_ui_processes(processes) -> None:
     for process in reversed(processes):
         if process.poll() is None:
-            process.send_signal(signal.SIGINT)
+            if os.name == "nt":
+                process.terminate()  # Headless Windows has no console SIGINT.
+            else:
+                process.send_signal(signal.SIGINT)
         try:
             process.communicate(timeout=5)
         except subprocess.TimeoutExpired:
@@ -423,11 +432,13 @@ def test_repeated_simple_ui_reuses_fallback_instance(tmp_path):
         instance = json.loads((data_dir / "ui_instance.json").read_text())
         assert instance["port"] == int(first_payload["url"].split(":")[-1][:-1])
         assert "token" not in instance
-        assert os.stat(data_dir / "ui_instance.json").st_mode & 0o077 == 0
+        if os.name != "nt":
+            assert os.stat(data_dir / "ui_instance.json").st_mode & 0o077 == 0
     finally:
         blocker.close()
         stop_ui_processes(processes)
-    assert not (data_dir / "ui_instance.json").exists()
+    if os.name != "nt":  # Windows TerminateProcess does not run finally.
+        assert not (data_dir / "ui_instance.json").exists()
 
 
 def test_concurrent_simple_ui_launches_share_one_instance(tmp_path):
@@ -448,7 +459,8 @@ def test_concurrent_simple_ui_launches_share_one_instance(tmp_path):
         assert processes[server_index].poll() is None
     finally:
         stop_ui_processes(processes)
-    assert not (data_dir / "ui_instance.json").exists()
+    if os.name != "nt":
+        assert not (data_dir / "ui_instance.json").exists()
 
 
 def test_stale_ui_instance_is_replaced_and_cleaned(tmp_path):
@@ -476,7 +488,8 @@ def test_stale_ui_instance_is_replaced_and_cleaned(tmp_path):
         assert current["port"] == preferred_port
     finally:
         stop_ui_processes([process])
-    assert not (data_dir / "ui_instance.json").exists()
+    if os.name != "nt":
+        assert not (data_dir / "ui_instance.json").exists()
 
 
 def test_default_port_conflict_falls_back_but_explicit_port_does_not():

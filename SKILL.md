@@ -31,6 +31,8 @@ description: ICODE 端到端编码工作流，适配 Claude Code、Codex、CodeB
 
 **自然语言请求、命令混合描述或上下文续接时，先读 [references/natural_language_entry.md](references/natural_language_entry.md)**：区分咨询与执行 → 解析目标/工程工单/限制/停止点 → 回显简短路由 → 读取原步骤文件并执行原门禁。用户显式工单/路径优先于已绑定工单，均不得被“最新目录”覆盖；歧义先只读定位，仍不唯一才问。否定条件不得丢失，不因一句“继续”扩大已授权范围。
 
+用户明确要求“按计划分阶段开发，每阶段验收确认后再继续”时，读取[阶段真源](references/serial_evidence_stages.md)，由宿主 AI 按各阶段目标选择并冻结既有流程与验收合同，再注册阶段绑定；续接按真实绑定识别当前阶段。不根据文件名、阶段编号或普通“继续”猜测启用，不增加新的公开指令。
+
 裸 `/icode`、`/icode help` 和能力咨询只展示帮助，不建工单；帮助覆盖下表全部能力与上述参考文档的分类示例，用户要完整示例时展开，不能只给 start/plan/code。示例中的请求不是执行授权。普通未点名 ICODE 的新任务不强制接管。
 
 ## 调用命令
@@ -90,6 +92,8 @@ DOC按当前工作区生成；模块族与精确版本快照、旧库保护及�
 
 Windows/WSL 构建按需加载 [WSL 构建合同](references/wsl_build.md)；本地 MCP 采用 [平台默认或显式路径策略](references/mcp_path_access.md)，访问拒绝不等于工程不存在。公共库接口变更复用跨层合同审查，测试结果复用[报告证据规则](references/evidence_and_verification.md#测试报告证据)，零用例/全部跳过保留不确定边界。
 
+串口连接、结构化原始证据、多帧视觉验收或阶段计划命中时，先读 [串口、证据与阶段验收真源](references/serial_evidence_stages.md)，再进入既有 code/patch/fast/verify/audit/status。严格证据与阶段守卫是条件硬门，不能被通用降级提示、fast、用户一次确认或旧票兼容绕过；缺依赖只阻断对应功能，不增加公开命令。
+
 ## 使用流程示例
 
 > 完整自然语言示例见 [入口与全能力示例](references/natural_language_entry.md)；命令示例见 [README.zh-CN.md](README.zh-CN.md)「快速开始」与各步骤文件；此处只给最小骨架。
@@ -147,7 +151,7 @@ Windows/WSL 构建按需加载 [WSL 构建合同](references/wsl_build.md)；本
 | **L1·致命** | 阻塞流程的前置条件不满足 | **报错退出**，流程不可继续 | 按[工程接入合同](references/project_intake.md)确认目标解析失败（多根、预算截断或该入口不支持 non-git），不是仅凭宿主 cwd / 强制产物文件缺失 / MCP 完全不可用 / **双活动实现根**（同一工单存在两个 `state=active` 的 checkout，见「目录管理·worktree 生命周期」） |
 | **L2·关键** | 重要约束未满足 | **警告 + 记入 metadata + 流程继续**（不阻塞等用户；用户事后审阅产物/audit 报告时可见，可手动回退）。icode 调性是 AI 自治 + 用户审阅，L2 不强制阻塞（避免 `/icode start` 串联时卡死）；02_review `absolute_cap` 触达同理，不再设例外 | plan §3 架构设计完全缺失 / review 触达 `absolute_cap` 仍有新问题 |
 | **L3·重要** | 重要检查项未通过 | **警告**，记入 metadata，**流程继续**（user 后续可手动回看） | plan §10 checklist ❌ > 3 条 / audit §6.7 视角 A 失败 / 步骤 4 编译失败（带 `code_compile_failed=true`）/ **worktree 创建失败**（降级原地 + metadata 记 `wt_degraded=true`，见「目录管理·worktree 决策与创建」④） |
-| **L4·参考** | 软性建议 | **柔性提示**，不影响流程 | limit 不存在 / cheap-research 未装 / vision-bridge 未装 / init 末轮理解核对清单用户不回复 |
+| **L4·参考** | 软性建议 | **柔性提示**，不影响流程 | limit 不存在 / cheap-research 未装 / 可选视觉增强不可用（严格视觉目标按[专用合同](references/serial_evidence_stages.md)阻断验收）/ init 末轮理解核对清单用户不回复 |
 
 **各步骤声明的 L1/L2 检查项**：详见对应 step 文件头部的「本步骤 L1/L2 检查项声明」段（已声明 7 个：plan / review / merge / code / deepcheck / audit / patch）。
 - `steps/01_plan.md` 头部 → L1（前置产物缺失）/ L2（§3 缺失 + §10 ❌ > 3）
@@ -347,6 +351,7 @@ test -f "{ICODE_OUT_DIR}/03_plan_final.md" && python3 -c "import json,sys; d=jso
 | [references/skill_routing.md](references/skill_routing.md) | **共享 SKILL 懒路由**：按机器路由表判触发、准备输入合同、消费输出合同；无命中不加载 | init / log / plan / code / doc / deepcheck / audit / verify / learn |
 | [references/project_intake.md](references/project_intake.md) | **工程接入真源**：唯一嵌套 Git 根解析、歧义阻断、超大仓扫描预算、构建入口静态副作用画像 | 所有 workspace-scoped 入口 |
 | [references/evidence_and_verification.md](references/evidence_and_verification.md) | **证据与验证习惯真源**：现场事实、主代理复核、无日志反查、多 Git 根、诊断/实现/验证分层 | log / plan / deepcheck / audit / verify |
+| [references/serial_evidence_stages.md](references/serial_evidence_stages.md) | **串口、严格原始证据、多帧实际视觉、阶段报告与确认真源**；内部接口与功能级 fail-closed，普通旧合同保留原边界 | code / patch / fast / verify / audit / status（按触发条件） |
 | [references/media_routing.md](references/media_routing.md) | **媒体能力路由真源**：文本优先、宿主能力证明、native/bridge/dual/text_only、分块与视觉证据来源 | init / log / plan / deepcheck / audit / verify（存在图片/视频/PDF 视觉区域时） |
 | [references/host_adapters.md](references/host_adapters.md) | Claude Code / Codex / CodeBuddy 宿主工具适配；共享技能正文禁止绑定具体工具语法 | 共享 SKILL 被路由时 |
 | [references/control_plane.md](references/control_plane.md) + [references/execution_model.md](references/execution_model.md) | **工单控制面 + 可恢复执行**：状态机/事件链/端口/边界回检/轨迹/副作用策略/回执/关闭 | 所有 ticket-scoped step |

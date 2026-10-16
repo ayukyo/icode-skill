@@ -1,0 +1,62 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "verification-evidence.schema.json",
+  "title": "ICODE verification evidence bundle v1",
+  "description": "候选与合同绑定的原始证据清单；路径和元数据均为数据，不包含执行语义。文件哈希、时间窗顺序、来源链、测量来源和视觉多帧验收由证据校验 helper 验证。",
+  "type": "object",
+  "required": ["schema_version", "ticket_id", "stage_id", "run_id", "candidate_id", "contract_sha256", "baseline_ref", "device", "window", "items", "measurements", "visual"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "type": "integer", "const": 1 },
+    "ticket_id": { "type": "string", "minLength": 1 },
+    "stage_id": { "type": ["string", "null"], "minLength": 1 },
+    "run_id": { "type": "string", "minLength": 1 },
+    "candidate_id": { "type": "string", "pattern": "^[0-9a-f]{64}(?![\\s\\S])" },
+    "contract_sha256": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}(?![\\s\\S])" },
+    "baseline_ref": { "type": ["string", "null"], "pattern": "^sha256:[0-9a-f]{64}(?![\\s\\S])" },
+    "device": {
+      "type": "object",
+      "required": ["device_id", "boot_id"],
+      "additionalProperties": false,
+      "properties": {
+        "device_id": { "type": "string", "minLength": 1 },
+        "boot_id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "window": {
+      "type": "object",
+      "required": ["host_start", "host_end", "monotonic_start", "monotonic_end"],
+      "additionalProperties": false,
+      "properties": {
+        "host_start": { "type": "string", "minLength": 1 },
+        "host_end": { "type": "string", "minLength": 1 },
+        "monotonic_start": { "type": "number", "minimum": 0 },
+        "monotonic_end": { "type": "number", "minimum": 0 }
+      }
+    },
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "requirement_id", "kind", "path", "sha256", "bytes", "complete", "source_ids", "metadata"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "requirement_id": { "type": "string", "minLength": 1 },
+          "kind": { "enum": ["log", "measurement", "artifact_identity", "frame_set", "visual_review"] },
+          "path": { "type": "string", "minLength": 1 },
+          "sha256": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}(?![\\s\\S])" },
+          "bytes": { "type": "integer", "minimum": 0 },
+          "complete": { "type": "boolean" },
+          "source_ids": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+          "metadata": { "type": "object", "additionalProperties": true }
+        }
+      }
+    },
+    "measurements": {
+      "type": "array",
+      "items": { "type": "object", "additionalProperties": true }
+    },
+    "visual": { "type": ["object", "null"], "additionalProperties": true }
+  }
+}

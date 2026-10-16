@@ -132,6 +132,17 @@
               </div>
             </section>
 
+            <section id="stage-panel" class="job-card" aria-label="阶段验收" hidden>
+              <h2>阶段验收报告</h2>
+              <p id="stage-state"></p>
+              <pre id="stage-report"></pre>
+              <div id="stage-previews" aria-label="当前报告的代表性帧" aria-live="polite" hidden></div>
+              <p>确认当前报告后，才可推进计划内的下一阶段。</p>
+              <button id="stage-confirm-button" class="primary-button" type="button">确认本阶段验收</button>
+              <button id="stage-reject-button" class="secondary-button" type="button">要求修改</button>
+              <button id="stage-revoke-button" class="secondary-button" type="button" hidden>撤销本阶段验收</button>
+            </section>
+
             <section class="timeline-section">
               <div class="section-title">
                 <div>

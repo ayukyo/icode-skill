@@ -5,6 +5,7 @@ The input is data only: this tool never executes values found in the baseline.
 """
 import argparse
 import hashlib
+import importlib.util
 import json
 import math
 import os
@@ -81,8 +82,8 @@ def validate(data):
     top = ["schema_version", "project_profile", "identity", "software",
            "components", "cameras", "verification"]
     exact_object(data, "$", top)
-    if data["schema_version"] != 1:
-        fail("$.schema_version 必须为 1")
+    if type(data["schema_version"]) is not int or data["schema_version"] not in {1, 2}:
+        fail("$.schema_version 必须为 1 或 2")
     if data["project_profile"] not in {"embedded", "camera"}:
         fail("$.project_profile 必须为 embedded 或 camera")
 
@@ -138,7 +139,8 @@ def validate(data):
             text(node, f"{path}.media_nodes[{node_index}]")
 
     verification = data["verification"]
-    exact_object(verification, "$.verification", ["scenarios", "safety"])
+    verification_keys = ["scenarios", "safety"] + (["evidence_contract"] if data["schema_version"] == 2 else [])
+    exact_object(verification, "$.verification", verification_keys)
     safety = verification["safety"]
     exact_object(safety, "$.verification.safety",
                  ["read_only_probe_default", "mutations_require_explicit_authorization"])
@@ -186,6 +188,15 @@ def validate(data):
             if metric_cell in metric_cells:
                 fail(f"{metric_path}.name 在同一验证单元重复: {metric['name']}")
             metric_cells.add(metric_cell)
+    if data["schema_version"] == 2:
+        spec = importlib.util.spec_from_file_location("baseline_evidence_bundle", Path(__file__).with_name("evidence_bundle.py"))
+        api = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(api)
+        contract = make_plan(Path("baseline.json"), data, "sha256:" + "0" * 64)["verification_contract"]
+        try:
+            api.validate_contract(contract)
+        except api.EvidenceBundleError as exc:
+            fail(str(exc))
 
 
 def ordered_unique(values):
@@ -203,7 +214,7 @@ def make_plan(source, data, baseline_digest):
                 "consumer": scenario["consumer"],
                 "scenario": scenario["id"],
             })
-    return {
+    plan = {
         "schema_version": 1,
         "generated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
         "source_baseline": source.name,
@@ -226,6 +237,9 @@ def make_plan(source, data, baseline_digest):
         "scenarios": scenarios,
         "safety": data["verification"]["safety"],
     }
+    if data["schema_version"] == 2:
+        plan["verification_contract"]["evidence_contract"] = data["verification"]["evidence_contract"]
+    return plan
 
 
 def markdown_plan(plan):

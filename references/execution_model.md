@@ -4,6 +4,8 @@
 > 唯一写入口：`tools/icode_control.py` 的 `step / artifact / operation`；`policy / trace` 只读。
 > 本模型不引入 BehaviorTree.CPP、XML、全局黑板或常驻 tick。`.ico_events.jsonl` 仍是唯一执行账本。
 
+命中串口、严格证据或阶段计划时，还须先读 [串口、证据与阶段验收](serial_evidence_stages.md)。阶段守卫进入现有 start/敏感写入/恢复边界；普通流程和历史事件不自动迁移。serial exec 的真实 `external_side_effect` operation、规范字符串 input 与首次 TX claim 按该真源执行；未知远端结果不能自动重放。
+
 ## 1. 五项能力及边界
 
 1. **Step Ports**：每个已登记步骤声明 `inputs / outputs`。开始时验证必填输入；成功终结前验证必填输出。端口只保存存在性、路径、大小和摘要，不把正文复制进事件链。

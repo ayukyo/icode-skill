@@ -3,6 +3,8 @@
 > 本文件是工单控制面的**共享契约真源**：各步骤文档只在状态写回点引用一句话，规则细节全部收拢于此。
 > 机器真源三件套：状态机与门禁分级 = `mcp/workflow-gate/gates.json`「state_machine」段；数据契约 = `schemas/ticket-metadata.schema.json`（v3）/`ticket-event.schema.json`/`ticket-index.schema.json`；执行器 = `tools/icode_control.py`（stdlib 零依赖）。
 
+严格原始证据、串口 claim 和受保护阶段计划属于条件控制合同，完整规则统一见 [串口、证据与阶段验收](serial_evidence_stages.md)。`extensions.stage_program/stage_binding` 及确认记录不能经普通 metadata/event 写入；阶段守卫附加到既有入口，不改变普通工单 status 词表或建立第二数据库。
+
 ## 1. vNext 判定与 legacy 适配
 
 - **vNext 工单**：metadata 顶层含 `"schema_version": 3`。新工单一律出生即 vNext（模板已内置）。
@@ -56,7 +58,7 @@ python3 tools/icode_control.py bind-execution-root --dir <out_dir> \
 - 状态机真源见 gates.json `state_machine.transitions`（含重入：`*_done → 同步 *_in_progress` 允许，跨步跳跃拒绝）。
 - **fail-closed 门禁分级**：
   - to **完成态**（`log_done/plan_done/review_done/plan_finalized/code_done/deepcheck_done/completed`）→ 依次运行三个 gate linter（vNext 一律 `--strict`），任一失败**状态不前移**，错误含 gate_id/期望/实际/修复入口。
-  - to **进行态**（`*_in_progress`）→ 仅状态机合法性判定，不跑 linter。
+  - to **进行态**（`*_in_progress`）→ 不跑完成态 linter；已启用阶段计划的实施态仍须通过[阶段守卫](serial_evidence_stages.md#5-阶段报告与用户确认)。
   - debug 孪生工单（`metadata.debug=true`）走 `.debug` 隔离域，不跑通用门禁。
 - **completed 强制显式交付结论**：`--delivery-verdict ∈ {verified, verification_pending, blocked, not_applicable}`。宿主验证通过不得自动映射为 verified（交付证据分层）。
 - **幂等**：`--request-id <幂等键>`——同键同操作的重放返回「已应用」摘要（exit 0）；同键改变操作或 payload 报 `idempotency_conflict`，不猜测。
@@ -130,6 +132,8 @@ Git checkout 和逐仓提交契约由 `steps/reopen.md` 先创建/校验；然�
 
 `record-verification` 在一个事务中追加 `verification_runs` 和 `verification_recorded` 事件，不修改 `patch_history/status/completed_steps/delivery_verdict`。`--evidence` 必填；复用构建时 `--build-source reused` 还必须提供 `--artifact-identity`。embedded/camera 每个验证单元都必须附与合同完全一致的 `--profile`、`--baseline-ref sha256:<64hex>`；有量化指标时再附严格数值对象 `--metrics-json`。布尔、NaN、Infinity 或非对象在加锁写入前拒绝。
 
+严格原始证据通过互斥 `--evidence-bundle <path>` / `--evidence-bundle-json <{path,sha256}>` 接入同一 writer；完整合同摘要、按 cell 要求、当前文件复查与历史可读边界见[严格原始证据](serial_evidence_stages.md#3-严格原始证据)。不能导入自报“已通过”结果。
+
 启用候选的工单还须显式传 `--candidate-id` 和 `--environment`。ID 必须有真实 current/review/run/capture 历史快照或匹配 live source，任意编造 ID 拒绝；完整快照进入 metadata/event，CLI 只显示 ID。`candidate_id` 与 embedded 的 `baseline_ref` 相互独立。查询资格使用当前 live source，捕获失败即阻断；记录旧 ID 只追加历史，不能清除当前验证债务。候选相等或严格同内容线性提交证明可复用，其余漂移需新证据。
 
 `--supersedes-run-id` 只能引用真实已有同 cell run。`--reuse-json` 接收 `{origin_run_id,reason,scope_paths,scope_hash,comparison_ref}`，验证真实成功来源、相同设备/窗口/环境/制品/指标/测试身份，且机器比较只含文档差异与 scope 实际哈希未变。旧 run append-only；自由文字不能豁免源码/配置/依赖变化。`--direct-test-json` 的四个独立布尔 `target_built/binary_executed/test_runner_discovered/ci_registered` 与 `binary_exit_code` 精确区分直接执行、runner 发现和 CI 登记。
@@ -170,15 +174,16 @@ Git checkout 和逐仓提交契约由 `steps/reopen.md` 先创建/校验；然�
 | artifact | 记录 outputs 合同内产物 | `--dir --step --attempt --path [--scope]` |
 | inspection | 准备联审清单、登记实际 Read、只读校验 | `--dir --step --attempt --phase [--read-phase --path --related --scope --baselines-json]`；见 [inspection_worklist.md](inspection_worklist.md) |
 | operation | 长动作开始/终结回执 | `--dir --phase [--name --opclass --attempt --outcome]` |
+| stage | 受控顺序阶段计划、绑定、报告与只读投影 | `--dir --phase`（register / bind / review / check）；参数与可信确认边界见[阶段真源](serial_evidence_stages.md#5-阶段报告与用户确认) |
 | policy | 查询 Retry/Fallback 策略 | `--opclass --failure [--attempts]` |
 | trace | 统一执行轨迹（只读） | `--dir [--limit]` |
 | index-write | 索引单一 writer | `--ticket-dir` |
 | index-update | 更新索引独有字段 | `--ticket-id [--increment-hit] [--set-json]` |
 | migration | legacy→v3 迁移 | `--dir [--apply]` |
-| record-verification | 原子记录验证 | `--dir --kind --outcome --evidence [--layer --consumer --scenario --baseline --profile --baseline-ref --metrics-json]` |
+| record-verification | 原子记录验证 | `--dir --kind --outcome --evidence [--layer --consumer --scenario --baseline --profile --baseline-ref --metrics-json] [--evidence-bundle 或 --evidence-bundle-json]` |
 | build-start | 机器观察构建前目录/候选 | `--dir --build-dir --candidate-id --parameters-json --request-id` |
 | record-claim | 原子记录证据结论 | `--dir --kind --statement --source --boundary [--evidence ...]` |
-| record-agent-spawn | 调用前原子记录 Agent 边界 | `--dir --task-scope --expected-artifact --evidence-boundary --join-condition --backend --model --capability --request-id` |
+| record-agent-spawn | 调用前原子记录 Agent 边界 | `--dir --task-scope --expected-artifact --evidence-boundary --join-condition --backend --model --capability --request-id [--stage-action]`；显式阶段动作不从 task-scope 文本推断 |
 | record-agent-result | 原子终结 Agent 调用 | `--dir --spawn-id --result --adopted --adoption-reason --evidence-ref --summary --request-id` |
 | archive-manifest | 生成/校验归档 hash 清单 | `--dir --archive-dir [--write]` |
 | close-phase | 关闭阶段记录 | `--dir --phase [--request-id]` |

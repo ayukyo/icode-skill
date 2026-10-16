@@ -588,6 +588,10 @@ def validate_delivery_evidence(metadata: Dict, catalog: Dict, out_dir=None) -> L
         label = f"layer={layer}, consumer={consumer}, scenario={scenario}"
         if run is None:
             issues.append(f"delivery_evidence 缺 required cell: {label}")
+            # The common selector re-reads bundle bytes. Expose its rejection
+            # instead of reporting modified evidence as an unexplained gap.
+            issues.extend("delivery_evidence " + row["reason"] for row in selection["rejected"]
+                          if str(row.get("reason", "")).startswith("evidence_bundle:"))
             continue
         outcome = run.get("outcome")
         if outcome != "pass":
