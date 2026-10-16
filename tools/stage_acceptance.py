@@ -5,6 +5,7 @@ events, is the authority. Read guards never acquire a second ticket lock. Writer
 take coordinator then child; no model, visual provider or device runs under locks.
 """
 import copy
+import contextlib
 import hashlib
 import importlib.util
 import json
@@ -259,10 +260,20 @@ def event_issues(events, meta):
         if marker is not None:
             namespace = payload.get("stage_namespace")
             if marker != 1 or type(marker) is not int or namespace not in {"stage_program", "stage_binding"} \
-                    or payload.get("stage_action") not in {"register", "bind", "review", "decision"}:
+                    or payload.get("stage_action") not in {"register", "bind", "review", "decision", "revise"}:
                 issues.append("stage_control_shape")
             else:
                 expected = [namespace]
+                if namespace == "stage_program" and mirror[namespace] is not None:
+                    old_program, new_program = mirror[namespace], values[namespace]
+                    if payload.get("stage_action") == "revise":
+                        try:
+                            _validate_revision_append(old_program, new_program)
+                        except (ctl().ControlError, ValueError, TypeError, KeyError):
+                            issues.append("stage_revision_not_append_only")
+                    elif any(old_program.get(key) != new_program.get(key)
+                             for key in ("plan", "plan_digest", "plan_revisions")):
+                        issues.append("stage_plan_changed_without_revision")
         elif serial is not None:
             if serial != 1 or type(serial) is not int:
                 issues.append("serial_claim_control_shape")
@@ -346,8 +357,9 @@ def _resolve(directory, *, _metadata_override=None, _allow_pending=False, **acce
         coordinator = Path(ref["coordinator_root"]).resolve(strict=True)
         coord_meta, coord_events = (meta, events) if coordinator == directory else _verified(coordinator, **access)
         program = (coord_meta.get("extensions") or {})["stage_program"]
+        plans = _revision_plans(program)
         if ref != {"schema_version": 1, "coordinator_root": str(coordinator),
-                   "program_id": program["plan"]["program_id"], "plan_digest": program["plan_digest"]} \
+                   "program_id": program["plan"]["program_id"], "plan_digest": digest(plans[0])} \
                 or Path(program["plan"]["project_root"]).resolve() != project \
                 or _project(coord_meta) != project or digest(program["plan"]) != program["plan_digest"]:
             fail("locator/program identity mismatch")
@@ -357,8 +369,10 @@ def _resolve(directory, *, _metadata_override=None, _allow_pending=False, **acce
         if binding is not None:
             sid = binding["stage_id"]
             expected = {"version": 1, "program_id": program["plan"]["program_id"], "stage_id": sid,
-                        "coordinator_root": str(coordinator), "plan_digest": program["plan_digest"]}
-            if binding != expected or program["bindings"].get(sid) != {"control_root": str(directory), "ticket_id": meta["ticket_id"]}:
+                        "coordinator_root": str(coordinator), "plan_digest": binding.get("plan_digest")}
+            if binding != expected or binding.get("plan_digest") not in {digest(plan) for plan in plans} \
+                    or sid not in {row["id"] for row in program["plan"]["stages"]} \
+                    or program["bindings"].get(sid) != {"control_root": str(directory), "ticket_id": meta["ticket_id"]}:
                 fail("stage binding is missing or disagrees with coordinator")
         elif directory != coordinator:
             fail("enabled project ticket is not bound to a planned stage")
@@ -427,13 +441,229 @@ def register_program(directory, plan, *, request_id, git_provider=None, require_
                        "bindings": {}, "reviews": {}, "decisions": []}
             _write(directory, meta, "stage_program", program, "register", request_id, **access)
         ref = {"schema_version": 1, "coordinator_root": str(directory), "program_id": plan["program_id"],
-               "plan_digest": program["plan_digest"]}
+               "plan_digest": digest(_revision_plans(program)[0])}
         path = locator_path(_project(meta))
         path.parent.mkdir(parents=True, exist_ok=True)
         if path.exists() and api.load_json(path, "stage locator") != ref:
             fail("existing locator disagrees; refusing replacement")
         api.atomic_write_json(path, ref)
     return {"ok": True, "program_id": plan["program_id"], "generation": program["generation"]}
+
+
+def _check_revision_plan(previous, proposed, accepted_prefix):
+    """Revision changes order/adds stages, never rewrites an existing obligation."""
+    violations = ctl().validate_against(proposed, ctl().SCHEMA_DIR / "stage-program.schema.json", "stage_plan_schema")
+    if violations:
+        fail("invalid revision plan schema", violations=violations)
+    if any(previous[key] != proposed[key] for key in ("schema_version", "program_id", "project_root")):
+        fail("revision cannot change program/project identity")
+    if set(previous["authorized_actions"]) != set(proposed["authorized_actions"]) \
+            or len(set(proposed["authorized_actions"])) != len(proposed["authorized_actions"]):
+        fail("revision cannot expand or remove authorized actions")
+    rows = {row["id"]: row for row in proposed["stages"]}
+    if len(rows) != len(proposed["stages"]):
+        fail("revision stage IDs must be unique")
+    for row in proposed["stages"]:
+        actions = row["required_actions"]
+        if len(actions) != len(set(actions)) or not set(actions).issubset(proposed["authorized_actions"]):
+            fail("revision stage actions exceed authorized scope")
+    if any(rows.get(row["id"]) != row for row in previous["stages"]):
+        fail("revision cannot remove or modify an existing stage")
+    old_ids = [row["id"] for row in previous["stages"]]
+    new_ids = [row["id"] for row in proposed["stages"]]
+    if old_ids[:len(accepted_prefix)] != accepted_prefix or new_ids[:len(accepted_prefix)] != accepted_prefix:
+        fail("revision cannot move accepted prefix or insert a predecessor before it")
+
+
+def _revision_plans(program):
+    """The locator remains an immutable registration anchor; history links it to current plan."""
+    history = program.get("plan_revisions", [])
+    if not isinstance(history, list):
+        fail("invalid revision history")
+    plans = [row["previous_plan"] for row in history] + [program["plan"]]
+    seen, generation = set(), 0
+    for index, row in enumerate(history):
+        if row["request_id"] in seen or type(row["generation"]) is not int \
+                or row["generation"] <= generation or row["generation"] > program["generation"]:
+            fail("invalid revision identity/generation")
+        seen.add(row["request_id"])
+        generation = row["generation"]
+        if digest(plans[index]) != row["old_plan_digest"] or digest(plans[index + 1]) != row["new_plan_digest"]:
+            fail("broken plan revision lineage")
+        _check_revision_plan(plans[index], plans[index + 1], row["accepted_prefix"])
+    return plans
+
+
+def _validate_revision_append(previous, proposed):
+    history = proposed.get("plan_revisions")
+    old = previous.get("plan_revisions", [])
+    if not isinstance(history, list) or len(history) != len(old) + 1 or history[:-1] != old:
+        fail("revision history must be append-only")
+    row = history[-1]
+    if row["previous_plan"] != previous["plan"] or row["old_plan_digest"] != previous["plan_digest"] \
+            or row["new_plan_digest"] != proposed["plan_digest"] \
+            or row["generation"] != previous["generation"] + 1 or proposed["generation"] != row["generation"]:
+        fail("revision does not extend the actual previous program")
+    invalidated = [review["review_id"] for sid, rows in previous["reviews"].items()
+                   if sid not in row["accepted_prefix"] for review in rows]
+    if row.get("invalidated_reviews") != invalidated:
+        fail("revision must invalidate pending reviews while retaining their evidence")
+    # Every previous protected decision and observation remains byte-for-byte identical.
+    expected = copy.deepcopy(previous)
+    expected.update(plan=proposed["plan"], plan_digest=proposed["plan_digest"],
+                    generation=proposed["generation"], plan_revisions=history)
+    if expected != proposed:
+        fail("revision changed bindings/reviews/decisions or another program field")
+    _revision_plans(proposed)
+
+
+def _revision_preview(state, proposed, **access):
+    api = ctl()
+    program = state["program"]
+    accepted, gap = [], False
+    for row in program["plan"]["stages"]:
+        decision = _decision(program, row["id"])
+        confirmed = bool(decision and decision["decision"] == "confirm")
+        if confirmed and gap:
+            fail("revision supports only an intact accepted prefix")
+        if confirmed:
+            accepted.append(row["id"])
+        else:
+            gap = True
+    _check_revision_plan(program["plan"], proposed, accepted)
+    if proposed == program["plan"]:
+        fail("revision must contain an actual plan change")
+    probe = dict(state, stage_id=next((row["id"] for row in program["plan"]["stages"]
+                                     if row["id"] not in accepted), None))
+    _refs, reasons = _predecessors(probe, **access)
+    if reasons:
+        fail("accepted prefix evidence is invalid", reasons=reasons)
+    facts = []
+    roots = [(state["coordinator"], state["coord_meta"], state["coord_events"])]
+    for sid, ref in sorted(program["bindings"].items()):
+        child_root = Path(ref["control_root"]).resolve()
+        child_meta, child_events = _verified(child_root, **access)
+        binding = (child_meta.get("extensions") or {}).get("stage_binding") or {}
+        expected = {"version": 1, "program_id": program["plan"]["program_id"], "stage_id": sid,
+                    "coordinator_root": str(state["coordinator"]), "plan_digest": binding.get("plan_digest")}
+        if binding != expected or binding.get("plan_digest") not in {digest(plan) for plan in _revision_plans(program)} \
+                or child_meta["ticket_id"] != ref["ticket_id"] or _project(child_meta) != _project(state["coord_meta"]):
+            fail("revision requires intact bound tickets")
+        # Moving an unaccepted stage cannot hide damaged historical reports.
+        for review in program["reviews"].get(sid, []):
+            try:
+                _check_report(child_root, review)
+            except (ValueError, OSError) as exc:
+                fail("historical report reference is invalid", stage_id=sid, reason=str(exc))
+        roots.append((child_root, child_meta, child_events))
+    for root, meta, events in roots:
+        mirror = api.ExecutionBindingMirror(meta)
+        for event in events:
+            mirror.consume(event)
+        if meta.get("close_state") is not None or mirror.open_steps or mirror.open_operations or mirror.open_agents:
+            fail("revision requires quiescent, open control tickets", directory=str(root))
+        facts.append({"root": str(root), "metadata": api.metadata_hash(meta), "tail": events[-1]["event_hash"]})
+    view = state.get("_publishing_projection") or projection(state["coordinator"], **access)
+    if view["blocked"]:
+        fail("revision coordinator is invalid", stage=view)
+    snapshot = {"program_id": program["plan"]["program_id"], "generation": program["generation"],
+                "revision": view["revision"], "old_plan_digest": program["plan_digest"],
+                "new_plan_digest": digest(proposed), "controls": facts, "accepted_prefix": accepted}
+    old_ids = [row["id"] for row in program["plan"]["stages"]]
+    new_ids = [row["id"] for row in proposed["stages"]]
+    def eligible(order, sid):
+        return sid not in accepted and all(prior in accepted for prior in order[:order.index(sid)])
+    action_effects = {row["id"]: {"required_actions": row["required_actions"],
+        "eligible_before_revision": row["id"] in old_ids and eligible(old_ids, row["id"]),
+        "eligible_after_revision": eligible(new_ids, row["id"]),
+        "binding_required": row["id"] not in program["bindings"]} for row in proposed["stages"]}
+    # A readonly preview can be exported as a complete original-record backup.
+    backup = {"original_plan": program["plan"], "locator": api.load_json(locator_path(_project(state["coord_meta"])), "stage locator"),
+              "controls": [{"root": str(root), "metadata": meta, "events": events} for root, meta, events in roots]}
+    challenge = {key: snapshot[key] for key in ("program_id", "generation", "revision", "old_plan_digest", "new_plan_digest")}
+    challenge["preview_digest"] = digest(snapshot)
+    return {"ok": True, "challenge": challenge, "accepted_prefix": accepted,
+            "previous_order": old_ids, "proposed_order": new_ids,
+            "inserted_stages": [sid for sid in new_ids if sid not in old_ids],
+            "action_effects": action_effects, "backup_snapshot": backup, "backup_sha256": digest(backup),
+            "preserved_reviews": {sid: [row["outcome"] for row in rows] for sid, rows in program["reviews"].items()},
+            "note": "Preview is not execution/acceptance authorization; original obligations and decisions are preserved."}
+
+
+def preview_revision(directory, proposed, *, git_provider=None, require_git_provider=False):
+    access = _access(git_provider, require_git_provider)
+    state = _resolve(directory, **access)
+    if state is None or state["stage_id"] is not None:
+        fail("plan revision requires the registered coordinator")
+    return _revision_preview(state, proposed, **access)
+
+
+def revise_program(directory, proposed, request, *, trusted_confirmation=None,
+                   git_provider=None, require_git_provider=False):
+    """Only a host/UI callback can attest approval; CLI JSON cannot."""
+    if not callable(trusted_confirmation) or not isinstance(request, dict):
+        fail("plan revision requires trusted host/UI user approval")
+    required = {"program_id", "generation", "revision", "old_plan_digest", "new_plan_digest", "preview_digest", "request_id", "reason"}
+    if set(request) != required or type(request["generation"]) is not int \
+            or any(not isinstance(request[key], str) or not request[key].strip() for key in required - {"generation"}):
+        fail("revision request must bind the exact preview and explicit reason/request_id")
+    source = trusted_confirmation(copy.deepcopy(request))
+    if not isinstance(source, dict) or source.get("source") not in {"ui", "host_user"} \
+            or source.get("intent") != "修订阶段计划" or not isinstance(source.get("source_id"), str) or not source["source_id"].strip():
+        fail("trusted callback did not attest explicit plan revision approval")
+    access = _access(git_provider, require_git_provider)
+    directory = Path(directory).resolve()
+    request_digest = digest({"plan": proposed, "request": request})
+    with ctl().DirLock(directory), contextlib.ExitStack() as child_locks:
+        ctl().recover_pending_transaction(directory)
+        state = _resolve(directory, **access)
+        if state is None or state["stage_id"] is not None:
+            fail("plan revision requires the registered coordinator")
+        # Respect the established coordinator -> child writer lock order. A
+        # generation check alone cannot close the final check/append window.
+        child_roots = sorted({Path(ref["control_root"]).resolve() for ref in state["program"]["bindings"].values()}, key=str)
+        if directory in child_roots:
+            fail("coordinator cannot also be a bound child")
+        for child_root in child_roots:
+            child_locks.enter_context(ctl().DirLock(child_root))
+        program = copy.deepcopy(state["program"])
+        prior = next((row for row in program.get("plan_revisions", []) if row["request_id"] == request["request_id"]), None)
+        if prior is not None:
+            if prior["request_digest"] != request_digest or prior["source"] != source:
+                fail("revision request replay payload/source conflict")
+            return {"ok": True, "already_applied": True, "revision_id": prior["revision_id"], "generation": prior["generation"]}
+        preview = _revision_preview(state, proposed, **access)
+        if any(request[key] != value for key, value in preview["challenge"].items()):
+            fail("plan revision preview is stale or does not match")
+        row = {"revision_id": str(uuid.uuid4()), "request_id": request["request_id"],
+               "request_digest": request_digest, "source": source, "at": ctl().now_iso(),
+               "generation": program["generation"] + 1, "previous_plan": copy.deepcopy(program["plan"]),
+               "old_plan_digest": program["plan_digest"], "new_plan_digest": digest(proposed),
+               "accepted_prefix": preview["accepted_prefix"], "reason": request["reason"],
+               "invalidated_reviews": [review["review_id"] for sid, rows in program["reviews"].items()
+                                       if sid not in preview["accepted_prefix"] for review in rows],
+               "preview_digest": request["preview_digest"]}
+        program.setdefault("plan_revisions", []).append(row)
+        program.update(plan=copy.deepcopy(proposed), plan_digest=digest(proposed), generation=row["generation"])
+        _validate_revision_append(state["program"], program)
+        def publication_check():
+            # The existing atomic writer has installed after-metadata but has
+            # not appended its event. Read guards must still reject that gap;
+            # only this publisher validates against its own recorded before state.
+            transaction = ctl().load_json(state["coordinator"] / ctl().TXN_NAME, "revision transaction")
+            actual = ctl().load_metadata(state["coordinator"])
+            current_events, _issues = ctl().read_events(state["coordinator"])
+            if transaction.get("before_metadata") != state["coord_meta"] \
+                    or transaction.get("after_metadata") != actual \
+                    or (actual.get("extensions") or {}).get("stage_program") != program \
+                    or current_events[-1]["event_hash"] != state["coord_events"][-1]["event_hash"]:
+                fail("revision publication transaction changed")
+            publishing = dict(state, _publishing_projection={"blocked": False, "revision": preview["challenge"]["revision"]})
+            if _revision_preview(publishing, proposed, **access)["challenge"] != preview["challenge"]:
+                fail("plan revision facts changed before publication")
+        _write(state["coordinator"], state["coord_meta"], "stage_program", program, "revise", request["request_id"],
+               before_append=publication_check, **access)
+    return {"ok": True, "already_applied": False, "revision_id": row["revision_id"], "generation": row["generation"]}
 
 
 def bind_stage(coordinator, stage_id, directory, *, request_id, git_provider=None, require_git_provider=False):
@@ -459,6 +689,8 @@ def bind_stage(coordinator, stage_id, directory, *, request_id, git_provider=Non
                    "coordinator_root": str(coordinator), "plan_digest": program["plan_digest"]}
         existing = (meta.get("extensions") or {}).get("stage_binding")
         reference = {"control_root": str(directory), "ticket_id": meta["ticket_id"]}
+        if existing is not None and existing.get("plan_digest") in {digest(plan) for plan in _revision_plans(program)}:
+            binding["plan_digest"] = existing["plan_digest"]
         if existing is not None and existing != binding:
             fail("stage ticket binding is immutable")
         if stage_id in program["bindings"] and program["bindings"][stage_id] != reference:
@@ -748,6 +980,10 @@ def projection(directory, *, git_provider=None, require_git_provider=False, _met
                             result.update(state="needs_review", reasons=["acceptance_facts_changed"], challenge=None)
                     else:
                         result["state"] = "needs_review"
+                    if not (decision and decision["decision"] == "confirm" and decision.get("review_id") == review["review_id"]) \
+                            and any(review["review_id"] in row.get("invalidated_reviews", [])
+                                    for row in program.get("plan_revisions", [])):
+                        result.update(state="needs_review", can_confirm=False, challenge=None)
                 except (ctl().ControlError, ValueError, TypeError, KeyError, OSError) as exc:
                     result.update(state="blocked", blocked=True, reasons=["report_or_evidence_invalid:" + str(exc)], available_actions=[], challenge=None)
                     result["can_confirm"] = False

@@ -175,6 +175,24 @@ python3 tools/icode_control.py stage --dir <阶段工单或协调工单> --phase
 
 Agent spawn 默认按当前阶段执行资格核对；受控调用可显式传 `--stage-action` 声明实际只读 plan 等步骤，普通 task-scope 文本不作授权判断。组合 verify 在登记 spawn 前及启动宿主进程前核对每个实际 variant（build/deploy/listen/device_test），不能只检查最后一个动作。最终发布重新核对原子事务前状态及前序证据；门禁不是一次查询后长期有效的执行凭证。
 
+### 已登记计划的受控换版
+
+阶段之间需要插入独立工程阶段或调整未接受阶段顺序时，先准备新计划，再用现有stage控制面的只读预览：
+
+```text
+python3 tools/icode_control.py stage --dir <协调工单> --phase preview-revision --plan-json <新计划JSON>
+```
+
+预览给出新旧摘要、顺序、新增阶段、已接受前缀和历史结论，不能据此实施。仅允许保持program/project身份及authorized_actions不变，保留所有旧阶段定义，在已接受前缀之后新增阶段或移动未接受阶段；不得删要求、改已接受定义、放宽旧阶段动作或把失败改成通过。需要增加原计划外的授权能力时，不能用这个最小换版接口代替单独的授权规划。
+
+实际应用复用`icode_control.revise_stage_program(out_dir, plan, request, *, trusted_confirmation, ...)`。request必须精确包含预览challenge的program_id/generation/revision/old_plan_digest/new_plan_digest/preview_digest，再带非空request_id/reason。可信host/UI适配器从真实用户输入确认`intent=修订阶段计划`，返回真实source/source_id；普通CLI、模型自填JSON及actor字段均不能证明用户批准。用户已经明确批准对应重规划时复用该授权，不重复询问同一意图。
+
+writer复用现有metadata+事件原子事务，追加`plan_revisions`保存旧计划和批准来源。locator保持最初登记摘要作为历史锚点，旧绑定通过受验证修订链关联当前计划，不重写已接受子票。所有bound票必须完整、无开放step/operation/agent且未进入关闭流程；预览后源控制记录或generation变化会拒绝应用。事务失败沿既有恢复合同收敛，不删除账本或locator。
+
+历史reviews/decisions及证据不删除。原已接受前缀继续按历史证据校验，后继源码变动规则保持；未接受阶段的旧报告仍可读，但确认challenge失效，必须重新AI审查。新增独立阶段完成并经用户确认后，后移的失败阶段仍须按原要求复验，不能把新增工程阶段的通过当成图像通过。多入口、恢复及UI/action-policy统一消费相同修订链。
+
+预览还包含每阶段动作及顺序资格的前后对照（实际执行仍需有效绑定和完整门禁），以及带摘要的内联原始控制记录备份`backup_snapshot`；宿主应将预览保存到受审资料目录。全部历史报告引用均须完整。进程中断后的同请求重试先在锁内恢复原事务：无事件时回滚后重试，有事件时完成发布并返回幂等结果。
+
 ### AI 先验收，再冻结可审报告
 
 先完成既定要求的机器检查、代码审查、必需 verification cells、真实多帧视觉与确有必要的 human_observation 证据；未满足项保留 fail/inconclusive 和最小补测动作。用户不需要替 AI 重跑同一批已可执行测试；物理插拔、场景布置、专业测量等少量确需人工动作单列。

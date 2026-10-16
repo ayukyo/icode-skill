@@ -8,7 +8,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-Skill-8A2BE2.svg)](SKILL.md)
-[![Version](https://img.shields.io/badge/version-v2.32.1-blue.svg)](SKILL.md)
+[![Version](https://img.shields.io/badge/version-v2.32.2-blue.svg)](SKILL.md)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/ayukyo/icode-skill/issues)
 
 </div>

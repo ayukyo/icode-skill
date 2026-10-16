@@ -3973,6 +3973,14 @@ def bind_stage(coordinator, stage_id, out_dir, **kwargs):
     return stage_module().bind_stage(coordinator, stage_id, out_dir, **kwargs)
 
 
+def preview_stage_revision(out_dir, plan, **kwargs):
+    return stage_module().preview_revision(out_dir, plan, **kwargs)
+
+
+def revise_stage_program(out_dir, plan, request, *, trusted_confirmation=None, **kwargs):
+    return stage_module().revise_program(out_dir, plan, request, trusted_confirmation=trusted_confirmation, **kwargs)
+
+
 def review_stage(out_dir, **kwargs):
     return stage_module().review_stage(out_dir, **kwargs)
 
@@ -4054,14 +4062,16 @@ def _stage_publication_check(token, *, git_provider=None, require_git_provider=F
 
 def cmd_stage(args, *, git_provider=None, require_git_provider=False):
     access = {"git_provider": git_provider, "require_git_provider": require_git_provider}
-    if args.phase == "register" and not args.plan_json:
-        raise ControlError("stage register requires --plan-json", exit_code=2, gate_id="stage_gate")
+    if args.phase in {"register", "preview-revision"} and not args.plan_json:
+        raise ControlError("stage register/preview-revision requires --plan-json", exit_code=2, gate_id="stage_gate")
     if args.phase == "bind" and (not args.stage_id or not args.ticket_dir):
         raise ControlError("stage bind requires --stage-id/--ticket-dir", exit_code=2, gate_id="stage_gate")
     if args.phase in {"register", "bind", "review"} and not args.request_id:
         raise ControlError("stage writer requires --request-id", exit_code=2, gate_id="stage_gate")
     if args.phase == "register":
         result = register_stage_program(args.dir, verification_json(args.plan_json, "--plan-json"), request_id=args.request_id, **access)
+    elif args.phase == "preview-revision":
+        result = preview_stage_revision(args.dir, verification_json(args.plan_json, "--plan-json"), **access)
     elif args.phase == "bind":
         result = bind_stage(args.dir, args.stage_id, args.ticket_dir, request_id=args.request_id, **access)
     elif args.phase == "review":
@@ -6944,7 +6954,7 @@ def build_parser():
 
     p = sub.add_parser("stage", help="受控顺序阶段计划、绑定、AI报告与验收投影")
     p.add_argument("--dir", required=True)
-    p.add_argument("--phase", required=True, choices=["register", "bind", "review", "check", "confirm", "reject", "revoke"])
+    p.add_argument("--phase", required=True, choices=["register", "bind", "review", "check", "confirm", "reject", "revoke", "preview-revision"])
     p.add_argument("--plan-json")
     p.add_argument("--stage-id")
     p.add_argument("--ticket-dir")
