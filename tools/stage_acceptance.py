@@ -451,7 +451,7 @@ def register_program(directory, plan, *, request_id, git_provider=None, require_
 
 
 def _check_revision_plan(previous, proposed, accepted_prefix):
-    """Revision changes order/adds stages, never rewrites an existing obligation."""
+    """Retain accepted stages and monotonically strengthen pending obligations."""
     violations = ctl().validate_against(proposed, ctl().SCHEMA_DIR / "stage-program.schema.json", "stage_plan_schema")
     if violations:
         fail("invalid revision plan schema", violations=violations)
@@ -467,8 +467,20 @@ def _check_revision_plan(previous, proposed, accepted_prefix):
         actions = row["required_actions"]
         if len(actions) != len(set(actions)) or not set(actions).issubset(proposed["authorized_actions"]):
             fail("revision stage actions exceed authorized scope")
-    if any(rows.get(row["id"]) != row for row in previous["stages"]):
-        fail("revision cannot remove or modify an existing stage")
+    for old in previous["stages"]:
+        new = rows.get(old["id"])
+        if new is None:
+            fail("revision cannot remove an existing stage")
+        if old["id"] in accepted_prefix:
+            if new != old:
+                fail("revision cannot modify an accepted stage")
+        else:
+            # Only additive required actions are allowed. Preserve every other
+            # field and the relative order of all original obligations.
+            original_actions = old["required_actions"]
+            if dict(new, required_actions=original_actions) != old or \
+                    [action for action in new["required_actions"] if action in original_actions] != original_actions:
+                fail("revision cannot weaken or rewrite an existing stage")
     old_ids = [row["id"] for row in previous["stages"]]
     new_ids = [row["id"] for row in proposed["stages"]]
     if old_ids[:len(accepted_prefix)] != accepted_prefix or new_ids[:len(accepted_prefix)] != accepted_prefix:
@@ -573,7 +585,9 @@ def _revision_preview(state, proposed, **access):
     new_ids = [row["id"] for row in proposed["stages"]]
     def eligible(order, sid):
         return sid not in accepted and all(prior in accepted for prior in order[:order.index(sid)])
+    old_actions = {row["id"]: row["required_actions"] for row in program["plan"]["stages"]}
     action_effects = {row["id"]: {"required_actions": row["required_actions"],
+        "added_actions": [action for action in row["required_actions"] if action not in old_actions.get(row["id"], [])],
         "eligible_before_revision": row["id"] in old_ids and eligible(old_ids, row["id"]),
         "eligible_after_revision": eligible(new_ids, row["id"]),
         "binding_required": row["id"] not in program["bindings"]} for row in proposed["stages"]}

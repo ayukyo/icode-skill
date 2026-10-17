@@ -183,7 +183,9 @@ Agent spawn 默认按当前阶段执行资格核对；受控调用可显式传 `
 python3 tools/icode_control.py stage --dir <协调工单> --phase preview-revision --plan-json <新计划JSON>
 ```
 
-预览给出新旧摘要、顺序、新增阶段、已接受前缀和历史结论，不能据此实施。仅允许保持program/project身份及authorized_actions不变，保留所有旧阶段定义，在已接受前缀之后新增阶段或移动未接受阶段；不得删要求、改已接受定义、放宽旧阶段动作或把失败改成通过。需要增加原计划外的授权能力时，不能用这个最小换版接口代替单独的授权规划。
+预览给出新旧摘要、顺序、新增阶段、已接受前缀、逐阶段added_actions和历史结论，不能据此实施。仅允许保持program/project身份及authorized_actions不变，在已接受前缀之后新增阶段、移动未接受阶段，或给未接受阶段追加原授权内的必需动作。已接受阶段定义必须完全相同；未接受旧阶段除required_actions外所有字段保持原样，原动作必须按原顺序作为新列表的子序列保留，新动作仍唯一且属于原authorized_actions。不得删要求、重排旧动作、改已接受定义或把失败改成通过。需要增加原计划外的授权能力时，不能用这个最小换版接口代替单独的授权规划。
+
+追加code/patch/fast类动作会沿现有验收链要求当前候选的代码审查新鲜度；不会因旧验证报告或本次计划批准而豁免code/deepcheck/audit。所有未接受历史报告仍保留并失去原确认资格，须按加强后的计划完成执行和新的AI报告，再由用户确认。
 
 实际应用复用`icode_control.revise_stage_program(out_dir, plan, request, *, trusted_confirmation, ...)`。request必须精确包含预览challenge的program_id/generation/revision/old_plan_digest/new_plan_digest/preview_digest，再带非空request_id/reason。可信host/UI适配器从真实用户输入确认`intent=修订阶段计划`，返回真实source/source_id；普通CLI、模型自填JSON及actor字段均不能证明用户批准。用户已经明确批准对应重规划时复用该授权，不重复询问同一意图。
 

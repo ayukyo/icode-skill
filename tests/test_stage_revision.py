@@ -1,6 +1,7 @@
 """Authorized append-only stage-plan revisions preserve acceptance and failures."""
 import copy
 import json
+from pathlib import Path
 import subprocess
 import sys
 import threading
@@ -61,6 +62,68 @@ class StageRevisionTests(unittest.TestCase):
         with self.assertRaises(self.ctl.ControlError):
             self.ctl.revise_stage_program(self.coord, plan, request)
         self.assertEqual(self.ctl.load_metadata(self.coord), before)
+
+    def test_unaccepted_stage_can_add_required_authorized_actions(self):
+        self.enable()
+        before = self.ctl.load_metadata(self.first)
+        plan = copy.deepcopy(self.plan)
+        plan['stages'][0]['required_actions'].append('code')
+        plan, view, request, trusted = self.revision(plan)
+        self.assertEqual(view['action_effects']['one']['added_actions'], ['code'])
+        self.assertEqual(view['action_effects']['two']['added_actions'], [])
+        self.ctl.revise_stage_program(self.coord, plan, request, trusted_confirmation=trusted)
+        self.assertEqual(self.ctl.load_metadata(self.first), before)
+        self.assertIn('code', self.ctl.stage_projection(self.first)['available_actions'])
+        with self.assertRaisesRegex(self.ctl.ControlError, 'candidate tracking must be enabled'):
+            self.ctl.require_stage_action(self.first, 'code')
+        self.assertEqual(self.ctl.verify_event_chain(self.coord, self.ctl.load_metadata(self.coord))[1], [])
+
+    def test_action_addition_cannot_change_old_obligations_or_order(self):
+        self.enable()
+        for kind in ['remove', 'reorder', 'title', 'duplicate', 'outside_authority']:
+            plan = copy.deepcopy(self.plan)
+            actions = plan['stages'][0]['required_actions']
+            if kind == 'remove':
+                actions[:] = ['verify', 'code']
+            elif kind == 'reorder':
+                actions[:] = ['serial_exec', 'verify', 'code']
+            elif kind == 'title':
+                actions.append('code')
+                plan['stages'][0]['title'] = 'Changed obligation'
+            elif kind == 'duplicate':
+                actions.append('verify')
+            else:
+                actions.append('audit')
+            with self.subTest(kind=kind), self.assertRaises(self.ctl.ControlError):
+                self.ctl.preview_stage_revision(self.coord, plan)
+
+    def test_action_addition_cannot_modify_accepted_stage(self):
+        access, _, _, run, bundle = self.ready()
+        self.record(access, run, bundle)
+        self.accept(access)
+        plan = copy.deepcopy(self.plan)
+        plan['stages'][0]['required_actions'].append('code')
+        with self.assertRaises(self.ctl.ControlError):
+            self.ctl.preview_stage_revision(self.coord, plan, **access)
+
+    def test_adding_code_invalidates_review_and_requires_code_freshness(self):
+        access, _, _, run, bundle = self.ready()
+        self.record(access, run, bundle)
+        self.ctl.review_stage(self.first, request_id='before-code-review', **access)
+        self.assertTrue(self.ctl.stage_projection(self.first, **access)['can_confirm'])
+        old_meta = self.ctl.load_metadata(self.first)
+        plan = copy.deepcopy(self.plan)
+        plan['stages'][0]['required_actions'].append('code')
+        plan, _, request, trusted = self.revision(plan, access)
+        self.ctl.revise_stage_program(self.coord, plan, request, trusted_confirmation=trusted, **access)
+        self.assertEqual(self.ctl.load_metadata(self.first), old_meta)
+        self.assertFalse(self.ctl.stage_projection(self.first, **access)['can_confirm'])
+        review = self.ctl.review_stage(self.first, request_id='after-code-review', **access)
+        self.assertNotEqual(review['outcome'], 'pass')
+        snapshot = self.ctl.load_json(Path(review['report_path']).with_name('stage_review.json'), 'stage review')
+        self.assertTrue({'missing_current_code', 'missing_current_deepcheck', 'missing_current_audit'}
+                        .issubset(snapshot['reasons']), snapshot['reasons'])
+        self.assertFalse(self.ctl.stage_projection(self.first, **access)['can_confirm'])
 
     def test_revision_replay_and_conflicting_source(self):
         self.enable()
