@@ -63,6 +63,12 @@ python3 tools/icode_control.py inspection --dir <out_dir> --step <code|deepcheck
 
 assess 复用同一步骤未终结 attempt、真实 before_write、artifact 回执与幂等保护；相同 request 重放保留后来进度，换结论或 check/phase 复用 request 拒绝且不写清单。所有新 prepare 的真实 writer 事件签发 `inspection_checks_version=1`，即使 checks 为空；控制面据该事件要求新版字段，删字段或自报 legacy 不能降级。真实旧 v1 清单/旧回执仍可只读解释，不补造专项历史；需新结论则重新入轮。跨阶段同范围自然新增 assessment 不改变规则身份。
 
+## 跨步骤冗余声明
+
+已启用候选跟踪时，新 code/deepcheck/audit prepare 会从真实事件与当前适用代际取得已有声明。仅在 scopes、已解析基线相同，related 差异都是范围内已必审文件，且两份重新派生的完整清单具有相同文件内容、单元、规则和专项声明时，保守沿用原 related。新增消费者、范围或基线变化、截断和未知不会被这种复用消除；源码身份仍由严格候选比较裁决。新轮的 Read、assessment、findings 始终重新开始。
+
+事件保留实际原始请求。相同幂等键及完全相同原参数可以重放已登记的规范声明，并保留后来阅读/结论；重放仍校验当前源码、受保护输入和声明回执。不同请求换范围继续拒绝，不修改旧回执或候选 schema。
+
 ## Finding 定位与版本
 
 本轮发现写入清单 findings，与 Markdown 用相同稳定 finding_id。确认的源码 finding 给 `verification_status=confirmed` 和 `locations`，每项含 `path,start_line,end_line,source_sha256,excerpt`。行号从 1 起；excerpt 与对应完整行段逐字相同（含换行）。校验单元成员、行段、hash 和原文；定位正确不等于语义正确，主代理仍复核因果/建议。

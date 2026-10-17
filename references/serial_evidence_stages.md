@@ -205,6 +205,8 @@ AI 先备齐可读的验收内容，再由共享阶段 helper 冻结 `stage_revi
 
 ### 确认绑定与来源
 
+新报告仅展示 accepted_runs 的证据包精确引用的审阅和帧：以所选 run 自身候选、合同、单元和逐帧 review_refs/通道/源图及预览摘要绑定，非视觉摘要按 item.metadata.review_ref 绑定。每帧可以有多通道结论，但只占一个代表性预览名额。未引用的历史审阅保留在冻结记录中，不混入当前展示；全部历史摘要与负面结果仍参与原有门禁。包读取、解析或稳定性检查失败时拒绝发布新报告，不回退历史摘要。旧报告继续按原落盘字节和摘要验证，不因展示修复重生成或重签。
+
 控制面复用 [stage_acceptance.py](../tools/stage_acceptance.py)：只读 `icode_control.stage_projection(out_dir,*,git_provider=None,require_git_provider=False)` 给出当前阶段、报告、challenge 与阻断原因。受控 `confirm_stage(out_dir,request,*,trusted_confirmation)` 消费报告指定的 `program_id/stage_id/challenge_id/facts_digest/report_sha256/revision` 及当前 decision/request_id/reason；适配器从真实 UI/host 用户输入核验来源与明确意图，不能由模型填写“人类已确认”。
 
 用户接受的是这份具体阶段报告，通常一次确认即可放行已授权范围内的下一阶段。“已读”、目标不明、过期 challenge、普通 CLI 的 actor=human、任意 JSON、模型输出或日志中写“确认”都不能放行。没有可信确认适配器时功能级 fail-closed，不用 CLI 伪造。拒绝、撤销和修改要求保留独立历史；确认不补缺失测试、不改 outcome、不授权新的部署/刷写/提交/推送。

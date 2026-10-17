@@ -1040,6 +1040,64 @@ def require_action(directory, action, *, expected_generation=None, git_provider=
     return state
 
 
+def _report_bundle_reviews(bundle, run, metadata, reader):
+    """Select presentation rows through the accepted bundle's exact references.
+
+    This does not filter frozen facts or negative-review adjudication. Bind to
+    the selected run's candidate (which can be a valid same-content ancestor).
+    """
+    cell = {key: run.get(key) for key in ("layer", "consumer", "scenario")}
+    if any(bundle[key] != run[key] for key in ("run_id", "candidate_id")):
+        raise ValueError("report bundle/run identity mismatch")
+    binding = {"run_id": run["run_id"], "candidate_id": run["candidate_id"],
+               "contract_digest": bundle["contract_sha256"], "cell": cell, "outcome": "pass"}
+    resolve = review_validator(metadata)
+
+    def bound(ref):
+        receipt = resolve(ref)
+        if any(receipt.get(key) != value for key, value in binding.items()):
+            raise ValueError("report review binding mismatch")
+        return receipt
+
+    items = {item["id"]: item for item in bundle["items"]}
+    if len(items) != len(bundle["items"]):
+        raise ValueError("duplicate report item")
+    visual, evidence = [], []
+    for group in (bundle.get("visual") or {}).get("frame_sets", []):
+        if any(group.get(key) != value for key, value in cell.items()):
+            raise ValueError("report frame group cell mismatch")
+        for frame in group["frames"]:
+            source, preview = items[frame["source_item_id"]], items[frame["preview_item_id"]]
+            frame_key = (run["run_id"], run["candidate_id"], *cell.values(), group["id"], frame["id"])
+            for ref in frame["review_refs"]:
+                receipt = bound(ref)
+                for channel in receipt["channels"]:
+                    rows = [row for row in receipt["frame_results"] if row.get("frame_set_id") == group["id"]
+                            and row.get("frame_id") == frame["id"] and row.get("channel") == channel]
+                    if len(rows) != 1 or rows[0].get("input_sha256") != preview["sha256"] \
+                            or rows[0].get("source_sha256") != source["sha256"] or rows[0].get("outcome") != "pass":
+                        raise ValueError("report frame/channel/hash binding mismatch")
+                    visual.append((receipt, rows[0], reader.path(preview["path"]), frame_key))
+    evidence_contract = metadata.get("verification_contract", {}).get("evidence_contract") or {}
+    requirements = {row["id"]: row for row in evidence_contract.get("required_items", [])}
+    for item in items.values():
+        req = requirements[item["requirement_id"]]
+        # Mirror evidence_bundle's selection: optional machine metadata is not
+        # an authenticated review; visual AI references belong to frame_refs.
+        visual_review = evidence_contract.get("visual") is not None and item["kind"] in {"frame_set", "visual_review"} \
+            and req["method"] != "human_observation"
+        if visual_review or req["method"] == "machine" and item["kind"] != "visual_review":
+            continue
+        ref = item.get("metadata", {}).get("review_ref")
+        receipt = bound(ref)
+        expected = {"requirement_id": item["requirement_id"], "item_sha256": item["sha256"],
+                    "method": req["method"]}
+        if any(receipt.get(key) != value for key, value in expected.items()):
+            raise ValueError("report item review binding mismatch")
+        evidence.append(receipt)
+    return visual, evidence
+
+
 def _report_text(snapshot, state):
     """Human-facing report; the separate JSON retains the exact frozen facts."""
     def safe(value):
@@ -1064,6 +1122,7 @@ def _report_text(snapshot, state):
         lines.append("| " + safe(row["id"]) + " | " + safe(row["method"]) + " | " +
                      safe(row["min_count"]) + " 项；" + ("必须完整" if row["complete"] else "按合同检查") + " |")
     lines.extend(["", "证据引用：", ""])
+    visual, evidence = [], []
     for run in runs:
         ref = run.get("evidence_bundle")
         if isinstance(ref, dict) and isinstance(ref.get("path"), str):
@@ -1072,30 +1131,38 @@ def _report_text(snapshot, state):
             try:
                 reader = ctl().verification_evidence_module().bundle_module().Reader(state["directory"])
                 bundle = reader.json(reader.read(ref["path"], ref["sha256"]))
+                # Eligible runs also include legitimate fail/inconclusive
+                # partial bundles. Keep their result and raw links, without
+                # imposing the completed pass-review contract on those items.
+                selected_visual, selected_evidence = (_report_bundle_reviews(bundle, run, snapshot["evidence_metadata"], reader)
+                                                       if run.get("outcome") == "pass" else ([], []))
                 reader.finish()
+                visual.extend(selected_visual)
+                evidence.extend(selected_evidence)
                 for item in bundle["items"]:
                     target = Path(state["directory"]) / item["path"]
                     lines.append("  - " + safe(item["requirement_id"]) + " / " + safe(item["id"]) +
                                  "：[原始/派生文件](<" + target.as_posix() + ">)，" + safe(item["bytes"]) + " 字节。")
-            except (ValueError, OSError, KeyError, TypeError):
-                lines.append("  - 证据包当前不可读取；本报告不构成通过结论。")
-    namespace = snapshot["evidence_metadata"]["extensions"]["verification"]
+            except (ValueError, OSError, KeyError, TypeError) as exc:
+                fail("selected evidence cannot be rendered safely", run_id=run.get("run_id"), error=str(exc))
     lines.extend(["", "逐帧视觉观察：", ""])
-    visual = namespace.get("visual_reviews") or []
     if not visual:
         lines.append("本次没有已执行视觉回执；涉及视觉的合同须补齐实际通道审查。" if (contract.get("evidence_contract") or {}).get("visual") else "本阶段合同没有视觉验收项。")
-    previews = 0
-    for receipt in visual:
-        for row in receipt.get("frame_results") or []:
-            lines.append("- " + safe(row.get("frame_set_id")) + " / " + safe(row.get("frame_id")) + "：" + safe(row.get("outcome")) +
-                         "；" + safe(row.get("conclusion")) + "（" + safe(row.get("channel")) + "/" + safe(row.get("model")) + "）。")
-            frame = next((x for x in receipt.get("frames") or [] if x.get("frame_id") == row.get("frame_id") and x.get("frame_set_id") == row.get("frame_set_id")), None)
-            if frame and previews < 5:
-                lines.extend(["", "![代表性帧 " + safe(row.get("frame_id")) + "](<" + Path(frame["preview_path"]).as_posix() + ">)", ""])
-                previews += 1
-    for receipt in namespace.get("evidence_reviews") or []:
+    previews, displayed, receipts = set(), set(), {}
+    for receipt, row, preview, frame_key in visual:
+        receipts[receipt["review_id"]] = receipt
+        row_key = (*frame_key, receipt["review_id"], row["channel"])
+        if row_key in displayed:
+            continue
+        displayed.add(row_key)
+        lines.append("- " + safe(row.get("frame_set_id")) + " / " + safe(row.get("frame_id")) + "：" + safe(row.get("outcome")) +
+                     "；" + safe(row.get("conclusion")) + "（" + safe(row.get("channel")) + "/" + safe(row.get("model")) + "）。")
+        if frame_key not in previews and len(previews) < 5:
+            lines.extend(["", "![代表性帧 " + safe(row.get("frame_id")) + "](<" + preview.as_posix() + ">)", ""])
+            previews.add(frame_key)
+    for receipt in {row["review_id"]: row for row in evidence}.values():
         lines.append("- " + safe(receipt.get("requirement_id")) + "（" + safe(receipt.get("method")) + "）：" + safe(receipt.get("conclusion")))
-    limitations = [*snapshot["reasons"], *(value for row in visual for value in row.get("limitations") or [])]
+    limitations = [*snapshot["reasons"], *(value for row in receipts.values() for value in row.get("limitations") or [])]
     lines.extend(["", "限制与最小补测：", ""])
     lines.extend("- " + safe(value) for value in dict.fromkeys(limitations))
     if not limitations:

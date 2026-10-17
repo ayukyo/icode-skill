@@ -615,6 +615,38 @@ def build_worklist(workspace, code_files, *, step, ticket_id, attempt, mode="ful
     return report
 
 
+def _reuse_equivalent_related(report, workspace, canonical_scope, *, git_provider=None):
+    """Reuse a live declaration only for redundant, already-required file names.
+
+    Both lists are freshly derived under the same pinned baseline and budget.
+    No old Read, assessment, finding or source hash is imported into this round.
+    Unknown coverage and genuinely added consumers keep their original scope.
+    """
+    related = canonical_scope.get("related", [])
+    if report["related"] == related or report["scopes"] != canonical_scope.get("scopes") \
+            or report["resolved_baselines"] != canonical_scope.get("baselines") \
+            or report["unobserved"] or report["coverage_status"] != "complete_within_scope":
+        return report
+    candidate = dict(report, related=related)
+    fresh = _rebuild(candidate, workspace, git_provider=git_provider)
+    if fresh["unobserved"] or fresh["coverage_status"] != "complete_within_scope":
+        return report
+    required = _flatten(fresh)
+    changed = set(report["related"]) ^ set(related)
+    if any(path not in required or not _inside(path, fresh["scopes"]) for path in changed):
+        return report
+
+    def identity(value):
+        # Explicit related changes the discovery reason, not the review duty.
+        return {"units": [{"unit_id": unit["unit_id"], "files": [
+                    {key: row[key] for key in ("path", "sha256", "kind", "rules")}
+                    for row in unit["files"]]} for unit in value["units"]],
+                "checks_version": value["checks_version"], "checks": check_declarations(value),
+                "exclusions": value["exclusions"]}
+
+    return fresh if identity(fresh) == identity(report) else report
+
+
 def _rebuild(report, workspace, code_files=None, *, git_provider=None):
     if not isinstance(report, dict):
         raise InspectionError("report must be an object")

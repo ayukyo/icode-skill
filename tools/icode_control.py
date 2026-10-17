@@ -6201,6 +6201,16 @@ def cmd_inspection(args, *, git_provider=None, require_git_provider=False, inspe
         else:
             report = None
         try:
+            assessment = strict_json_loads(args.assessment_json) if args.phase == "assess" and args.assessment_json else None
+            request_identity = dict(phase=args.phase,
+                read_phase=args.read_phase if args.phase == "read" else None,
+                source_path=args.path if args.phase == "read" else None,
+                related=sorted(set(args.related)) if args.related else None,
+                scopes=sorted(set(args.scope)) if args.scope else None,
+                baselines=strict_json_loads(args.baselines_json) if args.baselines_json else None)
+            if args.phase == "assess":
+                request_identity.update(check_id=args.check_id, assessment_phase=args.read_phase,
+                    assessment_sha256=canonical_digest(assessment))
             if args.phase == "prepare" and not resumed:
                 baselines = strict_json_loads(args.baselines_json) if args.baselines_json else None
                 if baselines is None and (meta.get("candidate_tracking") or {}).get("mode") == "enabled":
@@ -6209,12 +6219,25 @@ def cmd_inspection(args, *, git_provider=None, require_git_provider=False, inspe
                     ticket_id=meta["ticket_id"], attempt=args.attempt,
                     mode=(meta.get("risk_profile") or {}).get("effective_mode") or meta.get("mode", "full"),
                     related=args.related, scopes=args.scope, baselines=baselines, **inspection_access)
+                if (meta.get("candidate_tracking") or {}).get("mode") == "enabled":
+                    canonical_scope = candidate_inspection_scope(out_dir, meta,
+                        effective_base=meta["candidate_tracking"]["base"], events=events)
+                    report = helper._reuse_equivalent_related(report, workspace, canonical_scope, **inspection_access)
                 report.setdefault("findings", [])
             elif args.phase == "prepare" and resumed:
                 options = (("related", sorted(set(args.related)) if args.related else None),
                            ("scopes", sorted(set(args.scope)) if args.scope else None),
                            ("baselines", strict_json_loads(args.baselines_json) if args.baselines_json else None))
-                if any(value is not None and value != report.get(key) for key, value in options):
+                # A canonical declaration can differ from the original CLI
+                # spelling. Only its exact receipted request may replay that
+                # mapping; all normal source/declaration checks still follow.
+                exact_replay = any(e.get("event_type") == "artifact_written" and e.get("request_id") == args.request
+                    and (e.get("payload") or {}).get("step") == args.step
+                    and (e.get("payload") or {}).get("attempt") == args.attempt
+                    and (e.get("payload") or {}).get("inspection_request") == request_identity
+                    and (e.get("payload") or {}).get("inspection_declaration_hash") == inspection_declaration_hash(report)
+                    for e in events)
+                if not exact_replay and any(value is not None and value != report.get(key) for key, value in options):
                     raise ValueError("恢复轮不得改变审查范围；先 blocked 重入")
             if report is None:
                 raise ValueError("先 prepare 本 attempt 的工作清单")
@@ -6230,16 +6253,6 @@ def cmd_inspection(args, *, git_provider=None, require_git_provider=False, inspe
                 required_checks_version=1, **inspection_access)
             if issues:
                 raise ValueError(str(issues))
-            assessment = strict_json_loads(args.assessment_json) if args.phase == "assess" and args.assessment_json else None
-            request_identity = dict(phase=args.phase,
-                read_phase=args.read_phase if args.phase == "read" else None,
-                source_path=args.path if args.phase == "read" else None,
-                related=sorted(set(args.related)) if args.related else None,
-                scopes=sorted(set(args.scope)) if args.scope else None,
-                baselines=strict_json_loads(args.baselines_json) if args.baselines_json else None)
-            if args.phase == "assess":
-                request_identity.update(check_id=args.check_id, assessment_phase=args.read_phase,
-                    assessment_sha256=canonical_digest(assessment))
             stable_payload = dict(execution_model_version=model["schema_version"], step=args.step,
                 attempt=args.attempt, output="inspection_worklist", scope="ticket", path=str(target),
                 inspection_declaration_hash=inspection_declaration_hash(report), inspection_checks_version=1,
