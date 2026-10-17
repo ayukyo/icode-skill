@@ -12,6 +12,6 @@ description: ICODE 端到端编码工作流。用法 /icode <子命令> [参数]
 1. 若本会话尚未加载 ICODE 技能，先加载 `icode` skill（其 SKILL.md 位于 `~/.claude/skills/icode/SKILL.md`），以它为唯一路由入口。
 2. 从用户输入中解析子命令（help/init/log/start/fast/plan/review/merge/code/deepcheck/audit/readme/patch/verify/doc/docx/ppt/limit/learn/status/list/bak/worktree）与其余参数。子命令缺失时按 SKILL.md 的路由语义处理。
 3. 严格按 SKILL.md 与 `steps/` 目录下对应步骤文件执行；执行步骤前必须先读取对应的 `steps/XX_*.md`。
-4. 工单产物写入当前工程的 `.icode_output/.icode_output_N/`，状态与事件一律经 `python3 ~/.claude/skills/icode/tools/icode_control.py` 控制面执行，禁止绕过直写 metadata。
+4. 工单产物写入当前工程的 `.icode_output/.icode_output_N/`，状态与事件一律经 `~/.claude/skills/icode/tools/icode_control.py` 控制面执行，禁止绕过直写 metadata。解释器按平台解析：Linux/macOS 用 `python3`，**Windows 用 `py -3`**；裸 `python`/`python3` 在 Windows 可能命中 WindowsApps 假 stub（退出码 0 且无输出），这种"静默成功"一律视为失败并改用 `py -3` 重跑。
 5. 遵守 Git 安全规则：禁止 `git commit`、`git push` 及任何危险操作。
 6. 对用户的回复一律使用中文。

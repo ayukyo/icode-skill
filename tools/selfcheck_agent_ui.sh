@@ -3,6 +3,25 @@
 # 重型安装/全仓合同在进入本脚本前单独执行一次；本脚本避免把包索引波动误判为代码回归。
 set -u
 cd "$(dirname "$0")/.." || exit 1
+# 跨平台 Python 解析（Windows 硬规则）：ICODE_PYTHON_BIN 显式指定优先；
+# Windows(Git Bash/MSYS) 优先 py -3 —— 裸 python3/python 可能是 WindowsApps 假 stub
+# （退出码 0 且无输出）或 MSYS 自带 Python（与系统包不共享）；其余平台优先 python3。
+_py_ok() { [ "$("$@" -c 'print(1)' 2>/dev/null)" = "1" ]; }
+PY=()
+if [[ -n "${ICODE_PYTHON_BIN:-}" ]]; then
+  PY=("$ICODE_PYTHON_BIN")
+elif { [[ -n "${MSYSTEM:-}" ]] || [[ "$(uname -s 2>/dev/null)" == MINGW* ]] \
+       || [[ "$(uname -s 2>/dev/null)" == MSYS* ]]; } && _py_ok py -3; then
+  PY=(py -3)
+elif _py_ok python3; then
+  PY=(python3)
+elif _py_ok py -3; then
+  PY=(py -3)
+elif _py_ok python; then
+  PY=(python)
+else
+  PY=(python3)
+fi
 
 ROUNDS="${1:-20}"
 FAILED=0
@@ -50,7 +69,7 @@ for round in $(seq 1 "$ROUNDS"); do
 
   # 1. 语法/编译：Python、Shell、浏览器 JavaScript。
   for file in "${PY_FILES[@]}"; do
-    python3 -m py_compile "$file" 2>"$LOG_FILE" || {
+    "${PY[@]}" -m py_compile "$file" 2>"$LOG_FILE" || {
       echo "  [r$round] Python 语法失败: $file"; tail -n 20 "$LOG_FILE"; err=1;
     }
   done
@@ -64,7 +83,7 @@ for round in $(seq 1 "$ROUNDS"); do
   fi
 
   # 2/3/4. 依赖、逻辑边界、异常处理：离线单元/HTTP/控制面集成测试。
-  if ! python3 -m pytest -p no:anyio -q "${PYTEST_FILES[@]}" >"$LOG_FILE" 2>&1; then
+  if ! "${PY[@]}" -m pytest -p no:anyio -q "${PYTEST_FILES[@]}" >"$LOG_FILE" 2>&1; then
     echo "  [r$round] Runtime/UI pytest 失败"
     tail -n 40 "$LOG_FILE"
     err=1
@@ -80,7 +99,7 @@ for round in $(seq 1 "$ROUNDS"); do
   done
 
   # 7. 可运行性：机器真源、命令入口和工作树补丁格式。
-  if ! python3 - <<'PY' >"$LOG_FILE" 2>&1
+  if ! "${PY[@]}" - <<'PY' >"$LOG_FILE" 2>&1
 import json
 from pathlib import Path
 
@@ -98,7 +117,7 @@ PY
     tail -n 20 "$LOG_FILE"
     err=1
   fi
-  python3 tools/icode_agent.py ui --help >"$LOG_FILE" 2>&1 || {
+  "${PY[@]}" tools/icode_agent.py ui --help >"$LOG_FILE" 2>&1 || {
     echo "  [r$round] UI CLI 不可运行"; tail -n 20 "$LOG_FILE"; err=1;
   }
   git diff --check >"$LOG_FILE" 2>&1 || {

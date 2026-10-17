@@ -21,7 +21,7 @@ fi
 # WindowsApps stub 跑 --version 无输出但 exit 0;真 Python 必有版本字符串。
 # Linux/macOS 的 python3 --version 永远有输出,逻辑等价无副作用。
 PYTHON_BIN=""
-for _py in python3 python; do
+for _py in python3 py python; do
   if command -v "$_py" >/dev/null 2>&1; then
     _bin="$(command -v "$_py")"
     if [ -n "$("$_bin" --version 2>&1 | grep -i 'python')" ]; then

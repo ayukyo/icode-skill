@@ -25,6 +25,12 @@ description: ICODE 端到端编码工作流，适配 Claude Code、Codex、CodeB
 
 > 适用所有 `/icode` 命令的会话交互与步骤内对用户的询问/报告；产物文件正文遵循既有中文风格撰写。
 
+## Python 解释器解析（跨平台硬规则）
+
+skill 内所有 `python3 tools/...` 形式的命令，执行前必须按平台解析解释器：**Linux/macOS 用 `python3`；Windows 用 `py -3`**（已设 `ICODE_PYTHON_BIN` 时以它为准）。本文档与 `steps/*.md` 中保留 `python3` 写法是跨平台通用形式，不逐处改写，执行时按本规则解析。
+
+Windows 上裸 `python` / `python3` 常解析到 `%LOCALAPPDATA%\Microsoft\WindowsApps` 的应用执行别名（假 stub），表现为**退出码 0、无任何输出**。出现这种"静默成功"一律视为失败：改用 `py -3` 重跑同一命令，不得据此判定步骤完成，也不得把空输出当作通过证据。可用性判定：`py -3 -c "import sys; print(sys.executable)"` 有真实路径输出即可用。
+
 ## 自然语言入口
 
 用户可直接说“使用 ICODE 给这个模块增加重试，先出方案，不改代码”或“用 ICODE 测设备现有版本，不编译、不部署”。由**当前宿主 Agent**理解意图，不新增模型调用或 Runtime 依赖；`/icode <自然语言>` 与原有 `/icode <子命令>` 并存。

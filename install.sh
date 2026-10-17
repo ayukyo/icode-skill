@@ -123,18 +123,33 @@ if [[ ! -f "$DOCX_BOOTSTRAP" || ! -r "$DOCX_BOOTSTRAP" ]]; then
   echo "❌ 已安装 ICODE 中缺少可读的 DOCX runtime 安装器: $DOCX_BOOTSTRAP" >&2
   exit 1
 fi
-DOCX_PYTHON="${ICODE_PYTHON_BIN:-python3}"
-if ! command -v "$DOCX_PYTHON" >/dev/null 2>&1; then
-  echo "❌ 未找到 DOCX runtime 的 Python: $DOCX_PYTHON" >&2
+# 解释器解析：显式覆盖 > python3 > Windows py 启动器 > python。
+# Windows 上裸 python3/python 可能是 WindowsApps 假 stub（退出码 0 且无输出），用真实输出验证过滤。
+_docx_py_ok() { [ "$("$@" -c 'print(1)' 2>/dev/null)" = "1" ]; }
+DOCX_PYTHON=()
+if [[ -n "${ICODE_PYTHON_BIN:-}" ]]; then
+  DOCX_PYTHON=("$ICODE_PYTHON_BIN")
+elif { [[ -n "${MSYSTEM:-}" ]] || [[ "$(uname -s 2>/dev/null)" == MINGW* ]] \
+       || [[ "$(uname -s 2>/dev/null)" == MSYS* ]]; } && _docx_py_ok py -3; then
+  DOCX_PYTHON=(py -3)
+elif _docx_py_ok python3; then
+  DOCX_PYTHON=(python3)
+elif _docx_py_ok py -3; then
+  DOCX_PYTHON=(py -3)
+elif _docx_py_ok python; then
+  DOCX_PYTHON=(python)
+fi
+if [[ ${#DOCX_PYTHON[@]} -eq 0 ]]; then
+  echo "❌ 未找到可用的 DOCX runtime Python（可设 ICODE_PYTHON_BIN 显式指定）" >&2
   exit 1
 fi
-"$DOCX_PYTHON" "$DOCX_BOOTSTRAP"
+"${DOCX_PYTHON[@]}" "$DOCX_BOOTSTRAP"
 DOCX_RENDERER_BOOTSTRAP="$ICODE_DIR/tools/docx/bootstrap_renderer.py"
 if [[ ! -f "$DOCX_RENDERER_BOOTSTRAP" || ! -r "$DOCX_RENDERER_BOOTSTRAP" ]]; then
   echo "❌ 已安装 ICODE 中缺少 DOCX renderer 安装器: $DOCX_RENDERER_BOOTSTRAP" >&2
   exit 1
 fi
-"$DOCX_PYTHON" "$DOCX_RENDERER_BOOTSTRAP"
+"${DOCX_PYTHON[@]}" "$DOCX_RENDERER_BOOTSTRAP"
 
 if [[ "$SKIP_MCP" == true ]]; then
   echo "✅ ICODE、自管 DOCX runtime 与共享技能安装完成；已按要求跳过 MCP"

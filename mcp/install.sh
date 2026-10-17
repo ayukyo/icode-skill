@@ -73,13 +73,20 @@ if [ "$client" = "workbuddy" ] \
 fi
 
 # 探测 Python 解释器(Codex 分支跑 client_registry.py 用; 与子工程 install 探测模式一致)
-PYTHON_BIN=""
-for _py in python3 python; do
-  if command -v "$_py" >/dev/null 2>&1; then
-    PYTHON_BIN="$_py"
-    break
-  fi
-done
+# Windows 上裸 python3/python 可能是 WindowsApps 假 stub（无输出但退出码 0），
+# 用真实输出验证；同时补 py 启动器回退（Windows 只有 py 可用时仍能注册 MCP）。
+_py_ok() { [ "$("$@" -c 'print(1)' 2>/dev/null)" = "1" ]; }
+PYTHON_BIN=()
+if { [ -n "${MSYSTEM:-}" ] || case "$(uname -s 2>/dev/null)" in MINGW*|MSYS*) true;; *) false;; esac; } \
+   && _py_ok py -3; then
+  PYTHON_BIN=(py -3)
+elif _py_ok python3; then
+  PYTHON_BIN=(python3)
+elif _py_ok py -3; then
+  PYTHON_BIN=(py -3)
+elif _py_ok python; then
+  PYTHON_BIN=(python)
+fi
 
 # 扫描所有 mcp/*/install.sh
 shopt -s nullglob
@@ -119,7 +126,7 @@ for installer in "${installers[@]}"; do
   fi
 done
 if [ "$client" = "codex" ] || [ "$client" = "codebuddy" ] || [ "$client" = "workbuddy" ] || [ "$client" = "all" ]; then
-  if [ -z "$PYTHON_BIN" ]; then
+  if [ ${#PYTHON_BIN[@]} -eq 0 ]; then
     echo "❌ Codex/CodeBuddy/WorkBuddy MCP 注册需要 python3/python" >&2
     exit 1
   fi
@@ -163,11 +170,11 @@ for installer in "${installers[@]}"; do
     ok_count=$((ok_count + 1))
     # Codex 分支: 依赖子工程 install 成功导出的 entry
     if [ "$client" = "codex" ] || [ "$client" = "all" ]; then
-      if [ -z "$PYTHON_BIN" ]; then
+      if [ ${#PYTHON_BIN[@]} -eq 0 ]; then
         echo "   ⚠️ 未找到 python3/python，跳过 Codex 注册（client_registry.py 需 Python）"
         fail_count=$((fail_count + 1))
         failed+=("$name(codex:no-python)")
-      elif "$PYTHON_BIN" "$HERE/_lib/client_registry.py" codex-register "$name"; then
+      elif "${PYTHON_BIN[@]}" "$HERE/_lib/client_registry.py" codex-register "$name"; then
         :
       else
         fail_count=$((fail_count + 1))
@@ -176,11 +183,11 @@ for installer in "${installers[@]}"; do
     fi
     # CodeBuddy 分支: 同样依赖子工程导出的 entry，写入 ~/.codebuddy/mcp.json
     if [ "$codebuddy_enabled" = true ]; then
-      if [ -z "$PYTHON_BIN" ]; then
+      if [ ${#PYTHON_BIN[@]} -eq 0 ]; then
         echo "   ⚠️ 未找到 python3/python，跳过 CodeBuddy 注册（client_registry.py 需 Python）"
         fail_count=$((fail_count + 1))
         failed+=("$name(codebuddy:no-python)")
-      elif "$PYTHON_BIN" "$HERE/_lib/client_registry.py" codebuddy-register "$name"; then
+      elif "${PYTHON_BIN[@]}" "$HERE/_lib/client_registry.py" codebuddy-register "$name"; then
         :
       else
         fail_count=$((fail_count + 1))
@@ -189,11 +196,11 @@ for installer in "${installers[@]}"; do
     fi
     # WorkBuddy 分支: 同样依赖子工程导出的 entry，写入 ~/.workbuddy/mcp.json
     if [ "$workbuddy_enabled" = true ]; then
-      if [ -z "$PYTHON_BIN" ]; then
+      if [ ${#PYTHON_BIN[@]} -eq 0 ]; then
         echo "   ⚠️ 未找到 python3/python，跳过 WorkBuddy 注册（client_registry.py 需 Python）"
         fail_count=$((fail_count + 1))
         failed+=("$name(workbuddy:no-python)")
-      elif "$PYTHON_BIN" "$HERE/_lib/client_registry.py" workbuddy-register "$name"; then
+      elif "${PYTHON_BIN[@]}" "$HERE/_lib/client_registry.py" workbuddy-register "$name"; then
         :
       else
         fail_count=$((fail_count + 1))

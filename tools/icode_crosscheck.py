@@ -639,19 +639,26 @@ def load_manifest(directory):
     return directory, validate_manifest(manifest, directory)
 
 
-def matching_containers(root, target):
+def matching_containers(root, target, *, prune_empty=False):
     matches = []
     numbers = []
     for child in sorted(root.iterdir()):
         match = CONTAINER_RE.match(child.name)
         if not match:
             continue
-        numbers.append(int(match.group(1)))
         if child.is_symlink() or not child.is_dir():
             raise CrosscheckError(f"crosscheck 编号项不是安全目录: {child}", gate_id="crosscheck_dir_shape")
         manifest_path = child / MANIFEST_NAME
         if not manifest_path.is_file():
-            raise CrosscheckError(f"crosscheck 编号目录缺 manifest，拒绝猜测恢复: {child}", gate_id="crosscheck_manifest_missing")
+            # start 在 manifest 落盘前失败/被中断会残留空容器。空目录可以安全
+            # 清理重建（prune_empty=True，仅写路径使用）或视同不存在跳过；非空
+            # 缺 manifest 仍然拒绝，防止吞掉不可解释的半成品状态。
+            if any(child.iterdir()):
+                raise CrosscheckError(f"crosscheck 编号目录缺 manifest，拒绝猜测恢复: {child}", gate_id="crosscheck_manifest_missing")
+            if prune_empty:
+                child.rmdir()
+            continue
+        numbers.append(int(match.group(1)))
         manifest = validate_manifest(load_json(manifest_path, "crosscheck manifest"), child)
         identity = manifest["target"]
         if identity["ticket_id"] == target["ticket_id"] and identity["project_root"] == target["project_root"]:
@@ -680,7 +687,7 @@ def cmd_start(args):
     target, metadata = resolve_target(args)
     root = safe_crosscheck_root(target["project_root"], args.crosscheck_root)
     with DirectoryLock(root):
-        matches, numbers = matching_containers(root, target)
+        matches, numbers = matching_containers(root, target, prune_empty=True)
         if len(matches) > 1:
             raise CrosscheckError(
                 "同一目标存在多个 crosscheck 容器，拒绝猜测",
@@ -739,6 +746,9 @@ def cmd_start(args):
         else:
             number = max(numbers, default=0) + 1
             directory = root / f".icode_output_{number}"
+            # new_round 承载快照/候选捕获等可能失败或被中断的重活；先算成功再建
+            # 容器目录，避免"目录已建、manifest 未写"的残留把后续 start 全部挡死。
+            first_round = new_round(target, metadata, 1)
             directory.mkdir()
             created = now_iso()
             identity_material = f"{target['project_root']}\0{target['ticket_id']}"
@@ -749,9 +759,15 @@ def cmd_start(args):
                 "created_at": created,
                 "updated_at": created,
                 "current_round": 1,
-                "rounds": [new_round(target, metadata, 1)],
+                "rounds": [first_round],
             }
-            atomic_write_json(directory / MANIFEST_NAME, manifest)
+            try:
+                atomic_write_json(directory / MANIFEST_NAME, manifest)
+            except BaseException:
+                with contextlib.suppress(OSError):
+                    if not any(directory.iterdir()):
+                        directory.rmdir()
+                raise
         current = manifest["rounds"][-1]
         if current.get("inspection_version"):
             worklist = directory / current["worklist_file"]

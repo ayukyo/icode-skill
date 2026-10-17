@@ -30,9 +30,12 @@ esac
 # 优先探测可用的 python3，否则退回 python；也允许 TB_WATCH_PYTHON 显式指定。
 PY_BIN="${TB_WATCH_PYTHON:-}"
 if [ -z "$PY_BIN" ]; then
-  if command -v python3 >/dev/null 2>&1 && python3 -c 'import sys' >/dev/null 2>&1; then
+  # 用真实输出验证：WindowsApps 假 stub 会静默退出 0，只查退出码会把 stub 当可用。
+  if [ "$(python3 -c 'print(1)' 2>/dev/null)" = "1" ]; then
     PY_BIN=python3
-  elif command -v python >/dev/null 2>&1 && python -c 'import sys' >/dev/null 2>&1; then
+  elif [ "$(py -c 'print(1)' 2>/dev/null)" = "1" ]; then
+    PY_BIN=py
+  elif [ "$(python -c 'print(1)' 2>/dev/null)" = "1" ]; then
     PY_BIN=python
   else
     PY_BIN=python3

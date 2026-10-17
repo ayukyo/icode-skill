@@ -4,6 +4,25 @@
 # 全部 20 轮必须 PASS；任一轮失败即整体失败（自检不通过不交付）。
 set -u
 cd "$(dirname "$0")/.." || exit 1
+# 跨平台 Python 解析（Windows 硬规则）：ICODE_PYTHON_BIN 显式指定优先；
+# Windows(Git Bash/MSYS) 优先 py -3 —— 裸 python3/python 可能是 WindowsApps 假 stub
+# （退出码 0 且无输出）或 MSYS 自带 Python（与系统包不共享）；其余平台优先 python3。
+_py_ok() { [ "$("$@" -c 'print(1)' 2>/dev/null)" = "1" ]; }
+PY=()
+if [[ -n "${ICODE_PYTHON_BIN:-}" ]]; then
+  PY=("$ICODE_PYTHON_BIN")
+elif { [[ -n "${MSYSTEM:-}" ]] || [[ "$(uname -s 2>/dev/null)" == MINGW* ]] \
+       || [[ "$(uname -s 2>/dev/null)" == MSYS* ]]; } && _py_ok py -3; then
+  PY=(py -3)
+elif _py_ok python3; then
+  PY=(python3)
+elif _py_ok py -3; then
+  PY=(py -3)
+elif _py_ok python; then
+  PY=(python)
+else
+  PY=(python3)
+fi
 
 ROUNDS="${1:-20}"
 FAILED=0
@@ -16,7 +35,7 @@ MD_ACTIVE="SKILL.md README.md README.zh-CN.md references/*.md steps/*.md mcp/*/R
 GATES="mcp/workflow-gate/gates.json"
 STEPS="steps/*.md"
 LINT_PY="tools/lint_workflow_contract.py"
-LINT="python3 $LINT_PY"
+LINT=("${PY[@]}" "$LINT_PY")
 SIM="demo/.icode_output/.workflow_sim"
 
 echo "=== workflow contract ${ROUNDS} 轮全面自检（py=$(echo "$PY_FILES" | wc -l) sh=$(echo "$SH_FILES" | wc -l)）==="
@@ -25,13 +44,13 @@ for r in $(seq 1 "$ROUNDS"); do
   err=0
   # 1. 语法/编译
   for f in $PY_FILES; do
-    python3 -m py_compile "$f" 2>/dev/null || { echo "  [r$r] 语法 py: $f"; err=1; }
+    "${PY[@]}" -m py_compile "$f" 2>/dev/null || { echo "  [r$r] 语法 py: $f"; err=1; }
   done
   for f in $SH_FILES; do
     bash -n "$f" 2>/dev/null || { echo "  [r$r] 语法 sh: $f"; err=1; }
   done
   # 2. 依赖/调用链：gates.json 可解析且字段完整 + lint 步骤映射覆盖门禁入口
-  python3 - "$GATES" "$LINT_PY" <<'PY' 2>/dev/null || { echo "  [r$r] gates.json/lint 校验失败"; err=1; }
+  "${PY[@]}" - "$GATES" "$LINT_PY" <<'PY' 2>/dev/null || { echo "  [r$r] gates.json/lint 校验失败"; err=1; }
 import json,re,sys
 g=json.load(open(sys.argv[1]))
 assert g["schema_version"]==1
@@ -66,9 +85,9 @@ PY
     fi
   done
   # 5. 异常/边界：validator 对缺失目录返回受控退出码（0/1/2），--json 输出可解析
-  $LINT /nonexistent_dir >/dev/null 2>&1; rc=$?
+  "${LINT[@]}" /nonexistent_dir >/dev/null 2>&1; rc=$?
   if [ "$rc" -lt 0 ] || [ "$rc" -gt 2 ]; then echo "  [r$r] lint 异常路径 rc=$rc"; err=1; fi
-  if ! $LINT "$SIM/s2_unresolved" --json 2>/dev/null | python3 -c "import json,sys; json.load(sys.stdin)" 2>/dev/null; then
+  if ! "${LINT[@]}" "$SIM/s2_unresolved" --json 2>/dev/null | "${PY[@]}" -c "import json,sys; json.load(sys.stdin)" 2>/dev/null; then
     echo "  [r$r] lint --json 输出不可解析"; err=1
   fi
 
