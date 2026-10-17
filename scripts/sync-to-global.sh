@@ -693,9 +693,12 @@ reap_transaction_leftovers() {
 
 # cp 引擎的提交是"整体目录替换"(stage -> dst, 旧 dst 移入备份后删除), git 载荷
 # 之外的运行时产物会被摧毁。托管技能树内由 MCP 安装流程创建的 .venv、用户
-# config.json(含 KEY)、__pycache__/.cache 属于目标独有数据, 必须在提交前保留
-# 进 stage, 与 rsync 引擎(--delete 不删除 --exclude 匹配项)的行为对齐。
-# 只保留这四类已知运行时路径, 不恢复任意目标独有文件(避免历史累积问题复发)。
+# config.json(含 KEY)、__pycache__/.cache 属于目标独有数据, 必须保留到新目标,
+# 与 rsync 引擎(--delete 不删除 --exclude 匹配项)的行为对齐。
+# 只保留这几类已知运行时路径, 不恢复任意目标独有文件(避免历史累积问题复发)。
+# 只复制 config.json(体积小); .venv/.cache/__pycache__ 的大目录在提交成功后由
+# reclaim_runtime_dirs 用同盘 mv 回填——复制数百 MB 虚拟环境会把同步拖成小时级
+# (实测 9 个 MCP .venv 合计 575MB/32k 文件, 三份目标即 1.7GB 小文件复制)。
 preserve_runtime_artifacts() {
   local stage="$1" dst="$2" rel
   [[ -d "$dst" ]] || return 0
@@ -705,9 +708,31 @@ preserve_runtime_artifacts() {
     mkdir -p "$stage/$(dirname "$rel")"
     cp -a "$dst/$rel" "$stage/$rel" 2>/dev/null || true
   done < <(cd "$dst" 2>/dev/null && find . \
+      -type f -name 'config.json' -not -path '*/.git/*' -print \
+      | sed 's|^\./||')
+}
+
+# 提交全部成功后, 把备份里的运行时大目录原样移回新目标: 同一父目录内 rename 是
+# 元数据操作(秒级), 且保留 .venv 内固定的解释器路径(Windows 上 MCP 的 command
+# 直接指向 .venv/Scripts/python.exe)。必须只在 commit 成功后调用, 回填前备份
+# 保持完整, 失败仍可走既有回滚路径。mv 失败退回 cp -a 尽力而为并告警。
+reclaim_runtime_dirs() {
+  local backup="$1" dst="$2" rel
+  [[ -n "$backup" && -d "$backup" ]] || return 0
+  while IFS= read -r rel; do
+    [[ -n "$rel" ]] || continue
+    if [[ -e "$dst/$rel" ]]; then
+      continue
+    fi
+    mkdir -p "$dst/$(dirname "$rel")"
+    if ! mv -- "$backup/$rel" "$dst/$rel" 2>/dev/null; then
+      if ! cp -a "$backup/$rel" "$dst/$rel" 2>/dev/null; then
+        echo "⚠️ 运行时目录回填失败(需手动恢复 MCP 运行时): $dst/$rel" >&2
+      fi
+    fi
+  done < <(cd "$backup" 2>/dev/null && find . \
       \( -type d \( -name '.venv' -o -name '__pycache__' -o -name '.cache' \) \
          -print -prune \) \
-      -o \( -type f -name 'config.json' -not -path '*/.git/*' -print \) \
       | sed 's|^\./||')
 }
 
@@ -815,6 +840,11 @@ commit_icode_stages() {
     cleanup_prepared_stages
     return 1
   fi
+  # 全部目标提交成功后才回填运行时大目录：此时备份仍是完整副本，回填失败不影响
+  # 回滚语义（回滚只在 commit_failed 分支执行）。
+  for index in "${!committed_targets[@]}"; do
+    reclaim_runtime_dirs "${committed_backups[$index]}" "${committed_targets[$index]}"
+  done
   # Remove backups in the background: a large backup tree can exceed the
   # sandbox delete time budget and be SIGTERM'd, which must not fail an
   # otherwise successful commit. Leftover backups are reaped by the next run's

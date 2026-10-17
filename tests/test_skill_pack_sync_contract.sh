@@ -226,6 +226,14 @@ cp "$ROOT/SKILL.md" "$CP_CLAUDE/icode/SKILL.md"
 cp "$ROOT/SKILL.md" "$CP_AGENTS/icode/SKILL.md"
 printf legacy >"$CP_CLAUDE/icode/skill-packs/fixture-evidence-skill/SKILL.md"
 printf legacy >"$CP_AGENTS/icode/skill-packs/fixture-evidence-skill/SKILL.md"
+# 运行时产物保留契约：.venv 走提交后同盘 mv 回填（不复制大目录），config.json
+# 走提交前小文件复制；两者都必须在新目标中保留。
+mkdir -p "$CP_CLAUDE/icode/mcp/fixture/.venv/bin" \
+  "$CP_AGENTS/icode/mcp/fixture/.venv/bin"
+printf 'home = fixture\n' >"$CP_CLAUDE/icode/mcp/fixture/.venv/pyvenv.cfg"
+printf 'home = fixture\n' >"$CP_AGENTS/icode/mcp/fixture/.venv/pyvenv.cfg"
+printf '{"key":"cp-local"}\n' >"$CP_CLAUDE/icode/mcp/fixture/config.json"
+printf '{"key":"cp-local"}\n' >"$CP_AGENTS/icode/mcp/fixture/config.json"
 if ICODE_SYNC_ENGINE=cp run_sync "$CP_CLAUDE" "$CP_AGENTS" \
      --apply --client all >/dev/null 2>&1 \
   && [[ -f "$CP_CLAUDE/fixture-evidence-skill/SKILL.md" ]] \
@@ -233,10 +241,14 @@ if ICODE_SYNC_ENGINE=cp run_sync "$CP_CLAUDE" "$CP_AGENTS" \
   && [[ ! -e "$CP_CLAUDE/icode/.git" ]] \
   && [[ ! -e "$CP_AGENTS/icode/.git" ]] \
   && [[ ! -e "$CP_CLAUDE/icode/skill-packs/fixture-evidence-skill/SKILL.md" ]] \
-  && [[ ! -e "$CP_AGENTS/icode/skill-packs/fixture-evidence-skill/SKILL.md" ]]; then
-  ok "copy fallback publishes templates and removes exact legacy entries"
+  && [[ ! -e "$CP_AGENTS/icode/skill-packs/fixture-evidence-skill/SKILL.md" ]] \
+  && grep -qxF 'home = fixture' "$CP_CLAUDE/icode/mcp/fixture/.venv/pyvenv.cfg" \
+  && grep -qxF 'home = fixture' "$CP_AGENTS/icode/mcp/fixture/.venv/pyvenv.cfg" \
+  && grep -qxF '{"key":"cp-local"}' "$CP_CLAUDE/icode/mcp/fixture/config.json" \
+  && grep -qxF '{"key":"cp-local"}' "$CP_AGENTS/icode/mcp/fixture/config.json"; then
+  ok "copy fallback publishes templates, removes legacy entries and keeps runtime artifacts"
 else
-  bad "copy fallback publishes templates and removes exact legacy entries"
+  bad "copy fallback publishes templates, removes legacy entries and keeps runtime artifacts"
 fi
 
 ATOMIC_CLAUDE="$TMP/atomic-claude"
