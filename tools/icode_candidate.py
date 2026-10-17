@@ -19,6 +19,10 @@ DEFAULT_LIMITS = {"max_files": 50000, "max_bytes": 512 * 1024 * 1024,
                   "max_git_bytes": 16 * 1024 * 1024, "timeout_seconds": 30}
 REVIEW_STEPS = ("code", "deepcheck", "audit")
 CONTROL_DIRS = (".icode_output",)
+_LFS_POINTER_MAX_BYTES = 4096
+_GIT_OBJECT_SIZE_MAX_DIGITS = 20
+_LFS_POINTER_PATTERN = re.compile(
+    rb"version https://git-lfs.github.com/spec/v1\noid sha256:([0-9a-f]{64})\nsize ([0-9]+)\n")
 
 
 class CandidateError(ValueError):
@@ -215,7 +219,7 @@ def _candidate_facts(root, provider, limit, *, deadline=None):
     return value
 
 
-def _git(root, args, limit):
+def _git(root, args, limit, *, input_data=None):
     global _INSPECTION
     if _INSPECTION is None:
         spec = importlib.util.spec_from_file_location(
@@ -223,7 +227,10 @@ def _git(root, args, limit):
         _INSPECTION = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(_INSPECTION)
     try:
-        data, truncated = _INSPECTION._git(root, args, limit)
+        if input_data is None:
+            data, truncated = _INSPECTION._git(root, args, limit)
+        else:
+            data, truncated = _INSPECTION._git(root, args, limit, input_data=input_data)
     except _INSPECTION.InspectionError as exc:
         raise CandidateError(str(exc)) from exc
     if truncated:
@@ -370,6 +377,92 @@ def normalize_limits(limits=None):
     return bounds
 
 
+def _apply_lfs_pointer(row, oid, pointer):
+    match = _LFS_POINTER_PATTERN.fullmatch(pointer)
+    if match and match[1].decode() == row["sha256"] and int(match[2]) == row["size"]:
+        row["git_oid"] = oid
+
+
+def _batch_blob_size(header, expected):
+    """Accept exactly one canonical blob header for the requested full OID."""
+    if not header.endswith(b"\n"):
+        raise CandidateError("unterminated candidate object header")
+    parts = header[:-1].split(b" ")
+    if len(parts) != 3 or parts[0] != expected.encode("ascii") or parts[1] != b"blob":
+        raise CandidateError("candidate object missing/type/OID mismatch")
+    size = parts[2]
+    if len(size) > _GIT_OBJECT_SIZE_MAX_DIGITS or re.fullmatch(rb"0|[1-9][0-9]*", size) is None:
+        raise CandidateError("invalid candidate object size")
+    return int(size)
+
+
+def _resolve_native_lfs(pending, git, git_limit, object_format):
+    """Batch only referenced immutable objects; keep no cross-capture cache."""
+    grouped = {}
+    oid_chars = hashlib.new(object_format).digest_size * 2
+    for row, oid in pending:
+        if re.fullmatch(r"[0-9a-f]{" + str(oid_chars) + r"}", oid) is None:
+            raise CandidateError("invalid candidate index object OID")
+        grouped.setdefault(oid, []).append(row)
+    oids = sorted(grouped)
+    # Header sizing bounds both metadata output and its smaller OID-only input.
+    header_max = oid_chars + len(b" blob ") + _GIT_OBJECT_SIZE_MAX_DIGITS + len(b"\n")
+    metadata_count = max(1, git_limit // header_max)
+
+    def apply(oid, size, data):
+        actual = hashlib.new(object_format, b"blob " + str(len(data)).encode() + b"\0" + data).hexdigest()
+        if len(data) != size or actual != oid:
+            raise CandidateError("candidate object content/OID mismatch")
+        for row in grouped[oid]:
+            _apply_lfs_pointer(row, oid, data)
+
+    def read_contents(batch):
+        if not batch:
+            return
+        data = git(["cat-file", "--batch"], git_limit,
+                   input_data=b"".join(oid.encode("ascii") + b"\n" for oid, _ in batch))
+        position = 0
+        for oid, size in batch:
+            end = data.find(b"\n", position)
+            if end < 0 or _batch_blob_size(data[position:end + 1], oid) != size:
+                raise CandidateError("candidate object batch header mismatch")
+            position = end + 1
+            body = data[position:position + size]
+            if len(body) != size or data[position + size:position + size + 1] != b"\n":
+                raise CandidateError("incomplete candidate object batch")
+            apply(oid, size, body)
+            position += size + 1
+        if position != len(data):
+            raise CandidateError("unexpected candidate object batch output")
+
+    for offset in range(0, len(oids), metadata_count):
+        group = oids[offset:offset + metadata_count]
+        metadata = git(["cat-file", "--batch-check"], git_limit,
+                       input_data=b"".join(oid.encode("ascii") + b"\n" for oid in group))
+        headers = metadata.splitlines(keepends=True)
+        if len(headers) != len(group):
+            raise CandidateError("incomplete candidate object metadata")
+        sizes = [_batch_blob_size(header, oid) for header, oid in zip(headers, group)]
+        contents, content_bytes = [], 0
+        for oid, size in zip(group, sizes):
+            if size > _LFS_POINTER_MAX_BYTES:
+                continue  # A large indexed blob cannot be a supported pointer.
+            response_bytes = len(oid) + len(b" blob ") + len(str(size)) + 1 + size + 1
+            if response_bytes > git_limit:
+                # Preserve the old fixed bare-pointer content limit when only
+                # batch framing would exceed a small manifest/batch budget.
+                read_contents(contents)
+                contents, content_bytes = [], 0
+                apply(oid, size, git(["cat-file", "blob", oid], _LFS_POINTER_MAX_BYTES))
+            else:
+                if content_bytes + response_bytes > git_limit:
+                    read_contents(contents)
+                    contents, content_bytes = [], 0
+                contents.append((oid, size))
+                content_bytes += response_bytes
+        read_contents(contents)
+
+
 def capture_candidate(workspace, *, base, code_files=None, scope_contract=None,
                       excluded_side_effects=None, inspection_scope=None, limits=None,
                       git_provider=None, require_git_provider=False):
@@ -388,12 +481,16 @@ def capture_candidate(workspace, *, base, code_files=None, scope_contract=None,
     _candidate_provider(root, git_provider, require_git_provider,
                         deadline=deadline if git_provider is not None else None)
 
-    def git(args, limit=git_limit):
+    def git(args, limit=git_limit, *, input_data=None):
         if git_provider is not None:
             raise CandidateError("raw Git forbidden for candidate provider")
         if time.monotonic() > deadline:
             raise CandidateError("candidate capture timeout")
-        return _git(root, args, limit)
+        data = (_git(root, args, limit) if input_data is None
+                else _git(root, args, limit, input_data=input_data))
+        if time.monotonic() > deadline:
+            raise CandidateError("candidate capture timeout")
+        return data
 
     facts = None
     if git_provider is None:
@@ -453,7 +550,7 @@ def capture_candidate(workspace, *, base, code_files=None, scope_contract=None,
     names = sorted(set(head_entries) | set(index_entries) | set(untracked) | set(files))
     if len(names) > bounds["max_files"]:
         raise CandidateError("candidate scan exceeds max_files")
-    manifest, total_bytes = [], 0
+    manifest, total_bytes, pending_lfs = [], 0, []
     for name in names:
         if git_provider is None:
             _paths([name])
@@ -535,19 +632,16 @@ def capture_candidate(workspace, *, base, code_files=None, scope_contract=None,
         oid = index.get("oid")
         if oid and oid != row["git_oid"]:
             if git_provider is None:
-                try:
-                    pointer = git(["cat-file", "blob", oid], 4096)
-                except CandidateError:
-                    pointer = b""
+                pending_lfs.append((row, oid))
             else:
                 blob_size = int(_candidate_read(root, git_provider, CandidateRead.BLOB, oid=oid,
                     kind="size", limit=min(32, git_limit), deadline=deadline))
                 pointer = (_candidate_read(root, git_provider, CandidateRead.BLOB, oid=oid,
                     kind="content", limit=min(4096, git_limit), deadline=deadline) if blob_size <= 4096 else b"")
-            match = re.fullmatch(rb"version https://git-lfs.github.com/spec/v1\noid sha256:([0-9a-f]{64})\nsize ([0-9]+)\n", pointer)
-            if match and match[1].decode() == row["sha256"] and int(match[2]) == size:
-                row["git_oid"] = oid
+                _apply_lfs_pointer(row, oid, pointer)
         manifest.append(row)
+    if pending_lfs:
+        _resolve_native_lfs(pending_lfs, git, git_limit, object_format)
     # Check Git identities again, so concurrent index/HEAD changes never yield a
     # mixed snapshot. Every file is race checked above; this is not a FS lock.
     if git_provider is None:
@@ -581,8 +675,8 @@ def capture_candidate(workspace, *, base, code_files=None, scope_contract=None,
     snapshot["candidate_id"] = _digest(snapshot)
     if git_provider is not None:
         _candidate_provider(root, git_provider, True, deadline=deadline)
-        if time.monotonic() > deadline:
-            raise CandidateError("candidate capture timeout")
+    if time.monotonic() > deadline:
+        raise CandidateError("candidate capture timeout")
     return snapshot
 
 

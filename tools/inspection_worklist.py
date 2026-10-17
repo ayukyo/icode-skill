@@ -13,6 +13,7 @@ import re
 import selectors
 import stat
 import subprocess
+import tempfile
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -37,6 +38,8 @@ FORBIDDEN = {".git", ".icode_output", ".ssh", ".gnupg", ".aws"}
 ASSOCIATED_SUFFIXES = set(LANGUAGE) | CONFIG | {".cc", ".cxx", ".hxx", ".rs", ".go", ".java", ".js", ".ts", ".tsx", ".jsx"}
 SOURCE_SUFFIXES = ASSOCIATED_SUFFIXES - CONFIG
 CHECKS_VERSION = 1
+_GIT_READ_TIMEOUT_SECONDS = 5
+_GIT_CLEANUP_TIMEOUT_SECONDS = 1
 CHECK_IDENTITY_KEYS = ("check_id", "kind", "version", "paths", "required_items")
 CHECK_ITEMS = {
     "timestamp_contract": ["signedness", "domain", "unit", "epoch", "negative_zero_max", "sentinel",
@@ -188,6 +191,19 @@ def _paths(root, values, *, directory=False):
     return sorted({_path(root, x, directory=directory) for x in values})
 
 
+def _close_git_process(proc):
+    """Terminate and reap with a bounded wait, including setup failures."""
+    try:
+        if proc.poll() is None:
+            proc.kill()
+        try:
+            proc.wait(timeout=_GIT_CLEANUP_TIMEOUT_SECONDS)
+        except subprocess.TimeoutExpired as exc:
+            raise InspectionError("git process cleanup timeout") from exc
+    finally:
+        proc.stdout.close()
+
+
 def _git_pipe(proc, limit, deadline):
     """Read a bounded subprocess pipe without ``select`` on anonymous pipes.
 
@@ -224,9 +240,9 @@ def _git_pipe(proc, limit, deadline):
                     continue
 
     reader = Thread(target=read_chunks, name="icode-git-pipe", daemon=True)
-    reader.start()
     data, truncated = bytearray(), False
     try:
+        reader.start()
         while True:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
@@ -251,60 +267,69 @@ def _git_pipe(proc, limit, deadline):
         return bytes(data[:limit]), truncated
     finally:
         stop.set()
-        if proc.poll() is None:
-            proc.kill()
         try:
-            proc.wait(timeout=1)
-        except subprocess.TimeoutExpired:
-            pass
-        try:
-            proc.stdout.close()
-        except OSError:
-            pass
-        reader.join(timeout=1)
+            _close_git_process(proc)
+        finally:
+            if reader.ident is not None:
+                reader.join(timeout=_GIT_CLEANUP_TIMEOUT_SECONDS)
 
 
-def _git(repo, args, limit=8192):
-    """Bound both stdout memory and elapsed time, even for ls-files/git show."""
+def _git(repo, args, limit=8192, *, input_data=None):
+    """Bound stdout and optional bytes input without a duplex pipe deadlock."""
     env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
-    env.update(GIT_OPTIONAL_LOCKS="0", GIT_TERMINAL_PROMPT="0", LC_ALL="C")
+    env.update(GIT_OPTIONAL_LOCKS="0", GIT_TERMINAL_PROMPT="0", GIT_NO_LAZY_FETCH="1", LC_ALL="C")
     command = ["git", "--no-optional-locks", "-c", "core.fsmonitor=false",
                "-c", "core.hooksPath=/dev/null", "-C", str(repo), *args]
+    input_stream = None
     try:
-        with subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=env) as proc:
+        options = {}
+        if input_data is not None:
+            if type(input_data) is not bytes or not _positive(limit) or len(input_data) > limit:
+                raise InspectionError("git input exceeds byte budget or is not bytes")
+            # A finite file gives the child EOF without blocking a writer on a
+            # full stdin pipe while its stdout pipe is also full.
+            input_stream = tempfile.TemporaryFile()
+            if input_stream.write(input_data) != len(input_data):
+                raise InspectionError("git input write incomplete")
+            input_stream.seek(0)
+            options["stdin"] = input_stream
+        proc = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=env, **options)
+        try:
             if os.name == "nt":
-                data, truncated = _git_pipe(proc, limit, time.monotonic() + 5)
+                data, truncated = _git_pipe(proc, limit, time.monotonic() + _GIT_READ_TIMEOUT_SECONDS)
                 if proc.returncode and not truncated:
                     raise InspectionError(f"git failed: {args[0]}")
                 return data, truncated
             with selectors.DefaultSelector() as selector:
                 selector.register(proc.stdout, selectors.EVENT_READ)
-                data, deadline, truncated = bytearray(), time.monotonic() + 5, False
-                try:
-                    while selector.get_map():
-                        remaining = deadline - time.monotonic()
-                        if remaining <= 0:
-                            raise InspectionError("git timeout")
-                        for key, _ in selector.select(remaining):
-                            chunk = os.read(key.fd, min(65536, limit + 1 - len(data)))
-                            if not chunk:
+                data, deadline, truncated = bytearray(), time.monotonic() + _GIT_READ_TIMEOUT_SECONDS, False
+                while selector.get_map():
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise InspectionError("git timeout")
+                    for key, _ in selector.select(remaining):
+                        chunk = os.read(key.fd, min(65536, limit + 1 - len(data)))
+                        if not chunk:
+                            selector.unregister(key.fileobj)
+                        else:
+                            data.extend(chunk)
+                            if len(data) > limit:
+                                truncated = True
+                                proc.kill()
                                 selector.unregister(key.fileobj)
-                            else:
-                                data.extend(chunk)
-                                if len(data) > limit:
-                                    truncated = True
-                                    proc.kill()
-                                    selector.unregister(key.fileobj)
-                    proc.wait(timeout=max(0.01, deadline - time.monotonic()))
-                    if proc.returncode and not truncated:
-                        raise InspectionError(f"git failed: {args[0]}")
-                    return bytes(data[:limit]), truncated
-                finally:
-                    if proc.poll() is None:
-                        proc.kill()
-                        proc.wait()
-    except (OSError, subprocess.TimeoutExpired) as exc:
+                proc.wait(timeout=max(0.01, deadline - time.monotonic()))
+                if proc.returncode and not truncated:
+                    raise InspectionError(f"git failed: {args[0]}")
+                return bytes(data[:limit]), truncated
+        finally:
+            _close_git_process(proc)
+    except InspectionError:
+        raise
+    except (OSError, subprocess.TimeoutExpired, RuntimeError, ValueError) as exc:
         raise InspectionError(f"git unavailable/timeout: {exc}") from exc
+    finally:
+        if input_stream is not None:
+            input_stream.close()
 
 
 def _repo(root, path, *, git_provider=None):
