@@ -183,9 +183,125 @@ def strict_json_loads(value):
     return json.loads(value, parse_constant=reject_nonfinite_json)
 
 
-def load_json(path, what):
+class _DigestReader(io.RawIOBase):
+    """Hash original bytes beneath the unchanged UTF-8 newline decoder."""
+    def __init__(self, handle):
+        self.handle = handle
+        self.digest = hashlib.sha256()
+        self.byte_count = 0
+
+    def readable(self):
+        return True
+
+    def readinto(self, buffer):
+        size = self.handle.readinto(buffer)
+        if size:
+            self.digest.update(memoryview(buffer)[:size])
+            self.byte_count += size
+        return size
+
+
+class _ControlReadObservation:
+    """One call's actual reads; never persisted or externally supplied trust.
+
+    Historical qualification rehashes original control files before and after
+    checking original evidence. No extra raw event-log copy is retained.
+    """
+    def __init__(self, directory):
+        self.directory = Path(directory).absolute()
+        self.files = {}
+        self.objects = None
+        self.parent = self._parent()
+
+    @staticmethod
+    def _identity(info, *, cross_source=False):
+        value = info.st_dev, info.st_ino, info.st_mode, info.st_size, info.st_mtime_ns
+        return value if cross_source and os.name == "nt" else value + (info.st_ctime_ns,)
+
+    @staticmethod
+    def _ordinary(path, *, directory=False):
+        info = path.lstat()
+        if stat.S_ISLNK(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400 \
+                or not (stat.S_ISDIR(info.st_mode) if directory else stat.S_ISREG(info.st_mode)):
+            raise ControlError("stage observation requires ordinary control paths", gate_id="stage_gate")
+        return info
+
+    def _parent(self):
+        info = self._ordinary(self.directory, directory=True)
+        return str(self.directory.resolve(strict=True)), info.st_dev, info.st_ino, info.st_mode
+
+    def _check_parent(self):
+        if self._parent() != self.parent or os.path.lexists(self.directory / TXN_NAME):
+            raise ControlError("stage observation root or pending transaction changed", gate_id="stage_gate")
+
+    @contextlib.contextmanager
+    def _reader(self, path):
+        path = Path(path).absolute()
+        if path.parent != self.directory or path.name not in {METADATA_NAME, EVENTS_NAME}:
+            raise ControlError("stage observation path mismatch", gate_id="stage_gate")
+        self._check_parent()
+        before = self._ordinary(path)
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0)
+        with os.fdopen(os.open(path, flags), "rb", buffering=0) as handle:
+            opened = os.fstat(handle.fileno())
+            if self._identity(before, cross_source=True) != self._identity(opened, cross_source=True):
+                raise ControlError("stage observation file replaced before reading", gate_id="stage_gate")
+            reader = _DigestReader(handle)
+            with io.TextIOWrapper(io.BufferedReader(reader), encoding="utf-8", newline=None) as text:
+                yield text, reader
+                if reader.byte_count != before.st_size \
+                        or self._identity(os.fstat(handle.fileno())) != self._identity(opened) \
+                        or self._identity(self._ordinary(path)) != self._identity(before):
+                    raise ControlError("stage observation file changed while reading", gate_id="stage_gate")
+                self._check_parent()
+
+    @contextlib.contextmanager
+    def text(self, path):
+        with self._reader(path) as (text, reader):
+            yield text
+            record = (self._identity(self._ordinary(Path(path))), reader.byte_count, reader.digest.hexdigest())
+        self.files[Path(path).name] = record
+
+    def bind(self, directory, meta, events):
+        if Path(directory).absolute() != self.directory or set(self.files) != {METADATA_NAME, EVENTS_NAME}:
+            raise ControlError("stage observation is incomplete", gate_id="stage_gate")
+        self.objects = meta, events
+
+    def check(self, directory):
+        if Path(directory).absolute() != self.directory or self.objects is None \
+                or set(self.files) != {METADATA_NAME, EVENTS_NAME}:
+            raise ControlError("stage observation is not a verified control read", gate_id="stage_gate")
+        self._check_parent()
+        for name, expected in self.files.items():
+            # Rehash binary chunks, avoiding another parse or retained raw copy.
+            path = self.directory / name
+            before = self._ordinary(path)
+            if self._identity(before) != expected[0]:
+                raise ControlError("stage observation control version changed", gate_id="stage_gate")
+            flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0)
+            with os.fdopen(os.open(path, flags), "rb") as handle:
+                opened = os.fstat(handle.fileno())
+                if self._identity(before, cross_source=True) != self._identity(opened, cross_source=True):
+                    raise ControlError("stage observation file replaced", gate_id="stage_gate")
+                digest, size = hashlib.sha256(), 0
+                for block in iter(lambda: handle.read(1024 * 1024), b""):
+                    digest.update(block)
+                    size += len(block)
+                if self._identity(os.fstat(handle.fileno())) != self._identity(opened):
+                    raise ControlError("stage observation file changed during recheck", gate_id="stage_gate")
+            if (self._identity(self._ordinary(path)), size, digest.hexdigest()) != expected:
+                raise ControlError("stage observation raw bytes changed", gate_id="stage_gate")
+        if any(self._identity(self._ordinary(self.directory / name)) != value[0]
+               for name, value in self.files.items()):
+            raise ControlError("stage observation changed across control rechecks", gate_id="stage_gate")
+        self._check_parent()
+        return self.objects
+
+
+def load_json(path, what, *, _observation=None):
     try:
-        with open(path, "r", encoding="utf-8") as f:
+        source = open(path, "r", encoding="utf-8") if _observation is None else _observation.text(path)
+        with source as f:
             return json.load(f, parse_constant=reject_nonfinite_json)
     except FileNotFoundError:
         raise ControlError(f"{what} 不存在: {path}", exit_code=1, path=str(path))
@@ -314,7 +430,28 @@ def _check_type(value, types, path, errors):
         errors.append(f"{path}: 类型不符，期望 {types}，实际 {got}")
 
 
+_SCHEMA_ARRAY_MEMO = None
+
+
 def check_schema(value, schema, path="$", errors=None):
+    """Keep diagnostics mutable and exact; reuse only successful pure arrays."""
+    global _SCHEMA_ARRAY_MEMO
+    if errors is None:
+        errors = []
+    if isinstance(value, list) and len(value) >= 64:
+        if _SCHEMA_ARRAY_MEMO is None:
+            spec = importlib.util.spec_from_file_location(
+                "schema_validation_memo", Path(__file__).with_name("validation_memo.py"))
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            _SCHEMA_ARRAY_MEMO = module.PureJsonMemo(
+                lambda values, rules: not _check_schema(values, rules))
+        if _SCHEMA_ARRAY_MEMO.check(value, schema):
+            return errors
+    return _check_schema(value, schema, path, errors)
+
+
+def _check_schema(value, schema, path="$", errors=None):
     if errors is None:
         errors = []
     if "if" in schema:
@@ -538,9 +675,10 @@ def next_transitions(sm, from_status):
 
 # ---------------------------------------------------------------- 工单定位与元数据
 
-def load_metadata(out_dir):
+def load_metadata(out_dir, *, _observation=None):
     out_dir = Path(out_dir)
-    return load_json(out_dir / METADATA_NAME, "工单 metadata")
+    return load_json(out_dir / METADATA_NAME, "工单 metadata") if _observation is None else \
+        load_json(out_dir / METADATA_NAME, "工单 metadata", _observation=_observation)
 
 
 def is_vnext(meta):
@@ -828,7 +966,7 @@ def canonical_event_hash(event):
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
-def read_events(out_dir):
+def read_events(out_dir, *, _observation=None):
     path = Path(out_dir) / EVENTS_NAME
     events = []
     if not path.exists():
@@ -837,7 +975,8 @@ def read_events(out_dir):
         raise ControlError(f"事件日志路径存在但不是普通文件: {path}", exit_code=1,
                            gate_id="event_log_path")
     try:
-        with open(path, "r", encoding="utf-8") as f:
+        source = open(path, "r", encoding="utf-8") if _observation is None else _observation.text(path)
+        with source as f:
             for lineno, line in enumerate(f, 1):
                 line = line.strip()
                 if not line:
@@ -913,8 +1052,9 @@ def append_event(out_dir, meta, event_type, payload, request_id=None, actor="ico
     return event
 
 
-def verify_event_chain(out_dir, meta=None, semantic=True, *, git_provider=None, require_git_provider=False):
-    events, _ = read_events(out_dir)
+def verify_event_chain(out_dir, meta=None, semantic=True, *, git_provider=None, require_git_provider=False,
+                       _observation=None):
+    events, _ = read_events(out_dir) if _observation is None else read_events(out_dir, _observation=_observation)
     problems = []
     prev = GENESIS_HASH
     seen_event_ids = set()
@@ -1081,7 +1221,9 @@ def validate_event_semantics(events, meta, *, candidate_api=None, git_provider=N
         if bool(meta.get("debug")) != expected_debug:
             problems.append("ticket_created.birth_kind 与 metadata.debug 不一致")
 
+    review_return_mirror = ExecutionBindingMirror(meta)
     for idx, event in enumerate(events, 1):
+        review_return_mirror.consume(event)
         if event.get("event_type") != "state_changed":
             continue
         payload = event.get("payload") or {}
@@ -1094,8 +1236,17 @@ def validate_event_semantics(events, meta, *, candidate_api=None, git_provider=N
             problems.append(
                 f"第 {idx} 行 state_changed.from={source!r} 与事件序列当前状态 "
                 f"{current_state!r} 不一致")
-        if legal_transition(sm, source, target) is None:
+        transition = legal_transition(sm, source, target)
+        if transition is None:
             problems.append(f"第 {idx} 行记录非法状态流转 {source!r} → {target!r}")
+        if transition and transition.get("review_return"):
+            if not review_return_payload_ok(payload) or not event.get("request_id"):
+                problems.append(f"第 {idx} 行审查恢复缺少修订、原因或请求身份")
+            if (review_return_mirror.open_steps or review_return_mirror.open_operations
+                    or review_return_mirror.open_agents or review_return_mirror.closed):
+                problems.append(f"第 {idx} 行审查恢复发生于未静止或关闭工单")
+        elif "review_return" in payload:
+            problems.append(f"第 {idx} 行非恢复流转携带审查恢复标记")
         delivery = payload.get("delivery_verdict")
         if target == "completed" and delivery not in DELIVERY_VERDICTS:
             problems.append(f"第 {idx} 行 completed 流转缺合法 delivery_verdict")
@@ -1527,6 +1678,13 @@ def completion_receipt_issues(out_dir, meta, events, step):
     if not starts:
         return [f"{step}:missing_step_start"]
     start = starts[-1]
+    # Returning to review invalidates workflow completion, not retained raw
+    # executions. New steps may honestly reuse unchanged build/test artifacts.
+    returns = [i for i, e in enumerate(events) if e.get("event_type") == "state_changed"
+               and (e.get("payload") or {}).get("review_return") == 1]
+    if (returns and step in {"review", "merge", "code", "deepcheck", "audit"}
+            and events.index(start) < returns[-1]):
+        return [f"{step}:before_review_return"]
     finish = step_attempt_finished(events, start["payload"]["attempt"])
     outcome = (finish.get("payload") or {}).get("outcome") if finish else None
     if outcome not in {"success", "degraded"}:
@@ -2361,6 +2519,11 @@ def commit_metadata_and_event(out_dir, before, after, event_type, payload,
     elif event_type == "metadata_updated" and not any(payload.get(key) for key in ("stage_control", "serial_claim_control", "visual_review_control", "evidence_review_control")):
         stage_module().protect_update(before or {}, after)
     stage_token = _stage_write_guard(out_dir, event_type, payload, git_provider=git_provider, require_git_provider=require_git_provider)
+    if (before or {}).get("extensions", {}).get("stage_binding") is not None:
+        state = stage_module()._resolve(out_dir, **access)
+        stage_module().require_inherited_contract(state, after)
+        if stage_token is not None:
+            stage_token["proposed_contract"] = copy.deepcopy(after.get("verification_contract") or {})
     require_valid_metadata(after)
     event_payload = dict(payload)
     event_payload["metadata_hash_after"] = metadata_hash(after)
@@ -2648,30 +2811,52 @@ def cmd_create(args):
     if not stage_id:
         raise ControlError("stage: enabled project create requires --stage-id", gate_id="stage_gate")
     coordinator = ref.get("coordinator_root")
-    state = stage_module()._resolve(coordinator)
-    if state is None or stage_id not in [row["id"] for row in state["program"]["plan"]["stages"]]:
-        raise ControlError("stage: unknown planned stage", gate_id="stage_gate")
-    existing = state["program"]["bindings"].get(stage_id)
-    if existing is not None and existing["control_root"] != str(out_dir):
-        raise ControlError("stage: stage already bound to another ticket", gate_id="stage_gate")
-    if args.request_id and (out_dir / METADATA_NAME).is_file():
-        current, events = stage_module()._verified(out_dir)
-        prior = next((event for event in events if event.get("event_type") == "ticket_created" and event.get("request_id") == args.request_id), None)
-        if prior is not None:
-            expected_birth = {"stage_id": stage_id, "input_digest": _stage_birth_digest(args)}
-            if current["ticket_id"] != args.ticket_id or (prior.get("payload") or {}).get("stage_birth") != expected_birth:
-                raise ControlError("stage: create request_id conflicts with another birth payload", gate_id="idempotency_conflict")
-            bind_stage(coordinator, stage_id, out_dir, request_id=args.request_id + ":stage-bind")
-            print(json.dumps({"ok": True, "already_applied": True, "ticket_id": args.ticket_id,
-                "event_id": prior["event_id"], "out_dir": str(out_dir), "stage_binding": stage_id}, ensure_ascii=False, indent=2))
-            return 0
-    with contextlib.redirect_stdout(io.StringIO()) as stream:
-        code = _cmd_create_plain(args)
-    result = json.loads(stream.getvalue())
-    bind_stage(coordinator, stage_id, out_dir, request_id=(args.request_id or str(uuid.uuid4())) + ":stage-bind")
-    result["stage_binding"] = stage_id
-    print(json.dumps(result, ensure_ascii=False, indent=2))
-    return code
+    # Hold the program identity across the first ticket write and binding.
+    # bind_stage uses the same internal writer, avoiding non-reentrant locks.
+    def _bind_created(request_id):
+        with DirLock(out_dir):
+            return stage_module()._bind_stage_locked(coordinator, stage_id, out_dir, request_id=request_id)
+    with DirLock(coordinator):
+        recover_pending_transaction(coordinator)
+        state = stage_module()._resolve(coordinator)
+        if state is None or stage_id not in [row["id"] for row in state["program"]["plan"]["stages"]]:
+            raise ControlError("stage: unknown planned stage", gate_id="stage_gate")
+        try:
+            seed = strict_json_loads(args.metadata_json) if args.metadata_json else {}
+        except (json.JSONDecodeError, ValueError) as exc:
+            raise ControlError(f"--metadata-json 不是合法 JSON: {exc}", exit_code=2) from exc
+        if not isinstance(seed, dict):
+            raise ControlError("--metadata-json must be an object", exit_code=2)
+        # Inheritance runs before the ordinary birth validator; use its same
+        # schema first so malformed contracts keep the controlled error path.
+        contract_schema = load_json(SCHEMA_METADATA, "metadata schema")["properties"]["verification_contract"]
+        contract_errors = check_schema(seed.get("verification_contract"), contract_schema)
+        if contract_errors:
+            raise ControlError("invalid birth verification contract", exit_code=2,
+                               gate_id="stage_gate", violations=contract_errors)
+        stage_module().consolidation_module().require_contract(
+                stage_module().ctl(), state["program"], stage_id, seed.get("verification_contract") or {})
+        existing = state["program"]["bindings"].get(stage_id)
+        if existing is not None and existing["control_root"] != str(out_dir):
+            raise ControlError("stage: stage already bound to another ticket", gate_id="stage_gate")
+        if args.request_id and (out_dir / METADATA_NAME).is_file():
+            current, events = stage_module()._verified(out_dir)
+            prior = next((event for event in events if event.get("event_type") == "ticket_created" and event.get("request_id") == args.request_id), None)
+            if prior is not None:
+                expected_birth = {"stage_id": stage_id, "input_digest": _stage_birth_digest(args)}
+                if current["ticket_id"] != args.ticket_id or (prior.get("payload") or {}).get("stage_birth") != expected_birth:
+                    raise ControlError("stage: create request_id conflicts with another birth payload", gate_id="idempotency_conflict")
+                _bind_created(args.request_id + ":stage-bind")
+                print(json.dumps({"ok": True, "already_applied": True, "ticket_id": args.ticket_id,
+                    "event_id": prior["event_id"], "out_dir": str(out_dir), "stage_binding": stage_id}, ensure_ascii=False, indent=2))
+                return 0
+        with contextlib.redirect_stdout(io.StringIO()) as stream:
+            code = _cmd_create_plain(args)
+        result = json.loads(stream.getvalue())
+        _bind_created((args.request_id or str(uuid.uuid4())) + ":stage-bind")
+        result["stage_binding"] = stage_id
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return code
 
 
 def _find_ui_create_request(output_root, request_id):
@@ -2897,15 +3082,19 @@ def cmd_validate(args):
         completed_by_target = load_state_machine()["gate_policy"].get(
             "completed_step_by_target", {})
         completed_steps = set(meta.get("completed_steps") or [])
-        event_backed_steps = {
-            completed_by_target.get(item.get("payload", {}).get("to"))
-            for item in state_events
-        }
-        event_backed_steps.discard(None)
+        event_backed_targets = {}
         for state_event in state_events:
-            target = state_event.get("payload", {}).get("to")
+            payload = state_event.get("payload") or {}
+            if payload.get("review_return") == 1:
+                for invalidated in ("2", "3", "4", "5", "6"):
+                    event_backed_targets.pop(invalidated, None)
+            target = payload.get("to")
             expected_step = completed_by_target.get(target)
-            if expected_step and expected_step not in completed_steps:
+            if expected_step:
+                event_backed_targets[expected_step] = target
+        event_backed_steps = set(event_backed_targets)
+        for expected_step, target in event_backed_targets.items():
+            if expected_step not in completed_steps:
                 violations.append({
                     "gate_id": "completed_steps_consistency", "path": "$.completed_steps",
                     "detail": f"state_changed 已到 {target!r}，但 completed_steps 缺 {expected_step!r}。",
@@ -3032,13 +3221,48 @@ def cmd_event(args):
     return 0
 
 
+def workflow_revision(meta, events, stage):
+    """One revision contract for action previews and controlled review return."""
+    base = {"ticket_id": meta.get("ticket_id"), "metadata_hash": metadata_hash(meta),
+            "last_event_hash": events[-1]["event_hash"] if events else GENESIS_HASH,
+            "event_count": len(events), "stage_revision": stage.get("revision")}
+    return {**base, "token": canonical_digest(base)}
+
+
+def review_return_payload_ok(payload):
+    reason = payload.get("reason")
+    token = payload.get("expected_revision")
+    return (type(payload.get("review_return")) is int and payload["review_return"] == 1
+            and isinstance(reason, str) and 0 < len(reason.strip()) <= 2048
+            and isinstance(token, str) and re.fullmatch(r"[0-9a-f]{64}", token) is not None)
+
+
+def review_return_problem(meta, events, stage):
+    """Fail closed on legacy unpaired starts as well as current execution."""
+    if meta.get("close_state") is not None:
+        return "closed_ticket_status_frozen"
+    mirror = ExecutionBindingMirror(meta)
+    for event in events:
+        mirror.consume(event)
+    if mirror.open_steps or mirror.open_operations or mirror.open_agents or mirror.closed:
+        return "review_return_quiescence"
+    if stage.get("enabled") and (stage.get("blocked") or not stage.get("stage_id")
+                                  or stage.get("state") == "accepted"):
+        return "stage_gate"
+    return None
+
+
 def cmd_transition(args):
     out_dir = Path(args.dir).resolve()
     stage_action = _stage_write_action("state_changed", {"to": args.to})
-    if stage_action is not None:
-        require_stage_action(out_dir, stage_action)
     sm = load_state_machine()
     to_status = args.to
+    expected_revision = getattr(args, "expected_revision", None)
+    reason = getattr(args, "reason", None)
+    return_request = {"to": to_status, "delivery_verdict": args.delivery_verdict,
+                      "review_return": 1 if expected_revision is not None or reason is not None else None,
+                      "expected_revision": expected_revision, "reason": reason}
+    request_keys = tuple(return_request)
     if to_status not in sm["states"]:
         raise ControlError(f"未知目标状态 {to_status!r}，合法状态: {sm['states']}", exit_code=2)
     if args.delivery_verdict and args.delivery_verdict not in DELIVERY_VERDICTS:
@@ -3062,6 +3286,10 @@ def cmd_transition(args):
         meta = load_metadata(out_dir)
         require_vnext(meta, out_dir)
         require_valid_metadata(meta)
+        # Legacy migration diagnostics precede stage admission for every target;
+        # the locked read below is still the authoritative transition baseline.
+        if stage_action is not None:
+            require_stage_action(out_dir, stage_action)
         if meta.get("close_state") is not None:
             raise ControlError(
                 f"工单已进入关闭流程 close_state={meta.get('close_state')!r}，禁止再改变 status；"
@@ -3077,14 +3305,30 @@ def cmd_transition(args):
         trans = legal_transition(sm, current, to_status)
         prior = find_idempotent_event(
             events, args.request_id, "state_changed",
-            {"to": to_status, "delivery_verdict": args.delivery_verdict},
-            payload_keys=("to", "delivery_verdict"))
+            return_request, payload_keys=request_keys)
         if prior:
             print(json.dumps({"ok": True, "already_applied": True,
                               "request_id": args.request_id, "to": to_status,
                               "at": prior["timestamp"], "event_id": prior["event_id"]},
                              ensure_ascii=False, indent=2))
             return 0
+
+        is_review_return = bool(trans and trans.get("review_return"))
+        if is_review_return:
+            if not review_return_payload_ok(return_request) or not args.request_id:
+                raise ControlError("返回审查需要当前 revision、明确原因和 request-id",
+                                   gate_id="review_return_request")
+            stage = require_stage_action(out_dir, "review")
+            problem = review_return_problem(meta, events, stage)
+            if problem:
+                raise ControlError("返回审查要求未接受、未关闭且执行静止的工单", gate_id=problem)
+            trusted_execution_workspace(out_dir, meta)
+            actual = workflow_revision(meta, events, stage)["token"]
+            if expected_revision != actual:
+                raise ControlError("审查恢复预览已过期", gate_id="revision_mismatch",
+                                   expected_revision=expected_revision, actual_revision=actual)
+        elif expected_revision is not None or reason is not None:
+            raise ControlError("revision/reason 仅用于受控返回审查", gate_id="review_return_request")
 
         # Only historical births may be untracked. New births explicitly opt in
         # through the immutable event, so omitting start cannot bypass receipts.
@@ -3128,6 +3372,9 @@ def cmd_transition(args):
         "delivery_verdict": args.delivery_verdict,
         "note": trans.get("note"),
     }
+    if is_review_return:
+        transition_payload.update({k: return_request[k] for k in
+                                   ("review_return", "expected_revision", "reason")})
     if args.skip_gates:
         transition_payload["gates_skipped_for_test"] = True
 
@@ -3175,8 +3422,7 @@ def cmd_transition(args):
                                    violations=receipt_issues)
         prior = find_idempotent_event(
             events2, args.request_id, "state_changed",
-            {"to": to_status, "delivery_verdict": args.delivery_verdict},
-            payload_keys=("to", "delivery_verdict"))
+            return_request, payload_keys=request_keys)
         if prior:
             print(json.dumps({"ok": True, "already_applied": True,
                               "request_id": args.request_id, "to": to_status,
@@ -3184,6 +3430,18 @@ def cmd_transition(args):
                                  ensure_ascii=False, indent=2))
             return 0
         before_meta = dict(meta2)
+        if is_review_return:
+            stage = require_stage_action(out_dir, "review")
+            problem = review_return_problem(meta2, events2, stage)
+            if problem:
+                raise ControlError("审查恢复发布前执行资格改变", gate_id=problem)
+            trusted_execution_workspace(out_dir, meta2)
+            if workflow_revision(meta2, events2, stage)["token"] != expected_revision:
+                raise ControlError("审查恢复发布前 revision 改变", gate_id="revision_mismatch")
+            meta2["completed_steps"] = [s for s in meta2.get("completed_steps", [])
+                                        if s not in {"2", "3", "4", "5", "6"}]
+            meta2.update(delivery_verdict="verification_pending", verdict="unknown",
+                         total_rounds=1, clean_rounds=0, extended_rounds=0)
         meta2["status"] = to_status
         if current == "completed" and to_status.endswith("_in_progress"):
             # 终态被重开后，旧的现场交付结论不再能表示新一轮已完成。
@@ -3407,6 +3665,7 @@ def cmd_index_write(args):
             meta = load_metadata(out_dir)
             require_vnext(meta, out_dir)
             require_valid_metadata(meta)
+            _stage_retirement_guard(out_dir)
             if meta.get("debug"):
                 raise ControlError("debug 孪生工单走 .debug 隔离域，禁止写入全局索引", exit_code=1,
                                    gate_id="debug_isolation")
@@ -3810,6 +4069,18 @@ def handoff_close_control_root(source_dir, meta):
 
 
 def cmd_archive_manifest(args):
+    source = Path(args.dir).resolve()
+    target = Path(args.archive_dir).resolve()
+    # External history backups stay usable. Rebuilding inside the retired
+    # source itself is a mutation, even though no ledger event is appended.
+    if args.write and target.is_relative_to(source):
+        with DirLock(source):
+            _stage_retirement_guard(source)
+            return _cmd_archive_manifest(args)
+    return _cmd_archive_manifest(args)
+
+
+def _cmd_archive_manifest(args):
     source_dir = Path(args.dir).resolve()
     archive_dir = Path(args.archive_dir).resolve()
     if not archive_dir.is_dir():
@@ -4002,6 +4273,8 @@ def _stage_write_action(event_type, payload):
         return "verify"
     if event_type == "state_changed":
         target = payload.get("to") or ""
+        if target == "review_in_progress":
+            return "review"
         if target in {"code_in_progress", "code_done"}:
             return "code"
         if target in {"deepcheck_in_progress", "deepcheck_done", "audit_in_progress", "verify_in_progress", "completed", "debug_done"}:
@@ -4019,10 +4292,34 @@ def _stage_write_action(event_type, payload):
     return None
 
 
+def _stage_retirement_guard(out_dir, *, git_provider=None, require_git_provider=False):
+    """Check authenticated retirement before neutral/draft write exemptions.
+
+    A caller holding the child lock only reads coordinator state. Revision
+    publication also needs that child lock; never acquire a reverse parent lock.
+    Birth/coordinator and ordinary nonstage tickets retain their original path.
+    """
+    if not (Path(out_dir) / METADATA_NAME).is_file():
+        return None
+    meta = load_metadata(out_dir)
+    if (meta.get("extensions") or {}).get("stage_binding") is None:
+        return None
+    view = stage_module()._retirement_projection(out_dir, git_provider=git_provider, require_git_provider=require_git_provider)
+    # A damaged historical report can change presentation state to blocked;
+    # the authenticated replacement identity must still prohibit every write.
+    if not view.get("enabled") or not view.get("stage_id") or view["state"] == "superseded" \
+            or view.get("replacement_stages") is not None:
+        raise ControlError("stage: superseded or invalid bound ticket cannot mutate", gate_id="stage_gate", stage=view)
+    token = _stage_token(out_dir, view, None, meta)
+    token["retirement_only"] = True
+    return token
+
+
 def _stage_write_guard(out_dir, event_type, payload, *, git_provider=None, require_git_provider=False):
+    retirement = _stage_retirement_guard(out_dir, git_provider=git_provider, require_git_provider=require_git_provider)
     action = _stage_write_action(event_type, payload)
     if action is None:
-        return None
+        return retirement
     if event_type == "metadata_updated" and set(payload.get("set") or {}) | set(payload.get("append") or {}):
         fields = set(payload.get("set") or {}) | set(payload.get("append") or {})
         if fields.issubset({"requirement", "requirement_summary", "keywords"}):
@@ -4032,7 +4329,7 @@ def _stage_write_guard(out_dir, event_type, payload, *, git_provider=None, requi
                 (event["event_type"] == "step_started" and (event.get("payload") or {}).get("step") in {"code", "patch", "fast", "verify", "deploy", "deepcheck", "audit"}) or
                 (event["event_type"] == "operation_started" and (event.get("payload") or {}).get("class") != "read_only") for event in events)
             if not implemented and meta.get("status") in {"init_in_progress", "log_in_progress", "log_done", "plan_done", "review_in_progress", "review_done", "plan_finalized"}:
-                return None
+                return retirement
     view = require_stage_action(out_dir, action, git_provider=git_provider, require_git_provider=require_git_provider)
     if not view["enabled"]:
         return None
@@ -4055,6 +4352,16 @@ def _stage_publication_check(token, *, git_provider=None, require_git_provider=F
     view = stage_projection(token["coordinator_root"], git_provider=git_provider, require_git_provider=require_git_provider)
     if view["blocked"] or view.get("generation") != token["generation"] or view.get("program_id") != token["program_id"]:
         raise ControlError("stage: generation changed before result publication", gate_id="stage_gate", stage=view)
+    access = {"git_provider": git_provider, "require_git_provider": require_git_provider}
+    if "proposed_contract" in token:
+        state = stage_module()._resolve(token["child_root"], _metadata_override=token["metadata"], _allow_pending=True, **access)
+        stage_module().require_inherited_contract(state, {"verification_contract": token["proposed_contract"]})
+    if token.get("retirement_only"):
+        child = stage_module()._retirement_projection(token["child_root"], _metadata_override=token["metadata"], _allow_pending=True, **access)
+        if not child.get("stage_id") or child["state"] == "superseded" \
+                or child.get("replacement_stages") is not None:
+            raise ControlError("stage: retired binding before publication", gate_id="stage_gate", stage=child)
+        return
     stage_module().require_action(token["child_root"], token["action"], expected_generation=token["generation"],
         git_provider=git_provider, require_git_provider=require_git_provider,
         _metadata_override=token["metadata"], _allow_pending=True)
@@ -4071,7 +4378,8 @@ def cmd_stage(args, *, git_provider=None, require_git_provider=False):
     if args.phase == "register":
         result = register_stage_program(args.dir, verification_json(args.plan_json, "--plan-json"), request_id=args.request_id, **access)
     elif args.phase == "preview-revision":
-        result = preview_stage_revision(args.dir, verification_json(args.plan_json, "--plan-json"), **access)
+        result = preview_stage_revision(args.dir, verification_json(args.plan_json, "--plan-json"),
+            consolidation=verification_json(getattr(args, "consolidation_json", None), "--consolidation-json"), **access)
     elif args.phase == "bind":
         result = bind_stage(args.dir, args.stage_id, args.ticket_dir, request_id=args.request_id, **access)
     elif args.phase == "review":
@@ -4183,6 +4491,70 @@ def _review_replay(out_dir, meta, namespace, request_id, request_digest):
             "event_id": prior["event_id"], "receipt": copy.deepcopy(receipt)}
 
 
+def _finish_review_activity(out_dir, attempt, request_id, outcome, access):
+    """Use the same native operation finish writer and failure policies as CLI."""
+    argv = ["operation", "--dir", str(out_dir), "--phase", "finish", "--attempt", attempt,
+            "--outcome", outcome, "--evidence", "review request: " + request_id,
+            "--check", "protected review receipt published" if outcome == "success" else "review did not complete; inspect original failure before retry",
+            "--request", "review-finish:" + request_id]
+    if outcome != "success":
+        argv += ["--failure", "deterministic_failure"]
+    results = []
+    result = cmd_operation(build_parser().parse_args(argv), _result_sink=results.append, **access)
+    if result != 0:
+        raise ControlError("review operation did not terminate", gate_id="evidence_review", attempt=attempt)
+
+
+@contextlib.contextmanager
+def _review_activity(out_dir, meta, view, current, namespace, request_id, request_digest, access):
+    """Admit exactly one provider owner before releasing revision writer locks.
+
+    The existing operation ledger blocks consolidation while the provider runs,
+    and until its protected receipt is published. A crashed/open/replayed start
+    is never permission to call a provider again. Ordinary nonstage calls retain
+    their old path. Operation success means execution/publication, not image IQ.
+    """
+    if not view["enabled"]:
+        yield
+        return
+    operation_request = "review-activity:" + request_id
+    with _stage_writer_locks(out_dir, view):
+        fresh, events = stage_module()._verified(out_dir, **access)
+        if metadata_hash(fresh) != metadata_hash(meta):
+            raise ControlError("review metadata changed before provider admission", gate_id="evidence_review")
+        require_stage_action(out_dir, "record_visual_review", expected_generation=view["generation"], **access)
+        candidate = candidate_snapshot(out_dir, fresh, events=events, **access)
+        if candidate["candidate_id"] != current["candidate_id"]:
+            raise ControlError("source changed before provider admission", gate_id="evidence_review")
+        if _review_replay(out_dir, fresh, namespace, request_id, request_digest) is not None:
+            raise ControlError("review completed concurrently; query its exact receipt without rerunning provider", gate_id="evidence_review")
+        model = load_execution_model()
+        if validate_execution_catalog(model):
+            raise ControlError("invalid operation catalog", gate_id="execution_model_catalog")
+        args = argparse.Namespace(name="review:" + request_id, opclass="read_only", attempt=None,
+            request=operation_request, input=json.dumps({"action": "record_visual_review", "namespace": namespace,
+                "request_digest": request_digest}, sort_keys=True))
+        results = []
+        _operation_start_locked(args, out_dir, fresh, events, model, access, _result_sink=results.append)
+        started = results[0]
+        if started.get("already_applied"):
+            raise ControlError("existing review operation is not provider replay permission; inspect its outcome",
+                               gate_id="evidence_review", attempt=started["attempt"])
+        attempt = started["attempt"]
+    try:
+        yield
+    except BaseException as original:
+        try:
+            _finish_review_activity(out_dir, attempt, request_id, "failure", access)
+        except BaseException as terminal_error:
+            raise ControlError("review failed and operation termination remains pending; do not replay provider",
+                gate_id="evidence_review", attempt=attempt, failure=type(original).__name__,
+                terminal_failure=type(terminal_error).__name__) from original
+        raise
+    else:
+        _finish_review_activity(out_dir, attempt, request_id, "success", access)
+
+
 def _publish_review(out_dir, meta, view, current, receipt, namespace, request_id, check_files, access):
     with _stage_writer_locks(out_dir, view):
         fresh_meta, events = stage_module()._verified(out_dir, **access)
@@ -4253,27 +4625,28 @@ def record_evidence_review(out_dir, *, item, run, requirement_id, method, truste
         return raw
     raw = read()
     binding = {"method": method, "item_sha256": item["sha256"], "run_id": run["run_id"], "candidate_id": run["candidate_id"]}
-    try:
-        response = trusted_reviewer({**binding, "item": copy.deepcopy(item), "content": raw,
-                                     "requirement": copy.deepcopy(selected), "contract_digest": bundle_api.contract_digest(contract)})
-        encoded = json.dumps(response, ensure_ascii=False, allow_nan=False).encode("utf-8")
-        if len(encoded) > bundle_api.DEFAULT_LIMITS["max_json_bytes"]:
-            raise ValueError("review response exceeds JSON budget")
-    except Exception as exc:
-        raise ControlError("trusted reviewer failed: " + type(exc).__name__, gate_id="evidence_review") from exc
-    if not isinstance(response, dict) or any(response.get(key) != value for key, value in binding.items()) \
-            or response.get("outcome") not in {"pass", "fail", "inconclusive"} \
-            or not isinstance(response.get("conclusion"), str) or not response["conclusion"].strip() \
-            or not isinstance(response.get("limitations"), list) or any(not isinstance(v, str) for v in response["limitations"]) \
-            or not isinstance(response.get("source_id"), str) or not response["source_id"].strip() \
-            or (method == "ai_review" and any(not isinstance(response.get(k), str) or not response[k].strip() for k in ("provider", "model"))) \
-            or (method == "human_observation" and response.get("source") != "host_observation"):
-        raise ControlError("trusted evidence review returned incomplete or mismatched receipt", gate_id="evidence_review")
-    receipt = {**copy.deepcopy(response), "review_id": str(uuid.uuid4()), "at": now_iso(), "requirement_id": requirement_id,
-               "cell": {key: run[key] for key in ("layer", "consumer", "scenario")},
-               "item": {key: item[key] for key in ("path", "sha256", "bytes")},
-               "contract_digest": bundle_api.contract_digest(contract), "request_id": request_id, "request_digest": request_digest}
-    return _publish_review(out_dir, meta, view, current, receipt, "evidence_reviews", request_id, read, access)
+    with _review_activity(out_dir, meta, view, current, "evidence_reviews", request_id, request_digest, access):
+        try:
+            response = trusted_reviewer({**binding, "item": copy.deepcopy(item), "content": raw,
+                                         "requirement": copy.deepcopy(selected), "contract_digest": bundle_api.contract_digest(contract)})
+            encoded = json.dumps(response, ensure_ascii=False, allow_nan=False).encode("utf-8")
+            if len(encoded) > bundle_api.DEFAULT_LIMITS["max_json_bytes"]:
+                raise ValueError("review response exceeds JSON budget")
+        except Exception as exc:
+            raise ControlError("trusted reviewer failed: " + type(exc).__name__, gate_id="evidence_review") from exc
+        if not isinstance(response, dict) or any(response.get(key) != value for key, value in binding.items()) \
+                or response.get("outcome") not in {"pass", "fail", "inconclusive"} \
+                or not isinstance(response.get("conclusion"), str) or not response["conclusion"].strip() \
+                or not isinstance(response.get("limitations"), list) or any(not isinstance(v, str) for v in response["limitations"]) \
+                or not isinstance(response.get("source_id"), str) or not response["source_id"].strip() \
+                or (method == "ai_review" and any(not isinstance(response.get(k), str) or not response[k].strip() for k in ("provider", "model"))) \
+                or (method == "human_observation" and response.get("source") != "host_observation"):
+            raise ControlError("trusted evidence review returned incomplete or mismatched receipt", gate_id="evidence_review")
+        receipt = {**copy.deepcopy(response), "review_id": str(uuid.uuid4()), "at": now_iso(), "requirement_id": requirement_id,
+                   "cell": {key: run[key] for key in ("layer", "consumer", "scenario")},
+                   "item": {key: item[key] for key in ("path", "sha256", "bytes")},
+                   "contract_digest": bundle_api.contract_digest(contract), "request_id": request_id, "request_digest": request_digest}
+        return _publish_review(out_dir, meta, view, current, receipt, "evidence_reviews", request_id, read, access)
 
 
 def record_visual_review(out_dir, *, frames, route, run, prompt_version, adapters=None, prompt="", request_id,
@@ -4319,14 +4692,15 @@ def record_visual_review(out_dir, *, frames, route, run, prompt_version, adapter
     spec = importlib.util.spec_from_file_location("controlled_visual_evidence", SKILL_ROOT / "tools/visual_evidence.py")
     visual = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(visual)
-    report = visual.execute_visual_review(normalized, route, run=run, prompt_version=prompt_version,
-                                          adapters=adapters, prompt=prompt)
-    receipt = {**report, "review_id": str(uuid.uuid4()), "at": now_iso(), "request_id": request_id,
-               "cell": {key: run.get(key) for key in ("layer", "consumer", "scenario")},
-               "frames": normalized, "prompt_version": prompt_version, "prompt_sha256": canonical_digest(prompt),
-               "route_digest": canonical_digest(route), "contract_digest": bundle_api.contract_digest(meta["verification_contract"])}
-    receipt["request_digest"] = request_digest
-    return _publish_review(out_dir, meta, view, current, receipt, "visual_reviews", request_id, check_files, access)
+    with _review_activity(out_dir, meta, view, current, "visual_reviews", request_id, request_digest, access):
+        report = visual.execute_visual_review(normalized, route, run=run, prompt_version=prompt_version,
+                                              adapters=adapters, prompt=prompt)
+        receipt = {**report, "review_id": str(uuid.uuid4()), "at": now_iso(), "request_id": request_id,
+                   "cell": {key: run.get(key) for key in ("layer", "consumer", "scenario")},
+                   "frames": normalized, "prompt_version": prompt_version, "prompt_sha256": canonical_digest(prompt),
+                   "route_digest": canonical_digest(route), "contract_digest": bundle_api.contract_digest(meta["verification_contract"])}
+        receipt["request_digest"] = request_digest
+        return _publish_review(out_dir, meta, view, current, receipt, "visual_reviews", request_id, check_files, access)
 
 
 def candidate_module():
@@ -5655,6 +6029,7 @@ def cmd_reopen(args):
         meta = load_metadata(out_dir)
         require_vnext(meta, out_dir)
         require_valid_metadata(meta)
+        _stage_retirement_guard(out_dir)
         archive_root = Path(meta["archive_path"]).resolve() \
             if meta.get("archive_path") else None
         if archive_root != out_dir:
@@ -5926,6 +6301,19 @@ def cmd_step(args, *, git_provider=None, require_git_provider=False, inspection_
                           "input_digest": payload["input_digest"]}
                 _code_output(json.dumps(result, ensure_ascii=False, indent=2), out_dir, meta, access)
                 return 0
+            # Exact request replay above returns its old receipt without
+            # granting permission to create a new execution in this state.
+            if args.step == "review" and (legal_transition(load_state_machine(),
+                    meta.get("status"), "review_in_progress") or {}).get("review_return"):
+                raise ControlError("先通过受控 transition 返回审查，再启动新审查", gate_id="review_return_required")
+            if args.step == "review" and meta.get("status") != "review_in_progress":
+                raise ControlError("先原生进入 review_in_progress，再启动真实审查", gate_id="review_entry_required")
+            if (any(e.get("event_type") == "state_changed" and
+                    (e.get("payload") or {}).get("review_return") == 1 for e in events)
+                    and args.step in {"review", "merge", "code", "deepcheck", "audit"}):
+                policy = load_state_machine()["action_policy"]["actions"][args.step]
+                if meta.get("status") not in policy["statuses"]:
+                    raise ControlError("审查恢复后的步骤须按状态顺序执行", gate_id="action_policy")
             open_same_step = []
             for event in events:
                 payload0 = event.get("payload") or {}
@@ -6139,6 +6527,30 @@ def cmd_step(args, *, git_provider=None, require_git_provider=False, inspection_
 
 def cmd_inspection(args, *, git_provider=None, require_git_provider=False, inspection_provider_factory=None):
     """Prepare/read/assess through the same frozen declaration and artifact transaction."""
+    batch_paths = None
+    raw_paths = getattr(args, "paths_json", None)
+    if raw_paths is not None:
+        try:
+            if args.phase != "read" or getattr(args, "path", None) is not None:
+                raise ValueError("--paths-json 仅允许 read，且不能同时指定 --path")
+            if type(raw_paths) is not str or len(raw_paths.encode("utf-8")) > 64 * 1024:
+                raise ValueError("批量路径 JSON 必须是至多64KiB的字符串")
+            paths = strict_json_loads(raw_paths)
+            if type(paths) is not list or not 1 <= len(paths) <= 256:
+                raise ValueError("批量路径必须包含1至256个唯一成员")
+            for path in paths:
+                if type(path) is not str or not path or "\0" in path or "\\" in path \
+                        or path.startswith("/") or PureWindowsPath(path).drive \
+                        or any(part in {"", ".", "..", ".git"} for part in path.split("/")):
+                    raise ValueError("批量路径必须是规范的项目相对POSIX文件")
+            if len(set(paths)) != len(paths):
+                raise ValueError("批量路径不得重复")
+            batch_paths = sorted(paths)
+        except (ValueError, TypeError, RecursionError) as exc:
+            raise ControlError(f"批量Read参数无效: {exc}", gate_id="inspection_worklist") from exc
+    max_files = getattr(args, "max_files", None)
+    if max_files is not None and (args.phase != "prepare" or type(max_files) is not int or max_files <= 0):
+        raise ControlError("显式文件预算仅允许 prepare 使用正整数", gate_id="inspection_budget")
     out_dir = Path(args.dir).resolve()
     access = _code_access(args.step, git_provider, require_git_provider, inspection_provider_factory)
     candidate_access = _code_candidate_access(access)
@@ -6166,6 +6578,12 @@ def cmd_inspection(args, *, git_provider=None, require_git_provider=False, inspe
         _code_output(json.dumps(dict(ok=not issues, read_only=True, path=str(target), violations=issues), ensure_ascii=False), out_dir, meta, access)
         return 0 if not issues else 1
     with DirLock(out_dir):
+        # A new spelling or replay exemption cannot change a frozen budget.
+        # Reject before transaction recovery as well as the first report write.
+        if max_files is not None and target.exists():
+            frozen = load_json(target, "inspection worklist")
+            if isinstance(frozen, dict) and frozen.get("attempt") == args.attempt and frozen.get("max_files") != max_files:
+                raise ControlError("同 attempt 不得改变审查文件预算；先终结并按原流程新建", gate_id="inspection_budget")
         if access:
             _code_inspection_provider(out_dir, load_metadata(out_dir), **access)
             if (out_dir / TXN_NAME).exists():
@@ -6175,6 +6593,7 @@ def cmd_inspection(args, *, git_provider=None, require_git_provider=False, inspe
         require_vnext(meta, out_dir)
         require_valid_metadata(meta)
         ensure_execution_writable(meta)
+        _stage_retirement_guard(out_dir, **candidate_access)
         events, problems = verify_event_chain(out_dir, meta, **candidate_access)
         if problems:
             raise ControlError("事件链不完整", gate_id="event_chain", violations=problems)
@@ -6208,6 +6627,11 @@ def cmd_inspection(args, *, git_provider=None, require_git_provider=False, inspe
                 related=sorted(set(args.related)) if args.related else None,
                 scopes=sorted(set(args.scope)) if args.scope else None,
                 baselines=strict_json_loads(args.baselines_json) if args.baselines_json else None)
+            if batch_paths is not None:
+                request_identity["source_paths"] = batch_paths
+            # Omitting the new option retains the exact legacy request shape.
+            if max_files is not None:
+                request_identity["max_files"] = max_files
             if args.phase == "assess":
                 request_identity.update(check_id=args.check_id, assessment_phase=args.read_phase,
                     assessment_sha256=canonical_digest(assessment))
@@ -6218,7 +6642,8 @@ def cmd_inspection(args, *, git_provider=None, require_git_provider=False, inspe
                 report = helper.build_worklist(workspace, meta.get("code_files") or [], step=args.step,
                     ticket_id=meta["ticket_id"], attempt=args.attempt,
                     mode=(meta.get("risk_profile") or {}).get("effective_mode") or meta.get("mode", "full"),
-                    related=args.related, scopes=args.scope, baselines=baselines, **inspection_access)
+                    related=args.related, scopes=args.scope, baselines=baselines,
+                    **({"max_files": max_files} if max_files is not None else {}), **inspection_access)
                 if (meta.get("candidate_tracking") or {}).get("mode") == "enabled":
                     canonical_scope = candidate_inspection_scope(out_dir, meta,
                         effective_base=meta["candidate_tracking"]["base"], events=events)
@@ -6267,12 +6692,19 @@ def cmd_inspection(args, *, git_provider=None, require_git_provider=False, inspe
                     current_sha256=file_sha256(target), already_applied=True), ensure_ascii=False), out_dir, meta, access)
                 return 0
             if args.phase == "read":
-                if args.read_phase not in report["required_phases"] or not args.path:
+                if args.read_phase not in report["required_phases"] or (batch_paths is None and not args.path):
                     raise ValueError("read 必须指定合法 --read-phase 和 --path")
-                selected = [f for unit in report["units"] for f in unit["files"] if f["path"] == args.path]
-                if len(selected) != 1:
-                    raise ValueError("路径不在唯一自查单元中")
-                selected[0]["reads"][args.read_phase] = selected[0]["sha256"]
+                selected = []
+                for path in batch_paths if batch_paths is not None else [args.path]:
+                    members = [f for unit in report["units"] for f in unit["files"] if f["path"] == path]
+                    if len(members) != 1:
+                        raise ValueError("路径不在唯一自查单元中")
+                    selected.append(members[0])
+                # Resolve every member before changing the in-memory report.
+                # The original whole-worklist SHA/provider/stage checks above
+                # and original publication checks below remain mandatory.
+                for member in selected:
+                    member["reads"][args.read_phase] = member["sha256"]
             elif args.phase == "assess":
                 if not args.check_id or not args.assessment_json or not args.read_phase:
                     raise ValueError("assess 必须指定 --check-id/--read-phase/--assessment-json")
@@ -6459,93 +6891,127 @@ def operation_finished(events, attempt):
                  and (event.get("payload") or {}).get("attempt") == attempt), None)
 
 
-def cmd_operation(args):
+def _append_operation_event(out_dir, meta, event_type, payload, request_id, access):
+    """Candidate-only review operations use the existing native transaction.
+
+    append_event's optional inspection pair belongs to Code. Do not weaken that
+    contract to admit a candidate-only operation; its same-value metadata event
+    is supported by the regular transaction and the original operation ledger.
+    """
+    if not access:
+        return append_event(out_dir, meta, event_type, payload, request_id=request_id)
+    return commit_metadata_and_event(out_dir, meta, copy.deepcopy(meta), event_type, payload,
+        request_id=request_id, before_publish=lambda: _candidate_context_guard(
+            out_dir, meta, access["git_provider"], access["require_git_provider"]), **access)
+
+
+def _operation_output(payload, sink):
+    # A private result sink avoids redirecting process-global stdout while
+    # other trusted providers may be running. Default CLI output is unchanged.
+    if sink is None:
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+    else:
+        sink(payload)
+
+
+def _operation_start_locked(args, out_dir, meta, events, model, access, *, _result_sink=None):
+    """Native operation start, shared by CLI and already-locked review admission."""
+    if not isinstance(args.name, str) or not args.name.strip():
+        raise ControlError("operation --phase start 必须提供非空 --name", exit_code=2)
+    if args.opclass is None:
+        raise ControlError("operation --phase start 必须提供 --opclass", exit_code=2)
+    if args.opclass not in model["operation_classes"]:
+        raise ControlError(f"--opclass 非法: {args.opclass!r}", exit_code=2,
+                           allowed=sorted(model["operation_classes"]))
+    class_cfg = model["operation_classes"][args.opclass]
+    if class_cfg.get("requires_idempotency") and not args.request:
+        raise ControlError(
+            f"{args.opclass} 长动作必须提供 --request 幂等键", exit_code=1,
+            gate_id="operation_idempotency")
+    attempt = args.attempt or derived_attempt("operation", args.request)
+    open_same_name = []
+    for event in events:
+        if event.get("event_type") != "operation_started":
+            continue
+        payload = event.get("payload") or {}
+        prior_attempt = payload.get("attempt")
+        if payload.get("execution_model_version") == 1 \
+                and payload.get("name") == args.name \
+                and operation_finished(events, prior_attempt) is None:
+            open_same_name.append(prior_attempt)
+    payload = {
+        "execution_model_version": model["schema_version"],
+        "name": args.name,
+        "class": args.opclass,
+        "attempt": attempt,
+        "input_digest": canonical_digest(args.input or ""),
+        "idempotency_provided": bool(args.request),
+    }
+    try:
+        operation_input = strict_json_loads(args.input or "{}")
+        if isinstance(operation_input, dict) and isinstance(operation_input.get("action"), str):
+            payload["stage_action"] = operation_input["action"]
+    except (ValueError, TypeError):
+        pass
+    prior = find_idempotent_event(events, args.request, "operation_started", payload)
+    if prior:
+        if args.opclass != "read_only":
+            require_stage_action(out_dir, payload.get("stage_action", "operation"),
+                expected_generation=(prior.get("payload") or {}).get("stage_generation"), **access)
+        _operation_output({"ok": True, "already_applied": True,
+                          "name": args.name, "attempt": attempt,
+                          "event_id": prior["event_id"]}, _result_sink)
+        return 0
+    if any((event.get("payload") or {}).get("attempt") == attempt for event in events):
+        raise ControlError(f"attempt={attempt!r} 已被使用", exit_code=1,
+                           gate_id="attempt_conflict")
+    if open_same_name and args.opclass != "read_only":
+        action = class_cfg["ambiguous_start_action"]
+        raise ControlError(
+            "同名有副作用长动作存在无终结回执，禁止盲目重放", exit_code=1,
+            gate_id="ambiguous_side_effect", operation=args.name,
+            open_attempts=open_same_name, action=action,
+            hint="先核对远端/设备/文件写后状态，再用原 attempt finish 记录真实结果。")
+    event = _append_operation_event(out_dir, meta, "operation_started", payload, args.request, access)
+    _operation_output({"ok": True, "phase": "start", "name": args.name,
+                      "class": args.opclass, "attempt": attempt,
+                      "event_id": event["event_id"]}, _result_sink)
+    return 0
+
+
+def cmd_operation(args, *, git_provider=None, require_git_provider=False, _result_sink=None):
+    if _result_sink is not None and not callable(_result_sink):
+        raise ControlError("operation result sink must be callable", gate_id="operation_receipt")
     out_dir = Path(args.dir).resolve()
+    access = ({"git_provider": git_provider, "require_git_provider": require_git_provider}
+              if _candidate_access_requested(git_provider, require_git_provider) else {})
     if args.phase == "start" and args.opclass != "read_only":
         try:
             declared = strict_json_loads(args.input or "{}")
         except (ValueError, TypeError):
             declared = {}
-        require_stage_action(out_dir, declared.get("action", "operation") if isinstance(declared, dict) else "operation")
+        require_stage_action(out_dir, declared.get("action", "operation") if isinstance(declared, dict) else "operation", **access)
     model = load_execution_model()
     problems = validate_execution_catalog(model)
     if problems:
         raise ControlError("execution_model 机器契约无效", exit_code=1,
                            gate_id="execution_model_catalog", violations=problems)
     with DirLock(out_dir):
+        if access:
+            _candidate_context_guard(out_dir, load_metadata(out_dir), git_provider, require_git_provider)
+            if (out_dir / TXN_NAME).exists():
+                raise ControlError("provider transaction recovery is not enabled", gate_id="candidate_transaction_pending")
         recover_pending_transaction(out_dir)
         meta = load_metadata(out_dir)
         require_vnext(meta, out_dir)
         require_valid_metadata(meta)
         ensure_execution_writable(meta)
-        events, chain_problems = verify_event_chain(out_dir, meta)
+        events, chain_problems = verify_event_chain(out_dir, meta, **access)
         if chain_problems:
             raise ControlError("事件链不完整，拒绝记录长动作", exit_code=1,
                                gate_id="event_chain", violations=chain_problems)
         if args.phase == "start":
-            if not isinstance(args.name, str) or not args.name.strip():
-                raise ControlError("operation --phase start 必须提供非空 --name", exit_code=2)
-            if args.opclass is None:
-                raise ControlError("operation --phase start 必须提供 --opclass", exit_code=2)
-            if args.opclass not in model["operation_classes"]:
-                raise ControlError(f"--opclass 非法: {args.opclass!r}", exit_code=2,
-                                   allowed=sorted(model["operation_classes"]))
-            class_cfg = model["operation_classes"][args.opclass]
-            if class_cfg.get("requires_idempotency") and not args.request:
-                raise ControlError(
-                    f"{args.opclass} 长动作必须提供 --request 幂等键", exit_code=1,
-                    gate_id="operation_idempotency")
-            attempt = args.attempt or derived_attempt("operation", args.request)
-            open_same_name = []
-            for event in events:
-                if event.get("event_type") != "operation_started":
-                    continue
-                payload = event.get("payload") or {}
-                prior_attempt = payload.get("attempt")
-                if payload.get("execution_model_version") == 1 \
-                        and payload.get("name") == args.name \
-                        and operation_finished(events, prior_attempt) is None:
-                    open_same_name.append(prior_attempt)
-            payload = {
-                "execution_model_version": model["schema_version"],
-                "name": args.name,
-                "class": args.opclass,
-                "attempt": attempt,
-                "input_digest": canonical_digest(args.input or ""),
-                "idempotency_provided": bool(args.request),
-            }
-            try:
-                operation_input = strict_json_loads(args.input or "{}")
-                if isinstance(operation_input, dict) and isinstance(operation_input.get("action"), str):
-                    payload["stage_action"] = operation_input["action"]
-            except (ValueError, TypeError):
-                pass
-            prior = find_idempotent_event(events, args.request, "operation_started", payload)
-            if prior:
-                if args.opclass != "read_only":
-                    require_stage_action(out_dir, payload.get("stage_action", "operation"),
-                        expected_generation=(prior.get("payload") or {}).get("stage_generation"))
-                print(json.dumps({"ok": True, "already_applied": True,
-                                  "name": args.name, "attempt": attempt,
-                                  "event_id": prior["event_id"]},
-                                 ensure_ascii=False, indent=2))
-                return 0
-            if any((event.get("payload") or {}).get("attempt") == attempt for event in events):
-                raise ControlError(f"attempt={attempt!r} 已被使用", exit_code=1,
-                                   gate_id="attempt_conflict")
-            if open_same_name and args.opclass != "read_only":
-                action = class_cfg["ambiguous_start_action"]
-                raise ControlError(
-                    "同名有副作用长动作存在无终结回执，禁止盲目重放", exit_code=1,
-                    gate_id="ambiguous_side_effect", operation=args.name,
-                    open_attempts=open_same_name, action=action,
-                    hint="先核对远端/设备/文件写后状态，再用原 attempt finish 记录真实结果。")
-            event = append_event(out_dir, meta, "operation_started", payload,
-                                 request_id=args.request)
-            print(json.dumps({"ok": True, "phase": "start", "name": args.name,
-                              "class": args.opclass, "attempt": attempt,
-                              "event_id": event["event_id"]}, ensure_ascii=False, indent=2))
-            return 0
+            return _operation_start_locked(args, out_dir, meta, events, model, access, _result_sink=_result_sink)
 
         if not args.attempt:
             raise ControlError("operation --phase finish 必须提供 --attempt", exit_code=2)
@@ -6559,12 +7025,11 @@ def cmd_operation(args):
                     and finish_payload.get("failure") == args.failure \
                     and finish_payload.get("evidence") == args.evidence \
                     and finish_payload.get("after_check") == args.check:
-                print(json.dumps({"ok": True, "already_applied": True,
+                _operation_output({"ok": True, "already_applied": True,
                                   "name": finish_payload.get("name"),
                                   "attempt": args.attempt,
                                   "outcome": finish_payload.get("outcome"),
-                                  "event_id": finished["event_id"]},
-                                 ensure_ascii=False, indent=2))
+                                  "event_id": finished["event_id"]}, _result_sink)
                 return 0
             if args.request and finished.get("request_id") == args.request:
                 raise ControlError(
@@ -6623,13 +7088,12 @@ def cmd_operation(args):
             events, args.request, "operation_finished", payload,
             payload_keys=["name", "class", "attempt", "outcome", "failure",
                           "evidence", "after_check", "decision"])
-        event = prior or append_event(out_dir, meta, "operation_finished", payload,
-                                      request_id=args.request)
-    print(json.dumps({"ok": True, "phase": "finish", "name": payload["name"],
+        event = prior or _append_operation_event(out_dir, meta, "operation_finished", payload, args.request, access)
+    _operation_output({"ok": True, "phase": "finish", "name": payload["name"],
                       "class": payload["class"], "attempt": args.attempt,
                       "outcome": args.outcome, "duration_ms": payload["duration_ms"],
                       "decision": decision, "event_id": event["event_id"],
-                      "already_applied": bool(prior)}, ensure_ascii=False, indent=2))
+                      "already_applied": bool(prior)}, _result_sink)
     return 0
 
 
@@ -6738,16 +7202,7 @@ def cmd_action_policy(args, *, git_provider=None, require_git_provider=False):
         requested_verify_variant = "intent"
     if args.action == "verify":
         require_stage_action(out_dir, "plan" if requested_verify_variant in {"intent", "plan"} else requested_verify_variant, **access)
-    last_event_hash = events[-1]["event_hash"] if events else GENESIS_HASH
-    meta_digest = metadata_hash(meta)
-    revision_base = {
-        "ticket_id": meta.get("ticket_id"),
-        "metadata_hash": meta_digest,
-        "last_event_hash": last_event_hash,
-        "event_count": len(events),
-        "stage_revision": stage.get("revision"),
-    }
-    revision = {**revision_base, "token": canonical_digest(revision_base)}
+    revision = workflow_revision(meta, events, stage)
 
     if args.expected_revision and args.expected_revision != revision["token"]:
         raise ControlError(
@@ -6785,7 +7240,10 @@ def cmd_action_policy(args, *, git_provider=None, require_git_provider=False):
         allowed = [name for name in allowed if name in read_only]
         blocked_reason = "open_execution"
     if stage["enabled"]:
-        if stage["blocked"] or not stage.get("stage_id") or stage["state"] == "accepted":
+        if stage["state"] == "superseded":
+            allowed = [name for name in allowed if name in read_only]
+            blocked_reason = "superseded_stage"
+        elif stage["blocked"] or not stage.get("stage_id") or stage["state"] == "accepted":
             allowed = [name for name in allowed if name in read_only or name == "verify"]
             blocked_reason = "stage_gate"
         else:
@@ -6793,6 +7251,9 @@ def cmd_action_policy(args, *, git_provider=None, require_git_provider=False):
                        or name in {"deepcheck", "audit", "plan", "init", "log"}]
             if (meta.get("candidate_tracking") or {}).get("mode") != "enabled":
                 allowed = [name for name in allowed if name not in {"code", "patch", "fast"}]
+    return_required = bool((legal_transition(sm, status, "review_in_progress") or {}).get("review_return"))
+    if return_required and review_return_problem(meta, events, stage):
+        allowed = [name for name in allowed if name != "review"]
     allowed = sorted(allowed)
     recommended = (policy.get("recommended_by_status") or {}).get(status)
     if recommended not in allowed:
@@ -6836,6 +7297,7 @@ def cmd_action_policy(args, *, git_provider=None, require_git_provider=False):
         "recommended_action": recommended,
         "blocked_reason": blocked_reason,
         "revision": revision,
+        "review_return_required": return_required,
         "execution_root": str(trusted_execution_workspace(out_dir, meta)),
         "open_steps": execution["open_steps"],
         "open_operations": execution["open_operations"],
@@ -6863,7 +7325,8 @@ def cmd_snapshot(args):
     out_dir = Path(args.dir).resolve()
     sm = load_state_machine()
     snap_path = Path(out_dir) / SNAPSHOT_NAME
-    with DirLock(out_dir):
+    view = stage_projection(out_dir) if not args.verify else {"enabled": False}
+    with _stage_writer_locks(out_dir, view):
         if not args.verify:
             recover_pending_transaction(out_dir)
         elif (out_dir / TXN_NAME).exists():
@@ -6872,6 +7335,7 @@ def cmd_snapshot(args):
         meta = load_metadata(out_dir)
         require_vnext(meta, out_dir)
         require_valid_metadata(meta)
+        token = _stage_retirement_guard(out_dir) if not args.verify else None
         if not args.verify and meta.get("close_state") is not None:
             raise ControlError(
                 "工单已进入关闭流程，禁止生成会改写事件链的新快照；"
@@ -6933,6 +7397,7 @@ def cmd_snapshot(args):
             if snap_path.exists() else None
         atomic_write_json(snap_path, snapshot)
         try:
+            _stage_publication_check(token)
             append_prepared_event(out_dir, event)
         except BaseException:
             event_presence = None
@@ -6969,6 +7434,7 @@ def build_parser():
     p.add_argument("--dir", required=True)
     p.add_argument("--phase", required=True, choices=["register", "bind", "review", "check", "confirm", "reject", "revoke", "preview-revision"])
     p.add_argument("--plan-json")
+    p.add_argument("--consolidation-json", help="Explicit complete unaccepted-tail mapping; preview only")
     p.add_argument("--stage-id")
     p.add_argument("--ticket-dir")
     p.add_argument("--request-id")
@@ -7066,8 +7532,10 @@ def build_parser():
     p.add_argument("--scope", action="append", default=None, help="有证据的项目内范围，重复增补")
     p.add_argument("--related", action="append", default=None, help="调用方/协议另一端/测试等关联路径")
     p.add_argument("--baselines-json", help="受影响仓库相对根到真实Git基线的映射")
+    p.add_argument("--max-files", type=int, default=None, help="仅 prepare：显式文件枚举预算；省略保持原默认，同 attempt 冻结")
     p.add_argument("--read-phase", "--assessment-phase", dest="read_phase", help="真实Read/专项结论对应的必需阶段")
     p.add_argument("--path", help="read登记的项目相对文件")
+    p.add_argument("--paths-json", help="仅read：1至256个唯一相对路径的JSON数组；与--path互斥，最多64KiB")
     p.add_argument("--check-id", help="assess 的清单派生专项检查 ID")
     p.add_argument("--assessment-json", help="assess 本阶段全部 required_items 的 cells、理由和真实证据")
     p.add_argument("--allow-incomplete", action="store_true", help="check明确债务，仍不允许身份/源码漂移")
@@ -7115,6 +7583,8 @@ def build_parser():
     p.add_argument("--to", required=True)
     p.add_argument("--delivery-verdict", choices=DELIVERY_VERDICTS)
     p.add_argument("--request-id", help="幂等键（同键同目标重放=已应用摘要）")
+    p.add_argument("--expected-revision", help="受控返回审查时绑定 action-policy 的当前 revision")
+    p.add_argument("--reason", help="受控返回审查的明确原因；保留到原生事件")
     p.add_argument("--skip-gates", action="store_true",
                    help="仅限测试夹具；生产流程禁止跳门禁")
     p.set_defaults(func=cmd_transition)

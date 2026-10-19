@@ -167,6 +167,20 @@ def scan_sensitive(obj: Any, path: str = "$") -> List[str]:
             if kw in low:
                 issues.append(f"{path} 含敏感词 '{kw}'")
                 break
+        if path.endswith(".artifact_identity"):
+            # The CLI stores artifact identities as strings. Scan JSON containers
+            # per leaf, retaining the raw keyword check above so duplicate keys
+            # cannot conceal a credential that was visible in the original text.
+            try:
+                identity = evidence_module().control_module().strict_json_loads(obj)
+            except (ValueError, RecursionError):
+                identity = None
+            if isinstance(identity, (dict, list)):
+                try:
+                    issues.extend(scan_sensitive(identity, path))
+                except RecursionError:
+                    issues.append(f"{path} structured identity nesting exceeds scanner capacity")
+                return issues
         if len(obj) > MAX_EVIDENCE_VALUE_CHARS:
             issues.append(f"{path} 单值 {len(obj)} 字符，疑似完整正文（> {MAX_EVIDENCE_VALUE_CHARS}）")
     return issues

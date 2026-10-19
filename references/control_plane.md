@@ -64,6 +64,20 @@ python3 tools/icode_control.py bind-execution-root --dir <out_dir> \
 - **幂等**：`--request-id <幂等键>`——同键同操作的重放返回「已应用」摘要（exit 0）；同键改变操作或 payload 报 `idempotency_conflict`，不猜测。
 - `--skip-gates` 只在显式 `ICODE_CONTROL_TEST_MODE=1` 时生效，生产命令携带该参数会 fail-closed。
 
+### 3.1 尚未接受工单的受控返回审查
+
+对 `plan_finalized/code_in_progress/code_done/deepcheck_in_progress/deepcheck_done`，先真实终结全部步骤、operation 和 agent，再从 `action-policy` 取得当前 revision，通过原状态事务返回：
+
+```text
+icode_control.py transition --dir <工单> --to review_in_progress --expected-revision <token> --reason <明确原因> --request-id <唯一请求>
+```
+
+该入口要求工单未关闭、阶段未接受、工程根与阶段守卫有效且执行静止；缺配对ID的历史执行也不视为静止。预览过期、并发变化和同键不同内容拒绝。原事件、审查、失败、候选及验证原件保留；状态事务清除步骤2–6的当前完成投影、重置轮次并将交付结论置为 `verification_pending`，不删除历史或自动授予验收。
+
+必须先返回再启动新的真实review，首轮不能沿用旧origin；直接底层 `step review start` 不能跳过返回。之后按review→merge→code→deepcheck→audit重新完成必要流程，恢复前的完成回执不能推进新的完成态。无变化的构建/测试原件仅在来源、候选、合同和制品仍满足验证规则时引用，不能称为重新执行，也不能重签原运行。正常早期审查及历史completed重新审查行为保持；严格过期检查不放宽。
+
+UI/host在登记自己的agent之前执行同一受控事务，再重新读取动作策略；否则开放agent会正确阻止返回。原始用户请求已经明确要求恢复时复用该授权，不重复询问同一意图。此入口不增加部署、刷写、Git提交或推送授权。
+
 ## 4. 事件链（.ico_events.jsonl）
 
 - 每工单一本哈希链日志：`previous_event_hash` = 上一行 `event_hash`，首事件前驱为全 0；`event_hash` = sha256(去 hash 字段 canonical JSON)。validate 校验整链（断链/篡改报 `event_chain`）。

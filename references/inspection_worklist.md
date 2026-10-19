@@ -8,6 +8,8 @@
 
 已知工单/上游基线时必须用 `--baselines-json '{"<仓库相对根>":"<真实ref>"}'`（根仓键 `.`），不得把默认 HEAD 冒充工单原基线。错误 ref 不回退；多仓独立解析，删除文件读取基线原文并标记 deleted。无 Git、不可读/binary/过大文件、预算或超时均记录 partial/unobserved，默认最多 200 文件、每文件 1MiB。LIMIT 优先，rules 是检查提示、不是已执行 lint。
 
+原生 `inspection --phase prepare` 可用 `--max-files <正整数>` 显式选择既有文件枚举预算；省略保持原默认。预算纳入当前 attempt 的冻结声明，不减少 code_files、关联文件、专项或实际 Read 义务。原 attempt 省略参数恢复时沿已冻结值；显式不同值在任何重放豁免及业务写入前拒绝，改变预算须先终结旧 attempt 再按原流程新建。`read/assess/check` 不接受显式预算。旧无参请求保持原身份形状；显式默认值和省略也属于不同参数，同幂等键不能互换。精确同参重放只返回原回执，不回滚后续阅读进度。
+
 仅工程内相对路径；拒绝越界、符号链接、工单控制目录和凭据/密钥。不执行构建、hooks、外部 diff driver 或模型请求。
 
 每轮基线绑定已解析的 commit OID：同轮符号分支/tag 消失不改变证据版本；若该 commit 本身不可读，则保留失效边界重新入轮。crosscheck 新轮无显式覆盖时保留已声明的工单基线 OID，绝不静默退回另一 HEAD；新请求的错误 ref 仍硬拒绝。冻结清单先验普通文件/hash，再判断真实源码漂移，篡改不能伪装成 stale_input 来跳过。
@@ -30,6 +32,17 @@ python3 tools/icode_control.py inspection --dir <out_dir> --step <step> --attemp
 ```
 
 phase：code=`code_review`；deepcheck effective full=`reverse/fixed/free`，实际 fast=`reverse`（风险升级 full 不可减阶段）；audit=独立 `audit`。本轮每文件每阶段阅读绑定冻结 sha256，不能复用上一步、上一轮或另模型阅读。prepare/read 自动登记 artifact 回执；手改 findings/债务后须重新 `artifact --path <step>_worklist.json`。成功 finish 强制完整清单+当前 attempt 真实回执；源码/基线漂移需 blocked 重入并重新审查，不可只改 hash。
+
+同一attempt/phase实际读完一组文件后，可把多次登记合为一次原生调用：
+
+```bash
+python3 tools/icode_control.py inspection --dir <out_dir> --step <step> --attempt <attempt> \
+  --phase read --read-phase <phase> --paths-json '["src/first.py","src/second.py"]' --request <本次幂等键>
+```
+
+`--paths-json`仅用于read，与`--path`互斥；输入最多64KiB、1至256个唯一规范相对POSIX路径，不能重复、越界或包含点段。路径集合排序后绑定请求；同键换成员拒绝，精确重放返回原回执且保留后来进度。整批仍先校验全部冻结清单和每个成员，再一次替换、一个制品回执；参数或成员预验失败不部分登记。晚期provider/阶段发布拒绝沿既有失败与恢复边界保留原件，不能宣称清单与事件是跨文件原子事务；没有当前真实回执不得收口。
+
+批量只减少登记调用，不能替代本阶段逐文件实际Read、专项或验收。机器校验合法成员、阶段和版本；调用方仍负责实际阅读，不能把合法路径或登记回执称为宿主阅读证明。旧单文件参数及请求身份保持。
 
 遗漏保持 `coverage_status=partial|degraded` 和 `unobserved=[{"path":"<遗漏范围>","debt_reason":"<原因>"}]` 或明确全局 debt_reason，不允许 success/“全审完成”。degraded 可保留明确债务，但身份/路径/版本违规不能降级。deepcheck/audit 原有 coverage.json 与 Dedup 声明仍必需，清单不能代替它们。无 execution_model 事件的历史工单保持 untracked 可读，不追溯补写证据。
 

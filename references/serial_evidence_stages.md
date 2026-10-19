@@ -195,6 +195,20 @@ writer复用现有metadata+事件原子事务，追加`plan_revisions`保存旧�
 
 预览还包含每阶段动作及顺序资格的前后对照（实际执行仍需有效绑定和完整门禁），以及带摘要的内联原始控制记录备份`backup_snapshot`；宿主应将预览保存到受审资料目录。全部历史报告引用均须完整。进程中断后的同请求重试先在锁内恢复原事务：无事件时回滚后重试，有事件时完成发布并返回幂等结果。
 
+### 合并完整未接受尾部
+
+当用户已明确批准重新编排时，可在原预览/应用接口传可选`consolidation`，无需新建协调票或改写旧票。普通省略/None继续原换版语义及旧请求摘要；不得借此删除旧要求或重用退休ID。CLI仅`preview-revision --consolidation-json <JSON>`提供只读预览，没有CLI应用或自证用户批准入口。
+
+说明schema为[stage-consolidation.schema.json](../schemas/stage-consolidation.schema.json)：原计划摘要、按旧尾部顺序完整列出的source→targets映射、各阶段义务的来源/条目覆盖、来源文件绝对路径/sha256与必要的`contract_target`。新目标必须全新且全部有人承接，接受前缀定义/顺序/绑定/决定不变，原动作在对应目标顺序中保留且不越过原授权。机器核对声明和已登记合同，文档自然语言是否完整覆盖仍须AI实际逐项审阅。
+
+原生预览有界、稳定地读取实际来源和真实旧子票合同，冻结每目标继承义务。调用方不能传一份伪旧合同替代实际记录。连续合并尚未绑定的中间目标、穿插普通换版也继续传递祖先合同；目标出生绑定时必须带至少等强合同，后续更新、执行/发布及最终facts继续检查。`profile`和已有`baseline_ref`不能删除或替换；多个不兼容合同必须分配不同目标，不能静默选择较宽条件。
+
+预览保存到受审目录后，应用仍通过原可信host/UI callback、精确challenge及原协调→子票锁/事务追加修订。来源在预览和发布前重核；长期资料由宿主保存不可变原件。历史冻结谱系不因外部文档后来更新而重新签名，不能据此声称原件损坏也已通过。
+
+旧binding/报告/失败/决定保持原件，退休投影`state=superseded`给出当前`replacement_stages`。status/trace/历史报告可读；旧票不能编码、登记中性/失败验证、写草稿、生成快照或通过Host再次启动流程。首写守卫同时覆盖index/worklist/snapshot、reopen幂等恢复和本票内manifest直接写；纯外部历史备份及只读检索LRU保留。
+
+启用阶段的真实证据/视觉provider在首次调用前，通过原operation账本在协调→子票锁内登记唯一在途owner；provider锁外执行。已有open/unknown attempt不授予再次调用资格，已发布receipt仍精确幂等返回。保护receipt先发布，再终结operation；失败记录真实终结或保留开放待核对，进程崩溃后不得盲重放。开放审查阻止尾部换版；无阶段普通项目保留原路径。operation success仅说明调用/发布完成，不代表图像质量通过。
+
 ### AI 先验收，再冻结可审报告
 
 先完成既定要求的机器检查、代码审查、必需 verification cells、真实多帧视觉与确有必要的 human_observation 证据；未满足项保留 fail/inconclusive 和最小补测动作。用户不需要替 AI 重跑同一批已可执行测试；物理插拔、场景布置、专业测量等少量确需人工动作单列。

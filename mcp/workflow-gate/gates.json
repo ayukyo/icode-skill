@@ -366,6 +366,11 @@
       {"from": "code_done", "to": "deepcheck_in_progress"},
       {"from": "deepcheck_in_progress", "to": "deepcheck_done"},
       {"from": "deepcheck_done", "to": "deepcheck_in_progress", "note": "重新深检"},
+      {"from": "plan_finalized", "to": "review_in_progress", "review_return": true, "note": "受控返回计划审查，精确revision及原因；保留历史并重新执行下游流程"},
+      {"from": "code_in_progress", "to": "review_in_progress", "review_return": true, "note": "受控返回计划审查，精确revision及原因；保留历史并重新执行下游流程"},
+      {"from": "code_done", "to": "review_in_progress", "review_return": true, "note": "受控返回计划审查，精确revision及原因；保留历史并重新执行下游流程"},
+      {"from": "deepcheck_in_progress", "to": "review_in_progress", "review_return": true, "note": "受控返回计划审查，精确revision及原因；保留历史并重新执行下游流程"},
+      {"from": "deepcheck_done", "to": "review_in_progress", "review_return": true, "note": "受控返回计划审查，精确revision及原因；保留历史并重新执行下游流程"},
       {"from": "deepcheck_done", "to": "completed", "note": "audit 完成；必须 --delivery-verdict 显式回填交付结论，禁止缺省推断"},
       {"from": "completed", "to": "review_in_progress", "note": "已完成工单按用户指令重新审查"},
       {"from": "debug_in_progress", "to": "debug_done"}
@@ -406,7 +411,7 @@
       "actions": {
         "log": {"statuses": ["log_in_progress", "log_done", "debug_in_progress"], "debug": "both", "side_effect": "managed_write"},
         "plan": {"statuses": ["init_in_progress", "log_done"], "debug": "main", "side_effect": "managed_write"},
-        "review": {"statuses": ["plan_done", "review_in_progress", "review_done", "completed"], "debug": "main", "side_effect": "managed_write"},
+        "review": {"statuses": ["plan_done", "review_in_progress", "review_done", "completed", "plan_finalized", "code_in_progress", "code_done", "deepcheck_in_progress", "deepcheck_done"], "debug": "main", "side_effect": "managed_write"},
         "merge": {"statuses": ["review_done"], "debug": "main", "side_effect": "managed_write"},
         "code": {"statuses": ["plan_finalized", "code_in_progress", "code_done"], "debug": "main", "side_effect": "managed_write"},
         "deepcheck": {"statuses": ["code_done", "deepcheck_in_progress", "deepcheck_done"], "debug": "main", "side_effect": "managed_write"},

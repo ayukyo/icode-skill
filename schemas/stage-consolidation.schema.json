@@ -1,0 +1,46 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Explicit unaccepted stage-tail consolidation v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "old_plan_digest", "mappings", "sources"],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "old_plan_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "sources": {
+      "type": "array", "minItems": 1, "maxItems": 256,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["id", "path", "sha256", "item_ids"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "path": {"type": "string", "minLength": 1},
+          "sha256": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+          "item_ids": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}
+        }
+      }
+    },
+    "mappings": {
+      "type": "array", "minItems": 1,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["source_stage_id", "target_stage_ids", "obligations"],
+        "properties": {
+          "source_stage_id": {"type": "string", "minLength": 1},
+          "target_stage_ids": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+          "contract_target": {"type": "string", "minLength": 1},
+          "obligations": {
+            "type": "array", "minItems": 1,
+            "items": {
+              "type": "object", "additionalProperties": false, "required": ["source_id", "item_ids"],
+              "properties": {
+                "source_id": {"type": "string", "minLength": 1},
+                "item_ids": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

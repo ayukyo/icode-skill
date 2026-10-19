@@ -186,7 +186,8 @@ class Reader:
                     opened = os.fstat(source.fileno())
                     if self._identity(before, cross_source=True) != self._identity(opened, cross_source=True):
                         fail("file replaced before read")
-                    data = source.read(min(self.limits["max_file_bytes"], self.limits["max_total_bytes"] - self.total) + 1)
+                    # Bound allocation by the observed file; one extra byte probes growth.
+                    data = source.read(min(before.st_size, self.limits["max_file_bytes"], self.limits["max_total_bytes"] - self.total) + 1)
                     if self._identity(opened) != self._identity(os.fstat(source.fileno())):
                         fail("file changed during read")
                 if self._identity(before) != self._identity(path.lstat()) or parents != self._parents(path.parent):

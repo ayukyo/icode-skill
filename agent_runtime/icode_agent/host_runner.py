@@ -160,6 +160,17 @@ class ControlLifecycle:
             args += ["--verify-action", verify_action]
         return self._control(args)
 
+    def return_to_review(self, ticket, *, expected_revision, request_id, reason):
+        # The transition must precede record_spawn: an open host agent is
+        # deliberately ineligible for the quiescent review-return transaction.
+        self._control([
+            "transition", "--dir", str(ticket.out_dir), "--to", "review_in_progress",
+            "--expected-revision", expected_revision, "--reason", reason,
+            "--request-id", f"{request_id}:review-return",
+        ])
+        fresh = self.projection(ticket)
+        return self.action_policy(ticket, "review", fresh["revision"]["token"])
+
     def record_spawn(self, ticket, *, step, host, model, request_id, stage_action=None):
         return self._control([
             "record-agent-spawn", "--dir", str(ticket.out_dir),
@@ -487,6 +498,12 @@ class HostJobRunner:
             for variant in verify_actions or [None]:
                 policy_options = {"verify_action": variant} if variant is not None else {}
                 policy = self.lifecycle.action_policy(ticket, step, expected_revision, **policy_options)
+            if step == "review" and policy.get("review_return_required"):
+                handler = getattr(self.lifecycle, "return_to_review", None)
+                if not callable(handler):
+                    raise HostRunnerError("缺少受控返回审查适配器", code="review_return_required")
+                policy = handler(ticket, expected_revision=expected_revision,
+                    request_id=request_id, reason="用户从当前工单请求重新审查")
             execution_root = policy.get("execution_root")
             if not isinstance(execution_root, str) or not execution_root:
                 raise HostRunnerError(

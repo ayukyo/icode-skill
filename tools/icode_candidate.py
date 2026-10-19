@@ -5,6 +5,7 @@ establish source identity; only real successful step receipts establish review.
 """
 import hashlib
 import importlib.util
+from functools import lru_cache
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum
@@ -243,7 +244,23 @@ def _digest(value):
                          separators=(",", ":"), allow_nan=False).encode()).hexdigest()
 
 
+_SNAPSHOT_MEMO = None
+
+
 def snapshot_identity_ok(snapshot):
+    """Offline closed-shape/hash check; never caches live repository facts."""
+    global _SNAPSHOT_MEMO
+    if _SNAPSHOT_MEMO is None:
+        spec = importlib.util.spec_from_file_location(
+            "candidate_validation_memo", Path(__file__).with_name("validation_memo.py"))
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        _SNAPSHOT_MEMO = module.PureJsonMemo(
+            lambda value, rules: _snapshot_identity_ok(value, control_dirs=rules["control_dirs"]))
+    return _SNAPSHOT_MEMO.check(snapshot, {"control_dirs": list(CONTROL_DIRS)})
+
+
+def _snapshot_identity_ok(snapshot, *, control_dirs):
     """Offline closed-shape/hash check for linter and evidence consumers."""
     if not isinstance(snapshot, dict):
         return False
@@ -273,7 +290,7 @@ def snapshot_identity_ok(snapshot):
         for key in ("code_files", "excluded_side_effects", "control_artifact_exclusions"):
             if not isinstance(snapshot[key], list) or snapshot[key] != _paths(snapshot[key]):
                 return False
-        if snapshot["control_artifact_exclusions"] != list(CONTROL_DIRS) or \
+        if snapshot["control_artifact_exclusions"] != list(control_dirs) or \
                 "." in snapshot["code_files"] or "." in snapshot["excluded_side_effects"]:
             return False
         if not isinstance(snapshot["inspection_scope"], dict) or \
@@ -323,6 +340,15 @@ def _tree_entries(raw, exclusions=()):
     return result
 
 
+@lru_cache(maxsize=8192)
+def _lexical_candidate_path(raw, path_class):
+    """Only lexical platform Path semantics; no filesystem or CWD observation."""
+    value = path_class(raw)
+    if value.is_absolute() or ".." in value.parts or ".git" in value.parts:
+        raise CandidateError(f"unsafe candidate path: {raw}")
+    return value.as_posix()
+
+
 def _paths(values):
     if not isinstance(values, (tuple, list)):
         raise CandidateError("candidate paths must be an array")
@@ -330,10 +356,14 @@ def _paths(values):
     for raw in values:
         if not isinstance(raw, str) or not raw or "\0" in raw or "\\" in raw:
             raise CandidateError("candidate path must be a relative POSIX string")
-        value = Path(raw)
-        if value.is_absolute() or ".." in value.parts or ".git" in value.parts:
-            raise CandidateError(f"unsafe candidate path: {raw}")
-        normalized = value.as_posix()
+        if type(raw) is str:
+            normalized = _lexical_candidate_path(raw, Path)
+        else:
+            # Preserve custom str-subclass behavior without cache aliasing.
+            value = Path(raw)
+            if value.is_absolute() or ".." in value.parts or ".git" in value.parts:
+                raise CandidateError(f"unsafe candidate path: {raw}")
+            normalized = value.as_posix()
         result.add(normalized)
     return sorted(result)
 

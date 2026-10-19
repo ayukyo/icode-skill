@@ -193,7 +193,11 @@ def protect_update(before, after):
     receipts = protected_values(before)
     if binding is None or not (before.get("verification_runs") or receipts["evidence_reviews"] or receipts["visual_reviews"]):
         return
-    old, new = before.get("verification_contract") or {}, after.get("verification_contract") or {}
+    require_contract_strength(before.get("verification_contract") or {}, after.get("verification_contract") or {})
+
+
+def require_contract_strength(old, new):
+    """Shared monotone contract comparison; ordinary update eligibility is unchanged."""
     if old == new:
         return
     if old.get("required") is True and new.get("required") is not True:
@@ -315,18 +319,26 @@ def _access(provider=None, required=False):
     return {"git_provider": provider, "require_git_provider": required} if ctl()._candidate_access_requested(provider, required) else {}
 
 
-def _verified(directory, *, _metadata_override=None, _allow_pending=False, **access):
+def _verified(directory, *, _metadata_override=None, _allow_pending=False, _observation=None, **access):
     api = ctl()
     directory = Path(directory).resolve(strict=True)
-    meta = api.load_metadata(directory) if _metadata_override is None else _metadata_override
+    if _observation is not None:
+        if type(_observation) is not api._ControlReadObservation or _metadata_override is not None or _allow_pending:
+            fail("observed predecessor requires actual nonpending control reads")
+        meta = api.load_metadata(directory, _observation=_observation)
+    else:
+        meta = api.load_metadata(directory) if _metadata_override is None else _metadata_override
     api.require_vnext(meta, directory)
     api.require_valid_metadata(meta)
     if (directory / api.TXN_NAME).exists():
         if not _allow_pending or _metadata_override is None or api.load_json(directory / api.TXN_NAME, "stage publication transaction").get("before_metadata") != meta:
             fail("pending transaction requires controlled recovery", directory=str(directory))
-    events, issues = api.verify_event_chain(directory, meta, **access)
+    events, issues = api.verify_event_chain(directory, meta, **access) if _observation is None else \
+        api.verify_event_chain(directory, meta, _observation=_observation, **access)
     if issues:
         fail("event chain invalid", violations=issues)
+    if _observation is not None:
+        _observation.bind(directory, meta, events)
     return meta, events
 
 
@@ -371,7 +383,7 @@ def _resolve(directory, *, _metadata_override=None, _allow_pending=False, **acce
             expected = {"version": 1, "program_id": program["plan"]["program_id"], "stage_id": sid,
                         "coordinator_root": str(coordinator), "plan_digest": binding.get("plan_digest")}
             if binding != expected or binding.get("plan_digest") not in {digest(plan) for plan in plans} \
-                    or sid not in {row["id"] for row in program["plan"]["stages"]} \
+                    or sid not in {row["id"] for plan in plans for row in plan["stages"]} \
                     or program["bindings"].get(sid) != {"control_root": str(directory), "ticket_id": meta["ticket_id"]}:
                 fail("stage binding is missing or disagrees with coordinator")
         elif directory != coordinator:
@@ -487,13 +499,30 @@ def _check_revision_plan(previous, proposed, accepted_prefix):
         fail("revision cannot move accepted prefix or insert a predecessor before it")
 
 
+_CONSOLIDATION = None
+
+
+def consolidation_module():
+    global _CONSOLIDATION
+    if _CONSOLIDATION is None:
+        spec = importlib.util.spec_from_file_location("icode_stage_consolidation", Path(__file__).with_name("stage_consolidation.py"))
+        _CONSOLIDATION = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(_CONSOLIDATION)
+    return _CONSOLIDATION
+
+
+def require_inherited_contract(state, metadata):
+    if state is not None and state.get("stage_id") is not None:
+        consolidation_module().require_contract(ctl(), state["program"], state["stage_id"], metadata.get("verification_contract") or {})
+
+
 def _revision_plans(program):
     """The locator remains an immutable registration anchor; history links it to current plan."""
     history = program.get("plan_revisions", [])
     if not isinstance(history, list):
         fail("invalid revision history")
     plans = [row["previous_plan"] for row in history] + [program["plan"]]
-    seen, generation = set(), 0
+    seen, generation, retired = set(), 0, set()
     for index, row in enumerate(history):
         if row["request_id"] in seen or type(row["generation"]) is not int \
                 or row["generation"] <= generation or row["generation"] > program["generation"]:
@@ -502,7 +531,16 @@ def _revision_plans(program):
         generation = row["generation"]
         if digest(plans[index]) != row["old_plan_digest"] or digest(plans[index + 1]) != row["new_plan_digest"]:
             fail("broken plan revision lineage")
-        _check_revision_plan(plans[index], plans[index + 1], row["accepted_prefix"])
+        snapshot = row.get("consolidation")
+        if snapshot is None:
+            _check_revision_plan(plans[index], plans[index + 1], row["accepted_prefix"])
+            inserted = {stage["id"] for stage in plans[index + 1]["stages"]} - {stage["id"] for stage in plans[index]["stages"]}
+            if inserted & retired:
+                fail("ordinary revision cannot reuse a retired stage ID")
+        else:
+            helper = consolidation_module()
+            helper.validate_snapshot(ctl(), snapshot, plans[index], plans[index + 1], row["accepted_prefix"], retired=retired)
+            retired.update(mapping["source_stage_id"] for mapping in snapshot["descriptor"]["mappings"])
     return plans
 
 
@@ -529,7 +567,7 @@ def _validate_revision_append(previous, proposed):
     _revision_plans(proposed)
 
 
-def _revision_preview(state, proposed, **access):
+def _revision_preview(state, proposed, *, consolidation=None, **access):
     api = ctl()
     program = state["program"]
     accepted, gap = [], False
@@ -542,7 +580,13 @@ def _revision_preview(state, proposed, **access):
             accepted.append(row["id"])
         else:
             gap = True
-    _check_revision_plan(program["plan"], proposed, accepted)
+    snapshot = None
+    if consolidation is None:
+        _check_revision_plan(program["plan"], proposed, accepted)
+        if ({row["id"] for row in proposed["stages"]} - {row["id"] for row in program["plan"]["stages"]}) & consolidation_module().retired_ids(program):
+            fail("ordinary revision cannot reuse a retired stage ID")
+    else:
+        snapshot = consolidation_module().build_snapshot(api, program, proposed, accepted, consolidation, **access)
     if proposed == program["plan"]:
         fail("revision must contain an actual plan change")
     probe = dict(state, stage_id=next((row["id"] for row in program["plan"]["stages"]
@@ -578,9 +622,12 @@ def _revision_preview(state, proposed, **access):
     view = state.get("_publishing_projection") or projection(state["coordinator"], **access)
     if view["blocked"]:
         fail("revision coordinator is invalid", stage=view)
+    consolidation_snapshot = snapshot
     snapshot = {"program_id": program["plan"]["program_id"], "generation": program["generation"],
                 "revision": view["revision"], "old_plan_digest": program["plan_digest"],
                 "new_plan_digest": digest(proposed), "controls": facts, "accepted_prefix": accepted}
+    if consolidation_snapshot is not None:
+        snapshot["consolidation"] = consolidation_snapshot
     old_ids = [row["id"] for row in program["plan"]["stages"]]
     new_ids = [row["id"] for row in proposed["stages"]]
     def eligible(order, sid):
@@ -596,24 +643,27 @@ def _revision_preview(state, proposed, **access):
               "controls": [{"root": str(root), "metadata": meta, "events": events} for root, meta, events in roots]}
     challenge = {key: snapshot[key] for key in ("program_id", "generation", "revision", "old_plan_digest", "new_plan_digest")}
     challenge["preview_digest"] = digest(snapshot)
-    return {"ok": True, "challenge": challenge, "accepted_prefix": accepted,
+    result = {"ok": True, "challenge": challenge, "accepted_prefix": accepted,
             "previous_order": old_ids, "proposed_order": new_ids,
             "inserted_stages": [sid for sid in new_ids if sid not in old_ids],
             "action_effects": action_effects, "backup_snapshot": backup, "backup_sha256": digest(backup),
             "preserved_reviews": {sid: [row["outcome"] for row in rows] for sid, rows in program["reviews"].items()},
             "note": "Preview is not execution/acceptance authorization; original obligations and decisions are preserved."}
+    if consolidation_snapshot is not None:
+        result["consolidation"] = consolidation_snapshot
+    return result
 
 
-def preview_revision(directory, proposed, *, git_provider=None, require_git_provider=False):
+def preview_revision(directory, proposed, *, consolidation=None, git_provider=None, require_git_provider=False):
     access = _access(git_provider, require_git_provider)
     state = _resolve(directory, **access)
     if state is None or state["stage_id"] is not None:
         fail("plan revision requires the registered coordinator")
-    return _revision_preview(state, proposed, **access)
+    return _revision_preview(state, proposed, consolidation=consolidation, **access)
 
 
 def revise_program(directory, proposed, request, *, trusted_confirmation=None,
-                   git_provider=None, require_git_provider=False):
+                   consolidation=None, git_provider=None, require_git_provider=False):
     """Only a host/UI callback can attest approval; CLI JSON cannot."""
     if not callable(trusted_confirmation) or not isinstance(request, dict):
         fail("plan revision requires trusted host/UI user approval")
@@ -627,7 +677,10 @@ def revise_program(directory, proposed, request, *, trusted_confirmation=None,
         fail("trusted callback did not attest explicit plan revision approval")
     access = _access(git_provider, require_git_provider)
     directory = Path(directory).resolve()
-    request_digest = digest({"plan": proposed, "request": request})
+    request_identity = {"plan": proposed, "request": request}
+    if consolidation is not None:
+        request_identity["consolidation"] = consolidation
+    request_digest = digest(request_identity)
     with ctl().DirLock(directory), contextlib.ExitStack() as child_locks:
         ctl().recover_pending_transaction(directory)
         state = _resolve(directory, **access)
@@ -646,7 +699,7 @@ def revise_program(directory, proposed, request, *, trusted_confirmation=None,
             if prior["request_digest"] != request_digest or prior["source"] != source:
                 fail("revision request replay payload/source conflict")
             return {"ok": True, "already_applied": True, "revision_id": prior["revision_id"], "generation": prior["generation"]}
-        preview = _revision_preview(state, proposed, **access)
+        preview = _revision_preview(state, proposed, consolidation=consolidation, **access)
         if any(request[key] != value for key, value in preview["challenge"].items()):
             fail("plan revision preview is stale or does not match")
         row = {"revision_id": str(uuid.uuid4()), "request_id": request["request_id"],
@@ -657,6 +710,8 @@ def revise_program(directory, proposed, request, *, trusted_confirmation=None,
                "invalidated_reviews": [review["review_id"] for sid, rows in program["reviews"].items()
                                        if sid not in preview["accepted_prefix"] for review in rows],
                "preview_digest": request["preview_digest"]}
+        if consolidation is not None:
+            row["consolidation"] = preview["consolidation"]
         program.setdefault("plan_revisions", []).append(row)
         program.update(plan=copy.deepcopy(proposed), plan_digest=digest(proposed), generation=row["generation"])
         _validate_revision_append(state["program"], program)
@@ -673,7 +728,7 @@ def revise_program(directory, proposed, request, *, trusted_confirmation=None,
                     or current_events[-1]["event_hash"] != state["coord_events"][-1]["event_hash"]:
                 fail("revision publication transaction changed")
             publishing = dict(state, _publishing_projection={"blocked": False, "revision": preview["challenge"]["revision"]})
-            if _revision_preview(publishing, proposed, **access)["challenge"] != preview["challenge"]:
+            if _revision_preview(publishing, proposed, consolidation=consolidation, **access)["challenge"] != preview["challenge"]:
                 fail("plan revision facts changed before publication")
         _write(state["coordinator"], state["coord_meta"], "stage_program", program, "revise", request["request_id"],
                before_append=publication_check, **access)
@@ -688,37 +743,46 @@ def bind_stage(coordinator, stage_id, directory, *, request_id, git_provider=Non
     access = _access(git_provider, require_git_provider)
     # Fixed order is the only cross-ticket locking order.
     with api.DirLock(coordinator), api.DirLock(directory):
-        api.recover_pending_transaction(coordinator)
-        api.recover_pending_transaction(directory)
-        state = _resolve(coordinator, **access)
-        if state is None:
-            fail("program must be registered before binding")
-        program = copy.deepcopy(state["program"])
-        if stage_id not in [row["id"] for row in program["plan"]["stages"]]:
-            fail("unknown stage_id")
-        meta, events = _verified(directory, **access)
-        if _project(meta) != _project(state["coord_meta"]):
-            fail("cross-project stage binding forbidden")
-        binding = {"version": 1, "program_id": program["plan"]["program_id"], "stage_id": stage_id,
-                   "coordinator_root": str(coordinator), "plan_digest": program["plan_digest"]}
-        existing = (meta.get("extensions") or {}).get("stage_binding")
-        reference = {"control_root": str(directory), "ticket_id": meta["ticket_id"]}
-        if existing is not None and existing.get("plan_digest") in {digest(plan) for plan in _revision_plans(program)}:
-            binding["plan_digest"] = existing["plan_digest"]
-        if existing is not None and existing != binding:
-            fail("stage ticket binding is immutable")
-        if stage_id in program["bindings"] and program["bindings"][stage_id] != reference:
-            fail("stage already has another ticket")
-        if any(row == reference and key != stage_id for key, row in program["bindings"].items()):
-            fail("ticket cannot implement multiple stages")
-        if existing is None:
-            if any(e.get("event_type") in {"step_started", "operation_started", "verification_recorded"} for e in events):
-                fail("cannot retroactively bind an already implemented ticket")
-            _write(directory, meta, "stage_binding", binding, "bind", request_id + ":child", **access)
-        if program["bindings"].get(stage_id) != reference:
-            program["bindings"][stage_id] = reference
-            program["generation"] += 1
-            _write(coordinator, state["coord_meta"], "stage_program", program, "bind", request_id, **access)
+        return _bind_stage_locked(coordinator, stage_id, directory, request_id=request_id, **access)
+
+
+def _bind_stage_locked(coordinator, stage_id, directory, *, request_id, git_provider=None, require_git_provider=False):
+    """Internal birth/bind writer; caller holds coordinator then child locks."""
+    api = ctl()
+    coordinator, directory = Path(coordinator).resolve(), Path(directory).resolve()
+    access = _access(git_provider, require_git_provider)
+    api.recover_pending_transaction(coordinator)
+    api.recover_pending_transaction(directory)
+    state = _resolve(coordinator, **access)
+    if state is None:
+        fail("program must be registered before binding")
+    program = copy.deepcopy(state["program"])
+    if stage_id not in [row["id"] for row in program["plan"]["stages"]]:
+        fail("unknown stage_id")
+    meta, events = _verified(directory, **access)
+    if _project(meta) != _project(state["coord_meta"]):
+        fail("cross-project stage binding forbidden")
+    binding = {"version": 1, "program_id": program["plan"]["program_id"], "stage_id": stage_id,
+               "coordinator_root": str(coordinator), "plan_digest": program["plan_digest"]}
+    existing = (meta.get("extensions") or {}).get("stage_binding")
+    reference = {"control_root": str(directory), "ticket_id": meta["ticket_id"]}
+    if existing is not None and existing.get("plan_digest") in {digest(plan) for plan in _revision_plans(program)}:
+        binding["plan_digest"] = existing["plan_digest"]
+    if existing is not None and existing != binding:
+        fail("stage ticket binding is immutable")
+    if stage_id in program["bindings"] and program["bindings"][stage_id] != reference:
+        fail("stage already has another ticket")
+    if any(row == reference and key != stage_id for key, row in program["bindings"].items()):
+        fail("ticket cannot implement multiple stages")
+    if existing is None:
+        if any(e.get("event_type") in {"step_started", "operation_started", "verification_recorded"} for e in events):
+            fail("cannot retroactively bind an already implemented ticket")
+        consolidation_module().require_contract(api, program, stage_id, meta.get("verification_contract") or {})
+        _write(directory, meta, "stage_binding", binding, "bind", request_id + ":child", **access)
+    if program["bindings"].get(stage_id) != reference:
+        program["bindings"][stage_id] = reference
+        program["generation"] += 1
+        _write(coordinator, state["coord_meta"], "stage_program", program, "bind", request_id, **access)
     return {"ok": True, "stage_id": stage_id, "generation": program["generation"]}
 
 
@@ -811,17 +875,24 @@ def _negative_reviews(events, candidate_id, contract, qualified, *, after_positi
     return reasons, failed
 
 
-def _historical(directory, review):
+def _historical(directory, review, *, _observation=None, **access):
     """Frozen accepted source is not compared against a later live candidate."""
+    if _observation is not None:
+        if type(_observation) is not ctl()._ControlReadObservation:
+            fail("invalid internal predecessor observation")
+        current, events = _observation.check(directory)
+        if access:
+            ctl()._candidate_context_guard(directory, current, access["git_provider"], access["require_git_provider"])
+    else:
+        current = ctl().load_metadata(directory)
+        events, _ = ctl().read_events(directory)
     _check_report(directory, review)
     snapshot = review["snapshot"]
-    current = ctl().load_metadata(directory)
     by_id = {row.get("run_id"): row for row in current.get("verification_runs") or []}
     for ref in snapshot["facts"]["runs"]:
         if ref["run_id"] not in by_id or digest(by_id[ref["run_id"]]) != ref["digest"]:
             fail("accepted source verification event changed or disappeared")
     frozen = snapshot["evidence_metadata"]
-    events, _ = ctl().read_events(directory)
     accepted_ids = {run["run_id"] for run in snapshot["accepted_runs"]}
     last_run_position = max((i for i, event in enumerate(events) if event.get("event_type") == "verification_recorded" and
                              (event.get("payload") or {}).get("run_id") in accepted_ids), default=-1)
@@ -831,6 +902,10 @@ def _historical(directory, review):
         negative, _failed = _negative_reviews(events, run.get("candidate_id"), frozen["verification_contract"], [], after_position=last_run_position)
         if negative:
             fail("accepted snapshot refuted by actual later review", violations=negative)
+    if _observation is not None:
+        _observation.check(directory)
+        if access:
+            ctl()._candidate_context_guard(directory, current, access["git_provider"], access["require_git_provider"])
 
 
 def _predecessors(state, **access):
@@ -847,11 +922,12 @@ def _predecessors(state, **access):
             continue
         try:
             ref = program["bindings"][prior_id]
-            child, _events = _verified(ref["control_root"], **access)
+            observation = ctl()._ControlReadObservation(ref["control_root"])
+            child, _events = _verified(ref["control_root"], _observation=observation, **access)
             bind = (child.get("extensions") or {}).get("stage_binding") or {}
             if child["ticket_id"] != ref["ticket_id"] or bind.get("program_id") != program["plan"]["program_id"] or bind.get("stage_id") != prior_id:
                 fail("predecessor binding changed")
-            _historical(ref["control_root"], prior)
+            _historical(ref["control_root"], prior, _observation=observation, **access)
             if prior["snapshot"]["facts"]["predecessors"] != refs:
                 fail("accepted predecessor snapshot changed; later stage needs fresh acceptance")
             accepted_ids = {run["run_id"] for run in prior["snapshot"]["accepted_runs"]}
@@ -872,6 +948,7 @@ def _facts(state, **access):
     api = ctl()
     meta, directory, sid = state["meta"], state["directory"], state["stage_id"]
     program = state["program"]
+    require_inherited_contract(state, meta)
     predecessor_refs, reasons = _predecessors(state, **access)
     contract = meta.get("verification_contract")
     stage = next(row for row in program["plan"]["stages"] if row["id"] == sid)
@@ -946,6 +1023,27 @@ def _facts(state, **access):
             "accepted_runs": runs, "evidence_metadata": frozen}
 
 
+def _retirement_projection(directory, *, git_provider=None, require_git_provider=False,
+                           _metadata_override=None, _allow_pending=False):
+    """Authenticate binding/retirement only; grants no action or acceptance.
+
+    Resolution errors propagate. Only neutral-write retirement guards use this
+    view; actual action admission and ordinary publication still fully qualify.
+    """
+    state = _resolve(directory, _metadata_override=_metadata_override, _allow_pending=_allow_pending,
+                     **_access(git_provider, require_git_provider))
+    if state is None:
+        return {"enabled": False}
+    program, sid = state["program"], state["stage_id"]
+    replacements = consolidation_module().replacements(program, sid) if sid is not None else None
+    result = dict(enabled=True, stage_id=sid, program_id=program["plan"]["program_id"],
+                  generation=program["generation"], coordinator_root=str(state["coordinator"]),
+                  state="superseded" if replacements is not None else "in_progress")
+    if replacements is not None:
+        result["replacement_stages"] = replacements
+    return result
+
+
 def projection(directory, *, git_provider=None, require_git_provider=False, _metadata_override=None, _allow_pending=False):
     access = _access(git_provider, require_git_provider)
     result = {"enabled": False, "blocked": False, "state": "not_enabled", "reasons": [],
@@ -961,7 +1059,17 @@ def projection(directory, *, git_provider=None, require_git_provider=False, _met
         if sid is None:
             result["stages"] = [{"stage_id": row["id"], "title": row["title"], "bound": row["id"] in program["bindings"],
                                  "decision": (_decision(program, row["id"]) or {}).get("decision")} for row in program["plan"]["stages"]]
+            result["retired_stages"] = [{"stage_id": old, "replacement_stages": consolidation_module().replacements(program, old)}
+                                        for old in sorted(consolidation_module().retired_ids(program))]
+        elif consolidation_module().replacements(program, sid) is not None:
+            result.update(state="superseded", replacement_stages=consolidation_module().replacements(program, sid))
+            review = _latest_review(program, sid)
+            if review is not None:
+                text = _check_report(state["directory"], review)
+                result["report"] = {"path": review["report_path"], "text": text[:131072], "outcome": review["outcome"],
+                                    "facts_digest": review["facts_digest"], "report_sha256": review["report_sha256"]}
         else:
+            require_inherited_contract(state, state["meta"])
             _refs, reasons = _predecessors(state, **access)
             review, decision = _latest_review(program, sid), _decision(program, sid)
             result.update(state="in_progress", blocked=bool(reasons), reasons=reasons)
@@ -1017,14 +1125,16 @@ def projection(directory, *, git_provider=None, require_git_provider=False, _met
 
 def require_action(directory, action, *, expected_generation=None, git_provider=None, require_git_provider=False,
                    _metadata_override=None, _allow_pending=False):
+    retired = projection(directory, git_provider=git_provider, require_git_provider=require_git_provider,
+                         _metadata_override=_metadata_override, _allow_pending=_allow_pending)
+    if retired["state"] == "superseded" and action not in {"status", "trace", "check", "inspect"}:
+        fail("superseded stage is read-only", action=action, stage=retired)
     if action in READ_ONLY:
-        state = projection(directory, git_provider=git_provider, require_git_provider=require_git_provider,
-                           _metadata_override=_metadata_override, _allow_pending=_allow_pending)
+        state = retired
         if state["enabled"] and expected_generation is not None and state.get("generation") != expected_generation:
             fail("generation changed before read-only workflow publication", stage=state)
         return state
-    state = projection(directory, git_provider=git_provider, require_git_provider=require_git_provider,
-                       _metadata_override=_metadata_override, _allow_pending=_allow_pending)
+    state = retired
     if not state["enabled"]:
         return state
     if state["blocked"] or not state.get("stage_id") or (state["state"] == "accepted" and action != "record_visual_review"):
@@ -1181,6 +1291,8 @@ def review_stage(directory, *, request_id, git_provider=None, require_git_provid
     state = _resolve(directory, **access)
     if state is None or state["stage_id"] is None:
         fail("review requires a bound stage ticket")
+    if consolidation_module().replacements(state["program"], state["stage_id"]) is not None:
+        fail("superseded stage cannot publish a new review")
     # All expensive evidence/candidate work happens before taking writer locks.
     snapshot = _facts(state, **access)
     prior = next((row for row in state["program"]["reviews"].get(state["stage_id"], []) if row.get("request_id") == request_id), None)
@@ -1193,12 +1305,8 @@ def review_stage(directory, *, request_id, git_provider=None, require_git_provid
     snapshot.update(schema_version=1, review_id=review_id, stage_id=state["stage_id"],
                     program_id=state["program"]["plan"]["program_id"], at=api.now_iso())
     report_dir = Path(directory).resolve() / ".stage_acceptance" / review_id
-    report_dir.mkdir(parents=True, exist_ok=False)
     raw_json = (json.dumps(snapshot, ensure_ascii=False, sort_keys=True, indent=2) + "\n").encode("utf-8")
     text = _report_text(snapshot, state)
-    for name, raw in (("stage_review.json", raw_json), ("stage_acceptance.md", text.encode("utf-8"))):
-        with (report_dir / name).open("xb") as handle:
-            handle.write(raw)
     review = {"review_id": review_id, "request_id": request_id, "outcome": snapshot["outcome"], "facts_digest": snapshot["facts_digest"],
               "review_path": (report_dir / "stage_review.json").relative_to(directory).as_posix(),
               "review_sha256": hashlib.sha256(raw_json).hexdigest(),
@@ -1207,9 +1315,17 @@ def review_stage(directory, *, request_id, git_provider=None, require_git_provid
               "challenge_id": str(uuid.uuid4()) if snapshot["outcome"] == "pass" else None, "snapshot": snapshot}
     with api.DirLock(state["coordinator"]), api.DirLock(Path(directory)):
         current = _resolve(directory, **access)
+        if consolidation_module().replacements(current["program"], current["stage_id"]) is not None:
+            fail("stage retired while preparing review; no report written")
         fresh = _facts(current, **access)
         if current["program"]["generation"] != state["program"]["generation"] or fresh["facts_digest"] != snapshot["facts_digest"]:
-            fail("facts/generation changed while preparing review; report retained without challenge")
+            fail("facts/generation changed while preparing review; no report written")
+        # Qualification and first business write share the revision's locks.
+        # No provider/model work is performed while these locks are held.
+        report_dir.mkdir(parents=True, exist_ok=False)
+        for name, raw in (("stage_review.json", raw_json), ("stage_acceptance.md", text.encode("utf-8"))):
+            with (report_dir / name).open("xb") as handle:
+                handle.write(raw)
         program = copy.deepcopy(current["program"])
         program["reviews"].setdefault(state["stage_id"], []).append(review)
         program["generation"] += 1

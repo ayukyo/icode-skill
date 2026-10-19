@@ -1,0 +1,155 @@
+{
+  "schema_version": 1,
+  "program": {
+    "version": 1,
+    "generation": 4,
+    "plan": {
+      "schema_version": 1,
+      "program_id": "program",
+      "project_root": "/example/project",
+      "authorized_actions": [
+        "code",
+        "verify",
+        "build",
+        "serial_exec"
+      ],
+      "stages": [
+        {
+          "id": "one",
+          "title": "First",
+          "required_actions": [
+            "verify",
+            "serial_exec"
+          ]
+        },
+        {
+          "id": "independent",
+          "title": "Host-only preparation",
+          "required_actions": [
+            "verify"
+          ]
+        },
+        {
+          "id": "two",
+          "title": "Second",
+          "required_actions": [
+            "code",
+            "verify",
+            "build"
+          ]
+        }
+      ]
+    },
+    "plan_digest": "7e90b7e552a0df622d195432f163ee0e9c5cb0b5af191bbf712261a36270881b",
+    "bindings": {},
+    "reviews": {},
+    "decisions": [],
+    "plan_revisions": [
+      {
+        "revision_id": "65a447a5-a88d-430a-9b79-c37d249cc868",
+        "request_id": "revision-one",
+        "request_digest": "0e7ca2278744aa2a23470486021aa9218fdaf21264e38188e5490ba3527f926a",
+        "source": {
+          "source": "host_user",
+          "source_id": "test-user:revision",
+          "intent": "修订阶段计划"
+        },
+        "at": "2026-10-19T03:08:10",
+        "generation": 4,
+        "previous_plan": {
+          "schema_version": 1,
+          "program_id": "program",
+          "project_root": "/example/project",
+          "authorized_actions": [
+            "code",
+            "verify",
+            "build",
+            "serial_exec"
+          ],
+          "stages": [
+            {
+              "id": "one",
+              "title": "First",
+              "required_actions": [
+                "verify",
+                "serial_exec"
+              ]
+            },
+            {
+              "id": "two",
+              "title": "Second",
+              "required_actions": [
+                "code",
+                "verify",
+                "build"
+              ]
+            }
+          ]
+        },
+        "old_plan_digest": "ba8483e8d9c16b380b40b2b14b75ca84fc7cf252c88bd7afa25543a99b93797e",
+        "new_plan_digest": "7e90b7e552a0df622d195432f163ee0e9c5cb0b5af191bbf712261a36270881b",
+        "accepted_prefix": [],
+        "reason": "User approved independent preparation",
+        "invalidated_reviews": [],
+        "preview_digest": "ae87da135a76941ed98b899e1ab957501faf8d719942240fe27247e596dac865"
+      }
+    ]
+  },
+  "proposed": {
+    "schema_version": 1,
+    "program_id": "program",
+    "project_root": "/example/project",
+    "authorized_actions": [
+      "code",
+      "verify",
+      "build",
+      "serial_exec"
+    ],
+    "stages": [
+      {
+        "id": "one",
+        "title": "First",
+        "required_actions": [
+          "verify",
+          "serial_exec"
+        ]
+      },
+      {
+        "id": "independent",
+        "title": "Host-only preparation",
+        "required_actions": [
+          "verify"
+        ]
+      },
+      {
+        "id": "two",
+        "title": "Second",
+        "required_actions": [
+          "code",
+          "verify",
+          "build"
+        ]
+      }
+    ]
+  },
+  "request": {
+    "program_id": "program",
+    "generation": 3,
+    "revision": "dc97d40fe3c6a4abc1d064075fac4b84b3e6e9e0a15d911b15e4a77e681d9524",
+    "old_plan_digest": "ba8483e8d9c16b380b40b2b14b75ca84fc7cf252c88bd7afa25543a99b93797e",
+    "new_plan_digest": "7e90b7e552a0df622d195432f163ee0e9c5cb0b5af191bbf712261a36270881b",
+    "preview_digest": "ae87da135a76941ed98b899e1ab957501faf8d719942240fe27247e596dac865",
+    "request_id": "revision-one",
+    "reason": "User approved independent preparation"
+  },
+  "trusted_source": {
+    "source": "host_user",
+    "source_id": "test-user:revision",
+    "intent": "修订阶段计划"
+  },
+  "source_sha256": {
+    "tools/stage_acceptance.py": "c80e8cfed4c5d0c1e56494d8a166b7ba9b85ee4092affaf0dcff50ce8ae31420",
+    "tools/icode_control.py": "9bd80e8e6c2b06926d1ca575c55bd02b7c29fad6f211b9bbc0f97086aaa6142d"
+  },
+  "provenance": "Captured before feature edits; paths normalized and binding references omitted with old implementation digest function. Tests of this portable record cover lineage and exact replay selection, not live filesystem provenance. Private actual capture retained separately."
+}
