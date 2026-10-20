@@ -36,6 +36,11 @@ def invoke(function, *args, provider=None, required=False, **kwargs):
     return function(*args, **kwargs)
 
 
+def data_face(context):
+    """Equal contexts promise equal data; each call owns its resolver closure."""
+    return {key: value for key, value in context.items() if not callable(value)}
+
+
 class Provider(api.CandidateGitProvider):
     def __init__(self, workspace, facts, tree, index, blobs):
         self.workspace, self.facts = workspace, facts
@@ -132,7 +137,10 @@ class CandidateContextTests(unittest.TestCase):
         self.assertEqual(ctl.candidate_snapshot(self.ticket, meta),
                          invoke(ctl.candidate_snapshot, self.ticket, meta))
         first, second = ctl.verification_context(self.ticket, meta), invoke(ctl.verification_context, self.ticket, meta)
-        self.assertEqual(first, second)
+        self.assertEqual(sorted(first), sorted(second))
+        self.assertTrue(callable(first["review_validator"]))
+        self.assertTrue(callable(second["review_validator"]))
+        self.assertEqual(data_face(first), data_face(second))
         self.assertNotIn("_candidate_b1_pending", first)
         self.assertFalse(ctl.verify_event_chain(self.ticket, meta)[1])
         self.assertEqual(before, self.frozen())

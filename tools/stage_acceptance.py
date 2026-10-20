@@ -45,15 +45,20 @@ def locator_path(project):
     return Path(project) / ".icode_output" / ".stage_program" / "locator.json"
 
 
-def discover_stage_history(project, *, limits=None):
+def discover_stage_history(project, *, limits=None, tolerate=None):
     """Bounded control-file discovery after complete locator-directory loss.
 
     Only fixed ordinary/debug ticket directories are inspected. A metadata
     marker is trusted only with its writer-only event mirror and intact ledger.
     No Git query or historical raw evidence read is performed. Time is checked
     around local I/O; an OS filesystem call itself is not interruptible here.
+
+    ``tolerate`` names the one ordinary ticket whose own interrupted or damaged
+    control state is being handled by its business lane; it can never hold a
+    stage marker, so its state proves nothing about stage history.
     """
     api, project = ctl(), Path(project).resolve()
+    tolerate = Path(tolerate).resolve() if tolerate is not None else None
     bounds = dict(DISCOVERY_LIMITS)
     if limits is not None:
         if not isinstance(limits, dict) or set(limits) - bounds.keys() or any(
@@ -121,10 +126,8 @@ def discover_stage_history(project, *, limits=None):
         for root in roots:
             for directory in tickets(root):
                 meta_path, events_path = directory / api.METADATA_NAME, directory / api.EVENTS_NAME
-                if os.path.lexists(directory / api.TXN_NAME):
-                    fail("stage discovery found a pending transaction; recover its control ledger first")
                 if not os.path.lexists(meta_path):
-                    if os.path.lexists(events_path):
+                    if os.path.lexists(events_path) or os.path.lexists(directory / api.TXN_NAME):
                         fail("stage discovery found an orphan ledger; locator state is unknown")
                     continue
                 meta = api.strict_json_loads(read(meta_path).decode("utf-8"))
@@ -132,30 +135,50 @@ def discover_stage_history(project, *, limits=None):
                     fail("stage discovery metadata is not an object")
                 markers = protected_values(meta)
                 has_marker = any(markers[key] is not None for key in ("stage_program", "stage_binding"))
+                tolerant = tolerate is not None and directory == tolerate and not has_marker
+                if os.path.lexists(directory / api.TXN_NAME):
+                    if tolerant:
+                        continue
+                    fail("stage discovery found a pending transaction; recover its control ledger first")
                 if not os.path.lexists(events_path):
+                    if tolerant:
+                        continue
                     if api.is_vnext(meta) or has_marker:
                         fail("stage discovery cannot authenticate metadata without its ledger")
                     continue  # Ordinary legacy tickets had no vNext ledger.
-                events, previous, seen = [], api.GENESIS_HASH, set()
-                for line in read(events_path).splitlines():
-                    if not line.strip():
-                        continue
-                    check()
-                    counts["events"] += 1
-                    if counts["events"] > bounds["max_events"]:
-                        fail("stage history discovery event budget exhausted")
-                    event = api.strict_json_loads(line.decode("utf-8"))
-                    if api.check_schema(event, event_schema) or event["event_id"] in seen \
-                            or (events and event.get("ticket_id") != events[0].get("ticket_id")) or event["previous_event_hash"] != previous \
-                            or event["event_hash"] != api.canonical_event_hash(event):
-                        fail("stage discovery control ledger hash/schema/identity is damaged")
-                    seen.add(event["event_id"])
-                    previous = event["event_hash"]
-                    events.append(event)
-                if not events or events[0]["event_type"] not in {"ticket_created", "migration_applied"}:
-                    fail("stage discovery control ledger has no authenticated origin")
-                if event_issues(events, meta):
-                    fail("stage discovery metadata/protected writer ledger mirrors disagree")
+                unproven = {
+                    "stage: stage discovery control ledger hash/schema/identity is damaged",
+                    "stage: stage discovery control ledger has no authenticated origin",
+                    "stage: stage discovery metadata/protected writer ledger mirrors disagree",
+                }
+                try:
+                    events, previous, seen = [], api.GENESIS_HASH, set()
+                    for line in read(events_path).splitlines():
+                        if not line.strip():
+                            continue
+                        check()
+                        counts["events"] += 1
+                        if counts["events"] > bounds["max_events"]:
+                            fail("stage history discovery event budget exhausted")
+                        event = api.strict_json_loads(line.decode("utf-8"))
+                        if api.check_schema(event, event_schema) or event["event_id"] in seen \
+                                or (events and event.get("ticket_id") != events[0].get("ticket_id")) or event["previous_event_hash"] != previous \
+                                or event["event_hash"] != api.canonical_event_hash(event):
+                            fail("stage discovery control ledger hash/schema/identity is damaged")
+                        seen.add(event["event_id"])
+                        previous = event["event_hash"]
+                        events.append(event)
+                    if not events or events[0]["event_type"] not in {"ticket_created", "migration_applied"}:
+                        fail("stage discovery control ledger has no authenticated origin")
+                    if event_issues(events, meta):
+                        fail("stage discovery metadata/protected writer ledger mirrors disagree")
+                except api.ControlError as exc:
+                    # The tolerated ordinary ticket's ledger is the business
+                    # lane's contract, not stage evidence. Budget, timeout,
+                    # symlink and repeated-read failures stay fatal.
+                    if not tolerant or str(exc) not in unproven:
+                        raise
+                    continue
                 stage_history = has_marker or any((event.get("payload") or {}).get("stage_control") is not None for event in events)
                 if stage_history:
                     # Discovery is a stage guard, not a cross-ticket audit of
@@ -350,10 +373,10 @@ def _resolve(directory, *, _metadata_override=None, _allow_pending=False, **acce
     directory = Path(directory).resolve()
     hint = ctl().load_metadata(directory) if _metadata_override is None else _metadata_override
     if not locator_path(_project(hint)).parent.exists() and not any(protected_values(hint)[key] is not None for key in ("stage_binding", "stage_program")):
-        if discover_stage_history(_project(hint)) is not None:
+        if discover_stage_history(_project(hint), tolerate=directory) is not None:
             fail("project stage locator directory is missing; recover it with stage register on the authenticated coordinator")
-        if access:
-            ctl()._candidate_context_guard(directory, hint, access["git_provider"], access["require_git_provider"])
+        # No stage state to project. Provider context belongs to the business
+        # lane; failing it here would replace its own gate with stage_gate.
         return None
     meta, events = _verified(directory, _metadata_override=_metadata_override, _allow_pending=_allow_pending, **access)
     binding = (meta.get("extensions") or {}).get("stage_binding")
