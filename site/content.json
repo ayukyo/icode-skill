@@ -501,6 +501,12 @@
   },
   "updates": [
     {
+      "version": "v2.32.3",
+      "reviewed_on": "2026-10-20",
+      "zh-CN": "阶段程序与证据包纳入受控写入契约，受保护 Git 读取端口贯通候选、派发、构建启动与验证记录；修复阶段门禁误伤普通工单；同步改用重命名回收运行时目录，报告与门禁目录统一 UTF-8。",
+      "en": "Stage programs and evidence bundles join the controlled-write contract, protected Git reads cover candidate, dispatch, build-start and verification records, a stage gate regression on ordinary tickets is fixed, and synchronization reclaims runtime directories by rename with UTF-8 reports and gate catalogs."
+    },
+    {
       "version": "v2.32.1",
       "reviewed_on": "2026-10-08",
       "zh-CN": "修复 Word 兼容渲染器的自动安装、哈希校验与同步后登记保留；公开发行加入真实渲染验收。当前渲染配方覆盖 Ubuntu 兼容的 Linux x86_64，其他平台仍明确待补。",
