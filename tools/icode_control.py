@@ -2514,6 +2514,8 @@ def commit_metadata_and_event(out_dir, before, after, event_type, payload,
         _events, problems = verify_event_chain(out_dir, before, **access)
         if problems:
             raise ControlError("candidate transaction event chain invalid", gate_id="event_chain", violations=problems)
+        # The full history has been consumed; later guards revalidate independently.
+        del _events
     if event_type == "ticket_created":
         stage_module().protect_update({}, after)
     elif event_type == "metadata_updated" and not any(payload.get(key) for key in ("stage_control", "serial_claim_control", "visual_review_control", "evidence_review_control")):
@@ -2524,6 +2526,8 @@ def commit_metadata_and_event(out_dir, before, after, event_type, payload,
         stage_module().require_inherited_contract(state, after)
         if stage_token is not None:
             stage_token["proposed_contract"] = copy.deepcopy(after.get("verification_contract") or {})
+        # Keep only the copied contract across preparation and publication reads.
+        del state
     require_valid_metadata(after)
     event_payload = dict(payload)
     event_payload["metadata_hash_after"] = metadata_hash(after)
@@ -4328,6 +4332,8 @@ def _stage_write_guard(out_dir, event_type, payload, *, git_provider=None, requi
             implemented = any(event["event_type"] == "verification_recorded" or
                 (event["event_type"] == "step_started" and (event.get("payload") or {}).get("step") in {"code", "patch", "fast", "verify", "deploy", "deepcheck", "audit"}) or
                 (event["event_type"] == "operation_started" and (event.get("payload") or {}).get("class") != "read_only") for event in events)
+            # Only the completed boolean is needed by the following stage guard.
+            del events
             if not implemented and meta.get("status") in {"init_in_progress", "log_in_progress", "log_done", "plan_done", "review_in_progress", "review_done", "plan_finalized"}:
                 return retirement
     view = require_stage_action(out_dir, action, git_provider=git_provider, require_git_provider=require_git_provider)
@@ -5773,6 +5779,8 @@ def cmd_record_agent_spawn(args):
                               "event_id": prior["event_id"]},
                              ensure_ascii=False, indent=2))
             return 0
+        # Idempotency is resolved; the writer performs its own fresh validation.
+        del events
         spawns = _agent_spawns(meta)
         open_spawns = [item for item in spawns if "result" not in item]
         if exclusive_key:
@@ -5850,6 +5858,8 @@ def cmd_record_agent_result(args):
                               "event_id": prior["event_id"]},
                              ensure_ascii=False, indent=2))
             return 0
+        # Idempotency is resolved; do not retain the full history across commit.
+        del events
         spawns = [dict(item) for item in _agent_spawns(meta)]
         target = next((item for item in spawns if item.get("spawn_id") == spawn_id), None)
         if target is None:
@@ -6385,6 +6395,8 @@ def cmd_step(args, *, git_provider=None, require_git_provider=False, inspection_
                 events, args.request, "gate_checked", payload,
                 payload_keys=["step", "attempt", "boundary", "result", "changed_inputs",
                               "missing_inputs", "captured_digest", "current_digest", "route"])
+            # This branch needs only start/prior, not the complete history list.
+            del events
             event = prior or append_event(out_dir, meta, "gate_checked", payload,
                                           request_id=args.request, **access)
             result = {"ok": result_name == "pass", "step": args.step,

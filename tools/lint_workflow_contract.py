@@ -130,7 +130,63 @@ def find_gates_catalog() -> Tuple[Optional[Dict], Optional[str]]:
     return None, f"未找到 mcp/workflow-gate/gates.json（查找位置: {candidates}）"
 
 
-def scan_sensitive(obj: Any, path: str = "$") -> List[str]:
+def _negative_permission_note(text: str, path: str) -> bool:
+    """Recognize a bounded permission disclaimer, not general credential prose."""
+    if re.fullmatch(r"\$\.verification_runs(?:\[[0-9]+\])?\.note", path) is None \
+            or len(text) > MAX_EVIDENCE_VALUE_CHARS:
+        return False
+    # Unknown control/non-ASCII structure retains the original strict scan.
+    if any(not 32 <= ord(char) <= 126 for char in text) or text.splitlines() != [text]:
+        return False
+    # Reject assignment/structure syntax throughout the note before prose.
+    if any(char in text for char in '="\'`{}[]<>|&$%\\+*^~'):
+        return False
+    low = text.lower()
+    # Inspect the full prefix once, including punctuation inside header names.
+    last_colon = low.rfind(":")
+    if last_colon >= 0 and any(word in low[:last_colon]
+                              for word in (*SENSITIVE_KEYWORDS, "token", "credential")):
+        return False
+    if low.count("authorization") != 1 or any(
+            word in low for word in SENSITIVE_KEYWORDS if word != "authorization"):
+        return False
+    hit = re.search(r"(?<!\w)authorization(?!\w)", low)
+    if hit is None or re.fullmatch(r"[.!?]?\s*", low[hit.end():]) is None:
+        return False
+    # Find boundaries on the original full string; slicing must not invent '$'.
+    start = 0
+    for boundary in re.finditer(r"[.;!?](?=\s|$)", low):
+        if boundary.end() <= hit.start():
+            start = boundary.end()
+    clause = low[start:].strip().rstrip(".!?").strip()
+    if not clause.startswith("no "):
+        return False
+    body = clause[3:]
+    if re.search(r"\s+and\s+", body):
+        return False
+    fragments = re.split(r",\s*|\s+or\s+", body)
+    # Require a final 'or' for the defined label-list shape.
+    # This is lexical matching, not proof of English negation scope.
+    if len(fragments) > 1 and re.search(r"\s+or\s+[^,]+$", body) is None:
+        return False
+    # These are small label lists, not a natural-language semantic parser.
+    forbidden = {"no", "not", "only", "and", "or", "need", "needs", "require", "requires",
+                 "required", "is", "are", "was", "were", "has", "have", "had",
+                 "can", "could", "should", "must", "may", "might", "will", "would",
+                 "receive", "received", "grant", "granted", "allow", "allowed"}
+    for index, fragment in enumerate(fragments):
+        words = fragment.split()
+        limit = 2 if index == len(fragments) - 1 else 3
+        if not words or len(words) > limit or any(word in forbidden for word in words):
+            return False
+        if any(re.fullmatch(r"[a-z][a-z0-9]*(?:[-/][a-z0-9]+)*", word) is None
+               for word in words):
+            return False
+    return fragments[-1].split()[-1] == "authorization"
+
+
+def scan_sensitive(obj: Any, path: str = "$", *,
+                   direct_verification_run: bool = False) -> List[str]:
     """递归扫描 metadata 内敏感数据与超长文本。返回违规描述列表。"""
     issues: List[str] = []
     if isinstance(obj, dict):
@@ -157,6 +213,12 @@ def scan_sensitive(obj: Any, path: str = "$") -> List[str]:
             kl = str(k).lower()
             if any(kw in kl for kw in SENSITIVE_KEYWORDS):
                 issues.append(f"{path}.{k} 命中敏感键名")
+            # Only the trusted direct-run caller may exempt its exact note key.
+            # Recursive values never inherit this qualification.
+            if (direct_verification_run is True and k == "note"
+                    and isinstance(v, str)
+                    and _negative_permission_note(v, f"{path}.{k}")):
+                continue
             issues.extend(scan_sensitive(v, f"{path}.{k}"))
     elif isinstance(obj, list):
         for i, v in enumerate(obj):
@@ -759,7 +821,7 @@ def build_report(out_dir: Path, step_filter: Optional[str], metadata: Dict,
             if key in metadata:
                 sens += len(scan_sensitive(metadata[key]))
     for run in metadata.get("verification_runs") or []:
-        sens += len(scan_sensitive(run, "$.verification_runs"))
+        sens += len(scan_sensitive(run, "$.verification_runs", direct_verification_run=True))
     for receipt in evidence_module().build_starts(metadata):
         sens += len(scan_sensitive(receipt.get("parameters"), "$.build_start.parameters"))
     report["sensitive_data"] = sens
