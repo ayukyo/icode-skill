@@ -49,6 +49,7 @@ on:
       - 'tests/test_host_skill_loading.py'
       - 'tests/test_skill_evaluation.py'
       - 'tests/test_tool_support_progress.py'
+      - 'tests/test_platform_entry_unit.py'
       - 'tests/test_build_preflight_safety.py'
       - 'tests/test_project_intake_contract.sh'
       - 'tests/test_control_plane_verify_doc_contract.sh'
@@ -135,6 +136,7 @@ jobs:
           python3 -m unittest discover -s tests -p test_skill_listing.py -v
           python3 -m unittest discover -s tests -p test_docs_publication.py -v
           python3 -m unittest discover -s tests -p test_skill_installation.py -v
+          python3 -m unittest discover -s tests -p test_platform_entry_unit.py -v
           python3 -m pytest -p no:anyio tests/test_skill_evaluation.py -q
           python3 -m unittest discover -s tests -p test_tool_support_progress.py -v
           python3 -m pytest -p no:anyio tests/test_skill_discovery_metadata.py -q
