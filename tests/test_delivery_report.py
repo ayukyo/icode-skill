@@ -35,6 +35,21 @@ def test_report_has_neutral_optional_crosscheck_and_no_writes(inventory_repo):
     assert before == digest(repo)
 
 
+def test_report_surfaces_gate_degradation_without_changing_verdict_or_leaking_reason(inventory_repo):
+    repo, path, _ = inventory_repo
+    (path.parent / ".thinking_gate_trace.jsonl").write_text(json.dumps({
+        "step": "audit", "result": "degraded", "degraded_reason": "private-never-echo"}), encoding="utf-8")
+    before = digest(repo)
+    tool = delivery()
+    report = tool.build_delivery_report(path.parent)
+    assert report["environment_observations"]["thinking"]["degraded"] == 1
+    assert report["environment_observations"]["status"] == "attention"
+    assert report["delivery_verdict"] is None and report["verification"]["state"] == "untracked"
+    assert "private-never-echo" not in json.dumps(report)
+    assert "环境能力观测" in tool.markdown_report(report)
+    assert before == digest(repo)
+
+
 def test_direct_binary_result_is_independent_of_runner_and_ci(inventory_repo):
     repo, path, meta = inventory_repo
     meta["verification_runs"] = [{"run_id": "direct", "outcome": "pass", "kind": "unit_test",

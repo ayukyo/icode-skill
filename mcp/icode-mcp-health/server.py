@@ -18,12 +18,13 @@ if str(LIB_DIR) not in sys.path:
     sys.path.insert(0, str(LIB_DIR))
 
 from local_mcp_common import READ_ONLY_ANNOTATIONS, describe, expand_path, fail, load_config, ok, resolve_allowed_path  # noqa: E402
+from environment_diagnostics import diagnose_registration as inspect_registration  # noqa: E402
 from mcp import ClientSession, StdioServerParameters  # noqa: E402
 from mcp.client.stdio import stdio_client  # noqa: E402
 from mcp.server.fastmcp import FastMCP  # noqa: E402
 
 SERVER_NAME = "icode-mcp-health"
-TOOLS = ["describe_capabilities", "inventory_servers", "validate_manifest", "probe_python_server", "scan_sensitive_payload"]
+TOOLS = ["describe_capabilities", "inventory_servers", "validate_manifest", "probe_python_server", "scan_sensitive_payload", "diagnose_registration"]
 DEFAULTS = {
     "allowed_roots": None,
     "trusted_server_roots": ["$HOME/.claude/skills/icode/mcp"],
@@ -67,6 +68,23 @@ def inventory_servers(mcp_root: str) -> dict[str, Any]:
         return ok({"root": str(root), "servers": servers, "count": len(servers)})
     except (OSError, ValueError, PermissionError) as exc:
         return fail("inventory_failed", str(exc), exc=exc, config_env="ICODE_MCP_HEALTH_CONFIG")
+
+
+@mcp.tool(annotations=READ_ONLY_ANNOTATIONS)
+def diagnose_registration(host_config: str, entries_dir: str | None = None) -> dict[str, Any]:
+    """Offline JSON registration observations; never execute or repair entries."""
+    try:
+        config = _config()
+        target = resolve_allowed_path(host_config, config)
+        directory = resolve_allowed_path(entries_dir, config) if entries_dir is not None else None
+        limit = int(config["max_servers"])
+        if not 1 <= limit <= 1000:
+            raise ValueError("invalid server limit")
+        return ok(inspect_registration(target, directory, max_servers=limit,
+                                       resolve_path=lambda path: resolve_allowed_path(path, config)))
+    except (OSError, ValueError, TypeError, PermissionError):
+        # Config contents and parse errors may contain credentials.
+        return fail("registration_diagnosis_failed", "Registration paths or configuration are unavailable.")
 
 
 def _validate_manifest_file(path: Path) -> tuple[list[str], dict[str, Any] | None]:

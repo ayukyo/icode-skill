@@ -13,6 +13,12 @@ on:
       - 'tools/build_skill_distribution.py'
       - 'mcp/icode-local-index/**'
       - 'mcp/_lib/local_mcp_common.py'
+      - 'mcp/_lib/environment_diagnostics.py'
+      - 'mcp/_lib/claude_registry.py'
+      - 'tools/mcp_doctor.py'
+      - 'tests/test_environment_diagnostics.py'
+      - 'tests/test_claude_registry_unit.py'
+      - 'tests/test_field_verification_continuity.py'
       - 'mcp/icode-workspace/**'
       - 'mcp/icode-evidence/**'
       - 'mcp/icode-device-observe/**'
@@ -65,7 +71,7 @@ jobs:
       - name: Install declared MCP and test dependencies
         run: python -m pip install --disable-pip-version-check --no-cache-dir -r mcp/icode-local-index/requirements.txt pytest==9.0.3
       - name: Index lifetime, local MCP and test report regressions
-        run: python -m pytest -p no:anyio tests/test_local_index_lifecycle.py tests/test_local_mcp_suite.py tests/test_local_mcp_paths.py tests/test_local_mcp_access_policy.py tests/test_workspace_access_policy.py tests/test_test_result_summary.py tests/test_delivery_report.py -q
+        run: python -m pytest -p no:anyio tests/test_local_index_lifecycle.py tests/test_local_mcp_suite.py tests/test_local_mcp_paths.py tests/test_local_mcp_access_policy.py tests/test_workspace_access_policy.py tests/test_test_result_summary.py tests/test_delivery_report.py tests/test_environment_diagnostics.py tests/test_claude_registry_unit.py tests/test_field_verification_continuity.py -q
       - name: Shared skill and route contract
         run: python tools/validate_skill_pack.py --manifest skill-packs/manifest.json --routes mcp/workflow-gate/skill-routes.json --list
       - name: Offline distribution resource contract

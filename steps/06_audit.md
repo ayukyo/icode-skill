@@ -270,6 +270,12 @@ git rev-list --count <worktree_branch>..<目标基分支>     # 目标基分支 
 
 > **workflow gate 终审验收门（P1，无完整验收证据不得标 verified）**：终审前运行 `python3 tools/lint_workflow_contract.py {ICODE_OUT_DIR} --step audit-verified --json`——若工单**改变权威状态或实体身份**（`acceptance_contract` 声明生命周期 / `impact_contract.identity_change=true`）且验收矩阵**缺必填单元**（`phases × consumers` 有空 cell）→ `delivery_verdict` **不得标 `verified`**（只能 `verification_pending` / `blocked` / `not_applicable`），并在 6.1 问题清单记"生命周期验收矩阵不完整"。只验证直接查询不能标完成（lint 阻断）。终审报告须能解释每项结论对应的**合同字段 + 验证证据**（见 [SKILL.md「工作流硬门禁」](../SKILL.md)）。
 
+## 环境能力与现场登记对账
+
+终审交付前读取 [环境诊断与现场登记](../references/environment_diagnostics.md)，运行 `python3 tools/icode_delivery.py --dir {ICODE_OUT_DIR}`，在摘要中展示 `environment_observations` 的 thinking/MCP 降级、未记录或不可读状态。原始原因只在本地 trace 核对，给出 `python3 tools/mcp_doctor.py --json` 和对应修复/重载动作；不以统计代替已有严格门禁，不降低 verified 门槛。
+
+逐个对照本轮实际执行的构建、部署、监听、测试与 verification run/事件；缺登记、设备/制品/时间窗或原始证据的项目明确列为待办，不能用 HANDOFF 的文字成功抵消债务。后续轮次保留既有产物及摘要，沿现有 patch/verify 入口登记；完成和关闭的区别按共享参考执行。
+
 ## 6.4 交付报告提示
 
 步骤6 完成后，提示用户：`▶ 步骤6 终审完成。可选：运行 /icode readme 生成交付报告 + 跨领域简报（两份）`

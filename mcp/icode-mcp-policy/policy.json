@@ -16,7 +16,7 @@
     },
     "icode-mcp-health": {
       "operations": ["read"],
-      "tools": ["describe_capabilities", "inventory_servers", "validate_manifest", "probe_python_server", "scan_sensitive_payload"]
+      "tools": ["describe_capabilities", "inventory_servers", "validate_manifest", "probe_python_server", "scan_sensitive_payload", "diagnose_registration"]
     },
     "icode-mcp-policy": {
       "operations": ["read"],

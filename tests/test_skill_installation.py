@@ -198,6 +198,7 @@ class InstallationTests(unittest.TestCase):
                           "references/docx_authoring.md", "references/docx_revision.md",
                           "references/doc_snapshot_contract.md",
                           "references/wsl_build.md", "references/mcp_path_access.md",
+                          "references/environment_diagnostics.md",
                           "tools/icode_control.py"})
 
     def test_parent_traversal_is_rejected_without_normalizing_it_away(self):

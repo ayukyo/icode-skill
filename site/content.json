@@ -501,6 +501,12 @@
   },
   "updates": [
     {
+      "version": "v2.33.0",
+      "reviewed_on": "2026-10-24",
+      "zh-CN": "新增只读环境诊断，区分核心安装漂移、MCP 注册与会话实际可用性；兼容带 BOM 的 Claude 配置；交付摘要展示思考/MCP 降级，并沿用既有 patch/verify 留存现场验证证据。",
+      "en": "Add offline environment diagnostics separating core-installation drift, MCP registration and actual session availability. Accept BOM-prefixed Claude configuration, surface recorded gate degradation in delivery reports, and retain field evidence through the existing patch/verify ports."
+    },
+    {
       "version": "v2.32.3",
       "reviewed_on": "2026-10-20",
       "zh-CN": "阶段程序与证据包纳入受控写入契约，受保护 Git 读取端口贯通候选、派发、构建启动与验证记录；修复阶段门禁误伤普通工单；同步改用重命名回收运行时目录，报告与门禁目录统一 UTF-8。",

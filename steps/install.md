@@ -155,6 +155,8 @@
 
 ## 与其他步骤的关系
 
+安装或升级结束后，按 [环境诊断与现场登记](../references/environment_diagnostics.md) 执行 `python3 tools/mcp_doctor.py --json`；从明确源码仓安装时附 `--source <源码根>` 检查核心安装摘要。列出注册漂移、外来平台路径、缺入口及待重载会话，不以脚本安装成功替代真实握手。该诊断默认只读，不能自动修复无关服务；`mcp/install.sh --check` 仍仅表示安装入口预检，不冒充运行期诊断。
+
 - **与 `doc` / `docx` / `status` / `list` 并列**：均为独立步骤，不参与 1~6 流程推进
 - **建议时机**：clone 仓库后立即跑一次；后续 install.sh 升级时再跑（增量更新）
 - **不写工单**：不创建 `00_init.md` / `.ico_metadata.json`，不更新 `~/.claude/icode_data/index.json`

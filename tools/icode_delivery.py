@@ -26,6 +26,7 @@ ctl = load_module("delivery_control", "tools/icode_control.py")
 guard = load_module("delivery_submission", "scripts/submission_guard.py")
 debt = load_module("delivery_debt", "tools/verification_debt.py")
 crosscheck = load_module("delivery_crosscheck", "tools/icode_crosscheck.py")
+diagnostics = load_module("delivery_environment", "mcp/_lib/environment_diagnostics.py")
 
 
 def run_summary(run):
@@ -86,7 +87,8 @@ def build_delivery_report(out_dir, meta=None):
             "status": meta.get("status"), "delivery_verdict": meta.get("delivery_verdict"),
             "candidate": {"state": review["state"], "candidate_id": review.get("candidate_id"), "enabled": enabled},
             "internal_review": review, "verification": verification,
-            "submission_inventory": inventory_summary, "crosscheck": optional_review, "issues": issues}
+            "submission_inventory": inventory_summary, "crosscheck": optional_review,
+            "environment_observations": diagnostics.summarize_gates(out_dir), "issues": issues}
 
 
 def markdown_report(report):
@@ -96,6 +98,10 @@ def markdown_report(report):
              f"- 内部评审：`{report['internal_review']['state']}`",
              f"- 验证：`{report['verification']['state']}`",
              f"- 可选 crosscheck：`{report['crosscheck']['state']}`（不进入主门禁）", ""]
+    observations = report.get("environment_observations")
+    if observations:
+        lines.extend(["- 环境能力观测（既有 trace 统计，不替代门禁或会话验证）：" +
+                      json.dumps(observations, ensure_ascii=True, separators=(',', ':')), ""])
     for group in ("intended", "side_effects", "unknown"):
         paths = report["submission_inventory"][group]
         lines.append(f"- {group}：{json.dumps(paths, ensure_ascii=True)}")

@@ -22,6 +22,8 @@
 
 ## 定位
 
+**收口后续跑与登记对账**：执行 [环境诊断与现场登记](../references/environment_diagnostics.md) 的收尾规则。completed 后的验证沿本步骤逐阶段登记，修改源码转 patch；close_state 冻结仍需 reopen。新轮次使用唯一证据路径并保留旧摘要；结束前对照实际动作与 run_id/事件，缺身份/日志或未登记均显式列出。历史现场文本先核对原始证据，不自动补造通过或升级 delivery_verdict。
+
 **何时 verify**：已交付/打补丁后，需要单独再跑一轮实机验证（复测、回归、目标侧确认）而**无代码修改意图**时。改代码场景仍走 `/icode patch`；修改后需要自动监听时可用 `/icode patch --listen`，显式触发验证统一使用本步骤的 `--test`。
 
 **何时不用 verify**：要改代码 → `/icode patch`；需要设备的阶段无 device_config → 先补配置；`--build` 不受设备配置或是否已部署限制。`--deploy` 无唯一可核验的现有产物 → 停止并说明所需产物身份，不猜测“最近文件”。

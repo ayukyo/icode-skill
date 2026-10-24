@@ -75,6 +75,24 @@ class LocalMcpAccessPolicyTest(unittest.TestCase):
             with self.assertRaises(PermissionError):
                 common.resolve_allowed_path(self.disk, {"allowed_roots": None})
 
+    def test_registration_diagnosis_checks_every_export_and_never_spawns(self):
+        config = self.disk / "host.json"
+        config.write_text(json.dumps({"mcpServers": {"demo": {"command": sys.executable}}}), encoding="utf-8")
+        entries = self.disk / "entries"
+        entries.mkdir()
+        (entries / "demo.json").write_text(json.dumps({"command": sys.executable}), encoding="utf-8")
+        self.config("icode-mcp-health", {"allowed_roots": [str(self.disk)]})
+        health = self.modules["icode-mcp-health"]
+        with mock.patch("subprocess.Popen", side_effect=AssertionError("static tool must not spawn")):
+            result = health.diagnose_registration(str(config), str(entries))
+        self.assertNotIn("error_code", result)
+        self.assertEqual(result["answer"]["servers"][0]["status"], "launch_path_uninspected")
+        with mock.patch.object(health, "resolve_allowed_path", side_effect=PermissionError("denied")):
+            denied = health.diagnose_registration(str(config), str(entries))
+        self.assertEqual(denied["error_code"], "registration_diagnosis_failed")
+        self.config("icode-mcp-health", {"allowed_roots": [str(self.disk)], "max_servers": None})
+        self.assertEqual(health.diagnose_registration(str(config))["error_code"], "registration_diagnosis_failed")
+
     def test_empty_or_malformed_explicit_roots_fail_closed(self):
         for roots in ([], "all", ["", None], [str(self.disk), None]):
             with self.subTest(roots=roots), self.assertRaises(ValueError):

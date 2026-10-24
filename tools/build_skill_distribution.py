@@ -33,6 +33,8 @@ REQUIRED = FILES | METADATA | {"skill-packs/manifest.json", "mcp/workflow-gate/g
                     "tools/docx/verify_sources.py", "tools/docx/draw_sequence.py"}
 REQUIRED |= {"steps/doc.md", "references/doc_snapshot_contract.md", "tools/doc_snapshot.py"}
 REQUIRED |= {"tools/test_result_summary.py", "references/wsl_build.md", "references/mcp_path_access.md"}
+REQUIRED |= {"mcp/_lib/environment_diagnostics.py", "tools/mcp_doctor.py",
+             "references/environment_diagnostics.md"}
 
 
 def no_symlinks(path):

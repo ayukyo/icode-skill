@@ -6,6 +6,7 @@
 - `/icode status --scan`：批量扫描 unknown 完成态工单的证伪信号，提示标注
 - `/icode status --validate [N]`：机器校验工单产物集完整性（产物缺件 / status 词表外 / code_files 空），只读 + 输出问题清单
 - `/icode status --pending [--project <path>]`：跨工单汇总 required 验证单元的未完成/失败/证据缺失债务，只读源工单
+- `/icode status --doctor`：只读环境诊断，不要求存在工单；区分核心安装、注册配置和会话工具状态
 
 **产出**: 默认无（只读）；`--verdict` 写 `{ICODE_OUT_DIR}/.ico_metadata.json` + `~/.claude/icode_data/index.json`（不写工程内源码文件）；`--scan` / `--validate` 只读 + 输出提示/问题清单；`--pending` 只读源工单并写 `<project>/.icode_output/verification_debt.json/.md` 派生报告
 **会话**: 主会话
@@ -13,6 +14,10 @@
 ## 定位
 
 会话中断后恢复时，用户不知道当前在哪个步骤。此命令默认纯读 metadata 输出摘要帮助快速定位；`--verdict` 给历史工单标方向结论（防误导新需求，详见 SKILL.md「verdict 字段族」+「注入形式·按 verdict 分流」）；`--scan` 批量识别可能被证伪但未标注的旧工单（治本，比一个个手动标高效）。
+
+## 环境诊断（`/icode status --doctor`）
+
+先读取 [环境诊断与现场登记](../references/environment_diagnostics.md)。运行 `python3 tools/mcp_doctor.py --json`；用户明确提供源码根时附 `--source <源码根>`，明确工单时附 `--ticket-dir <工单目录>`。没有工单也可执行，不套用下方 latest 检测。只报告问题与修复入口，不写注册、不启动进程、不要求重建工单。Codex 注册使用官方 CLI 另行查询，不能把未检查的宿主写成正常；同步后会话仍需真实工具调用验证。
 
 ## 模式一：默认只读查询（`/icode status`）
 
@@ -22,6 +27,7 @@
 2. 读取 `.ico_metadata.json`
 3. 运行 `python3 tools/icode_control.py trace --dir {ICODE_OUT_DIR} --limit 10`；成功时把开放 step/operation 与最近轨迹并入摘要，失败时明确标「执行轨迹不可验证」，不得用猜测补齐。
    再运行 `python3 tools/icode_delivery.py --dir {ICODE_OUT_DIR}` 读取派生交付事实：当前候选 ID、内部 code/deepcheck/audit 新鲜度、验证合同/债务、run 的实际 build/deploy/runtime 来源、直接测试的四项独立事实，以及 intended/side_effects/unknown 提交库存。查询执行成功与报告 `ok` 分开：stdout 查询退出 0 不代表已满足交付；`legacy_untracked` 不补造评审。未完成事务或事件链不一致显示 blocked，禁止查询时恢复事务、建锁或改工单。
+   同时展示 `environment_observations` 的思考/MCP 降级统计；`untracked`/`partial` 如实保留，出现问题给出 `status --doctor` 入口。统计口径与会话验证边界见上述共享参考。
    可选 crosscheck 仅显示事实：没有记录为中性 `not_run`，不推荐、不阻塞；有效历史可显示 `current(pass|changes_recommended)`，源码漂移显示 `stale`，无候选的旧记录附 `legacy_untracked`。不自动启动或重跑 crosscheck，也不把其结果加入主门禁。
 4. 输出状态摘要：
 

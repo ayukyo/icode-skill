@@ -53,7 +53,7 @@ def _read_cfg(path: Path) -> dict:
     if not path.exists():
         return {}
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
     except (json.JSONDecodeError, UnicodeDecodeError) as exc:
         backup = _backup(path)
         raise RuntimeError(

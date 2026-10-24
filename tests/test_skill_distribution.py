@@ -36,6 +36,9 @@ class DistributionTests(unittest.TestCase):
             "references/wsl_build.md": "WSL build contract\n",
             "references/mcp_path_access.md": "Local MCP path contract\n",
             "tools/test_result_summary.py": "# bounded JUnit report summary\n",
+            "mcp/_lib/environment_diagnostics.py": "# offline observations\n",
+            "tools/mcp_doctor.py": "# offline environment CLI\n",
+            "references/environment_diagnostics.md": "Environment observation boundaries\n",
             "tools/doc_snapshot.py": "# DOC capture/publish/resolve runtime\n",
             "references/skill_routing.md": "routing\n",
             "references/docx_authoring.md": "authoring\n",
@@ -118,6 +121,7 @@ class DistributionTests(unittest.TestCase):
                      "steps/docx.md", "references/docx_authoring.md", "references/docx_revision.md",
                      "steps/doc.md", "references/doc_snapshot_contract.md", "tools/doc_snapshot.py",
                      "references/wsl_build.md", "references/mcp_path_access.md", "tools/test_result_summary.py",
+                     "mcp/_lib/environment_diagnostics.py", "tools/mcp_doctor.py", "references/environment_diagnostics.md",
                      "tools/docx/compare_docx.py", "tools/docx/verify_sources.py", "tools/docx/draw_sequence.py",
                      "integrations/codebuddy/commands/icode.md"):
             self.assertEqual((workflow / name).read_bytes(), (self.source / name).read_bytes())
@@ -205,7 +209,8 @@ class DistributionTests(unittest.TestCase):
         self.assertFalse(self.output.exists())
 
     def test_generic_verification_resources_must_be_tracked(self):
-        for name in ("tools/test_result_summary.py", "references/wsl_build.md", "references/mcp_path_access.md"):
+        for name in ("tools/test_result_summary.py", "references/wsl_build.md", "references/mcp_path_access.md",
+                     "mcp/_lib/environment_diagnostics.py", "tools/mcp_doctor.py", "references/environment_diagnostics.md"):
             with self.subTest(resource=name):
                 self.git("rm", "--cached", name)
                 result = self.build()
