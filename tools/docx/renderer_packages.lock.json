@@ -41,7 +41,8 @@
           "bytes": 185976,
           "sha256": "5e2579fac5478529967f7955283676906f2692419117c5a49d2439ec5bea2498",
           "urls": [
-            "https://security.ubuntu.com/ubuntu/pool/main/p/poppler/poppler-utils_22.02.0-2ubuntu0.14_amd64.deb"
+            "https://snapshot.ubuntu.com/ubuntu/20261020T000000Z/pool/main/p/poppler/poppler-utils_22.02.0-2ubuntu0.14_amd64.deb",
+            "https://archive.ubuntu.com/ubuntu/pool/main/p/poppler/poppler-utils_22.02.0-2ubuntu0.14_amd64.deb"
           ],
           "provenance": "Ubuntu jammy-security signed APT Packages metadata"
         },
@@ -51,7 +52,8 @@
           "bytes": 1079142,
           "sha256": "7cb48217cbd05e22248a801021410353b1e50d3cd6f864f907273c915ed78d2c",
           "urls": [
-            "https://security.ubuntu.com/ubuntu/pool/main/p/poppler/libpoppler118_22.02.0-2ubuntu0.14_amd64.deb"
+            "https://snapshot.ubuntu.com/ubuntu/20261020T000000Z/pool/main/p/poppler/libpoppler118_22.02.0-2ubuntu0.14_amd64.deb",
+            "https://archive.ubuntu.com/ubuntu/pool/main/p/poppler/libpoppler118_22.02.0-2ubuntu0.14_amd64.deb"
           ],
           "provenance": "Ubuntu jammy-security signed APT Packages metadata"
         }
