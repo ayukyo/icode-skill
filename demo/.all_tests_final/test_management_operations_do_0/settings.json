@@ -1,9 +1,0 @@
-{
-  "host": "auto",
-  "model": "",
-  "mode": "simple",
-  "fallback": true,
-  "show_next_step": true,
-  "preferred_port": 8765,
-  "refresh_interval_seconds": 45
-}
