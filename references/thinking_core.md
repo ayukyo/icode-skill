@@ -101,7 +101,7 @@ N. **强制思考前置**（不可跳过，缺证据视为不合规；按 [refer
 >
 > | 组 | 必须同时满足 | 降级声明固定模板（原样输出，确认行格式与 steps/08_patch.md 一致） |
 > |----|------------|-------------------------------------|
-> | **配置缺失组** | ① ToolSearch 取 schema（精确 + 模糊各至少 1 次）→ 均无命中（**宿主无 ToolSearch 能力时跳过本条**，见 0.A）；② Read **宿主配置** 的 `mcpServers` **与** 项目根 `.mcp.json`（若有）→ **都**无 `sequential-thinking` server。宿主配置路径自适应：**CodeBuddy = `~/.codebuddy/mcp.json`** / Claude Code = `~/.claude.json` / Codex = `codex mcp list` | `强制思考: 降级文字块（未配置 server：<宿主配置路径> 与 .mcp.json 均无 sequential-thinking，可运行 mcp/sequential-thinking/install.sh 安装）` |
+> | **配置缺失组** | ① ToolSearch 取 schema（精确 + 模糊各至少 1 次）→ 均无命中（**宿主无 ToolSearch 能力时跳过本条**，见 0.A）；② Read **宿主配置** 的 `mcpServers` **与** 项目根 `.mcp.json`（若有）→ **都**无 `sequential-thinking` server。宿主配置路径自适应：**CodeBuddy = `~/.codebuddy/mcp.json`** / Claude Code = `~/.claude.json` / Codex = `codex mcp list` | `强制思考: 降级文字块（未配置 server：<宿主配置路径> 与 .mcp.json 均无 sequential-thinking，可运行 mcp/install.sh --client <claude|codex|codebuddy|workbuddy> sequential-thinking 安装——子工程脚本 mcp/sequential-thinking/install.sh 仅注册 Claude Code，CodeBuddy/WorkBuddy/Codex 宿主必须走顶层安装器才写入各自宿主配置）` |
 > | **解析失败组** | ① ToolSearch 取 schema（精确 + 模糊各至少 1 次）→ 均无命中（**宿主无 ToolSearch 能力时跳过本条**）；② Read **宿主配置**（路径同配置缺失组，按宿主自适应）→ 至少**一处**有 `sequential-thinking` server | `强制思考: 降级文字块（配置有 server——本会话未连接/工具未暴露，请检查宿主 MCP 连接状态或重开会话；工具本身已装，思考按文字块照常完成）` |
 > | **调用失败组** | ① ToolSearch 取 schema ≥1 次 → **有命中**；② 实际调用工具 ≥1 次 → 返回错误/超时 | `强制思考: 降级文字块（ToolSearch 命中但调用失败：<具体错误>）` |
 >

@@ -119,6 +119,10 @@ case "$CLIENT" in
     ;;
 esac
 
+# WindowsApps 的 python3/python 可能是假 stub（--version 无输出但 exit 0）。
+# 探测顺序与其余入口（tools/selfcheck_reasoning_gate.sh、mcp/install.sh）一致：
+# 真实 python3/python 优先；Windows(Git Bash/MSYS) 回退 py 启动器。
+_py_ok() { [ "$("$@" -c 'print(1)' 2>/dev/null)" = "1" ]; }
 PYTHON_BIN=""
 for candidate in python3 python; do
   if command -v "$candidate" >/dev/null 2>&1; then
@@ -129,8 +133,13 @@ for candidate in python3 python; do
     fi
   fi
 done
+if [ -z "$PYTHON_BIN" ] && _py_ok py -3; then
+  # 以包装函数保持 "$PYTHON_BIN" 的单词引用形式（bash 解析函数先于 PATH）
+  py3() { py -3 "$@"; }
+  PYTHON_BIN=py3
+fi
 if [[ -z "$PYTHON_BIN" ]]; then
-  echo "❌ 未找到 python3/python，共享技能校验与安装无法运行" >&2
+  echo "❌ 未找到 python3/python/py 启动器，共享技能校验与安装无法运行" >&2
   exit 1
 fi
 for required in "$DEV_REPO/.gitignore" "$SKILL_PACK_MANIFEST" "$SKILL_ROUTES"; do

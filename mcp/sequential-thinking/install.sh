@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# sequential-thinking 一键注册 MCP server 到 ~/.claude.json
+# sequential-thinking 一键注册 MCP server 到 ~/.claude.json（仅 Claude Code 宿主）
+# ⚠️ CodeBuddy/WorkBuddy/Codex 宿主读各自配置（~/.codebuddy/mcp.json 等），
+#    须走仓库顶层安装器: ./mcp/install.sh --client <host> sequential-thinking
 # 使用:
 #   ./install.sh                  # 注册默认包 @modelcontextprotocol/server-sequential-thinking
 #   ./install.sh <npm_package>    # 注册其他实现包

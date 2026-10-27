@@ -36,6 +36,19 @@ cd <你的 icode-skill 仓库>/mcp/sequential-thinking
 
 **首次调用** MCP 时 `npx` 会自动下载包到 npm 缓存，无需预装。
 
+> **⚠️ 其他宿主（CodeBuddy / WorkBuddy / Codex）**：上面的脚本**只写 `~/.claude.json`**，
+> 而这些宿主读各自的配置（`~/.codebuddy/mcp.json`、`~/.workbuddy/mcp.json`、`codex mcp list`）——
+> 跑完上面的脚本后它们的宿主配置仍缺条目，工作流会一直报「配置缺失组」降级。
+> 这些宿主请改用仓库顶层安装器（同一 entry 会注册到 Claude 真源并合并进对应宿主配置）：
+>
+> ```bash
+> cd <你的 icode-skill 仓库>
+> ./mcp/install.sh --client codebuddy sequential-thinking   # WorkBuddy/Codex 换 --client 值；--client all 自动检测
+> ```
+>
+> 生效方式：CodeBuddy/WorkBuddy 需**新建或重开会话**（当前会话不热加载 MCP）；Codex 新建任务。
+> 宿主配置路径与边界见 [host_adapters.md](../../references/host_adapters.md)。
+
 ### 2. 重启 Claude Code
 
 让 MCP 注册生效。此后 icode 工作流中 reasoning gate 判 **L2/L3** 的步骤首选调用
