@@ -30,10 +30,10 @@
           "bytes": 219786895,
           "sha256": "d0a6031a3837e48f9854e6d2da6489b9fadbd814afa4741fa32a197741663a22",
           "urls": [
-            "https://download.documentfoundation.org/libreoffice/stable/26.8.0/deb/x86_64/LibreOffice_26.8.0_Linux_x86-64_deb.tar.gz",
-            "https://mirrors.bfsu.edu.cn/libreoffice/libreoffice/stable/26.8.0/deb/x86_64/LibreOffice_26.8.0_Linux_x86-64_deb.tar.gz"
+            "https://downloadarchive.documentfoundation.org/libreoffice/old/26.8.0.3/deb/x86_64/LibreOffice_26.8.0.3_Linux_x86-64_deb.tar.gz",
+            "https://download.documentfoundation.org/libreoffice/stable/26.8.0/deb/x86_64/LibreOffice_26.8.0_Linux_x86-64_deb.tar.gz"
           ],
-          "provenance": "https://download.documentfoundation.org/libreoffice/stable/26.8.0/deb/x86_64/LibreOffice_26.8.0_Linux_x86-64_deb.tar.gz.mirrorlist"
+          "provenance": "https://downloadarchive.documentfoundation.org/libreoffice/old/26.8.0.3/deb/x86_64/"
         },
         {
           "name": "poppler-utils_22.02.0-2ubuntu0.14_amd64.deb",
