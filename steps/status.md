@@ -17,7 +17,7 @@
 
 ## 环境诊断（`/icode status --doctor`）
 
-先读取 [环境诊断与现场登记](../references/environment_diagnostics.md)。运行 `python3 tools/mcp_doctor.py --json`；用户明确提供源码根时附 `--source <源码根>`，明确工单时附 `--ticket-dir <工单目录>`。没有工单也可执行，不套用下方 latest 检测。只报告问题与修复入口，不写注册、不启动进程、不要求重建工单。Codex 注册使用官方 CLI 另行查询，不能把未检查的宿主写成正常；同步后会话仍需真实工具调用验证。
+先读取 [环境诊断与现场登记](../references/environment_diagnostics.md)。运行 `python3 tools/mcp_doctor.py --json`；用户明确提供源码根时附 `--source <源码根>`，明确工单时附 `--ticket-dir <工单目录>`。没有工单也可执行，不套用下方 latest 检测。只报告问题与修复入口，不写注册、不启动进程、不要求重建工单。默认检查已存在的 Codex TOML；解析器缺失或宿主未检查必须明示，不能写成正常；同步后会话仍需真实工具调用验证。
 
 ## 模式一：默认只读查询（`/icode status`）
 

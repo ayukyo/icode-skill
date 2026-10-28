@@ -4,6 +4,8 @@
 **产出**: `{ICODE_OUT_DIR}/06_audit.md`（含修复日志段）+ 回写 `{ICODE_OUT_DIR}/03_plan_final.md` 的「实现偏差备忘」段（6.2 第5步）
 **会话**: 主会话
 
+**报告先给决策摘要**：开篇用简短自然语言说明本次改了什么、实际验证范围、交付结论、尚未完成的验证及下一步。内部评分、候选 hash、回执和门禁纠正移入后续证据段；摘要只保留影响用户决策的事实，`verification_pending` 须解释具体待验项。随后完整履行本文件的追溯、七维检查、修复日志与债务要求，不以摘要代替证据，不新增产物文件。
+
 > **共享技能路由**：终审证据收集前读取 [references/skill_routing.md](../references/skill_routing.md)，复核已命中技能的输出与实际代码/验证记录一致。
 > **证据习惯真源**：主代理决定性证据复核、claim ledger 和交付分层统一执行 [references/evidence_and_verification.md](../references/evidence_and_verification.md)。
 > **条件验收**：严格原始证据、视觉目标或阶段计划按 [串口、证据与阶段验收真源](../references/serial_evidence_stages.md)复查当前文件和实际多帧回执；provider success 不等于图像通过。终审报告与阶段报告分别履行既有职责，AI 必需项全通过后才生成当前阶段待确认快照，用户确认不能把 fail/inconclusive 改为 pass。

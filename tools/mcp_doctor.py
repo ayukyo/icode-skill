@@ -29,7 +29,7 @@ def build_report(configs, entries_dir, *, source=None, installed=(), ticket_dir=
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--config", type=Path, action="append", help="JSON mcpServers config; repeat for explicit hosts")
+    parser.add_argument("--config", type=Path, action="append", help="JSON mcpServers or Codex TOML config; repeat for explicit hosts")
     parser.add_argument("--entries-dir", type=Path, default=Path.home() / ".claude/icode_data/mcp_entries")
     parser.add_argument("--source", type=Path, help="Verified source root for core file comparisons")
     parser.add_argument("--installed", type=Path, action="append", help="Installed root; repeat as needed")
@@ -42,7 +42,8 @@ def main(argv=None):
     configs = args.config
     if configs is None:
         configs = [Path.home() / ".claude.json"]
-        configs.extend(path for path in (Path.home() / ".codebuddy/mcp.json", Path.home() / ".workbuddy/mcp.json") if path.is_file())
+        configs.extend(path for path in (Path.home() / ".codebuddy/mcp.json", Path.home() / ".workbuddy/mcp.json",
+                                         Path.home() / ".codex/config.toml") if path.is_file())
     installed = args.installed
     if installed is None:
         installed = [root / "skills/icode" for root in (Path.home() / ".claude", Path.home() / ".agents", Path.home() / ".workbuddy") if (root / "skills/icode").is_dir()]

@@ -2611,7 +2611,8 @@ def run_gate_linters(out_dir, to_status=None, delivery_verdict=None, legacy=Fals
             and full_cmd[:2] == ["python3", f"tools/lint_{gate_id}.py"]
         )
         if fixed_python_linter:
-            full_cmd[:1] = [sys.executable, "-X", "utf8"]
+            # Keep discovery packages unchanged when bundled gates import helpers.
+            full_cmd[:1] = [sys.executable, "-B", "-X", "utf8"]
         if legacy:
             full_cmd = [arg for arg in full_cmd if arg != "--strict"]
         # 按 linter 归一化 audit-verified：workflow_contract 的 STEP_GATES 有

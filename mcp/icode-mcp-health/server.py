@@ -72,7 +72,7 @@ def inventory_servers(mcp_root: str) -> dict[str, Any]:
 
 @mcp.tool(annotations=READ_ONLY_ANNOTATIONS)
 def diagnose_registration(host_config: str, entries_dir: str | None = None) -> dict[str, Any]:
-    """Offline JSON registration observations; never execute or repair entries."""
+    """Offline JSON/TOML registration observations; never execute or repair entries."""
     try:
         config = _config()
         target = resolve_allowed_path(host_config, config)

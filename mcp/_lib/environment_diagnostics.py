@@ -13,6 +13,14 @@ import re
 import shutil
 import stat
 
+try:
+    import tomllib
+except ImportError:  # Python 3.10: optional parser, never guess TOML with regex.
+    try:
+        import tomli as tomllib
+    except ImportError:
+        tomllib = None
+
 MAX_BYTES = 4 * 1024 * 1024
 SERVER_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 COMPARE_KEYS = ("command", "args", "env", "cwd")
@@ -90,7 +98,7 @@ def _foreign(value, windows):
 def _entry_status(entry, windows, resolve_path=None):
     if not isinstance(entry, dict):
         return "invalid_entry"
-    if entry.get("disabled") is True:
+    if entry.get("disabled") is True or entry.get("enabled") is False:
         return "disabled"
     command = entry.get("command")
     if not command and isinstance(entry.get("url"), str) and entry["url"]:
@@ -108,6 +116,8 @@ def _entry_status(entry, windows, resolve_path=None):
     # Do not access UNC/device targets in an offline diagnostic.
     if any(_remote_path(value, windows) for value in [command, *args, *([cwd] if cwd else [])]):
         return "network_path_uninspected"
+    launch_env = {k.upper(): v for k, v in env.items()} if windows else env
+    search_path = launch_env.get("PATH", os.environ.get("PATH", ""))
     if cwd:
         try:
             directory = Path(cwd).expanduser().absolute()
@@ -125,8 +135,7 @@ def _entry_status(entry, windows, resolve_path=None):
                 return "relative_command_unresolved"
             path = Path(cwd) / path
     else:
-        launch_env = {k.upper(): v for k, v in env.items()} if windows else env
-        located, state = _search_command(command, launch_env.get("PATH", os.environ.get("PATH", "")), windows, resolve_path)
+        located, state = _search_command(command, search_path, windows, resolve_path)
         if state != "observed":
             return state
         if not located:
@@ -161,11 +170,20 @@ def _entry_status(entry, windows, resolve_path=None):
                 return "launch_path_uninspected"
             if not candidate.is_file():
                 return "stale_entrypoint"
+    # An absolute Node executable only starts npx itself. Its package launcher
+    # still resolves the child `node` through PATH on Windows.
+    if (windows and path.name.lower() in {"node", "node.exe"} and args
+            and Path(args[0]).name.lower() == "npx-cli.js"):
+        located, state = _search_command("node", search_path, windows, resolve_path)
+        if state != "observed":
+            return state
+        if not located:
+            return "node_runner_not_found"
     return "static_ok"
 
 
 def diagnose_registration(host_config, entries_dir=None, *, system=None, max_servers=100, resolve_path=None):
-    """Read a JSON mcpServers config and optional exported entries under one policy.
+    """Read JSON mcpServers or Codex TOML mcp_servers under one path policy.
 
     static_ok only covers the launch command and platform shape. It does not
     certify packages, remote services, a handshake or the current session.
@@ -175,8 +193,15 @@ def diagnose_registration(host_config, entries_dir=None, *, system=None, max_ser
               "session": {"status": "unverified", "reason": "static_check_only"},
               "summary": {"total": 0, "problems": 0}}
     try:
-        config = _object(host_config, resolve_path)
-        servers = config.get("mcpServers", {})
+        raw = _read_bytes(host_config, resolve_path).decode("utf-8-sig")
+        is_toml = Path(host_config).suffix.lower() == ".toml"
+        if is_toml and tomllib is None:
+            report.update(status="toml_parser_unavailable", summary={"total": 0, "problems": 1})
+            return report
+        config = tomllib.loads(raw) if is_toml else json.loads(raw)
+        if not isinstance(config, dict):
+            raise ValueError("object_required")
+        servers = config.get("mcp_servers" if is_toml else "mcpServers", {})
         if not isinstance(servers, dict):
             raise ValueError("servers_object_required")
     except (OSError, ValueError, UnicodeError):
@@ -220,7 +245,12 @@ def diagnose_registration(host_config, entries_dir=None, *, system=None, max_ser
                     row["expected_status"] = _entry_status(expected, windows, resolve_path)
                     actual = servers.get(name)
                     if isinstance(actual, dict):
-                        row["different_fields"] = [k for k in COMPARE_KEYS if actual.get(k) != expected.get(k)]
+                        # These adapters intentionally publish command/args/env only.
+                        # An explicitly configured cwd must still be checked.
+                        omitted_cwd = actual.get("cwd") is None and (
+                            is_toml or Path(host_config).parent.name in {".codebuddy", ".workbuddy"})
+                        row["different_fields"] = [k for k in COMPARE_KEYS
+                            if not (k == "cwd" and omitted_cwd) and actual.get(k) != expected.get(k)]
                         row["drift"] = bool(row["different_fields"])
                 except (OSError, ValueError, UnicodeError):
                     row["expected_status"] = "unreadable"

@@ -1,5 +1,39 @@
 # ICODE 最小插件分发接入
 
+## 核心发行与按需扩展（2026-10-28）
+
+默认 `full` 仍生成完整工作流。新增 `core` 用于有体积或文件数限制的导入入口：整个插件展开后最多 200 文件、5 MiB，核心 `SKILL.md` 最多 8 KiB；构建超预算直接失败，不创建输出。完整规则保存在同目录 `WORKFLOW.md`，名称、description、版本及授权边界保持原来源。必要图标与分发校验工具的依赖一起携带。
+
+```bash
+# 两个输出均须不存在，父目录存在，并位于源码之外。
+python3 -B tools/build_skill_distribution.py --profile core \
+  --output /新建父目录/icode --components-output /新建父目录/components
+```
+
+核心保留代码流程、schemas/gates、公共 MCP 库、路由及生成的共享技能；PPT、DOCX、MCP 服务、UI、开发资料分别生成 `icode-v<版本>-ppt|docx|mcp|ui|support.zip`。每份扩展是同一发行的资源附件，不是另一个需要用户选择的 Skill。`components.json` 固定同版本下载 URL、归档 SHA-256 和逐文件 hash；核心与全部扩展合起来保留原工作流资源，不复制第二套业务实现。
+
+### 使用者如何获得扩展
+
+核心 SKILL 已说明按需获取方式。用户正常请求 PPT、Word 或 UI 时，由 Agent 执行：
+
+```bash
+python -B tools/install_skill_pack.py --component-root "<核心技能目录>" --component ppt
+```
+
+无需用户寻找或解压资源包。安装器从同版本 GitHub Release 附件获取并校验，归档与展开后的运行根放在用户缓存（Windows 为 LocalAppData 下，其他平台为 `~/.cache` 下）。返回的 `runtime_root` 是后续读取步骤、执行工具的根。Agent 扫描的核心技能目录保持不变，启用扩展后也不会重新膨胀到 200 文件以上。
+
+相同内容缓存复用；核心快照和扩展均以 hash 绑定，版本不同不会混用。不同内容的已有文件拒绝覆盖。准备资源不等于注册 MCP、安装全部运行依赖或实际功能验收；DOCX 渲染环境仍走既有引导。插件缓存中不直接运行依赖 Git checkout 的源码 `install.sh`。
+
+无网络时可追加 `--component-archive <同版本本地zip>`，由同一校验与缓存流程处理。`--dry-run` 不下载、不准备运行根、不写技能目录；可报告需要获取的资源。缺资源、下载失败、hash 不符或路径冲突时明确失败，不静默切换版本。
+
+### 维护者如何发行
+
+同一次构建的核心 ZIP、可选插件核心 ZIP、五份扩展 ZIP 与校验清单作为**同一个版本**的 Release 附件提供。默认附件基址为 `https://github.com/ayukyo/icode-skill/releases/download/v<版本>`；分叉仓可在构建时显式指定 `--download-base`，必须是版本一致的 HTTPS GitHub Release 基址。先测试和校验同批产物，再按原发布授权流程上传，不能覆盖已发布的不同内容冒充同版本。
+
+构建完全离线，生成下载 URL 不代表该附件已经发布或可访问。本地候选完成后，仍须完成发布和真实网络首次获取验证，才可声称普通用户已能在线取得扩展。离线文件、缓存与网络边界均有回归测试，不能将网络边界模拟测试写成线上发行验收。
+
+以下保留早期完整发行的设计与历史验收记录；当前生成器的默认 full 语义继续适用。
+
 核查日期：2026-09-20。本切片为 Claude Code、Codex、CodeBuddy 准备**可构建的完整技能资源包**，
 不新增宿主运行适配，不安装宿主、不注册账号、不登记市场、不推送。
 目录发现、安装入口、宿主执行、市场收录和推荐排名是不同验收层。

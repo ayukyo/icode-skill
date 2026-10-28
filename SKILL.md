@@ -202,7 +202,7 @@ python3 -c "import json,sys; d=json.load(open('{ICODE_OUT_DIR}/.ico_metadata.jso
 
 | 主题 | 真源 | 核心要点 |
 |------|------|---------|
-| 强制思考前置（分级 reasoning gate） | [references/thinking_core.md](references/thinking_core.md)（每步必读）+ [references/thinking_detail.md](references/thinking_detail.md)（按需读） | 每步开始前先按 **reasoning gate 分级 L0～L3**：L0（help/status/list/install/bak/learn）只执行机器门禁；L1（readme/ppt/study/close/reopen/worktree/init/doc/limit/merge）写决策记录（study 写库外私有来源，其余按步骤合同写 `.decision_anchors.json`）；**L2/L3（plan/review/code/patch/log/deepcheck/audit）才首选 `sequential-thinking` MCP 3～5 步**，MCP 不可用降级 `### 结构化思考` 文字块；思考子项见各 step 文件。分级判定机器真源 = `mcp/reasoning-gate/gates.json`，工单运行痕迹 = `{ICODE_OUT_DIR}/.thinking_gate_trace.jsonl`（study 无工单 trace），校验器 = `python3 tools/lint_thinking_gate.py` |
+| 强制思考前置（分级 reasoning gate） | [references/thinking_core.md](references/thinking_core.md)（首次完整读、失效重载）+ [references/thinking_detail.md](references/thinking_detail.md)（按需读） | 每步开始前先按 **reasoning gate 分级 L0～L3**：L0（help/status/list/install/bak/learn）只执行机器门禁；L1（readme/ppt/study/close/reopen/worktree/init/doc/limit/merge）写决策记录（study 写库外私有来源，其余按步骤合同写 `.decision_anchors.json`）；**L2/L3（plan/review/code/patch/log/deepcheck/audit）才首选 `sequential-thinking` MCP 3～5 步**，MCP 不可用降级 `### 结构化思考` 文字块；思考子项见各 step 文件。分级判定机器真源 = `mcp/reasoning-gate/gates.json`，工单运行痕迹 = `{ICODE_OUT_DIR}/.thinking_gate_trace.jsonl`（study 无工单 trace），校验器 = `python3 tools/lint_thinking_gate.py` |
 | 反偷懒约束 | [references/anti_laziness.md](references/anti_laziness.md) | 39 条典型偷懒行为 + 正面合规要求；引用 references 必须每步重新 Read 输出 `📖 已 Read` 确认行；思考块每子项 ≥2 句实质内容 |
 
 ### 根因优先决策准则（修复缺陷逻辑本身，优先于规避/绕过/补丁/开关）
@@ -350,7 +350,7 @@ test -f "{ICODE_OUT_DIR}/03_plan_final.md" && python3 -c "import json,sys; d=jso
 | 共享文件 | 内容 | 引用方 |
 |---------|------|--------|
 | [references/natural_language_entry.md](references/natural_language_entry.md) | 自然语言入口、意图/工单/限制/停止点解析、全能力示例与帮助；不另建执行状态机 | 入口 / help / 上下文续接 |
-| [references/thinking_core.md](references/thinking_core.md) | 强制思考前置核心（每步必读：MCP+降级文字块/结构化思考/Read references） | 所有 step |
+| [references/thinking_core.md](references/thinking_core.md) | 强制思考前置核心（首次完整读、失效重载：MCP+降级文字块/结构化思考/Read references） | 所有 step |
 | [references/thinking_detail.md](references/thinking_detail.md) | 强制思考前置细节（按需读：各步骤子项速查/历史参考小节） | 所有 step |
 | [references/anti_laziness.md](references/anti_laziness.md) | 反偷懒约束（39条偷懒行为+合规要求+references必读+确认行） | 所有 step |
 | [references/adversarial.md](references/adversarial.md) | 对抗分析模式（3质疑者/裁决优先级/诚实降级/证据回指） | 02_review / log |

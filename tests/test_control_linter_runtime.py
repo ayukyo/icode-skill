@@ -93,7 +93,7 @@ class ControlLinterRuntimeTests(unittest.TestCase):
             rows = CONTROL.run_gate_linters(Path("ticket"), to_status="plan_done")
         self.assertTrue(all(row["ok"] for row in rows))
         for gate_id, call in zip(GATES, run.call_args_list):
-            self.assertEqual(call.args[0], [sys.executable, "-X", "utf8",
+            self.assertEqual(call.args[0], [sys.executable, "-B", "-X", "utf8",
                 f"tools/lint_{gate_id}.py", "--strict", "--json", "--step", "plan", "ticket"])
             self.assertEqual(call.kwargs, {"capture_output": True, "text": False,
                 "timeout": 180, "cwd": str(ROOT)})

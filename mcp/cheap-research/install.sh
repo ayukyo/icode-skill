@@ -117,7 +117,8 @@ if [ ! -f "$TARGET/config.json" ]; then
 fi
 
 # 4. 注册到 ~/.claude.json
-PY="$PYBIN/python"
+# Git Bash resolves the .exe suffix; MCP hosts need the actual executable path.
+PY="$("$PYBIN/python" -c 'import sys; print(sys.executable)')"
 SERVER="$TARGET/server.py"
 "$PYTHON_BIN" "$TARGET/scripts/register_mcp.py" "$PY" "$SERVER" "$TARGET"
 

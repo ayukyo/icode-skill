@@ -6,7 +6,7 @@
 |---|---|---|
 | 源码 | 当前仓库与 `SKILL.md` | 源码存在不表示安装已更新 |
 | 安装 | `mcp_doctor.py --source <源码根>` 的核心文件 SHA-256 | 仅覆盖 `CORE_RESOURCES` 声明的核心资源；完整发行资源校验仍用 `check_skill_installation.py` 的受支持平台与官方同步校验 |
-| 注册 | JSON `mcpServers` 与导出条目静态比对 | `static_ok` 只检查启动命令与平台形态，不证明依赖包、握手或远端服务正常 |
+| 注册 | JSON `mcpServers` / Codex TOML `mcp_servers` 与导出条目静态比对 | `static_ok` 只检查启动命令与平台形态，不证明依赖包、握手或远端服务正常 |
 | 会话 | 重载后真实工具发现与调用 | 同步文件、正确注册和 MCP 已加载分别报告；静态工具始终返回 `unverified` |
 
 ## 只读诊断
@@ -17,11 +17,11 @@ python3 tools/mcp_doctor.py --source <源码根> --installed <安装根> --json
 python3 tools/mcp_doctor.py --config <宿主JSON> --entries-dir <导出目录> --ticket-dir <明确工单目录> --json
 ```
 
-Windows 可使用 `py -3`。默认读取 Claude JSON 和已存在的 CodeBuddy/WorkBuddy JSON；不直接解析 Codex TOML，Codex 注册仍使用其官方 CLI 另行查询。`--config` 可重复并替换默认配置集合。`--source` 未传时不做安装比较；传入后默认检查检测到的三个技能根，`--installed` 可重复指定范围。
+Windows 可使用 `py -3`。默认读取 Claude JSON，以及已存在的 CodeBuddy/WorkBuddy JSON 和 `~/.codex/config.toml`；`.toml` 使用 `mcp_servers`，JSON 使用 `mcpServers`。Python 3.11 以上用标准库 tomllib，Python 3.10 可用 health MCP 条件依赖 tomli；两者均不可用时报告 `toml_parser_unavailable`，不当作空配置或健康。`--config` 可重复并替换默认配置集合。`--source` 未传时不做安装比较；传入后默认检查检测到的三个技能根，`--installed` 可重复指定范围。
 
 默认退出 0 表示查询已完成，问题数见 `summary.problems`；`--strict` 在有问题时退出 1。参数错误退出 2。所有输出为 schema_version=1 JSON。不读取/回传密钥字段值、命令参数或环境变量值，不启动注册命令、不下载依赖、不写配置、不生成备份。配置与单文件读取上限 4 MiB，默认最多 100 项服务；无法完整读取时保留问题，不宣称健康。
 
-分类包含 `foreign_os`、`command_not_found`、`stale_entrypoint`、`wrapper_shebang`、`missing`、`invalid_entry`；`drift` 与 `different_fields` 单独展示。相对命令名按条目 PATH 或当前进程 PATH 解析，因此结果也受实际宿主启动环境影响。`remote_unprobed`、`relative_command_unresolved` 等状态必须按名称说明，不能改写成握手通过。
+分类包含 `foreign_os`、`command_not_found`、`stale_entrypoint`、`wrapper_shebang`、`missing`、`invalid_entry`；`drift` 与 `different_fields` 单独展示。相对命令名按条目 PATH 或当前进程 PATH 解析，因此结果也受实际宿主启动环境影响。Windows 的绝对 Node + npx-cli.js 还需检查包启动器所用的子进程 `node` 是否可由 PATH 解析；缺失报告 `node_runner_not_found`。修复复用 `platform_entry.py` 的 Node PATH 构造，保留用户其他 env，不通过增加超时掩盖启动失败。`enabled=false` / `disabled=true` 标为 disabled；`remote_unprobed`、`relative_command_unresolved` 等状态不能改写成握手通过。
 
 health MCP 提供相同的 `diagnose_registration(host_config, entries_dir=None)`，配置、目录与每个导出文件逐个应用 allowed_roots。CLI 是本机显式诊断入口，不扩展 MCP 的权限。
 

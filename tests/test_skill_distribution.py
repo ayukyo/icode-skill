@@ -1,12 +1,17 @@
 """Offline package tests; never install a host or touch user configuration."""
 import hashlib
+import importlib.util
+import io
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
+import zipfile
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -82,9 +87,14 @@ class DistributionTests(unittest.TestCase):
         }
         for name, body in files.items():
             self.put(name, body)
+        self.put("assets/icode-ticket-hex-128.png", "small icon\n")
+        self.put("assets/icode-ticket-hex-512.png", "large icon\n")
+        self.put("tools/ppt/templates/example/template.pptx", "template payload\n")
+        for name in ("install_skill_pack.py", "validate_skill_pack.py", "build_skill_distribution.py"):
+            self.put(f"tools/{name}", (ROOT / "tools" / name).read_text(encoding="utf-8"))
         for path in (ROOT / "integrations/discovery").iterdir():
             if path.name == "README.md" or path.name.endswith(".plugin.json.template"):
-                self.put(f"integrations/discovery/{path.name}", path.read_text())
+                self.put(f"integrations/discovery/{path.name}", path.read_text(encoding="utf-8"))
         (self.source / "install.sh").chmod(0o755)
         self.git("add", ".")
 
@@ -97,11 +107,70 @@ class DistributionTests(unittest.TestCase):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(body, encoding="utf-8")
 
+    def symlink_or_skip(self, path, target, **kwargs):
+        try:
+            path.symlink_to(target, **kwargs)
+        except OSError as exc:
+            if os.name == "nt" and getattr(exc, "winerror", None) == 1314:
+                self.skipTest("Windows account cannot create symbolic links; verify on Linux")
+            raise
+
     def build(self, output=None, source=None):
         return subprocess.run([
             sys.executable, "-B", str(BUILDER), "--source", str(source or self.source),
             "--output", str(output or self.output),
         ], capture_output=True, text=True)
+
+    def build_core(self):
+        return subprocess.run([
+            sys.executable, "-B", str(BUILDER), "--source", str(self.source),
+            "--output", str(self.output), "--profile", "core",
+            "--components-output", str(self.base / "components"),
+        ], capture_output=True, text=True, encoding="utf-8")
+
+    def component_install(self, component="docx", dry_run=False):
+        skill = self.output / "skills/icode"
+        manifest = json.loads((skill / "components.json").read_text(encoding="utf-8"))
+        archive = self.base / "components" / manifest["components"][component]["archive"]
+        args = [sys.executable, "-B", str(skill / "tools/install_skill_pack.py"),
+                "--component-root", str(skill), "--component", component,
+                "--component-archive", str(archive), "--component-cache", str(self.base / "cache")]
+        if dry_run:
+            args.append("--dry-run")
+        return subprocess.run(args, capture_output=True, text=True, encoding="utf-8")
+
+    def file_snapshot(self, root):
+        return {p.relative_to(root).as_posix(): p.read_bytes()
+                for p in root.rglob("*") if p.is_file()}
+
+    def component_module(self):
+        sys.path.insert(0, str(ROOT / "tools"))
+        try:
+            spec = importlib.util.spec_from_file_location("component_test_installer", ROOT / "tools/install_skill_pack.py")
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            return module
+        finally:
+            sys.path.pop(0)
+
+    def rewrite_component(self, members, declaration_change=None):
+        skill = self.output / "skills/icode"
+        path = skill / "components.json"
+        metadata = json.loads(path.read_text(encoding="utf-8"))
+        spec = metadata["components"]["docx"]
+        archive = self.base / "components" / spec["archive"]
+        rows = []
+        with zipfile.ZipFile(archive, "w") as zipped:
+            for name, data, mode in members:
+                info = zipfile.ZipInfo(name)
+                info.create_system = 3
+                info.external_attr = mode << 16
+                zipped.writestr(info, data)
+                rows.append({"path": name, "size": len(data), "sha256": hashlib.sha256(data).hexdigest(), "mode": 0o644})
+        if declaration_change:
+            declaration_change(rows)
+        spec.update(files=rows, size=archive.stat().st_size, sha256=hashlib.sha256(archive.read_bytes()).hexdigest())
+        path.write_text(json.dumps(metadata), encoding="utf-8")
 
     def assert_rejected(self, result):
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
@@ -133,7 +202,7 @@ class DistributionTests(unittest.TestCase):
                          {"icode", "example"})
         self.assertFalse(any((workflow / x).exists() for x in ("site", "demo", "tests", ".git")))
         for host in ("claude", "codex", "codebuddy"):
-            manifest = json.loads((self.output / f".{host}-plugin/plugin.json").read_text())
+            manifest = json.loads((self.output / f".{host}-plugin/plugin.json").read_text(encoding="utf-8"))
             self.assertEqual(manifest["skills"], "./skills/")
             self.assertEqual(manifest["name"], "icode")
             self.assertEqual(manifest["version"], "2.32.0")
@@ -163,7 +232,7 @@ class DistributionTests(unittest.TestCase):
                 path = self.source / relative
                 if path.exists():
                     path.unlink()
-                path.symlink_to(self.source / "references")
+                self.symlink_or_skip(path, self.source / "references")
                 self.git("add", relative)
                 self.assert_rejected(self.build())
                 self.assertFalse(self.output.exists())
@@ -172,7 +241,7 @@ class DistributionTests(unittest.TestCase):
 
     def test_rejects_symlink_output_parent_and_source_root(self):
         link = self.base / "link"
-        link.symlink_to(self.base, target_is_directory=True)
+        self.symlink_or_skip(link, self.base, target_is_directory=True)
         self.assert_rejected(self.build(output=link / "icode"))
         self.assert_rejected(self.build(source=link / "source"))
         self.assertFalse(self.output.exists())
@@ -253,18 +322,237 @@ class DistributionTests(unittest.TestCase):
 
     def test_manifest_metadata_comes_from_selected_source(self):
         name = "integrations/discovery/claude.plugin.json.template"
-        manifest = json.loads((self.source / name).read_text())
+        manifest = json.loads((self.source / name).read_text(encoding="utf-8"))
         manifest["description"] = "selected source description"
         self.put(name, json.dumps(manifest))
         result = self.build()
         self.assertEqual(result.returncode, 0, result.stderr)
-        built = json.loads((self.output / ".claude-plugin/plugin.json").read_text())
+        built = json.loads((self.output / ".claude-plugin/plugin.json").read_text(encoding="utf-8"))
         self.assertEqual(built["description"], "selected source description")
 
     def test_missing_shared_template_fails_before_output(self):
         self.git("rm", "-f", "skill-packs/example/SKILL.md.template")
         self.assert_rejected(self.build())
         self.assertFalse(self.output.exists())
+
+    def test_core_has_small_entry_complete_gates_icons_and_bounded_file_count(self):
+        result = self.build_core()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        skill = self.output / "skills/icode"
+        self.assertLessEqual(len(self.file_snapshot(self.output)), 200)
+        self.assertLessEqual((skill / "SKILL.md").stat().st_size, 8192)
+        self.assertEqual((skill / "WORKFLOW.md").read_bytes(), (self.source / "SKILL.md").read_bytes())
+        for name in ("tools/icode_control.py", "schemas/metadata.schema.json",
+                     "mcp/workflow-gate/gates.json", "mcp/workflow-gate/skill-routes.json",
+                     "assets/icode-ticket-hex-128.png", "tools/install_skill_pack.py"):
+            self.assertTrue((skill / name).is_file(), name)
+        for name in ("tools/docx/build_docx.py", "tools/ppt/templates/example/template.pptx",
+                     "agent_runtime/README.md", "docs/example.md", "mcp/example/config.example.json"):
+            self.assertFalse((skill / name).exists(), name)
+        self.assertTrue((self.output / "skills/example/SKILL.md").is_file())
+
+    def test_core_and_component_archives_preserve_all_source_payload(self):
+        result = self.build_core()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        skill = self.output / "skills/icode"
+        metadata = json.loads((skill / "components.json").read_text(encoding="utf-8"))
+        self.assertEqual(set(metadata["components"]), {"ppt", "docx", "mcp", "ui", "support"})
+        restored = self.file_snapshot(skill)
+        for component in metadata["components"].values():
+            archive = self.base / "components" / component["archive"]
+            self.assertEqual(hashlib.sha256(archive.read_bytes()).hexdigest(), component["sha256"])
+            with zipfile.ZipFile(archive) as z:
+                self.assertEqual(set(z.namelist()), {f["path"] for f in component["files"]})
+                for row in component["files"]:
+                    data = z.read(row["path"])
+                    self.assertNotIn(row["path"], restored)
+                    self.assertEqual(len(data), row["size"])
+                    self.assertEqual(hashlib.sha256(data).hexdigest(), row["sha256"])
+                    restored[row["path"]] = data
+        full_parent = self.base / "full"
+        full_parent.mkdir()
+        result = self.build(output=full_parent / "icode")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        full = self.file_snapshot(full_parent / "icode/skills/icode")
+        self.assertEqual(restored.pop("WORKFLOW.md"), full.pop("SKILL.md"))
+        restored.pop("SKILL.md")
+        restored.pop("components.json")
+        self.assertEqual(restored, full)
+
+    def test_core_budget_failure_leaves_both_outputs_absent(self):
+        for i in range(201):
+            self.put(f"tools/extra_{i}.py", "# extra core resource\n")
+        self.git("add", ".")
+        result = self.build_core()
+        self.assert_rejected(result)
+        self.assertIn("budget", result.stderr)
+        self.assertFalse(self.output.exists())
+        self.assertFalse((self.base / "components").exists())
+
+    def test_component_install_dry_run_exact_restore_and_idempotency(self):
+        result = self.build_core()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        skill = self.output / "skills/icode"
+        before = self.file_snapshot(skill)
+        result = self.component_install(dry_run=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.file_snapshot(skill), before)
+        result = self.component_install()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        runtime = Path(json.loads(result.stdout)["runtime_root"])
+        self.assertFalse(runtime.is_relative_to(self.output))
+        self.assertEqual((runtime / "tools/docx/build_docx.py").read_bytes(),
+                         (self.source / "tools/docx/build_docx.py").read_bytes())
+        self.assertEqual(self.file_snapshot(skill), before)
+        installed = self.file_snapshot(runtime)
+        result = self.component_install()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.file_snapshot(runtime), installed)
+        self.assertEqual(self.file_snapshot(skill), before)
+
+    def test_component_conflict_is_rejected_before_any_new_file(self):
+        result = self.build_core()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        skill = self.output / "skills/icode"
+        conflict = skill / "tools/docx/build_docx.py"
+        conflict.parent.mkdir(parents=True)
+        conflict.write_text("user content", encoding="utf-8")
+        before = self.file_snapshot(skill)
+        result = self.component_install()
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(self.file_snapshot(skill), before)
+
+    def test_component_cache_cannot_expand_inside_the_discovery_package(self):
+        result = self.build_core()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        skill = self.output / "skills/icode"
+        spec = json.loads((skill / "components.json").read_text(encoding="utf-8"))["components"]["docx"]
+        archive = self.base / "components" / spec["archive"]
+        module = self.component_module()
+        for cache in (skill / "local-cache", self.output / "local-cache"):
+            with self.subTest(cache=str(cache)):
+                before = self.file_snapshot(self.output)
+                with self.assertRaises(module.InstallConflict):
+                    module.install_component(skill, "docx", archive=archive, cache=cache)
+                self.assertFalse(cache.exists())
+                self.assertEqual(self.file_snapshot(self.output), before)
+
+    def test_corrupt_component_and_version_mismatch_are_rejected_without_writes(self):
+        result = self.build_core()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        skill = self.output / "skills/icode"
+        metadata = json.loads((skill / "components.json").read_text(encoding="utf-8"))
+        archive = self.base / "components" / metadata["components"]["docx"]["archive"]
+        old = archive.read_bytes()
+        archive.write_bytes(old + b"corrupt")
+        before = self.file_snapshot(skill)
+        self.assertEqual(self.component_install().returncode, 1)
+        self.assertEqual(self.file_snapshot(skill), before)
+        archive.write_bytes(old)
+        entry = skill / "SKILL.md"
+        entry.write_text(entry.read_text(encoding="utf-8").replace("v2.32.0", "v9.0.0"), encoding="utf-8")
+        before = self.file_snapshot(skill)
+        self.assertEqual(self.component_install().returncode, 1)
+        self.assertEqual(self.file_snapshot(skill), before)
+
+    def test_automatic_download_is_pinned_and_cache_is_reused(self):
+        result = self.build_core()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        skill = self.output / "skills/icode"
+        second = self.base / "second-skill"
+        shutil.copytree(skill, second)
+        metadata = json.loads((skill / "components.json").read_text(encoding="utf-8"))
+        spec = metadata["components"]["docx"]
+        data = (self.base / "components" / spec["archive"]).read_bytes()
+        calls = []
+        class Reply(io.BytesIO):
+            def geturl(self):
+                return spec["url"]
+        class Opener:
+            def open(self, request, timeout):
+                calls.append(request.full_url)
+                return Reply(data)
+        module = self.component_module()
+        cache = self.base / "cache"
+        before = self.file_snapshot(skill)
+        with patch.object(module, "build_opener", return_value=Opener()):
+            result = module.install_component(skill, "docx", cache=cache)
+        self.assertTrue(result["ok"])
+        self.assertEqual(calls, [spec["url"]])
+        with patch.object(module, "build_opener", side_effect=AssertionError("cache must avoid network")):
+            second_result = module.install_component(second, "docx", cache=cache)
+            self.assertEqual(module.obtain_component(spec, cache / "archives").read_bytes(), data)
+        runtime = Path(second_result["runtime_root"])
+        self.assertEqual((runtime / "tools/docx/build_docx.py").read_bytes(),
+                         (self.source / "tools/docx/build_docx.py").read_bytes())
+        self.assertEqual(self.file_snapshot(skill), before)
+
+    def test_automatic_dry_run_never_downloads_or_creates_cache(self):
+        result = self.build_core()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        module = self.component_module()
+        skill = self.output / "skills/icode"
+        before = self.file_snapshot(skill)
+        cache = self.base / "cache"
+        with patch.object(module, "build_opener", side_effect=AssertionError("dry-run must stay offline")):
+            report = module.install_component(skill, "docx", dry_run=True, cache=cache)
+        self.assertTrue(report["download_required"])
+        self.assertFalse(cache.exists())
+        self.assertEqual(self.file_snapshot(skill), before)
+
+    def test_download_hash_failure_does_not_publish_a_cache_archive(self):
+        result = self.build_core()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        skill = self.output / "skills/icode"
+        spec = json.loads((skill / "components.json").read_text(encoding="utf-8"))["components"]["docx"]
+        class Reply(io.BytesIO):
+            def geturl(self):
+                return spec["url"]
+        class Opener:
+            def open(self, request, timeout):
+                return Reply(b"x" * spec["size"])
+        module = self.component_module()
+        cache = self.base / "download-cache"
+        with patch.object(module, "build_opener", return_value=Opener()):
+            with self.assertRaises(module.InstallConflict):
+                module.obtain_component(spec, cache)
+        self.assertFalse(list(cache.glob("*.zip")))
+        self.assertFalse(list(cache.glob("component-*")))
+        with patch.object(module, "build_opener", return_value=Opener()):
+            with self.assertRaises(module.InstallConflict):
+                module.install_component(skill, "docx", cache=cache)
+        self.assertFalse((cache / "runtimes").exists())
+
+    def test_component_download_urls_and_redirects_reject_untrusted_hosts(self):
+        module = self.component_module()
+        for url in (None, "http://github.com/owner/repo", "https://private.invalid/a.zip",
+                    "https://user:pass@github.com/owner/repo", "file:///tmp/a.zip"):
+            with self.subTest(url=url):
+                with self.assertRaises(module.InstallConflict):
+                    module.check_component_url(url)
+        with self.assertRaises(module.InstallConflict):
+            module.ComponentRedirects().redirect_request(
+                module.Request("https://github.com/owner/repo"), None, 302, "redirect", {}, "http://private.invalid/a.zip")
+
+    def test_unsafe_member_and_malformed_mode_are_rejected_without_writes(self):
+        result = self.build_core()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        skill = self.output / "skills/icode"
+        scenarios = [
+            ([("../escape.txt", b"bad", 0o100644)], None),
+            ([("tools/docx/link.py", b"outside", 0o120777)], None),
+            ([("tools/docx/a.py", b"valid", 0o100644)], lambda rows: rows[0].update(mode=[])),
+            ([("tools/docx", b"file", 0o100644), ("tools/docx/a.py", b"child", 0o100644)], None),
+            ([("tools/docx/A.py", b"upper", 0o100644), ("tools/docx/a.py", b"lower", 0o100644)], None),
+        ]
+        for members, change in scenarios:
+            with self.subTest(members=[row[0] for row in members]):
+                self.rewrite_component(members, change)
+                before = self.file_snapshot(skill)
+                result = self.component_install()
+                self.assertEqual(result.returncode, 1)
+                self.assertNotIn("Traceback", result.stderr)
+                self.assertEqual(self.file_snapshot(skill), before)
 
 
 if __name__ == "__main__":

@@ -4,7 +4,7 @@
 > - **各步骤思考子项**：仅在思考时缺参考时 Read（各 step 文件本已声明本步骤子项）
 > - **历史参考小节**：仅 init/plan/log/start 检索命中时 Read
 >
-> 核心规则（每步必读）见 [thinking_core.md](thinking_core.md)。
+> 核心规则与「共享规则加载」见 [thinking_core.md](thinking_core.md)；首次完整读取、失效重载，每步执行。
 
 ## 各步骤思考子项（步骤文件已声明本步骤的子项，本节主要作为速查）
 

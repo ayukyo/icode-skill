@@ -1,6 +1,6 @@
-# 强制思考前置——核心规则（每步必读）
+# 强制思考前置——核心规则
 
-> 本文件是 icode 所有步骤共享的「强制思考前置」**核心规则**，每步必读。
+> 本文件是 icode 所有步骤共享的「强制思考前置」**核心规则**。按下方「共享规则加载」首次完整读取、失效重载；每步仍独立执行思考与门禁。
 > 各步骤子项详见 [thinking_detail.md](thinking_detail.md)「各步骤思考子项」段，按需 Read 自身步骤对应小节（各 step 文件本已声明本步骤子项，主要作为速查）。
 >
 > 历史参考小节（init/plan/log/start 检索命中时）按 verdict 分流标注在 [thinking_detail.md](thinking_detail.md)「历史参考小节」段。
@@ -32,9 +32,16 @@ N. **强制思考前置**（不可跳过，缺证据视为不合规；按 [refer
 
 **三件套 Read 要求**（统一契约真源，step 文件不得重复展开）：
 
-1. **[thinking_core.md](thinking_core.md) 完整内容**（每步必读）——核心规则 + reasoning gate（L0～L3）+ MCP gate + L2/L3 思考载体（sequential-thinking、降级文字块）
+1. **[thinking_core.md](thinking_core.md) 完整内容**——核心规则 + reasoning gate（L0～L3）+ MCP gate + L2/L3 思考载体（sequential-thinking、降级文字块）
 2. **[thinking_detail.md](thinking_detail.md) 对应小节**（按需 Read）——各步骤思考子项 + 历史参考小节
 3. **[anti_laziness.md](anti_laziness.md) 完整内容**——39 条偷工反例 + 正面合规要求
+
+### 共享规则加载
+
+- **首次实读**：当前上下文首次执行相关步骤时，按声明范围实读共享规则；要求完整内容的必须完整读，指定小节的读完整小节。只作导航或历史出处的链接不触发递归加载；有条件的规则在条件命中时读取。
+- **同上下文复用**：完整原文仍在当前上下文、路径相同且已用当前内容 SHA-256 核对未变时，可以复用已读规则，不重复输出全文。首次 Read 记录路径及 SHA-256；复用只需简短说明引用的已读来源，不新增工单缓存文件或逐步回执。哈希相等只证明内容未变，不能替代首次实读。
+- **失效重载**：新会话、上下文压缩后原文未保留、切换源码/安装根、内容变化、只保留摘要，或不能确认原文仍可用时，重新按声明范围实读。不能凭磁盘缓存、其他代理阅读或历史确认行声称已经读过。
+- **适用边界**：本节只复用静态共享规则。每步分级、真实工具调用、当前状态/计划/源码新鲜度、独立审查及阶段 Read/assessment 仍按各自合同执行；步骤明确要求重新 Read 的业务证据不得复用。全流程、fast、独立步骤与续跑均使用本节，不因入口不同豁免。
 
 **多 Read 追加**：本步骤额外要求 Read 其他 references 时，**追加**在 step 文件强制思考前置段落末，格式 `+ Read [references/xxx.md](../references/xxx.md) 完整内容` 即可。当前已识别的多 Read 场景：
 
@@ -65,57 +72,35 @@ N. **强制思考前置**（不可跳过，缺证据视为不合规；按 [refer
 - **L2/L3**：**首选**调用 `sequential-thinking` MCP 工具（`mcp__sequential-thinking__sequentialthinking`）3～5 步（L3 另加独立对抗），每步对应该步骤声明的子项之一；**降级**（MCP 未配置/取不到/调用失败，判定见下节）时必须以显式的「### 结构化思考」文字块替代，逐项完成该步骤要求的子项。该文字块即为合规证据。
 - **L2/L3 未调用且没有真实调用失败证据 = 不合规**（trace 记录 `attempted=false` 或伪造 `success` 均为违规）。
 
-> **判定 MCP 是否可用**（**仅 L2/L3 需要**——L0/L1 不进入本探测；三态判定：① 工具直接可见 → 直接调用；② 不可见 → ToolSearch 验证；③ 调用报错 → 降级。**先走第 0 判据**）：
+> **判定 MCP 是否可用**（仅 L2/L3；L0/L1 不做发现探测）：先区分当前会话工具、宿主注册、独立服务握手三个事实，不能互相替代。
 >
-> **0 前置·强制可见性自检（第 0 判据执行入口）**（**任何 ToolSearch 之前必先执行**，覆盖**全部**场景——思考块、非思考块、MCP 判定、其他工具可用性判断）：① 先扫描当前会话工具列表（顶层工具定义或已加载工具集）；② 目标工具**直接可见**（标准形态 `mcp__<server>__<tool>` 或代理前缀 `__<proxy>_<tool>`）→ **直接调用**，并在回复中输出证据行「📖 工具可见性自检: `<工具名>` 直接可见 → 直接调用」；③ 不可见 → **仅此时**才走下方第 0 判据 / 第一步 ToolSearch。**强制句**：任何 ToolSearch 调用之前，必须先完成本次可见性自检（或已有直接可见证据）；**未自检直接 ToolSearch、并以空结果判"环境无此工具" = 违规**——直接可见工具不在 ToolSearch deferred 懒加载池内，对其 ToolSearch **恒空**是设计使然，空结果不代表不可用。
+> **第 0 判据·直接可见即可用**：先检查当前宿主提供的工具目录。目标工具已有完整 schema（标准 `mcp__<server>__<tool>` 或代理前缀）时直接调用，禁止再以 ToolSearch 空结果否定它；没有暴露也不能直接断言未安装。可见性检查不替代实际调用。
 >
-> **第 0 判据·直接可见即可用**（**最高优先级**，先于任何 ToolSearch / Read 配置文件步骤；上方 **0 前置** 为本判据的**强制执行入口**——可见性自检即按本判据判定）：若当前会话工具列表（顶层工具定义或已加载工具集）中**已直接存在**对应 MCP 工具的完整 schema 定义 → **直接调用**即可（工具名按语义识别：标准形态 `mcp__<server>__<tool>` 如 `mcp__sequential-thinking__sequentialthinking`，或代理前缀形态 `__<proxy>_<tool>` 也算直接可见），**无需 ToolSearch、无需 Read `~/.claude.json`**。ToolSearch 仅用于"列表里看不到但怀疑有（懒加载）"的场景——直接可见是最强可用证据，绕过它去查 ToolSearch 并拿空结果判"不可用"是本段要消灭的误判根因。**直接可见时禁止再走 ToolSearch 验证**（已暴露工具不在 ToolSearch deferred 懒加载池内，对其 ToolSearch **恒空**是设计使然，空结果不代表不可用）；**工具列表直接可见却报"不可用/降级" = 违规**，必须直接调用。
+> **第一步·直接 ToolSearch 验证**：仅在工具不可见且宿主实际提供 ToolSearch 时，先用 `select:mcp__sequential-thinking__sequentialthinking` 精确发现，无命中后再用 `sequential-thinking` 补充发现。无 ToolSearch 的宿主不虚构调用，直接进入下方配置读取判定。每个宿主工具目录版本只需发现一次；会话重载、目录变化、配置修复或原调用失败后必须重新检查，不能用旧发现结果跳过本步实际思考。
 >
-> **第一步·直接 ToolSearch 验证**（仅当列表**不可见**时走此步；不依赖 AI 对 deferred 列表的文本解析）：
+> **配置读取判定**：按实际宿主检查，Claude Code 为 `~/.claude.json`，Codex 为 `~/.codex/config.toml` / `codex mcp list`，CodeBuddy / WorkBuddy 分别为其 `mcp.json`；仅在该宿主支持时另查项目 `.mcp.json`。优先用 `python3 tools/mcp_doctor.py --json` 得到不含配置值的只读诊断。不能用 Claude 配置代替 Codex 配置，不能把读取失败当作未注册。
 >
-> **0.A 宿主无 ToolSearch 能力时跳过本步**（CodeBuddy 等未提供 ToolSearch 工具的宿主）：确认当前宿主工具集**不存在** ToolSearch 后，**直接跳到「配置读取判定」**——即按宿主配置路径读取 `mcpServers` 判定 server 是否注册：已注册但本会话工具列表不可见 → 按**解析失败组**降级；未注册 → 按**配置缺失组**降级。禁止因“无法 ToolSearch”而宣称判定不了或绕过降级声明。
+> - 发现不到但已注册：区分静态入口/平台/PATH 错误、握手失败、工具过滤和当前会话未加载。只有实际日志或协议结果支持时才指定根因；配置存在不证明服务已安装完整，独立 MCP 握手成功不证明宿主已暴露工具。
+> - Windows 的 Node + npx-cli.js 检查子进程 Node PATH；`node_runner_not_found` 先按现有安装器的 PATH 构造修复，不用延长超时替代根因修复。
+> - 默认诊断不执行配置中的命令、不下载依赖、不写配置；有授权的修复先展示具体差异、备份，再验证原启动环境及重载后的真实工具调用。原会话未重新暴露时保留待验，禁止称完全恢复。
 >
-> 1. **直接调用 ToolSearch**：`query="select:mcp__sequential-thinking__sequentialthinking"` 取 schema
-> 2. **ToolSearch 返回 schema** → 工具可用，进入「第二步·首选路径执行」
-> 3. **ToolSearch 返回空/无命中** → 再 Read `~/.claude.json` 确认是否配置了 `sequential-thinking` server：
->    - `~/.claude.json` 有配置 → 用 `query="sequential-thinking"`（模糊搜索）再试一次 ToolSearch
->    - `~/.claude.json` 无配置 → 也用 `query="sequential-thinking"`（模糊搜索）再试一次 ToolSearch（与下方配置缺失组前置 ① 对齐）→ 仍无命中 → 进入「降级路径」
+> **第二步·首选路径执行**：实际调用 sequential-thinking 3～5 步（步骤另有要求除外），每步完成本步骤声明的职责；L3 另做独立对抗。调用成功才记工具成功；实际错误/超时按真实结果进入降级，不把发现动作、配置健康或其他代理调用写成工具执行成功。
 >
-> **第二步·首选路径执行**（ToolSearch 确认 schema 可用后，L2/L3）：
+> **降级路径的合法前置**：先完成上述发现与宿主检查，只能按已取得的事实选择以下分组，保留真实失败/发现依据并完成结构化文字思考。
 >
-> 1. 实际调用 `mcp__sequential-thinking__sequentialthinking` 工具，3～5 步（步骤定义里另有要求除外），每步对应该步骤声明的子项之一；L3 在此基础上另加独立对抗验证
-> 2. 调用成功 -> 完成思考
-> 3. 调用返回错误/超时 -> 才能进入降级路径
+> | 组 | 前置事实 | 声明 |
+> |---|---|---|
+> | 配置缺失组 | 工具不可见，宿主与适用项目配置实际可读且均无该服务；有 ToolSearch 时完成精确及模糊发现 | `强制思考: 降级文字块（未配置 server：<实际宿主配置路径>；按该宿主安装入口补注册）` |
+> | 注册但未暴露组 | 工具不可见、发现无命中或宿主无发现工具，实际宿主配置有该服务 | `强制思考: 降级文字块（配置有 server，本会话工具未暴露：<已核实原因或尚未确定>；<修复及重载后验证动作>）` |
+> | 调用失败组 | 当前工具可见/发现成功，实际调用返回错误或超时 | `强制思考: 降级文字块（工具实际调用失败：<具体错误类别>）` |
 >
-> **禁止误判场景**（历史实测的踩坑模式，逐条禁止）：
->
-> - ⛔ **未实际调用 ToolSearch 就判定"deferred tools 无 X"** —— 这是早期版本的踩坑根因：AI 试图手动解析系统提示中的 deferred 列表但匹配失败。**必须直接调 ToolSearch，不以 AI 文本解析结果为判断依据**
-> - ⛔ **ToolSearch 首次精确搜索无命中但 ~/.claude.json 有配置时不再试模糊搜索** —— 必须再试一次模糊搜索，ToolSearch 对某些工具名的精确匹配可能因前缀差异（`mcp__` vs server 名）失败
-> - ⛔ **ToolSearch 用模糊词查询并以其空结果判"工具不存在"** —— 精确 `select:` 优先（`query="select:mcp__<name>__<tool>"`）；模糊词（如 `query="sequential-thinking"`）仅允许在精确无命中后按上方流程作**补充重试**，其空结果**不能单独作为"工具不存在"依据**（模糊词可能不匹配，且非 deferred 工具本就不在 ToolSearch 池内）
-> - ⛔ **未实际调用 `mcp__sequential-thinking__sequentialthinking` 就判定"调用失败"** —— 必须有真实的调用返回错误/超时证据
-> - ⛔ **看到顶层工具列表里没有该 MCP 就判定"不可用"** —— 顶层看不到 ≡ deferred 池可见，是懒加载不是缺失
-> - ⛔ **工具已在当前工具列表直接可见（完整 schema），却绕过直接调用去 ToolSearch、并以空结果判"不可用"** —— 直接可见 = 可直接调用（走第 0 判据）；ToolSearch 空结果只对"未直接暴露"场景有判定意义
-> - ⛔ **凭记忆推断未经 Read 配置文件判定"无 server"** —— 必须实际 Read `~/.claude.json`，未读到配置才能说"无 server"
->
-> **降级路径的合法前置**（进入下表三组判定**之前**，先执行**可见性自检**：反查当前会话顶层工具列表是否已直接可见对应 MCP 工具完整 schema——**若可见，直接调用，禁止走降级**（走第 0 判据）；确认不可见后才按下表判定。满足以下**任一组**即可走降级文字块；降级声明**必须**按下表固定模板原样输出，不得自拟其他措辞——AI 自拟的泛化声明会漏掉"配置有 server"等关键区分信息，造成"配置了却报不可用"的误解）：
->
-> | 组 | 必须同时满足 | 降级声明固定模板（原样输出，确认行格式与 steps/08_patch.md 一致） |
-> |----|------------|-------------------------------------|
-> | **配置缺失组** | ① ToolSearch 取 schema（精确 + 模糊各至少 1 次）→ 均无命中（**宿主无 ToolSearch 能力时跳过本条**，见 0.A）；② Read **宿主配置** 的 `mcpServers` **与** 项目根 `.mcp.json`（若有）→ **都**无 `sequential-thinking` server。宿主配置路径自适应：**CodeBuddy = `~/.codebuddy/mcp.json`** / Claude Code = `~/.claude.json` / Codex = `codex mcp list` | `强制思考: 降级文字块（未配置 server：<宿主配置路径> 与 .mcp.json 均无 sequential-thinking，可运行 mcp/install.sh --client <claude|codex|codebuddy|workbuddy> sequential-thinking 安装——子工程脚本 mcp/sequential-thinking/install.sh 仅注册 Claude Code，CodeBuddy/WorkBuddy/Codex 宿主必须走顶层安装器才写入各自宿主配置）` |
-> | **解析失败组** | ① ToolSearch 取 schema（精确 + 模糊各至少 1 次）→ 均无命中（**宿主无 ToolSearch 能力时跳过本条**）；② Read **宿主配置**（路径同配置缺失组，按宿主自适应）→ 至少**一处**有 `sequential-thinking` server | `强制思考: 降级文字块（配置有 server——本会话未连接/工具未暴露，请检查宿主 MCP 连接状态或重开会话；工具本身已装，思考按文字块照常完成）` |
-> | **调用失败组** | ① ToolSearch 取 schema ≥1 次 → **有命中**；② 实际调用工具 ≥1 次 → 返回错误/超时 | `强制思考: 降级文字块（ToolSearch 命中但调用失败：<具体错误>）` |
->
-> > **解析失败组根因认知**：配置存在 ≠ 本会话已连接——MCP 连接是会话级快照，server 未连接/工具未暴露时 ToolSearch 恒空；部分会话经代理接入（如 litellm）时 MCP 工具以 `__<proxy>_<tool>` 前缀暴露、不在 ToolSearch deferred 池内，此时 ToolSearch 对**所有** MCP 工具恒空（含已装好可用的），属命名/连接差异、**不代表未安装**。此组降级合法，思考质量不受影响，无需反复怀疑配置缺失。
->
-> **三组均不满足即不可走降级**，必须坚持首选路径。
->
-> **两种载体任选其一即可，但思考环节本身不可省略**——未呈现任一形式的思考证据，该步骤产出视为不合规。
+> 不能满足分组事实时保留未知并继续取证；不得虚构 ToolSearch、调用尝试或成功。按原 trace 合同记录真实边界，不把独立协议客户端结果冒充当前会话调用。无论采用何种载体，思考本身与证据要求均不可省略。
 
 ## 通用流程（每步执行）
 
 1. **分级**：按 [mcp_per_step.md](mcp_per_step.md)「默认等级表」+ `mcp/reasoning-gate/gates.json` 升级触发器确定本步等级（L0～L3），把等级与触发原因写入 `{ICODE_OUT_DIR}/.thinking_gate_trace.jsonl`（每 step 最终一行；schema/词表见 [thinking_detail.md](thinking_detail.md)「thinking gate trace」段）。
 2. 输出 `ultrathink` 触发词（触发更长的内部推理 budget）——**L0/L1 可省略**（纯机器门禁/决策记录不依赖推理预算）。
-3. **显式 Read 本步骤引用的 references 文件**（每步必须重新 Read，同会话已读不豁免——显式Read是深度思考的前置仪式，凭记忆会降级思考质量），Read 后在回复中输出确认行 `📖 已 Read references/xxx.md` 作为合规证据。
+3. **加载本步骤适用的 references**：按「共享规则加载」首次实读或失效重载，实际 Read 后输出 `📖 已 Read references/xxx.md`；满足复用条件时引用已有来源，不伪造本步新 Read。
 4. **ICODE 本地 MCP 路由门（所有等级）**：读取 `mcp/icode-mcp-policy/policy.json` 当前 step 的 routes；若 `icode-mcp-policy.evaluate_call` 当前会话可见则用它复核目标 server/tool/operation，否则直接按同一 JSON 判定。只有 condition 被当前事实满足才调用目标服务；`required=true` 的命中项在工具可见时必须先实际调用；工具未暴露时记录发现依据，随后按 [mcp_integration.md](mcp_integration.md) 的底层确定性工具降级。policy 缺失/损坏时默认拒绝新增 MCP 调用，不影响原有 Read/rg/git/ssh/adb 路径。不得为探测 MCP 而读取无关工程文件。
 5. **MCP 调用 gate**（L2/L3 不可跳过）：在结构化思考开始前，先处理本步 🟢 MCP（按 [mcp_per_step.md](mcp_per_step.md)「强证据场景判定」）：
    - 列出本步满足强证据场景的 🟢 MCP（**不含 sequential-thinking**，它由第 5 步承载；其余 🟢 MCP 由本 gate + 各 step 执行步骤内嵌点承载）

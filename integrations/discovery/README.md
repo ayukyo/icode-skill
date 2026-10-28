@@ -9,13 +9,19 @@
 源码、相对引用、共享技能模板均来自同一 checkout；`SHA256SUMS` 记录包内文件摘要。
 生成包不是已上架产品，也不代表任一宿主已实装通过。
 
+## 核心发行
+
+生成时指定 `--profile core --components-output <新目录>` 可得到不超过 200 文件的核心插件与同版本扩展资源附件。核心 `skills/icode/SKILL.md` 是短入口，原完整规则保存在其 `WORKFLOW.md`。用户正常请求可选能力时，Agent 按入口说明自动获取、校验并缓存对应资源；离线包是无网络时的备用来源，用户不必手工解压。
+
+扩展展开到返回的用户缓存运行根，核心扫描目录保持不变。扩展 URL 只有在维护者将同批产物正式发布后才可访问；本地构建不上传附件，也不代表线上下载已验收。核心中的 `components.json` 列明组件、版本与 hash。
+
 ## 使用与依赖边界
 
 - 根工作流位于 `skills/icode/SKILL.md`；共享技能位于其同级目录。
 - Claude 插件技能按官方规则使用 `/icode:icode`，不能承诺原 `/icode` 别名。
   Codex、CodeBuddy 的实际入口与共享技能名，以安装后宿主列出的限定名称为准。
   未验证裸名称路由、同名旧安装的优先级或共存；不要自动删除旧安装。
-- 自包含指源码与资源自包含。此包没有自动执行的 Hook、MCP 注册配置、依赖下载、凭证或账号。
+- full 的自包含指源码与资源自包含；core 的可选资源按上述流程准备。此包没有自动执行的 Hook、MCP 注册配置、凭证或账号。
   Python 工具、DOCX runtime、Node/外部命令及 MCP 仍有独立运行前提。
 - 完整安装继续使用**原源码 checkout** 的 `install.sh --client claude|codex|codebuddy`。
   包内保留的 `install.sh` 是资源原样快照，不应直接从插件缓存运行：旧同步脚本存在 Git、
@@ -25,4 +31,4 @@
   不是安装用户的全部个人技能。外部技能不可用时记录缺口，遵循原路由降级合同。
 
 更详细的官方依据、构建命令、测试范围见源码仓库 `docs/skill-distribution.md`
-（生成包内为 `skills/icode/docs/skill-distribution.md`）。
+（full 包或已准备 support 的运行根中为 `docs/skill-distribution.md`）。

@@ -54,6 +54,25 @@ def test_foreign_os_is_distinct_from_missing_command(tmp_path, system, command):
     assert report["servers"][0]["status"] == "foreign_os"
 
 
+@pytest.mark.parametrize("host", [".codebuddy", ".workbuddy", ".codex"])
+def test_adapter_omitted_cwd_is_not_drift_but_explicit_change_is(tmp_path, host):
+    directory = tmp_path / host
+    directory.mkdir()
+    config = directory / ("config.toml" if host == ".codex" else "mcp.json")
+    entry = {"command": sys.executable, "args": []}
+    entries = tmp_path / "entries"
+    write(entries / "demo.json", dict(entry, cwd=str(tmp_path)))
+    for cwd, drift in [(None, False), (str(directory), True)]:
+        actual = dict(entry, **({"cwd": cwd} if cwd is not None else {}))
+        if host == ".codex":
+            config.write_text("[mcp_servers.demo]\ncommand = " + json.dumps(sys.executable) +
+                              "\nargs = []\n" + ("cwd = " + json.dumps(cwd) + "\n" if cwd else ""), encoding="utf-8")
+        else:
+            write(config, {"mcpServers": {"demo": actual}})
+        row = diagnostics().diagnose_registration(config, entries)["servers"][0]
+        assert row["drift"] is drift
+
+
 def test_nested_foreign_arg_drift_missing_and_remote_are_distinct(tmp_path):
     config = write(tmp_path / "host.json", {"mcpServers": {
         "nested": {"command": "cmd", "args": ["/c", "/usr/local/bin/npx"]},
@@ -233,3 +252,103 @@ def test_network_entries_directory_is_rejected_before_enumeration(tmp_path):
     with patch.object(Path, "glob", side_effect=AssertionError("must not enumerate network")):
         report = module.diagnose_registration(config, r"\\fixture.invalid\share", system="windows")
     assert report["status"] == "entries_unreadable"
+
+
+@pytest.mark.parametrize("encoding", ["utf-8", "utf-8-sig"])
+def test_codex_toml_is_read_only_redacted_and_honors_enabled(tmp_path, encoding):
+    module = diagnostics()
+    config = tmp_path / "config.toml"
+    config.write_text(
+        '[mcp_servers.thinking]\ncommand = ' + json.dumps(sys.executable)
+        + '\nargs = ["--private=never-echo"]\n'
+        '[mcp_servers.offline]\nenabled = false\n'
+        '[mcp_servers.remote]\nurl = "https://private.invalid/?token=never-echo"\n',
+        encoding=encoding)
+    before = config.read_bytes()
+    with patch.object(subprocess, "Popen", side_effect=AssertionError("must not spawn")):
+        report = module.diagnose_registration(config)
+    rows = {r["name"]: r for r in report["servers"]}
+    assert set(rows) == {"thinking", "offline", "remote"}
+    assert rows["thinking"]["status"] == "static_ok"
+    assert rows["offline"]["status"] == "disabled"
+    assert rows["remote"]["status"] == "remote_unprobed"
+    assert report["summary"]["problems"] == 0
+    assert report["session"]["status"] == "unverified"
+    assert "never-echo" not in json.dumps(report)
+    assert config.read_bytes() == before and list(tmp_path.iterdir()) == [config]
+
+
+def test_missing_toml_parser_is_explicit_and_never_healthy(tmp_path):
+    module = diagnostics()
+    config = tmp_path / "config.toml"
+    config.write_text('[mcp_servers.demo]\ncommand = "never-echo"\n', encoding="utf-8")
+    with patch.object(module, "tomllib", None, create=True):
+        report = module.diagnose_registration(config)
+    assert report["status"] == "toml_parser_unavailable"
+    assert report["summary"]["problems"] == 1 and not report["servers"]
+    assert "never-echo" not in json.dumps(report)
+
+
+@pytest.mark.parametrize("content", [
+    '[mcp_servers.demo\ncommand = "never-echo"',
+    'mcp_servers = []',
+    '[mcp_servers]\ndemo = []',
+])
+def test_invalid_codex_toml_is_reported_without_echo_or_backup(tmp_path, content):
+    config = tmp_path / "config.toml"
+    config.write_text(content, encoding="utf-8")
+    before = config.read_bytes()
+    report = diagnostics().diagnose_registration(config)
+    assert report["summary"]["problems"] > 0
+    assert "never-echo" not in json.dumps(report)
+    assert config.read_bytes() == before and list(tmp_path.iterdir()) == [config]
+
+
+@pytest.mark.parametrize("child_available,expected", [
+    (False, "node_runner_not_found"), (True, "static_ok"),
+])
+def test_windows_absolute_node_npx_checks_child_node_path(tmp_path, child_available, expected):
+    module = diagnostics()
+    node, runner = tmp_path / "node.exe", tmp_path / "npx-cli.js"
+    node.write_bytes(b"MZfixture")
+    runner.write_text("// fixture only", encoding="utf-8")
+    config = write(tmp_path / "host.json", {"mcpServers": {"demo": {
+        "command": str(node), "args": [str(runner), "never-echo"],
+        "env": {"Path": str(tmp_path)}}}})
+    # The temporary files use the native host's paths. Platform classification
+    # has separate coverage; exercise the Windows runner branch on both hosts.
+    with patch.object(module, "_foreign", return_value=False), \
+            patch.object(module.shutil, "which", return_value=str(node) if child_available else None) as which:
+        report = module.diagnose_registration(config, system="windows")
+    assert report["servers"][0]["status"] == expected
+    which.assert_called_once_with("node", path=str(tmp_path))
+    assert report["summary"]["problems"] == (0 if child_available else 1)
+    assert "never-echo" not in json.dumps(report)
+
+
+def test_windows_npx_does_not_search_a_network_path(tmp_path):
+    module = diagnostics()
+    node, runner = tmp_path / "node.exe", tmp_path / "npx-cli.js"
+    node.write_bytes(b"MZfixture")
+    runner.write_text("// fixture only", encoding="utf-8")
+    config = write(tmp_path / "host.json", {"mcpServers": {"demo": {
+        "command": str(node), "args": [str(runner)],
+        "env": {"PATH": r"\\fixture.invalid\share"}}}})
+    with patch.object(module, "_foreign", return_value=False), \
+            patch.object(module.shutil, "which", side_effect=AssertionError("must not search network")):
+        report = module.diagnose_registration(config, system="windows")
+    assert report["servers"][0]["status"] == "network_path_uninspected"
+
+
+def test_doctor_default_includes_existing_codex_configuration(tmp_path, monkeypatch, capsys):
+    spec = importlib.util.spec_from_file_location("test_mcp_doctor_default", ROOT / "tools/mcp_doctor.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    config = tmp_path / ".codex/config.toml"
+    config.parent.mkdir()
+    config.write_text('[mcp_servers.demo]\ncommand = ' + json.dumps(sys.executable), encoding="utf-8")
+    monkeypatch.setattr(module.Path, "home", classmethod(lambda cls: tmp_path))
+    assert module.main(["--json", "--entries-dir", str(tmp_path / "entries")]) == 0
+    report = json.loads(capsys.readouterr().out)
+    rows = [r for r in report["registrations"] if r["config"] == str(config)]
+    assert len(rows) == 1 and rows[0]["servers"][0]["status"] == "static_ok"
