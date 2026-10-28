@@ -46,7 +46,7 @@
 | **自动部署** | GitHub Pages 官网 | `main` push 触发 GitHub Actions 自动构建与部署；本地提交和其他分支不触发线上更新，部署后仍需核对对应提交与页面。 |
 | **关联仓库待刷新核验** | Context7、SkillsMP、agentskill.sh、已绑定 Git URL 的 Smithery、skills.sh Pack | 品牌变更公开为固定提交后逐一核验平台是否刷新，不承诺实时同步。Smithery、agentskill.sh、skills.sh Pack 先解决并复验既有载荷完整性问题，不宣称完整安装通过。 |
 | **人工资料更新** | 需要人工录入、编辑或审核的平台资料页 | 仅在平台提供相应入口且资料确需变更时人工更新，并保留实际回执；README 已展示图标不作为平台资料已更新的证据。 |
-| **维护原申请与重试失败导入** | 尚未发布的 SkillHub、待审核的 SkillKit.io | SkillKit.io 保留待审核申请；SkillHub 已获授权重试失败导入，不重复创建已有条目。 |
+| **暂不重复提交；重试失败导入** | 尚未发布的 SkillHub、待审核的 SkillKit.io | SkillKit.io 保留待审核申请；SkillHub 已获授权重试失败导入，不重复创建已有条目。 |
 
 2026-09-21 以提交 `c4d1531` 完成品牌图标发布复核：GitHub Pages [构建与部署](https://github.com/ayukyo/icode-skill/actions/runs/35588882527)成功，线上 SVG 与 512 PNG 和该提交逐字节一致。agentskill.sh 安装接口已自动刷新 `updatedAt`，但仍只返回 50 个附加文件且没有独立图标字段；Smithery 页面仍关联仓库根并识别 `v2.32.0`，未发现消费仓库品牌图标的资料入口。Context7、SkillsMP 与 skills.sh 也没有可验证的单技能图标同步入口。结论是无需重复上架或来回修改 Git URL；目录抓取与载荷完整性仍按既有边界继续跟踪。
 
