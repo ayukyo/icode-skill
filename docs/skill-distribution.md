@@ -28,6 +28,15 @@ python -B tools/install_skill_pack.py --component-root "<核心技能目录>" --
 
 ### 维护者如何发行
 
+`tools/build_release_assets.py` 复用现有生成器，一次生成完整 tar、单技能 core ZIP、plugin-core ZIP、五个组件 ZIP，以及旧版 `.sha256`、总 `SHA256SUMS`、`release-assets.json`，共 11 个文件：
+
+```bash
+python3 -B tools/build_release_assets.py --output /已有父目录/新发行目录
+(cd /已有父目录/新发行目录 && sha256sum --check SHA256SUMS)
+```
+
+脚本只做离线构建，不提交、打标签或上传。它比较两个 profile 的完整工作流、共享技能及插件元数据，拒绝构建间漂移；所有路径祖先拒绝 symlink 和 Windows reparse point。成功前不创建发行输出，已有目录不覆盖。`.github/workflows/release.yml` 在版本标签与源码、发行说明绑定且真实 DOCX 渲染门禁通过后，上传整批附件，保留旧完整包名称。
+
 同一次构建的核心 ZIP、可选插件核心 ZIP、五份扩展 ZIP 与校验清单作为**同一个版本**的 Release 附件提供。默认附件基址为 `https://github.com/ayukyo/icode-skill/releases/download/v<版本>`；分叉仓可在构建时显式指定 `--download-base`，必须是版本一致的 HTTPS GitHub Release 基址。先测试和校验同批产物，再按原发布授权流程上传，不能覆盖已发布的不同内容冒充同版本。
 
 构建完全离线，生成下载 URL 不代表该附件已经发布或可访问。本地候选完成后，仍须完成发布和真实网络首次获取验证，才可声称普通用户已能在线取得扩展。离线文件、缓存与网络边界均有回归测试，不能将网络边界模拟测试写成线上发行验收。

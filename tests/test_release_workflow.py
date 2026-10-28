@@ -1,6 +1,7 @@
 """Release authorization, qualification and tag/source binding contracts."""
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import tempfile
 import textwrap
@@ -35,6 +36,20 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertIn('.tar.gz.sha256', publish['run'])
         self.assertNotIn('--clobber', publish['run'])
 
+    def test_lightweight_and_component_assets_are_built_and_uploaded_together(self):
+        steps = self.data['jobs']['publish']['steps']
+        build = next(s['run'] for s in steps if s.get('name') == 'Build complete public skills archive')
+        self.assertIn('tools/build_release_assets.py', build)
+        self.assertIn('sha256sum --check SHA256SUMS', build)
+        publish = steps[-1]['run']
+        self.assertIn('"$RUNNER_TEMP/release-assets/"*.zip', publish)
+        self.assertIn('release-assets.json', publish)
+        self.assertIn('SHA256SUMS', publish)
+        for path in ('docx-renderer.yml', 'public-site.yml'):
+            text = (ROOT / '.github/workflows' / path).read_text(encoding='utf-8')
+            self.assertIn("'tools/build_release_assets.py'", text)
+            self.assertIn('python3 -m unittest discover -s tests -p test_release_assets.py -v', text)
+
     def test_binding_rejects_mismatch_invalid_tag_and_missing_notes(self):
         steps = self.data['jobs']['publish']['steps']
         script = next(s['run'] for s in steps if s.get('name') == 'Bind tag to source version and reviewed notes')
@@ -49,7 +64,7 @@ class ReleaseWorkflowTests(unittest.TestCase):
                 if notes:
                     (root / 'docs/releases').mkdir(parents=True)
                     (root / 'docs/releases/v2.32.1.md').write_text('Reviewed notes\n')
-                result = subprocess.run(['bash', '-e', '-c', textwrap.dedent(script)], cwd=root,
+                result = subprocess.run([shutil.which('bash') or 'bash', '-e', '-c', textwrap.dedent(script)], cwd=root,
                                         env={**os.environ, 'GITHUB_REF_NAME': tag},
                                         capture_output=True, text=True)
                 self.assertEqual(result.returncode, expected, result.stderr)

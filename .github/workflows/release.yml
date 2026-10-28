@@ -43,15 +43,15 @@ jobs:
           PY
       - name: Build complete public skills archive
         run: |
-          mkdir -p "$RUNNER_TEMP/release-package"
-          python3 tools/build_skill_distribution.py --output "$RUNNER_TEMP/release-package/icode"
-          tar -C "$RUNNER_TEMP/release-package" -czf "$RUNNER_TEMP/icode-$GITHUB_REF_NAME.tar.gz" icode
-          cd "$RUNNER_TEMP"
-          sha256sum "icode-$GITHUB_REF_NAME.tar.gz" > "icode-$GITHUB_REF_NAME.tar.gz.sha256"
+          python3 -B tools/build_release_assets.py --output "$RUNNER_TEMP/release-assets"
+          (cd "$RUNNER_TEMP/release-assets" && sha256sum --check SHA256SUMS)
       - name: Publish verified tag and archive
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "$GITHUB_REF_NAME" --verify-tag --target "$GITHUB_SHA" \
             --title "ICODE $GITHUB_REF_NAME" --notes-file "docs/releases/$GITHUB_REF_NAME.md" --latest \
-            "$RUNNER_TEMP/icode-$GITHUB_REF_NAME.tar.gz" "$RUNNER_TEMP/icode-$GITHUB_REF_NAME.tar.gz.sha256"
+            "$RUNNER_TEMP/release-assets/icode-$GITHUB_REF_NAME.tar.gz" \
+            "$RUNNER_TEMP/release-assets/icode-$GITHUB_REF_NAME.tar.gz.sha256" \
+            "$RUNNER_TEMP/release-assets/"*.zip \
+            "$RUNNER_TEMP/release-assets/release-assets.json" "$RUNNER_TEMP/release-assets/SHA256SUMS"

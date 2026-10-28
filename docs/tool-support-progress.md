@@ -4,6 +4,8 @@
 
 **可搜索、已收录、安装完整、宿主运行通过、自动更新是独立状态。** 已发布不代表安装可用；根技能资源完整不代表共享技能、MCP、设备或每个模型已通过。待验和受阻不计作支持完成，也不保证推荐排名。
 
+2026-10-29 补充：已获授权重试先前失败的导入与下载；本轮不新建、评论或重开各平台 ISSUE。轻量发行工作流正在补齐核心和组件附件，候选通过不代表新版本已发布。
+
 ## 当前台账
 
 日期 2026-09-21 的初始核查基线为源码 `1441fc6d91d544f3e097415fb9db278f71783715`；同日远程安装、Smithery 下载与 GitHub 索引追加核查使用 `0b7a3f49ea9187b5d33f20b83313ec09200587f9`。各次结果保留自身来源，不用新提交替换历史证据。
@@ -16,15 +18,15 @@
 | `workbuddy` | 宿主 | [官方路径适配说明](workbuddy-support.md)已有；2026-10-02 起 `--client workbuddy` 安装目标已实现（独立技能根 `~/.workbuddy/skills`、命令桥、MCP `~/.workbuddy/mcp.json`），契约测试 `test_workbuddy_sync_contract.sh`（11/11）与 `test_workbuddy_mcp_contract.sh`（5/5）通过 | 复用 ICODE 来源，不复制维护；WorkBuddy 本体加载/执行待验 | 复用单一源码，由安装器分发 | 沿用显式安装；市场更新待验 | 2026-10-02 | 隔离目录安装已验证；WorkBuddy 实机会话加载、共享技能调用与步骤停止点待验；不虚构 Runtime runner |
 | `find-skills` | 发现/安装 | 官方 CLI 查询 icode 未命中目标；直接来源可识别 | [隔离 GitHub 远程 copy 安装及旧→新刷新](find-skills-compatibility.md)通过，328项资源一致；宿主运行待验 | 锁文件为 github / ayukyo/icode-skill / main，前后hash变化 | update退出1且旧安装未损；显式add --copy完成0b7a3f49→6eb09d4 | 2026-09-21 | 保留有界超时、完整性校验和失败日志；不把显式刷新当自动更新通过，不启用遥测 |
 | `skill-creator` | 创建/评估 | 创建/评估工具，不是推广目录 | 格式/证据检查通过；[追加两组36份文本复测](skill-creator-compatibility.md)，末组合同15符合/1问题/2边界，知识错误另列 | 绑定每轮源码提交、diff与输入摘要，保留上下文/评分口径变化 | 源码变更后重跑评估；无市场同步语义 | 2026-09-21 | 已修正工程根冲突、预检/示例绑定并补三态约束；不将局部补测合并全绿，真实工具行为与模型稳定性待验 |
-| `skillsmp` | 市场/目录 | [已收录](https://skillsmp.com/creators/ayukyo/icode-skill/skill)，描述仍为旧版 | 最新完整安装待验 | 条目关联正确 GitHub 来源 | 平台抓取；刷新时间由平台控制 | 2026-09-21 | 关注旧参数描述刷新；作者词命中不代表用途词排名 |
-| `skills-sh` | 市场/目录 | icode 有限查询未命中；[ICODE Pack已创建](https://skills.sh/p/qyTEI6OU23DzlcNx) | 只读导入通过；平台漏掉16个PPT二进制资源，非完整安装通过 | 只读关联公开 ICODE 仓库，不授予提交/推送 | Pack内来源为ayukyo/icode-skill@main；实际更新待验 | 2026-09-21 | Pack为不列入目录的分享链接，不保证搜索上榜；完整功能从GitHub安装 |
-| `smithery` | 市场/目录 | [ICODE 条目已发布](https://smithery.ai/skills/ayukyo/icode) | 受阻：下载ZIP检出1项缺失、25项变化，包括16个二进制文件损坏 | 设置中已关联仓库根 URL，不是仅固定提交 | 文本仍有旧版差异；定时跟随更新未证实 | 2026-09-21 | 已提交[官方反馈 #816](https://github.com/arcadeai-labs/smithery-cli/issues/816)，注明网页下载而非已确认CLI缺陷；修复前从GitHub安装 |
-| `agentskill-sh` | 市场/目录 | [条目已收录](https://agentskill.sh/@ayukyo/icode-skill)；导入回执 1 updated | 受阻：[实样检查](find-skills-compatibility.md)对比基线323项资源，311项缺失、1项内容不同 | 条目关联 GitHub 根仓库；contentSha 对应源码 SKILL 摘要短前缀，不是附加指令后载荷的完整摘要 | 提交页声明每日检查；实际刷新完整性待验 | 2026-09-21 | 缺 steps/references/tools 等；根 SKILL 注入 AUTO-REVIEW 静默评价上报指令，未执行；解决前不建议使用该载荷 |
-| `skillhub` | 市场/目录 | 导入受阻，尚未发布 | 受阻：刷新后仍Failed to fetch；站内官方反馈问卷已提交成功 | 已绑定 GitHub；昵称/源码简介申请仍审核中，未正式展示；尚无发布条目 | 未发布，不承诺自动更新 | 2026-09-21 | 按维护者要求关闭[问题 #2](https://github.com/Tencent/skillhub/issues/2)，转站内反馈；关闭不表示故障修复 |
+| `skillsmp` | 市场/目录 | [已收录，直接页本轮可访问](https://skillsmp.com/creators/ayukyo/icode-skill/skill) | 最新完整安装待验 | 条目关联正确 GitHub 来源 | 平台抓取；刷新时间由平台控制 | 2026-10-29 | 有限名称查询未命中不推翻直接条目；不保证用途词排名 |
+| `skills-sh` | 市场/目录 | [既有 ICODE Pack 可访问](https://skills.sh/p/qyTEI6OU23DzlcNx) | 历史导入漏掉16个PPT二进制，完整安装待验 | 既有Pack来源ayukyo/icode-skill@main | 本轮页面可访问；实际资源刷新待验 | 2026-10-29 | 维持已有分享包，不重复建包；不模拟安装或制造遥测 |
+| `smithery` | 市场/目录 | [既有条目可访问](https://smithery.ai/skills/ayukyo/icode) | 受阻：历史下载二进制损坏，本轮完整ZIP仍待复验 | 已关联仓库根；本轮页面已识别v2.33.0 | 已观察文本版本更新；不等于二进制完整性通过 | 2026-10-29 | 历史反馈保留，本轮不新增或评论ISSUE；复验前从GitHub安装 |
+| `agentskill-sh` | 市场/目录 | [既有条目](https://agentskill.sh/@ayukyo/icode-skill)本轮访问超时 | 受阻：历史311项缺失及AUTO-REVIEW附加指令未获修复证据 | 既有关联GitHub根仓库 | 平台声称每日检查；本轮更新状态待验 | 2026-10-29 | 不执行附加上报指令；超时不证明条目下架 |
+| `skillhub` | 市场/目录 | 已登录并重试；仓库可列出，归档下载仍Failed to fetch，尚未发布 | 受阻：GitHub归档失败；169文件ZIP离线通过，浏览器本地文件权限阻止上传，平台解析待验 | GitHub已绑定；昵称与源码简介本轮已显示 | 尚无发布条目，不承诺自动更新 | 2026-10-29 | 新表单上限200文件、10MB；先完成发行附件与ZIP预检，不向平台发ISSUE |
 | `skillkit-io` | 市场/目录 | 已提交，页面提示待审核添加 | 完整安装待验 | 提交公开 GitHub 根 URL | 审核与自动刷新未证实 | 2026-09-21 | 等待目录条目，核对来源及资源；勿重复提交 |
 | `context7-docs` | 文档索引 | [已索引且验证通过](https://context7.com/ayukyo/icode-skill)；新配置刷新94文件、2048片段 | crosscheck主题检索通过，返回源码引用及隔离/fresh规则；技能安装不适用 | 根仓库已关联，已补官网、用途和验证申请资料 | 仓库 context7.json 已被平台校验并刷新成功；不承诺每次 push 即重建 | 2026-09-21 | 保留工具执行证据边界；文档索引不等同 Skills 目录收录 |
-| `context7-skills` | 市场/目录 | 有限查询未命中 | 待验；官方 CLI 已标记 skills 命令弃用 | 查询按目标来源核对 | 不新增已弃用 CLI 的长期依赖 | 2026-09-21 | 与文档索引分开跟踪，先确认继任渠道 |
-| `clawhub` | 市场/目录 | 查询未命中；未发布 | 受阻：发布许可条件须与第三方素材逐项核对 | 尚无已发布关联 | 不适用，未发布 | 2026-09-21 | 不更改许可或用空包装冒充完整技能 |
+| `context7-skills` | 市场/目录 | 旧Skills查询端点本轮返回404 | 受阻：探针接口不可用，不作为未收录证据 | 原目标来源保持，不推断目录当前状态 | 不新增已弃用CLI的长期依赖 | 2026-10-29 | 与已验证文档索引分开；确认继任接口后再查 |
+| `clawhub` | 市场/目录 | 本轮查询未命中；未发布 | 受阻：许可条件与PPT第三方素材仍需逐项核对 | 尚无已发布关联 | 不适用，未发布 | 2026-10-29 | 不更改许可或将完整发行统一声明为MIT-0 |
 | `github-skill-search` | 发现/安装 | Code Search 已命中根 SKILL.md（0b7a3f49）；gh skill search 尚未实测 | 网页代码索引通过；CLI搜索/安装待验 | 查询结果直接指向公开源码与提交 | GitHub 索引已从先前pending变为可查；时效无保证 | 2026-09-21 | 不把网页 Code Search 命中说成CLI技能搜索/安装通过或推荐排名 |
 | `cursor` | 宿主 | 标准技能目录接入路线已有 | 官方CLI完整17技能copy/重复安装通过；本体加载/执行待验 | 复用单一源码生成包 | local来源显式重建/重装 | 2026-09-21 | [复现配方](host-loading-validation.md)；继续验证目标版本MCP、步骤停止点 |
 | `gemini-cli` | 宿主 | 标准技能目录接入路线已有 | 官方CLI完整17技能copy/重复安装通过；本体加载/执行待验 | 复用单一源码生成包 | local来源显式重建/重装 | 2026-09-21 | 不虚构原install.sh专用目标；验证宿主权限和停止点 |
@@ -44,13 +46,13 @@
 | **自动部署** | GitHub Pages 官网 | `main` push 触发 GitHub Actions 自动构建与部署；本地提交和其他分支不触发线上更新，部署后仍需核对对应提交与页面。 |
 | **关联仓库待刷新核验** | Context7、SkillsMP、agentskill.sh、已绑定 Git URL 的 Smithery、skills.sh Pack | 品牌变更公开为固定提交后逐一核验平台是否刷新，不承诺实时同步。Smithery、agentskill.sh、skills.sh Pack 先解决并复验既有载荷完整性问题，不宣称完整安装通过。 |
 | **人工资料更新** | 需要人工录入、编辑或审核的平台资料页 | 仅在平台提供相应入口且资料确需变更时人工更新，并保留实际回执；README 已展示图标不作为平台资料已更新的证据。 |
-| **暂不重复提交** | 尚未发布的 SkillHub、待审核的 SkillKit.io | 维持现有等待状态；没有新的平台回执或状态变化时不重复提交。 |
+| **维护原申请与重试失败导入** | 尚未发布的 SkillHub、待审核的 SkillKit.io | SkillKit.io 保留待审核申请；SkillHub 已获授权重试失败导入，不重复创建已有条目。 |
 
 2026-09-21 以提交 `c4d1531` 完成品牌图标发布复核：GitHub Pages [构建与部署](https://github.com/ayukyo/icode-skill/actions/runs/35588882527)成功，线上 SVG 与 512 PNG 和该提交逐字节一致。agentskill.sh 安装接口已自动刷新 `updatedAt`，但仍只返回 50 个附加文件且没有独立图标字段；Smithery 页面仍关联仓库根并识别 `v2.32.0`，未发现消费仓库品牌图标的资料入口。Context7、SkillsMP 与 skills.sh 也没有可验证的单技能图标同步入口。结论是无需重复上架或来回修改 Git URL；目录抓取与载荷完整性仍按既有边界继续跟踪。
 
 ## 当前优先级
 
-1. **可用性优先**：Smithery 下载包二进制损坏已反馈；agentskill.sh 实样检出311项缺失、1项内容不同，根 SKILL 注入 `AUTO-REVIEW` 静默评价上报指令（并非 ICODE 源码行为，未执行）。解决前引导从完整 GitHub 来源安装。SkillHub 等官方答复，不能靠继续删模板绕过未知条件。
+1. **可用性优先**：Smithery 下载包二进制损坏已反馈；agentskill.sh 实样检出311项缺失、1项内容不同，根 SKILL 注入 `AUTO-REVIEW` 静默评价上报指令（并非 ICODE 源码行为，未执行）。解决前引导从完整 GitHub 来源安装。SkillHub 本轮 GitHub 导入仍下载失败；169文件候选离线通过，本地 ZIP 平台预检待完成，不把文件数达标当作上架成功。
 2. **验证闭环**：find-skills 的GitHub远程完整安装与显式旧→新刷新已测，update新增Git trace确认本次首轮克隆在360秒上限终止、旧安装无损，不与先前子安装失败混因；skill-creator保留所有失败轮、上下文变化和局部补测。末组15项合同符合不代表全部事实正确；模型稳定性、正反触发与真实工具行为仍待验。离线通过、网络受阻和行为缺口分别记录。
 3. **后续扩展**：10个官方CLI安装目标的完整包复制已通过，Codex/Claude真实加载已验证；Codex追加真实模型只读status与legacy降级通过，Claude当前模型及无ICODE对照均无成功Read，OpenCode本体下载未完成。继续补共享技能/MCP和其他宿主，复制、加载与执行不是同一层。
 4. **维护现有条目**：SkillsMP 等待旧描述刷新；Smithery 跟踪损坏修复与同步；SkillKit.io 等待审核。Context7 仓库配置读取与问答检索已验证，不再列为未完成。不要重复提交或堆砌关键词。

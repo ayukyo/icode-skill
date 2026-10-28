@@ -10,6 +10,8 @@ on:
       - 'scripts/sync-to-global.sh'
       - 'scripts/check-docx-renderer-release.py'
       - 'tools/build_skill_distribution.py'
+      - 'tools/build_release_assets.py'
+      - 'tests/test_release_assets.py'
       - 'tests/test_docx*'
       - 'tests/test_skill_distribution.py'
       - '.github/workflows/docx-renderer.yml'
@@ -23,6 +25,8 @@ on:
       - 'scripts/sync-to-global.sh'
       - 'scripts/check-docx-renderer-release.py'
       - 'tools/build_skill_distribution.py'
+      - 'tools/build_release_assets.py'
+      - 'tests/test_release_assets.py'
       - 'tests/test_docx*'
       - 'tests/test_skill_distribution.py'
       - '.github/workflows/docx-renderer.yml'
@@ -64,6 +68,7 @@ jobs:
         run: |
           python3 -m unittest discover -s tests -p test_docx_renderer.py -v
           python3 -m unittest discover -s tests -p test_skill_distribution.py -v
+          python3 -m unittest discover -s tests -p test_release_assets.py -v
       - name: Public installer downloads and registers pinned owned renderer
         run: bash install.sh --client all --skip-mcp
       - name: Managed DOCX authoring and revision regressions

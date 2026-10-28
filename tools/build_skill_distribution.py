@@ -49,9 +49,17 @@ def no_symlinks(path):
     for component in (path, *path.parents):
         if component.is_symlink():
             raise ValueError(f"symlink is not allowed: {component}")
+        try:
+            attributes = getattr(component.lstat(), "st_file_attributes", 0)
+        except FileNotFoundError:
+            continue
+        if attributes & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0):
+            raise ValueError(f"reparse point is not allowed: {component}")
 
 
 def allowed(path):
+    if path.as_posix() == "tools/build_release_assets.py":
+        return False  # Release maintenance is not part of the installed runtime.
     return (path.as_posix() in FILES | METADATA or path.parts[0] in DIRECTORIES | {"assets"}
             or path.parts[:2] == ("integrations", "codebuddy"))
 
@@ -127,6 +135,7 @@ def component_for(path):
 
 
 def compact_entry(original, version):
+    original = original.replace("\r\n", "\n")
     metadata = re.match(r"\A---\r?\n.*?\r?\n---\r?\n", original, re.S)
     if not metadata:
         raise ValueError("root SKILL.md must expose frontmatter")
@@ -200,7 +209,8 @@ def split_components(workflow, archives, version, download_base):
             "size": archive.stat().st_size, "url": base.rstrip("/") + "/" + filename, "files": rows}
     original = (workflow / "SKILL.md").read_bytes()
     (workflow / "WORKFLOW.md").write_bytes(original)
-    (workflow / "SKILL.md").write_text(compact_entry(original.decode("utf-8"), version), encoding="utf-8")
+    (workflow / "SKILL.md").write_text(compact_entry(original.decode("utf-8"), version),
+                                     encoding="utf-8", newline="\n")
     manifest["core_files"] = [
         {"path": p.relative_to(workflow).as_posix(), "size": p.stat().st_size,
          "sha256": hashlib.sha256(p.read_bytes()).hexdigest(),
