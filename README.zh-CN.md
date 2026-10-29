@@ -6,6 +6,10 @@
 
 ICode 是可供 Claude Code、Codex、CodeBuddy 与 WorkBuddy 使用的开源 AI 编码工作流 Skill。通过工单驱动开发，串联需求、设计、实现、代码审查与证据化验证，保存状态以支持跨会话断点续接。
 
+技术图可复用同一 SVG 源，供 Markdown、Word 和 PPT 使用。按需 DOCX/PPT 组件提供静态 SVG 校验、字体字形检查和可追踪 PNG 兼容输出；实验 SVG+PNG 双表示仍须完成实际 Office 与最终页面检查，才能认定原生矢量验收通过。见 [SVG 编写与检查](tools/docx/README.md)。
+
+生成与验收使用开源 resvg、LibreOffice 和本地字体，可采用 Noto CJK；不要求安装微软 Office，微软 Office/WPS 只作可选兼容验证。
+
 多模型代码审查由用户先自行切换 Agent/模型，再用 `/icode crosscheck` 复评已完成工单；ICODE 不会自动切换模型。可选的 `/icode ui` 提供本地工单工作台。仅在点名 ICODE 或续接已绑定的 ICODE 工单时使用，不接管未指定 ICODE 的普通请求。
 
 - **入口命令（可选）**：`/icode log` 日志根因分析（领域无关）→ 转修复需求；`/icode init` 需求初稿对话

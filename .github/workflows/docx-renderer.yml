@@ -6,6 +6,11 @@ on:
       - 'LICENSE.txt'
       - 'templates/**'
       - 'tools/docx/**'
+      - 'tools/ppt/scripts/**'
+      - 'steps/ppt.md'
+      - 'tests/test_svg*'
+      - 'tests/test_sequence_svg.py'
+      - 'tests/test_ppt_diagrams.py'
       - 'steps/docx.md'
       - 'references/docx_*.md'
       - 'install.sh'
@@ -23,6 +28,11 @@ on:
       - 'LICENSE.txt'
       - 'templates/**'
       - 'tools/docx/**'
+      - 'tools/ppt/scripts/**'
+      - 'steps/ppt.md'
+      - 'tests/test_svg*'
+      - 'tests/test_sequence_svg.py'
+      - 'tests/test_ppt_diagrams.py'
       - 'steps/docx.md'
       - 'references/docx_*.md'
       - 'install.sh'
@@ -81,6 +91,10 @@ jobs:
           RUNTIME_JSON="$(python3 tools/docx/bootstrap_runtime.py)"
           DOCX_PYTHON="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["python"])' "$RUNTIME_JSON")"
           "$DOCX_PYTHON" -m unittest discover -s tests -p test_docx_integrity.py -v
+          "$DOCX_PYTHON" -m pip install --disable-pip-version-check pytest==8.3.5
+          "$DOCX_PYTHON" -m pytest tests/test_svg_diagrams.py tests/test_docx_svg.py tests/test_sequence_svg.py tests/test_ppt_diagrams.py tests/test_ppt_managed_renderer.py tests/test_svg_qualification.py tests/test_svg_release.py -q
+          "$DOCX_PYTHON" tools/docx/qualify_svg.py --output-dir "$RUNNER_TEMP/svg-fixtures" --font /usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc
+          "$DOCX_PYTHON" tools/docx/check_svg_release.py --fixtures "$RUNNER_TEMP/svg-fixtures" --output-dir "$RUNNER_TEMP/svg-consumer"
       - name: Sync does not erase renderer registration
         run: |
           bash scripts/sync-to-global.sh --apply --client all

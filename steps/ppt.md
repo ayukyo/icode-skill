@@ -10,6 +10,16 @@
 
 ## 0. 前置校验
 
+SVG 正式验收使用 `render_slides.py <pptx> <preview> --managed`；先从同版 DOCX 组件运行 `bootstrap_renderer.py` 准备受管 LibreOffice/Poppler。此模式不回退 PATH，缺组件/不兼容明确失败。旧无 flag 渲染入口仍兼容原流程。
+
+生成与正式验收依赖开源 resvg、受管 LibreOffice 和本地开放字体（如 Noto CJK）；微软 Office/WPS 仅为可选兼容检查，不是安装依赖或必过项。SVG 和 PNG 必须在 LibreOffice 实际导入、PDF 导出、再保存后复查，逐页视觉审阅另记。
+
+需要 SVG 时，同时准备同版本 `ppt` 和 `docx` 组件（返回同一 `runtime_root`）。运行该根的 `tools/docx/bootstrap_runtime.py`，使用其返回的受管 Python，包含锁定 python-pptx/resvg/fonttools，不在核心扫描目录安装依赖。
+
+`edits.json` 可增加 `images` 列表，每项必须有模板原页码 `slide`、相对 edits 的 `source`、非空 `alt_text`，以及 `slot_id`、`address:{shape_id}` 或 `box_inches:[x,y,w,h]` 三选一。槽位用 `detail.json` 的 `pages[].image_slots` 声明；替换核对 `expected_placeholder` 或原图片 `expected_sha256`。显式区域不得越界或遮挡其它 shape，只允许 `fit=contain`。未选页、重复目标、未知字段、缺文件和错误期望均失败，dry-run 同样预检。
+
+SVG 默认转 PNG，`--svg-dpi 192`、可重复 `--svg-font <字体>` 控制尺寸和字形。实验 `--svg-mode dual` 嵌入 SVG+PNG，报告 `native_vector_pending` 和兼容性 pending。构建附带同名 manifest，绑定模板、edits、源图、实际页/shape、几何和产物 hash；渲染后运行 `check_render_output.py <pptx> <preview_dir> --manifest <manifest>`，再按媒体路由审阅最终页面。实际 Office 打开、缩放、PDF 导出和再保存不能用结构检查替代。
+
 1. **python-pptx 必需**：`python3 -c "import pptx"` 失败 → 提示 `pip install python-pptx`，缺则本步骤无法产出 .pptx。
 2. **渲染自检可选**：LibreOffice（`soffice --version`）+ poppler（`pdftoppm`）存在才生成 PNG 预览；缺失则跳过渲染，**不阻断**（只出 .pptx，并提示无法自检）。渲染成功只证明 PPTX 可转成逐页 PNG，不等于视觉排版已经验证。
 3. **模板完整性**：`tools/ppt/templates/` 下应有 `INDEX.md` + ≥1 套模板（每套 4 文件：`template.pptx`/`intro.md`/`detail.json`/`preview.png`）。缺失 → 报错提示模板目录不完整。

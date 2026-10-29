@@ -27,6 +27,47 @@ Dependency/version failures never switch sources.
 
 ## Build and inspect
 
+Technical diagrams can retain one local SVG source. The managed Python runtime
+pins resvg-py 0.5.0 and fonttools 4.60.1; no browser is required. Text uses
+explicit local fonts (`--svg-font`, `ICODE_SVG_FONT_FILES`, or named CJK
+candidates in `diagram_svg.py`); missing glyphs fail. Fonts are not bundled or
+downloaded. Static shapes, paths, groups, text/tspan and local markers work;
+CSS styles, scripts, events, DTD/entities, external resources, images,
+use-elements and foreignObject fail. A positive viewBox is required; explicit
+width/height must match its aspect ratio.
+
+```bash
+"$PYTHON" tools/docx/diagram_svg.py figure.svg --validate-only
+"$PYTHON" tools/docx/build_docx.py guide.md guide.docx --svg-dpi 192
+"$PYTHON" tools/docx/build_docx.py guide.md guide-dual.docx --svg-mode dual
+```
+
+Default output is `raster_fallback`, sized by physical width and DPI. Dual mode
+keeps SVG plus PNG and reports `native_vector_pending`; `vector_preserved=true`
+describes the packaged source, not verified Office behavior. Source, PNG and
+receipts remain with the delivery; records follow `diagram.schema.json`.
+Cache identity includes source, renderer, font hashes, width and DPI. Inspection
+separately checks source/embedded hashes, SVG content types and relationships,
+drawing identity, alt text and ratio. Acceptance uses the open-source resvg +
+managed LibreOffice chain with local open fonts such as Noto CJK: actual import,
+PDF export, resave, fallback and final page review. Microsoft Office and WPS are
+optional compatibility checks, never installation dependencies or release gates.
+`draw_sequence.py` also accepts `.svg` output with native text elements.
+
+Prepare both DOCX and PPT components to generate three Chinese qualification
+diagrams and four raster/dual packages with `qualify_svg.py --output-dir <new
+external directory> --font /path/to/NotoSansCJK-Regular.ttc`. Its receipt records
+build evidence only; actual LibreOffice and page-review results are separate.
+
+Run `check_svg_release.py --fixtures <fixture-directory> --output-dir <new
+consumer-directory>` with the same managed Python. It checks every artifact
+hash before executing the pinned owned renderer, exports and resaves all four
+packages, and requires three pages before/after. Dual mode must preserve the
+three source SVG hashes and PNG fallbacks. Verified owned `pdfimages` checks
+that dual PDFs contain no raster image objects, while raster PDFs contain the
+expected images. Rendering and roundtrip statuses can pass automatically;
+`visual_review` stays pending until all final pages have actually been viewed.
+
 ```bash
 RUNTIME_JSON="$(python3 tools/docx/bootstrap_runtime.py)"
 PYTHON="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["python"])' "$RUNTIME_JSON")"

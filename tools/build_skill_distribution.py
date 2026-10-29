@@ -38,6 +38,8 @@ REQUIRED = FILES | METADATA | {"skill-packs/manifest.json", "mcp/workflow-gate/g
                     "tools/docx/render_docx.py", "tools/docx/compare_docx.py",
                     "tools/docx/verify_sources.py", "tools/docx/draw_sequence.py"}
 REQUIRED |= {"steps/doc.md", "references/doc_snapshot_contract.md", "tools/doc_snapshot.py"}
+REQUIRED |= {"tools/docx/diagram_svg.py", "tools/docx/diagram_ooxml.py",
+             "tools/docx/diagram.schema.json", "tools/docx/qualify_svg.py", "tools/docx/check_svg_release.py"}
 REQUIRED |= {"tools/test_result_summary.py", "references/wsl_build.md", "references/mcp_path_access.md"}
 REQUIRED |= {"mcp/_lib/environment_diagnostics.py", "tools/mcp_doctor.py",
              "references/environment_diagnostics.md"}

@@ -1,13 +1,13 @@
 # tools/ppt - PPT 生成引擎（`/icode ppt` 独立交付步骤的底层工具）
 
-`/icode ppt` 的生成层：**模板文字替换式**产出真实 `.pptx`。机制来自
+`/icode ppt` 的生成层：**模板文字替换与受控图片编辑**产出真实 `.pptx`。机制来自
 [lmori1301/Agent-PPTSkill](https://github.com/lmori1301/Agent-PPTSkill)（脚本 MIT；**模板非商业**，见 [NOTICE](NOTICE)）。
 
 ## 文件
 
 | 文件/目录 | 职责 |
 |------|------|
-| `scripts/build_pptx.py` | 按 `edits.json`（选页 + 文字替换）从模板生成 .pptx；带出框检测（默认只提示不阻断，`--strict` 时超框拒绝保存） |
+| `scripts/build_pptx.py` | 按 `edits.json`（选页、文字及显式图片操作）生成 .pptx；文字出框只提示，`--strict` 校验预期文字；图片操作始终严格预检 |
 | `scripts/render_slides.py` | .pptx → PDF → 每页 PNG（LibreOffice + pdftoppm，渲染自检用，可选） |
 | `scripts/check_render_output.py` | 纯文本安全的确定性检查：PPTX 页数、逐页 PNG 完整性、签名和尺寸；不做排版语义判断 |
 | `scripts/compute_capacity.py` | 由 template.pptx 计算每个 slot 容量字段（数据准备/自建模用） |
@@ -15,6 +15,29 @@
 | `templates/<slug>/` | 每套 4 文件：`template.pptx` / `intro.md` / `detail.json`（槽位寻址+容量+type_scale）/ `preview.png` |
 
 ## 前置
+
+For formal SVG acceptance, `render_slides.py INPUT OUT --managed` uses only the
+compatible owned LibreOffice/Poppler resolved from the sibling DOCX component.
+Run its `bootstrap_renderer.py` first. Missing or incompatible owned tooling
+fails explicitly, with no PATH fallback; the legacy call without this flag
+keeps its existing optional host-renderer behavior.
+
+`build_pptx.py` also accepts strict `images` alongside text edits. Each entry
+requires original-template `slide`, `source` relative to edits.json, `alt_text`,
+and one of `slot_id`, `address:{shape_id}`, or `box_inches:[x,y,w,h]`. Slots use
+`detail.json` pages[].image_slots. Replacements verify `expected_placeholder`
+or `expected_sha256`. Only contain fitting is supported; unknown fields,
+unselected pages, duplicate targets, overlap and invalid inputs fail before
+publishing output, including dry-run. Replacement retains shape id and z-order.
+
+For SVG prepare the same-version `docx` and `ppt` components, then use the Python
+returned by `tools/docx/bootstrap_runtime.py` (pinned python-pptx/resvg/fonttools).
+Default output embeds a traced PNG; `--svg-mode dual` retains SVG plus PNG and
+reports `native_vector_pending`. Select local fonts with `--svg-font`, density
+with `--svg-dpi`. Sources and receipts are in the sibling `.manifest.json`;
+generated PNGs remain in `<output-stem>.assets/svg/`. After rendering run
+`check_render_output.py ... --manifest <manifest>`. Consumer compatibility and
+visual review remain separate gates. See [shared SVG details](../docx/README.md).
 
 ```bash
 python3 -c "import pptx"      # python-pptx 1.0+（必需，缺则 pip install python-pptx）

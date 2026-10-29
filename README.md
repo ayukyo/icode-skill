@@ -8,7 +8,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE.txt)
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-Skill-8A2BE2.svg)](SKILL.md)
-[![Version](https://img.shields.io/badge/version-v2.33.2-blue.svg)](SKILL.md)
+[![Version](https://img.shields.io/badge/version-v2.34.0-blue.svg)](SKILL.md)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/ayukyo/icode-skill/issues)
 
 </div>
@@ -16,6 +16,15 @@
 [Website & workflow diagrams](https://ayukyo.github.io/icode-skill/en/) · [中文官网](https://ayukyo.github.io/icode-skill/) · [中文说明](README.zh-CN.md) · [Installation](#installation)
 
 ICode is an open-source AI coding workflow Skill for Claude Code, Codex, CodeBuddy and WorkBuddy. Ticket-based development connects requirements, design, implementation, code review and evidence-based verification, with saved state for resuming interrupted work across sessions.
+
+Technical diagrams can reuse a local SVG across Markdown, Word and PowerPoint.
+The optional DOCX/PPT components validate static SVGs and generate traced PNG
+fallbacks using pinned local tooling. Experimental SVG+PNG embedding keeps
+consumer compatibility pending until managed LibreOffice and final-page checks pass.
+See [SVG authoring and inspection](tools/docx/README.md).
+
+Generation and acceptance use open-source resvg, managed LibreOffice and local
+fonts such as Noto CJK. Microsoft Office/WPS are optional compatibility checks.
 
 For multi-model code review, switch agents or models yourself, then run `/icode crosscheck` on a completed ticket; ICODE does not automatically switch models. The optional `/icode ui` provides a local ticket workspace. Use ICODE only when you name ICODE or resume a bound ICODE ticket; it does not take over unrelated requests.
 

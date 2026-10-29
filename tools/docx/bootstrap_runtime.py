@@ -109,18 +109,18 @@ def validate_runtime(runtime: Path, lock_hash: str) -> tuple[bool, str]:
     if not python.is_file():
         return False, f"runtime Python 不存在: {python}"
     probe = subprocess.run(
-        [str(python), "-c", "import json, docx, PIL; print(json.dumps({'python_docx': docx.__version__, 'pillow': PIL.__version__}))"],
+        [str(python), "-c", "import json, docx, pptx, PIL, resvg_py, fontTools; print(json.dumps({'python_docx': docx.__version__, 'python_pptx': pptx.__version__, 'pillow': PIL.__version__, 'resvg_py': resvg_py.__version__, 'fonttools': fontTools.__version__}))"],
         text=True,
         capture_output=True,
     )
     if probe.returncode:
-        return False, probe.stderr.strip() or "python-docx/Pillow 导入失败"
+        return False, probe.stderr.strip() or "python-docx/python-pptx/Pillow/resvg-py/fonttools 导入失败"
     try:
         versions = json.loads(probe.stdout)
     except json.JSONDecodeError:
         return False, "runtime 版本探针输出无效"
     required = locked_versions()
-    if versions.get("python_docx") != required.get("python_docx") or versions.get("pillow") != required.get("pillow"):
+    if any(versions.get(name) != required.get(name) for name in ("python_docx", "python_pptx", "pillow", "resvg_py", "fonttools")):
         return False, f"runtime 版本不符合 lock: current={versions}, required={required}"
     return True, json.dumps(versions, ensure_ascii=False, sort_keys=True)
 

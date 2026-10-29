@@ -88,4 +88,10 @@ DOCX_PYTHON="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["pytho
 
 ## 5. 收尾
 
+正式验收使用开源 resvg、受管 LibreOffice 和本地开放字体（如 Noto CJK）；微软 Office/WPS 仅作可选兼容检查，不是安装依赖或必过项。完成 LibreOffice 实际导入、PDF 导出、再保存与全部最终页面审阅后才能报告开源链路验收通过。
+
+技术图可直接引用相对 SVG：`![图注](diagrams/route.svg)`。用受管 Python 的 `diagram_svg.py --validate-only` 预检；构建时 `--svg-dpi 192` 控制兼容 PNG 密度，`--svg-font <本地字体>` 可重复。受限子集、字形与资源预算不通过时明确失败。图源/PNG/hash/字体/renderer 均进入 manifest，最终仍需结构检查、受管渲染和逐页检查。时序图可用 `draw_sequence.py ... sequence.svg --palette ...` 输出矢量源。
+
+默认 `diagram_status=raster_fallback`；实验 `--svg-mode dual` 保留 SVG+PNG，状态为 `native_vector_pending`、`consumer_compatibility=pending`。包内 `vector_preserved=true` 不代表目标 Office 已验证；实际消费者打开、缩放、导出 PDF、再保存和 fallback 结果须单独记录。
+
 输出：DOCX/manifest 路径、主要内容或图示变化、结构检查、内容核对范围、渲染和逐页审阅状态。P1 还说明关联来源/Git baseline；静态源码核对与设备实测分别说明，不把缺失固件或闭源逻辑写成已确认事实。多文件请求逐份列出完成或未完成项，不能以其中两份通过代表整批完成。备份、图源和审计保留在目录中，正文按用户要求保持简要。

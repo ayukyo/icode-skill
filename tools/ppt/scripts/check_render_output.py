@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
+import importlib
 import json
 import re
 import struct
@@ -40,8 +42,81 @@ def _png_info(path: Path) -> dict[str, Any]:
     return item
 
 
-def check_render_output(pptx_path: Path, preview_dir: Path) -> dict[str, Any]:
+def _sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _find_shape(shapes, shape_id):
+    for shape in shapes:
+        if shape.shape_id == shape_id:
+            return shape
+        if hasattr(shape, "shapes"):
+            found = _find_shape(shape.shapes, shape_id)
+            if found is not None:
+                return found
+    return None
+
+
+def _check_manifest(pptx_path: Path, manifest_path: Path) -> tuple[dict, list[str]]:
+    checks, errors = {}, []
+
+    def check(name, passed):
+        checks[name] = bool(passed)
+        if not passed:
+            errors.append(f"manifest {name} mismatch")
+
+    try:
+        manifest = json.loads(Path(manifest_path).read_text(encoding="utf-8"))
+        check("output_hash", _sha256(pptx_path) == manifest["output"]["sha256"])
+        for name in ("template", "input"):
+            check(f"{name}_hash", _sha256(Path(manifest[name]["path"])) == manifest[name]["sha256"])
+        prs = Presentation(str(pptx_path))
+        images = manifest["images"]
+        diagrams = manifest["diagrams"]
+        if not isinstance(images, list) or not isinstance(diagrams, list):
+            raise ValueError("images and diagrams must be lists")
+        check("diagram_records", diagrams == [r for r in images if r["source_format"] == "svg"])
+        check("selected_slide_count", len(manifest["selected_slides"]) == len(prs.slides))
+        for i, record in enumerate(images):
+            prefix = f"image_{i}"
+            source = Path(record["source"])
+            check(f"{prefix}_source_hash", _sha256(source) == record["sha256"])
+            if record["source_format"] == "svg":
+                check(f"{prefix}_fallback_hash", _sha256(Path(record["fallback_png"])) == record["fallback_sha256"])
+                check(f"{prefix}_fallback_embedded", record["fallback_sha256"] == record["embedded_sha256"])
+            slide_number = record["output_slide"]
+            if type(slide_number) is not int or not 1 <= slide_number <= len(prs.slides):
+                raise ValueError(f"{prefix} output_slide is out of range")
+            check(f"{prefix}_slide_mapping", manifest["selected_slides"][slide_number - 1] == record["original_slide"])
+            shape = _find_shape(prs.slides[slide_number - 1].shapes, record["shape_id"])
+            if shape is None or not hasattr(shape, "image"):
+                raise ValueError(f"{prefix} picture shape is missing")
+            check(f"{prefix}_embedded_hash", hashlib.sha256(shape.image.blob).hexdigest() == record["embedded_sha256"])
+            geometry = {key: int(getattr(shape, key)) for key in ("left", "top", "width", "height")}
+            check(f"{prefix}_geometry", geometry == record["geometry"])
+            check(f"{prefix}_alt_text", shape._element.nvPicPr.cNvPr.get("descr") == record["alt_text"])
+        if any(r.get("embedded_format") == "svg_with_png_fallback" for r in diagrams):
+            sibling = Path(__file__).resolve().parents[2] / "docx"
+            if str(sibling) not in sys.path:
+                sys.path.insert(0, str(sibling))
+            try:
+                helper = importlib.import_module("diagram_ooxml")
+            except ImportError as exc:
+                raise ValueError(f"SVG verification requires tools/docx/diagram_ooxml.py: {exc}") from exc
+            for name, passed in helper.inspect_diagram_package(pptx_path, diagrams).items():
+                check(f"diagram_package_{name}", passed)
+    except (OSError, ValueError, KeyError, TypeError, IndexError, AttributeError,
+            PackageNotFoundError, zipfile.BadZipFile) as exc:
+        errors.append(f"manifest validation failed: {exc}")
+    return checks, errors
+
+
+def check_render_output(pptx_path: Path, preview_dir: Path, manifest_path: Path | None = None) -> dict[str, Any]:
     errors: list[str] = []
+    manifest_checks = None
+    if manifest_path is not None:
+        manifest_checks, manifest_errors = _check_manifest(pptx_path, manifest_path)
+        errors.extend(manifest_errors)
     try:
         if pptx_path.is_symlink() or not pptx_path.is_file():
             raise ValueError(f"PPTX 不是普通文件: {pptx_path}")
@@ -51,7 +126,8 @@ def check_render_output(pptx_path: Path, preview_dir: Path) -> dict[str, Any]:
             "status": "failed",
             "pptx": str(pptx_path),
             "preview_dir": str(preview_dir),
-            "errors": [str(exc)],
+            "errors": errors + [str(exc)],
+            **({"manifest_checks": manifest_checks} if manifest_path is not None else {}),
         }
 
     if not preview_dir.is_dir() or preview_dir.is_symlink():
@@ -65,7 +141,8 @@ def check_render_output(pptx_path: Path, preview_dir: Path) -> dict[str, Any]:
             "extras": [],
             "invalid": [],
             "previews": [],
-            "errors": ["预览目录不存在或不是普通目录"],
+            "errors": errors + ["预览目录不存在或不是普通目录"],
+            **({"manifest_checks": manifest_checks} if manifest_path is not None else {}),
         }
 
     actual_paths = sorted(preview_dir.glob("slide-*.png"), key=lambda path: path.name)
@@ -121,6 +198,7 @@ def check_render_output(pptx_path: Path, preview_dir: Path) -> dict[str, Any]:
         "invalid": invalid,
         "previews": previews,
         "errors": errors,
+        **({"manifest_checks": manifest_checks} if manifest_path is not None else {}),
     }
 
 
@@ -130,8 +208,9 @@ def main() -> int:
     )
     parser.add_argument("pptx", type=Path)
     parser.add_argument("preview_dir", type=Path)
+    parser.add_argument("--manifest", type=Path)
     args = parser.parse_args()
-    result = check_render_output(args.pptx, args.preview_dir)
+    result = check_render_output(args.pptx, args.preview_dir, args.manifest)
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0 if result["status"] == "passed" else 1
 

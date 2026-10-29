@@ -3,7 +3,7 @@ name: icode
 description: ICODE 端到端编码工作流，适配 Claude Code、Codex、CodeBuddy、WorkBuddy。用户调用 /icode、$icode，或说“使用 ICODE”“用 icode 帮我”“让 ICODE”“Use ICODE”完成开发、日志分析、设计/代码审查、证据验证、独立复评、文档/Word/PPT、学习、工单管理等任务时使用；也用于已绑定 ICODE 工单的续接。Use when users explicitly request ICODE for an AI coding workflow, ticket-based development, code review, log analysis, documentation, or evidence verification; also use to resume a bound ICODE ticket. 支持自然语言目标与限制，不要求背命令；能力咨询只解释不执行。保留全部 /icode 子命令，复用既有步骤与安全门禁，不接管未指定 ICODE 的普通请求。
 ---
 
-**版本**: v2.33.2
+**版本**: v2.34.0
 
 # ICode 全流程编码工作流（步骤 0 + 1~6）
 
@@ -20,6 +20,8 @@ description: ICODE 端到端编码工作流，适配 Claude Code、Codex、CodeB
 > - **强制**：产物命名 + `completed_steps` 写号**对照 `ls steps/*.md` 实时结果**（如入口含 `log` → 可写 `"log"`），不在清单 → 停下核对，禁止自造产物占位；steps/ 目录与本文档不一致时**以 steps/ 目录为准**
 
 ## 通用约定（对话语言）
+
+DOCX/PPT 技术图可复用 SVG 图源；按对应步骤读取受限校验、PNG 兼容输出和实验双表示合同。PPT 使用 SVG 时同时准备同版本 DOCX 组件。生成、结构、消费者兼容和最终视觉验收分别记录，不因包内有 SVG 就报告原生矢量已验收。
 
 **AI 对用户的回复一律使用中文**（提示 / 解释 / 报告 / 追问 / 总结 / 决策说明 / 输出行）。**工程内容保持原样、不翻译**：代码、标识符、产物文件名、命令、日志原文、报错原文、设备输出、配置字段值。仅当用户明确要求英文回复时切换。
 

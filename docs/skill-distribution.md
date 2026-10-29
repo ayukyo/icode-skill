@@ -2,6 +2,8 @@
 
 ## 发行硬门禁：导入包最多 200 个文件
 
+SVG 校验、转换、schema 和 Office 双表示工具随 `docx` 组件分发；PPT 的 SVG 操作同时获取同版本 `docx`，复用同一缓存根和受管 Python。二进制依赖、字体及生成样例不进入 Agent 核心扫描目录。新增功能必须验证组件展开后实际调用，并重新统计 core/plugin-core/skillhub 文件数。
+
 供 Agent 扫描或平台上传的 `core`、`plugin-core`、`skillhub` 包，展开后的普通文件总数必须 **不超过 200**。`SKILL.md`、`WORKFLOW.md`、`components.json`、许可证、图标、插件清单、校验清单和共享技能全部计数，不以 ZIP 压缩后大小或入口文件数替代。
 
 上限在 `tools/build_skill_distribution.py::CORE_MAX_FILES` 单处定义，发行构建器复用；测试验证 200 文件成功、201 文件失败且不创建发行输出。核心同时受 5 MiB 和入口 8 KiB 预算约束。开发仓库/完整备份包含测试和维护资料；运行扩展置于 Agent 扫描目录外，不回填核心目录突破上限。

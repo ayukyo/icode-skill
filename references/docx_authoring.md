@@ -72,6 +72,9 @@
 
 ### 能力选择
 
+- 架构、流程、时间轴、坐标等技术图优先保留 SVG 图源；照片和截图用 PNG/JPEG，正文、公式和数据表保留可编辑对象。SVG 只接受 `diagram_svg.py` 的静态受限子集，中文字体通过 `--svg-font` 或 `ICODE_SVG_FONT_FILES` 明确选择并校验字形。
+- Markdown 相对 SVG 默认按物理尺寸和 DPI 转为 PNG，报告 `raster_fallback`。保留 SVG、PNG 和 manifest，不手工更换缓存或只刷新 hash。`--svg-mode dual` 同时嵌入 SVG 与 PNG，报告 `native_vector_pending`；实际 Office 打开、缩放、PDF 导出、再保存与逐页检查完成前不得宣称原生矢量验收通过。
+
 - 普通文字、表格、本地图片：`build_docx.py`。
 - 简单线性图：内置 Mermaid 渲染。它只支持明确的小子集，不是完整 Mermaid 引擎。
 - 常见收发时序：`draw_sequence.py` 用本地JSON生成带参与者、步骤编号、请求/应答、自调用和条件文字的PNG；必须传共享 palette，不替用户另选模块颜色。适合2～5个参与者、最多10步的单阶段图，更长或含循环/并行的过程分阶段或使用专用脚本。

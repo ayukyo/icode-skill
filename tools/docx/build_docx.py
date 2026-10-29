@@ -14,6 +14,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -26,7 +27,7 @@ from docx.oxml.ns import qn
 from docx.shared import Inches, Pt
 
 
-TOOL_VERSION = "1.1.0"
+TOOL_VERSION = "1.2.0"
 IMAGE_RE = re.compile(r"^!\[([^]]*)\]\(([^)]+)\)\s*$")
 HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*$")
 LIST_RE = re.compile(r"^(\s*)([-*+]|\d+[.)])\s+(.+?)\s*$")
@@ -276,7 +277,15 @@ def add_image(document: Document, path: Path):
     return paragraph
 
 
-def build(source: Path, output: Path, manifest_path: Path) -> dict[str, Any]:
+def build(source: Path, output: Path, manifest_path: Path, *, svg_mode: str = 'raster',
+          svg_dpi: int = 192, svg_font_files: list[Path] | None = None) -> dict[str, Any]:
+    if svg_mode not in {'raster', 'dual'}:
+        raise ValueError('svg_mode must be raster or dual')
+    if len({source.resolve(), output.resolve(), manifest_path.resolve()}) != 3:
+        raise ValueError('source, output and manifest must be distinct paths')
+    for destination in (output, manifest_path):
+        if destination.exists() and not destination.is_file():
+            raise ValueError('output and manifest destinations must be regular files')
     if source.suffix.lower() not in {".md", ".markdown"}:
         raise ValueError("输入必须是 .md 或 .markdown 文件")
     content = source.read_text(encoding="utf-8")
@@ -334,13 +343,34 @@ def build(source: Path, output: Path, manifest_path: Path) -> dict[str, Any]:
                 alt, target = image_match.groups()
                 candidate = (source.parent / target).resolve()
                 if candidate.is_file():
-                    image_paragraph = add_image(document, candidate)
+                    if candidate in {output.resolve(), manifest_path.resolve()}:
+                        raise ValueError('image source cannot be the delivery output or manifest')
+                    if candidate.suffix.lower() == '.svg':
+                        from diagram_svg import prepare_svg
+                        section = document.sections[-1]
+                        width_inches = min(6.25, (section.page_width - section.left_margin - section.right_margin) / 914400)
+                        # Generated fallback assets belong to the delivery, not the Skill discovery root.
+                        record = prepare_svg(candidate, output.parent / (output.stem + '.assets') / 'svg',
+                                             width_inches=width_inches, dpi=svg_dpi, font_files=svg_font_files)
+                        record['alt_text'] = alt or candidate.stem
+                        if svg_mode == 'dual':
+                            record.update(embedded_format='svg_with_png_fallback', vector_preserved=True,
+                                          consumer_compatibility='pending')
+                        image_path = Path(record['fallback_png'])
+                    else:
+                        record = {'source': str(candidate), 'sha256': sha256_file(candidate)}
+                        image_path = candidate
+                    image_paragraph = add_image(document, image_path)
+                    drawing = image_paragraph._p.xpath('.//wp:docPr')[0]
+                    drawing.set('descr', alt or candidate.stem)
+                    if record.get('source_format') == 'svg':
+                        record['drawing_id'] = int(drawing.get('id'))
                     if alt:
                         image_paragraph.paragraph_format.keep_with_next = True
                         caption = document.add_paragraph(alt)
                         caption.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                    source_images.append({"source": str(candidate), "sha256": sha256_file(candidate)})
-                    source_map.append({"lines": [line_number, line_number], "kind": "image", "status": "embedded", "source": str(candidate)})
+                    source_images.append(record)
+                    source_map.append({"lines": [line_number, line_number], "kind": "image", "status": "embedded", **record})
                 else:
                     document.add_paragraph(f"[未找到图片：{target}] {alt}")
                     source_map.append({"lines": [line_number, line_number], "kind": "image", "status": "missing", "source": target})
@@ -381,24 +411,39 @@ def build(source: Path, output: Path, manifest_path: Path) -> dict[str, Any]:
             document.add_paragraph(strip_inline_markdown(" ".join(paragraph_lines)))
             source_map.append({"lines": [line_number, index], "kind": "paragraph"})
     output.parent.mkdir(parents=True, exist_ok=True)
-    temporary_output = output.with_suffix(output.suffix + ".tmp")
-    document.save(temporary_output)
-    temporary_output.replace(output)
-    result = {
-        "schema_version": 1,
-        "generator": {"name": "icode-docx", "version": TOOL_VERSION},
-        "created_at": datetime.now(timezone.utc).isoformat(),
-        "input": {"path": str(source.resolve()), "sha256": sha256_file(source)},
-        "output": {"path": str(output.resolve()), "sha256": sha256_file(output)},
-        "git_baseline": git_baseline(source),
-        "source_images": source_images,
-        "source_map": source_map,
-        "visual_qa": {"status": "not_requested"},
-    }
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
-    temporary_manifest = manifest_path.with_suffix(manifest_path.suffix + ".tmp")
-    temporary_manifest.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    temporary_manifest.replace(manifest_path)
+    diagrams = [item for item in source_images if item.get('source_format') == 'svg']
+    # Dedicated random directories cannot collide with a user's .tmp image.
+    # Keep both staged files on their destination filesystems for atomic replace.
+    with tempfile.TemporaryDirectory(prefix='.icode-docx-build-', dir=output.parent) as output_stage, \
+            tempfile.TemporaryDirectory(prefix='.icode-docx-manifest-', dir=manifest_path.parent) as manifest_stage:
+        temporary_output = Path(output_stage) / 'document.docx'
+        temporary_manifest = Path(manifest_stage) / 'manifest.json'
+        document.save(temporary_output)
+        if diagrams:
+            from diagram_ooxml import embed_svg_sources, inspect_diagram_package
+            if svg_mode == 'dual':
+                embed_svg_sources(temporary_output, diagrams)
+            checks = inspect_diagram_package(temporary_output, diagrams)
+            if not all(checks.values()):
+                raise ValueError(f'diagram package checks failed: {checks}')
+        result = {
+            "schema_version": 1,
+            "generator": {"name": "icode-docx", "version": TOOL_VERSION},
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "input": {"path": str(source.resolve()), "sha256": sha256_file(source)},
+            "output": {"path": str(output.resolve()), "sha256": sha256_file(temporary_output)},
+            "git_baseline": git_baseline(source),
+            "source_images": source_images,
+            "source_map": source_map,
+            "diagrams": diagrams,
+            "diagram_status": ('native_vector_pending' if svg_mode == 'dual' else 'raster_fallback') if diagrams else 'none',
+            "consumer_compatibility": 'pending' if diagrams else 'not_applicable',
+            "visual_qa": {"status": "not_requested"},
+        }
+        temporary_manifest.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        temporary_output.replace(output)
+        temporary_manifest.replace(manifest_path)
     return result
 
 
@@ -407,10 +452,15 @@ def main() -> int:
     parser.add_argument("source", type=Path)
     parser.add_argument("output", type=Path)
     parser.add_argument("--manifest", type=Path, help="default: sibling manifest.json")
+    parser.add_argument('--svg-mode', choices=('raster', 'dual'), default='raster',
+                        help='dual preserves SVG plus PNG; actual Office compatibility still needs validation')
+    parser.add_argument('--svg-dpi', type=int, default=192)
+    parser.add_argument('--svg-font', type=Path, action='append', help='explicit local font files (repeatable)')
     args = parser.parse_args()
     manifest = args.manifest or args.output.with_name(args.output.stem + ".manifest.json")
     try:
-        data = build(args.source.resolve(), args.output.resolve(), manifest.resolve())
+        data = build(args.source.resolve(), args.output.resolve(), manifest.resolve(), svg_mode=args.svg_mode,
+                     svg_dpi=args.svg_dpi, svg_font_files=args.svg_font)
     except (OSError, UnicodeError, ValueError, RuntimeError) as exc:
         print(f"ERROR: DOCX build failed: {exc}", file=sys.stderr)
         return 1

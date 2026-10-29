@@ -13,6 +13,7 @@ import json
 from pathlib import Path
 import re
 import sys
+from xml.etree import ElementTree as ET
 
 from PIL import Image, ImageDraw
 from build_docx import font_for_mermaid
@@ -77,11 +78,79 @@ def wrap(text: str, font, width: int) -> str:
     return '\n'.join(lines)
 
 
+class SvgCanvas:
+    """Small SVG adapter for the drawing primitives used by this diagram.
+
+    Pillow still measures text, so both output formats share wrapping, spacing
+    and geometry. SVG contains native shapes and editable text, never a bitmap.
+    """
+
+    def __init__(self, width: int, height: int, title: str):
+        self.root = ET.Element('svg', {'xmlns': 'http://www.w3.org/2000/svg',
+                                     'width': str(width), 'height': str(height),
+                                     'viewBox': f'0 0 {width} {height}',
+                                     'role': 'img', 'aria-labelledby': 'title description'})
+        ET.SubElement(self.root, 'title', {'id': 'title'}).text = title or 'Sequence diagram'
+        ET.SubElement(self.root, 'desc', {'id': 'description'}).text = (
+            'Labeled sequence diagram. Arrows follow numbered messages; dashed arrows indicate replies.')
+        self.measure = ImageDraw.Draw(Image.new('RGB', (1, 1)))
+        self.rectangle((0, 0, width, height), fill='white')
+
+    def rectangle(self, box, fill):
+        left, top, right, bottom = box
+        return ET.SubElement(self.root, 'rect', {'x': str(left), 'y': str(top),
+                             'width': str(right - left), 'height': str(bottom - top), 'fill': fill})
+
+    def rounded_rectangle(self, box, radius, fill, outline, width):
+        node = self.rectangle(box, fill)
+        node.set('rx', str(radius))
+        node.set('stroke', outline)
+        node.set('stroke-width', str(width))
+
+    def line(self, points, fill, width):
+        if len(points) == 2:
+            (x1, y1), (x2, y2) = points
+        else:
+            x1, y1, x2, y2 = points
+        ET.SubElement(self.root, 'line', {'x1': str(x1), 'y1': str(y1),
+                      'x2': str(x2), 'y2': str(y2), 'stroke': fill, 'stroke-width': str(width)})
+
+    def polygon(self, points, fill):
+        ET.SubElement(self.root, 'polygon', {'points': ' '.join(f'{x},{y}' for x, y in points),
+                      'fill': fill})
+
+    def multiline_textbbox(self, xy, text, font, spacing):
+        return self.measure.multiline_textbbox(xy, text, font=font, spacing=spacing)
+
+    def multiline_text(self, xy, text, fill, font, spacing):
+        # Pillow's default horizontal anchor is left/ascender. SVG positions
+        # text at the baseline; use the same font ascent and line advance.
+        ascent = font.getmetrics()[0] if hasattr(font, 'getmetrics') else font.getbbox('A')[3]
+        advance = self.measure.textbbox((0, 0), 'A', font=font)[3] + spacing
+        node = ET.SubElement(self.root, 'text', {'fill': fill, 'font-size': str(getattr(font, 'size', 10)),
+                             'font-family': 'Microsoft YaHei, Noto Sans CJK SC, Droid Sans Fallback, PingFang SC, sans-serif',
+                             '{http://www.w3.org/XML/1998/namespace}space': 'preserve'})
+        for index, line in enumerate(text.split('\n')):
+            ET.SubElement(node, 'tspan', {'x': str(xy[0]),
+                          'y': str(xy[1] + ascent + index * advance)}).text = line
+
+    def save(self, output: Path):
+        ET.ElementTree(self.root).write(output, encoding='utf-8', xml_declaration=True)
+
+
 def draw(spec_path: Path, palette_path: Path, output: Path) -> dict:
-    if output.suffix.lower() != '.png':
-        raise ValueError('output must be a PNG file')
+    output_format = output.suffix.lower().lstrip('.')
+    if output_format not in {'png', 'svg'}:
+        raise ValueError('output must be a PNG or SVG file')
     spec, palette = read_json(spec_path), read_json(palette_path)
     validate(spec, palette)
+    if output_format == 'svg':
+        # ElementTree escapes markup but does not reject XML 1.0 control
+        # characters. Check original labels before wrapping can remove them.
+        texts = [spec.get('title', '')] + [p['label'] for p in spec['participants']]
+        texts += [value for step in spec['steps'] for value in (step['text'], step.get('condition', ''))]
+        if any(re.search(r'[\x00-\x08\x0b\x0c\x0e-\x1f\ud800-\udfff\ufffe\uffff]', text) for text in texts):
+            raise ValueError('SVG labels must contain valid XML 1.0 characters')
     font = font_for_mermaid()
     participants = spec['participants']
     width = max(840, len(participants) * 320 + 80)
@@ -102,8 +171,11 @@ def draw(spec_path: Path, palette_path: Path, output: Path) -> dict:
         rows.append((step, text, cursor, cursor + label_height + 12))
         cursor += label_height + (84 if left == right else 60)
     height = cursor + 30
-    image = Image.new('RGB', (width, height), 'white')
-    canvas = ImageDraw.Draw(image)
+    if output_format == 'svg':
+        canvas = SvgCanvas(width, height, spec.get('title', ''))
+    else:
+        image = Image.new('RGB', (width, height), 'white')
+        canvas = ImageDraw.Draw(image)
     if title:
         canvas.multiline_text((40, 20), title, fill='#172B4D', font=font, spacing=4)
     for participant, label in zip(participants, labels):
@@ -142,11 +214,16 @@ def draw(spec_path: Path, palette_path: Path, output: Path) -> dict:
         sign = 1 if end[0] > start[0] else -1
         canvas.polygon([end, (end[0] - sign * 13, end[1] - 7), (end[0] - sign * 13, end[1] + 7)], fill=color)
     output.parent.mkdir(parents=True, exist_ok=True)
-    image.save(output, format='PNG')
+    if output_format == 'svg':
+        canvas.save(output)
+    else:
+        image.save(output, format='PNG')
     return {'schema_version': 1, 'output': str(output.resolve()), 'sha256': hashlib.sha256(output.read_bytes()).hexdigest(),
             'spec_sha256': hashlib.sha256(spec_path.read_bytes()).hexdigest(),
             'palette_sha256': hashlib.sha256(palette_path.read_bytes()).hexdigest(),
             'participants': participants, 'steps': spec['steps'], 'size': [width, height],
+            'source_format': 'json', 'output_format': output_format,
+            'native_svg_source': output_format == 'svg', 'office_validation': 'not_performed',
             'scope': 'labeled sequence rendering; implementation correctness and page readability require review'}
 
 

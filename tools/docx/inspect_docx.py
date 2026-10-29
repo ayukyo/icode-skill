@@ -169,8 +169,12 @@ def main() -> int:
                            "input_path_matches": source.resolve() == Path(data["input"]["path"]).resolve()})
             checks["source_images_unchanged"] = all(sha256_file(Path(item["source"])) == item["sha256"]
                                                    for item in data.get("source_images", []))
-            checks["source_images_embedded"] = all(item["sha256"] in actual["media_sha256"].values()
+            checks["source_images_embedded"] = all(item.get('fallback_sha256', item["sha256"]) in actual["media_sha256"].values()
                                                   for item in data.get("source_images", []))
+            diagrams = [item for item in data.get('source_images', []) if item.get('source_format') == 'svg']
+            if diagrams:
+                from diagram_ooxml import inspect_diagram_package
+                checks.update(inspect_diagram_package(args.docx, diagrams))
             qa = data.get("visual_qa", {})
             if qa.get("status") == "passed":
                 if qa.get("docx_sha256"):
