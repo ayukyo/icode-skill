@@ -29,7 +29,7 @@ class DistributionTests(unittest.TestCase):
         self.git("init", "-q")
         files = {
             "SKILL.md": "---\nname: icode\ndescription: Workflow\n---\n**版本**: v2.32.0\n",
-            "LICENSE": "MIT\n",
+            "LICENSE.txt": "MIT\n",
             "README.md": "Readme\n",
             "README.zh-CN.md": "说明\n",
             ".gitignore": "__pycache__/\n",
@@ -93,7 +93,7 @@ class DistributionTests(unittest.TestCase):
         for name in ("install_skill_pack.py", "validate_skill_pack.py", "build_skill_distribution.py"):
             self.put(f"tools/{name}", (ROOT / "tools" / name).read_text(encoding="utf-8"))
         for path in (ROOT / "integrations/discovery").iterdir():
-            if path.name == "README.md" or path.name.endswith(".plugin.json.template"):
+            if path.name == "README.md" or path.name.endswith(".plugin.template.json"):
                 self.put(f"integrations/discovery/{path.name}", path.read_text(encoding="utf-8"))
         (self.source / "install.sh").chmod(0o755)
         self.git("add", ".")
@@ -321,7 +321,7 @@ class DistributionTests(unittest.TestCase):
         self.assertEqual(digest(self.output), digest(another))
 
     def test_manifest_metadata_comes_from_selected_source(self):
-        name = "integrations/discovery/claude.plugin.json.template"
+        name = "integrations/discovery/claude.plugin.template.json"
         manifest = json.loads((self.source / name).read_text(encoding="utf-8"))
         manifest["description"] = "selected source description"
         self.put(name, json.dumps(manifest))

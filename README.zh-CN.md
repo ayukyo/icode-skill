@@ -298,12 +298,12 @@ Windows 上使用 Linux 工具链时复用 [WSL 构建合同](references/wsl_bui
 | `/icode deepcheck` | 仅步骤 5：三阶段递进复检（Reverse → Fixed → Free） |
 | `/icode audit` | 仅步骤 6：终极终审 + 统一修复（产出 `06_audit.md`） |
 | `/icode readme` | 可选步骤 7：一次生成两份——交付报告（给自己看，完整档案）+ 跨领域简报（`_brief.md`，给其它模块研发/测试/产品看，含必要代码，较简略；对外表达按统一契约） |
-| `/icode patch [问题或新需求]` | 追加修改（独立步骤）：主流程后/中途继续改——测试发现问题 / 新需求，在既有工单上打补丁。轻量四段式（重审现状→增量计划→最小实施→反向复检），靠磁盘产物重载上下文（换会话可继续），产出 `08_patch.md` 追加式；可选 `--listen` 自动进行实机部署监听；先配 `~/.claude/icode_data/device_config/<project_id>.json`，模板 `templates/device_config.json.template`，单文件多连接 adb/ssh/串口） |
+| `/icode patch [问题或新需求]` | 追加修改（独立步骤）：主流程后/中途继续改——测试发现问题 / 新需求，在既有工单上打补丁。轻量四段式（重审现状→增量计划→最小实施→反向复检），靠磁盘产物重载上下文（换会话可继续），产出 `08_patch.md` 追加式；可选 `--listen` 自动进行实机部署监听；先配 `~/.claude/icode_data/device_config/<project_id>.json`，模板 `templates/device_config.template.json`，单文件多连接 adb/ssh/串口） |
 | `/icode crosscheck [--ticket <id>\|<工单路径>]` | 用户自行换 Agent/模型后独立复评 completed 工单；结果多轮追加到项目 `.icode_output/.crosscheck/`，不写原工单历史/代码，不自动 patch |
 | `/icode verify [--build] [--deploy] [--listen\|--test <target>] [自然语言]` / `/icode verify --plan [--ticket <id>]` | 选项按编译→部署→监听/测试顺序显式组合；单独动作不隐式运行前面阶段；无选项先解析自然语言意图。各执行阶段分别记 verification_runs，plan 只写计划，均不自动升级 delivery_verdict |
 | `/icode learn [--project <path>] [--ticket <id>] [--since <ISO-8601>]` | 基于项目内真实 skill-run 观测生成学习报告，分类复用/组合/增强/新建/工具化/no-action；本步骤不直接创建或发布 Skill |
 | `/icode doc [自然语言]` | 工程级知识库生成（独立步骤）：扫描代码特征生成全局知识库章节，供段零自动检索注入 |
-| `/icode study [--ticket <id>] [--library <目录>] [主题]` | 从工单代码提炼可独立阅读的通用技术文章，按卷章写入用户自己的知识库（[配置模板](templates/knowledge_config.json.template)）；私有源码溯源留库外，不自动提交或推送 |
+| `/icode study [--ticket <id>] [--library <目录>] [主题]` | 从工单代码提炼可独立阅读的通用技术文章，按卷章写入用户自己的知识库（[配置模板](templates/knowledge_config.template.json)）；私有源码溯源留库外，不自动提交或推送 |
 | `/icode docx [自然语言]` | DOCX独立交付：Markdown忠实转换、按源码编写技术Word或修订已有Word；章节/文字/图示/排版、来源检查、修订对照与最终页面审阅；用户指定输出位置优先，自管运行时不依赖系统LibreOffice |
 | `/icode limit [自然语言]` | 项目约束红线（独立步骤）：定义和维护本工程的红线/约束/禁区。主存全局 + 单 checkout 覆盖（自动 gitignore），追加式演进。plan 步骤引用作为硬基线 |
 | `/icode ppt [自然语言]` | PPT 生成（独立交付步骤）：自然语言 → 真实 `.pptx`，4 类场景——**项目 / 模块 / 本次功能开发 / 本次BUG修复**；内容源为 icode 产物/知识库（禁止编造），内置 8 套模板（`tools/ppt/templates/`，AI 先筛 2-3 个风格匹配候选、由用户挑选；也可直接点名模板），产出 `<工程根>/.icode_output/ppt/`（不放进工单目录）可回溯；依赖 python-pptx（必需），LibreOffice+poppler 可选（PNG 预览自检）；内置模板非商业授权（见 `tools/ppt/NOTICE`） |
@@ -322,7 +322,7 @@ Windows 上使用 Linux 工具链时复用 [WSL 构建合同](references/wsl_bui
 
 ## 许可证
 
-MIT — 详见 [LICENSE](LICENSE)。
+MIT — 详见 [LICENSE.txt](LICENSE.txt)。
 
 ## DEMO（用于测试 icode 流程）
 

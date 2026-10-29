@@ -48,6 +48,8 @@ class ReleaseWorkflowTests(unittest.TestCase):
         for path in ('docx-renderer.yml', 'public-site.yml'):
             text = (ROOT / '.github/workflows' / path).read_text(encoding='utf-8')
             self.assertIn("'tools/build_release_assets.py'", text)
+            self.assertIn("'LICENSE.txt'", text)
+            self.assertIn("'templates/**'", text)
             self.assertIn('python3 -m unittest discover -s tests -p test_release_assets.py -v', text)
 
     def test_binding_rejects_mismatch_invalid_tag_and_missing_notes(self):

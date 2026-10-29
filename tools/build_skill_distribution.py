@@ -25,9 +25,9 @@ CORE_ENTRY_MAX_BYTES = 8 * 1024
 # Runtime resources only. Website, tests, demo, host settings and Git are excluded.
 DIRECTORIES = {"steps", "references", "tools", "schemas", "templates", "scripts", "agents",
                "mcp", "agent_runtime", "skill-packs", "docs"}
-FILES = {"SKILL.md", "LICENSE", "README.md", "README.zh-CN.md", "install.sh", ".gitignore"}
+FILES = {"SKILL.md", "LICENSE.txt", "README.md", "README.zh-CN.md", "install.sh", ".gitignore"}
 METADATA = {"integrations/discovery/README.md"} | {
-    f"integrations/discovery/{host}.plugin.json.template" for host in HOSTS}
+    f"integrations/discovery/{host}.plugin.template.json" for host in HOSTS}
 REQUIRED = FILES | METADATA | {"skill-packs/manifest.json", "mcp/workflow-gate/gates.json",
                     "mcp/workflow-gate/skill-routes.json", "tools/icode_control.py",
                     "scripts/sync-to-global.sh", "tools/docx/bootstrap_renderer.py",
@@ -78,7 +78,7 @@ def check_public_path(path):
         return
     if any(re.search(r"(^|[._-])(cookies?|token)([._-]|$)", part.lower()) for part in path.parts):
         raise ValueError(f"credential data path is not publishable: {path}")
-    if name == "config.example.json" or name.endswith(".template"):
+    if name == "config.example.json" or name.endswith((".template", ".template.json")):
         return
     if (re.search(r"(^|[._-])(private|secrets?|credentials?|cookies?|token)([._-]|$)", name)
             or re.match(r"config([._-]|$)", name)
@@ -125,7 +125,8 @@ def component_for(path):
         return "docx"
     if name.startswith("agent_runtime/") or name == "tools/icode_agent.py":
         return "ui"
-    if name.startswith("docs/") or (name.startswith("skill-packs/") and name != "skill-packs/manifest.json"):
+    if (name == ".gitignore" or name.startswith("docs/")
+            or (name.startswith("skill-packs/") and name != "skill-packs/manifest.json")):
         return "support"
     if name.startswith("mcp/") and not (
             name.startswith(("mcp/_lib/", "mcp/workflow-gate/", "mcp/reasoning-gate/"))
@@ -176,6 +177,14 @@ python -B tools/install_skill_pack.py --component-root "<本技能根>" --compon
 '''
 
 
+def file_inventory(root):
+    return [{"path": path.relative_to(root).as_posix(), "size": path.stat().st_size,
+             "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+             "mode": 0o755 if path.stat().st_mode & 0o111 else 0o644}
+            for path in sorted(root.rglob("*")) if path.is_file()
+            and path != root / "components.json"]
+
+
 def split_components(workflow, archives, version, download_base):
     archives.mkdir()
     base = download_base or f"https://github.com/ayukyo/icode-skill/releases/download/v{version}"
@@ -211,11 +220,7 @@ def split_components(workflow, archives, version, download_base):
     (workflow / "WORKFLOW.md").write_bytes(original)
     (workflow / "SKILL.md").write_text(compact_entry(original.decode("utf-8"), version),
                                      encoding="utf-8", newline="\n")
-    manifest["core_files"] = [
-        {"path": p.relative_to(workflow).as_posix(), "size": p.stat().st_size,
-         "sha256": hashlib.sha256(p.read_bytes()).hexdigest(),
-         "mode": 0o755 if p.stat().st_mode & 0o111 else 0o644}
-        for p in sorted(workflow.rglob("*")) if p.is_file()]
+    manifest["core_files"] = file_inventory(workflow)
     (workflow / "components.json").write_text(json.dumps(manifest, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
     for directory in sorted(workflow.rglob("*"), key=lambda p: len(p.parts), reverse=True):
         if directory.is_dir() and not any(directory.iterdir()):
@@ -245,7 +250,7 @@ def build(source, output, profile="full", components_output=None, download_base=
         raise ValueError("component options require core profile")
     paths = source_files(source)  # Preflight every path before reading any payload.
     templates = source / "integrations/discovery"
-    for name in ("README.md", *(f"{host}.plugin.json.template" for host in HOSTS)):
+    for name in ("README.md", *(f"{host}.plugin.template.json" for host in HOSTS)):
         no_symlinks(templates / name)
     # Validate a tracked-only snapshot: the existing shared-skill validator must
     # never traverse untracked files or personal configuration in the checkout.
@@ -278,13 +283,13 @@ def build(source, output, profile="full", components_output=None, download_base=
         if profile == "core":
             split_components(workflow, archives, version.group(1), download_base)
         for host in HOSTS:
-            manifest = json.loads((templates / f"{host}.plugin.json.template").read_text(encoding="utf-8"))
+            manifest = json.loads((templates / f"{host}.plugin.template.json").read_text(encoding="utf-8"))
             manifest["version"] = version.group(1)
             target = package / f".{host}-plugin/plugin.json"
             target.parent.mkdir()
             target.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         shutil.copyfile(templates / "README.md", package / "README.md")
-        shutil.copyfile(workflow / "LICENSE", package / "LICENSE")
+        shutil.copyfile(workflow / "LICENSE.txt", package / "LICENSE.txt")
         sums = [f"{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.relative_to(package).as_posix()}"
                 for p in sorted(package.rglob("*")) if p.is_file()]
         (package / "SHA256SUMS").write_text("\n".join(sums) + "\n", encoding="utf-8")

@@ -78,8 +78,8 @@ BUNDLED_CAPABILITIES=(
   tools/docx/resolve_renderer.py
   tools/docx/requirements.lock
   tools/docx/renderer_manifest.json
-  templates/media_policy.json.template
-  templates/knowledge_config.json.template
+  templates/media_policy.template.json
+  templates/knowledge_config.template.json
   steps/learn.md
   steps/study.md
   steps/docx.md

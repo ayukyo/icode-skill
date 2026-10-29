@@ -96,7 +96,7 @@ if [[ "$EVAL_OK" -eq 1 ]]; then ok "四个技能均保留 RED/GREEN eval"; else 
 
 TOOL="tools/embedded_profile.py"
 SCHEMA="schemas/embedded-baseline.schema.json"
-TEMPLATE="templates/embedded_baseline.json.template"
+TEMPLATE="templates/embedded_baseline.template.json"
 TMP="$(mktemp -d -t icode-embedded-profile.XXXXXX)"
 trap 'rm -rf "$TMP"' EXIT
 TICKET="$TMP/.icode_output/.icode_output_1"

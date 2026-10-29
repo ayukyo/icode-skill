@@ -37,13 +37,13 @@ class ReleaseAssetsTests(unittest.TestCase):
     def test_every_component_url_has_a_matching_published_attachment(self):
         result = self.success()
         names = {f"icode-v2.32.0-{name}.zip" for name in
-                 ("core", "plugin-core", "ppt", "docx", "mcp", "ui", "support")}
+                 ("core", "plugin-core", "skillhub", "ppt", "docx", "mcp", "ui", "support")}
         names.add("icode-v2.32.0.tar.gz")
         self.assertEqual({row["name"] for row in result["assets"]}, names)
         for line in (self.output / "SHA256SUMS").read_text(encoding="utf-8").splitlines():
             digest, name = line.split("  ", 1)
             self.assertEqual(hashlib.sha256((self.output / name).read_bytes()).hexdigest(), digest)
-        self.assertEqual(len(list(self.output.iterdir())), 11)
+        self.assertEqual(len(list(self.output.iterdir())), 12)
         with zipfile.ZipFile(self.output / "icode-v2.32.0-core.zip") as core:
             self.assertTrue(core.read("icode/SKILL.md").startswith(b"---\n"))
             self.assertNotIn(b"\r", core.read("icode/SKILL.md"))
@@ -55,6 +55,71 @@ class ReleaseAssetsTests(unittest.TestCase):
                 self.assertTrue(component["url"].endswith("/v2.32.0/" + path.name))
         legacy = (self.output / "icode-v2.32.0.tar.gz.sha256").read_text(encoding="utf-8")
         self.assertIn("  icode-v2.32.0.tar.gz\n", legacy)
+
+    def test_skillhub_archive_preserves_resources_license_and_pinned_components(self):
+        template = '{"project_id":"example"}\n'
+        self.fixture.put("templates/device_config.template.json", template)
+        self.fixture.git("add", "templates/device_config.template.json")
+        self.success()
+        target = self.output / "icode-v2.32.0-skillhub.zip"
+        self.assertTrue(target.is_file(), "Release must build the upload package from source")
+        with zipfile.ZipFile(target) as archive:
+            payload = {name.removeprefix("icode/"): archive.read(name)
+                       for name in archive.namelist()}
+        self.assertLessEqual(len(payload), 200)
+        self.assertLessEqual(sum(map(len, payload.values())), 5 * 1024 * 1024)
+        self.assertEqual(payload["LICENSE.txt"], (self.fixture.source / "LICENSE.txt").read_bytes())
+        self.assertEqual(payload["templates/device_config.template.json"],
+                         (self.fixture.source / "templates/device_config.template.json").read_bytes())
+        self.assertNotIn(".gitignore", payload)
+        self.assertNotIn("agents/openai.yaml", payload)
+        entry = payload["SKILL.md"].decode("utf-8")
+        for field in ('slug: "icode"', 'version: "2.32.0"',
+                      'displayName: "ICODE AI Coding Workflow"'):
+            self.assertIn(field, entry)
+        for name, data in payload.items():
+            self.assertIn(Path(name).suffix, {".md", ".txt", ".json", ".py", ".sh", ".svg"})
+            data.decode("utf-8", errors="strict")
+        manifest = json.loads(payload["components.json"])
+        with zipfile.ZipFile(self.output / "icode-v2.32.0-core.zip") as core:
+            original = json.loads(core.read("icode/components.json"))
+        self.assertEqual(manifest["components"], original["components"])
+        declared = set()
+        for row in manifest["core_files"]:
+            declared.add(row["path"])
+            data = payload[row["path"]]
+            self.assertEqual(row["size"], len(data))
+            self.assertEqual(row["sha256"], hashlib.sha256(data).hexdigest())
+        self.assertEqual(declared, payload.keys() - {"components.json"})
+
+    def test_skillhub_rejects_unhandled_source_file_types_before_release_output(self):
+        self.fixture.put("references/unsupported.blob", "text with unsupported extension\n")
+        self.fixture.git("add", "references/unsupported.blob")
+        result = self.build()
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("SkillHub", result.stderr)
+        self.assertFalse(self.output.exists())
+
+    def test_import_archive_accepts_200_files_and_rejects_201(self):
+        baseline = self.success()["profiles"]["core"]["files"]
+        for index in range(200 - baseline):
+            self.fixture.put(f"references/budget-{index}.md", "budget fixture\n")
+        self.fixture.git("add", "references")
+        at_limit = self.fixture.base / "at-limit"
+        result = self.success(at_limit)
+        self.assertEqual(result["profiles"]["core"]["files"], 200)
+        with zipfile.ZipFile(at_limit / "icode-v2.32.0-plugin-core.zip") as archive:
+            self.assertEqual(len(archive.namelist()), 200)
+        for profile in ("core", "skillhub"):
+            with zipfile.ZipFile(at_limit / f"icode-v2.32.0-{profile}.zip") as archive:
+                self.assertLessEqual(len(archive.namelist()), 200)
+        self.fixture.put("references/over-limit.md", "one file too many\n")
+        self.fixture.git("add", "references/over-limit.md")
+        overflow = self.fixture.base / "over-limit"
+        result = self.build(overflow)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("core budget exceeded", result.stderr)
+        self.assertFalse(overflow.exists())
 
     def test_core_plus_all_components_restores_full_workflow(self):
         self.success()
@@ -111,7 +176,7 @@ class ReleaseAssetsTests(unittest.TestCase):
         def change_after_full(*args, **kwargs):
             report = original(*args, **kwargs)
             if report["profile"] == "full":
-                path = self.fixture.source / "integrations/discovery/claude.plugin.json.template"
+                path = self.fixture.source / "integrations/discovery/claude.plugin.template.json"
                 metadata = json.loads(path.read_text(encoding="utf-8"))
                 metadata["description"] = "Changed between profile builds"
                 path.write_text(json.dumps(metadata), encoding="utf-8")

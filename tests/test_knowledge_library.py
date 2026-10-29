@@ -144,7 +144,7 @@ def test_missing_default_catalog_is_read_only(tmp_path, monkeypatch):
 
 
 def test_public_config_template_requires_user_path(tmp_path, monkeypatch):
-    template_path = ROOT / "templates" / "knowledge_config.json.template"
+    template_path = ROOT / "templates" / "knowledge_config.template.json"
     template = json.loads(template_path.read_text(encoding="utf-8"))
     assert set(template) == {"schema_version", "library_root"}
     assert template["schema_version"] == 1

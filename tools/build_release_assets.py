@@ -14,7 +14,16 @@ import tempfile
 import zipfile
 
 sys.dont_write_bytecode = True
-from build_skill_distribution import ROOT, build, no_symlinks
+from build_skill_distribution import (
+    ROOT, CORE_MAX_BYTES, CORE_MAX_FILES, CORE_ENTRY_MAX_BYTES,
+    build, file_inventory, no_symlinks,
+)
+from prepare_skill_listing import drafts
+
+# A conservative local release policy, not a claim of registry approval.
+SKILLHUB_TEXT_SUFFIXES = {".md", ".txt", ".json", ".py", ".sh", ".svg"}
+SKILLHUB_OPTIONAL_UI = {"agents/openai.yaml", "assets/icode-ticket-hex-128.png",
+                       "assets/icode-ticket-hex-512.png", "assets/icode-ticket-hex.manifest.json"}
 
 
 def digest(path):
@@ -70,6 +79,39 @@ def verify_batch(full, core, components, version):
         raise ValueError("core and components do not match the full source snapshot")
 
 
+def skillhub_snapshot(core, output, version):
+    """Project the same frozen core into one text-only, pinned upload skill."""
+    shutil.copytree(core, output)
+    for name in SKILLHUB_OPTIONAL_UI:
+        path = output / name
+        if path.is_file():
+            path.unlink()  # Only this build's private temporary projection.
+    metadata = drafts(core, "skillhub")
+    if metadata["source_version"] != version:
+        raise ValueError("SkillHub/core version mismatch")
+    fields = metadata["drafts"][0]["frontmatter"]
+    entry = (output / "SKILL.md").read_text(encoding="utf-8")
+    header = "".join(name + ": " + json.dumps(fields[name], ensure_ascii=False) + "\n"
+                     for name in ("slug", "version", "displayName", "summary", "tags", "homepage"))
+    (output / "SKILL.md").write_text("---\n" + header + entry[4:], encoding="utf-8", newline="\n")
+    manifest = json.loads((output / "components.json").read_text(encoding="utf-8"))
+    manifest["core_files"] = file_inventory(output)
+    (output / "components.json").write_text(
+        json.dumps(manifest, ensure_ascii=True, indent=2) + "\n", encoding="utf-8", newline="\n")
+    payload = files(output)
+    if not (output / "LICENSE.txt").is_file():
+        raise ValueError("SkillHub package must preserve LICENSE.txt")
+    for path in payload:
+        if path.suffix.lower() not in SKILLHUB_TEXT_SUFFIXES:
+            raise ValueError("SkillHub unsupported file type: " + path.relative_to(output).as_posix())
+        path.read_text(encoding="utf-8", errors="strict")
+    size = sum(path.stat().st_size for path in payload)
+    if (len(payload) > CORE_MAX_FILES or size > CORE_MAX_BYTES
+            or (output / "SKILL.md").stat().st_size > CORE_ENTRY_MAX_BYTES):
+        raise ValueError("SkillHub core budget exceeded")
+    return {"files": len(payload), "bytes": size, "skills": 1}
+
+
 def build_assets(source, output):
     source, output = source.expanduser().absolute(), output.expanduser().absolute()
     no_symlinks(source)
@@ -96,17 +138,21 @@ def build_assets(source, output):
                     and path != root / "SHA256SUMS"}
         if plugin_resources(full) != plugin_resources(core):
             raise ValueError("plugin resources changed between release profile builds")
+        skillhub = work / "skillhub/icode"
+        skillhub_report = skillhub_snapshot(core / "skills/icode", skillhub, version)
         assets = work / "assets"
         for path in files(components):
             shutil.copyfile(path, assets / path.name)
         tar_tree(full, assets / f"icode-v{version}.tar.gz")
         zip_tree(core / "skills/icode", assets / f"icode-v{version}-core.zip")
         zip_tree(core, assets / f"icode-v{version}-plugin-core.zip")
+        zip_tree(skillhub, assets / f"icode-v{version}-skillhub.zip")
         rows = [{"name": path.name, "size": path.stat().st_size, "sha256": digest(path)}
                 for path in files(assets)]
         record = {"schema_version": 1, "version": version, "assets": rows,
                   "profiles": {name: {key: report[key] for key in ("files", "bytes", "skills")}
-                               for name, report in (("full", full_report), ("core", core_report))},
+                               for name, report in (("full", full_report), ("core", core_report),
+                                                    ("skillhub", skillhub_report))},
                   "validation": "offline_payload_integrity", "published": False}
         tarball = assets / f"icode-v{version}.tar.gz"
         (assets / (tarball.name + ".sha256")).write_text(

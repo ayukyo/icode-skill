@@ -375,7 +375,7 @@ class EvidenceBundleTests(unittest.TestCase):
 
     def test_baseline_v2_derives_evidence_contract_without_changing_v1(self):
         profile = module("embedded_profile")
-        baseline = json.loads((ROOT / "templates/embedded_baseline.json.template").read_text())
+        baseline = json.loads((ROOT / "templates/embedded_baseline.template.json").read_text())
         profile.validate(baseline)
         self.assertNotIn("evidence_contract", profile.make_plan(Path("baseline.json"), baseline, "sha256:" + "a" * 64)["verification_contract"])
         baseline["schema_version"] = 2

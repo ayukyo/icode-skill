@@ -1,5 +1,13 @@
 # ICODE 最小插件分发接入
 
+## 发行硬门禁：导入包最多 200 个文件
+
+供 Agent 扫描或平台上传的 `core`、`plugin-core`、`skillhub` 包，展开后的普通文件总数必须 **不超过 200**。`SKILL.md`、`WORKFLOW.md`、`components.json`、许可证、图标、插件清单、校验清单和共享技能全部计数，不以 ZIP 压缩后大小或入口文件数替代。
+
+上限在 `tools/build_skill_distribution.py::CORE_MAX_FILES` 单处定义，发行构建器复用；测试验证 200 文件成功、201 文件失败且不创建发行输出。核心同时受 5 MiB 和入口 8 KiB 预算约束。开发仓库/完整备份包含测试和维护资料；运行扩展置于 Agent 扫描目录外，不回填核心目录突破上限。
+
+源码统一采用 `LICENSE.txt` 与 `*.template.json`；构建器、调用说明和测试使用同一命名。`.gitignore` 属于 support 开发资料组件，不进入核心导入包。发行批次自动生成 `icode-v<版本>-skillhub.zip`，补充平台必填元数据并重算核心清单，五组件与同批 core 共用地址和摘要，不再手工重命名上传包。该包保留许可正文和功能资源；本地格式检查通过仍需真实平台校验与审核回执。
+
 ## 核心发行与按需扩展（2026-10-28）
 
 默认 `full` 仍生成完整工作流。新增 `core` 用于有体积或文件数限制的导入入口：整个插件展开后最多 200 文件、5 MiB，核心 `SKILL.md` 最多 8 KiB；构建超预算直接失败，不创建输出。完整规则保存在同目录 `WORKFLOW.md`，名称、description、版本及授权边界保持原来源。必要图标与分发校验工具的依赖一起携带。
@@ -28,7 +36,7 @@ python -B tools/install_skill_pack.py --component-root "<核心技能目录>" --
 
 ### 维护者如何发行
 
-`tools/build_release_assets.py` 复用现有生成器，一次生成完整 tar、单技能 core ZIP、plugin-core ZIP、五个组件 ZIP，以及旧版 `.sha256`、总 `SHA256SUMS`、`release-assets.json`，共 11 个文件：
+`tools/build_release_assets.py` 复用现有生成器，一次生成完整 tar、单技能 core ZIP、plugin-core ZIP、SkillHub ZIP、五个组件 ZIP，以及旧版 `.sha256`、总 `SHA256SUMS`、`release-assets.json`，共 12 个文件：
 
 ```bash
 python3 -B tools/build_release_assets.py --output /已有父目录/新发行目录
@@ -51,7 +59,7 @@ python3 -B tools/build_release_assets.py --output /已有父目录/新发行目�
 Claude插件命名空间发现及10个安装目标的完整包复制。下文“本切片/本次未运行”保留原始阶段的
 证据边界；后续结果不等于各宿主模型执行或市场安装已通过。
 
-2026-09-21 补充：下述是完整资源分发原型，不是已经可上传各市场的发行包。SkillHub 整仓导入有大小限制，见[当前技术边界](agent-skill-discovery.md)；[PPT NOTICE](../tools/ppt/NOTICE)还规定第三方模板/预览的非商业授权。生成包携带根 LICENSE 不代表所有素材统一 MIT，摘要通过也不代表许可和平台容量验收通过。正式市场包须单独核对这些条件，不改变原安装方式。
+2026-09-21 补充：下述是完整资源分发原型，不是已经可上传各市场的发行包。SkillHub 整仓导入有大小限制，见[当前技术边界](agent-skill-discovery.md)；[PPT NOTICE](../tools/ppt/NOTICE)还规定第三方模板/预览的非商业授权。生成包携带根 LICENSE.txt 不代表所有素材统一 MIT，摘要通过也不代表许可和平台容量验收通过。正式市场包须单独核对这些条件，不改变原安装方式。
 
 ## 方案与根路径结论
 
@@ -77,7 +85,7 @@ Claude插件命名空间发现及10个安装目标的完整包复制。下文“
   .claude-plugin/plugin.json
   .codex-plugin/plugin.json
   .codebuddy-plugin/plugin.json
-  README.md / LICENSE / SHA256SUMS
+  README.md / LICENSE.txt / SHA256SUMS
   skills/
     icode/
       SKILL.md                  # 原样复制根入口

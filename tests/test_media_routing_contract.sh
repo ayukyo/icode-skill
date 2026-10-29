@@ -9,7 +9,7 @@ bad() { FAIL=$((FAIL + 1)); printf '  FAIL %s\n' "$1" >&2; }
 
 TOOL="tools/media_router.py"
 POLICY="references/media_routing.md"
-TEMPLATE="templates/media_policy.json.template"
+TEMPLATE="templates/media_policy.template.json"
 BRIDGE_CONFIG="mcp/vision-bridge/config.example.json"
 BRIDGE_README="mcp/vision-bridge/README.md"
 HOST_ADAPTERS="references/host_adapters.md"

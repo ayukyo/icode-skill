@@ -359,7 +359,7 @@ def render_page(data, lang, base, version, google_site_verification=None,
 <section class="section" id="examples"><details class="more-examples"><summary>{e(t['examples_title'])}</summary><p class="note">{e(t['examples_note'])}</p><div class="examples">{examples}</div></details>
 <p class="boundary note">{e(t['boundary'])}</p></section>
 <section class="section" id="updates"><details class="updates-details"><summary>{e(t['updates_title'])}</summary>{updates}</details></section></main>
-<footer><p>{e(t['privacy'])}</p><a itemprop="codeRepository" href="{REPO}">GitHub</a><a href="{relative}feed.xml">RSS</a><a href="{relative}llms.txt">llms.txt</a><a href="index.md">Markdown</a><a itemprop="license" href="{REPO}/blob/main/LICENSE">MIT</a></footer>
+<footer><p>{e(t['privacy'])}</p><a itemprop="codeRepository" href="{REPO}">GitHub</a><a href="{relative}feed.xml">RSS</a><a href="{relative}llms.txt">llms.txt</a><a href="index.md">Markdown</a><a itemprop="license" href="{REPO}/blob/main/LICENSE.txt">MIT</a></footer>
 </body></html>\n'''
 
 
@@ -405,7 +405,7 @@ def render_guide(data, slug, lang, base, google_site_verification=None,
 <main id="content" class="guide-page" itemscope itemtype="https://schema.org/TechArticle"><article><p class="eyebrow">ICODE · Claude Code · Codex · CodeBuddy · WorkBuddy</p><h1 itemprop="headline">{e(guide['title'])}</h1>
 <p class="lead" itemprop="description">{e(guide['intro'])}</p>{sections}<section class="guide-section"><h2>{'Commands' if english else '命令示例'}</h2>{commands}</section>
 <p class="boundary note">{'Examples explain workflow behavior; they are not execution evidence.' if english else '示例用于说明工作流行为，不代表已经执行或验证。'}</p></article></main>
-<footer><a href="{home_relative}">{back}</a><a href="{REPO}">GitHub</a><a href="{REPO}/blob/main/LICENSE">MIT</a></footer></body></html>\n'''
+<footer><a href="{home_relative}">{back}</a><a href="{REPO}">GitHub</a><a href="{REPO}/blob/main/LICENSE.txt">MIT</a></footer></body></html>\n'''
 
 
 def markdown_text(value):
@@ -456,7 +456,7 @@ def render_markdown(data, lang, base, version):
     parts.extend([m(t['boundary']), '## ' + m(t['updates_title'])])
     for note in data['updates']:
         parts.extend(['### ' + note['version'] + ' / ' + note['reviewed_on'], m(note[lang])])
-    parts.extend([m(t['privacy']), '[MIT](' + REPO + '/blob/main/LICENSE)'])
+    parts.extend([m(t['privacy']), '[MIT](' + REPO + '/blob/main/LICENSE.txt)'])
     return '\n\n'.join(parts) + '\n'
 
 

@@ -83,7 +83,7 @@ class EvidenceSchemaTests(unittest.TestCase):
         self.assertTrue(self.errors(name, value), repr(value))
 
     def baseline(self, version=1):
-        value = json.loads((ROOT / "templates/embedded_baseline.json.template").read_text(encoding="utf-8"))
+        value = json.loads((ROOT / "templates/embedded_baseline.template.json").read_text(encoding="utf-8"))
         value["schema_version"] = version
         return value
 

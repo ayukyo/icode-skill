@@ -14,7 +14,7 @@
 2. 工单须是 `code_done`、`deepcheck_in_progress`、`deepcheck_done` 或 `completed`，`code_files` 非空。阅读存在的计划、代码复检、终审、patch 产物理解“为何如此设计”，但以**当前源码与测试**核对事实。绑定实际 checkout/worktree、逐仓 Git root/branch/HEAD/dirty 和本次 diff；大仓只扫描相关代码及调用链，禁止无界全树灌入。
 3. 知识库路径由 `python3 tools/knowledge_library.py resolve [--library <目录>]` 解析：显式参数优先，其次用户配置 `~/.claude/icode_data/knowledge_config.json`，否则使用 `~/.claude/icode_data/knowledge/`。这些是 ICODE 的全局配置与默认产物位置；配置中的 `library_root` 才是每个人自己的知识库位置，不得在开源 ICODE 中写入某位用户的路径。用户配置目录必须存在；Git 可选。输出“输入工程根 → 工单 → 知识库根”，禁止把文章误写到工程、ICODE 安装副本或源码仓。每人可用 `python3 tools/knowledge_library.py configure --root <已有目录>` 绑定自己的本地 Git 仓库；该命令不触发 clone/fetch/commit/push。
 
-首次手工配置可参考 [templates/knowledge_config.json.template](../templates/knowledge_config.json.template)：复制到上述配置文件路径，把 `library_root` 改成**已存在的绝对目录**，再运行 `resolve` 校验。模板的路径仅是占位值，不能原样使用；已有配置文件不得用模板覆盖。使用 `configure --root` 时工具会直接生成同一格式的配置，无需手工复制模板。
+首次手工配置可参考 [templates/knowledge_config.template.json](../templates/knowledge_config.template.json)：复制到上述配置文件路径，把 `library_root` 改成**已存在的绝对目录**，再运行 `resolve` 校验。模板的路径仅是占位值，不能原样使用；已有配置文件不得用模板覆盖。使用 `configure --root` 时工具会直接生成同一格式的配置，无需手工复制模板。
 
 ## 2. 先查已有卷章，再决定动作
 
