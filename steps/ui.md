@@ -67,6 +67,22 @@ python3 tools/icode_agent.py ui --dir <ticket_dir> --port 9010
 
 Markdown、HTML 清理和 Mermaid 资源随 UI 本地提供，来源、版本、许可证和字节摘要保存在 `agent_runtime/icode_agent/ui_assets/vendor/manifest.json`。Mermaid 在仅 `allow-scripts` 的本地沙箱中排版，不获得同源权限或 UI 令牌；宿主清理 SVG 并给生成的样式表附加 nonce，主页面不放宽内联脚本或样式策略。正文禁用原始 HTML 和执行型链接；图片必须通过带会话令牌的受限资源接口，支持 PNG/JPEG/GIF/WebP。未收录链接和不支持的图片显示提示，图表解析失败保留源码。HTTP 只接收不透明文档/章节/资源 ID，不提供任意文件读取。
 
+## Windows 原生启动与连通性检查
+
+在 Windows PowerShell 中可使用 `py -3.11 tools/icode_agent.py ui --port 8765 --no-browser`。终端的 `ok: true` 表示监听已建立，还需用浏览器访问打印的 URL 验证 HTTP 可达；当前终端需保持运行。
+
+浏览器连接超时时，先确认该端口仍有监听，并用独立 TCP 探测区分网络过滤与页面故障：
+
+```powershell
+Get-NetTCPConnection -LocalAddress 127.0.0.1 -LocalPort 8765 -State Listen
+py -3.11 -c "import socket; s=socket.create_connection(('127.0.0.1',8765),2); print(s.getpeername()); s.close()"
+py -3.11 -c "import sys; print(sys.executable)"
+```
+
+若 TCP 本身失败，应检查当前解释器的实际路径与 Windows 有效入站策略；旧版本或其他工具自带 Python 的同名规则不能代表当前程序已获允许。以实际丢包事件中的程序、用户、端口和过滤器为依据，不能仅凭安装了某个网络软件就归因。确认为防火墙阻断后，由用户或管理员明确配置仅该程序、仅本地与远端 `127.0.0.1` 的 TCP 访问；固定端口可以进一步限定端口，自动选端口和随机端口回归需覆盖其实际端口范围。UI 和安装器不自动修改系统安全规则。
+
+Windows 原生 CI 必须通过真实 UI CLI 的 HTTP/CSP 浏览器集成和文档阅读回归，才允许公开构建；远端 runner 通过不等于用户本机的网络配置已验收。
+
 ## 5. 结束服务
 
 用户要求停止 UI 时，只终止本次启动的 UI 服务进程并报告端口已释放；正常退出仅清理由自身 instance ID 持有的登记。不得通过模糊进程名批量杀死其它 Python、Codex 或 Claude Code 进程。
