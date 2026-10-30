@@ -4,6 +4,7 @@ Set ICODE_NATIVE_HOST_EXE to a locally compiled Windows host executable.
 """
 
 import base64
+import ctypes
 import json
 import os
 import queue
@@ -11,6 +12,7 @@ import subprocess
 import threading
 import time
 import xml.etree.ElementTree as ET
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -71,7 +73,7 @@ def test_webview_environment_override_is_rejected_before_window(host_exe, tmp_pa
 
 
 class PipeHost:
-    def __init__(self, executable, tmp_path, steps):
+    def __init__(self, executable, tmp_path, steps, *, init_overrides=None):
         script = tmp_path / "test-script.json"
         script.write_text(json.dumps(steps), encoding="utf-8")
         self.process = subprocess.Popen(
@@ -79,13 +81,21 @@ class PipeHost:
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8")
         self.messages = queue.Queue()
         self.requests = []
+        self.ready = threading.Event()
+        self.ready_message = None
         threading.Thread(target=self._read, daemon=True).start()
-        self.send({"type": "init", "origin": ORIGIN, "initial_path": "/?view=docs",
-                   "user_data_dir": str(tmp_path / "profile"), "instance_id": "native-test"})
+        init = {"type": "init", "origin": ORIGIN, "initial_path": "/?view=docs",
+                "user_data_dir": str(tmp_path / "profile"), "instance_id": "native-test"}
+        init.update(init_overrides or {})
+        self.send(init)
 
     def _read(self):
         for line in self.process.stdout:
-            self.messages.put(json.loads(line))
+            message = json.loads(line)
+            if message.get("event") == "ready":
+                self.ready_message = message
+                self.ready.set()
+            self.messages.put(message)
 
     def send(self, message):
         self.process.stdin.write(json.dumps(message) + "\n")
@@ -276,3 +286,160 @@ def test_unanswered_request_times_out_with_explicit_safe_response(host_exe, tmp_
                        "/slow": lambda _: None}, timeout=45)
     result = json.loads(next(e for e in events if e.get("id") == "timeout")["result"])
     assert result == {"status": 504, "csp": "default-src 'none'; frame-ancestors 'none'"}
+
+
+class NativeControlClient:
+    """Use real Win32 pipe handles; no third-party package or socket fallback."""
+
+    def __init__(self, name, timeout=4):
+        self.kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+        self.kernel.CreateFileW.argtypes = [ctypes.c_wchar_p, ctypes.c_uint32, ctypes.c_uint32,
+                                           ctypes.c_void_p, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_void_p]
+        self.kernel.CreateFileW.restype = ctypes.c_void_p
+        self.kernel.CloseHandle.argtypes = [ctypes.c_void_p]
+        self.kernel.ReadFile.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint32,
+                                        ctypes.POINTER(ctypes.c_uint32), ctypes.c_void_p]
+        self.kernel.WriteFile.argtypes = self.kernel.ReadFile.argtypes
+        deadline = time.monotonic() + timeout
+        path = "\\\\.\\pipe\\" + name
+        while True:
+            self.handle = self.kernel.CreateFileW(path, 0xC0000000, 0, None, 3, 0, None)
+            if self.handle != ctypes.c_void_p(-1).value:
+                break
+            if time.monotonic() >= deadline:
+                raise TimeoutError("Native control pipe unavailable")
+            time.sleep(0.02)
+
+    def send(self, request):
+        raw = json.dumps(request).encode("utf-8") + b"\n"
+        written = ctypes.c_uint32()
+        assert self.kernel.WriteFile(self.handle, raw, len(raw), ctypes.byref(written), None)
+        assert written.value == len(raw)
+        buffer = ctypes.create_string_buffer(4096)
+        read = ctypes.c_uint32()
+        assert self.kernel.ReadFile(self.handle, buffer, len(buffer), ctypes.byref(read), None)
+        assert read.value <= 4096
+        return json.loads(buffer.raw[:read.value])
+
+    def sddl(self):
+        advapi = ctypes.WinDLL("advapi32", use_last_error=True)
+        advapi.GetSecurityInfo.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_uint32,
+                                          ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+                                          ctypes.c_void_p, ctypes.POINTER(ctypes.c_void_p)]
+        advapi.ConvertSecurityDescriptorToStringSecurityDescriptorW.argtypes = [
+            ctypes.c_void_p, ctypes.c_uint32, ctypes.c_uint32, ctypes.POINTER(ctypes.c_wchar_p), ctypes.c_void_p]
+        self.kernel.LocalFree.argtypes = [ctypes.c_void_p]
+        descriptor = ctypes.c_void_p()
+        assert advapi.GetSecurityInfo(self.handle, 6, 4, None, None, None, None,
+                                      ctypes.byref(descriptor)) == 0
+        value = ctypes.c_wchar_p()
+        try:
+            assert advapi.ConvertSecurityDescriptorToStringSecurityDescriptorW(
+                descriptor, 1, 4, ctypes.byref(value), None)
+            return value.value
+        finally:
+            self.kernel.LocalFree(ctypes.cast(value, ctypes.c_void_p))
+            self.kernel.LocalFree(descriptor)
+
+    def close(self):
+        if self.handle is not None:
+            self.kernel.CloseHandle(self.handle)
+            self.handle = None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        self.close()
+
+
+@contextmanager
+def control_host(host_exe, tmp_path):
+    pipe_name = "icode-native-test-" + str(os.getpid()) + "-" + str(time.time_ns())
+    host = PipeHost(host_exe, tmp_path, [], init_overrides={"control_pipe_name": pipe_name})
+    failures = []
+
+    def serve():
+        try:
+            host.run({"/": (b"<!doctype html><title>Control pipe</title>", "text/html")})
+        except BaseException as error:
+            failures.append(error)
+
+    worker = threading.Thread(target=serve, daemon=True)
+    worker.start()
+    try:
+        assert host.ready.wait(15), "Host did not become ready"
+        yield host, pipe_name
+    finally:
+        if host.process.poll() is None:
+            host.send({"type": "close"})
+        worker.join(timeout=10)
+        assert not worker.is_alive()
+        assert not failures, failures
+
+
+def test_control_pipe_health_focus_and_current_sid_acl(host_exe, tmp_path):
+    with control_host(host_exe, tmp_path) as (host, name):
+        with NativeControlClient(name) as client:
+            sddl = client.sddl()
+            response = client.send({"action": "health", "instance_id": "native-test"})
+        assert response == {"ok": True, "instance_id": "native-test", "pid": host.process.pid,
+                            "window_id": host.ready_message["window_id"], "ready": True}
+        sid_output = subprocess.check_output(["whoami", "/user", "/fo", "csv", "/nh"], text=True)
+        import re
+        sid = re.search(r"S-1-5-(?:\d+-)+\d+", sid_output).group()
+        assert sddl.count("(A;") == 1 and sid in sddl and sddl.startswith("D:P")
+        user = ctypes.WinDLL("user32", use_last_error=True)
+        user.ShowWindow.argtypes = [ctypes.c_void_p, ctypes.c_int]
+        user.IsIconic.argtypes = [ctypes.c_void_p]
+        user.ShowWindow(response["window_id"], 6)
+        assert user.IsIconic(response["window_id"])
+        with NativeControlClient(name) as client:
+            assert client.send({"action": "focus", "instance_id": "native-test"}) == response
+        assert not user.IsIconic(response["window_id"]), "focus replied before restoring the native window"
+    with pytest.raises(TimeoutError):
+        NativeControlClient(name, timeout=0.2)
+
+
+def test_control_pipe_rejects_identity_and_unknown_action(host_exe, tmp_path):
+    with control_host(host_exe, tmp_path) as (_, name):
+        for request, error in [
+            ({"action": "focus", "instance_id": "wrong-instance"}, "instance_mismatch"),
+            ({"action": "navigate", "instance_id": "native-test"}, "unknown_action"),
+            ({"action": "health", "instance_id": "native-test", "script": "arbitrary"}, "invalid_request"),
+            ({"action": "health", "instance_id": "x" * 4096}, "invalid_request"),
+        ]:
+            with NativeControlClient(name) as client:
+                assert client.send(request) == {"ok": False, "error": error}
+
+
+def test_control_pipe_times_out_idle_client_without_blocking_window(host_exe, tmp_path):
+    with control_host(host_exe, tmp_path) as (host, name):
+        with NativeControlClient(name):
+            time.sleep(2.5)
+            with NativeControlClient(name) as client:
+                response = client.send({"action": "health", "instance_id": "native-test"})
+                assert response["ok"] and response["pid"] == host.process.pid
+
+
+def test_control_pipe_shutdown_disconnects_stalled_client(host_exe, tmp_path):
+    with control_host(host_exe, tmp_path) as (host, name):
+        with NativeControlClient(name):
+            started = time.monotonic()
+            host.send({"type": "close"})
+            host.process.wait(timeout=5)
+            assert host.process.returncode == 0
+            assert time.monotonic() - started < 2, "Closing waited for a control client's read timeout"
+
+
+def test_explicit_test_resize_uses_native_client_area(host_exe, tmp_path):
+    host = PipeHost(host_exe, tmp_path, [
+        {"action": "resize", "width": 400, "height": 600},
+        {"action": "wait", "milliseconds": 150},
+        {"action": "script", "id": "narrow", "script": "({width:innerWidth,height:innerHeight})"},
+        {"action": "close"},
+    ])
+    events = host.run({"/": (b"<!doctype html><title>Narrow</title>", "text/html")})
+    result = json.loads(next(e for e in events if e.get("id") == "narrow")["result"])
+    assert 320 <= result["width"] <= 400
+    assert 500 <= result["height"] <= 600

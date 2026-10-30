@@ -7,6 +7,9 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.IO.Pipes;
+using System.Security.AccessControl;
+using System.Security.Principal;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -38,7 +41,7 @@ internal static class NativeHostProgram
     }
 
     // Bound the encoded frame before allocating a JSON string; ReadLine has no limit.
-    internal static Dictionary<string, object> ReadMessage(Stream input)
+    internal static Dictionary<string, object> ReadMessage(Stream input, int maxBytes = MaxMessageBytes)
     {
         using (MemoryStream bytes = new MemoryStream())
         {
@@ -51,7 +54,8 @@ internal static class NativeHostProgram
                     return null;
                 }
                 if (next == 10) break;
-                if (bytes.Length >= MaxMessageBytes) throw new InvalidDataException("JSONL frame exceeds 32 MiB");
+                if (bytes.Length >= maxBytes) throw new InvalidDataException(
+                    maxBytes == MaxMessageBytes ? "JSONL frame exceeds 32 MiB" : "Control frame exceeds 4 KiB");
                 bytes.WriteByte((byte)next);
             }
             string line = Utf8.GetString(bytes.ToArray()).TrimEnd('\r');
@@ -98,13 +102,21 @@ internal static class NativeHostProgram
                     throw new InvalidDataException("Unsupported init origin");
                 string path = Text(init, "initial_path");
                 string profile = Text(init, "user_data_dir");
+                string instanceId = Text(init, "instance_id");
+                string controlPipe = null;
+                if (init.ContainsKey("control_pipe_name"))
+                {
+                    controlPipe = Text(init, "control_pipe_name");
+                    if (!System.Text.RegularExpressions.Regex.IsMatch(controlPipe, "\\A[A-Za-z0-9_.-]{1,128}\\z"))
+                        throw new InvalidDataException("Invalid control pipe name");
+                }
                 if (!path.StartsWith("/", StringComparison.Ordinal) || path.StartsWith("//", StringComparison.Ordinal) ||
                     !IsOrigin(Origin + path) || !Path.IsPathRooted(profile) ||
-                    String.IsNullOrWhiteSpace(Text(init, "instance_id")))
+                    String.IsNullOrWhiteSpace(instanceId))
                     throw new InvalidDataException("Invalid init fields");
                 Application.EnableVisualStyles();
                 Application.SetCompatibleTextRenderingDefault(false);
-                using (NativeHostWindow window = new NativeHostWindow(input, output, profile, path, testScript))
+                using (NativeHostWindow window = new NativeHostWindow(input, output, profile, path, testScript, instanceId, controlPipe))
                 {
                     Application.Run(window);
                     return window.Failed ? 1 : 0;
@@ -165,6 +177,124 @@ internal sealed class ProtocolOutput : IDisposable
     }
 }
 
+// One short request per connection. A stalled client is disconnected after two
+// seconds; neither connection waiting nor client reads can block the UI thread.
+internal sealed class NativeControlPipe : IDisposable
+{
+    private readonly string name;
+    private readonly string instanceId;
+    private readonly Func<string, CancellationToken, Dictionary<string, object>> execute;
+    private readonly Action<Exception> fail;
+    private readonly object gate = new object();
+    private readonly CancellationTokenSource stopped = new CancellationTokenSource();
+    private NamedPipeServerStream server;
+
+    internal NativeControlPipe(string name, string instanceId,
+        Func<string, CancellationToken, Dictionary<string, object>> execute, Action<Exception> fail)
+    {
+        this.name = name;
+        this.instanceId = instanceId;
+        this.execute = execute;
+        this.fail = fail;
+        server = CreateServer();
+        new Thread(Serve) { IsBackground = true, Name = "ICODE instance control" }.Start();
+    }
+
+    private NamedPipeServerStream CreateServer()
+    {
+        SecurityIdentifier sid;
+        using (WindowsIdentity identity = WindowsIdentity.GetCurrent()) sid = identity.User;
+        if (sid == null) throw new InvalidOperationException("Current Windows SID is unavailable");
+        PipeSecurity security = new PipeSecurity();
+        security.SetAccessRuleProtection(true, false);
+        security.SetOwner(sid);
+        security.AddAccessRule(new PipeAccessRule(sid,
+            PipeAccessRights.ReadWrite | PipeAccessRights.CreateNewInstance, AccessControlType.Allow));
+        return new NamedPipeServerStream(name, PipeDirection.InOut, 1, PipeTransmissionMode.Byte,
+            PipeOptions.Asynchronous, 4096, 4096, security);
+    }
+
+    internal static Dictionary<string, object> Reject(string error)
+    {
+        return new Dictionary<string, object> { { "ok", false }, { "error", error } };
+    }
+
+    private Dictionary<string, object> Handle(Stream pipe, CancellationToken cancellation)
+    {
+        Dictionary<string, object> request;
+        try { request = NativeHostProgram.ReadMessage(pipe, 4095); }
+        catch (ArgumentException) { return Reject("invalid_request"); }
+        catch (InvalidDataException) { return Reject("invalid_request"); }
+        catch (InvalidOperationException) { return Reject("invalid_request"); }
+        if (request == null || request.Count != 2 || !request.ContainsKey("action") ||
+            !request.ContainsKey("instance_id") || !(request["action"] is string) || !(request["instance_id"] is string))
+            return Reject("invalid_request");
+        if (!String.Equals((string)request["instance_id"], instanceId, StringComparison.Ordinal))
+            return Reject("instance_mismatch");
+        string action = (string)request["action"];
+        if (action != "health" && action != "focus") return Reject("unknown_action");
+        return execute(action, cancellation);
+    }
+
+    private void Serve()
+    {
+        while (!stopped.IsCancellationRequested)
+        {
+            NamedPipeServerStream pipe;
+            lock (gate) { pipe = server; }
+            if (pipe == null) return;
+            try
+            {
+                pipe.WaitForConnection();
+                using (CancellationTokenSource client = CancellationTokenSource.CreateLinkedTokenSource(stopped.Token))
+                using (System.Threading.Timer timeout = new System.Threading.Timer(delegate
+                {
+                    // Timer.Dispose does not join an already queued callback.
+                    try { client.Cancel(); } catch (ObjectDisposedException) { }
+                    try { pipe.Dispose(); } catch (Exception) { }
+                }, null, 2000, Timeout.Infinite))
+                {
+                    Dictionary<string, object> response = Handle(pipe, client.Token);
+                    client.Token.ThrowIfCancellationRequested();
+                    byte[] bytes = NativeHostProgram.Utf8.GetBytes(NativeHostProgram.Serializer().Serialize(response) + "\n");
+                    if (bytes.Length > 4096) throw new InvalidDataException("Control response exceeds 4 KiB");
+                    pipe.Write(bytes, 0, bytes.Length);
+                    pipe.Flush();
+                }
+            }
+            catch (IOException) { }
+            catch (ObjectDisposedException) { }
+            catch (OperationCanceledException) { }
+            catch (Exception error)
+            {
+                if (!stopped.IsCancellationRequested) fail(error);
+                return;
+            }
+            finally { pipe.Dispose(); }
+            try
+            {
+                lock (gate)
+                {
+                    server = null;
+                    if (stopped.IsCancellationRequested) return;
+                    server = CreateServer();
+                }
+            }
+            catch (Exception error) { if (!stopped.IsCancellationRequested) fail(error); return; }
+        }
+    }
+
+    public void Dispose()
+    {
+        stopped.Cancel();
+        lock (gate)
+        {
+            if (server != null) server.Dispose();
+            server = null;
+        }
+    }
+}
+
 internal sealed class NativeHostWindow : Form
 {
     private sealed class PendingRequest
@@ -181,6 +311,9 @@ internal sealed class NativeHostWindow : Form
     private readonly string profile;
     private readonly string initialPath;
     private readonly string testScript;
+    private readonly string instanceId;
+    private readonly string controlPipeName;
+    private NativeControlPipe controlPipe;
     private readonly WebView2 web = new WebView2();
     private readonly Dictionary<string, PendingRequest> pending = new Dictionary<string, PendingRequest>();
     private readonly CancellationTokenSource shutdown = new CancellationTokenSource();
@@ -192,13 +325,16 @@ internal sealed class NativeHostWindow : Form
     private long nextRequest;
     internal bool Failed { get; private set; }
 
-    internal NativeHostWindow(Stream input, ProtocolOutput output, string profile, string initialPath, string testScript)
+    internal NativeHostWindow(Stream input, ProtocolOutput output, string profile, string initialPath, string testScript,
+        string instanceId, string controlPipeName)
     {
         this.input = input;
         this.output = output;
         this.profile = profile;
         this.initialPath = initialPath;
         this.testScript = testScript;
+        this.instanceId = instanceId;
+        this.controlPipeName = controlPipeName;
         Text = "ICODE";
         Width = 1240;
         Height = 860;
@@ -261,6 +397,9 @@ internal sealed class NativeHostWindow : Form
         reader.Start();
         try
         {
+            if (controlPipeName != null)
+                controlPipe = new NativeControlPipe(controlPipeName, instanceId, ExecuteControl,
+                    delegate(Exception error) { Post(delegate { Fail(error); }); });
             CoreWebView2EnvironmentOptions options = new CoreWebView2EnvironmentOptions(
                 "--disable-background-networking --disable-component-update --no-proxy-server");
             CoreWebView2Environment environment = await CoreWebView2Environment.CreateAsync(null, profile, options);
@@ -361,6 +500,7 @@ internal sealed class NativeHostWindow : Form
     {
         if (closing) return;
         closing = true;
+        if (controlPipe != null) controlPipe.Dispose();
         shutdown.Cancel();
         // Snapshot: completing a task may synchronously finish its event handler.
         List<PendingRequest> all = new List<PendingRequest>(pending.Values);
@@ -371,6 +511,38 @@ internal sealed class NativeHostWindow : Form
             request.Completion.TrySetResult(null);
         }
         pending.Clear();
+    }
+
+    private Dictionary<string, object> ExecuteControl(string action, CancellationToken cancellation)
+    {
+        TaskCompletionSource<Dictionary<string, object>> completion = new TaskCompletionSource<Dictionary<string, object>>();
+        using (CancellationTokenSource queued = CancellationTokenSource.CreateLinkedTokenSource(cancellation))
+        {
+            Post(delegate
+            {
+                if (closing || queued.IsCancellationRequested || !ready)
+                {
+                    completion.TrySetResult(NativeControlPipe.Reject("not_ready"));
+                    return;
+                }
+                if (action == "focus")
+                {
+                    WindowState = FormWindowState.Normal;
+                    Show();
+                    Activate();
+                    BringToFront();
+                }
+                completion.TrySetResult(new Dictionary<string, object> {
+                    { "ok", true }, { "instance_id", instanceId }, { "pid", Process.GetCurrentProcess().Id },
+                    { "window_id", Handle.ToInt64() }, { "ready", true } });
+            });
+            if (!completion.Task.Wait(1500, cancellation))
+            {
+                queued.Cancel();
+                return NativeControlPipe.Reject("not_ready");
+            }
+            return completion.Task.Result;
+        }
     }
 
     private static byte[] ReadBody(Stream content)
@@ -542,6 +714,17 @@ internal sealed class NativeHostWindow : Form
                     using (FileStream image = new FileStream(path, FileMode.CreateNew, FileAccess.Write))
                         await web.CoreWebView2.CapturePreviewAsync(CoreWebView2CapturePreviewImageFormat.Png, image);
                     output.Event("test_screenshot");
+                }
+                else if (action == "resize")
+                {
+                    object rawWidth;
+                    object rawHeight;
+                    if (!step.TryGetValue("width", out rawWidth) || !(rawWidth is int) ||
+                        !step.TryGetValue("height", out rawHeight) || !(rawHeight is int) ||
+                        (int)rawWidth < 320 || (int)rawWidth > 3840 || (int)rawHeight < 240 || (int)rawHeight > 2160)
+                        throw new InvalidDataException("Invalid test window size");
+                    MinimumSize = System.Drawing.Size.Empty;
+                    ClientSize = new System.Drawing.Size((int)rawWidth, (int)rawHeight);
                 }
                 else throw new InvalidDataException("Unknown test action");
             }
