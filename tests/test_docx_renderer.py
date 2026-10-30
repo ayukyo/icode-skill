@@ -364,7 +364,7 @@ class RendererTests(unittest.TestCase):
         text = (ROOT / '.github/workflows/public-site.yml').read_text()
         renderer, build = text.split('\n  build:\n', 1)
         self.assertIn('uses: ./.github/workflows/docx-renderer.yml', renderer)
-        self.assertIn('    needs: renderer\n', build.split('\n  deploy:\n', 1)[0])
+        self.assertIn('    needs: [renderer, windows-ui]\n', build.split('\n  deploy:\n', 1)[0])
         self.assertIn('    needs: build\n', build.split('\n  deploy:\n', 1)[1])
         self.assertNotIn('continue-on-error', renderer)
 

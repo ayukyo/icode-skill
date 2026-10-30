@@ -2,7 +2,10 @@
 import json
 import os
 from pathlib import Path
+from contextlib import contextmanager
+import queue
 import struct
+import subprocess
 import sys
 import threading
 import zlib
@@ -13,12 +16,41 @@ pytestmark = pytest.mark.skipif(os.environ.get("ICODE_RUN_BROWSER_TESTS") != "1"
                                 reason="set ICODE_RUN_BROWSER_TESTS=1 with a local Playwright browser")
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "agent_runtime"))
-from icode_agent.ui_server import create_ui_server
+
+
+@contextmanager
+def ui_cli(home):
+    # Path.home() uses USERPROFILE on Windows and HOME on POSIX. Isolate both
+    # so the real CLI cannot read or write the user's installed document library.
+    process = subprocess.Popen(
+        [sys.executable, '-u', str(ROOT / 'tools/icode_agent.py'),
+         'ui', '--port', '0', '--no-browser'], cwd=ROOT,
+        env={**os.environ, 'HOME': str(home), 'USERPROFILE': str(home)},
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+    )
+    startup_lines = queue.Queue()
+    reader = threading.Thread(target=lambda: startup_lines.put(process.stdout.readline()), daemon=True)
+    reader.start()
+    try:
+        startup = json.loads(startup_lines.get(timeout=15))
+        assert startup['ok'] and not startup['reused'], startup
+        yield startup['url']
+    finally:
+        if process.poll() is None:
+            process.terminate()
+        try:
+            process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=5)
+        reader.join(timeout=3)
+        process.stdout.close()
 
 
 def test_real_http_reader_renders_graph_image_and_preserves_position(tmp_path):
     playwright = pytest.importorskip("playwright.sync_api")
-    docs_root = tmp_path / "library"
+    home = tmp_path / 'home'
+    docs_root = home / '.claude/icode_data'
     book_path = docs_root / "project_docs" / "demo" / "main"
     book_path.mkdir(parents=True)
     (book_path / "_meta.json").write_text(json.dumps({"branch": "main"}), encoding="utf-8")
@@ -32,12 +64,7 @@ def test_real_http_reader_renders_graph_image_and_preserves_position(tmp_path):
     png = b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", 1, 1, 8, 2, 0, 0, 0))
     png += chunk(b"IDAT", zlib.compress(b"\x00\xff\x00\x00")) + chunk(b"IEND", b"")
     (book_path / "pixel.png").write_bytes(png)
-    server = create_ui_server(None, ROOT / "tools/icode_control.py", port=0,
-                              docs_root=docs_root, index_path=tmp_path / "index.json",
-                              settings_path=tmp_path / "settings.json")
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    try:
+    with ui_cli(home) as url:
         with playwright.sync_playwright() as driver:
             browser = driver.chromium.launch(executable_path=os.environ.get("ICODE_TEST_BROWSER"),
                                                headless=True, args=["--no-sandbox", "--disable-gpu"])
@@ -48,7 +75,8 @@ def test_real_http_reader_renders_graph_image_and_preserves_position(tmp_path):
                 page.on("pageerror", lambda error: errors.append(str(error)))
                 page.on("console", lambda message: console_errors.append(message.text)
                         if message.type == 'error' else None)
-                response = page.goto("http://127.0.0.1:%d/?view=docs" % server.server_port)
+                response = page.goto(url + "?view=docs")
+                assert page.evaluate('navigator.platform').startswith('Win') == (sys.platform == 'win32')
                 assert "script-src 'self'" in response.headers["content-security-policy"]
                 assert "'unsafe-inline'" not in response.headers['content-security-policy']
                 page.locator("#doc-body table").wait_for()
@@ -80,7 +108,3 @@ def test_real_http_reader_renders_graph_image_and_preserves_position(tmp_path):
                 assert not errors
             finally:
                 browser.close()
-    finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=3)

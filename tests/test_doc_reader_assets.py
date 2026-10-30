@@ -67,3 +67,19 @@ def test_document_reader_checks_are_mandatory_in_ci():
     assert 'tools/build_release_assets.py' in budget['run']
     assert 'CORE_MAX_FILES' in budget['run']
     assert not budget.get('continue-on-error', False)
+
+
+def test_windows_native_reader_acceptance_gates_public_build():
+    import yaml
+    workflow = yaml.safe_load((ROOT / '.github/workflows/public-site.yml').read_text(encoding='utf-8'))
+    job = workflow['jobs'].get('windows-ui')
+    assert job is not None, 'Windows native UI acceptance must run before public builds'
+    assert job['runs-on'] == 'windows-latest'
+    assert 'windows-ui' in workflow['jobs']['build']['needs']
+    assert not job.get('if') and not job.get('continue-on-error', False)
+    browser = next(step for step in job['steps'] if step.get('name') == 'Windows native document reader acceptance')
+    assert browser.get('env', {}).get('ICODE_RUN_BROWSER_TESTS') == '1'
+    assert not browser.get('if') and not browser.get('continue-on-error', False)
+    for name in ('test_doc_library.py', 'test_doc_reader_assets.py',
+                 'test_doc_reader_browser.py', 'test_doc_reader_integration.py'):
+        assert name in browser['run']
