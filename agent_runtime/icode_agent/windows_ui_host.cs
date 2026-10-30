@@ -766,8 +766,7 @@ internal sealed class NativeHostWindow : Form
                 else if (action == "toolbar_layout")
                 {
                     // Observe the shown native controls only through the explicit test script.
-                    output.Send(new Dictionary<string, object> {
-                        { "type", "event" }, { "event", "test_toolbar_layout" },
+                    Dictionary<string, object> layout = new Dictionary<string, object> {
                         { "client_width", ClientSize.Width },
                         { "display_left", toolbar.DisplayRectangle.Left },
                         { "display_right", toolbar.DisplayRectangle.Right },
@@ -775,7 +774,10 @@ internal sealed class NativeHostWindow : Form
                         { "address_width", address.Width }, { "address_placement", address.Placement.ToString() },
                         { "copy_placement", toolbar.Items[toolbar.Items.Count - 1].Placement.ToString() },
                         { "overflow_visible", toolbar.OverflowButton.Visible },
-                        { "toolbar_bottom", toolbar.Bottom }, { "web_top", web.Top } });
+                        { "toolbar_bottom", toolbar.Bottom }, { "web_top", web.Top } };
+                    output.Send(new Dictionary<string, object> {
+                        { "type", "event" }, { "event", "test_result" }, { "id", "toolbar_layout" },
+                        { "result", NativeHostProgram.Serializer().Serialize(layout) } });
                 }
                 else if (action == "screenshot")
                 {
