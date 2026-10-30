@@ -2,7 +2,7 @@
   "schema_version": 1,
   "packages": [
     {
-      "id": "linux-x86_64-lo26.8.0-poppler22.02.0-14",
+      "id": "linux-x86_64-lo26.8.2-poppler22.02.0-14",
       "os": "linux",
       "arch": "x86_64",
       "libc": "glibc",
@@ -25,15 +25,16 @@
       "library_dir": "root/usr/lib/x86_64-linux-gnu",
       "artifacts": [
         {
-          "name": "LibreOffice_26.8.0_Linux_x86-64_deb.tar.gz",
+          "name": "LibreOffice_26.8.2_Linux_x86-64_deb.tar.gz",
           "kind": "libreoffice-debs",
-          "bytes": 219786895,
-          "sha256": "d0a6031a3837e48f9854e6d2da6489b9fadbd814afa4741fa32a197741663a22",
+          "bytes": 221006208,
+          "sha256": "8290c8f46cb33d6df8f681cb796e0697461ea070f86ec55b63c94d7eb9d9a476",
           "urls": [
-            "https://downloadarchive.documentfoundation.org/libreoffice/old/26.8.0.3/deb/x86_64/LibreOffice_26.8.0.3_Linux_x86-64_deb.tar.gz",
-            "https://download.documentfoundation.org/libreoffice/stable/26.8.0/deb/x86_64/LibreOffice_26.8.0_Linux_x86-64_deb.tar.gz"
+            "https://ftp.gwdg.de/pub/tdf/libreoffice/stable/26.8.2/deb/x86_64/LibreOffice_26.8.2_Linux_x86-64_deb.tar.gz",
+            "https://download.documentfoundation.org/libreoffice/stable/26.8.2/deb/x86_64/LibreOffice_26.8.2_Linux_x86-64_deb.tar.gz",
+            "https://downloadarchive.documentfoundation.org/libreoffice/old/26.8.2.2/deb/x86_64/LibreOffice_26.8.2.2_Linux_x86-64_deb.tar.gz"
           ],
-          "provenance": "https://downloadarchive.documentfoundation.org/libreoffice/old/26.8.0.3/deb/x86_64/"
+          "provenance": "https://download.documentfoundation.org/libreoffice/stable/26.8.2/deb/x86_64/LibreOffice_26.8.2_Linux_x86-64_deb.tar.gz.mirrorlist"
         },
         {
           "name": "poppler-utils_22.02.0-2ubuntu0.14_amd64.deb",
