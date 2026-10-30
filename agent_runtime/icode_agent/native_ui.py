@@ -7,9 +7,11 @@ import json
 import os
 from pathlib import Path
 import queue
+import re
 import subprocess
 import threading
 import time
+from typing import Callable
 from urllib.parse import urlsplit
 
 from .ui_server import AgentUIInMemoryDispatcher, AgentUIService, NATIVE_UI_ORIGIN
@@ -17,6 +19,11 @@ from .ui_server import AgentUIInMemoryDispatcher, AgentUIService, NATIVE_UI_ORIG
 MAX_NATIVE_MESSAGE_BYTES = 32 * 1024 * 1024
 MAX_NATIVE_INFLIGHT = 16
 NATIVE_TIMEOUT_SECONDS = 30
+# Match the host's fail-closed policy while leaving the caller's environment intact.
+_WEBVIEW2_ENV_OVERRIDES = frozenset({
+    'WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS', 'WEBVIEW2_PIPE_FOR_SCRIPT_DEBUGGER',
+    'WEBVIEW2_WAIT_FOR_SCRIPT_DEBUGGER', 'WEBVIEW2_USER_DATA_FOLDER',
+})
 
 
 class NativeUIError(RuntimeError):
@@ -66,7 +73,7 @@ def _encode(message):
 
 
 class _NativeSession:
-    def __init__(self, process, dispatcher, *, test_mode=False):
+    def __init__(self, process, dispatcher, *, test_mode=False, on_ready=None):
         self.process = process
         self.dispatcher = dispatcher
         self.stopped = threading.Event()
@@ -75,6 +82,7 @@ class _NativeSession:
         self.threads = []
         self.pending = {}
         self.test_mode = test_mode
+        self.on_ready = on_ready
 
     def _put(self, target, value):
         while not self.stopped.is_set():
@@ -180,10 +188,16 @@ class _NativeSession:
                         or type(pid) is not int or pid != self.process.pid
                         or type(window_id) is not int or window_id <= 0):
                     raise NativeUIError('原生 UI ready 事件无效')
+                ready_info = {'ok': True, 'transport': 'webview2', 'origin': NATIVE_UI_ORIGIN,
+                              'instance_id': self.dispatcher.service.instance_id,
+                              'pid': pid, 'window_id': window_id}
+                if self.on_ready is not None:
+                    try:
+                        self.on_ready(dict(ready_info))
+                    except Exception as exc:
+                        raise NativeUIError('原生 UI ready 回调失败') from exc
                 ready = True
-                print(json.dumps({'ok': True, 'transport': 'webview2', 'origin': NATIVE_UI_ORIGIN,
-                                  'instance_id': self.dispatcher.service.instance_id,
-                                  'pid': pid, 'window_id': window_id}), flush=True)
+                print(json.dumps(ready_info), flush=True)
             elif event == 'closed' and set(value) == {'type', 'event'}:
                 if not ready:
                     raise NativeUIError('原生 UI 宿主在就绪前关闭')
@@ -234,12 +248,20 @@ class _NativeSession:
 
 def run_native_ui(host_executable, *, ticket_dir, control_path, seed_project_paths,
                   initial_ticket_id, initial_project_id, initial_path='/',
-                  user_data_dir=None, test_script=None):
+                  user_data_dir=None, test_script=None, control_pipe_name: str | None = None,
+                  on_ready: Callable[[dict], None] | None = None):
     """Own a single host until its window closes; announce success only after ready.
 
     Errors raise NativeUIError for the caller's normal CLI error response. Host
     diagnostics inherit stderr; stdout is reserved for one truthful ready receipt.
+    The ready hook runs after host identity validation and before that receipt;
+    failures abort startup and clean up the owned host.
     """
+    if control_pipe_name is not None and (not isinstance(control_pipe_name, str)
+            or (control_pipe_name and not re.fullmatch(r'[A-Za-z0-9_.-]{1,128}', control_pipe_name))):
+        raise NativeUIError('原生 UI 控制管道名称无效')
+    if on_ready is not None and not callable(on_ready):
+        raise NativeUIError('原生 UI ready 回调必须可调用')
     if not isinstance(initial_path, str) or len(initial_path) > 4096 or any(ord(c) < 32 for c in initial_path):
         raise NativeUIError('原生 UI 初始路径无效')
     parsed = urlsplit(initial_path)
@@ -259,13 +281,19 @@ def run_native_ui(host_executable, *, ticket_dir, control_path, seed_project_pat
     try:
         process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                    stderr=None,
+                                   env={key: value for key, value in os.environ.items()
+                                        if key.upper() not in _WEBVIEW2_ENV_OVERRIDES},
                                    creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
     except OSError as exc:
         raise NativeUIError('原生 UI 宿主启动失败') from exc
-    session = _NativeSession(process, AgentUIInMemoryDispatcher(service), test_mode=test_script is not None)
+    session = _NativeSession(process, AgentUIInMemoryDispatcher(service),
+                             test_mode=test_script is not None, on_ready=on_ready)
     try:
-        return session.run({'type': 'init', 'origin': NATIVE_UI_ORIGIN,
-                            'initial_path': initial_path, 'user_data_dir': str(profile),
-                            'instance_id': service.instance_id})
+        init = {'type': 'init', 'origin': NATIVE_UI_ORIGIN,
+                'initial_path': initial_path, 'user_data_dir': str(profile),
+                'instance_id': service.instance_id}
+        if control_pipe_name:
+            init['control_pipe_name'] = control_pipe_name
+        return session.run(init)
     finally:
         session.close()
