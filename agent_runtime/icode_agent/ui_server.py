@@ -5,8 +5,12 @@ import json
 import os
 import re
 import secrets
+from dataclasses import dataclass
 from datetime import datetime, timezone
+from email.message import Message
+from http.client import HTTPResponse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from io import BytesIO
 from pathlib import Path
 from typing import Callable, Dict
 from urllib.parse import parse_qs, unquote, urlsplit
@@ -23,6 +27,7 @@ from .ui_settings import SettingsError, UISettingsStore
 
 
 MAX_REQUEST_BYTES = 64 * 1024
+NATIVE_UI_ORIGIN = "https://icode.localhost"
 MAX_IMAGE_REFERENCES = 4
 MAX_OUTPUT_TOKENS = 32768
 MAX_STAGE_PREVIEWS = 5
@@ -777,6 +782,9 @@ class AgentUIRequestHandler(BaseHTTPRequestHandler):
 
     def _valid_host(self) -> bool:
         raw = self.headers.get("Host", "")
+        native_origin = getattr(self.server, "native_origin", None)
+        if native_origin is not None:
+            return raw == urlsplit(native_origin).netloc
         try:
             parsed = urlsplit(f"//{raw}")
             host = parsed.hostname
@@ -789,6 +797,9 @@ class AgentUIRequestHandler(BaseHTTPRequestHandler):
         raw = self.headers.get("Origin")
         if not raw:
             return True
+        native_origin = getattr(self.server, "native_origin", None)
+        if native_origin is not None:
+            return raw == native_origin
         try:
             parsed = urlsplit(raw)
             return (
@@ -813,7 +824,7 @@ class AgentUIRequestHandler(BaseHTTPRequestHandler):
             supplied, self.server.ui_token)
 
     def _check_api_access(self, *, write=False) -> bool:
-        if write and not self._valid_origin():
+        if (write or getattr(self.server, "native_origin", None) is not None) and not self._valid_origin():
             self._send_error_json(403, "UIAccessError", "Origin 不是当前 loopback UI")
             return False
         if not self._valid_token():
@@ -1124,6 +1135,102 @@ class AgentUIRequestHandler(BaseHTTPRequestHandler):
         if not self._check_host():
             return
         self._send_error_json(405, "UIRequestError", "不支持 OPTIONS")
+
+
+@dataclass(frozen=True)
+class UIResponse:
+    status: int
+    headers: dict[str, str]
+    body: bytes
+
+
+@dataclass(frozen=True)
+class _InMemoryUIContext:
+    service: AgentUIService
+    # The parent selects this context; request headers can never select a transport.
+    native_origin: str = NATIVE_UI_ORIGIN
+
+    @property
+    def ui_token(self):
+        return self.service.token
+
+    @property
+    def ui_instance_id(self):
+        return self.service.instance_id
+
+
+class _ResponseBuffer:
+    def __init__(self, body):
+        self.body = body
+
+    def makefile(self, _mode):
+        return BytesIO(self.body)
+
+
+class AgentUIInMemoryDispatcher:
+    """Run the existing HTTP routes entirely in memory, without constructing a server.
+
+    Only the transport framing differs. All business routes, errors, token checks,
+    opaque IDs and security headers remain in AgentUIRequestHandler.
+    """
+
+    def __init__(self, service: AgentUIService):
+        self.service = service
+        self._context = _InMemoryUIContext(service)
+
+    def dispatch(self, method: str, url: str, headers: dict[str, str],
+                 body: bytes = b"") -> UIResponse:
+        if not isinstance(method, str) or not re.fullmatch(r"[A-Z]{1,32}", method):
+            raise ValueError("原生 UI 请求方法无效")
+        if not isinstance(url, str) or len(url) > 65536 or any(ord(c) < 32 for c in url):
+            raise ValueError("原生 UI 请求 URL 无效")
+        parsed = urlsplit(url)
+        if (parsed.scheme != "https" or parsed.netloc != "icode.localhost"
+                or parsed.fragment or "#" in url):
+            raise ValueError("原生 UI 请求只能访问当前固定原点")
+        if not isinstance(headers, dict) or len(headers) > 100 or not isinstance(body, bytes):
+            raise ValueError("原生 UI 请求头或请求体无效")
+        normalized = {}
+        for name, value in headers.items():
+            if (not isinstance(name, str) or not re.fullmatch(r"[!#$%&'*+.^_`|~0-9A-Za-z-]+", name)
+                    or not isinstance(value, str) or any(ord(c) < 32 or ord(c) == 127 for c in value)
+                    or len(name) + len(value) > 65536 or name.lower() in normalized):
+                raise ValueError("原生 UI 请求头无效")
+            normalized[name.lower()] = value
+        if "transfer-encoding" in normalized:
+            raise ValueError("原生 UI 不接受分块请求")
+        supplied_length = normalized.get("content-length")
+        if supplied_length is not None and supplied_length != str(len(body)):
+            raise ValueError("原生 UI 请求体长度不一致")
+        normalized.setdefault("host", "icode.localhost")
+        normalized["content-length"] = str(len(body))
+        handler = AgentUIRequestHandler.__new__(AgentUIRequestHandler)
+        handler.server = self._context
+        handler.command = method
+        handler.path = (parsed.path or "/") + ("?" + parsed.query if parsed.query else "")
+        handler.request_version = "HTTP/1.1"
+        handler.requestline = f"{method} {handler.path} HTTP/1.1"
+        handler.close_connection = True
+        handler.headers = Message()
+        for name, value in normalized.items():
+            handler.headers[name] = value
+        handler.rfile = BytesIO(body)
+        handler.wfile = BytesIO()
+        if len(body) > MAX_REQUEST_BYTES:
+            handler._send_error_json(413, "UIRequestError", "请求体超过 64 KiB")
+        else:
+            route = getattr(handler, "do_" + method, None)
+            if route is None:
+                if handler._check_host():
+                    handler._send_error_json(501, "UIRequestError", "不支持该请求方法")
+            else:
+                route()
+        response = HTTPResponse(_ResponseBuffer(handler.wfile.getvalue()), method=method)
+        response.begin()
+        try:
+            return UIResponse(response.status, dict(response.getheaders()), response.read())
+        finally:
+            response.close()
 
 
 def create_ui_server(ticket_dir: Path | None, control_path: Path, port: int = 0,
