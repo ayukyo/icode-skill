@@ -490,7 +490,7 @@ def test_shown_toolbar_fits_address_after_autoscale_and_resize(host_exe, tmp_pat
 
     events = host.run({"/": (b"<!doctype html><title>Toolbar layout</title>", "text/html"),
                        "/physical-resize": resize_to_physical_work_area})
-    desktop, narrow, restored = [e for e in events if e.get("event") == "test_toolbar_layout"]
+    desktop, narrow, restored = [json.loads(e["result"]) for e in events if e.get("id") == "toolbar_layout"]
     for layout in (desktop, restored):
         assert layout["address_placement"] == "Main", layout
         assert layout["copy_placement"] == "Main", layout
