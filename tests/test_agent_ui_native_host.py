@@ -443,3 +443,62 @@ def test_explicit_test_resize_uses_native_client_area(host_exe, tmp_path):
     result = json.loads(next(e for e in events if e.get("id") == "narrow")["result"])
     assert 320 <= result["width"] <= 400
     assert 500 <= result["height"] <= 600
+
+
+def test_shown_toolbar_fits_address_after_autoscale_and_resize(host_exe, tmp_path):
+    host = PipeHost(host_exe, tmp_path, [
+        {"action": "resize", "width": 1500, "height": 900},
+        {"action": "script", "script": "fetch('/physical-resize').then(r=>r.text())"},
+        {"action": "wait", "milliseconds": 150},
+        {"action": "toolbar_layout"},
+        {"action": "resize", "width": 390, "height": 600},
+        {"action": "wait", "milliseconds": 150},
+        {"action": "toolbar_layout"},
+        {"action": "resize", "width": 1280, "height": 800},
+        {"action": "wait", "milliseconds": 150},
+        {"action": "toolbar_layout"},
+        {"action": "close"},
+    ])
+
+    def resize_to_physical_work_area(_):
+        from ctypes import wintypes as w
+
+        user = ctypes.WinDLL("user32", use_last_error=True)
+        user.SetThreadDpiAwarenessContext.argtypes = [w.HANDLE]
+        user.SetThreadDpiAwarenessContext.restype = w.HANDLE
+        user.SystemParametersInfoW.argtypes = [w.UINT, w.UINT, w.LPVOID, w.UINT]
+        user.SetWindowPos.argtypes = [w.HWND, w.HWND, ctypes.c_int, ctypes.c_int,
+                                     ctypes.c_int, ctypes.c_int, w.UINT]
+        user.GetWindowThreadProcessId.argtypes = [w.HWND, ctypes.POINTER(w.DWORD)]
+        window = host.ready_message["window_id"]
+        owner = w.DWORD()
+        user.GetWindowThreadProcessId(window, ctypes.byref(owner))
+        assert owner.value == host.process.pid
+        previous = user.SetThreadDpiAwarenessContext(w.HANDLE(-4))
+        assert previous
+        try:
+            work = w.RECT()
+            assert user.SystemParametersInfoW(48, 0, ctypes.byref(work), 0)
+            # Match a DPI-aware desktop resize without changing this window's focus or z-order.
+            no_z_order_or_activate = 0x0004 | 0x0010
+            assert user.SetWindowPos(window, None, work.left + 20, work.top + 20,
+                                     min(3000, work.right - work.left - 40),
+                                     min(1800, work.bottom - work.top - 40), no_z_order_or_activate)
+        finally:
+            user.SetThreadDpiAwarenessContext(previous)
+        return b"resized", "text/plain"
+
+    events = host.run({"/": (b"<!doctype html><title>Toolbar layout</title>", "text/html"),
+                       "/physical-resize": resize_to_physical_work_area})
+    desktop, narrow, restored = [e for e in events if e.get("event") == "test_toolbar_layout"]
+    for layout in (desktop, restored):
+        assert layout["address_placement"] == "Main", layout
+        assert layout["copy_placement"] == "Main", layout
+        assert (layout["display_left"] <= layout["address_left"] <
+                layout["address_right"] <= layout["display_right"]), layout
+    assert narrow["client_width"] == 390
+    assert narrow["address_placement"] in ("Main", "Overflow"), narrow
+    assert narrow["address_width"] > 0
+    assert narrow["overflow_visible"], narrow
+    for layout in (desktop, narrow, restored):
+        assert layout["web_top"] >= layout["toolbar_bottom"], layout
