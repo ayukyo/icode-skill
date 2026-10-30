@@ -2,6 +2,7 @@
 import base64
 import importlib
 import json
+import os
 from pathlib import Path
 import re
 import socket
@@ -334,3 +335,95 @@ def test_native_test_events_validate_payload(dispatcher, tmp_path, monkeypatch, 
     with pytest.raises(native.NativeUIError, match='测试事件'):
         run_host(native, tmp_path, test_script=tmp_path / 'test.json')
     assert children[0].poll() is not None
+
+
+def test_native_ready_callback_runs_after_validation_before_receipt(dispatcher, tmp_path, monkeypatch, capsys):
+    capture = tmp_path / 'control-init.json'
+    native, children, _ = fake_host(tmp_path, monkeypatch, dispatcher,
+        f'open({str(capture)!r},"w").write(json.dumps(init))\n'
+        'emit({"type":"event","event":"ready","pid":os.getpid(),"window_id":123})\n'
+        'emit({"type":"event","event":"closed"})\n')
+    calls = []
+    def ready_callback(info):
+        assert capsys.readouterr().out == ''
+        assert info['pid'] == children[0].pid and info['window_id'] == 123
+        calls.append(dict(info))
+        info['pid'] = -1  # Metadata hooks cannot change the trusted public receipt.
+    assert run_host(native, tmp_path, control_pipe_name='icode-ui-test', on_ready=ready_callback) == 0
+    receipt = json.loads(capsys.readouterr().out)
+    assert calls == [receipt]
+    assert json.loads(capture.read_text())['control_pipe_name'] == 'icode-ui-test'
+    assert children[0].poll() is not None
+
+
+def test_native_ready_callback_failure_is_error_without_success_receipt(dispatcher, tmp_path, monkeypatch, capsys):
+    native, children, _ = fake_host(tmp_path, monkeypatch, dispatcher,
+        'emit({"type":"event","event":"ready","pid":os.getpid(),"window_id":123})\n'
+        'time.sleep(5)\n')
+    def broken_callback(_info):
+        raise OSError('private metadata path must not leak')
+    with pytest.raises(native.NativeUIError, match='ready 回调失败') as result:
+        run_host(native, tmp_path, on_ready=broken_callback)
+    assert isinstance(result.value.__cause__, OSError)
+    assert 'private metadata' not in str(result.value)
+    assert capsys.readouterr().out == ''
+    assert children[0].poll() is not None
+
+
+def test_native_invalid_ready_never_calls_callback(dispatcher, tmp_path, monkeypatch):
+    native, children, _ = fake_host(tmp_path, monkeypatch, dispatcher,
+        'emit({"type":"event","event":"ready","pid":1,"window_id":123})\n'
+        'time.sleep(5)\n')
+    calls = []
+    with pytest.raises(native.NativeUIError, match='ready 事件无效'):
+        run_host(native, tmp_path, on_ready=calls.append)
+    assert not calls and children[0].poll() is not None
+
+
+def test_native_host_environment_cannot_override_webview_policy(dispatcher, tmp_path, monkeypatch):
+    overrides = ['WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS', 'WEBVIEW2_PIPE_FOR_SCRIPT_DEBUGGER',
+                 'WEBVIEW2_WAIT_FOR_SCRIPT_DEBUGGER', 'WEBVIEW2_USER_DATA_FOLDER']
+    for key in overrides:
+        monkeypatch.setenv(key, 'unsafe-inherited-override')
+    monkeypatch.setenv('webview2_additional_browser_arguments', 'unsafe-case-variant')
+    monkeypatch.setenv('ICODE_TEST_ENV_PRESERVED', 'preserved')
+    capture = tmp_path / 'child-env.json'
+    native, children, _ = fake_host(tmp_path, monkeypatch, dispatcher,
+        f'keys={overrides!r}\n'
+        f'open({str(capture)!r},"w").write(json.dumps({{"overrides":[k for k in os.environ if k.upper() in keys],"preserved":os.environ["ICODE_TEST_ENV_PRESERVED"]}}))\n'
+        'emit({"type":"event","event":"ready","pid":os.getpid(),"window_id":123})\n'
+        'emit({"type":"event","event":"closed"})\n')
+    start = native.subprocess.Popen
+    def assert_flags(command, **kwargs):
+        assert kwargs['creationflags'] == (subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0)
+        return start(command, **kwargs)
+    monkeypatch.setattr(native.subprocess, 'Popen', assert_flags)
+    assert run_host(native, tmp_path) == 0
+    assert json.loads(capture.read_text()) == {'overrides':[], 'preserved':'preserved'}
+    assert all(key in os.environ for key in overrides)
+    assert children[0].poll() is not None
+
+
+@pytest.mark.parametrize('pipe_name', [None, ''])
+def test_native_optional_control_pipe_keeps_original_init(dispatcher, tmp_path, monkeypatch, pipe_name):
+    native, children, _ = fake_host(tmp_path, monkeypatch, dispatcher,
+        'assert "control_pipe_name" not in init\n'
+        'emit({"type":"event","event":"ready","pid":os.getpid(),"window_id":123})\n'
+        'emit({"type":"event","event":"closed"})\n')
+    assert run_host(native, tmp_path, control_pipe_name=pipe_name) == 0
+    assert children[0].poll() is not None
+
+
+@pytest.mark.parametrize('pipe_name', [False, 1, 'bad/name', 'bad\\name', 'x' * 129, 'bad\nname'])
+def test_native_control_pipe_name_is_validated_before_spawn(dispatcher, tmp_path, monkeypatch, pipe_name):
+    native, children, _ = fake_host(tmp_path, monkeypatch, dispatcher, 'pass\n')
+    with pytest.raises(native.NativeUIError, match='管道名称无效'):
+        run_host(native, tmp_path, control_pipe_name=pipe_name)
+    assert not children
+
+
+def test_native_ready_hook_must_be_callable_before_spawn(dispatcher, tmp_path, monkeypatch):
+    native, children, _ = fake_host(tmp_path, monkeypatch, dispatcher, 'pass\n')
+    with pytest.raises(native.NativeUIError, match='回调必须可调用'):
+        run_host(native, tmp_path, on_ready=False)
+    assert not children
