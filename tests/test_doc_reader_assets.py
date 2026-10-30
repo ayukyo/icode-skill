@@ -62,3 +62,8 @@ def test_document_reader_checks_are_mandatory_in_ci():
     regression = next(step for step in steps if step.get('name') == 'Brand and UI regression tests')
     assert 'tests/test_doc_library.py' in regression['run']
     assert 'tests/test_doc_reader_assets.py' in regression['run']
+    budget = next((step for step in steps if step.get('name') == 'Validate actual import package budgets'), None)
+    assert budget is not None, 'the exact committed source must be built under the import budget'
+    assert 'tools/build_release_assets.py' in budget['run']
+    assert 'CORE_MAX_FILES' in budget['run']
+    assert not budget.get('continue-on-error', False)
