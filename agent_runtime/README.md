@@ -16,7 +16,7 @@ Codex / Claude Code / CI / 手工终端
        tools/icode_control.py
 ```
 
-v0.4 把可选本地 Web UI 扩展为 ICODE Manager 2.0。它不是常驻服务：只在显式执行 `ui` 子命令后监听 `127.0.0.1`，当前终端退出即停止。Codex/Claude Code 的聊天界面和原有 `status/run` 继续可用；UI 只通过真实宿主 CLI 执行已获控制面许可的 `/icode <step>`。
+v0.4 把可选本地 Web UI 扩展为 ICODE Manager 2.0。只在显式执行 `ui` 后启动：Windows 默认使用无 TCP 的 WebView2 网页窗口，Linux/macOS 和显式普通浏览器模式使用 `127.0.0.1` HTTP。Codex/Claude Code 的聊天界面和原有 `status/run` 继续可用；UI 只通过真实宿主 CLI 执行已获控制面许可的 `/icode <step>`。
 
 ## 本地 Web UI
 
@@ -24,7 +24,11 @@ v0.4 把可选本地 Web UI 扩展为 ICODE Manager 2.0。它不是常驻服务�
 python3 tools/icode_agent.py ui
 ```
 
-命令默认监听 `127.0.0.1:8765` 并打开浏览器；端口被占用时自动选择空闲 loopback 端口。无参数重复调用会通过 `~/.claude/icode_data/ui_instance.json` 的私有登记和带实例 ID 的健康探测复用现有全局 UI，不会不断创建新端口。服务器会在终端打印实际 URL 和 `reused` 状态。不希望自动打开浏览器时：
+Windows PowerShell 使用 `py -3.11 tools/icode_agent.py ui`。要求 Windows x64、64位 Python、.NET Framework 4.8 和 Evergreen WebView2 Runtime；首次从官方 NuGet 下载固定 SDK并校验 SHA256，使用系统 C# 编译器构建宿主，依赖/许可证/编译产物保存在 `%LOCALAPPDATA%/icode/runtime/ui-native`。不修改防火墙、不自动安装系统 Runtime，失败不静默切换通信方式。固定应用 origin 的资源与 API 经私有 stdin/stdout 分派到原有业务，不开放 UI TCP 或远程调试端口。
+
+同上下文重复启动通过当前用户专用命名管道聚焦现有窗口，核对实例 ID、PID/创建时间和窗口句柄；固定工单/初始选择的阅读缓存隔离。输出 `transport: webview2` 的真实窗口就绪回执。
+
+Linux/macOS 默认或显式 `--browser` 监听 `127.0.0.1:8765` 并打开普通浏览器；默认端口占用时选择空闲 loopback 端口。无参数全局 HTTP 模式通过 `~/.claude/icode_data/ui_instance.json` 和带实例 ID 的健康探测复用窗口。HTTP 服务打印实际 URL；保留旧参数：
 
 ```bash
 python3 tools/icode_agent.py ui --no-browser
@@ -34,7 +38,7 @@ python3 tools/icode_agent.py ui --no-browser
 
 UI 可以浏览、筛选和排序全局项目/工单，创建并登记第一张工单，查看控制面推荐下一步、步骤进度、交付结论、验证记录和白名单关键产物，并通过 Codex 或 Claude Code CLI 执行受控 ICODE 步骤。简单模式显示“制定实施计划”“编码实现”等中文动作，高级模式保留 `/icode <step>` 身份。自动刷新默认 30 秒，可在设置中选择 5 秒到 5 分钟；约 1.2 秒一次的有界事件轮询只更新任务进度，手动刷新始终可用。新建工单不直接调用模型：控制面先原子分配编号并写索引，随后用户再运行推荐的计划步骤。安全边界：
 
-- 固定监听 `127.0.0.1`，不提供 `--host` 或远程访问。
+- HTTP 固定监听 `127.0.0.1`；Windows 网页窗口固定 `https://icode.localhost` 内存分派，无 UI TCP 监听。不提供 `--host` 或远程访问。
 - 新增 API 必须携带页面会话令牌；写请求是 64 KiB 内的严格 JSON，并拒绝跨源 Origin、恶意 Host 和未知字段。
 - 页面资源全部随仓提供，无 CDN 或内联脚本。工单动态内容使用 `textContent`；文档正文经本地 Marked 解析、DOMPurify 白名单清理，Mermaid 在无同源权限的本地沙箱中以严格模式排版，禁用交互指令；宿主仅给生成样式表附加 nonce。固定版本及许可证见 `icode_agent/ui_assets/vendor/manifest.json`。
 - UI 不接收 API Key、ticket path、任意文件路径或任意 shell；浏览器只提交 ticket ID、动作枚举和 revision。
@@ -109,6 +113,6 @@ python3 tools/icode_agent.py status --dir <ticket_dir>
 - UI 本身不解释模型 tool call；真实 ICODE 工具使用由 Codex/Claude Code 及既有步骤规则约束。
 - UI 不成为 metadata/status 第二写入器；步骤仍通过现有 ICODE 控制面推进。
 - 不自动 commit、push、deploy、删除或操作硬件。
-- 不安装 provider SDK；只有显式 `ui` 在当前进程生命周期内启动 loopback 监听。
+- 不安装 provider SDK；只有显式 `ui` 在当前进程生命周期内启动网页窗口或 loopback HTTP 服务。
 
 后续工具循环必须经过 Tool Gateway、`operation` 回执和副作用审批后再启用。

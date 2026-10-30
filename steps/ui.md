@@ -12,14 +12,17 @@
 python3 tools/icode_agent.py ui
 ```
 
-默认监听 `127.0.0.1:8765` 并打开浏览器。8765 被占用时自动选择另一个空闲 loopback 端口，终端会打印实际 URL。无参数重复调用 `/icode ui` 时，通过私有实例登记、启动锁和带 `instance_id` 的健康回执复用现有全局实例，不再启动第二个随机端口。登记过期或进程异常退出时，健康探测失败，下一次启动会安全覆盖过期登记。UI 进程随当前终端任务结束而停止，不安装系统服务、不开放远程监听。
+Windows 默认打开 WebView2 网页窗口，通过私有进程管道共用现有 UI/DOC 业务，不建立 UI TCP 监听。成功回执包含 `transport: webview2`、宿主 PID 和窗口句柄；它不是普通浏览器 URL。重复调用同一上下文时验证当前用户专用控制管道、实例 ID、PID 和进程创建时间，然后聚焦原窗口。不同固定工单或初始选择使用独立登记与阅读缓存。
 
-Codex 使用可持续读取输出的终端会话运行；Claude Code 使用 Bash 工具的后台运行能力。启动命令返回 URL 后立即报告给用户，不等待服务器自然退出。若自动打开浏览器失败，保留服务并把 URL 明确交给用户。
+Linux/macOS 默认监听 `127.0.0.1:8765` 并打开浏览器；Windows 显式 `--browser`、`--port` 或 `--no-browser` 也使用该兼容模式。默认端口被占用时自动选择空闲 loopback 端口，打印实际 URL；无参数全局 HTTP 模式复用健康实例。登记过期后下一次启动重新验证并替换登记。UI 不安装系统服务、不开放远程监听。
+
+Codex 使用可持续读取输出的终端会话运行；Claude Code 使用 Bash 工具的后台运行能力。取得实际就绪回执后立即报告窗口或 URL，不等待进程自然退出。普通浏览器自动打开失败时，保留 HTTP 服务并提供 URL。
 
 ## 2. 高级参数
 
 ```bash
 python3 tools/icode_agent.py ui --no-browser
+python3 tools/icode_agent.py ui --browser
 python3 tools/icode_agent.py ui --ticket <ticket_id>
 python3 tools/icode_agent.py ui --project <project_id>
 python3 tools/icode_agent.py ui --dir <ticket_dir> --port 9010
@@ -29,8 +32,10 @@ python3 tools/icode_agent.py ui --dir <ticket_dir> --port 9010
 - `--ticket` / `--project`：只指定初始选中项，不把浏览器输入当文件路径。
 - `--port`：显式端口。显式端口被占用时直接报错；`--port 0` 仍表示由系统选择空闲端口。
 - `--no-browser`：只启动服务并打印 URL。
+- `--window`：显式使用 Windows 网页窗口；不能与 `--port` 或 `--no-browser` 同用。
+- `--browser`：显式使用普通浏览器 HTTP 模式，不依赖 WebView2 宿主。
 
-无参数全局模式才启用单实例复用；`--dir`、`--ticket`、`--project` 或显式 `--port` 保留高级精确语义，不会暗中复用上下文不同的实例。
+HTTP 模式仅无参数全局入口启用单实例复用。Windows 网页窗口按 `--dir`、`--ticket`、`--project` 的精确上下文复用，不会复用不同工单或选择的窗口。
 
 ## 3. UI 操作合同
 
@@ -49,9 +54,9 @@ python3 tools/icode_agent.py ui --dir <ticket_dir> --port 9010
 
 ## 4. 安全边界
 
-- 固定 `127.0.0.1`，无 `--host`、无 CORS、无外链前端资源。
+- HTTP 固定 `127.0.0.1`；原生窗口固定 `https://icode.localhost` 内存分派，不解析为本机服务。无 `--host`、无 CORS、无外链前端资源。
 - UI 不接收 API Key、任意 shell、环境变量或浏览器提供的文件路径。
-- `ui_instance.json` 只保存实例 ID、PID 和 loopback 端口，权限为 `0600`；会话 token 不落盘，复用前必须同时匹配登记与健康回执。
+- HTTP 的 `ui_instance.json` 只保存实例 ID、PID 和 loopback 端口；原生 `ui_native_<上下文摘要>.json` 保存实例 ID、宿主 PID/创建时间、窗口句柄和控制管道名。会话 token 不落盘；POSIX 请求 `0600`，Windows 沿用用户目录访问控制，控制管道 DACL 仅允许当前用户 SID。
 - 控制面只读策略返回的执行根须通过 checkout 拓扑校验；Runtime 不自行相信 metadata 路径。
 - Runtime 不自动 commit、push、deploy、关闭工单、删除 checkout/branch 或操作硬件。
 - 关闭/清理类动作不在本版 HTTP 动作集合中；后续加入时仍须 G4 和完整 ticket ID 二次确认，永不 force。
@@ -67,9 +72,13 @@ python3 tools/icode_agent.py ui --dir <ticket_dir> --port 9010
 
 Markdown、HTML 清理和 Mermaid 资源随 UI 本地提供，来源、版本、许可证和字节摘要保存在 `agent_runtime/icode_agent/ui_assets/vendor/manifest.json`。Mermaid 在仅 `allow-scripts` 的本地沙箱中排版，不获得同源权限或 UI 令牌；宿主清理 SVG 并给生成的样式表附加 nonce，主页面不放宽内联脚本或样式策略。正文禁用原始 HTML 和执行型链接；图片必须通过带会话令牌的受限资源接口，支持 PNG/JPEG/GIF/WebP。未收录链接和不支持的图片显示提示，图表解析失败保留源码。HTTP 只接收不透明文档/章节/资源 ID，不提供任意文件读取。
 
-## Windows 原生启动与连通性检查
+## Windows 网页窗口与普通浏览器兼容
 
-在 Windows PowerShell 中可使用 `py -3.11 tools/icode_agent.py ui --port 8765 --no-browser`。终端的 `ok: true` 表示监听已建立，还需用浏览器访问打印的 URL 验证 HTTP 可达；当前终端需保持运行。
+在 Windows PowerShell 中执行 `py -3.11 tools/icode_agent.py ui`。首版要求 Windows x64、64 位 Python、.NET Framework 4.8 和 Evergreen WebView2 Runtime。首次启动从官方 NuGet 下载固定 SDK，核对包及 DLL 的大小/SHA256，再用系统 C# 编译器构建宿主；源码、SDK 锁和许可证保留在 UI 组件/运行缓存中。运行缓存位于 `%LOCALAPPDATA%/icode/runtime/ui-native`，不放入技能导入树。缺少系统 Runtime 时明确报错，不自动提权安装、不静默回退 HTTP。
+
+网页窗口支持前进、后退、刷新及应用内地址恢复。正文、图表、令牌和受控步骤沿用共享业务；没有页面可调用的 Python/宿主对象桥接。UI 通信不需要防火墙入站例外。
+
+需要普通 Edge/Chrome 标签页时显式执行 `py -3.11 tools/icode_agent.py ui --browser`。`--port 8765 --no-browser` 仍保持旧 HTTP 语义；此模式的 `ok: true` 表示监听已建立，还需实际访问 URL 验证可达，当前终端需保持运行。
 
 浏览器连接超时时，先确认该端口仍有监听，并用独立 TCP 探测区分网络过滤与页面故障：
 
@@ -79,9 +88,9 @@ py -3.11 -c "import socket; s=socket.create_connection(('127.0.0.1',8765),2); pr
 py -3.11 -c "import sys; print(sys.executable)"
 ```
 
-若 TCP 本身失败，应检查当前解释器的实际路径与 Windows 有效入站策略；旧版本或其他工具自带 Python 的同名规则不能代表当前程序已获允许。以实际丢包事件中的程序、用户、端口和过滤器为依据，不能仅凭安装了某个网络软件就归因。确认为防火墙阻断后，由用户或管理员明确配置仅该程序、仅本地与远端 `127.0.0.1` 的 TCP 访问；固定端口可以进一步限定端口，自动选端口和随机端口回归需覆盖其实际端口范围。UI 和安装器不自动修改系统安全规则。
+若兼容模式 TCP 本身失败，应检查当前解释器的实际路径与 Windows 有效入站策略；旧版本或其他工具自带 Python 的同名规则不能代表当前程序。以实际丢包事件中的程序、用户、端口和过滤器为依据，不凭安装的软件猜测归因。默认网页窗口不依赖该 TCP 通道；UI 和安装器不修改系统安全规则。
 
-Windows 原生 CI 必须通过真实 UI CLI 的 HTTP/CSP 浏览器集成和文档阅读回归，才允许公开构建；远端 runner 通过不等于用户本机的网络配置已验收。
+Windows CI 同时运行 HTTP/CSP 兼容回归和真正 WebView2 宿主/私有管道/实际 CLI 文档集成测试；缺失原生运行条件应失败，不能以跳过代替验收。远端 runner 通过不等于用户本机已验收。
 
 ## 5. 结束服务
 

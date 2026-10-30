@@ -97,7 +97,7 @@ Or run step by step (switch models between steps anytime):
 Other entry points:
 
 ```bash
-# Local global ticket manager (defaults to 127.0.0.1:8765; auto-falls back if occupied)
+# Local workbench (Windows: WebView2 window; Linux/macOS: loopback browser)
 /icode ui
 
 # Trimmed full flow (fast mode: single-file/small changes; not a fixed cost guarantee)
@@ -246,7 +246,7 @@ When `/icode log` receives a Teambition project URL or a `<LIB>-<NUM>` ticket re
 
 ## Optional Agent Runtime and Local UI (v0.4)
 
-Run `/icode ui` (advanced equivalent: `python3 tools/icode_agent.py ui`) to open the dependency-free local ICODE workbench. It prefers `127.0.0.1:8765`, falls back to another loopback port when the default is occupied, opens the browser, and requires no ticket path. Repeating the simple command reuses the live global instance instead of allocating more random ports. The v0.4 dashboard adds status filtering, beginner-friendly action names, a control-plane-backed ticket cockpit, bounded live job events, and restart recovery that marks unfinished work as outcome-unknown without replay. It still offers manual refresh plus configurable automatic refresh (30 seconds by default, 5–300 seconds), stores no prompt or raw output in its recovery file, and can invoke approved ICODE steps through the installed Codex or Claude Code CLI. It does not replace either host's normal chat workflow: every launch is guarded by a current event-chain revision, a control-plane action policy, a validated execution root, persistent Agent spawn/result receipts, and a cross-process per-ticket lock. It accepts no API key, arbitrary path, or shell command, and never automatically commits, deploys, closes tickets, or deletes workspaces. Existing `status`, `run`, and `ui --dir <ticket_dir>` modes remain compatible. See [`agent_runtime/`](agent_runtime/README.md).
+Run `/icode ui` (advanced equivalent: `python3 tools/icode_agent.py ui`) to open the local ICODE workbench. Windows defaults to a WebView2 webpage window with private process-pipe communication and no UI TCP listener; it requires x64 Python, .NET Framework 4.8 and Evergreen WebView2. A pinned official SDK is verified and compiled into an external user cache on first use. Linux/macOS and explicit `--browser` use `127.0.0.1:8765`, with a free loopback port if the default is occupied. Existing `--port` and `--no-browser` commands retain HTTP behavior. Repeating the same native context verifies the current-user control pipe and process identity before focusing its window. The v0.4 dashboard adds status filtering, beginner-friendly action names, a control-plane-backed ticket cockpit, bounded live job events, and restart recovery that marks unfinished work as outcome-unknown without replay. Manual refresh and configurable automatic refresh remain available (30 seconds by default, 5–300 seconds). Approved steps run through the installed Codex or Claude Code CLI, guarded by the event-chain revision, action policy, validated execution root, Agent spawn/result receipts and per-ticket lock. The UI accepts no API key, arbitrary path or shell command, and never automatically commits, deploys, closes tickets or deletes workspaces. Existing `status`, `run` and `ui --dir <ticket_dir>` modes remain compatible. See [`agent_runtime/`](agent_runtime/README.md).
 
 ## Optional Enhancements
 

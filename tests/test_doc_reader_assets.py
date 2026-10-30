@@ -77,9 +77,17 @@ def test_windows_native_reader_acceptance_gates_public_build():
     assert job['runs-on'] == 'windows-latest'
     assert 'windows-ui' in workflow['jobs']['build']['needs']
     assert not job.get('if') and not job.get('continue-on-error', False)
-    browser = next(step for step in job['steps'] if step.get('name') == 'Windows native document reader acceptance')
+    browser = next(step for step in job['steps'] if step.get('name') == 'Windows HTTP document reader compatibility')
     assert browser.get('env', {}).get('ICODE_RUN_BROWSER_TESTS') == '1'
     assert not browser.get('if') and not browser.get('continue-on-error', False)
     for name in ('test_doc_library.py', 'test_doc_reader_assets.py',
                  'test_doc_reader_browser.py', 'test_doc_reader_integration.py'):
         assert name in browser['run']
+    native = next(step for step in job['steps'] if step.get('name') == 'Windows WebView2 transport and actual CLI acceptance')
+    assert native.get('env', {}).get('ICODE_RUN_NATIVE_UI_TESTS') == '1'
+    assert not native.get('if') and not native.get('continue-on-error', False)
+    for name in ('test_agent_ui_native_host.py', 'test_agent_ui_native_instance.py',
+                 'test_agent_ui_native_integration.py'):
+        assert name in native['run']
+    bootstrap = next(step for step in job['steps'] if 'ensure_native_runtime' in step.get('run', ''))
+    assert 'ICODE_NATIVE_HOST_EXE' in bootstrap['run'] and '$LASTEXITCODE' in bootstrap['run']

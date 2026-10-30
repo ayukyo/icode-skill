@@ -108,12 +108,21 @@ jobs:
           python -m pip install --disable-pip-version-check pytest==9.0.3 PyYAML==6.0.2 playwright==1.64.1
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python -m playwright install chromium --only-shell
-      - name: Windows native document reader acceptance
+      - name: Windows HTTP document reader compatibility
         env:
           ICODE_RUN_BROWSER_TESTS: '1'
         run: python -m pytest -p no:anyio tests/test_doc_library.py tests/test_doc_reader_assets.py tests/test_doc_reader_browser.py tests/test_doc_reader_integration.py -q
       - name: Windows reader core behavior
         run: node tests/test_doc_reader_core.js
+      - name: Prepare pinned WebView2 host in external cache
+        run: |
+          $hostExe = python -c "import sys;sys.path.insert(0,'agent_runtime');from icode_agent.native_runtime import ensure_native_runtime;print(ensure_native_runtime())"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "ICODE_NATIVE_HOST_EXE=$hostExe" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - name: Windows WebView2 transport and actual CLI acceptance
+        env:
+          ICODE_RUN_NATIVE_UI_TESTS: '1'
+        run: python -m pytest -p no:anyio tests/test_agent_ui_native_runtime.py tests/test_agent_ui_native_cli.py tests/test_agent_ui_native_protocol.py tests/test_agent_ui_native_host.py tests/test_agent_ui_native_instance.py tests/test_agent_ui_native_integration.py -q
       - name: Preserve Windows document reader screenshots
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

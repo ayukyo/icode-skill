@@ -3,6 +3,7 @@
 
 import argparse
 import errno
+import hashlib
 import http.client
 import importlib.util
 import json
@@ -10,7 +11,8 @@ import os
 import subprocess
 import sys
 import time
-from contextlib import contextmanager
+import uuid
+from contextlib import contextmanager, ExitStack
 from pathlib import Path
 
 
@@ -75,6 +77,10 @@ def build_parser() -> argparse.ArgumentParser:
                     help="显式本机端口；省略时优先设置值 8765，冲突自动换端口")
     ui.add_argument("--no-browser", action="store_true",
                     help="不自动打开默认浏览器")
+    mode = ui.add_mutually_exclusive_group()
+    mode.add_argument("--window", action="store_true", help="使用 Windows WebView2 网页窗口（无需本机 TCP）")
+    mode.add_argument("--browser", action="store_true", help="使用普通浏览器及本机 HTTP 服务")
+    ui.add_argument("--native-test-script", help=argparse.SUPPRESS)
     ui.set_defaults(func=cmd_ui)
     return parser
 
@@ -279,7 +285,98 @@ def launch_project_root(cwd: Path) -> Path:
     return current
 
 
+def ui_transport(args, *, platform=None) -> str:
+    platform = sys.platform if platform is None else platform
+    window = getattr(args, "window", False)
+    browser = getattr(args, "browser", False)
+    legacy = args.port is not None or args.no_browser
+    if window and (legacy or platform != "win32"):
+        raise ValueError("--window 仅支持 Windows，且不能与 --port/--no-browser 同用")
+    selected = "window" if window or (platform == "win32" and not browser and not legacy) else "browser"
+    if getattr(args, "native_test_script", None):
+        if selected != "window" or os.environ.get("ICODE_RUN_NATIVE_UI_TESTS") != "1":
+            raise ValueError("原生测试脚本要求 --window 且 ICODE_RUN_NATIVE_UI_TESTS=1")
+    return selected
+
+
 def cmd_ui(args) -> int:
+    if ui_transport(args) == "window":
+        return cmd_ui_window(args)
+    return cmd_ui_browser(args)
+
+
+def native_ui_context(args, data_dir: Path, cache_root: Path):
+    context = [str(data_dir.resolve()), str(Path(args.dir).resolve()) if args.dir else None,
+               args.ticket, args.project]
+    key = hashlib.sha256(json.dumps(context, ensure_ascii=True).encode()).hexdigest()[:24]
+    return cache_root / "profiles" / key, data_dir / ("ui_native_" + key + ".json")
+
+
+def cmd_ui_window(args) -> int:
+    # Native imports are lazy so other platforms and explicit HTTP mode retain
+    # their existing dependency and startup behavior.
+    from icode_agent.native_runtime import NativeRuntimeError, ensure_native_runtime
+    from icode_agent.native_ui import NativeUIError, run_native_ui
+    from icode_agent.native_instance import process_identity, probe_native_instance, native_startup_lock
+    instance_id = None
+    registration = None
+    try:
+        data_dir = Path.home() / ".claude/icode_data"
+        cache_root = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData/Local")) / "icode/runtime/ui-native"
+        profile, registration = native_ui_context(args, data_dir, cache_root)
+        # SDK preparation may exceed the Windows legacy lock's ten-second retry
+        # window. Prepare first; use a context-specific lock for actual startup.
+        executable = ensure_native_runtime()
+        with ExitStack() as startup:
+            startup.enter_context(native_startup_lock(registration))
+            try:
+                previous = json.loads(registration.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                previous = None
+            existing = probe_native_instance(previous, action="focus") if previous else None
+            if existing:
+                print(json.dumps({"ok": True, "transport": "webview2", "origin": "https://icode.localhost",
+                                  "reused": True, **existing}), flush=True)
+                return 0
+            pipe_name = "icode-ui-" + uuid.uuid4().hex
+
+            def ready(info):
+                nonlocal instance_id
+                started = process_identity(info["pid"])
+                if started is None:
+                    raise NativeUIError("无法验证原生 UI 宿主进程身份")
+                record = {"schema_version": 1, "transport": "webview2",
+                          "instance_id": info["instance_id"], "pid": info["pid"],
+                          "window_id": info["window_id"], "process_started": started,
+                          "pipe_name": pipe_name}
+                if not probe_native_instance(record):
+                    raise NativeUIError("原生 UI 私有控制管道未就绪")
+                write_ui_instance(registration, record)
+                instance_id = info["instance_id"]
+                startup.close()  # Release only after the verified window is registered.
+
+            return run_native_ui(executable,
+                ticket_dir=Path(args.dir).resolve() if args.dir else None,
+                control_path=ROOT / "tools/icode_control.py",
+                seed_project_paths=[launch_project_root(Path.cwd())],
+                initial_ticket_id=args.ticket, initial_project_id=args.project,
+                user_data_dir=profile, test_script=getattr(args, "native_test_script", None),
+                control_pipe_name=pipe_name, on_ready=ready)
+    except (NativeRuntimeError, NativeUIError) as exc:
+        print(json.dumps({"ok": False, "error_class": type(exc).__name__, "error": str(exc)}, ensure_ascii=False), flush=True)
+        return 1
+    finally:
+        if instance_id is not None and registration is not None:
+            with native_startup_lock(registration):
+                try:
+                    current = json.loads(registration.read_text(encoding="utf-8"))
+                    if isinstance(current, dict) and current.get("instance_id") == instance_id:
+                        registration.unlink(missing_ok=True)
+                except (OSError, ValueError):
+                    pass
+
+
+def cmd_ui_browser(args) -> int:
     from icode_agent.ui_server import create_ui_server
     from icode_agent.ui_settings import UISettingsStore
 

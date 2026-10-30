@@ -271,7 +271,8 @@ def ensure_native_runtime(*, cache_root: Path | None = None, package_cache: Path
         references = ['System.dll', 'System.Core.dll', 'System.Drawing.dll', 'System.Windows.Forms.dll',
                       'System.Web.Extensions.dll', str(stage / 'Microsoft.Web.WebView2.Core.dll'),
                       str(stage / 'Microsoft.Web.WebView2.WinForms.dll')]
-        command = [str(compiler), '/nologo', '/target:exe', '/platform:x64', '/out:' + str(exe)]
+        command = [str(compiler), '/nologo', '/target:exe', '/platform:x64',
+                   '/langversion:5', '/warnaserror', '/out:' + str(exe)]
         command.extend('/reference:' + name for name in references)
         command.append(str(HOST_SOURCE))
         try:
