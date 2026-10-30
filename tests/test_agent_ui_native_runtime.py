@@ -3,6 +3,7 @@ import hashlib
 import io
 import json
 from pathlib import Path
+import shutil
 import sys
 import zipfile
 
@@ -146,3 +147,74 @@ def test_webview_probe_timeout_is_actionable(tmp_path, monkeypatch):
     monkeypatch.setattr(runtime.subprocess, 'run', timeout)
     with pytest.raises(runtime.NativeRuntimeError, match='WebView2'):
         runtime._check_webview2(tmp_path / 'loader.dll')
+
+
+@pytest.fixture
+def prepared_runtime(tmp_path, monkeypatch):
+    archive, pin = package(tmp_path)
+    compiler = tmp_path / 'csc.exe'
+    compiler.write_bytes(b'compiler')
+    monkeypatch.setattr(runtime, '_check_environment', lambda: compiler)
+    monkeypatch.setattr(runtime, 'load_lock', lambda: pin)
+    monkeypatch.setattr(runtime, '_check_webview2', lambda _: None)
+
+    def compile_host(command, **kwargs):
+        output = next(arg[len('/out:'):] for arg in command if arg.startswith('/out:'))
+        Path(output).write_bytes(b'compiled host')
+        return runtime.subprocess.CompletedProcess(command, 0, stdout=b'', stderr=b'')
+
+    monkeypatch.setattr(runtime.subprocess, 'run', compile_host)
+    root = tmp_path / 'runtime-cache'
+    bundle = root / runtime.runtime_key(runtime.HOST_SOURCE, pin, compiler)
+    return root, archive, bundle
+
+
+@pytest.mark.skipif(sys.platform != 'win32', reason='exercise real Windows directory replacement errors')
+@pytest.mark.parametrize('corrupt', [False, True], ids=['valid-winner', 'corrupt-winner'])
+def test_concurrent_publication_validates_and_preserves_winner(prepared_runtime, monkeypatch, corrupt):
+    root, archive, bundle = prepared_runtime
+    replace = Path.replace
+    publish_errors = []
+    winner_files = {}
+
+    def publish_then_replace(stage, target):
+        # Publish in the gap after the final exists() check, then use the real
+        # Windows rename against the winner's nonempty directory.
+        assert target == bundle and not target.exists()
+        shutil.copytree(stage, target)
+        if corrupt:
+            (target / 'ICODEUI.exe').write_bytes(b'damaged competitor host')
+        winner_files.update({path.name: path.read_bytes() for path in target.iterdir()})
+        try:
+            return replace(stage, target)
+        except OSError as exc:
+            publish_errors.append(exc)
+            raise
+
+    monkeypatch.setattr(Path, 'replace', publish_then_replace)
+    if corrupt:
+        with pytest.raises(runtime.NativeRuntimeError, match='cache integrity mismatch; original cache preserved'):
+            runtime.ensure_native_runtime(cache_root=root, package_cache=archive, offline=True)
+    else:
+        assert runtime.ensure_native_runtime(cache_root=root, package_cache=archive, offline=True) == bundle / 'ICODEUI.exe'
+    assert len(publish_errors) == 1
+    assert isinstance(publish_errors[0], PermissionError)
+    assert publish_errors[0].winerror == 5 and publish_errors[0].errno == 13
+    assert {path.name: path.read_bytes() for path in bundle.iterdir()} == winner_files
+    assert not list(root.glob('.stage-*'))
+
+
+def test_publication_permission_error_without_winner_is_preserved(prepared_runtime, monkeypatch):
+    root, archive, bundle = prepared_runtime
+    denied = PermissionError(13, 'publication denied', str(bundle))
+
+    def deny_publication(stage, target):
+        assert target == bundle and not target.exists()
+        raise denied
+
+    monkeypatch.setattr(Path, 'replace', deny_publication)
+    with pytest.raises(PermissionError) as exc:
+        runtime.ensure_native_runtime(cache_root=root, package_cache=archive, offline=True)
+    assert exc.value is denied
+    assert not bundle.exists()
+    assert not list(root.glob('.stage-*'))

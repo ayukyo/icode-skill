@@ -10,6 +10,7 @@ on:
       - 'LICENSE.txt'
       - 'templates/**'
       - 'agent_runtime/**'
+      - 'tools/icode_agent.py'
       - 'tests/test_doc_library.py'
       - 'tests/test_doc_reader*'
       - 'site/**'
