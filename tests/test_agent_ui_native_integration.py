@@ -58,6 +58,9 @@ hostObjects:!!(window.chrome&&chrome.webview&&chrome.webview.hostObjects),url:lo
     assert reading['diagramHeight'] > 20 and reading['scroll'] >= 490
     assert screenshot.read_bytes().startswith(b'\x89PNG\r\n\x1a\n')
     assert chapter.read_text(encoding='utf-8') == source
+    evidence = ROOT / 'docs/nbl/verification'
+    evidence.mkdir(parents=True, exist_ok=True)
+    (evidence / 'native-cli-document.png').write_bytes(screenshot.read_bytes())
 
 
 def test_actual_duplicate_cli_focuses_window_and_recovers_stale_registration(tmp_path):
@@ -97,10 +100,14 @@ def test_actual_duplicate_cli_focuses_window_and_recovers_stale_registration(tmp
         assert any(p['ProcessId'] in owned and p['Name'] == 'msedgewebview2.exe' for p in network['processes'])
         listeners = [row for row in network['listeners'] if row['OwningProcess'] in owned]
         assert not listeners, listeners
-        (tmp_path / 'native-process-listeners.json').write_text(json.dumps({
+        audit = json.dumps({
             'parent_pid': process.pid, 'ready': ready,
             'processes': [p for p in network['processes'] if p['ProcessId'] in owned],
-            'listeners': listeners}, indent=2), encoding='utf-8')
+            'listeners': listeners}, indent=2)
+        (tmp_path / 'native-process-listeners.json').write_text(audit, encoding='utf-8')
+        evidence = ROOT / 'docs/nbl/verification'
+        evidence.mkdir(parents=True, exist_ok=True)
+        (evidence / 'native-process-listeners.json').write_text(audit, encoding='utf-8')
         registration = next((home / '.claude/icode_data').glob('ui_native_*.json'))
         old_record = json.loads(registration.read_text(encoding='utf-8'))
         assert 'token' not in old_record
