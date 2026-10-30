@@ -6,6 +6,7 @@ using System.Collections;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Drawing;
 using System.IO;
 using System.IO.Pipes;
 using System.Security.AccessControl;
@@ -295,6 +296,34 @@ internal sealed class NativeControlPipe : IDisposable
     }
 }
 
+// Match the website palette while retaining the standard ToolStrip interaction model.
+internal sealed class SiteToolbarColors : ProfessionalColorTable
+{
+    internal static readonly Color Background = Color.FromArgb(244, 248, 247);
+    internal static readonly Color Panel = Color.White;
+    internal static readonly Color Text = Color.FromArgb(16, 36, 50);
+    internal static readonly Color Muted = Color.FromArgb(80, 101, 116);
+    internal static readonly Color Line = Color.FromArgb(203, 216, 219);
+    internal static readonly Color Accent = Color.FromArgb(7, 94, 86);
+
+    internal SiteToolbarColors() { UseSystemColors = false; }
+    public override Color ToolStripGradientBegin { get { return Background; } }
+    public override Color ToolStripGradientMiddle { get { return Background; } }
+    public override Color ToolStripGradientEnd { get { return Background; } }
+    public override Color ToolStripBorder { get { return Line; } }
+    public override Color ButtonSelectedBorder { get { return Accent; } }
+    public override Color ButtonSelectedGradientBegin { get { return Panel; } }
+    public override Color ButtonSelectedGradientMiddle { get { return Panel; } }
+    public override Color ButtonSelectedGradientEnd { get { return Panel; } }
+    public override Color ButtonPressedBorder { get { return Accent; } }
+    public override Color ButtonPressedGradientBegin { get { return Line; } }
+    public override Color ButtonPressedGradientMiddle { get { return Line; } }
+    public override Color ButtonPressedGradientEnd { get { return Line; } }
+    public override Color OverflowButtonGradientBegin { get { return Background; } }
+    public override Color OverflowButtonGradientMiddle { get { return Background; } }
+    public override Color OverflowButtonGradientEnd { get { return Background; } }
+}
+
 internal sealed class NativeHostWindow : Form
 {
     private sealed class PendingRequest
@@ -318,8 +347,8 @@ internal sealed class NativeHostWindow : Form
     private readonly Dictionary<string, PendingRequest> pending = new Dictionary<string, PendingRequest>();
     private readonly CancellationTokenSource shutdown = new CancellationTokenSource();
     private readonly ToolStripTextBox address = new ToolStripTextBox();
-    private readonly ToolStripButton back = new ToolStripButton("Back");
-    private readonly ToolStripButton forward = new ToolStripButton("Forward");
+    private readonly ToolStripButton back = new ToolStripButton("后退");
+    private readonly ToolStripButton forward = new ToolStripButton("前进");
     private bool closing;
     private bool ready;
     private long nextRequest;
@@ -340,13 +369,37 @@ internal sealed class NativeHostWindow : Form
         Height = 860;
         MinimumSize = new System.Drawing.Size(640, 480);
         ToolStrip toolbar = new ToolStrip();
-        ToolStripButton reload = new ToolStripButton("Reload");
-        ToolStripButton copy = new ToolStripButton("Copy link");
-        ToolStripButton home = new ToolStripButton("Home");
+        toolbar.Font = new Font("Segoe UI", 10F, FontStyle.Regular, GraphicsUnit.Point);
+        toolbar.BackColor = SiteToolbarColors.Background;
+        toolbar.ForeColor = SiteToolbarColors.Muted;
+        toolbar.GripStyle = ToolStripGripStyle.Hidden;
+        toolbar.Padding = new Padding(12, 8, 12, 8);
+        toolbar.Renderer = new ToolStripProfessionalRenderer(new SiteToolbarColors()) { RoundedEdges = false };
+        ToolStripButton reload = new ToolStripButton("刷新");
+        ToolStripButton copy = new ToolStripButton("复制链接");
+        ToolStripButton home = new ToolStripButton("首页");
+        foreach (ToolStripButton button in new ToolStripButton[] { back, forward, reload, home, copy })
+        {
+            button.Padding = new Padding(8, 5, 8, 5);
+            button.Margin = new Padding(0, 0, 4, 0);
+        }
+        home.ForeColor = SiteToolbarColors.Accent;
         address.AutoSize = false;
         address.Width = 680;
+        address.Font = toolbar.Font;
+        address.BackColor = SiteToolbarColors.Panel;
+        address.ForeColor = SiteToolbarColors.Text;
+        address.BorderStyle = BorderStyle.FixedSingle;
+        address.Margin = new Padding(8, 0, 12, 0);
         address.Text = NativeHostProgram.Origin + initialPath;
         toolbar.Items.AddRange(new ToolStripItem[] { back, forward, reload, home, address, copy });
+        toolbar.SizeChanged += delegate
+        {
+            int available = toolbar.DisplayRectangle.Width - address.Margin.Horizontal;
+            foreach (ToolStripItem item in toolbar.Items)
+                if (item != address) available -= item.Width + item.Margin.Horizontal;
+            address.Width = Math.Max(120, available);
+        };
         web.Dock = DockStyle.Fill;
         Controls.Add(web);
         Controls.Add(toolbar);
