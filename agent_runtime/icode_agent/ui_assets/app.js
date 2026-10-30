@@ -85,6 +85,7 @@
     stagePreviewPending: false,
     stagePreviewFailed: false,
     stagePreviewURLs: [],
+    workspace: "tickets",
   };
 
   const setText = (id, value) => {
@@ -189,6 +190,11 @@
     return item;
   };
 
+  const notifyProjectSelected = () => {
+    document.body.dataset.projectId = state.selectedProjectId || "";
+    document.dispatchEvent(new CustomEvent("icode:project-selected", { detail: { project_id: state.selectedProjectId } }));
+  };
+
   const renderProjects = () => {
     const container = byId("project-list");
     container.replaceChildren();
@@ -205,6 +211,7 @@
     all.append(allName, allCount);
     all.addEventListener("click", () => {
       state.selectedProjectId = null;
+      notifyProjectSelected();
       renderProjects();
       renderTickets();
     });
@@ -222,6 +229,7 @@
       button.append(name, count);
       button.addEventListener("click", () => {
         state.selectedProjectId = project.project_id;
+        notifyProjectSelected();
         setText("current-project", project.name);
         renderProjects();
         renderTickets();
@@ -305,8 +313,8 @@
 
   const renderTicket = () => {
     const ticket = state.ticket;
-    byId("welcome-view").hidden = Boolean(ticket);
-    byId("ticket-view").hidden = !ticket;
+    byId("welcome-view").hidden = state.workspace !== "tickets" || Boolean(ticket);
+    byId("ticket-view").hidden = state.workspace !== "tickets" || !ticket;
     if (!ticket) return;
     setText("current-project", ticket.project_name);
     setText("current-ticket", ticket.ticket_id);
@@ -560,6 +568,11 @@
 
   const selectTicket = async (ticketId) => {
     state.selectedTicketId = ticketId;
+    const selected = state.tickets.find((ticket) => ticket.ticket_id === ticketId);
+    if (selected) {
+      state.selectedProjectId = selected.project_id;
+      notifyProjectSelected();
+    }
     state.ticket = null;
     setStale(true);
     renderTickets();
@@ -704,6 +717,7 @@
         request_id: makeRequestId(),
       });
       state.selectedProjectId = response.ticket.project_id;
+      notifyProjectSelected();
       state.selectedTicketId = response.ticket.ticket_id;
       closeNewTicket();
       await refresh(true);
@@ -773,6 +787,7 @@
       state.hosts = payload.hosts;
       state.settings = payload.settings;
       state.selectedProjectId = payload.initial_project_id;
+      notifyProjectSelected();
       const requestedTicket = payload.initial_ticket_id
         ? payload.tickets.find((ticket) => ticket.ticket_id === payload.initial_ticket_id)
         : null;
@@ -805,6 +820,10 @@
     }
   };
 
+  document.addEventListener("icode:workspace-selected", (event) => {
+    state.workspace = event.detail.workspace;
+    renderTicket();
+  });
   byId("ticket-search").addEventListener("input", (event) => {
     state.search = event.target.value.trim();
     renderTickets();

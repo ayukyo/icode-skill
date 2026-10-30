@@ -4,9 +4,15 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="icode-ui-token" content="{{ICODE_UI_TOKEN}}">
+  <meta name="icode-style-nonce" content="{{ICODE_STYLE_NONCE}}">
   <title>ICODE 工作台</title>
   <link rel="stylesheet" href="/assets/style.css">
+  <link rel="stylesheet" href="/assets/doc-reader.css">
   <script src="/assets/app.js" defer></script>
+  <script src="/assets/vendor/marked.js" defer></script>
+  <script src="/assets/vendor/purify.js" defer></script>
+  <script src="/assets/diagram-host.js" defer></script>
+  <script src="/assets/doc-reader.js" defer></script>
 </head>
 <body>
   <div class="app-shell">
@@ -18,6 +24,12 @@
           <span>本地工作台</span>
         </div>
       </div>
+
+      <div class="workspace-tabs" role="tablist" aria-label="工作区">
+        <button id="workspace-tickets" type="button" role="tab" aria-selected="true">工单</button>
+        <button id="workspace-docs" type="button" role="tab" aria-selected="false" aria-controls="doc-library">文档库</button>
+      </div>
+      <button id="project-docs-button" class="sidebar-action" type="button">阅读当前工程文档</button>
 
       <label class="search-box" for="ticket-search">
         <span aria-hidden="true">⌕</span>
@@ -75,6 +87,45 @@
           </button>
         </div>
       </header>
+
+      <section id="doc-library" class="doc-library" aria-label="文档库" hidden>
+        <header class="doc-toolbar">
+          <div class="doc-identity-controls">
+            <label>阅读范围<select id="doc-scope"><option value="all">全部工程</option><option value="project">当前工程</option><option value="module">独立模块</option></select></label>
+            <label id="doc-book-label">工程文档集<select id="doc-book" disabled aria-label="工程或模块文档集"></select></label>
+            <label>分支 / 版本<select id="doc-version" disabled aria-label="分支或快照版本"></select></label>
+          </div>
+          <div class="doc-tools">
+            <button id="doc-return-project" class="secondary-button" type="button" hidden>返回工程文档</button>
+            <label class="doc-search-label"><span class="sr-only">搜索当前文档集标题和正文</span><input id="doc-search" type="search" maxlength="240" placeholder="搜索标题和正文" autocomplete="off"></label>
+            <button id="doc-refresh" class="secondary-button" type="button">刷新目录</button>
+            <button id="doc-focus" class="secondary-button" type="button" aria-pressed="false">专注阅读</button>
+          </div>
+        </header>
+        <p id="doc-catalog-errors" class="doc-catalog-errors" role="status"></p>
+        <div id="doc-search-results" class="doc-search-results" aria-label="文档搜索结果" aria-live="polite" hidden></div>
+        <div class="doc-reader-grid">
+          <nav id="doc-tree" class="doc-tree" aria-label="章节与模块依赖"><p class="empty-state">选择文档集开始阅读</p></nav>
+          <div id="doc-content" class="doc-content" tabindex="0" aria-label="文档阅读区域">
+            <header class="doc-book-heading">
+              <p class="eyebrow">ICODE 文档库</p>
+              <h1 id="doc-book-title">选择文档集</h1>
+              <span id="doc-book-status" class="doc-status"></span>
+              <p id="doc-provenance"></p>
+              <details class="doc-metadata-details"><summary>来源与完整性详情</summary><dl id="doc-metadata"></dl></details>
+            </header>
+            <p id="doc-message" class="doc-message" role="status">独立发现工程文档和模块快照，无需已有工单。</p>
+            <p id="doc-chapter-state" class="doc-chapter-state"></p>
+            <article id="doc-body" class="doc-body" aria-label="章节正文"></article>
+            <footer class="doc-chapter-nav">
+              <button id="doc-prev" class="secondary-button" type="button" disabled>← 上一章</button>
+              <button id="doc-copy-link" class="secondary-button" type="button" disabled>复制阅读链接</button>
+              <button id="doc-next" class="secondary-button" type="button" disabled>下一章 →</button>
+            </footer>
+          </div>
+          <aside class="doc-outline" aria-label="章内目录"><h2>本章目录</h2><nav id="doc-toc"></nav></aside>
+        </div>
+      </section>
 
       <section id="welcome-view" class="welcome-view">
         <div class="welcome-orb"><img src="/assets/icode-ticket-hex.svg" alt="" aria-hidden="true"></div>

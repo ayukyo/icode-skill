@@ -18,6 +18,7 @@ from .coordinator import AgentCoordinator, ControlPlaneError, LifecycleAmbiguity
 from .host_runner import ControlLifecycle, HostJobRunner, HostRunnerError
 from .models import AgentRequest, CapabilityError
 from .ticket_catalog import CatalogError, ResolvedTicket, TicketCatalog
+from .doc_catalog import DocCatalog, DocLibraryError
 from .ui_settings import SettingsError, UISettingsStore
 
 
@@ -101,6 +102,14 @@ HOST_ERROR_GUIDANCE = {
 ASSET_ROOT = Path(__file__).resolve().parent / "ui_assets"
 STATIC_ASSETS = {
     "/assets/app.js": (ASSET_ROOT / "app.js", "text/javascript; charset=utf-8"),
+    "/assets/doc-reader.js": (ASSET_ROOT / "doc-reader.js", "text/javascript; charset=utf-8"),
+    "/assets/doc-reader.css": (ASSET_ROOT / "doc-reader.css", "text/css; charset=utf-8"),
+    "/assets/diagram-host.js": (ASSET_ROOT / "diagram-host.js", "text/javascript; charset=utf-8"),
+    "/assets/diagram-renderer.html": (ASSET_ROOT / "diagram-renderer.html", "text/html; charset=utf-8"),
+    "/assets/diagram-renderer.js": (ASSET_ROOT / "diagram-renderer.js", "text/javascript; charset=utf-8"),
+    "/assets/vendor/marked.js": (ASSET_ROOT / "vendor/marked.js", "text/javascript; charset=utf-8"),
+    "/assets/vendor/purify.js": (ASSET_ROOT / "vendor/purify.js", "text/javascript; charset=utf-8"),
+    "/assets/vendor/mermaid.js": (ASSET_ROOT / "vendor/mermaid.js", "text/javascript; charset=utf-8"),
     "/assets/style.css": (ASSET_ROOT / "style.css", "text/css; charset=utf-8"),
     "/assets/icode-ticket-hex.svg": (
         ASSET_ROOT / "icode-ticket-hex.svg",
@@ -108,8 +117,8 @@ STATIC_ASSETS = {
     ),
 }
 CONTENT_SECURITY_POLICY = (
-    "default-src 'none'; script-src 'self'; style-src 'self'; "
-    "img-src 'self' data: blob:; connect-src 'self'; base-uri 'none'; "
+    "default-src 'none'; script-src 'self'; style-src 'self' 'nonce-{style_nonce}'; "
+    "img-src 'self' data: blob:; connect-src 'self'; frame-src 'self'; base-uri 'none'; "
     "form-action 'self'; frame-ancestors 'none'"
 )
 
@@ -269,17 +278,22 @@ class AgentUIService:
                  seed_project_paths=None,
                  initial_ticket_id: str | None = None,
                  initial_project_id: str | None = None,
-                 instance_id: str | None = None):
+                 instance_id: str | None = None,
+                 docs_root: Path | None = None):
         self.ticket_dir = Path(ticket_dir).resolve() if ticket_dir else None
         self.coordinator = AgentCoordinator(control_path=control_path)
         self._stage_module = None
         self._preview_visual_module = None
         self.backend_factory = backend_factory or _default_backend_factory
         self.token = secrets.token_urlsafe(32)
+        # Only renderer-produced style elements receive this nonce; script policy stays external-only.
+        self.style_nonce = secrets.token_urlsafe(24)
         self.catalog = TicketCatalog(
             index_path or (Path.home() / ".claude" / "icode_data" / "index.json"),
             seed_projects=seed_project_paths,
         )
+        self.doc_catalog = DocCatalog(
+            docs_root or (Path.home() / ".claude" / "icode_data"), self.catalog)
         self.settings_store = UISettingsStore(
             settings_path or (Path.home() / ".claude" / "icode_data" / "ui_settings.json"))
         self.lifecycle = ControlLifecycle(control_path)
@@ -724,11 +738,21 @@ class AgentUIRequestHandler(BaseHTTPRequestHandler):
 
     def _security_headers(self):
         self.send_header("Cache-Control", "no-store")
-        self.send_header("Content-Security-Policy", CONTENT_SECURITY_POLICY)
+        diagram_page = urlsplit(self.path).path == "/assets/diagram-renderer.html"
+        # Only this opaque, script-only sandbox permits the layout library's
+        # inline CSS. It has no same-origin privilege, network or UI token.
+        policy = ("default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
+                  "base-uri 'none'; form-action 'none'; frame-ancestors 'self'; sandbox allow-scripts") \
+            if diagram_page else CONTENT_SECURITY_POLICY.replace("{style_nonce}", self.server.service.style_nonce)
+        self.send_header("Content-Security-Policy", policy)
         self.send_header("Referrer-Policy", "no-referrer")
         self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("X-Frame-Options", "DENY")
-        self.send_header("Cross-Origin-Resource-Policy", "same-origin")
+        self.send_header("X-Frame-Options", "SAMEORIGIN" if diagram_page else "DENY")
+        diagram_script = urlsplit(self.path).path in {
+            "/assets/diagram-renderer.js", "/assets/vendor/mermaid.js"}
+        # These public, immutable scripts are also loaded from the opaque
+        # sandbox; no API or document body gets this resource policy.
+        self.send_header("Cross-Origin-Resource-Policy", "cross-origin" if diagram_script else "same-origin")
 
     def _send_bytes(self, status: int, body: bytes, content_type: str):
         self.send_response(status)
@@ -798,7 +822,9 @@ class AgentUIRequestHandler(BaseHTTPRequestHandler):
         return True
 
     def _send_known_error(self, exc) -> None:
-        if isinstance(exc, UIRequestError):
+        if isinstance(exc, DocLibraryError):
+            self._send_error_json(exc.status, "DocLibraryError", str(exc))
+        elif isinstance(exc, UIRequestError):
             self._send_error_json(400, "UIRequestError", str(exc))
         elif isinstance(exc, SettingsError):
             self._send_error_json(400, "SettingsError", str(exc))
@@ -855,6 +881,7 @@ class AgentUIRequestHandler(BaseHTTPRequestHandler):
                 self._send_error_json(500, "UIAssetError", "UI 首页资源不可用")
                 return
             html = template.replace("{{ICODE_UI_TOKEN}}", self.server.ui_token)
+            html = html.replace("{{ICODE_STYLE_NONCE}}", self.server.service.style_nonce)
             self._send_bytes(200, html.encode("utf-8"), "text/html; charset=utf-8")
             return
         asset = STATIC_ASSETS.get(path)
@@ -890,6 +917,29 @@ class AgentUIRequestHandler(BaseHTTPRequestHandler):
         if path.startswith("/api/v1/") and not self._check_api_access():
             return
         try:
+            if path.startswith("/api/v1/docs/"):
+                query = parse_qs(parsed.query, keep_blank_values=True)
+                endpoints = {
+                    "/api/v1/docs/catalog": (),
+                    "/api/v1/docs/book": ("id",),
+                    "/api/v1/docs/chapter": ("book_id", "chapter_id"),
+                    "/api/v1/docs/search": ("book_id", "q"),
+                    "/api/v1/docs/asset": ("id",),
+                }
+                fields = endpoints.get(path)
+                if fields is None:
+                    raise DocLibraryError()
+                if set(query) != set(fields) or any(len(query[key]) != 1 for key in fields):
+                    raise DocLibraryError("文档请求参数无效", 400)
+                args = [query[field][0] for field in fields]
+                docs = self.server.service.doc_catalog
+                if path.endswith("/asset"):
+                    body, content_type = docs.asset(*args)
+                    self._send_bytes(200, body, content_type)
+                else:
+                    method = getattr(docs, path.rsplit("/", 1)[-1])
+                    self._send_json(200, method(*args))
+                return
             if path == "/api/v1/bootstrap":
                 self._send_json(200, self.server.service.bootstrap())
                 return
@@ -1084,7 +1134,8 @@ def create_ui_server(ticket_dir: Path | None, control_path: Path, port: int = 0,
                      seed_project_paths=None,
                      initial_ticket_id: str | None = None,
                      initial_project_id: str | None = None,
-                     instance_id: str | None = None) -> AgentUIHTTPServer:
+                     instance_id: str | None = None,
+                     docs_root: Path | None = None) -> AgentUIHTTPServer:
     """创建但不启动本地 UI server；调用方负责 serve_forever/server_close。"""
     if isinstance(port, bool) or not isinstance(port, int) or not 0 <= port <= 65535:
         raise ValueError("port 必须是 0..65535 的整数")
@@ -1099,5 +1150,6 @@ def create_ui_server(ticket_dir: Path | None, control_path: Path, port: int = 0,
         initial_ticket_id=initial_ticket_id,
         initial_project_id=initial_project_id,
         instance_id=instance_id,
+        docs_root=docs_root,
     )
     return AgentUIHTTPServer((LOOPBACK_HOST, port), service)

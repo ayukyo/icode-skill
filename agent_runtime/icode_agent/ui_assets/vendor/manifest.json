@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "packages": [
+    {
+      "name": "marked",
+      "version": "18.1.2",
+      "license": "MIT",
+      "source": "https://registry.npmjs.org/marked/-/marked-18.1.2.tgz",
+      "integrity": "sha512-DfOnvLAQ6WYeWxWO1u4RyFOeqyHup6dks5PPqnoFiooU7ipRvidO/2j8plhAHIiZg574E9ZlzSjUiPMLAzFkgg==",
+      "files": {
+        "marked.js": "9eb730d2362ae1a8c6201698f17009e16671be6946d3d06503ddc0575283db7c",
+        "marked-LICENSE.txt": "8e3a3f82f59a60958f56ca08f445647c32a4733dc7ca6c2c46f6eb898471ab9c"
+      }
+    },
+    {
+      "name": "dompurify",
+      "version": "3.4.17",
+      "license": "(MPL-2.0 OR Apache-2.0)",
+      "source": "https://registry.npmjs.org/dompurify/-/dompurify-3.4.17.tgz",
+      "integrity": "sha512-B/pSlYVHQ58kqISD/yDjuJ1yfzI34m1gF4lAod2bwSRhiN4K5Cl3H8Af7hqB2PmTL911tdEudnnXn5FnhRoz0w==",
+      "files": {
+        "purify.js": "cd37898f9782adf54820c413191b5691803f0f137c799d6edcfd38523b4c2c31",
+        "dompurify-LICENSE.txt": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+      }
+    },
+    {
+      "name": "mermaid",
+      "version": "12.2.0",
+      "license": "MIT",
+      "source": "https://registry.npmjs.org/mermaid/-/mermaid-12.2.0.tgz",
+      "integrity": "sha512-w7nr/SFrLO7BaVTs3dQTvYSV6nYSBj0Yy9DjBhsIJtAcHqRzXSq4Pg32ujHZ/AdWsAMNEvvhbm5dt9E2tOiHzw==",
+      "files": {
+        "mermaid.js": "a8a6a6f805b074a8261a2825c86f99c8054acb3b35f50bb7e24a4f9f2c3c3b9f",
+        "mermaid-LICENSE.txt": "ec9fb67dcb25eccc416ed56e1aab819222c805a2a4bfe4cb19e7556bf2ffde80"
+      }
+    }
+  ]
+}
