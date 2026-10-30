@@ -69,6 +69,7 @@ jobs:
           printf '%s\n' \
             "ICODE_DOCX_RUNTIME_ROOT=$RUNNER_TEMP/icode-docx-python" \
             "ICODE_DOCX_RENDERER_ROOT=$RUNNER_TEMP/icode-docx-renderer" \
+            "ICODE_DOCX_DOWNLOAD_TIMEOUT_SECONDS=180" \
             "CLAUDE_SKILLS_ROOT=$RUNNER_TEMP/icode-skills/claude" \
             "AGENTS_SKILLS_ROOT=$RUNNER_TEMP/icode-skills/codex" \
             "WORKBUDDY_SKILLS_ROOT=$RUNNER_TEMP/icode-skills/workbuddy" \

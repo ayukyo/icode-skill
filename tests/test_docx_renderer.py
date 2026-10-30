@@ -210,6 +210,51 @@ class RendererTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'HTTPS'):
             bootstrap.HTTPSRedirect().redirect_request(None, None, 302, '', {}, 'http://example.invalid/file')
 
+    def test_transfer_deadline_retries_next_pinned_mirror(self):
+        payload = self.archive.read_bytes()
+        artifact = {**self.package['artifacts'][0], 'urls': ['https://example.invalid/one', 'https://example.invalid/two']}
+        self.archive.unlink()
+        first, second = io.BytesIO(payload), io.BytesIO(payload)
+        first.url, second.url = artifact['urls']
+        with patch.dict(os.environ, {'ICODE_DOCX_DOWNLOAD_TIMEOUT_SECONDS': '180'}), \
+                patch.object(bootstrap.urllib.request, 'build_opener') as create, \
+                patch.object(bootstrap.time, 'monotonic', side_effect=[0, 901, 902, 903]):
+            create.return_value.open.side_effect = [first, second]
+            result = bootstrap.download(artifact, self.cache, False)
+            self.assertEqual(result.read_bytes(), payload)
+            self.assertEqual(create.return_value.open.call_count, 2)
+        self.assertFalse(list(self.cache.glob('.renderer-download-*')))
+
+    def test_download_integrity_failures_never_retry_mirrors(self):
+        payload = self.archive.read_bytes()
+        artifact = {**self.package['artifacts'][0], 'urls': ['https://example.invalid/one', 'https://example.invalid/two']}
+        self.archive.unlink()
+        for invalid in (payload + b'extra', b'x' * len(payload)):
+            with self.subTest(size=len(invalid)), patch.object(bootstrap.urllib.request, 'build_opener') as create:
+                response = io.BytesIO(invalid)
+                response.url = artifact['urls'][0]
+                create.return_value.open.return_value = response
+                with self.assertRaises(ValueError):
+                    bootstrap.download(artifact, self.cache, False)
+                self.assertEqual(create.return_value.open.call_count, 1)
+                self.assertFalse(self.archive.exists())
+                self.assertFalse(list(self.cache.glob('.renderer-download-*')))
+
+    def test_transport_deadline_configuration_is_bounded(self):
+        artifact = self.package['artifacts'][0]
+        payload = self.archive.read_bytes()
+        self.archive.unlink()
+        for invalid in ('0', '-1', '901', 'nan', '1.5'):
+            self.archive.unlink(missing_ok=True)
+            with self.subTest(value=invalid), patch.dict(os.environ, {'ICODE_DOCX_DOWNLOAD_TIMEOUT_SECONDS': invalid}), \
+                    patch.object(bootstrap.urllib.request, 'build_opener') as create:
+                response = io.BytesIO(payload)
+                response.url = artifact['urls'][0]
+                create.return_value.open.return_value = response
+                with self.assertRaisesRegex(ValueError, 'download timeout'):
+                    bootstrap.download(artifact, self.cache, False)
+                create.assert_not_called()
+
     def test_launcher_revision_changes_runtime_identity(self):
         original = bootstrap.package_key(self.package)
         with patch.object(bootstrap, 'INSTALLER_VERSION', '1.0.1'):

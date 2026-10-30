@@ -24,6 +24,8 @@ from renderer_support import TOOL_DIR, host, matches, owned_path, runtime_root, 
 CATALOG = TOOL_DIR / 'renderer_packages.lock.json'
 MAX_EXTRACT_BYTES = 4 * 1024 ** 3
 INSTALLER_VERSION = '1.0.0'
+DEFAULT_DOWNLOAD_TIMEOUT_SECONDS = 900
+MIN_DOWNLOAD_TIMEOUT_SECONDS = 30
 
 
 def atomic_json(path: Path, data: dict) -> None:
@@ -84,6 +86,12 @@ def download(artifact: dict, cache: Path, offline: bool) -> Path:
         return target
     if offline:
         raise ValueError('offline renderer artifact missing: ' + str(target))
+    try:
+        timeout_seconds = int(os.environ.get('ICODE_DOCX_DOWNLOAD_TIMEOUT_SECONDS', DEFAULT_DOWNLOAD_TIMEOUT_SECONDS))
+    except ValueError as exc:
+        raise ValueError('renderer download timeout must be an integer in 30..900 seconds') from exc
+    if not MIN_DOWNLOAD_TIMEOUT_SECONDS <= timeout_seconds <= DEFAULT_DOWNLOAD_TIMEOUT_SECONDS:
+        raise ValueError('renderer download timeout must be an integer in 30..900 seconds')
     cache.mkdir(parents=True, exist_ok=True)
     opener = urllib.request.build_opener(HTTPSRedirect())
     for index, url in enumerate(artifact['urls']):
@@ -91,7 +99,7 @@ def download(artifact: dict, cache: Path, offline: bool) -> Path:
         with tempfile.NamedTemporaryFile(dir=cache, prefix='.renderer-download-', delete=False) as stream:
             temporary = Path(stream.name)
             try:
-                deadline = time.monotonic() + 900
+                deadline = time.monotonic() + timeout_seconds
                 request = urllib.request.Request(url, headers={'User-Agent': 'ICODE-DOCX-renderer/1.0'})
                 with opener.open(request, timeout=45) as response:
                     if urllib.parse.urlsplit(response.url).scheme != 'https':
@@ -99,8 +107,12 @@ def download(artifact: dict, cache: Path, offline: bool) -> Path:
                     size = 0
                     for block in iter(lambda: response.read(1024 * 1024), b''):
                         size += len(block)
-                        if size > artifact['bytes'] or time.monotonic() > deadline:
-                            raise ValueError('renderer download exceeded declared size/time limit')
+                        if size > artifact['bytes']:
+                            raise ValueError('renderer download exceeded declared size limit')
+                        # A slow trusted source is a transport failure. Retry the
+                        # next pinned mirror while retaining strict size/SHA checks.
+                        if time.monotonic() > deadline:
+                            raise TimeoutError('renderer download exceeded transport time limit')
                         stream.write(block)
                 stream.flush()
                 verify_artifact(temporary, artifact)
