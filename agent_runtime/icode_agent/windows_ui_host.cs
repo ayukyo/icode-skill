@@ -346,6 +346,7 @@ internal sealed class NativeHostWindow : Form
     private readonly WebView2 web = new WebView2();
     private readonly Dictionary<string, PendingRequest> pending = new Dictionary<string, PendingRequest>();
     private readonly CancellationTokenSource shutdown = new CancellationTokenSource();
+    private readonly ToolStrip toolbar = new ToolStrip();
     private readonly ToolStripTextBox address = new ToolStripTextBox();
     private readonly ToolStripButton back = new ToolStripButton("后退");
     private readonly ToolStripButton forward = new ToolStripButton("前进");
@@ -368,7 +369,6 @@ internal sealed class NativeHostWindow : Form
         Width = 1240;
         Height = 860;
         MinimumSize = new System.Drawing.Size(640, 480);
-        ToolStrip toolbar = new ToolStrip();
         toolbar.Font = new Font("Segoe UI", 10F, FontStyle.Regular, GraphicsUnit.Point);
         toolbar.BackColor = SiteToolbarColors.Background;
         toolbar.ForeColor = SiteToolbarColors.Muted;
@@ -393,12 +393,15 @@ internal sealed class NativeHostWindow : Form
         address.Margin = new Padding(8, 0, 12, 0);
         address.Text = NativeHostProgram.Origin + initialPath;
         toolbar.Items.AddRange(new ToolStripItem[] { back, forward, reload, home, address, copy });
-        toolbar.SizeChanged += delegate
+        toolbar.Layout += delegate
         {
-            int available = toolbar.DisplayRectangle.Width - address.Margin.Horizontal;
+            // SizeChanged can run before ToolStrip updates its display area after a DPI-aware resize.
+            // Use the final client area and preferred button sizes, independent of overflow placement.
+            int available = toolbar.ClientSize.Width - toolbar.Padding.Horizontal - address.Margin.Horizontal;
             foreach (ToolStripItem item in toolbar.Items)
-                if (item != address) available -= item.Width + item.Margin.Horizontal;
-            address.Width = Math.Max(120, available);
+                if (item != address) available -= item.GetPreferredSize(Size.Empty).Width + item.Margin.Horizontal;
+            int width = Math.Max(120, available);
+            if (address.Width != width) address.Width = width;
         };
         web.Dock = DockStyle.Fill;
         Controls.Add(web);
@@ -759,6 +762,20 @@ internal sealed class NativeHostWindow : Form
                     output.Send(new Dictionary<string, object> {
                         { "type", "event" }, { "event", "test_result" }, { "id", stepId },
                         { "result", NativeHostProgram.Serializer().Serialize(returned) } });
+                }
+                else if (action == "toolbar_layout")
+                {
+                    // Observe the shown native controls only through the explicit test script.
+                    output.Send(new Dictionary<string, object> {
+                        { "type", "event" }, { "event", "test_toolbar_layout" },
+                        { "client_width", ClientSize.Width },
+                        { "display_left", toolbar.DisplayRectangle.Left },
+                        { "display_right", toolbar.DisplayRectangle.Right },
+                        { "address_left", address.Bounds.Left }, { "address_right", address.Bounds.Right },
+                        { "address_width", address.Width }, { "address_placement", address.Placement.ToString() },
+                        { "copy_placement", toolbar.Items[toolbar.Items.Count - 1].Placement.ToString() },
+                        { "overflow_visible", toolbar.OverflowButton.Visible },
+                        { "toolbar_bottom", toolbar.Bottom }, { "web_top", web.Top } });
                 }
                 else if (action == "screenshot")
                 {
