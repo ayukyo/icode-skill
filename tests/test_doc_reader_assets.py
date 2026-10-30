@@ -72,6 +72,8 @@ def test_document_reader_checks_are_mandatory_in_ci():
 def test_windows_native_reader_acceptance_gates_public_build():
     import yaml
     workflow = yaml.safe_load((ROOT / '.github/workflows/public-site.yml').read_text(encoding='utf-8'))
+    events = workflow.get('on', workflow.get(True))  # PyYAML also parses YAML 1.1's boolean "on".
+    assert 'tools/icode_agent.py' in events['pull_request']['paths']
     job = workflow['jobs'].get('windows-ui')
     assert job is not None, 'Windows native UI acceptance must run before public builds'
     assert job['runs-on'] == 'windows-latest'

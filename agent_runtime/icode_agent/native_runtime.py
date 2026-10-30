@@ -291,7 +291,10 @@ def ensure_native_runtime(*, cache_root: Path | None = None, package_cache: Path
             return _validate_bundle(bundle, key, pin)
         try:
             stage.replace(bundle)
-        except FileExistsError:
-            # A concurrent installer may have published this exact identity.
-            return _validate_bundle(bundle, key, pin)
+        except OSError:
+            # Windows reports an existing nonempty directory as PermissionError.
+            # Reuse a concurrent publication only after validating its identity.
+            if bundle.exists():
+                return _validate_bundle(bundle, key, pin)
+            raise
     return _validate_bundle(bundle, key, pin)
