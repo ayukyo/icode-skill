@@ -288,6 +288,148 @@ def test_unanswered_request_times_out_with_explicit_safe_response(host_exe, tmp_
     assert result == {"status": 504, "csp": "default-src 'none'; frame-ancestors 'none'"}
 
 
+# PipeAccessRights.ReadWrite | CreateNewInstance, plus Synchronize added by
+# .NET PipeAccessRule for an Allow ACE.
+CONTROL_PIPE_ACCESS_MASK = 0x12019F
+
+
+@contextmanager
+def security_descriptor_from_sddl(sddl):
+    advapi = ctypes.WinDLL("advapi32", use_last_error=True)
+    advapi.ConvertStringSecurityDescriptorToSecurityDescriptorW.argtypes = [
+        ctypes.c_wchar_p, ctypes.c_uint32, ctypes.POINTER(ctypes.c_void_p), ctypes.c_void_p]
+    advapi.ConvertStringSecurityDescriptorToSecurityDescriptorW.restype = ctypes.c_int
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.LocalFree.argtypes = [ctypes.c_void_p]
+    kernel.LocalFree.restype = ctypes.c_void_p
+    descriptor = ctypes.c_void_p()
+    assert advapi.ConvertStringSecurityDescriptorToSecurityDescriptorW(
+        sddl, 1, ctypes.byref(descriptor), None), ctypes.WinError(ctypes.get_last_error())
+    try:
+        yield descriptor
+    finally:
+        kernel.LocalFree(descriptor)
+
+
+def descriptor_dacl(descriptor):
+    """Read actual ACE trustees as canonical SIDs, independent of SDDL aliases."""
+    class AclSizeInformation(ctypes.Structure):
+        _fields_ = [("AceCount", ctypes.c_uint32), ("AclBytesInUse", ctypes.c_uint32),
+                    ("AclBytesFree", ctypes.c_uint32)]
+
+    class AceHeader(ctypes.Structure):
+        _fields_ = [("AceType", ctypes.c_ubyte), ("AceFlags", ctypes.c_ubyte),
+                    ("AceSize", ctypes.c_uint16)]
+
+    class AccessAllowedAce(ctypes.Structure):
+        _fields_ = [("Header", AceHeader), ("Mask", ctypes.c_uint32),
+                    ("SidStart", ctypes.c_uint32)]
+
+    advapi = ctypes.WinDLL("advapi32", use_last_error=True)
+    advapi.GetSecurityDescriptorControl.argtypes = [
+        ctypes.c_void_p, ctypes.POINTER(ctypes.c_uint16), ctypes.POINTER(ctypes.c_uint32)]
+    advapi.GetSecurityDescriptorControl.restype = ctypes.c_int
+    advapi.GetSecurityDescriptorDacl.argtypes = [
+        ctypes.c_void_p, ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_void_p),
+        ctypes.POINTER(ctypes.c_int)]
+    advapi.GetSecurityDescriptorDacl.restype = ctypes.c_int
+    advapi.GetAclInformation.argtypes = [
+        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint32, ctypes.c_int]
+    advapi.GetAclInformation.restype = ctypes.c_int
+    advapi.GetAce.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.POINTER(ctypes.c_void_p)]
+    advapi.GetAce.restype = ctypes.c_int
+    advapi.ConvertSidToStringSidW.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_wchar_p)]
+    advapi.ConvertSidToStringSidW.restype = ctypes.c_int
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.LocalFree.argtypes = [ctypes.c_void_p]
+    kernel.LocalFree.restype = ctypes.c_void_p
+    control, revision = ctypes.c_uint16(), ctypes.c_uint32()
+    assert advapi.GetSecurityDescriptorControl(descriptor, ctypes.byref(control), ctypes.byref(revision))
+    present, defaulted, dacl = ctypes.c_int(), ctypes.c_int(), ctypes.c_void_p()
+    assert advapi.GetSecurityDescriptorDacl(
+        descriptor, ctypes.byref(present), ctypes.byref(dacl), ctypes.byref(defaulted))
+    result = {"protected": bool(control.value & 0x1000),  # SE_DACL_PROTECTED
+              "present": bool(present.value), "defaulted": bool(defaulted.value), "aces": None}
+    # Both absent and NULL DACLs grant unrestricted access; keep them distinguishable
+    # from an empty ACL, and let the strict contract assertion reject all three.
+    if not present.value or not dacl.value:
+        return result
+    info = AclSizeInformation()
+    assert advapi.GetAclInformation(dacl, ctypes.byref(info), ctypes.sizeof(info), 2)  # AclSizeInformation
+    result["aces"] = []
+    for index in range(info.AceCount):
+        ace = ctypes.c_void_p()
+        assert advapi.GetAce(dacl, index, ctypes.byref(ace))
+        header = ctypes.cast(ace, ctypes.POINTER(AceHeader)).contents
+        entry = {"type": header.AceType, "flags": header.AceFlags, "mask": None, "sid": None}
+        # Other ACE layouts are not accepted by this contract. Do not interpret
+        # their variable fields as an ACCESS_ALLOWED_ACE SID.
+        if header.AceType == 0:  # ACCESS_ALLOWED_ACE_TYPE
+            allowed = ctypes.cast(ace, ctypes.POINTER(AccessAllowedAce)).contents
+            value = ctypes.c_wchar_p()
+            try:
+                assert advapi.ConvertSidToStringSidW(
+                    ace.value + AccessAllowedAce.SidStart.offset, ctypes.byref(value))
+                entry.update(mask=allowed.Mask, sid=value.value)
+            finally:
+                kernel.LocalFree(ctypes.cast(value, ctypes.c_void_p))
+        result["aces"].append(entry)
+    return result
+
+
+def assert_control_pipe_acl(acl, sid):
+    assert acl == {"protected": True, "present": True, "defaulted": False,
+                   "aces": [{"type": 0, "flags": 0, "mask": CONTROL_PIPE_ACCESS_MASK, "sid": sid}]}, acl
+
+
+@pytest.fixture(scope="module")
+def local_administrator_sid():
+    if os.name != "nt":
+        pytest.skip("Requires Windows security descriptor APIs")
+    # Ask Windows to resolve LA, independently of the current user's domain/RID.
+    result = subprocess.check_output(
+        ["powershell", "-NoProfile", "-NonInteractive", "-Command",
+         "[System.Security.Principal.SecurityIdentifier]::new('LA').Value"], text=True).strip()
+    assert result.startswith("S-1-5-21-") and result.endswith("-500"), result
+    return result
+
+
+def test_control_pipe_acl_accepts_equivalent_la_and_full_sid(local_administrator_sid):
+    parsed = []
+    for trustee in ("LA", local_administrator_sid):
+        with security_descriptor_from_sddl("D:P(A;;0x12019f;;;" + trustee + ")") as descriptor:
+            acl = descriptor_dacl(descriptor)
+        assert_control_pipe_acl(acl, local_administrator_sid)
+        parsed.append(acl)
+    assert parsed[0] == parsed[1]
+
+
+@pytest.mark.parametrize("sddl", [
+    "D:P(A;;0x12019f;;;WD)",
+    "D:P(A;;0x12019f;;;BA)",
+    "D:P(A;;0x12019f;;;{sid})(A;;0x12019f;;;WD)",
+    "D:P(A;;0x12019f;;;{sid})(D;;0x12019f;;;WD)",
+    "D:(A;;0x12019f;;;{sid})",
+    "D:P(D;;0x12019f;;;{sid})",
+    "D:P(A;ID;0x12019f;;;{sid})",
+    "D:P(A;;0x1f01ff;;;{sid})",
+    "D:P(A;;0x12019b;;;{sid})",
+    "D:P(A;;0x12019f;;;{other_sid})",
+    "D:P",
+    "D:NO_ACCESS_CONTROL",
+    "O:SY",
+], ids=["everyone", "administrators", "extra_allow", "extra_deny", "unprotected",
+        "deny", "inherited", "excess_rights", "missing_create_instance", "other_user",
+        "empty_dacl", "null_dacl", "absent_dacl"])
+def test_control_pipe_acl_rejects_weaker_descriptors(local_administrator_sid, sddl):
+    sddl = sddl.format(sid=local_administrator_sid,
+                       other_sid=local_administrator_sid.rsplit("-", 1)[0] + "-501")
+    with security_descriptor_from_sddl(sddl) as descriptor:
+        acl = descriptor_dacl(descriptor)
+    with pytest.raises(AssertionError):
+        assert_control_pipe_acl(acl, local_administrator_sid)
+
+
 class NativeControlClient:
     """Use real Win32 pipe handles; no third-party package or socket fallback."""
 
@@ -321,24 +463,20 @@ class NativeControlClient:
         assert read.value <= 4096
         return json.loads(buffer.raw[:read.value])
 
-    def sddl(self):
+    def dacl(self):
         advapi = ctypes.WinDLL("advapi32", use_last_error=True)
         advapi.GetSecurityInfo.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_uint32,
                                           ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
                                           ctypes.c_void_p, ctypes.POINTER(ctypes.c_void_p)]
-        advapi.ConvertSecurityDescriptorToStringSecurityDescriptorW.argtypes = [
-            ctypes.c_void_p, ctypes.c_uint32, ctypes.c_uint32, ctypes.POINTER(ctypes.c_wchar_p), ctypes.c_void_p]
+        advapi.GetSecurityInfo.restype = ctypes.c_uint32
         self.kernel.LocalFree.argtypes = [ctypes.c_void_p]
+        self.kernel.LocalFree.restype = ctypes.c_void_p
         descriptor = ctypes.c_void_p()
         assert advapi.GetSecurityInfo(self.handle, 6, 4, None, None, None, None,
                                       ctypes.byref(descriptor)) == 0
-        value = ctypes.c_wchar_p()
         try:
-            assert advapi.ConvertSecurityDescriptorToStringSecurityDescriptorW(
-                descriptor, 1, 4, ctypes.byref(value), None)
-            return value.value
+            return descriptor_dacl(descriptor)
         finally:
-            self.kernel.LocalFree(ctypes.cast(value, ctypes.c_void_p))
             self.kernel.LocalFree(descriptor)
 
     def close(self):
@@ -381,14 +519,14 @@ def control_host(host_exe, tmp_path):
 def test_control_pipe_health_focus_and_current_sid_acl(host_exe, tmp_path):
     with control_host(host_exe, tmp_path) as (host, name):
         with NativeControlClient(name) as client:
-            sddl = client.sddl()
+            acl = client.dacl()
             response = client.send({"action": "health", "instance_id": "native-test"})
         assert response == {"ok": True, "instance_id": "native-test", "pid": host.process.pid,
                             "window_id": host.ready_message["window_id"], "ready": True}
         sid_output = subprocess.check_output(["whoami", "/user", "/fo", "csv", "/nh"], text=True)
         import re
         sid = re.search(r"S-1-5-(?:\d+-)+\d+", sid_output).group()
-        assert sddl.count("(A;") == 1 and sid in sddl and sddl.startswith("D:P")
+        assert_control_pipe_acl(acl, sid)
         user = ctypes.WinDLL("user32", use_last_error=True)
         user.ShowWindow.argtypes = [ctypes.c_void_p, ctypes.c_int]
         user.IsIconic.argtypes = [ctypes.c_void_p]
