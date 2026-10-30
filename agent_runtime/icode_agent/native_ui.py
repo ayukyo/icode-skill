@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import queue
 import re
+import stat
 import subprocess
 import threading
 import time
@@ -19,6 +20,7 @@ from .ui_server import AgentUIInMemoryDispatcher, AgentUIService, NATIVE_UI_ORIG
 MAX_NATIVE_MESSAGE_BYTES = 32 * 1024 * 1024
 MAX_NATIVE_INFLIGHT = 16
 NATIVE_TIMEOUT_SECONDS = 30
+_REPARSE_POINT = 0x400
 # Match the host's fail-closed policy while leaving the caller's environment intact.
 _WEBVIEW2_ENV_OVERRIDES = frozenset({
     'WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS', 'WEBVIEW2_PIPE_FOR_SCRIPT_DEBUGGER',
@@ -28,6 +30,39 @@ _WEBVIEW2_ENV_OVERRIDES = frozenset({
 
 class NativeUIError(RuntimeError):
     """A bounded, path-free failure safe for the CLI startup error response."""
+
+
+def _profile_comparison_path(path):
+    raw = str(path)
+    if os.name == 'nt' and raw[:4] in {'\\\\?\\', '\\\\.\\'}:
+        raw = '\\\\' + raw[8:] if raw[4:8].upper() == 'UNC\\' else raw[4:]
+    return Path(raw)
+
+
+def _validated_profile_path(value):
+    # Preserve the original components until lstat has checked every ancestor;
+    # resolve() first would hide a junction that redirects writes elsewhere.
+    profile = Path(value).expanduser().absolute()
+    try:
+        for component in (*reversed(profile.parents), profile):
+            try:
+                info = component.lstat()
+            except FileNotFoundError:
+                continue
+            if stat.S_ISLNK(info.st_mode) or getattr(info, 'st_file_attributes', 0) & _REPARSE_POINT:
+                raise NativeUIError('原生 UI profile 路径不得包含链接或重解析点')
+        resolved = profile.resolve()
+        # Extended Win32 namespace spelling must not bypass the same-directory
+        # comparison while the original spelling remains available for I/O.
+        comparison = _profile_comparison_path(resolved)
+        installation = _profile_comparison_path(Path(__file__).resolve().parents[2])
+        if comparison == Path(comparison.anchor) or comparison.is_relative_to(installation):
+            raise NativeUIError('原生 UI profile 目录不得位于安装目录内或文件系统根目录')
+        return resolved
+    except NativeUIError:
+        raise
+    except (OSError, ValueError, RuntimeError) as exc:
+        raise NativeUIError('原生 UI profile 目录无法安全检查') from exc
 
 
 def decode_native_request(message):
@@ -272,8 +307,8 @@ def run_native_ui(host_executable, *, ticket_dir, control_path, seed_project_pat
                              seed_project_paths=seed_project_paths,
                              initial_ticket_id=initial_ticket_id,
                              initial_project_id=initial_project_id)
-    profile = Path(user_data_dir).expanduser().resolve() if user_data_dir else (
-        Path.home() / '.claude' / 'icode_data' / 'webview2' / service.instance_id).resolve()
+    profile = _validated_profile_path(user_data_dir if user_data_dir is not None else (
+        Path.home() / '.claude' / 'icode_data' / 'webview2' / service.instance_id))
     profile.mkdir(parents=True, exist_ok=True)
     command = [str(Path(host_executable).resolve())]
     if test_script is not None:
