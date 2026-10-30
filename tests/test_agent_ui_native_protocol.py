@@ -9,6 +9,7 @@ import socket
 import subprocess
 import sys
 import time
+from types import SimpleNamespace
 
 import pytest
 
@@ -426,4 +427,61 @@ def test_native_ready_hook_must_be_callable_before_spawn(dispatcher, tmp_path, m
     native, children, _ = fake_host(tmp_path, monkeypatch, dispatcher, 'pass\n')
     with pytest.raises(native.NativeUIError, match='回调必须可调用'):
         run_host(native, tmp_path, on_ready=False)
+    assert not children
+
+
+def test_native_profile_reparse_ancestor_rejected_before_mkdir(dispatcher, tmp_path, monkeypatch):
+    native, children, _ = fake_host(tmp_path, monkeypatch, dispatcher, 'pass\n')
+    suspicious = tmp_path / 'cache'
+    suspicious.mkdir()
+    original = Path.lstat
+    def attributes(path, *args, **kwargs):
+        info = original(path, *args, **kwargs)
+        if path == suspicious:
+            return SimpleNamespace(st_mode=info.st_mode, st_file_attributes=0x400)
+        return info
+    monkeypatch.setattr(Path, 'lstat', attributes)
+    monkeypatch.setattr(Path, 'mkdir', lambda *a, **k: pytest.fail('profile mkdir ran before reparse rejection'))
+    with pytest.raises(native.NativeUIError, match='profile.*链接'):
+        native.run_native_ui(tmp_path/'host.exe', ticket_dir=None,control_path=ROOT/'tools/icode_control.py',
+            seed_project_paths=[],initial_ticket_id=None,initial_project_id=None,
+            user_data_dir=suspicious/'new-profile')
+    assert not children
+
+
+@pytest.mark.parametrize('target', ['installation', 'filesystem-root'])
+def test_native_profile_cannot_use_installation_or_root(dispatcher, tmp_path, monkeypatch, target):
+    native, children, _ = fake_host(tmp_path, monkeypatch, dispatcher, 'pass\n')
+    path = ROOT/'profile-must-not-exist' if target == 'installation' else Path(tmp_path.anchor)
+    monkeypatch.setattr(Path, 'mkdir', lambda *a, **k: pytest.fail('forbidden profile mkdir ran'))
+    with pytest.raises(native.NativeUIError, match='profile.*目录'):
+        native.run_native_ui(tmp_path/'host.exe', ticket_dir=None,control_path=ROOT/'tools/icode_control.py',
+            seed_project_paths=[],initial_ticket_id=None,initial_project_id=None,user_data_dir=path)
+    assert not children
+
+
+@pytest.mark.skipif(os.name != 'nt', reason='Windows junction protection')
+def test_native_profile_real_junction_never_writes_target(dispatcher, tmp_path, monkeypatch):
+    target, link = tmp_path/'repoish-sandbox', tmp_path/'cache-junction'
+    target.mkdir()
+    marker = target/'owned-marker.txt'
+    marker.write_text('unchanged', encoding='utf-8')
+    result = subprocess.run(['cmd', '/c', 'mklink', '/J', str(link), str(target)], capture_output=True)
+    assert result.returncode == 0, result.stderr
+    native, children, _ = fake_host(tmp_path, monkeypatch, dispatcher, 'pass\n')
+    with pytest.raises(native.NativeUIError, match='profile.*链接'):
+        native.run_native_ui(tmp_path/'host.exe', ticket_dir=None,control_path=ROOT/'tools/icode_control.py',
+            seed_project_paths=[],initial_ticket_id=None,initial_project_id=None,user_data_dir=link/'profile')
+    assert list(target.iterdir()) == [marker] and marker.read_text(encoding='utf-8') == 'unchanged'
+    assert not children
+
+
+@pytest.mark.skipif(os.name != 'nt', reason='Windows extended path namespace')
+def test_native_profile_extended_path_cannot_bypass_installation_guard(dispatcher, tmp_path, monkeypatch):
+    native, children, _ = fake_host(tmp_path, monkeypatch, dispatcher, 'pass\n')
+    extended = Path('\\\\?\\' + str(ROOT/'profile-must-not-exist'))
+    monkeypatch.setattr(Path, 'mkdir', lambda *a, **k: pytest.fail('extended installation profile mkdir ran'))
+    with pytest.raises(native.NativeUIError, match='profile.*目录'):
+        native.run_native_ui(tmp_path/'host.exe', ticket_dir=None,control_path=ROOT/'tools/icode_control.py',
+            seed_project_paths=[],initial_ticket_id=None,initial_project_id=None,user_data_dir=extended)
     assert not children
