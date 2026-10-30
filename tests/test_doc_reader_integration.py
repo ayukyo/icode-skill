@@ -71,7 +71,7 @@ def test_real_http_reader_renders_graph_image_and_preserves_position(tmp_path):
                 assert page.locator("#doc-library").evaluate("el => el.classList.contains('doc-focused')")
                 page.locator("#doc-focus").click()
                 output = ROOT / "docs/nbl/verification"
-                output.mkdir(exist_ok=True)
+                output.mkdir(parents=True, exist_ok=True)
                 page.locator("#doc-content").evaluate("el => {el.scrollTop = 0;}")
                 page.screenshot(path=str(output / "doc-reader-desktop.png"))
                 page.set_viewport_size({"width": 390, "height": 844})
