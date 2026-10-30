@@ -1,15 +1,20 @@
 """Bounded Windows native-UI instance probes over SID-protected named pipes.
 
 Registration files are only hints. Reuse requires a pipe owned by the registered
-process incarnation and an exact live host identity response. No TCP, file
-mutation, process termination or window messaging occurs in this client.
+process incarnation and an exact live host identity response. Probes never mutate
+files, terminate processes or send window messages. Startup serialization uses
+only a separate, empty lock file; no transport uses TCP.
 """
 from __future__ import annotations
 
 import ctypes
 from ctypes import wintypes as w
+from contextlib import contextmanager
+import errno
 import json
+import math
 import os
+from pathlib import Path
 import re
 import threading
 import time
@@ -33,6 +38,7 @@ _SECURITY_SQOS_PRESENT = 0x00100000
 _SECURITY_IDENTIFICATION = 0x00010000
 _WAIT_OBJECT_0 = 0
 _PIPE_RETRY_MILLISECONDS = 20
+_STARTUP_LOCK_RETRY_SECONDS = .05
 
 
 class _Overlapped(ctypes.Structure):
@@ -236,3 +242,59 @@ def probe_native_instance(record, action='health') -> dict | None:
     if not finished.wait(max(0, deadline - time.monotonic())):
         return None
     return result[0]
+
+
+@contextmanager
+def native_startup_lock(registration_path: Path, timeout=90):
+    """Serialize one native context's startup with an explicit total wait budget.
+
+    Keep the lock file in place after release: unlinking it would let another
+    caller lock a different inode while an existing waiter still holds this one.
+    The Windows byte range may extend beyond EOF, so no placeholder/token write
+    is needed, including while another process already holds byte zero.
+    """
+    if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or not math.isfinite(timeout) or timeout < 0:
+        raise ValueError('native startup lock timeout must be finite and nonnegative')
+    registration = Path(registration_path).expanduser().absolute()
+    lock_path = registration.with_name(registration.name + '.lock')
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    if os.name == 'nt':
+        import msvcrt
+        # RDWR open permission failures occur before this loop. With a valid
+        # writable descriptor, LK_NBLCK reports a competing byte lock as EACCES.
+        contention_errors = {errno.EACCES}
+        def lock(handle):
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+        def unlock(handle):
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+    else:
+        import fcntl
+        contention_errors = {errno.EACCES, errno.EAGAIN}
+        def lock(handle):
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        def unlock(handle):
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+    deadline = time.monotonic() + timeout
+    descriptor = os.open(lock_path, os.O_CREAT | os.O_RDWR | getattr(os, 'O_BINARY', 0), 0o600)
+    with os.fdopen(descriptor, 'r+b', buffering=0) as handle:
+        first_attempt = True
+        while True:
+            if not first_attempt and time.monotonic() >= deadline:
+                raise TimeoutError('native startup lock wait timed out')
+            first_attempt = False
+            try:
+                lock(handle)
+                break
+            except OSError as exc:
+                if exc.errno not in contention_errors:
+                    raise
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError('native startup lock wait timed out') from exc
+                time.sleep(min(_STARTUP_LOCK_RETRY_SECONDS, remaining))
+        try:
+            yield
+        finally:
+            unlock(handle)

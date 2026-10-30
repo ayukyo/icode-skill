@@ -1,10 +1,12 @@
 """Native instance identity and named-pipe probes; no TCP or user metadata writes."""
 import ctypes
+import errno
 import importlib
 import json
 import os
 from pathlib import Path
 import queue
+import subprocess
 import sys
 import threading
 import time
@@ -184,3 +186,116 @@ def test_actual_host_control_pipe_health_and_focus(native, tmp_path, monkeypatch
         user.PostMessageW(info['window_id'], 0x10, 0, 0)
         thread.join(timeout=10)
     assert not thread.is_alive() and results == [0]
+
+
+def test_native_startup_lock_is_available(native):
+    assert hasattr(native, 'native_startup_lock'), 'native startup lock is missing'
+
+
+_LOCK_CHILD = '''
+import json,sys,time
+from pathlib import Path
+sys.path.insert(0,sys.argv[1])
+from icode_agent.native_instance import native_startup_lock
+started=time.monotonic()
+try:
+    with native_startup_lock(Path(sys.argv[2]), timeout=float(sys.argv[4])):
+        print(json.dumps({'locked':True,'waited':time.monotonic()-started}),flush=True)
+        time.sleep(float(sys.argv[3]))
+except TimeoutError:
+    print(json.dumps({'timeout':True,'waited':time.monotonic()-started}),flush=True)
+'''
+
+
+def lock_child(path, *, hold=0, timeout=20):
+    return subprocess.Popen([sys.executable, '-u', '-c', _LOCK_CHILD,
+                             str(ROOT/'agent_runtime'), str(path), str(hold), str(timeout)],
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                            creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
+
+
+def finish_lock_child(child):
+    if child.poll() is None:
+        child.terminate()
+    try:
+        child.wait(timeout=3)
+    except subprocess.TimeoutExpired:
+        child.kill()
+        child.wait(timeout=3)
+    child.stdout.close()
+    child.stderr.close()
+
+
+@pytest.mark.skipif(os.name != 'nt', reason='regression for Windows LK_LOCK ten-attempt limit')
+def test_windows_second_process_can_wait_beyond_ten_seconds(native, tmp_path):
+    path = tmp_path/'slow-native.json'
+    holder = lock_child(path, hold=11.5)
+    waiter = None
+    try:
+        first = holder.stdout.readline()
+        assert first and json.loads(first)['locked'], holder.stderr.read()
+        waiter = lock_child(path)
+        output, errors = waiter.communicate(timeout=20)
+        assert waiter.returncode == 0, errors
+        result = json.loads(output)
+        assert result['locked'] and result['waited'] > 10
+        assert holder.wait(timeout=3) == 0
+    finally:
+        finish_lock_child(holder)
+        if waiter is not None:
+            finish_lock_child(waiter)
+
+
+def test_native_startup_locks_for_different_contexts_do_not_block(native, tmp_path):
+    with native.native_startup_lock(tmp_path/'global.json'):
+        child = lock_child(tmp_path/'fixed.json', timeout=0)
+        try:
+            output, errors = child.communicate(timeout=3)
+            assert child.returncode == 0, errors
+            assert json.loads(output)['locked']
+        finally:
+            finish_lock_child(child)
+
+
+def test_native_startup_lock_exception_releases_owned_handle(native, tmp_path):
+    path = tmp_path/'exception.json'
+    with pytest.raises(RuntimeError, match='synthetic'):
+        with native.native_startup_lock(path):
+            raise RuntimeError('synthetic startup failure')
+    with native.native_startup_lock(path, timeout=0):
+        pass
+    assert not path.exists()
+    assert (tmp_path/'exception.json.lock').read_bytes() == b''
+
+
+def test_native_startup_lock_wait_budget_is_bounded(native, tmp_path):
+    path = tmp_path/'busy.json'
+    with native.native_startup_lock(path):
+        child = lock_child(path, timeout=.15)
+        try:
+            output, errors = child.communicate(timeout=3)
+            assert child.returncode == 0, errors
+            result = json.loads(output)
+            assert result['timeout'] and .1 <= result['waited'] < .5
+        finally:
+            finish_lock_child(child)
+        # The waiter must never release the owner's lock or change lock files.
+        child = lock_child(path, timeout=0)
+        try:
+            output, errors = child.communicate(timeout=3)
+            assert child.returncode == 0, errors
+            assert json.loads(output)['timeout']
+        finally:
+            finish_lock_child(child)
+
+
+def test_native_startup_lock_non_contention_error_is_immediate(native, tmp_path, monkeypatch):
+    module = importlib.import_module('msvcrt' if os.name == 'nt' else 'fcntl')
+    def fail(*_args):
+        raise OSError(errno.EIO, 'synthetic I/O failure')
+    monkeypatch.setattr(module, 'locking' if os.name == 'nt' else 'flock', fail)
+    started = time.monotonic()
+    with pytest.raises(OSError) as result:
+        with native.native_startup_lock(tmp_path/'io-error.json'):
+            pytest.fail('failed lock entered its critical section')
+    assert result.value.errno == errno.EIO and time.monotonic() - started < .5
