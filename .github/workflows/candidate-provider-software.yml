@@ -25,6 +25,7 @@ on:
       - 'tests/test_workflow_capability_preflight.py'
       - 'tests/test_permission_authorization_scan.py'
       - 'tests/test_stage_discovery.py'
+      - 'tests/test_stage_acceptance.py'
       - 'tests/test_inspection_history_supersession.py'
       - 'tests/test_execution_model_contract.sh'
       - '.github/workflows/candidate-provider-software.yml'

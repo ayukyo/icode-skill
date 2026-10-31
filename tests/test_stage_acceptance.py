@@ -28,7 +28,9 @@ class StageAcceptanceTests(unittest.TestCase):
         self.ctl = load("icode_control")
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        self.project = Path(self.tmp.name)
+        # Match the control plane's canonical paths even when Windows TEMP is
+        # expressed through an 8.3 alias such as RUNNER~1.
+        self.project = Path(self.tmp.name).resolve()
         self.coord = self.project / ".icode_output" / ".icode_output_1"
         self.first = self.project / ".icode_output" / ".icode_output_2"
         self.second = self.project / ".icode_output" / ".icode_output_3"
