@@ -15,7 +15,7 @@ import test_candidate_history_unit as history
 ctl, api = history.ctl, history.api
 
 
-def invoke(function, *args, provider=None, required=False):
+def invoke(function, *args, provider=None, required=False, factory=None):
     # Old source executes normally: unsupported kwargs never manufacture ERROR.
     names = inspect.signature(function).parameters
     access = {}
@@ -23,6 +23,8 @@ def invoke(function, *args, provider=None, required=False):
         access["git_provider"] = provider
     if "require_git_provider" in names:
         access["require_git_provider"] = required
+    if factory is not None:
+        access["inspection_provider_factory"] = factory
     return function(*args, **access)
 
 
@@ -50,7 +52,7 @@ class ActionPolicyProviderTests(unittest.TestCase):
         self.assertFalse((self.f.code / ".git").exists())
         return provider
 
-    def call(self, *extra, provider=None, required=False, main=False):
+    def call(self, *extra, provider=None, required=False, main=False, factory=None):
         output = io.StringIO()
         try:
             with contextlib.redirect_stdout(output):
@@ -58,25 +60,44 @@ class ActionPolicyProviderTests(unittest.TestCase):
                     argv = ["icode_control.py", "action-policy", "--dir",
                             str(self.f.ticket), *extra]
                     with patch("sys.argv", argv):
-                        code = invoke(ctl.main, provider=provider, required=required)
+                        code = invoke(ctl.main, provider=provider, required=required, factory=factory)
                 else:
                     code = invoke(ctl.cmd_action_policy, self.args(*extra),
-                                  provider=provider, required=required)
+                                  provider=provider, required=required, factory=factory)
         except ctl.ControlError as exc:
             return exc.exit_code, exc.report(), output.getvalue()
         raw = output.getvalue()
         return code, json.loads(raw), raw
 
     def rejected(self, *extra, provider=None, required=True, main=False,
-                 gate="candidate_provider_context"):
+                 gate="candidate_provider_context", factory=None):
         before = self.frozen()
-        code, result, raw = self.call(*extra, provider=provider, required=required, main=main)
+        code, result, raw = self.call(*extra, provider=provider, required=required, main=main, factory=factory)
         self.assertEqual(code, 1, result)
         self.assertEqual(result.get("gate_id"), gate, result)
         self.assertIs(result["ok"], False)
         self.assertNotIn('"action_allowed": true', raw)
         self.assertEqual(self.frozen(), before)
         return result
+
+    def code_ready(self):
+        self.advance("plan_finalized")
+        (self.f.ticket / "03_plan_final.md").write_text("native fixture plan\n", encoding="utf-8")
+        return lambda *args: self.fail("projection must not execute inspection transport")
+
+    def assert_protected_projection(self, actual, local):
+        # Capability support intentionally differs; every other state/receipt
+        # fact must retain its exact local interpretation.
+        actual, expected = copy.deepcopy(actual), copy.deepcopy(local)
+        preflight = actual.pop("capability_preflight")
+        expected.pop("capability_preflight")
+        self.assertEqual(preflight["profile"], "protected_provider")
+        self.assertFalse(preflight["runtime_verified"])
+        expected["allowed_actions"] = [name for name in expected["allowed_actions"] if name == "status"]
+        if expected["allowed_actions"] != local["allowed_actions"] and expected["blocked_reason"] is None:
+            expected["blocked_reason"] = "workflow_capability"
+        expected["recommended_action"] = None
+        self.assertEqual(actual, expected)
 
     def advance(self, target):
         route = ["plan_done", "review_in_progress", "review_done", "plan_finalized",
@@ -105,7 +126,7 @@ class ActionPolicyProviderTests(unittest.TestCase):
         self.assertEqual(before, self.frozen())
 
     def test_direct_verify_reads_real_git_free_code_and_canonical_head(self):
-        expected = self.call("--action", "verify")[1]
+        factory = self.code_ready()
         provider = self.seal()
         before = self.frozen()
         captured = []
@@ -116,17 +137,17 @@ class ActionPolicyProviderTests(unittest.TestCase):
             return result
         with patch.object(ctl, "capture_step_inputs", side_effect=capture), \
                 patch.object(ctl, "verify_event_chain", wraps=ctl.verify_event_chain) as verify:
-            code, result, _ = self.call("--action", "verify", provider=provider, required=True)
+            code, result, _ = self.call("--action", "code", provider=provider, required=True, factory=factory)
         self.assertEqual(code, 0, result)
-        self.assertEqual(result, expected)
+        self.assertTrue(result["capability_preflight"]["task_supported"])
         self.assertEqual(len(captured), 1)
         (snapshot, missing), access = captured[0]
         self.assertEqual(missing, [])
         self.assertIs(access.get("git_provider"), provider)
         self.assertIs(access.get("require_git_provider"), True)
         facts = {fact["id"]: fact for fact in snapshot["inputs"]}
-        self.assertEqual(facts["code_files"]["items"][0]["sha256"],
-                         hashlib.sha256((self.f.code / "source.py").read_bytes()).hexdigest())
+        self.assertEqual(facts["final_plan"]["sha256"],
+                         hashlib.sha256((self.f.ticket / "03_plan_final.md").read_bytes()).hexdigest())
         self.assertEqual(facts["workspace_head"]["roots"],
                          [{"root": self.f.code.as_posix(), "head": self.f.base}])
         for call in verify.call_args_list:
@@ -145,7 +166,7 @@ class ActionPolicyProviderTests(unittest.TestCase):
                 with self.subTest(extra=extra, required=required):
                     code, result, _ = self.call(*extra, provider=provider, required=required, main=True)
                     self.assertEqual(code, 0, result)
-                    self.assertEqual(result, wanted)
+                    self.assert_protected_projection(result, wanted)
         self.assertEqual(before, self.frozen())
 
     def test_required_provider_missing_guards_every_action_shape(self):
@@ -188,6 +209,7 @@ class ActionPolicyProviderTests(unittest.TestCase):
             self.rejected(provider=provider)
 
     def test_stale_after_actual_capture_is_not_success(self):
+        factory = self.code_ready()
         provider = self.seal()
         original = ctl.capture_step_inputs
         def capture(*args, **kwargs):
@@ -195,7 +217,7 @@ class ActionPolicyProviderTests(unittest.TestCase):
             provider.expired = True
             return result
         with patch.object(ctl, "capture_step_inputs", side_effect=capture):
-            self.rejected("--action", "verify", provider=provider)
+            self.rejected("--action", "code", provider=provider, factory=factory)
 
     def test_serialization_expiry_rejects_before_direct_success_output(self):
         provider = self.seal()
@@ -209,6 +231,7 @@ class ActionPolicyProviderTests(unittest.TestCase):
             self.rejected(provider=provider)
 
     def test_deadline_covers_whole_handler_not_only_individual_port_reads(self):
+        factory = self.code_ready()
         provider = self.seal()
         clock = [0.0]
         original, read = ctl.json.dumps, ctl.capture_step_inputs
@@ -224,7 +247,7 @@ class ActionPolicyProviderTests(unittest.TestCase):
         with patch.object(api.time, "monotonic", side_effect=lambda: clock[0]), \
                 patch.object(ctl, "capture_step_inputs", side_effect=capture), \
                 patch.object(ctl.json, "dumps", side_effect=dumps):
-            self.assertIn("deadline", self.rejected("--action", "verify", provider=provider)["error"])
+            self.assertIn("deadline", self.rejected("--action", "code", provider=provider, factory=factory)["error"])
 
     def test_deadline_covers_final_context_guard_itself(self):
         provider = self.seal()
@@ -321,7 +344,10 @@ class ActionPolicyProviderTests(unittest.TestCase):
                 ("--expected-revision", "0" * 64), ("--action", "review"),
                 ("--action", "absent")), expected):
             with self.subTest(extra=extra):
-                self.assertEqual(self.call(*extra, provider=provider, required=True)[:2], wanted)
+                if "review" in extra:
+                    self.rejected(*extra, provider=provider, gate="workflow_capability")
+                else:
+                    self.assertEqual(self.call(*extra, provider=provider, required=True)[:2], wanted)
 
     def test_real_open_execution_limits_actions_and_keeps_receipts_unchanged(self):
         self.f.command("step", "--dir", self.f.ticket, "--step", "plan", "--phase", "start",
@@ -331,8 +357,8 @@ class ActionPolicyProviderTests(unittest.TestCase):
         self.assertEqual(expected["allowed_actions"], ["status"])
         provider = self.seal()
         before = self.frozen()
-        self.assertEqual(self.call(provider=provider, required=True)[1], expected)
-        self.rejected("--action", "plan", provider=provider, gate="action_policy")
+        self.assert_protected_projection(self.call(provider=provider, required=True)[1], expected)
+        self.rejected("--action", "plan", provider=provider, gate="workflow_capability")
         self.assertEqual(before, self.frozen())
 
     def test_real_closed_ticket_remains_readonly_and_action_limited(self):
@@ -344,7 +370,7 @@ class ActionPolicyProviderTests(unittest.TestCase):
         self.assertEqual(expected["allowed_actions"], ["status"])
         provider = self.seal()
         before = self.frozen()
-        self.assertEqual(self.call(provider=provider, required=True, main=True)[1], expected)
+        self.assert_protected_projection(self.call(provider=provider, required=True, main=True)[1], expected)
         self.assertEqual(before, self.frozen())
 
     def test_verify_variant_intent_default_and_restrictions_are_preserved(self):
@@ -360,7 +386,10 @@ class ActionPolicyProviderTests(unittest.TestCase):
         provider = self.seal()
         for extra, wanted in zip(extras, expected):
             with self.subTest(extra=extra):
-                self.assertEqual(self.call(*extra, provider=provider, required=True)[:2], wanted)
+                if "verify" in extra:
+                    self.rejected(*extra, provider=provider, gate="workflow_capability")
+                else:
+                    self.assertEqual(self.call(*extra, provider=provider, required=True)[:2], wanted)
 
     def test_corrupt_event_and_metadata_are_still_rejected_without_writes(self):
         provider = self.seal()
@@ -390,9 +419,11 @@ class ActionPolicyProviderTests(unittest.TestCase):
         expected = self.call("--action", "code")[:2]
         self.assertEqual(expected[1].get("gate_id"), "step_ports")
         provider = self.seal()
-        self.assertEqual(self.call("--action", "code", provider=provider, required=True)[:2], expected)
+        factory = lambda *args: self.fail("missing inputs must not run inspection")
+        self.assertEqual(self.call("--action", "code", provider=provider, required=True, factory=factory)[:2], expected)
 
     def test_query_error_bad_facts_and_late_fact_result_cannot_admit_action(self):
+        factory = self.code_ready()
         provider = self.seal()
         original = provider.query
         def late(*args, **kwargs):
@@ -405,7 +436,7 @@ class ActionPolicyProviderTests(unittest.TestCase):
             before = self.frozen()
             with self.subTest(response=response), patch.object(provider, "query",
                     side_effect=late if response is None else lambda *a, **k: response):
-                code, result, raw = self.call("--action", "verify", provider=provider, required=True)
+                code, result, raw = self.call("--action", "code", provider=provider, required=True, factory=factory)
                 self.assertEqual(code, 1, result)
                 self.assertFalse(result["ok"])
                 self.assertNotIn('"action_allowed": true', raw)

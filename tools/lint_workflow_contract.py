@@ -48,6 +48,7 @@ import argparse
 import math
 import importlib.util
 import re
+import unicodedata
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -92,11 +93,26 @@ ALL_GATES = [
 ]
 
 MAX_EVIDENCE_VALUE_CHARS = 2048
+MAX_EVIDENCE_NESTING = 64
 MAX_LINE_CHARS = 4096
 SENSITIVE_KEYWORDS = [
     "api_key", "apikey", "cookie", "password", "passwd",
-    "secret", "authorization", "bearer",
+    "secret", "authorization", "bearer", "access_token", "refresh_token",
+    "token", "credential", "private_key", "access_key",
+    "密码", "口令", "密钥", "令牌",
 ]
+# Field names stay strict. Free text instead needs credential syntax/material;
+# merely discussing permission or security is never a path-dependent exemption.
+_SENSITIVE_LABEL = r"(?:api[ \t_-]?key|cookie|password|passwd|secret|authorization|bearer|token|credentials?|private[ \t_-]?key|access[ \t_-]?key|密码|口令|密钥|令牌)"
+_SENSITIVE_ASSIGNMENT = re.compile(
+    _SENSITIVE_LABEL + r"[a-z0-9_.-]{0,64}(?:[ \t]*(?:/[a-z0-9_./-]{1,32}|\([a-z0-9_./-]{1,32}\)))?[\"']?[ \t]*[:：=]",
+    re.IGNORECASE)
+_SENSITIVE_MATERIAL = re.compile(
+    r"-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY-----"
+    r"|\b(?:sk-[a-z0-9_-]{20,}|gh[pousr]_[a-z0-9]{20,}|github_pat_[a-z0-9_]{20,}|(?:AKIA|ASIA)[A-Z0-9]{16})\b"
+    r"|\beyJ[a-z0-9_-]+\.[a-z0-9_-]+\.[a-z0-9_-]+\b"
+    r"|\bbearer[ \t]+(?:[a-z0-9_-]{24,}|(?=[a-z0-9._~+/-]*[0-9._~+/-])[a-z0-9._~+/-]{8,})={0,2}\b",
+    re.IGNORECASE)
 
 _EVIDENCE = None
 
@@ -130,70 +146,17 @@ def find_gates_catalog() -> Tuple[Optional[Dict], Optional[str]]:
     return None, f"未找到 mcp/workflow-gate/gates.json（查找位置: {candidates}）"
 
 
-def _negative_permission_note(text: str, path: str) -> bool:
-    """Recognize a bounded permission disclaimer, not general credential prose."""
-    if re.fullmatch(r"\$\.verification_runs(?:\[[0-9]+\])?\.note", path) is None \
-            or len(text) > MAX_EVIDENCE_VALUE_CHARS:
-        return False
-    # Unknown control/non-ASCII structure retains the original strict scan.
-    if any(not 32 <= ord(char) <= 126 for char in text) or text.splitlines() != [text]:
-        return False
-    # Reject assignment/structure syntax throughout the note before prose.
-    if any(char in text for char in '="\'`{}[]<>|&$%\\+*^~'):
-        return False
-    low = text.lower()
-    # Inspect the full prefix once, including punctuation inside header names.
-    last_colon = low.rfind(":")
-    if last_colon >= 0 and any(word in low[:last_colon]
-                              for word in (*SENSITIVE_KEYWORDS, "token", "credential")):
-        return False
-    if low.count("authorization") != 1 or any(
-            word in low for word in SENSITIVE_KEYWORDS if word != "authorization"):
-        return False
-    hit = re.search(r"(?<!\w)authorization(?!\w)", low)
-    if hit is None or re.fullmatch(r"[.!?]?\s*", low[hit.end():]) is None:
-        return False
-    # Find boundaries on the original full string; slicing must not invent '$'.
-    start = 0
-    for boundary in re.finditer(r"[.;!?](?=\s|$)", low):
-        if boundary.end() <= hit.start():
-            start = boundary.end()
-    clause = low[start:].strip().rstrip(".!?").strip()
-    if not clause.startswith("no "):
-        return False
-    body = clause[3:]
-    if re.search(r"\s+and\s+", body):
-        return False
-    fragments = re.split(r",\s*|\s+or\s+", body)
-    # Require a final 'or' for the defined label-list shape.
-    # This is lexical matching, not proof of English negation scope.
-    if len(fragments) > 1 and re.search(r"\s+or\s+[^,]+$", body) is None:
-        return False
-    # These are small label lists, not a natural-language semantic parser.
-    forbidden = {"no", "not", "only", "and", "or", "need", "needs", "require", "requires",
-                 "required", "is", "are", "was", "were", "has", "have", "had",
-                 "can", "could", "should", "must", "may", "might", "will", "would",
-                 "receive", "received", "grant", "granted", "allow", "allowed"}
-    for index, fragment in enumerate(fragments):
-        words = fragment.split()
-        limit = 2 if index == len(fragments) - 1 else 3
-        if not words or len(words) > limit or any(word in forbidden for word in words):
-            return False
-        if any(re.fullmatch(r"[a-z][a-z0-9]*(?:[-/][a-z0-9]+)*", word) is None
-               for word in words):
-            return False
-    return fragments[-1].split()[-1] == "authorization"
-
-
 def scan_sensitive(obj: Any, path: str = "$", *,
-                   direct_verification_run: bool = False) -> List[str]:
-    """递归扫描 metadata 内敏感数据与超长文本。返回违规描述列表。"""
+                   direct_verification_run: bool = False, _depth: int = 0) -> List[str]:
+    """递归扫描敏感数据与超长文本；保留旧调用参数，但不再按上下文豁免。"""
+    if _depth > MAX_EVIDENCE_NESTING:
+        return [f"{path} nesting exceeds scanner capacity"]
     issues: List[str] = []
     if isinstance(obj, dict):
         # Candidate paths/hashes are typed source metadata, not credential
         # values. Unknown contract fields remain free text and are scanned.
         if "candidate_id" in obj and "manifest" in obj and evidence_module().control_module().candidate_module().snapshot_identity_ok(obj):
-            issues.extend(scan_sensitive(obj.get("scope_contract"), path + ".scope_contract"))
+            issues.extend(scan_sensitive(obj.get("scope_contract"), path + ".scope_contract", _depth=_depth + 1))
             scope = obj.get("inspection_scope") or {}
             for key, value in scope.items():
                 if key in {"scopes", "related"} and isinstance(value, list) and all(
@@ -205,46 +168,42 @@ def scan_sensitive(obj: Any, path: str = "$", *,
                     # IDs have a typed exemption; arbitrary values remain text.
                     for label, baseline in value.items():
                         if not isinstance(baseline, str) or re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", baseline) is None:
-                            issues.extend(scan_sensitive(baseline, path + ".inspection_scope.baselines." + str(label)))
+                            issues.extend(scan_sensitive(baseline, path + ".inspection_scope.baselines." + str(label), _depth=_depth + 1))
                     continue
-                issues.extend(scan_sensitive({key: value}, path + ".inspection_scope"))
+                issues.extend(scan_sensitive({key: value}, path + ".inspection_scope", _depth=_depth + 1))
             return issues
         for k, v in obj.items():
-            kl = str(k).lower()
-            if any(kw in kl for kw in SENSITIVE_KEYWORDS):
+            issues.extend(scan_sensitive(str(k), path + ".<field>", _depth=_depth + 1))
+            kl = re.sub(r"[-_\s]", "", str(k).lower())
+            if any(kw.replace("_", "") in kl for kw in SENSITIVE_KEYWORDS):
                 issues.append(f"{path}.{k} 命中敏感键名")
-            # Only the trusted direct-run caller may exempt its exact note key.
-            # Recursive values never inherit this qualification.
-            if (direct_verification_run is True and k == "note"
-                    and isinstance(v, str)
-                    and _negative_permission_note(v, f"{path}.{k}")):
-                continue
-            issues.extend(scan_sensitive(v, f"{path}.{k}"))
+            issues.extend(scan_sensitive(v, f"{path}.{k}", _depth=_depth + 1))
     elif isinstance(obj, list):
         for i, v in enumerate(obj):
-            issues.extend(scan_sensitive(v, f"{path}[{i}]"))
+            issues.extend(scan_sensitive(v, f"{path}[{i}]", _depth=_depth + 1))
     elif isinstance(obj, str):
-        low = obj.lower()
-        for kw in SENSITIVE_KEYWORDS:
-            if kw in low:
-                issues.append(f"{path} 含敏感词 '{kw}'")
-                break
         if path.endswith(".artifact_identity"):
             # The CLI stores artifact identities as strings. Scan JSON containers
-            # per leaf, retaining the raw keyword check above so duplicate keys
-            # cannot conceal a credential that was visible in the original text.
+            # per leaf, preserving duplicate fields rather than silently dropping
+            # earlier material during JSON decoding. Invalid JSON uses raw syntax.
             try:
-                identity = evidence_module().control_module().strict_json_loads(obj)
+                identity = json.loads(obj, object_pairs_hook=lambda pairs: [{key: value} for key, value in pairs],
+                                      parse_constant=evidence_module().control_module().reject_nonfinite_json)
             except (ValueError, RecursionError):
                 identity = None
             if isinstance(identity, (dict, list)):
                 try:
-                    issues.extend(scan_sensitive(identity, path))
+                    issues.extend(scan_sensitive(identity, path, _depth=_depth + 1))
                 except RecursionError:
                     issues.append(f"{path} structured identity nesting exceeds scanner capacity")
                 return issues
         if len(obj) > MAX_EVIDENCE_VALUE_CHARS:
             issues.append(f"{path} 单值 {len(obj)} 字符，疑似完整正文（> {MAX_EVIDENCE_VALUE_CHARS}）")
+            return issues
+        if any(unicodedata.category(char) in {"Cc", "Cf"} and char not in "\t\r\n" for char in obj):
+            issues.append(f"{path} contains hidden control characters")
+        if _SENSITIVE_ASSIGNMENT.search(obj) or _SENSITIVE_MATERIAL.search(obj):
+            issues.append(f"{path} contains credential syntax or material")
     return issues
 
 

@@ -148,6 +148,8 @@ Git checkout 和逐仓提交契约由 `steps/reopen.md` 先创建/校验；然�
 
 `record-verification` 在一个事务中追加 `verification_runs` 和 `verification_recorded` 事件，不修改 `patch_history/status/completed_steps/delivery_verdict`。`--evidence` 必填；复用构建时 `--build-source reused` 还必须提供 `--artifact-identity`。embedded/camera 每个验证单元都必须附与合同完全一致的 `--profile`、`--baseline-ref sha256:<64hex>`；有量化指标时再附严格数值对象 `--metrics-json`。布尔、NaN、Infinity 或非对象在加锁写入前拒绝。
 
+验证记录与后续 workflow 检查共享敏感材料规则：普通授权/安全说明可使用自然语言，实际凭据字段、赋值、认证头和密钥材料拒绝写入，诊断不回显凭据值。历史合法说明按同一规则只读解释，不改写受保护事件。能力预检和阶段未知恢复复用 [环境诊断](environment_diagnostics.md#请求能力与阻断恢复)，不增加独立状态机或人工审批环节。
+
 严格原始证据通过互斥 `--evidence-bundle <path>` / `--evidence-bundle-json <{path,sha256}>` 接入同一 writer；完整合同摘要、按 cell 要求、当前文件复查与历史可读边界见[严格原始证据](serial_evidence_stages.md#3-严格原始证据)。不能导入自报“已通过”结果。
 
 启用候选的工单还须显式传 `--candidate-id` 和 `--environment`。ID 必须有真实 current/review/run/capture 历史快照或匹配 live source，任意编造 ID 拒绝；完整快照进入 metadata/event，CLI 只显示 ID。`candidate_id` 与 embedded 的 `baseline_ref` 相互独立。查询资格使用当前 live source，捕获失败即阻断；记录旧 ID 只追加历史，不能清除当前验证债务。候选相等或严格同内容线性提交证明可复用，其余漂移需新证据。

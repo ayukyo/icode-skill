@@ -27,6 +27,14 @@ health MCP 提供相同的 `diagnose_registration(host_config, entries_dir=None)
 
 修复按问题定位：安装漂移走官方 `scripts/sync-to-global.sh` 预览→apply→摘要/配置/入口复核→二次预览；注册漂移先核对导出来源与对应安装器，展示具体目标后按授权重新注册。不存在通用 `--fix`；不得运行任意配置项或自动删除其他服务。重载宿主后再验证工具。
 
+## 请求能力与阻断恢复
+
+复用 `icode_control.py action-policy --dir <已绑定工单>` 的 `capability_preflight`。路由器将本次请求实际包含的步骤通过可重复的 `--required-step` 一并传入，例如 `--required-step code --required-step deepcheck --required-step audit`；由宿主自动生成，不要求用户重输步骤或填写确认表。没有显式步骤时仍返回能力概览。能力表示当前后端的控制面入口支持，`runtime_verified=false`，不能替代端口、权限、设备或实际运行验收。
+
+受保护 Git 宿主必须向同一次调用传入实际 candidate provider 和需要的 inspection provider factory。普通本地 CLI 的 local 概览不能代替受保护宿主的结果。当前受保护模式只有 code inspection 已接通，仍需配对 factory；其他业务步骤缺少传播链时返回 `workflow_capability` 和全部不支持步骤。动作投影也不会推荐这些步骤。保留原工单，补齐对应实现后重试；重复授权或改用裸 Git 都不能解决后端能力缺失。
+
+阶段历史无法可靠解析时，投影使用 `state=unknown`，保留写入保护，并给出 `discovery` 中的具体控制文件和 `recovery` 建议。先用已有只读入口核对受影响历史与可信备份；不得删除坏账本、伪造事件或将未知状态当普通无阶段工程。已确定阶段的正常证据/前置阶段不足仍按原门禁报告，不混成发现失败。
+
 ## 降级进入交付摘要
 
 `icode_delivery.py --dir <工单>` 的 `environment_observations` 读取 thinking trace 和已有 `.mcp_gate_report.json`，输出记录条数、success/degraded/blocked 计数及 MCP 不可用计数；不回传自由文本原因。thinking 计数包含历史重试，不是唯一步骤数；MCP 来源是已有派生报告，未重新执行其门禁。缺文件为 `untracked`、坏文件为 `partial`、存在降级为 `attention`。

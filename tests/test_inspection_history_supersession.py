@@ -226,6 +226,109 @@ def test_later_finished_review_on_new_head_does_not_rebind_old_history(fast_cand
     check_rejected(f)
 
 
+def test_forward_commit_with_same_base_accepts_history_without_rewriting_receipts(candidate):
+    f = candidate
+    f.create()
+    f.finish_review("code", "code-before-commit")
+    old_worklist = (f.ticket / "code_worklist.json").read_bytes()
+    old_report = (f.ticket / "04_code_review_fix.md").read_bytes()
+    old_receipt = copy.deepcopy(ctl.load_metadata(f.ticket)["review_receipts"][0])
+    old_ledger = (f.ticket / ctl.EVENTS_NAME).read_bytes()
+    (f.repo / "source.py").write_text("value = 2\n", encoding="utf-8")
+    f.git("add", "source.py")
+    f.git("commit", "-qm", "normal forward source change")
+    f.call("candidate", "--dir", f.ticket, "--phase", "capture", "--base", f.base,
+           "--request-id", "forward-same-base")
+    f.finish_review("audit", "audit-after-commit")
+    assert ctl.delivery_freshness(f.ticket, required_steps=("audit",))["ok"]
+    frozen = f.bytes()
+    result = f.call("check-outputs", "--dir", f.ticket, "--step", "code")
+    assert result["ok"]
+    assert any("historical_inspection_superseded_by=audit" in item for item in result["warnings"])
+    assert f.bytes() == frozen
+    assert (f.ticket / "code_worklist.json").read_bytes() == old_worklist
+    assert (f.ticket / "04_code_review_fix.md").read_bytes() == old_report
+    assert ctl.load_metadata(f.ticket)["review_receipts"][0] == old_receipt
+    assert (f.ticket / ctl.EVENTS_NAME).read_bytes().startswith(old_ledger)
+
+
+def test_native_history_proof_keeps_64_commit_boundary_and_same_head_tree_guard(candidate):
+    f = candidate
+    old = f.capture()
+    for index in range(64):
+        f.git("commit", "--allow-empty", "-qm", "forward proof " + str(index))
+    current = f.capture()
+    assert ctl._inspection_history_extends(old, current)
+    f.git("commit", "--allow-empty", "-qm", "forward proof exceeds budget")
+    assert not ctl._inspection_history_extends(old, f.capture())
+    assert not ctl._inspection_history_extends(old, dict(old, head_tree="0" * 40))
+
+
+def test_history_query_failures_keep_check_outputs_structured_and_read_only(fast_candidate):
+    f = fast_candidate
+    f.create()
+    f.finish_review("code", "code-before-query-failure")
+    (f.repo / "source.py").write_text("value = 2\n", encoding="utf-8")
+    f.git("commit", "-qam", "normal forward source change")
+    f.call("candidate", "--dir", f.ticket, "--phase", "capture", "--base", f.base,
+           "--request-id", "forward-query-failure")
+    f.finish_review("audit", "audit-before-query-failure")
+    module = ctl.candidate_module()
+    native_git = module._git
+    frozen = f.bytes()
+    for failure in (module.CandidateError("Git query unavailable"),
+                    module.CandidateError("Git query timeout"), b"\xff"):
+        proof_queries = []
+
+        def failed_proof(root, args, limit, **kwargs):
+            if args[:2] == ["--no-replace-objects", "rev-list"]:
+                proof_queries.append(args)
+                if isinstance(failure, Exception):
+                    raise failure
+                return failure
+            return native_git(root, args, limit, **kwargs)
+
+        with patch.object(module, "_git", side_effect=failed_proof):
+            check_rejected(f)
+        assert len(proof_queries) == 1
+        assert f.bytes() == frozen
+
+
+@pytest.mark.parametrize("history", ["rollback", "amend", "divergence", "replacement", "graft"])
+def test_fresh_audit_cannot_certify_rewritten_or_rolled_back_history(fast_candidate, history):
+    f = fast_candidate
+    (f.repo / "source.py").write_text("value = 2\n", encoding="utf-8")
+    f.git("commit", "-qam", "old reviewed head")
+    f.create()
+    f.call("candidate", "--dir", f.ticket, "--phase", "capture", "--base", f.base,
+           "--request-id", "original-base")
+    f.finish_review("code", "code-old-head")
+    old_head = f.git("rev-parse", "HEAD").strip()
+    if history == "rollback":
+        f.git("checkout", "--detach", f.base)
+    elif history == "amend":
+        (f.repo / "source.py").write_text("value = 3\n", encoding="utf-8")
+        f.git("commit", "-qam", "rewritten reviewed head", "--amend")
+    else:
+        f.git("checkout", "-qb", "other-history", f.base)
+        (f.repo / "source.py").write_text("value = 3\n", encoding="utf-8")
+        f.git("commit", "-qam", "divergent head")
+        current_head = f.git("rev-parse", "HEAD").strip()
+        if history == "replacement":
+            tree = f.git("rev-parse", "HEAD^{tree}").strip()
+            replacement = f.git("commit-tree", tree, "-p", old_head, "-m", "forged parent").strip()
+            f.git("replace", current_head, replacement)
+        elif history == "graft":
+            (f.repo / ".git/info/grafts").write_text(current_head + " " + old_head + "\n", encoding="ascii")
+    f.call("candidate", "--dir", f.ticket, "--phase", "capture", "--base", f.base,
+           "--request-id", "changed-history")
+    f.finish_review("audit", "audit-changed-history")
+    assert ctl.delivery_freshness(f.ticket, required_steps=("audit",))["ok"]
+    frozen = f.bytes()
+    check_rejected(f)
+    assert f.bytes() == frozen
+
+
 def test_later_finished_review_in_another_root_does_not_rebind_history(fast_candidate):
     f = fast_candidate
     f.create()

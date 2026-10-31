@@ -4,6 +4,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import shutil
 from pathlib import Path
 import subprocess
 import sys
@@ -375,18 +376,21 @@ class VerificationTests(unittest.TestCase):
                 self.assertIn(issue, ctl.candidate_event_issues(events, self.meta()))
 
     def test_reproducible_compiled_artifact_new_ctime_old_mtime_is_fresh(self):
+        compiler = next((path for name in ("cc", "gcc", "clang") if (path := shutil.which(name))), None)
+        if compiler is None:
+            self.skipTest("native C compiler unavailable (cc/gcc/clang)")
         source = self.repo / "hello.c"
         source.write_text("int main(void) { return 0; }\n", encoding="utf-8", newline="\n")
         build = self.repo / "build"
         build.mkdir()
         binary = build / ("hello.exe" if os.name == "nt" else "hello")
         binary_relative = binary.relative_to(self.repo).as_posix()
-        parameters = {"configure_command": ["cc", "--version"], "build_command": ["cc", "hello.c", "-o", binary_relative]}
+        parameters = {"configure_command": [compiler, "--version"], "build_command": [compiler, "hello.c", "-o", binary_relative]}
         candidate = self.snapshot()["candidate_id"]
         start = self.call("build-start", "--dir", self.ticket, "--build-dir", build, "--candidate-id", candidate,
                           "--parameters-json", json.dumps(parameters), "--request-id", "compile-start")
-        self.assertEqual(subprocess.run(["cc", "--version"], capture_output=True).returncode, 0)
-        compiled = subprocess.run(["cc", str(source), "-o", str(binary)], capture_output=True, text=True)
+        self.assertEqual(subprocess.run([compiler, "--version"], capture_output=True).returncode, 0)
+        compiled = subprocess.run([compiler, str(source), "-o", str(binary)], capture_output=True, text=True)
         self.assertEqual(compiled.returncode, 0, compiled.stderr)
         self.assertEqual(subprocess.run([str(binary)]).returncode, 0)
         os.utime(binary, (1, 1))
@@ -394,7 +398,7 @@ class VerificationTests(unittest.TestCase):
         self.assertLess(binary.stat().st_mtime_ns, receipt["observed_ns"])
         self.assertGreaterEqual(binary.stat().st_ctime_ns, receipt["observed_ns"])
         sha = hashlib.sha256(binary.read_bytes()).hexdigest()
-        provenance = dict(self.binary_provenance(start, [{"path": binary_relative, "sha256": sha}]), **parameters, compiler="cc")
+        provenance = dict(self.binary_provenance(start, [{"path": binary_relative, "sha256": sha}]), **parameters, compiler=compiler)
         self.record_artifacts(provenance, request="reproducible-artifact")
 
     def test_artifact_byte_budget_rejects_before_append_and_can_be_explicitly_raised(self):
@@ -446,7 +450,9 @@ class VerificationTests(unittest.TestCase):
         self.assertEqual(before, self.frozen())
 
     def test_artifact_timeout_rejects_real_writer_and_releases_lock(self):
-        self.budget_capture({"timeout_seconds": 1})
+        # Keep native Git setup on the normal budget; expire only the artifact
+        # reader's clock below so this test reaches the boundary it verifies.
+        self.budget_capture({})
         start = self.start_build()
         (self.repo / "build/app").write_bytes(b"binary")
         provenance = self.binary_provenance(start, [{"path": "build/app", "sha256": hashlib.sha256(b"binary").hexdigest()}])
@@ -457,8 +463,9 @@ class VerificationTests(unittest.TestCase):
         module = ctl.verification_evidence_module()
         # Expire after the first actual stream read, rather than only at
         # preflight, to exercise the per-block timeout guard under the lock.
-        ticks = iter([0, 0, 0, 2])
-        clock = SimpleNamespace(monotonic=lambda: next(ticks, 2))
+        expired = ctl.candidate_module().DEFAULT_LIMITS["timeout_seconds"] + 1
+        ticks = iter([0, 0, 0, expired])
+        clock = SimpleNamespace(monotonic=lambda: next(ticks, expired))
         before = self.frozen()
         with mock.patch.object(module, "time", clock, create=True):
             with self.assertRaises(ctl.ControlError) as failure:

@@ -1971,10 +1971,13 @@ def validate_step_outputs(out_dir, meta, model, step, allow_incomplete=False,
 
 
 
+PROTECTED_INSPECTION_STEPS = frozenset({"code"})
+
+
 def _code_access(step, provider, required, factory, deadline=None):
     if not (_candidate_access_requested(provider, required) or factory is not None):
         return {}
-    if step != "code":
+    if step not in PROTECTED_INSPECTION_STEPS:
         raise ControlError("only code inspection is enabled", gate_id="candidate_business_propagation_pending")
     return dict(git_provider=provider, require_git_provider=required,
                 inspection_provider_factory=factory,
@@ -2360,6 +2363,37 @@ def _authenticated_inspection_review(out_dir, meta, model, events, start):
     return {"start": start, "finish": finish, "report": report, "candidate": candidate, "files": files}
 
 
+def _inspection_history_extends(recorded, current):
+    """Prove ordinary native history with the candidate backend's linear bound.
+
+    Protected check-outputs never enters historical supersession. Its typed
+    provider contract cannot be replaced by this native-only Git query.
+    """
+    if recorded["head"] == current["head"]:
+        return recorded["head_tree"] == current["head_tree"]
+    module = candidate_module()
+    root = Path(current["identity"]["checkout_realpath"])
+    # Grafts alter rev-list parents; replacement objects are disabled below.
+    # Neither can establish the original immutable commit relationship.
+    if (Path(current["identity"]["common_git_dir"]) / "info/grafts").exists():
+        return False
+    old_head, new_head = recorded["head"], current["head"]
+    ancestors = module._git(root, ["--no-replace-objects", "rev-list", "--parents", "--ancestry-path",
+                                  "--max-count=65", f"{old_head}..{new_head}"],
+                            module.DEFAULT_LIMITS["max_git_bytes"]).decode("ascii").splitlines()
+    # Keep the existing candidate LINEAR semantics: at most 64 commits, with
+    # one parent at each edge. Merge/rewrite/rollback cannot certify history.
+    if not ancestors or len(ancestors) > 64:
+        return False
+    parent = old_head
+    for line in reversed(ancestors):
+        parts = line.split()
+        if len(parts) != 2 or parts[1] != parent:
+            return False
+        parent = parts[0]
+    return parent == new_head
+
+
 def inspection_superseded_by_current_review(out_dir, meta, model, events, step, start):
     """Accept historical bytes only behind a complete later current review.
 
@@ -2381,15 +2415,17 @@ def inspection_superseded_by_current_review(out_dir, meta, model, events, step, 
                 or new["finish"]["payload"].get("outcome") != "success":
             return None
         current = candidate_snapshot(out_dir, meta, events=events)
-        # A later source revision within the same checkout/base is allowed;
-        # moving roots, HEAD, exclusions or the implementation contract is not.
-        stable = ("identity", "base", "head", "head_tree", "scope_contract",
+        # A later source revision/linear commit within this checkout/base is
+        # allowed; roots, exclusions and the implementation contract stay bound.
+        stable = ("identity", "base", "scope_contract",
                   "excluded_side_effects", "control_artifact_exclusions")
         if any(old["candidate"].get(key) != current.get(key) for key in stable) \
                 or not set(old["candidate"]["code_files"]).issubset(current["code_files"]) \
                 or new["candidate"]["candidate_id"] != current["candidate_id"] \
                 or old["report"].get("resolved_baselines") != new["report"].get("resolved_baselines") \
                 or not set(old["files"]).issubset(new["files"]):
+            return None
+        if not _inspection_history_extends(old["candidate"], current):
             return None
         later_step, attempt = latest["payload"]["step"], latest["payload"]["attempt"]
         if inspection_worklist_issues(out_dir, meta, later_step, attempt) \
@@ -4857,6 +4893,7 @@ def _candidate_context_guard(out_dir, meta, provider, required):
 
 
 _VERIFICATION_EVIDENCE_MODULE = None
+_WORKFLOW_LINT_MODULE = None
 
 
 def verification_evidence_module():
@@ -4866,6 +4903,16 @@ def verification_evidence_module():
         _VERIFICATION_EVIDENCE_MODULE = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(_VERIFICATION_EVIDENCE_MODULE)
     return _VERIFICATION_EVIDENCE_MODULE
+
+
+def workflow_lint_module():
+    """Reuse the read-only credential policy enforced by the workflow linter."""
+    global _WORKFLOW_LINT_MODULE
+    if _WORKFLOW_LINT_MODULE is None:
+        spec = importlib.util.spec_from_file_location("icode_workflow_lint", SKILL_ROOT / "tools/lint_workflow_contract.py")
+        _WORKFLOW_LINT_MODULE = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(_WORKFLOW_LINT_MODULE)
+    return _WORKFLOW_LINT_MODULE
 
 
 def verification_context(out_dir, meta=None, *, git_provider=None, require_git_provider=False):
@@ -5562,6 +5609,21 @@ def cmd_build_start(args, *, git_provider=None, require_git_provider=False):
 
 def cmd_record_verification(args, *, git_provider=None, require_git_provider=False):
     out_dir = Path(args.dir).resolve()
+    # Reject before acquiring a lock or recovering/publishing any transaction.
+    # Parse JSON options per leaf so container size is not mistaken for a long
+    # evidence value. Existing validators retain responsibility for their shape.
+    scanner = workflow_lint_module()
+    supplied = {key: value for key, value in vars(args).items() if key not in {"dir", "cmd", "func"}}
+    for key, value in supplied.items():
+        if key.endswith("_json") and isinstance(value, str):
+            try:
+                supplied[key] = strict_json_loads(value)
+            except (ValueError, RecursionError):
+                pass
+    if scanner.scan_sensitive(supplied, "$.verification_input"):
+        # Keys and values are untrusted too: never echo scanner paths or input.
+        raise ControlError("verification input contains credential data or unsafe text",
+                           exit_code=1, gate_id="verification_sensitive_data")
     if args.outcome == "pass":
         require_stage_action(out_dir, "verify", git_provider=git_provider, require_git_provider=require_git_provider)
     access = ({"git_provider": git_provider, "require_git_provider": require_git_provider}
@@ -5733,6 +5795,9 @@ def cmd_record_verification(args, *, git_provider=None, require_git_provider=Fal
         prior = find_idempotent_event(
             events, args.request_id, "verification_recorded", input_payload,
             payload_keys=(*input_payload, "test_summary"))
+        if scanner.scan_sensitive(input_payload, "$.verification_runs", direct_verification_run=True):
+            raise ControlError("verification record contains credential data or unsafe text",
+                               exit_code=1, gate_id="verification_sensitive_data")
         def before_publish():
             # Bind this invocation's live source, not a permitted historical origin.
             current = candidate_snapshot(out_dir, meta, events=events, **access)
@@ -7299,13 +7364,50 @@ def cmd_trace(args):
     return 0
 
 
-def cmd_action_policy(args, *, git_provider=None, require_git_provider=False):
+def workflow_capability_preflight(model, policy, required_steps, *, protected=False,
+                                  inspection_provider_factory=None):
+    """Describe dispatch support, separately from authorization/runtime proof.
+
+    Reuse the protected inspection admission set. A missing backend is an
+    implementation limit: neither another confirmation nor raw Git can fix it.
+    This read-only projection never activates an inspection transport.
+    """
+    known = set(model["step_contracts"]) | set(policy["actions"])
+    required = list(dict.fromkeys(required_steps))
+    unknown = sorted(set(required) - known)
+    if unknown:
+        raise ControlError("未知能力预检步骤", exit_code=2,
+                           gate_id="workflow_capability_contract", unknown_steps=unknown)
+    steps = {}
+    for name in sorted(known):
+        supported = not protected or name in policy.get("read_only_actions", []) or (
+            name in PROTECTED_INSPECTION_STEPS and callable(inspection_provider_factory))
+        reason = None if supported else (
+            "inspection_provider_required" if name in PROTECTED_INSPECTION_STEPS
+            else "provider_propagation_pending")
+        steps[name] = {"supported": supported, "reason": reason}
+    unsupported = [name for name in required if not steps[name]["supported"]]
+    return {"schema_version": 1,
+            "profile": "protected_provider" if protected else "local",
+            "boundary": "control_plane_dispatch", "runtime_verified": False,
+            "steps": steps, "required_steps": required, "unsupported_steps": unsupported,
+            "task_supported": not unsupported if required else None,
+            "recovery": {"automatic_fallback": False, "requires_user_confirmation": False,
+                         "action": "complete_provider_propagation" if protected else None,
+                         "message": "后端能力缺失时保留当前工单，先补齐受保护调用链；不改用裸 Git，也不重复索取授权。"
+                                    if protected else None}}
+
+
+def cmd_action_policy(args, *, git_provider=None, require_git_provider=False,
+                      inspection_provider_factory=None):
     """生成轻量、一致的 UI/Agent 动作投影，并用 revision 防止过期执行。"""
     if getattr(args, "verify_action", None) and args.action != "verify":
         raise ControlError("--verify-action 只能与 --action verify 一起使用", exit_code=2)
     out_dir = Path(args.dir).resolve()
     access = ({"git_provider": git_provider, "require_git_provider": require_git_provider}
               if _candidate_access_requested(git_provider, require_git_provider) else {})
+    if inspection_provider_factory is not None and not access:
+        raise ControlError("能力预检缺少配对的受保护候选上下文", gate_id="candidate_provider_context")
     deadline = time.monotonic() + candidate_module().DEFAULT_LIMITS["timeout_seconds"] if access else None
     sm = load_state_machine()
     policy = sm.get("action_policy")
@@ -7330,6 +7432,16 @@ def cmd_action_policy(args, *, git_provider=None, require_git_provider=False):
         raise ControlError(
             "事件链不完整，拒绝生成动作策略",
             exit_code=1, gate_id="event_chain", violations=problems)
+    model = load_execution_model()
+    required_steps = list(getattr(args, "required_step", None) or [])
+    if args.action in policy["actions"]:
+        required_steps.append(args.action)
+    capabilities = workflow_capability_preflight(
+        model, policy, required_steps, protected=bool(access) or inspection_provider_factory is not None,
+        inspection_provider_factory=inspection_provider_factory)
+    if capabilities["task_supported"] is False:
+        raise ControlError("当前后端尚不支持请求的完整步骤组合", gate_id="workflow_capability",
+                           capability_preflight=capabilities)
     execution = execution_trace(events)
     stage = stage_projection(out_dir, **access)
     requested_verify_variant = getattr(args, "verify_action", None) or "intent"
@@ -7389,7 +7501,11 @@ def cmd_action_policy(args, *, git_provider=None, require_git_provider=False):
     return_required = bool((legal_transition(sm, status, "review_in_progress") or {}).get("review_return"))
     if return_required and review_return_problem(meta, events, stage):
         allowed = [name for name in allowed if name != "review"]
-    allowed = sorted(allowed)
+    # State permission alone must not recommend a step whose backend is absent.
+    executable = sorted(name for name in allowed if capabilities["steps"][name]["supported"])
+    if len(executable) != len(allowed) and blocked_reason is None:
+        blocked_reason = "workflow_capability"
+    allowed = executable
     recommended = (policy.get("recommended_by_status") or {}).get(status)
     if recommended not in allowed:
         recommended = None
@@ -7438,6 +7554,7 @@ def cmd_action_policy(args, *, git_provider=None, require_git_provider=False):
         "open_operations": execution["open_operations"],
         "open_agents": execution["open_agents"],
         "stage": stage,
+        "capability_preflight": capabilities,
     }
     if args.action:
         result.update({"action": args.action, "action_allowed": True})
@@ -7708,6 +7825,8 @@ def build_parser():
                        help="只读生成允许动作、可信执行根与 revision")
     p.add_argument("--dir", required=True)
     p.add_argument("--action", help="可选：启动前复检指定动作")
+    p.add_argument("--required-step", action="append", default=[],
+                   help="可重复：自动路由请求包含的全部步骤，提前检查后端支持；不执行步骤")
     p.add_argument("--verify-action", choices=["default", "intent", "build", "plan", "deploy", "listen", "device_test"],
                    help="verify 子动作；无选项仅解释意图，实际执行前须按解析后的动作复检")
     p.add_argument("--expected-revision",
@@ -7917,13 +8036,13 @@ def main(*, git_provider=None, require_git_provider=False, inspection_provider_f
         if inspection_provider_factory is not None:
             access = dict(git_provider=git_provider, require_git_provider=require_git_provider,
                           inspection_provider_factory=inspection_provider_factory)
-        ordinary = inspection_provider_factory is None and (
+        policy_entry = args.cmd == "action-policy" and args.func is cmd_action_policy
+        ordinary = policy_entry or inspection_provider_factory is None and (
             (args.cmd == "candidate" and args.func is cmd_candidate) or
             (args.cmd == "build-start" and args.func is cmd_build_start) or
             (args.cmd == "record-verification" and args.func is cmd_record_verification) or
-            (args.cmd == "stage" and args.func is cmd_stage) or
-            (args.cmd == "action-policy" and args.func is cmd_action_policy))
-        code_entry = inspection_provider_factory is not None and getattr(args, "step", None) == "code" and (
+            (args.cmd == "stage" and args.func is cmd_stage))
+        code_entry = inspection_provider_factory is not None and getattr(args, "step", None) in PROTECTED_INSPECTION_STEPS and (
             (args.cmd == "step" and args.func is cmd_step and getattr(args, "phase", None) in {"start", "check", "finish"}) or
             (args.cmd == "inspection" and args.func is cmd_inspection and getattr(args, "phase", None) in {"prepare", "read", "assess", "check"}) or
             (args.cmd == "artifact" and args.func is cmd_artifact) or

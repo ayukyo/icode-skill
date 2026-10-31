@@ -71,52 +71,72 @@ def discover_stage_history(project, *, limits=None, tolerate=None):
         bounds.update(limits)
     started = time.monotonic()
     counts = {"entries": 0, "files": 0, "bytes": 0, "events": 0}
+    context = {"path": str(project / ".icode_output"), "control_root": None, "ticket_id": None}
+    def reject(message, reason="invalid_control_state", **details):
+        diagnostic = {**context, "reason": reason, "message": message, **details}
+        if reason == "discovery_budget_exhausted":
+            diagnostic.update(counters=dict(counts), limits=dict(bounds))
+        action = "restore_stage_locator" if reason == "discovery_budget_exhausted" else \
+            "recover_pending_transaction" if reason == "pending_transaction" else \
+            "inspect_control_path" if reason == "unsafe_control_path" else "repair_control_ledger"
+        recovery = {"action": action, "path": context["path"],
+                    "message": "Restore the authenticated stage locator or repair this control state from trusted records, then retry; do not discard unverifiable history.",
+                    "read_only_actions": ["status", "trace", "check", "inspect"]}
+        fail(message, discovery=diagnostic, recovery=recovery)
     def check():
         if time.monotonic() - started > bounds["timeout_seconds"]:
-            fail("stage history discovery time budget exhausted; locator state is unknown")
+            reject("stage history discovery time budget exhausted; locator state is unknown", "discovery_budget_exhausted", limit="timeout_seconds")
     def identity(info, *, cross_source=False):
         value = info.st_dev, info.st_ino, info.st_mode, info.st_size, info.st_mtime_ns
         # Windows path/handle ctime differs; same-source checks retain it below.
         return value if cross_source and os.name == "nt" else value + (info.st_ctime_ns,)
     def ordinary(path, directory=False):
+        context["path"] = str(path)
         info = path.lstat()
         if stat.S_ISLNK(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400 \
                 or not (stat.S_ISDIR(info.st_mode) if directory else stat.S_ISREG(info.st_mode)):
-            fail("stage discovery refuses a symlink/reparse or nonordinary control path")
+            reject("stage discovery refuses a symlink/reparse or nonordinary control path", "unsafe_control_path")
         return info
     def read(path):
+        context["path"] = str(path)
         check()
         counts["files"] += 1
         if counts["files"] > bounds["max_files"]:
-            fail("stage history discovery file budget exhausted")
+            reject("stage history discovery file budget exhausted", "discovery_budget_exhausted", limit="max_files")
         before = ordinary(path)
         parent = ordinary(path.parent, True)
+        context["path"] = str(path)
         if before.st_size > bounds["max_file_bytes"] or counts["bytes"] + before.st_size > bounds["max_total_bytes"]:
-            fail("stage history discovery byte budget exhausted")
+            limit = "max_file_bytes" if before.st_size > bounds["max_file_bytes"] else "max_total_bytes"
+            reject("stage history discovery byte budget exhausted", "discovery_budget_exhausted", limit=limit)
         flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0)
         with os.fdopen(os.open(path, flags), "rb") as handle:
             opened = os.fstat(handle.fileno())
             if identity(opened, cross_source=True) != identity(before, cross_source=True):
-                fail("stage discovery control file replaced before reading")
+                reject("stage discovery control file replaced before reading", "control_file_changed")
             raw = handle.read(min(bounds["max_file_bytes"], bounds["max_total_bytes"] - counts["bytes"]) + 1)
             if identity(os.fstat(handle.fileno())) != identity(opened):
-                fail("stage discovery control file changed while reading")
+                reject("stage discovery control file changed while reading", "control_file_changed")
         if len(raw) != before.st_size or identity(path.lstat()) != identity(before) \
                 or (parent.st_dev, parent.st_ino, parent.st_mode) != tuple(getattr(path.parent.lstat(), key) for key in ("st_dev", "st_ino", "st_mode")):
-            fail("stage discovery control file/parent changed while reading")
+            reject("stage discovery control file/parent changed while reading", "control_file_changed")
         counts["bytes"] += len(raw)
         check()
         return raw
     def tickets(root):
+        context.update(control_root=None, ticket_id=None)
         ordinary(root, True)
         with os.scandir(root) as entries:
             for entry in entries:
+                context.update(path=str(root), control_root=None, ticket_id=None)
+                context.pop("line", None)
                 check()
                 counts["entries"] += 1
                 if counts["entries"] > bounds["max_entries"]:
-                    fail("stage history discovery directory budget exhausted")
+                    reject("stage history discovery directory budget exhausted", "discovery_budget_exhausted", limit="max_entries")
                 if entry.name.startswith(".icode_output_") and entry.name.removeprefix(".icode_output_").isdigit():
                     path = root / entry.name
+                    context.update(control_root=str(path), ticket_id=None)
                     ordinary(path, True)
                     yield path
     output = project / ".icode_output"
@@ -130,25 +150,30 @@ def discover_stage_history(project, *, limits=None, tolerate=None):
         for root in roots:
             for directory in tickets(root):
                 meta_path, events_path = directory / api.METADATA_NAME, directory / api.EVENTS_NAME
+                context.pop("line", None)
                 if not os.path.lexists(meta_path):
                     if os.path.lexists(events_path) or os.path.lexists(directory / api.TXN_NAME):
-                        fail("stage discovery found an orphan ledger; locator state is unknown")
+                        context["path"] = str(meta_path)
+                        reject("stage discovery found an orphan ledger; locator state is unknown", "missing_control_metadata")
                     continue
                 meta = api.strict_json_loads(read(meta_path).decode("utf-8"))
                 if not isinstance(meta, dict):
-                    fail("stage discovery metadata is not an object")
+                    reject("stage discovery metadata is not an object")
+                context["ticket_id"] = meta.get("ticket_id")
                 markers = protected_values(meta)
                 has_marker = any(markers[key] is not None for key in ("stage_program", "stage_binding"))
                 tolerant = tolerate is not None and directory == tolerate and not has_marker
                 if os.path.lexists(directory / api.TXN_NAME):
                     if tolerant:
                         continue
-                    fail("stage discovery found a pending transaction; recover its control ledger first")
+                    context["path"] = str(directory / api.TXN_NAME)
+                    reject("stage discovery found a pending transaction; recover its control ledger first", "pending_transaction")
                 if not os.path.lexists(events_path):
                     if tolerant:
                         continue
                     if api.is_vnext(meta) or has_marker:
-                        fail("stage discovery cannot authenticate metadata without its ledger")
+                        context["path"] = str(events_path)
+                        reject("stage discovery cannot authenticate metadata without its ledger", "missing_control_ledger")
                     continue  # Ordinary legacy tickets had no vNext ledger.
                 unproven = {
                     "stage: stage discovery control ledger hash/schema/identity is damaged",
@@ -157,25 +182,26 @@ def discover_stage_history(project, *, limits=None, tolerate=None):
                 }
                 try:
                     events, previous, seen = [], api.GENESIS_HASH, set()
-                    for line in read(events_path).splitlines():
+                    for line_number, line in enumerate(read(events_path).splitlines(), 1):
+                        context["line"] = line_number
                         if not line.strip():
                             continue
                         check()
                         counts["events"] += 1
                         if counts["events"] > bounds["max_events"]:
-                            fail("stage history discovery event budget exhausted")
+                            reject("stage history discovery event budget exhausted", "discovery_budget_exhausted", limit="max_events")
                         event = api.strict_json_loads(line.decode("utf-8"))
                         if api.check_schema(event, event_schema) or event["event_id"] in seen \
                                 or (events and event.get("ticket_id") != events[0].get("ticket_id")) or event["previous_event_hash"] != previous \
                                 or event["event_hash"] != api.canonical_event_hash(event):
-                            fail("stage discovery control ledger hash/schema/identity is damaged")
+                            reject("stage discovery control ledger hash/schema/identity is damaged", "invalid_control_ledger")
                         seen.add(event["event_id"])
                         previous = event["event_hash"]
                         events.append(event)
                     if not events or events[0]["event_type"] not in {"ticket_created", "migration_applied"}:
-                        fail("stage discovery control ledger has no authenticated origin")
+                        reject("stage discovery control ledger has no authenticated origin", "invalid_control_ledger")
                     if event_issues(events, meta):
-                        fail("stage discovery metadata/protected writer ledger mirrors disagree")
+                        reject("stage discovery metadata/protected writer ledger mirrors disagree", "control_mirror_mismatch")
                 except api.ControlError as exc:
                     # The tolerated ordinary ticket's ledger is the business
                     # lane's contract, not stage evidence. Budget, timeout,
@@ -189,20 +215,26 @@ def discover_stage_history(project, *, limits=None, tolerate=None):
                     # unrelated generic metrics or source-path migrations.
                     api.require_valid_metadata(meta)
                     if events[0].get("ticket_id") != meta.get("ticket_id"):
-                        fail("stage discovery ticket/ledger identity mismatch")
+                        reject("stage discovery ticket/ledger identity mismatch", "control_identity_mismatch")
                     if _project(meta) != project:
-                        fail("stage discovery ticket project identity mismatch")
+                        reject("stage discovery ticket project identity mismatch", "control_identity_mismatch")
                     hashed = [event for event in events if (event.get("payload") or {}).get("metadata_hash_after")]
                     if hashed and hashed[-1]["payload"]["metadata_hash_after"] != api.metadata_hash(meta):
-                        fail("stage discovery metadata/protected writer ledger mirrors disagree")
+                        reject("stage discovery metadata/protected writer ledger mirrors disagree", "control_mirror_mismatch")
                 check()
                 if stage_history:
                     return {"control_root": str(directory), "reason": "authenticated_stage_history"}
         return None
-    except (api.ControlError,):
-        raise
+    except api.ControlError as exc:
+        if "discovery" in exc.extra:
+            raise
+        reject(str(exc), "invalid_control_state")
+    except json.JSONDecodeError as exc:
+        context.setdefault("line", exc.lineno)
+        reject("stage discovery invalid control JSON: " + exc.msg, "invalid_control_json", column=exc.colno)
     except (OSError, ValueError, TypeError, KeyError, AttributeError, RecursionError) as exc:
-        fail("stage history discovery cannot establish ordinary-project state: " + type(exc).__name__)
+        reject("stage history discovery cannot establish ordinary-project state: " + type(exc).__name__,
+               "control_read_failed" if isinstance(exc, OSError) else "invalid_control_state", error_type=type(exc).__name__)
 
 
 def protected_values(meta):
@@ -346,6 +378,21 @@ def _access(provider=None, required=False):
     return {"git_provider": provider, "require_git_provider": required} if ctl()._candidate_access_requested(provider, required) else {}
 
 
+def _require_metadata_object(meta, directory):
+    objects = [("control metadata", meta)]
+    if isinstance(meta, dict):
+        extensions = meta.get("extensions")
+        if extensions is not None:
+            objects.append(("extensions", extensions))
+        if isinstance(extensions, dict) and extensions.get("verification") is not None:
+            objects.append(("extensions.verification", extensions["verification"]))
+    for field, value in objects:
+        if not isinstance(value, dict):
+            fail(field + " must be a JSON object", reason="invalid_control_metadata",
+                 control_path=str(Path(directory) / ctl().METADATA_NAME), control_root=str(directory),
+                 recovery_action="repair_control_metadata")
+
+
 def _verified(directory, *, _metadata_override=None, _allow_pending=False, _observation=None, **access):
     api = ctl()
     directory = Path(directory).resolve(strict=True)
@@ -355,15 +402,28 @@ def _verified(directory, *, _metadata_override=None, _allow_pending=False, _obse
         meta = api.load_metadata(directory, _observation=_observation)
     else:
         meta = api.load_metadata(directory) if _metadata_override is None else _metadata_override
-    api.require_vnext(meta, directory)
-    api.require_valid_metadata(meta)
+    _require_metadata_object(meta, directory)
+    try:
+        api.require_vnext(meta, directory)
+        api.require_valid_metadata(meta)
+    except api.ControlError as exc:
+        exc.extra.setdefault("control_path", str(directory / api.METADATA_NAME))
+        exc.extra.setdefault("control_root", str(directory))
+        raise
     if (directory / api.TXN_NAME).exists():
         if not _allow_pending or _metadata_override is None or api.load_json(directory / api.TXN_NAME, "stage publication transaction").get("before_metadata") != meta:
-            fail("pending transaction requires controlled recovery", directory=str(directory))
-    events, issues = api.verify_event_chain(directory, meta, **access) if _observation is None else \
-        api.verify_event_chain(directory, meta, _observation=_observation, **access)
+            fail("pending transaction requires controlled recovery", directory=str(directory),
+                 control_path=str(directory / api.TXN_NAME), control_root=str(directory),
+                 reason="pending_transaction", recovery_action="recover_pending_transaction")
+    try:
+        events, issues = api.verify_event_chain(directory, meta, **access) if _observation is None else \
+            api.verify_event_chain(directory, meta, _observation=_observation, **access)
+    except api.ControlError as exc:
+        exc.extra.setdefault("control_path", exc.extra.get("path", str(directory / api.EVENTS_NAME)))
+        exc.extra.setdefault("control_root", str(directory))
+        raise
     if issues:
-        fail("event chain invalid", violations=issues)
+        fail("event chain invalid", violations=issues, control_path=str(directory / api.EVENTS_NAME), control_root=str(directory))
     if _observation is not None:
         _observation.bind(directory, meta, events)
     return meta, events
@@ -376,9 +436,13 @@ def _project(meta):
 def _resolve(directory, *, _metadata_override=None, _allow_pending=False, **access):
     directory = Path(directory).resolve()
     hint = ctl().load_metadata(directory) if _metadata_override is None else _metadata_override
+    _require_metadata_object(hint, directory)
     if not locator_path(_project(hint)).parent.exists() and not any(protected_values(hint)[key] is not None for key in ("stage_binding", "stage_program")):
-        if discover_stage_history(_project(hint), tolerate=directory) is not None:
-            fail("project stage locator directory is missing; recover it with stage register on the authenticated coordinator")
+        history = discover_stage_history(_project(hint), tolerate=directory)
+        if history is not None:
+            fail("project stage locator directory is missing; recover it with stage register on the authenticated coordinator",
+                 control_path=str(locator_path(_project(hint))), reason="missing_stage_locator",
+                 recovery_action="restore_stage_locator", coordinator_root=history["control_root"])
         # No stage state to project. Provider context belongs to the business
         # lane; failing it here would replace its own gate with stage_gate.
         return None
@@ -389,7 +453,8 @@ def _resolve(directory, *, _metadata_override=None, _allow_pending=False, **acce
     locator = locator_path(project)
     if not locator.exists():
         if locator.parent.exists() or binding is not None or own_program is not None:
-            fail("enabled project locator is missing")
+            fail("enabled project locator is missing", control_path=str(locator), reason="missing_stage_locator",
+                 recovery_action="restore_stage_locator")
         return None
     try:
         ref = ctl().load_json(locator, "stage locator")
@@ -401,9 +466,10 @@ def _resolve(directory, *, _metadata_override=None, _allow_pending=False, **acce
                    "program_id": program["plan"]["program_id"], "plan_digest": digest(plans[0])} \
                 or Path(program["plan"]["project_root"]).resolve() != project \
                 or _project(coord_meta) != project or digest(program["plan"]) != program["plan_digest"]:
-            fail("locator/program identity mismatch")
+            fail("locator/program identity mismatch", control_path=str(locator), reason="invalid_stage_locator",
+                 recovery_action="restore_stage_locator")
         if not isinstance(program.get("generation"), int) or program["generation"] < 1:
-            fail("invalid program generation")
+            fail("invalid program generation", control_path=str(coordinator / ctl().METADATA_NAME), control_root=str(coordinator))
         sid = None
         if binding is not None:
             sid = binding["stage_id"]
@@ -412,15 +478,18 @@ def _resolve(directory, *, _metadata_override=None, _allow_pending=False, **acce
             if binding != expected or binding.get("plan_digest") not in {digest(plan) for plan in plans} \
                     or sid not in {row["id"] for plan in plans for row in plan["stages"]} \
                     or program["bindings"].get(sid) != {"control_root": str(directory), "ticket_id": meta["ticket_id"]}:
-                fail("stage binding is missing or disagrees with coordinator")
+                fail("stage binding is missing or disagrees with coordinator", control_path=str(directory / ctl().METADATA_NAME),
+                     control_root=str(directory))
         elif directory != coordinator:
-            fail("enabled project ticket is not bound to a planned stage")
+            fail("enabled project ticket is not bound to a planned stage", control_path=str(directory / ctl().METADATA_NAME),
+                 control_root=str(directory))
         return {"directory": directory, "meta": meta, "events": events, "coordinator": coordinator,
                 "coord_meta": coord_meta, "coord_events": coord_events, "program": program, "stage_id": sid}
     except (KeyError, TypeError, ValueError, OSError) as exc:
         if isinstance(exc, ctl().ControlError):
             raise
-        fail("invalid stage locator or binding: " + str(exc))
+        fail("invalid stage locator or binding: " + str(exc), control_path=str(locator), reason="invalid_stage_locator",
+             recovery_action="restore_stage_locator")
 
 
 def _write(directory, before, namespace, value, action, request_id, *, before_append=None, **access):
@@ -1081,8 +1150,10 @@ def projection(directory, *, git_provider=None, require_git_provider=False, _met
     result = {"enabled": False, "blocked": False, "state": "not_enabled", "reasons": [],
               "available_actions": [], "generation": None, "revision": None, "challenge": None, "report": None,
               "can_confirm": False, "can_revoke": False, "acceptance_snapshot": None}
+    resolved = False
     try:
         state = _resolve(directory, _metadata_override=_metadata_override, _allow_pending=_allow_pending, **access)
+        resolved = True
         if state is None:
             return result
         program, sid = state["program"], state["stage_id"]
@@ -1151,7 +1222,23 @@ def projection(directory, *, git_provider=None, require_git_provider=False, _met
         if result["acceptance_snapshot"] is not None:
             result["acceptance_snapshot"]["revision"] = result["revision"]
     except (ctl().ControlError, ValueError, TypeError, KeyError, OSError) as exc:
-        result.update(enabled=True, blocked=True, state="blocked", reasons=[str(exc)], challenge=None)
+        # enabled stays conservative for existing fail-closed consumers; unknown
+        # means stage activation/identity could not be established, not proven.
+        result.update(enabled=True, blocked=True, state="blocked" if resolved else "unknown", reasons=[str(exc)], challenge=None)
+        details = getattr(exc, "extra", {})
+        for key in ("discovery", "recovery"):
+            if key in details:
+                result[key] = details[key]
+        if not resolved and "discovery" not in result:
+            path = details.get("control_path", details.get("path", str(Path(directory).resolve())))
+            result["discovery"] = {"reason": details.get("reason", "unresolved_stage_control"), "message": str(exc),
+                                   "path": path, "control_root": details.get("control_root", str(Path(directory).resolve())),
+                                   "coordinator_root": details.get("coordinator_root")}
+            result["recovery"] = {"action": details.get("recovery_action", "inspect_control_state"), "path": path,
+                                  "message": "Restore the authenticated locator or control records identified by this error, then retry.",
+                                  "read_only_actions": ["status", "trace", "check", "inspect"]}
+        if not resolved:
+            result["reasons"] = [str(exc) + " [" + result["discovery"]["path"] + "]"]
     return result
 
 
