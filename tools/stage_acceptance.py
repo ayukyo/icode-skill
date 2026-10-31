@@ -20,9 +20,11 @@ READ_ONLY = {"status", "trace", "plan", "check", "inspect", "init", "log"}
 CODE_ACTIONS = {"code", "patch", "fast"}
 PROTECTED = ("stage_program", "stage_binding", "serial_claims", "visual_reviews", "evidence_reviews")
 DISCOVERY_LIMITS = {"max_entries": 4096, "max_files": 512, "max_events": 32768,
-                    # One control file may use the existing cumulative budget;
-                    # max_total_bytes still bounds every scanned ticket together.
-                    "max_file_bytes": 64 * 1024 * 1024, "max_total_bytes": 64 * 1024 * 1024,
+                    # Candidate snapshots can make authenticated historical
+                    # ledgers exceed 64 MiB. Keep a finite per-file and total
+                    # budget without changing authentication or time limits.
+                    # A bounded ledger and its metadata must fit together.
+                    "max_file_bytes": 256 * 1024 * 1024, "max_total_bytes": 512 * 1024 * 1024,
                     "timeout_seconds": 5}
 
 

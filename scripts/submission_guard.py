@@ -38,6 +38,7 @@ scripts/submission_guard.py — worktree 提交契约机器闸门（提案 workt
 """
 
 import argparse
+import hashlib
 import importlib.util
 import json
 import os
@@ -92,7 +93,7 @@ def _status_entries(raw):
     return rows
 
 
-def _inventory_modes(raw, *, tree=False):
+def _inventory_modes(raw, *, tree=False, object_ids=None):
     modes = {}
     for value in raw.split(b"\0"):
         if not value:
@@ -101,8 +102,61 @@ def _inventory_modes(raw, *, tree=False):
         fields = info.decode("ascii").split()
         if not tree and fields[2] != "0":
             raise ValueError("unmerged index requires resolution")
-        modes[os.fsdecode(path)] = fields[0]
+        name = os.fsdecode(path)
+        modes[name] = fields[0]
+        if object_ids is not None:
+            object_ids[name] = fields[2] if tree else fields[1]
     return modes
+
+
+def _inventory_links(repo, rows, indexed, headed, index_ids, head_ids):
+    """Read link bytes, never their targets, before excluding opaque Git reads."""
+    candidate = control_module().candidate_module()
+    names = candidate._paths(sorted(set(indexed) | set(headed) | {row["path"] for row in rows}))
+    links, object_format = {}, None
+    for name in names:
+        path = repo / name
+        if any(candidate._path_is_candidate_link(parent) for parent in path.parents
+               if parent == repo or repo in parent.parents):
+            raise ValueError(f"inventory symlink parent: {name}")
+        try:
+            before = path.lstat()
+        except FileNotFoundError:
+            continue
+        if not candidate._is_candidate_link(before):
+            continue
+        opaque = getattr(before, "st_reparse_tag", 0) == candidate._IO_REPARSE_TAG_LX_SYMLINK
+        data = candidate._read_lx_symlink(path, before) if opaque else os.fsencode(os.readlink(path))
+        if candidate._stat_identity(before) != candidate._stat_identity(path.lstat()):
+            raise ValueError(f"inventory symlink changed during read: {name}")
+        if object_format is None:
+            object_format = _inventory_git(repo, "rev-parse", "--show-object-format").decode("ascii").strip()
+        oid = hashlib.new(object_format, b"blob " + str(len(data)).encode("ascii") + b"\0" + data).hexdigest()
+        links[name] = oid
+        old = (headed.get(name), head_ids.get(name))
+        index = (indexed.get(name), index_ids.get(name))
+        work = ("120000", oid)
+        # Git may consider an opaque reparse point stat-clean. Independently
+        # surface target/type changes rather than trusting that cached status.
+        staged = (" " if old == index else "A" if old[0] is None else "D" if index[0] is None
+                  else "T" if old[0] != index[0] else "M")
+        unstaged = "?" if index[0] is None else "T" if index[0] != "120000" else "M" if index != work else " "
+        matches = [row for row in rows if row["path"] == name]
+        if not matches and (staged != " " or unstaged != " "):
+            rows.append({"path": name, "original_path": None, "staged": staged, "unstaged": unstaged})
+        elif matches and opaque and index == work:
+            # Native Windows Git can report LX links as modified even though
+            # both their exact target blob and 120000 type equal the index.
+            # Never remove a staged/HEAD difference or a rename status.
+            for row in matches:
+                if row["unstaged"] in {"M", "T"}:
+                    row["unstaged"] = " "
+            rows[:] = [row for row in rows if row["staged"] != " " or row["unstaged"] != " "]
+        elif matches and unstaged != " ":
+            for row in matches:
+                if row["unstaged"] in {" ", "M", "T"}:
+                    row["unstaged"] = unstaged
+    return links
 
 
 def _binary_paths(raw):
@@ -200,10 +254,15 @@ def build_submission_inventory(meta, metadata_path):
             if Path(top).resolve() != repo:
                 raise ValueError(f"repository unavailable or not checkout root: {repo}")
             rows = _status_entries(_inventory_git(repo, "status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignore-submodules=none"))
-            indexed = _inventory_modes(_inventory_git(repo, "ls-files", "--stage", "-z"))
-            headed = _inventory_modes(_inventory_git(repo, "ls-tree", "-rz", "HEAD"), tree=True)
-            binary = _binary_paths(_inventory_git(repo, "diff", "--no-ext-diff", "--no-textconv", "--numstat", "-z", "HEAD"))
+            index_ids, head_ids = {}, {}
+            indexed = _inventory_modes(_inventory_git(repo, "ls-files", "--stage", "-z"), object_ids=index_ids)
+            headed = _inventory_modes(_inventory_git(repo, "ls-tree", "-rz", "HEAD"), tree=True, object_ids=head_ids)
+            links = _inventory_links(repo, rows, indexed, headed, index_ids, head_ids)
+            link_specs = ["--", *[":(literal,exclude)" + name for name in sorted(links)]] if links else []
+            binary = _binary_paths(_inventory_git(repo, "diff", "--no-ext-diff", "--no-textconv", "--numstat", "-z", "HEAD", *link_specs))
             binary |= _binary_paths(_inventory_git(repo, "diff", "--no-ext-diff", "--no-textconv", "--numstat", "-z", "--cached"))
+            if links != _inventory_links(repo, [dict(row) for row in rows], indexed, headed, index_ids, head_ids):
+                raise ValueError("inventory symlink changed after Git scan")
             repository = {"repo_path": str(repo), "changes": []}
             report["repositories"].append(repository)
             for row in rows:
@@ -216,12 +275,14 @@ def build_submission_inventory(meta, metadata_path):
                 original = repo / row["original_path"] if row["original_path"] else None
                 old_mode = headed.get(row["original_path"] or local)
                 new_mode = indexed.get(local)
-                if path.is_file() and not path.is_symlink():
+                if local in links:
+                    new_mode = "120000"
+                elif path.is_file() and not path.is_symlink():
                     new_mode = "100755" if path.stat().st_mode & 0o111 else "100644"
                 row.update(path=name, repo_path=str(repo), repo_relative_path=local,
-                           kind="gitlink" if "160000" in {old_mode, new_mode} else "symlink" if path.is_symlink() else "file",
-                           mode_changed=bool(old_mode and new_mode and old_mode != new_mode), binary=local in binary)
-                if path.is_file() and not path.is_symlink() and not row["binary"]:
+                           kind="gitlink" if "160000" in {old_mode, new_mode} else "symlink" if "120000" in {old_mode, indexed.get(local), new_mode} else "file",
+                           mode_changed=len({mode for mode in (old_mode, indexed.get(local), new_mode) if mode}) > 1, binary=local in binary)
+                if local not in links and path.is_file() and not path.is_symlink() and not row["binary"]:
                     with path.open("rb") as stream:
                         row["binary"] = b"\0" in stream.read(8192)
                 original_name = None

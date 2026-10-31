@@ -39,6 +39,22 @@ def test_windows_pipe_reader_bounds_anonymous_pipe(api, monkeypatch):
     assert proc.returncode is not None
 
 
+def test_git_failure_keeps_its_real_stderr(api, tmp_path):
+    with pytest.raises(api.InspectionError, match="not a git repository"):
+        api._git(tmp_path, ["rev-parse", "--verify", "HEAD"])
+
+
+def test_git_stderr_flood_is_drained_but_only_bounded_tail_is_retained(api, tmp_path, monkeypatch):
+    real_popen = subprocess.Popen
+    script = "import sys;sys.stderr.write('x'*100000+'specific-final-error');sys.exit(1)"
+    monkeypatch.setattr(api.subprocess, "Popen", lambda command, **options:
+                        real_popen([sys.executable, "-c", script], **options))
+    with pytest.raises(api.InspectionError) as caught:
+        api._git(tmp_path, ["rev-parse"], 128)
+    assert "specific-final-error" in str(caught.value)
+    assert "truncated" in str(caught.value) and len(str(caught.value)) < 9000
+
+
 def git(root, *args):
     return subprocess.check_output(["git", "-C", str(root), *args], stderr=subprocess.STDOUT).decode().strip()
 

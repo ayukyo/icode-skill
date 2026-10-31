@@ -3,6 +3,8 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import stat
+from types import SimpleNamespace
 import sys
 
 import pytest
@@ -40,6 +42,126 @@ def inventory_repo(tmp_path):
 def inventory(path, meta):
     assert callable(getattr(guard, "build_submission_inventory", None)), "missing read-only inventory"
     return guard.build_submission_inventory(meta, path)
+
+
+@pytest.fixture
+def lx_inventory(inventory_repo, monkeypatch):
+    """Real Git index/HEAD; only the Windows reparse metadata reader is injected."""
+    repo, path, meta = inventory_repo
+    name, target = "library.so", b"library.so.1"
+    link = repo / name
+    link.write_bytes(target)
+    git(repo, "config", "core.symlinks", "false")
+    oid = subprocess.run(["git", "-C", str(repo), "hash-object", "-w", "--stdin"],
+                         input=target, capture_output=True, check=True).stdout.decode().strip()
+    git(repo, "update-index", "--add", "--cacheinfo", "120000," + oid + "," + name)
+    git(repo, "commit", "-qm", "link fixture")
+    candidate = guard.control_module().candidate_module()
+    real_lstat, real_git = Path.lstat, guard._inventory_git
+    state = {"target": target, "changed": False, "read_error": False, "replace": False,
+             "false_status": False, "after_diff": False, "reads": 0}
+
+    def lstat(item, *args, **kwargs):
+        info = real_lstat(item, *args, **kwargs)
+        if item != link:
+            return info
+        fields = {key: getattr(info, key) for key in (
+            "st_dev", "st_ino", "st_mode", "st_size", "st_mtime_ns", "st_ctime_ns")}
+        fields.update(st_reparse_tag=0xA000001D, st_mode=stat.S_IFREG | 0o644)
+        fields["st_ino"] += int(state["changed"])
+        return SimpleNamespace(**fields)
+
+    def read_link(item, before):
+        state["reads"] += 1
+        if state["read_error"]:
+            raise OSError("fixture reparse read unavailable")
+        if state["replace"]:
+            state["changed"] = True
+        return state["target"]
+
+    def read_git(root, *args):
+        # Reproduce native Windows Git's inability to open LX links. Real Git
+        # still supplies all objects/status/numstat for every other path.
+        if args[0] == "diff" and "HEAD" in args and ":(literal,exclude)" + name not in args:
+            raise candidate.CandidateError("git failed: diff; fixture LX open not implemented")
+        raw = real_git(root, *args)
+        if args[0] == "diff" and "HEAD" in args and state["after_diff"]:
+            state["target"] = b"changed-after-scan.so"
+        return raw + b" M library.so\0" if args[0] == "status" and state["false_status"] else raw
+
+    monkeypatch.setattr(Path, "lstat", lstat)
+    monkeypatch.setattr(candidate, "_read_lx_symlink", read_link)
+    monkeypatch.setattr(guard, "_inventory_git", read_git)
+    return repo, path, meta, state, oid
+
+
+@pytest.mark.parametrize("false_status", [False, True])
+def test_inventory_checks_unchanged_lx_link_without_hiding_other_changes(lx_inventory, false_status):
+    repo, path, meta, state, _ = lx_inventory
+    state["false_status"] = false_status
+    (repo / "source.py").write_text("value = 2\n")
+    result = inventory(path, meta)
+    assert result["ok"], result["violations"]
+    assert [row["path"] for row in result["intended"]] == ["source.py"]
+
+
+@pytest.mark.parametrize("change", ["target", "index-mode", "staged-target"])
+def test_inventory_preserves_lx_target_index_mode_and_head_changes(lx_inventory, change):
+    repo, path, meta, state, oid = lx_inventory
+    meta["code_files"] = ["library.so"]
+    if change == "target":
+        state["target"] = b"different.so"
+    elif change == "index-mode":
+        git(repo, "update-index", "--cacheinfo", "100644," + oid + ",library.so")
+    else:
+        oid = subprocess.run(["git", "-C", str(repo), "hash-object", "-w", "--stdin"],
+                             input=b"staged.so", capture_output=True, check=True).stdout.decode().strip()
+        git(repo, "update-index", "--cacheinfo", "120000," + oid + ",library.so")
+    result = inventory(path, meta)
+    assert result["ok"], result["violations"]
+    row = next(row for row in result["intended"] if row["path"] == "library.so")
+    assert row["kind"] == "symlink" and row["mode_changed"] == (change == "index-mode")
+    assert row["unstaged"] in {"M", "T"}
+    if change != "target":
+        assert row["staged"] in {"M", "T"}
+
+
+@pytest.mark.parametrize("target_kind", ["relative-external", "absolute-external"])
+def test_inventory_hashes_external_link_target_bytes_without_accessing_target(lx_inventory, monkeypatch, target_kind):
+    repo, path, meta, state, _ = lx_inventory
+    outside = repo.parent / "external-target.bin"
+    outside.write_bytes(b"outside fixture data")
+    state["target"] = b"../external-target.bin" if target_kind == "relative-external" else os.fsencode(outside)
+    meta["code_files"] = ["library.so"]
+    real_open = Path.open
+
+    def no_target_access(item, *args, **kwargs):
+        assert Path(os.path.abspath(item)) != outside, "inventory must not open a symlink target"
+        return real_open(item, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", no_target_access)
+    result = inventory(path, meta)
+    assert result["ok"], result["violations"]
+    row = next(row for row in result["intended"] if row["path"] == "library.so")
+    assert row["kind"] == "symlink" and row["unstaged"] == "M" and state["reads"] >= 2
+
+
+def test_inventory_rejects_linked_parent_before_reading_link_bytes(lx_inventory, monkeypatch):
+    repo, path, meta, state, _ = lx_inventory
+    candidate = guard.control_module().candidate_module()
+    real_check = candidate._path_is_candidate_link
+    monkeypatch.setattr(candidate, "_path_is_candidate_link", lambda item: item == repo or real_check(item))
+    result = inventory(path, meta)
+    assert not result["ok"] and any("symlink parent" in item for item in result["violations"])
+    assert state["reads"] == 0
+
+
+@pytest.mark.parametrize("fault", ["read_error", "replace", "after_diff"])
+def test_inventory_never_exempts_unvalidated_lx_links(lx_inventory, fault):
+    _, path, meta, state, _ = lx_inventory
+    state[fault] = True
+    result = inventory(path, meta)
+    assert not result["ok"] and result["violations"]
 
 
 def test_inventory_requires_explicit_generated_exclusions_and_unknown_scope(inventory_repo):

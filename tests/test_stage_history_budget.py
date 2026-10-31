@@ -30,8 +30,10 @@ class HistoryDiscoveryBudgetTests(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.root, ignore_errors=True)
 
-    def write_ticket(self, payload_bytes):
-        ticket_id = "budget-fixture"
+    def write_ticket(self, payload_bytes, *, ticket=None):
+        ticket = ticket or self.ticket
+        ticket.mkdir(parents=True, exist_ok=True)
+        ticket_id = "budget-fixture-" + ticket.name
         event = {
             "schema_version": 1,
             "event_id": str(uuid.uuid4()),
@@ -53,20 +55,44 @@ class HistoryDiscoveryBudgetTests(unittest.TestCase):
             "project_path": str(self.project),
             "requirement": "fixture",
         }
-        (self.ticket / self.api.METADATA_NAME).write_text(
+        (ticket / self.api.METADATA_NAME).write_text(
             json.dumps(meta), encoding="utf-8")
-        (self.ticket / self.api.EVENTS_NAME).write_text(
+        (ticket / self.api.EVENTS_NAME).write_text(
             json.dumps(event) + "\n", encoding="utf-8")
 
-    def test_default_per_file_budget_uses_total_budget(self):
-        self.assertEqual(self.stage.DISCOVERY_LIMITS["max_file_bytes"],
-                         self.stage.DISCOVERY_LIMITS["max_total_bytes"])
+    def test_default_budget_admits_metadata_beside_valid_large_ledger(self):
+        self.write_ticket(5500)
+        path = self.ticket / self.api.METADATA_NAME
+        meta = json.loads(path.read_text(encoding="utf-8"))
+        meta["ordinary_notes"] = "x" * 3500
+        path.write_text(json.dumps(meta), encoding="utf-8")
+        # Keep the default cumulative/per-file relationship, scaled down so
+        # this authenticated coexistence case needs no huge allocation.
+        per_file = 8192
+        cumulative = per_file * self.stage.DISCOVERY_LIMITS["max_total_bytes"] // self.stage.DISCOVERY_LIMITS["max_file_bytes"]
+        with mock.patch.dict(self.stage.DISCOVERY_LIMITS,
+                             {"max_file_bytes": per_file, "max_total_bytes": cumulative}):
+            self.assertIsNone(self.stage.discover_stage_history(self.project))
 
     def test_single_file_above_old_default_is_accepted(self):
-        # The previous default was 16 MiB; a legal single control file may use
-        # the existing 64 MiB cumulative budget.
-        self.write_ticket(16 * 1024 * 1024 + 1024)
+        # A legitimate ledger can outgrow the previous 64 MiB limit while
+        # remaining within the bounded discovery budget.
+        self.write_ticket(64 * 1024 * 1024 + 1024)
         self.assertIsNone(self.stage.discover_stage_history(self.project))
+
+    def test_cumulative_history_above_old_default_is_accepted(self):
+        self.write_ticket(33 * 1024 * 1024)
+        self.write_ticket(33 * 1024 * 1024,
+                          ticket=self.ticket.with_name(".icode_output_2"))
+        self.assertIsNone(self.stage.discover_stage_history(self.project))
+
+    def test_larger_budget_does_not_accept_damaged_ledger(self):
+        self.write_ticket(256)
+        path = self.ticket / self.api.EVENTS_NAME
+        path.write_bytes(path.read_bytes().replace(b'"padding": "x',
+                                                   b'"padding": "y', 1))
+        with self.assertRaisesRegex(self.api.ControlError, "damaged"):
+            self.stage.discover_stage_history(self.project)
 
     def test_single_file_cannot_exceed_configured_cap(self):
         self.write_ticket(256)

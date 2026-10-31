@@ -14,6 +14,7 @@ import os
 from pathlib import Path, PureWindowsPath
 import re
 import stat
+import struct
 import time
 
 DEFAULT_LIMITS = {"max_files": 50000, "max_bytes": 512 * 1024 * 1024,
@@ -21,6 +22,7 @@ DEFAULT_LIMITS = {"max_files": 50000, "max_bytes": 512 * 1024 * 1024,
 REVIEW_STEPS = ("code", "deepcheck", "audit")
 CONTROL_DIRS = (".icode_output",)
 _LFS_POINTER_MAX_BYTES = 4096
+_IO_REPARSE_TAG_LX_SYMLINK = 0xA000001D
 _GIT_OBJECT_SIZE_MAX_DIGITS = 20
 _LFS_POINTER_PATTERN = re.compile(
     rb"version https://git-lfs.github.com/spec/v1\noid sha256:([0-9a-f]{64})\nsize ([0-9]+)\n")
@@ -28,6 +30,72 @@ _LFS_POINTER_PATTERN = re.compile(
 
 class CandidateError(ValueError):
     """Identity cannot be established completely inside the resource boundary."""
+
+
+def _is_candidate_link(info):
+    return (stat.S_ISLNK(info.st_mode) or
+            getattr(info, "st_reparse_tag", 0) == _IO_REPARSE_TAG_LX_SYMLINK)
+
+
+def _path_is_candidate_link(path):
+    try:
+        return _is_candidate_link(path.lstat())
+    except FileNotFoundError:
+        return False
+
+
+def _stat_identity(info):
+    return (info.st_dev, info.st_ino, info.st_mode, info.st_size,
+            info.st_mtime_ns, info.st_ctime_ns, getattr(info, "st_reparse_tag", 0))
+
+
+def _parse_lx_symlink(raw):
+    # LX_SYMLINK has a standard reparse header, version 2, then Linux path
+    # bytes. Hash those bytes unchanged, including non-UTF-8 names.
+    if len(raw) < 13 or len(raw) > 16384:
+        raise CandidateError("invalid LX symlink buffer length")
+    tag, size, reserved, version = struct.unpack_from("<IHHI", raw)
+    if tag != _IO_REPARSE_TAG_LX_SYMLINK or reserved or version != 2 or size != len(raw) - 8 or b"\0" in raw[12:]:
+        raise CandidateError("invalid LX symlink reparse data")
+    return raw[12:]
+
+
+def _read_lx_symlink(path, before):
+    # Windows Python does not expose LX links through os.readlink. Open the
+    # reparse point itself, never its target; deny concurrent writes/deletion.
+    import ctypes
+    from ctypes import wintypes as w
+    import msvcrt
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.CreateFileW.argtypes = [w.LPCWSTR, w.DWORD, w.DWORD, w.LPVOID, w.DWORD, w.DWORD, w.HANDLE]
+    kernel.CreateFileW.restype = w.HANDLE
+    kernel.DeviceIoControl.argtypes = [w.HANDLE, w.DWORD, w.LPVOID, w.DWORD, w.LPVOID, w.DWORD,
+                                      ctypes.POINTER(w.DWORD), w.LPVOID]
+    kernel.DeviceIoControl.restype = w.BOOL
+    kernel.CloseHandle.argtypes = [w.HANDLE]
+    kernel.CloseHandle.restype = w.BOOL
+    # OPEN_EXISTING, FILE_SHARE_READ, OPEN_REPARSE_POINT | BACKUP_SEMANTICS.
+    handle = kernel.CreateFileW(str(path), 0, 1, None, 3, 0x00200000 | 0x02000000, None)
+    if handle == ctypes.c_void_p(-1).value:
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        descriptor = msvcrt.open_osfhandle(handle, os.O_RDONLY)
+    except BaseException:
+        kernel.CloseHandle(handle)
+        raise
+    try:
+        # Windows fstat does not populate st_reparse_tag; the ioctl header
+        # below verifies the tag on this same, identity-checked handle.
+        if _stat_identity(os.fstat(descriptor))[:-1] != _stat_identity(before)[:-1]:
+            raise CandidateError("LX symlink replaced while opening")
+        buffer = ctypes.create_string_buffer(16384)
+        returned = w.DWORD()
+        # FSCTL_GET_REPARSE_POINT, bounded by MAXIMUM_REPARSE_DATA_BUFFER_SIZE.
+        if not kernel.DeviceIoControl(handle, 0x000900A8, None, 0, buffer, len(buffer), ctypes.byref(returned), None):
+            raise ctypes.WinError(ctypes.get_last_error())
+        return _parse_lx_symlink(buffer.raw[:returned.value])
+    finally:
+        os.close(descriptor)  # owns and closes the Windows handle exactly once
 
 
 _INSPECTION = None
@@ -589,7 +657,7 @@ def capture_candidate(workspace, *, base, code_files=None, scope_contract=None,
         if _excluded(name, [*CONTROL_DIRS, *exclusions]):
             continue
         path = root / name
-        if any(p.is_symlink() for p in path.parents if p == root or root in p.parents):
+        if any(_path_is_candidate_link(p) for p in path.parents if p == root or root in p.parents):
             raise CandidateError(f"candidate symlink parent: {name}")
         if time.monotonic() > deadline:
             raise CandidateError("candidate capture timeout")
@@ -621,8 +689,11 @@ def capture_candidate(workspace, *, base, code_files=None, scope_contract=None,
                              "sha256": sub["content_id"], "size": sum(r["size"] for r in sub["manifest"]),
                              "git_oid": sub["head"]})
             continue
-        if stat.S_ISLNK(before.st_mode):
-            data = os.fsencode(os.readlink(path))
+        if _is_candidate_link(before):
+            data = (_read_lx_symlink(path, before) if getattr(before, "st_reparse_tag", 0) == _IO_REPARSE_TAG_LX_SYMLINK
+                    else os.fsencode(os.readlink(path)))
+            if _stat_identity(before) != _stat_identity(path.lstat()):
+                raise CandidateError(f"candidate symlink changed during capture: {name}")
             digest = hashlib.sha256(data)
             blob = hashlib.new(object_format, b"blob " + str(len(data)).encode() + b"\0" + data)
             size, mode, kind = len(data), "120000", "symlink"

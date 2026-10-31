@@ -40,6 +40,7 @@ SOURCE_SUFFIXES = ASSOCIATED_SUFFIXES - CONFIG
 CHECKS_VERSION = 1
 _GIT_READ_TIMEOUT_SECONDS = 5
 _GIT_CLEANUP_TIMEOUT_SECONDS = 1
+_GIT_STDERR_TAIL_BYTES = 8192
 CHECK_IDENTITY_KEYS = ("check_id", "kind", "version", "paths", "required_items")
 CHECK_ITEMS = {
     "timestamp_contract": ["signedness", "domain", "unit", "epoch", "negative_zero_max", "sentinel",
@@ -274,6 +275,38 @@ def _git_pipe(proc, limit, deadline):
                 reader.join(timeout=_GIT_CLEANUP_TIMEOUT_SECONDS)
 
 
+def _git_stderr(proc):
+    """Drain stderr independently; retain only a fixed-size diagnostic tail."""
+    state = {"tail": bytearray(), "truncated": False, "unavailable": False}
+
+    def drain():
+        try:
+            descriptor = proc.stderr.fileno()
+            while True:
+                chunk = os.read(descriptor, 4096)
+                if not chunk:
+                    break
+                state["tail"].extend(chunk)
+                if len(state["tail"]) > _GIT_STDERR_TAIL_BYTES:
+                    del state["tail"][:-_GIT_STDERR_TAIL_BYTES]
+                    state["truncated"] = True
+        except (OSError, ValueError):
+            state["unavailable"] = True
+
+    reader = Thread(target=drain, name="icode-git-stderr", daemon=True)
+    reader.start()
+    return state, reader
+
+
+def _git_failure(args, state, reader):
+    reader.join(timeout=_GIT_CLEANUP_TIMEOUT_SECONDS)
+    detail = bytes(state["tail"]).decode("utf-8", errors="replace").strip()
+    markers = (" [stderr truncated]" if state["truncated"] else "")
+    if state["unavailable"] or reader.is_alive():
+        markers += " [stderr capture incomplete]"
+    return InspectionError(f"git failed: {args[0]}{markers}" + (f": {detail}" if detail else ""))
+
+
 def _git(repo, args, limit=8192, *, input_data=None):
     """Bound stdout and optional bytes input without a duplex pipe deadlock."""
     env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
@@ -293,12 +326,14 @@ def _git(repo, args, limit=8192, *, input_data=None):
                 raise InspectionError("git input write incomplete")
             input_stream.seek(0)
             options["stdin"] = input_stream
-        proc = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=env, **options)
+        proc = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env, **options)
+        stderr_reader = None
         try:
+            stderr_state, stderr_reader = _git_stderr(proc)
             if os.name == "nt":
                 data, truncated = _git_pipe(proc, limit, time.monotonic() + _GIT_READ_TIMEOUT_SECONDS)
                 if proc.returncode and not truncated:
-                    raise InspectionError(f"git failed: {args[0]}")
+                    raise _git_failure(args, stderr_state, stderr_reader)
                 return data, truncated
             with selectors.DefaultSelector() as selector:
                 selector.register(proc.stdout, selectors.EVENT_READ)
@@ -319,10 +354,15 @@ def _git(repo, args, limit=8192, *, input_data=None):
                                 selector.unregister(key.fileobj)
                 proc.wait(timeout=max(0.01, deadline - time.monotonic()))
                 if proc.returncode and not truncated:
-                    raise InspectionError(f"git failed: {args[0]}")
+                    raise _git_failure(args, stderr_state, stderr_reader)
                 return bytes(data[:limit]), truncated
         finally:
-            _close_git_process(proc)
+            try:
+                _close_git_process(proc)
+            finally:
+                if stderr_reader is not None:
+                    stderr_reader.join(timeout=_GIT_CLEANUP_TIMEOUT_SECONDS)
+                proc.stderr.close()
     except InspectionError:
         raise
     except (OSError, subprocess.TimeoutExpired, RuntimeError, ValueError) as exc:

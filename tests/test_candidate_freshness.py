@@ -389,6 +389,70 @@ class CandidateTests(unittest.TestCase):
         with self.assertRaisesRegex(module.CandidateError, "submodule"):
             self.capture()
 
+    def test_birth_exclusion_binds_unused_dirty_submodule_and_replay(self):
+        nested = Path(self.temp.name) / "nested"
+        nested.mkdir()
+        self.git("init", "-q", cwd=nested)
+        self.git("config", "user.email", "test@example.invalid", cwd=nested)
+        self.git("config", "user.name", "Candidate Test", cwd=nested)
+        (nested / "x").write_text("original\n", encoding="utf-8", newline="\n")
+        self.git("add", ".", cwd=nested)
+        self.git("commit", "-qm", "sub", cwd=nested)
+        self.git("-c", "protocol.file.allow=always", "submodule", "add", "-q", str(nested), "sub")
+        self.git("commit", "-qam", "submodule")
+        (self.repo / "sub/x").write_text("dirty\n", encoding="utf-8", newline="\n")
+        args = ("create", "--dir", self.ticket, "--ticket-id", "candidate-1", "--birth", "plan",
+                "--requirement", "use external SDK", "--metadata-json", '{"code_files":["source.py"]}',
+                "--request-id", "birth-excluded")
+        rejected = self.call(*args, ok=False)
+        self.assertEqual(rejected["gate_id"], "candidate_capture")
+        self.call(*args, "--exclude", "sub")
+        meta = ctl.load_metadata(self.ticket)
+        events, problems = ctl.verify_event_chain(self.ticket, meta)
+        self.assertEqual(problems, [])
+        self.assertEqual(meta["excluded_side_effects"], ["sub"])
+        self.assertEqual(events[0]["payload"]["excluded_side_effects"], ["sub"])
+        candidate = meta["candidate_tracking"]["current"]
+        self.assertEqual(candidate["excluded_side_effects"], ["sub"])
+        self.assertNotIn("sub", [row["path"] for row in candidate["manifest"]])
+        before = self.bytes()
+        self.assertTrue(self.call(*args, "--exclude", "sub")["already_applied"])
+        self.assertEqual(before, self.bytes())
+        (self.repo / "sub/x").write_text("another excluded change\n", encoding="utf-8", newline="\n")
+        stable = self.call("candidate", "--dir", self.ticket, "--phase", "capture", "--request-id", "excluded-edit")
+        self.assertEqual(stable["candidate_id"], candidate["candidate_id"])
+        (self.repo / "source.py").write_text("value = 2\n", encoding="utf-8", newline="\n")
+        changed = self.call("candidate", "--dir", self.ticket, "--phase", "capture", "--request-id", "source-edit")
+        self.assertNotEqual(changed["candidate_id"], candidate["candidate_id"])
+
+    def test_birth_exclusions_reject_unsafe_and_code_overlaps(self):
+        for excluded in (".", "../escape", "source.py"):
+            with self.subTest(excluded=excluded):
+                result = self.call("create", "--dir", self.ticket, "--ticket-id", "candidate-1", "--birth", "plan",
+                                   "--requirement", "safe birth", "--metadata-json", '{"code_files":["source.py"]}',
+                                   "--exclude", excluded, "--request-id", "unsafe-exclusion", ok=False)
+                self.assertEqual(result["gate_id"], "candidate_capture")
+                self.assertFalse((self.ticket / ctl.METADATA_NAME).exists())
+                self.assertFalse((self.ticket / ctl.EVENTS_NAME).exists())
+
+    def test_stage_birth_digest_binds_exclusions_without_changing_old_shape(self):
+        from argparse import Namespace
+        args = Namespace(ticket_id="candidate-1", requirement="birth", birth="plan", stage_id="S1",
+                         metadata_json=None, candidate_limits_json=None)
+        original = ctl._stage_birth_digest(args)
+        args.exclude = []
+        self.assertEqual(ctl._stage_birth_digest(args), original)
+        args.exclude = ["sub"]
+        self.assertNotEqual(ctl._stage_birth_digest(args), original)
+
+    def test_non_git_birth_cannot_silently_drop_exclusions(self):
+        plain = Path(self.temp.name) / "plain/.icode_output/.icode_output_1"
+        plain.parent.parent.mkdir(parents=True)
+        result = self.call("create", "--dir", plain, "--ticket-id", "plain-1", "--birth", "plan",
+                           "--requirement", "non git", "--exclude", "sub", "--request-id", "plain-birth", ok=False)
+        self.assertEqual(result["gate_id"], "candidate_capture")
+        self.assertFalse((plain / ctl.METADATA_NAME).exists())
+
     def test_legacy_read_has_no_migration_or_fake_receipts(self):
         self.ticket.mkdir(parents=True)
         old = {"ticket_id": "old", "status": "completed", "completed_steps": ["4", "5", "6"],

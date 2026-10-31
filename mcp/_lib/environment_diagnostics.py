@@ -299,17 +299,39 @@ def summarize_gates(out_dir):
         report["status"] = "observed"
         try:
             raw = _read_bytes(trace).decode("utf-8-sig")
+        except (OSError, ValueError, UnicodeError):
+            report["errors"].append("thinking_trace_unreadable")
+        else:
+            rows, errors = [], set()
             for line in raw.splitlines():
                 if not line.strip():
                     continue
-                row = json.loads(line)
+                try:
+                    row = json.loads(line)
+                except ValueError:
+                    errors.add("thinking_trace_invalid_json")
+                    continue
                 if (not isinstance(row, dict) or not isinstance(row.get("result"), str)
-                        or row["result"] not in {"success", "degraded", "blocked"}):
-                    raise ValueError("invalid_trace")
+                        or row["result"] not in {"pending", "success", "degraded", "blocked"}):
+                    errors.add("thinking_trace_invalid_record")
+                    continue
+                rows.append(row)
+            # Preserve all terminal history, including prior degradation. Only
+            # a later terminal for this same step can resolve a pending record.
+            later_terminal = set()
+            for row in reversed(rows):
+                step = row.get("step")
+                if row["result"] == "pending":
+                    if not isinstance(step, str) or not step:
+                        errors.add("thinking_trace_invalid_record")
+                    elif step not in later_terminal:
+                        errors.add("thinking_trace_unfinished_pending")
+                    continue
+                if isinstance(step, str) and step:
+                    later_terminal.add(step)
                 report["thinking"]["total"] += 1
                 report["thinking"][row["result"]] += 1
-        except (OSError, ValueError, UnicodeError):
-            report["errors"].append("thinking_trace_unreadable")
+            report["errors"].extend(sorted(errors))
     mcp_report = root / ".mcp_gate_report.json"
     if mcp_report.exists():
         if report["status"] == "untracked":

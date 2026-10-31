@@ -1949,7 +1949,8 @@ def capture_step_inputs(out_dir, meta, model, step, *, git_provider=None, requir
 
 
 def validate_step_outputs(out_dir, meta, model, step, allow_incomplete=False,
-                          *, git_provider=None, require_git_provider=False, inspection_provider_factory=None, inspection_deadline=None):
+                          *, git_provider=None, require_git_provider=False, inspection_provider_factory=None, inspection_deadline=None,
+                          check_inspections=True):
     access = _code_access(step, git_provider, require_git_provider, inspection_provider_factory, inspection_deadline)
     if access:
         _code_inspection_provider(out_dir, meta, **access)
@@ -1960,9 +1961,9 @@ def validate_step_outputs(out_dir, meta, model, step, allow_incomplete=False,
                if port.get("required", True) and not by_id[port["id"]]["exists"]]
     if step == "review" and by_id.get("review_manifest", {}).get("exists"):
         missing.extend(review_evidence_issues(out_dir, meta))
-    if step in ("deepcheck", "audit") and by_id.get("inspection_coverage", {}).get("exists"):
+    if check_inspections and step in ("deepcheck", "audit") and by_id.get("inspection_coverage", {}).get("exists"):
         missing.extend(inspection_coverage_issues(out_dir, meta, step, allow_incomplete=allow_incomplete))
-    if by_id.get("inspection_worklist", {}).get("exists"):
+    if check_inspections and by_id.get("inspection_worklist", {}).get("exists"):
         missing.extend(inspection_worklist_issues(out_dir, meta, step, allow_incomplete=allow_incomplete, **access))
     if access:
         _code_guard(out_dir, meta, **access)
@@ -2296,6 +2297,111 @@ def inspection_coverage_issues(out_dir, meta, step, attempt=None, allow_incomple
     return issues
 
 
+def _authenticated_inspection_review(out_dir, meta, model, events, start):
+    """Read an immutable finished review version, without rebuilding old source.
+
+    A finish alone is insufficient: its real boundary checks and ticket output
+    bytes must still agree with the native writer receipts and final facts.
+    """
+    payload = start.get("payload") or {}
+    step, attempt = payload.get("step"), payload.get("attempt")
+    contract = step_contract(model, step)
+    finish = step_attempt_finished(events, attempt)
+    if payload.get("contract_digest") != canonical_digest(contract) or not finish \
+            or finish["payload"].get("outcome") not in ("success", "degraded"):
+        return None
+    first, last = events.index(start), events.index(finish)
+    between = events[first + 1:last]
+    checks = {}
+    for event in between:
+        fact = event.get("payload") or {}
+        if event.get("event_type") == "gate_checked" and fact.get("attempt") == attempt:
+            checks[fact.get("boundary")] = fact.get("result")
+    if checks != finish["payload"].get("checks") or any(
+            checks.get(boundary) != "pass" for boundary in contract["required_checks"]):
+        return None
+    for port in contract["outputs"]:
+        if port["kind"] != "ticket_file" or not port.get("required", True):
+            continue
+        path = port_path(Path(out_dir), port_value(out_dir, meta, port))
+        if path.is_symlink() or not path.is_file():
+            return None
+        digest = file_sha256(path)
+        writes = [event["payload"] for event in between if event.get("event_type") == "artifact_written"
+                  and event["payload"].get("attempt") == attempt and event["payload"].get("output") == port["id"]]
+        final_facts = [fact for fact in finish["payload"].get("outputs", []) if fact.get("id") == port["id"]]
+        if not writes or writes[-1].get("path") != str(path) or writes[-1].get("sha256") != digest \
+                or len(final_facts) != 1 or final_facts[0].get("sha256") != digest:
+            return None
+    report = load_json(Path(out_dir) / f"{step}_worklist.json", "inspection worklist")
+    if not isinstance(report, dict) or report.get("step") != step or report.get("attempt") != attempt \
+            or report.get("ticket_id") != meta.get("ticket_id"):
+        return None
+    declaration = inspection_declaration_hash(report)
+    writes = [event["payload"] for event in between if event.get("event_type") == "artifact_written"
+              and event["payload"].get("attempt") == attempt
+              and event["payload"].get("output") == "inspection_worklist"]
+    # Generic artifact receipts may repeat the same output without claiming
+    # inspection proof; they cannot substitute for a native declaration.
+    declared = [fact for fact in writes if "inspection_declaration_hash" in fact]
+    if not declared or any(fact["inspection_declaration_hash"] != declaration for fact in declared):
+        return None
+    receipt = finish["payload"].get("candidate_receipt") or {}
+    candidate = receipt.get("candidate") if finish["payload"].get("outcome") == "success" else payload.get("candidate_input")
+    if not candidate_module().snapshot_identity_ok(candidate):
+        return None
+    files = inspection_module()._flatten(report)
+    manifest = {fact["path"]: fact for fact in candidate["manifest"]}
+    if report.get("workspace") != candidate["identity"]["checkout_realpath"] \
+            or report.get("code_files") != candidate["code_files"] or any(
+                path not in manifest or fact.get("sha256") != manifest[path].get("sha256")
+                for path, fact in files.items()):
+        return None
+    return {"start": start, "finish": finish, "report": report, "candidate": candidate, "files": files}
+
+
+def inspection_superseded_by_current_review(out_dir, meta, model, events, step, start):
+    """Accept historical bytes only behind a complete later current review.
+
+    This is a final-check interpretation, never a writer or a replacement for
+    the latest review's strict source/Read/coverage validation.
+    """
+    order = ("code", "deepcheck", "audit")
+    if step not in order[:-1] or not start:
+        return None
+    starts = [event for event in events if event.get("event_type") == "step_started"
+              and (event.get("payload") or {}).get("step") in order]
+    latest = starts[-1] if starts else None
+    if not latest or order.index(latest["payload"]["step"]) <= order.index(step):
+        return None
+    try:
+        old = _authenticated_inspection_review(out_dir, meta, model, events, start)
+        new = _authenticated_inspection_review(out_dir, meta, model, events, latest)
+        if not old or not new or events.index(old["finish"]) >= events.index(latest) \
+                or new["finish"]["payload"].get("outcome") != "success":
+            return None
+        current = candidate_snapshot(out_dir, meta, events=events)
+        # A later source revision within the same checkout/base is allowed;
+        # moving roots, HEAD, exclusions or the implementation contract is not.
+        stable = ("identity", "base", "head", "head_tree", "scope_contract",
+                  "excluded_side_effects", "control_artifact_exclusions")
+        if any(old["candidate"].get(key) != current.get(key) for key in stable) \
+                or not set(old["candidate"]["code_files"]).issubset(current["code_files"]) \
+                or new["candidate"]["candidate_id"] != current["candidate_id"] \
+                or old["report"].get("resolved_baselines") != new["report"].get("resolved_baselines") \
+                or not set(old["files"]).issubset(new["files"]):
+            return None
+        later_step, attempt = latest["payload"]["step"], latest["payload"]["attempt"]
+        if inspection_worklist_issues(out_dir, meta, later_step, attempt) \
+                or inspection_coverage_issues(out_dir, meta, later_step, attempt):
+            return None
+        return {"step": later_step, "attempt": attempt, "event_id": new["finish"]["event_id"]}
+    except (ControlError, ValueError, OSError, KeyError, TypeError, inspection_module().InspectionError):
+        # Unknown or incomplete proof leaves the original current-source
+        # rejection in place. No error-string whitelist can grant acceptance.
+        return None
+
+
 def cmd_check_outputs(args, *, git_provider=None, require_git_provider=False, inspection_provider_factory=None):
     """Single read-only final product check; historical receipts are not invented."""
     out_dir = Path(args.dir).resolve()
@@ -2326,7 +2432,11 @@ def cmd_check_outputs(args, *, git_provider=None, require_git_provider=False, in
         if old_contract and not historical:
             problems.append(f"{step}:contract_drift_reenter")
         degraded = bool(finished and (finished.get("payload") or {}).get("outcome") == "degraded")
-        facts, missing = validate_step_outputs(out_dir, meta, model, step, allow_incomplete=degraded, **access)
+        superseded = inspection_superseded_by_current_review(out_dir, meta, model, events, step, latest_start) \
+            if not problems and not access and not historical else None
+        # Check each inspection once, with its authenticated attempt below.
+        facts, missing = validate_step_outputs(out_dir, meta, model, step, allow_incomplete=degraded,
+                                               check_inspections=False, **access)
         # New evidence ports apply to new attempts, not completed old contracts.
         if historical:
             new_ports = {"review_manifest", "inspection_coverage", "inspection_worklist"}
@@ -2337,7 +2447,10 @@ def cmd_check_outputs(args, *, git_provider=None, require_git_provider=False, in
             problems.extend(review_evidence_issues(out_dir, meta, None if historical else events,
                                                    allow_legacy=historical))
         if step in ("code", "deepcheck", "audit") and not historical:
-            problems.extend(inspection_worklist_issues(out_dir, meta, step, attempt, allow_incomplete=degraded, **access))
+            if not superseded:
+                problems.extend(inspection_worklist_issues(out_dir, meta, step, attempt, allow_incomplete=degraded, **access))
+            else:
+                warnings.append(f"{step}:historical_inspection_superseded_by={superseded['step']}:{superseded['attempt']}")
             if latest_start is None:
                 problems.append(f"{step}:inspection_worklist:missing_step_start")
             else:
@@ -2350,7 +2463,8 @@ def cmd_check_outputs(args, *, git_provider=None, require_git_provider=False, in
         if step in ("deepcheck", "audit"):
             coverage_exists = any(f["id"] == "inspection_coverage" and f["exists"] for f in facts)
             if not historical and coverage_exists:
-                problems.extend(inspection_coverage_issues(out_dir, meta, step, attempt, allow_incomplete=degraded, **access))
+                if not superseded:
+                    problems.extend(inspection_coverage_issues(out_dir, meta, step, attempt, allow_incomplete=degraded, **access))
                 if latest_start is None:
                     problems.append(f"{step}:inspection_coverage:missing_step_start")
                 else:
@@ -2739,11 +2853,16 @@ def _cmd_create_plain(args):
         raise ControlError(f"Git工程候选绑定失败: {exc}", gate_id="candidate_capture") from exc
     if repo_head:
         limits = candidate_limits(getattr(args, "candidate_limits_json", None))
-        meta["excluded_side_effects"] = []
+        meta["excluded_side_effects"] = getattr(args, "exclude", None) or []
         meta["review_receipts"] = []
         candidate = candidate_snapshot(out_dir, meta, base=repo_head, limits=limits, events=[])
+        # Reuse candidate path/overlap validation and persist its canonical
+        # declaration in both the birth metadata and authenticated event.
+        meta["excluded_side_effects"] = candidate["excluded_side_effects"]
         meta["candidate_tracking"] = {"version": 1, "mode": "enabled",
                                       "base": repo_head, "current": candidate, "limits": limits}
+    elif getattr(args, "exclude", None):
+        raise ControlError("非 Git 出生无法绑定候选排除项", gate_id="candidate_capture")
     require_valid_metadata(meta)
     payload = {"birth_kind": args.birth,
                "execution_contract_version": 1,
@@ -2752,7 +2871,7 @@ def _cmd_create_plain(args):
         payload["stage_birth"] = {"stage_id": args.stage_id, "input_digest": _stage_birth_digest(args)}
     if "candidate_tracking" in meta:
         payload["candidate_tracking"] = meta["candidate_tracking"]
-        payload["excluded_side_effects"] = []
+        payload["excluded_side_effects"] = meta["excluded_side_effects"]
     with DirLock(out_dir):
         recover_pending_transaction(out_dir)
         meta_path = out_dir / METADATA_NAME
@@ -2794,9 +2913,12 @@ def _cmd_create_plain(args):
 
 
 def _stage_birth_digest(args):
-    return canonical_digest({"ticket_id": args.ticket_id, "requirement": args.requirement, "birth": args.birth,
+    identity = {"ticket_id": args.ticket_id, "requirement": args.requirement, "birth": args.birth,
         "stage_id": args.stage_id, "metadata": strict_json_loads(args.metadata_json) if args.metadata_json else {},
-        "candidate_limits": strict_json_loads(args.candidate_limits_json) if args.candidate_limits_json else None})
+        "candidate_limits": strict_json_loads(args.candidate_limits_json) if args.candidate_limits_json else None}
+    if getattr(args, "exclude", None):
+        identity["candidate_exclusions"] = args.exclude
+    return canonical_digest(identity)
 
 
 def cmd_create(args):
@@ -7475,6 +7597,7 @@ def build_parser():
                    choices=["init", "plan", "log", "debug-init", "debug-log"])
     p.add_argument("--metadata-json", help="额外 metadata 字段 JSON 对象；受保护出生字段由工具覆盖")
     p.add_argument("--candidate-limits-json", help="Git候选扫描预算JSON；超预算fail-closed，不降级")
+    p.add_argument("--exclude", action="append", default=None, help="用户明确排除且未参与本轮实现/构建的相对路径；写入出生候选合同")
     p.add_argument("--stage-id", help="已启用阶段项目必须显式指定计划内 stage id")
     p.add_argument("--request-id", help="创建幂等键")
     p.set_defaults(func=cmd_create)

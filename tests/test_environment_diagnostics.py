@@ -167,6 +167,37 @@ def test_gate_summary_uses_trace_counts_and_does_not_echo_reasons(tmp_path):
     assert module.summarize_gates(tmp_path)["status"] == "partial"
 
 
+def test_gate_summary_resolves_only_superseded_pending_and_keeps_terminal_history(tmp_path):
+    rows = [{"step": "plan", "result": "pending"}, {"step": "plan", "result": "degraded"},
+            {"step": "plan", "result": "success"}, {"step": "audit", "result": "success"}]
+    (tmp_path / ".thinking_gate_trace.jsonl").write_text(
+        "\n".join(json.dumps(row) for row in rows), encoding="utf-8")
+    report = diagnostics().summarize_gates(tmp_path)
+    assert report["errors"] == []
+    assert report["thinking"] == {"total": 3, "success": 2, "degraded": 1, "blocked": 0}
+    assert report["status"] == "attention"
+
+
+@pytest.mark.parametrize("rows", [
+    [{"step": "plan", "result": "pending"}, {"step": "audit", "result": "success"}],
+    [{"step": "plan", "result": "success"}, {"step": "plan", "result": "pending"}],
+])
+def test_gate_summary_reports_unfinished_pending_without_calling_file_unreadable(tmp_path, rows):
+    (tmp_path / ".thinking_gate_trace.jsonl").write_text(
+        "\n".join(json.dumps(row) for row in rows), encoding="utf-8")
+    report = diagnostics().summarize_gates(tmp_path)
+    assert report["errors"] == ["thinking_trace_unfinished_pending"]
+    assert report["status"] == "partial" and report["thinking"]["success"] == 1
+
+
+@pytest.mark.parametrize("raw,error", [("not json", "thinking_trace_invalid_json"),
+                                      ('{"step":"plan","result":"unknown"}', "thinking_trace_invalid_record")])
+def test_gate_summary_separates_invalid_json_and_record_from_read_failure(tmp_path, raw, error):
+    (tmp_path / ".thinking_gate_trace.jsonl").write_text(raw, encoding="utf-8")
+    report = diagnostics().summarize_gates(tmp_path)
+    assert report["errors"] == [error] and report["status"] == "partial"
+
+
 def test_doctor_cli_keeps_problems_separate_from_query_failure(tmp_path):
     config = write(tmp_path / "host.json", {"mcpServers": {"x": {"command": "missing-fixture-command"}}})
     args = [sys.executable, str(ROOT / "tools/mcp_doctor.py"), "--config", str(config),
