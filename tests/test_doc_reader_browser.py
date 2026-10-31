@@ -141,6 +141,277 @@ class DocReaderBrowserTest(unittest.TestCase):
         self.page.locator("#doc-version").select_option("project-dev")
         self.page.wait_for_function("location.search.includes('project-dev')")
 
+    def test_panel_toggles_are_independent_preserve_reading_and_focus_restores_snapshot(self):
+        self.open_reader()
+        self.page.locator("#doc-content").evaluate("el => { el.scrollTop = 640; el.dispatchEvent(new Event('scroll')); }")
+        before_url, before_history = self.page.url, self.page.evaluate("history.length")
+        before_requests = len([r for r in self.requests if '/api/v1/docs/' in r.url])
+        self.assertEqual(self.page.locator('#doc-tree-toggle').count(), 1, 'chapter tree needs an independent, always reachable toggle')
+        self.page.locator('#doc-tree-toggle').click()
+        self.assertTrue(self.page.locator('#doc-tree').is_hidden())
+        self.assertTrue(self.page.locator('.doc-outline').is_visible())
+        self.assertEqual(self.page.locator('#doc-tree-toggle').get_attribute('aria-expanded'), 'false')
+        self.page.locator('#sidebar-toggle').click()
+        self.assertLess(self.page.locator('.sidebar').bounding_box()['width'], 64)
+        self.assertTrue(self.page.locator('#sidebar-toggle').is_visible())
+        self.page.locator('#doc-focus').click()
+        self.assertTrue(self.page.locator('.doc-outline').is_hidden())
+        self.page.locator('#doc-focus').click()
+        self.assertTrue(self.page.locator('#doc-tree').is_hidden())
+        self.assertTrue(self.page.locator('.doc-outline').is_visible())
+        self.assertEqual(self.page.locator('#sidebar-toggle').get_attribute('aria-expanded'), 'false')
+        self.page.locator('#doc-outline-toggle').focus()
+        self.page.keyboard.press('Enter')
+        self.assertTrue(self.page.locator('.doc-outline').is_hidden())
+        self.page.keyboard.press('Enter')
+        self.assertTrue(self.page.locator('.doc-outline').is_visible())
+        self.assertEqual(self.page.evaluate('document.activeElement.id'), 'doc-outline-toggle')
+        self.assertEqual(self.page.url, before_url)
+        self.assertEqual(self.page.evaluate('history.length'), before_history)
+        self.assertEqual(len([r for r in self.requests if '/api/v1/docs/' in r.url]), before_requests)
+        self.assertAlmostEqual(self.page.locator('#doc-content').evaluate('el => el.scrollTop'), 640, delta=3)
+        self.assertEqual(self.page.evaluate("JSON.parse(localStorage.getItem('icode-doc-panels:v1'))"), dict(sidebar=True, tree=True, outline=False))
+        self.page.reload()
+        self.page.locator('#doc-body h1').wait_for()
+        self.assertTrue(self.page.locator('#doc-tree').is_hidden())
+        self.assertEqual(self.page.locator('#sidebar-toggle').get_attribute('aria-expanded'), 'false')
+
+    def test_native_toolbar_is_compact_and_settings_handler_remains_connected(self):
+        self.page.goto('https://icode.localhost/?view=docs')
+        self.page.locator('#doc-body h1').wait_for()
+        self.assertEqual(self.page.locator('html').get_attribute('data-transport'), 'native')
+        self.assertTrue(self.page.locator('.topbar').is_hidden(), 'native reading must reclaim the empty 67px header')
+        self.page.locator('#settings-button').evaluate('el => el.click()')
+        self.assertTrue(self.page.locator('#settings-drawer').is_visible())
+        self.page.locator('#settings-close').click()
+        self.page.locator('#workspace-tickets').click()
+        self.assertTrue(self.page.locator('.crumbs').is_visible())
+        self.assertLess(self.page.locator('.topbar').bounding_box()['height'], 50)
+        self.assertTrue(self.page.locator('.top-actions').is_hidden())
+        self.page.goto('https://icode.localhost.evil.test/?view=docs')
+        self.page.locator('#doc-body h1').wait_for()
+        self.assertEqual(self.page.locator('html').get_attribute('data-transport'), 'browser')
+        self.assertTrue(self.page.locator('#settings-button').is_visible())
+
+    def test_native_connection_status_survives_refresh_errors_workspace_and_collapsed_navigation(self):
+        project_name = '状态验证工程的较长名称' * 8
+        payload = dict(ok=True, projects=[dict(project_id='p0', name=project_name, ticket_count=0)], tickets=[], jobs=[], hosts={}, initial_project_id=None, initial_ticket_id=None,
+                       refreshed_at='2026-10-31T08:00:00Z', settings=dict(host='auto', model='', mode='simple', preferred_port=8765,
+                       refresh_interval_seconds=30, fallback=True, show_next_step=True))
+        self.page.route('**/api/v1/bootstrap', lambda route: route.fulfill(content_type='application/json', body=json.dumps(payload)))
+        self.page.goto('https://icode.localhost/?view=docs')
+        self.page.locator('#doc-body h1').wait_for()
+        self.page.wait_for_function("document.getElementById('connection-state').textContent === '本地已连接'")
+        self.assertTrue(self.page.locator('#connection-state').is_visible(), 'native reading must retain the existing connection status')
+        self.assertTrue(self.page.locator('#last-refresh').is_visible())
+        self.page.locator('#project-list button').filter(has_text=project_name).click()
+        self.page.evaluate("window.originalConnection = document.getElementById('connection-state'); window.originalRefresh = document.getElementById('last-refresh')")
+        self.page.locator('#sidebar-toggle').click()
+        for width in (1440, 390):
+            self.page.set_viewport_size(dict(width=width, height=960))
+            self.assertTrue(self.page.locator('#connection-state').is_visible())
+            self.assertTrue(self.page.locator('#last-refresh').is_visible())
+            self.assertTrue(self.page.evaluate('document.documentElement.scrollWidth <= innerWidth'))
+        self.page.locator('#refresh-button').evaluate('el => el.click()')
+        self.page.wait_for_function("document.getElementById('connection-state').classList.contains('error')")
+        self.assertEqual(self.page.locator('#connection-state').inner_text(), '连接或状态异常')
+        self.assertTrue(self.page.locator('#connection-state').is_visible())
+        self.page.locator('#sidebar-toggle').click()
+        self.page.locator('#workspace-tickets').click()
+        self.assertTrue(self.page.locator('#connection-state').is_visible())
+        self.assertTrue(self.page.locator('#last-refresh').is_visible())
+        self.assertTrue(self.page.evaluate('originalConnection === document.getElementById("connection-state") && originalRefresh === document.getElementById("last-refresh")'))
+        self.assertTrue(self.page.evaluate('document.documentElement.scrollWidth <= innerWidth'))
+        self.assertLess(self.page.locator('.topbar').bounding_box()['height'], 80)
+
+    def test_mobile_expanded_navigation_exposes_real_project_buttons(self):
+        payload = dict(ok=True, projects=[dict(project_id=f'p{i}', name=f'工程{i}较长名称', ticket_count=0) for i in range(12)],
+                       tickets=[], jobs=[], hosts={}, initial_project_id=None, initial_ticket_id=None, refreshed_at=None, settings=None)
+        self.page.route('**/api/v1/bootstrap', lambda route: route.fulfill(content_type='application/json', body=json.dumps(payload)))
+        self.page.set_viewport_size(dict(width=390, height=844))
+        self.open_reader()
+        project = self.page.locator('#project-list button').filter(has_text='工程0较长名称')
+        self.assertTrue(project.is_visible(), 'expanded mobile navigation must expose project selection')
+        project.click()
+        self.assertEqual(self.page.locator('body').get_attribute('data-project-id'), 'p0')
+        self.assertLess(self.page.locator('.sidebar').bounding_box()['height'], 130)
+        self.assertGreater(self.page.locator('#doc-content').bounding_box()['height'], 100)
+        self.assertTrue(self.page.evaluate('document.documentElement.scrollWidth <= innerWidth'))
+        self.page.locator('#sidebar-toggle').click()
+        self.assertTrue(project.is_hidden())
+        self.page.locator('#sidebar-toggle').click()
+        self.assertTrue(project.is_visible())
+
+    def test_collapsed_panels_stay_collapsed_at_breakpoints_and_storage_denied(self):
+        self.page.add_init_script("for (const key of ['sessionStorage', 'localStorage']) Object.defineProperty(window, key, {get() {throw new DOMException('disabled', 'SecurityError')}})")
+        self.open_reader()
+        self.assertEqual(self.page.locator('#doc-tree-toggle').count(), 1)
+        for selector in ('#sidebar-toggle', '#doc-tree-toggle', '#doc-outline-toggle'):
+            self.page.locator(selector).click()
+        for width in (1280, 980, 720, 390, 320, 1440):
+            self.page.set_viewport_size(dict(width=width, height=844))
+            self.assertTrue(self.page.locator('#doc-tree').is_hidden())
+            self.assertTrue(self.page.locator('.doc-outline').is_hidden())
+            self.assertTrue(self.page.evaluate('document.documentElement.scrollWidth <= innerWidth'))
+            for selector in ('#sidebar-toggle', '#doc-tree-toggle', '#doc-outline-toggle'):
+                self.assertTrue(self.page.locator(selector).is_visible())
+            self.assertGreater(self.page.locator('#doc-content').bounding_box()['height'], 100)
+        self.page.locator('#doc-tree-toggle').click()
+        self.assertTrue(self.page.locator('#doc-tree').is_visible())
+        self.assertEqual(self.page.locator('#doc-focus').get_attribute('aria-pressed'), 'false')
+
+    def test_wide_diagram_keeps_natural_labels_and_prose_keeps_comfortable_measure(self):
+        self.markdown = '# 宽图\n\n正文保持舒适行宽。\n\n```mermaid\nflowchart LR\n' + ' --> '.join(f'N{i}[节点{i}包含较长中文标签]' for i in range(12)) + '\n```\n\n```cpp\n' + 'x' * 250 + '\n```'
+        self.open_reader()
+        self.page.locator('#doc-body svg').wait_for()
+        self.page.locator('#doc-focus').click()
+        sizes = self.page.locator('#doc-body').evaluate('''el => {
+const svg=el.querySelector('svg'),diagram=el.querySelector('.doc-diagram');
+return {svg:svg.getBoundingClientRect().width,natural:svg.viewBox.baseVal.width,diagram:diagram.clientWidth,
+scroll:diagram.scrollWidth,prose:el.querySelector('p').getBoundingClientRect().width,code:el.querySelector('pre').getBoundingClientRect().width};}''')
+        self.assertGreater(sizes['natural'], 1500)
+        self.assertGreaterEqual(sizes['svg'], sizes['natural'] - 1, 'wide diagrams must scroll instead of shrinking labels')
+        self.assertGreater(sizes['scroll'], sizes['diagram'])
+        self.assertLessEqual(sizes['prose'], 820)
+        self.assertGreater(sizes['code'], sizes['prose'])
+        self.assertTrue(self.page.evaluate('document.documentElement.scrollWidth <= innerWidth'))
+
+    def test_malformed_panel_preferences_and_hidden_focus_do_not_break_reader(self):
+        self.page.add_init_script("localStorage.setItem('icode-doc-panels:v1', '{bad json')")
+        self.open_reader()
+        self.page.locator('#doc-tree .doc-tree-item').first.focus()
+        self.page.locator('#doc-tree-toggle').evaluate('el => el.click()')
+        self.assertEqual(self.page.evaluate('document.activeElement.id'), 'doc-tree-toggle')
+        self.page.locator('#doc-focus').click()
+        self.page.locator('#doc-outline-toggle').click()
+        self.assertEqual(self.page.locator('#doc-focus').get_attribute('aria-pressed'), 'false')
+        self.assertTrue(self.page.locator('.doc-outline').is_visible())
+        self.assertTrue(self.page.locator('#doc-tree').is_hidden())
+
+    def test_panel_layout_preserves_visible_paragraph_when_text_reflows(self):
+        self.markdown = '# 长段落\n\n' + '\n\n'.join(f'段落{i} ' + '连续中文正文用于验证栏宽变化后的阅读位置。' * 20 for i in range(40))
+        self.open_reader()
+        self.page.locator('#doc-content').evaluate('''el => {
+const p=document.querySelectorAll('#doc-body > p')[12];
+el.scrollTop += p.getBoundingClientRect().top - el.getBoundingClientRect().top + 16;
+}''')
+        offset = self.page.locator('#doc-content').evaluate("el => document.querySelectorAll('#doc-body > p')[12].getBoundingClientRect().top - el.getBoundingClientRect().top")
+        self.page.locator('#doc-focus').click()
+        actual = self.page.locator('#doc-content').evaluate("el => document.querySelectorAll('#doc-body > p')[12].getBoundingClientRect().top - el.getBoundingClientRect().top")
+        self.assertAlmostEqual(actual, offset, delta=2)
+        self.page.locator('#doc-focus').click()
+        restored = self.page.locator('#doc-content').evaluate("el => document.querySelectorAll('#doc-body > p')[12].getBoundingClientRect().top - el.getBoundingClientRect().top")
+        self.assertAlmostEqual(restored, offset, delta=2)
+
+    def test_ticket_sidebar_toggle_does_not_overwrite_hidden_reader_position(self):
+        self.open_reader()
+        self.page.locator('#doc-content').evaluate("el => { el.scrollTop = 640; el.dispatchEvent(new Event('scroll')); }")
+        key = self.page.evaluate("Object.keys(sessionStorage).find(key => key.startsWith('icode-doc-scroll:') && key.includes('intro'))")
+        self.page.locator('#workspace-tickets').click()
+        self.page.locator('#sidebar-toggle').click()
+        self.assertEqual(self.page.evaluate('key => sessionStorage.getItem(key)', key), '640', 'ticket-only panel changes must not save a hidden reader scrollTop')
+        self.page.locator('#sidebar-toggle').click()
+        self.page.locator('#workspace-docs').click()
+        self.assertGreaterEqual(self.page.locator('#doc-content').evaluate('el => el.scrollTop'), 600)
+
+    def test_layout_change_during_deferred_image_restore_keeps_restore_intent(self):
+        self.prepare_delayed_image_history()
+        self.page.locator('#doc-focus').click()
+        self.fulfill_tall_image(self.pending_asset)
+        self.page.wait_for_function("document.querySelector('#doc-content').getAttribute('aria-busy') === 'false'")
+        self.assertAlmostEqual(self.page.locator('#doc-content').evaluate('el => el.scrollTop'), 6000, delta=3)
+
+    def test_medium_width_reader_does_not_squeeze_prose_between_three_columns(self):
+        self.page.set_viewport_size(dict(width=900, height=960))
+        self.open_reader()
+        self.assertGreater(self.page.locator('#doc-content').bounding_box()['width'], 420)
+        self.assertTrue(self.page.locator('#doc-tree').is_visible())
+        self.assertTrue(self.page.locator('.doc-outline').is_visible())
+
+    def test_low_height_reader_keeps_text_space_with_expanded_and_collapsed_navigation(self):
+        self.page.add_init_script("localStorage.removeItem('icode-doc-panels:v1')")
+        payload = dict(ok=True, projects=[dict(project_id=f'p{i}', name=f'工程{i}', ticket_count=0) for i in range(12)],
+                       tickets=[], jobs=[], hosts={}, initial_project_id=None, initial_ticket_id=None,
+                       refreshed_at='2026-10-31T08:00:00Z', settings=None)
+        self.page.route('**/api/v1/bootstrap', lambda route: route.fulfill(content_type='application/json', body=json.dumps(payload)))
+        toggles = ('#sidebar-toggle', '#doc-tree-toggle', '#doc-outline-toggle')
+        for origin, width, height in (('https://icode.localhost', 624, 394), ('https://icode.localhost', 640, 480), ('http://reader.test', 640, 480)):
+            self.page.set_viewport_size(dict(width=width, height=height))
+            self.page.goto(origin + '/?view=docs')
+            self.page.locator('#doc-body h1').wait_for()
+            self.page.wait_for_function("document.getElementById('doc-content').getAttribute('aria-busy') === 'false'")
+            for collapsed in (False, True, False):
+                with self.subTest(origin=origin, css_size=(width, height), collapsed=collapsed):
+                    if self.page.locator('#sidebar-toggle').get_attribute('aria-expanded') != str(not collapsed).lower():
+                        for selector in toggles:
+                            self.page.locator(selector).click()
+                    geometry = self.page.locator('#doc-content').evaluate('''el => {
+const style=getComputedStyle(el),top=parseFloat(style.paddingTop),bottom=parseFloat(style.paddingBottom);
+const heading=document.querySelector('#doc-body h1');el.scrollTop += heading.getBoundingClientRect().top-el.getBoundingClientRect().top-top;
+const content=el.getBoundingClientRect(),text=heading.getBoundingClientRect(),grid=document.querySelector('.doc-reader-grid').getBoundingClientRect();
+return {inner:el.clientHeight-top-bottom,bottom:content.bottom,gridBottom:grid.bottom,
+visibleText:Math.min(text.bottom,content.bottom-bottom)-Math.max(text.top,content.top+top),overflow:document.documentElement.scrollWidth>innerWidth};}''')
+                    self.assertGreater(geometry['inner'], 50, geometry)
+                    self.assertLessEqual(geometry['bottom'], geometry['gridBottom'] + 1, geometry)
+                    self.assertGreater(geometry['visibleText'], 15, geometry)
+                    self.assertFalse(geometry['overflow'], geometry)
+                    for selector in toggles:
+                        self.assertTrue(self.page.locator(selector).is_visible())
+                        self.assertEqual(self.page.locator(selector).get_attribute('aria-expanded'), str(not collapsed).lower())
+
+    def test_simulated_dpr_matrix_preserves_reader_layout_and_pixel_density(self):
+        """Browser DPR emulation supplements, but does not replace, native monitor DPI checks."""
+        self.markdown = '# 缩放矩阵\n\n正文保持16px。\n\n```mermaid\nflowchart LR\n' + ' --> '.join(f'N{i}[节点{i}较长中文标签]' for i in range(12)) + '\n```'
+        original_page = self.page
+        toggles = ('#sidebar-toggle', '#doc-tree-toggle', '#doc-outline-toggle')
+        for scale in (1, 1.25, 1.5, 1.75, 2):
+            context = self.browser.new_context(viewport=dict(width=1280, height=960), device_scale_factor=scale)
+            try:
+                self.page = context.new_page()
+                self.page.route('**/*', self.route)
+                self.open_reader()
+                self.page.locator('#doc-body svg').wait_for()
+                expanded_width = self.page.locator('#doc-content').bounding_box()['width']
+                self.assertTrue(self.page.evaluate('document.documentElement.scrollWidth <= innerWidth'))
+                for selector in toggles:
+                    self.page.locator(selector).click()
+                self.assertGreater(self.page.locator('#doc-content').bounding_box()['width'], expanded_width + 400)
+                for width, height in ((1280, 960), (390, 844)):
+                    with self.subTest(simulated_dpr=scale, css_width=width):
+                        self.page.set_viewport_size(dict(width=width, height=height))
+                        if width == 390:
+                            for selector in toggles:
+                                self.page.locator(selector).click()
+                            expanded_height = self.page.locator('#doc-content').bounding_box()['height']
+                            self.assertTrue(self.page.evaluate('document.documentElement.scrollWidth <= innerWidth'))
+                            for selector in toggles:
+                                self.page.locator(selector).click()
+                            self.assertGreater(self.page.locator('#doc-content').bounding_box()['height'], expanded_height + 150)
+                        metrics = self.page.evaluate('''() => {
+const svg=document.querySelector('#doc-body svg'),diagram=svg.parentElement;
+const unscaled=['html','body','.app-shell','.main-stage','#doc-library','#doc-content','#doc-body'].every(selector=>{
+  const style=getComputedStyle(document.querySelector(selector));return Number(style.zoom||1)===1&&style.transform==='none';
+});
+return {dpr:devicePixelRatio,width:innerWidth,height:innerHeight,overflow:document.documentElement.scrollWidth>innerWidth,
+font:getComputedStyle(document.getElementById('doc-body')).fontSize,unscaled,
+svg:svg.getBoundingClientRect().width,natural:svg.viewBox.baseVal.width,diagram:diagram.clientWidth,scroll:diagram.scrollWidth};}''')
+                        self.assertAlmostEqual(metrics['dpr'], scale, delta=0.01)
+                        self.assertEqual((metrics['width'], metrics['height']), (width, height))
+                        self.assertFalse(metrics['overflow'])
+                        self.assertEqual(metrics['font'], '16px')
+                        self.assertTrue(metrics['unscaled'], 'reading must not compensate using CSS zoom or transforms')
+                        self.assertGreater(metrics['natural'], 1500)
+                        self.assertGreaterEqual(metrics['svg'], metrics['natural'] - 1)
+                        self.assertGreater(metrics['scroll'], metrics['diagram'])
+                        png = self.page.screenshot()
+                        self.assertEqual(png[:8], b'\x89PNG\r\n\x1a\n')
+                        pixel_width, pixel_height = struct.unpack('>II', png[16:24])
+                        self.assertAlmostEqual(pixel_width, width * scale, delta=1)
+                        self.assertAlmostEqual(pixel_height, height * scale, delta=1)
+            finally:
+                self.page = original_page
+                context.close()
+
     def test_cross_chapter_history_and_scroll_restore(self):
         self.open_reader()
         self.page.locator("#doc-content").evaluate("el => { el.scrollTop = 640; el.dispatchEvent(new Event('scroll')); }")
@@ -400,6 +671,53 @@ class DocReaderBrowserTest(unittest.TestCase):
         self.page.locator("#doc-return-project").click()
         self.page.wait_for_function("location.search.includes('doc_book=project-dev')")
         self.assertEqual(self.page.locator("#doc-version").input_value(), "project-dev")
+
+
+def test_native_reader_panel_behavior_without_http_listener(tmp_path):
+    """Use the shipped native test driver when HTTP browser automation is unavailable."""
+    import subprocess
+    import sys
+    import pytest
+    if sys.platform != 'win32' or os.environ.get('ICODE_RUN_NATIVE_UI_TESTS') != '1':
+        pytest.skip('opt-in Windows WebView2 acceptance')
+    home = tmp_path / 'isolated-home'
+    book = home / '.claude/icode_data/project_docs/reader/main'
+    book.mkdir(parents=True)
+    (book / '_meta.json').write_text(json.dumps(dict(branch='main')), encoding='utf-8')
+    (book / '00_overview.md').write_text('# 阅读测试\n\n## 章节\n\n' + '\n\n'.join('阅读段落 ' + str(i) for i in range(160)), encoding='utf-8')
+    script = tmp_path / 'panel-test.json'
+    script.write_text(json.dumps([
+        {'action': 'resize', 'width': 1600, 'height': 1000},
+        {'action': 'script', 'id': 'panels', 'script': r'''(async()=>{
+const wait=async(f)=>{const end=Date.now()+20000;while(!f()){if(Date.now()>end)throw Error('reader timeout');await new Promise(r=>setTimeout(r,40));}};
+document.getElementById('workspace-docs').click();await wait(()=>document.querySelector('#doc-body h1')&&document.getElementById('doc-content').getAttribute('aria-busy')==='false');
+const ids=['sidebar-toggle','doc-tree-toggle','doc-outline-toggle'];
+if(ids.some(id=>!document.getElementById(id)))return {controls:false};
+const get=id=>document.getElementById(id),shown=el=>!!el.getClientRects().length;
+const content=get('doc-content');content.scrollTop=640;content.dispatchEvent(new Event('scroll'));
+const url=location.href,historyCount=history.length,body=get('doc-body');body.dataset.preserved='yes';
+get('doc-tree-toggle').click();get('sidebar-toggle').click();
+const independent=!shown(get('doc-tree'))&&shown(get('doc-outline'))&&get('doc-outline-toggle').getAttribute('aria-expanded')==='true';
+get('doc-focus').click();const focused=ids.every(id=>get(id).getAttribute('aria-expanded')==='false');get('doc-focus').click();
+const snapshot=!shown(get('doc-tree'))&&shown(get('doc-outline'))&&get('sidebar-toggle').getAttribute('aria-expanded')==='false';
+get('doc-outline-toggle').focus();get('doc-outline-toggle').click();get('doc-outline-toggle').click();
+const prefs=JSON.parse(localStorage.getItem('icode-doc-panels:v1'));
+return {controls:true,independent,focused,snapshot,prefs,scroll:content.scrollTop,unchanged:location.href===url&&history.length===historyCount&&body.dataset.preserved==='yes',focus:document.activeElement.id,transport:document.documentElement.dataset.transport,topbar:shown(document.querySelector('.topbar')),connection:shown(get('connection-state')),refresh:shown(get('last-refresh')),overflow:document.documentElement.scrollWidth>innerWidth};})()'''},
+        {'action': 'close'},
+    ]), encoding='utf-8')
+    result = subprocess.run([sys.executable, str(ASSETS.parents[2] / 'tools/icode_agent.py'), 'ui', '--native-test-script', str(script)],
+                            cwd=tmp_path, env=dict(os.environ, HOME=str(home), USERPROFILE=str(home), PYTHONUTF8='1'),
+                            capture_output=True, text=True, encoding='utf-8', timeout=60)
+    assert result.returncode == 0, result.stdout + result.stderr
+    events = [json.loads(line) for line in result.stdout.splitlines()]
+    value = json.loads(next(event['result'] for event in events if event.get('id') == 'panels'))
+    assert value.get('controls'), 'independent panel restore controls are missing'
+    assert value['independent'] and value['focused'] and value['snapshot'], value
+    assert value['prefs'] == dict(sidebar=True, tree=True, outline=False)
+    assert value['unchanged'] and abs(value['scroll'] - 640) < 3, value
+    assert value['focus'] == 'doc-outline-toggle'
+    assert value['transport'] == 'native' and not value['topbar'] and not value['overflow'], value
+    assert value['connection'] and value['refresh'], value
 
 
 if __name__ == "__main__":

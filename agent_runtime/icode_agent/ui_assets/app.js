@@ -1,6 +1,9 @@
 (() => {
   "use strict";
 
+  // The native host owns refresh/settings chrome only at its fixed local origin.
+  document.documentElement.dataset.transport = location.origin === "https://icode.localhost" ? "native" : "browser";
+
   const token = document.querySelector('meta[name="icode-ui-token"]').content;
   const byId = (id) => document.getElementById(id);
   const STEP_LABELS = {
@@ -86,6 +89,13 @@
     stagePreviewFailed: false,
     stagePreviewURLs: [],
     workspace: "tickets",
+  };
+
+  const placeConnectionStatus = () => {
+    if (document.documentElement.dataset.transport !== "native") return;
+    // Move the existing nodes: refresh/error updates keep the same ID and state.
+    const target = state.workspace === "docs" ? byId("doc-tools") : document.querySelector(".topbar");
+    target.append(byId("runtime-status"));
   };
 
   const setText = (id, value) => {
@@ -822,6 +832,7 @@
 
   document.addEventListener("icode:workspace-selected", (event) => {
     state.workspace = event.detail.workspace;
+    placeConnectionStatus();
     renderTicket();
   });
   byId("ticket-search").addEventListener("input", (event) => {
@@ -859,5 +870,6 @@
   byId("settings-close").addEventListener("click", closeSettings);
   byId("drawer-backdrop").addEventListener("click", closeSettings);
   byId("settings-form").addEventListener("submit", saveSettings);
+  placeConnectionStatus();
   bootstrap();
 })();

@@ -86,13 +86,64 @@
     byId("doc-message").textContent = text;
     byId("doc-message").classList.toggle("danger-text", danger);
   };
-  const stored = (key) => { try { return sessionStorage.getItem(key); } catch (_error) { return null; } };
+  const stored = (key, storage = "sessionStorage") => { try { return globalThis[storage].getItem(key); } catch (_error) { return null; } };
+  const store = (key, value, storage = "sessionStorage") => {
+    try { globalThis[storage].setItem(key, value); } catch (_error) { /* Reading remains available with storage disabled. */ }
+  };
+  const panelKey = "icode-doc-panels:v1";
+  const panels = { sidebar: false, tree: false, outline: false };
+  try {
+    const saved = JSON.parse(stored(panelKey, "localStorage"));
+    if (saved && typeof saved === "object") Object.keys(panels).forEach((key) => {
+      if (typeof saved[key] === "boolean") panels[key] = saved[key];
+    });
+  } catch (_error) { /* Ignore malformed nonsecret preferences. */ }
+  let focusSnapshot = null;
+  const applyPanels = () => {
+    const collapsed = focusSnapshot && state.reading ? { sidebar: true, tree: true, outline: true } : panels;
+    const definitions = [
+      ["sidebar", "sidebar-toggle", "sidebar-navigation", "工程导航", "导航"],
+      ["tree", "doc-tree-toggle", "doc-tree", "章节导航", "章节"],
+      ["outline", "doc-outline-toggle", "doc-outline", "章内目录", "目录"],
+    ];
+    definitions.forEach(([key, buttonId, panelId, label, shortLabel]) => {
+      const button = byId(buttonId), panel = byId(panelId);
+      // Never leave keyboard focus in a region that is about to disappear.
+      if (collapsed[key] && panel.contains(document.activeElement)) button.focus({ preventScroll: true });
+      panel.hidden = collapsed[key];
+      button.setAttribute("aria-expanded", String(!collapsed[key]));
+      button.setAttribute("aria-label", `${collapsed[key] ? "展开" : "收起"}${label}`);
+      button.textContent = `${collapsed[key] ? "展开" : "收起"}${shortLabel}`;
+    });
+    document.body.dataset.sidebarCollapsed = String(collapsed.sidebar);
+    root.dataset.treeCollapsed = String(collapsed.tree);
+    root.dataset.outlineCollapsed = String(collapsed.outline);
+    root.classList.toggle("doc-focused", Boolean(focusSnapshot));
+    byId("doc-focus").setAttribute("aria-pressed", String(Boolean(focusSnapshot)));
+    byId("doc-focus").textContent = focusSnapshot ? "退出专注" : "专注阅读";
+  };
+  const changePanels = (change) => {
+    const content = byId("doc-content");
+    // Keep the visible paragraph in place when a wider column reflows text.
+    // Pending chapter/image restoration retains ownership of its own scroll intent.
+    const anchor = state.reading && !state.pendingRestore
+      ? [...byId("doc-body").children].find((element) => element.getBoundingClientRect().bottom > content.getBoundingClientRect().top)
+      : null;
+    const offset = anchor && anchor.getBoundingClientRect().top - content.getBoundingClientRect().top;
+    change();
+    applyPanels();
+    if (anchor) content.scrollTop += anchor.getBoundingClientRect().top - content.getBoundingClientRect().top - offset;
+    if (state.reading) {
+      rememberScroll();
+      markActiveHeading();
+    }
+  };
   const rememberScroll = () => {
     if (!state.currentKey) return;
     // An unloaded image can clamp scrollTop. Preserve the captured target until
     // layout settles or the reader deliberately chooses a new position.
     if (state.pendingRestore && state.pendingRestore.epoch === state.chapterEpoch) return;
-    try { sessionStorage.setItem(state.currentKey, String(byId("doc-content").scrollTop)); } catch (_error) { /* Reading remains available with storage disabled. */ }
+    store(state.currentKey, String(byId("doc-content").scrollTop));
   };
   const markActiveHeading = () => {
     const headings = [...byId("doc-body").querySelectorAll("h1,h2,h3,h4,h5,h6")].filter((heading) => heading.getClientRects().length);
@@ -142,6 +193,7 @@
     state.reading = workspace === "docs";
     document.body.dataset.workspace = workspace;
     root.hidden = !state.reading;
+    applyPanels();
     byId("workspace-docs").setAttribute("aria-selected", String(state.reading));
     byId("workspace-tickets").setAttribute("aria-selected", String(!state.reading));
     document.dispatchEvent(new CustomEvent("icode:workspace-selected", { detail: { workspace } }));
@@ -407,6 +459,9 @@
         // Markdown HTML and style attributes never receive this capability.
         const nonce = document.querySelector('meta[name="icode-style-nonce"]');
         const svg = container.querySelector("svg");
+        // Mermaid emits width="100%". Use its own viewBox width so large diagrams
+        // scroll at readable label size instead of scaling every label down.
+        if (svg && svg.viewBox.baseVal.width > 0) svg.setAttribute("width", String(svg.viewBox.baseVal.width));
         if (nonce && svg) (result.styles || []).forEach((css) => {
           if (!safeDiagramCSS(css)) return;
           const style = document.createElementNS("http://www.w3.org/2000/svg", "style");
@@ -678,9 +733,21 @@
     if (chapter) void openChapter(chapter.id);
   }));
   byId("doc-focus").addEventListener("click", () => {
-    const focused = root.classList.toggle("doc-focused");
-    byId("doc-focus").setAttribute("aria-pressed", String(focused));
-    byId("doc-focus").textContent = focused ? "退出专注" : "专注阅读";
+    changePanels(() => {
+      if (focusSnapshot) { Object.assign(panels, focusSnapshot); focusSnapshot = null; }
+      else focusSnapshot = { ...panels };
+    });
+  });
+  ["sidebar", "tree", "outline"].forEach((key) => {
+    byId(key === "sidebar" ? "sidebar-toggle" : `doc-${key}-toggle`).addEventListener("click", () => {
+      changePanels(() => {
+        // An individual expansion exits focus mode and preserves its entry snapshot.
+        const collapsed = focusSnapshot ? true : panels[key];
+        if (focusSnapshot) { Object.assign(panels, focusSnapshot); focusSnapshot = null; }
+        panels[key] = !collapsed;
+        store(panelKey, JSON.stringify(panels), "localStorage");
+      });
+    });
   });
   byId("doc-copy-link").addEventListener("click", async () => {
     try { await navigator.clipboard.writeText(location.href); setMessage("阅读链接已复制。"); }

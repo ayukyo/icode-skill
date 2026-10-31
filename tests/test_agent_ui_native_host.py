@@ -574,13 +574,16 @@ def test_explicit_test_resize_uses_native_client_area(host_exe, tmp_path):
     host = PipeHost(host_exe, tmp_path, [
         {"action": "resize", "width": 400, "height": 600},
         {"action": "wait", "milliseconds": 150},
-        {"action": "script", "id": "narrow", "script": "({width:innerWidth,height:innerHeight})"},
+        {"action": "toolbar_layout"},
+        {"action": "script", "id": "narrow", "script": "({width:innerWidth,height:innerHeight,dpr:devicePixelRatio})"},
         {"action": "close"},
     ])
     events = host.run({"/": (b"<!doctype html><title>Narrow</title>", "text/html")})
     result = json.loads(next(e for e in events if e.get("id") == "narrow")["result"])
-    assert 320 <= result["width"] <= 400
-    assert 500 <= result["height"] <= 600
+    layout = json.loads(next(e for e in events if e.get('id') == 'toolbar_layout')['result'])
+    # The explicit native resize is physical pixels; CSS pixels follow OS DPI.
+    assert result['width'] * result['dpr'] == pytest.approx(400, abs=2)
+    assert result['height'] * result['dpr'] == pytest.approx(600 - layout['web_top'], abs=2)
 
 
 def test_shown_toolbar_fits_address_after_autoscale_and_resize(host_exe, tmp_path):
@@ -640,3 +643,51 @@ def test_shown_toolbar_fits_address_after_autoscale_and_resize(host_exe, tmp_pat
     assert narrow["overflow_visible"], narrow
     for layout in (desktop, narrow, restored):
         assert layout["web_top"] >= layout["toolbar_bottom"], layout
+
+
+def test_native_window_dpi_matches_webview_and_survives_maximize_restore(host_exe, tmp_path):
+    host = PipeHost(host_exe, tmp_path, [
+        {"action": "toolbar_layout"},
+        {"action": "window_state", "state": "maximized"},
+        {"action": "wait", "milliseconds": 150},
+        {"action": "toolbar_layout"},
+        {"action": "window_state", "state": "normal"},
+        {"action": "wait", "milliseconds": 150},
+        {"action": "toolbar_layout"},
+        {"action": "script", "id": "dpi", "script": "({dpr:devicePixelRatio,width:innerWidth})"},
+        {"action": "close"},
+    ])
+    events = host.run({"/": (b"<!doctype html><title>DPI</title>", "text/html")})
+    layouts = [json.loads(e["result"]) for e in events if e.get("id") == "toolbar_layout"]
+    page = json.loads(next(e for e in events if e.get("id") == "dpi")["result"])
+    assert [item['window_state'] for item in layouts] == ['Normal', 'Maximized', 'Normal']
+    for layout in layouts:
+        assert layout['dpi_awareness'] == 2, layout  # Per-monitor, OS-reported (no assumed scale).
+        assert layout['native_dpi'] == layout['form_dpi'], layout
+        assert 0 < layout['minimum_width'] <= layout['work_width'], layout
+        assert 0 < layout['minimum_height'] <= layout['work_height'], layout
+        assert layout['web_top'] >= layout['toolbar_bottom'], layout
+    initial, _, restored = layouts
+    for layout in (initial, restored):
+        assert layout['work_left'] <= layout['window_left'] < layout['window_right'] <= layout['work_right'], layout
+        assert layout['work_top'] <= layout['window_top'] < layout['window_bottom'] <= layout['work_bottom'], layout
+    assert restored['native_dpi'] / 96 == pytest.approx(page['dpr'], abs=0.02)
+    assert page['width'] * page['dpr'] == pytest.approx(restored['client_width'], abs=2)
+    assert (initial['client_width'], initial['toolbar_bottom']) == (restored['client_width'], restored['toolbar_bottom'])
+
+
+def test_native_settings_click_reuses_hidden_page_button(host_exe, tmp_path):
+    host = PipeHost(host_exe, tmp_path, [
+        {"action": "script", "script": "window.settingClicks=0;document.getElementById('settings-button').addEventListener('click',()=>window.settingClicks++);true"},
+        {"action": "settings"},
+        {"action": "script", "id": "settings", "script": "({clicks:window.settingClicks,origin:location.origin})"},
+        {"action": "script", "script": "document.getElementById('settings-button').remove();true"},
+        {"action": "settings"},
+        {"action": "toolbar_layout"},
+        {"action": "close"},
+    ])
+    events = host.run({"/": (b"<!doctype html><button id='settings-button' hidden>Settings</button>", "text/html")})
+    result = json.loads(next(e for e in events if e.get('id') == 'settings')['result'])
+    assert result['clicks'] == 1 and result['origin'] == ORIGIN
+    layout = json.loads(next(e for e in events if e.get('id') == 'toolbar_layout')['result'])
+    assert layout['settings_count'] == 1 and layout['refresh_count'] == 1

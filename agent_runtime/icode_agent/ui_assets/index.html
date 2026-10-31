@@ -17,6 +17,8 @@
 <body>
   <div class="app-shell">
     <aside class="sidebar" aria-label="项目与工单导航">
+      <button id="sidebar-toggle" class="panel-toggle" type="button" aria-expanded="true" aria-controls="sidebar-navigation" aria-label="收起工程导航">收起导航</button>
+      <div id="sidebar-navigation" class="sidebar-navigation">
       <div class="brand-row">
         <div class="brand-mark"><img src="/assets/icode-ticket-hex.svg" alt="" aria-hidden="true"></div>
         <div>
@@ -67,6 +69,7 @@
         <span id="host-summary" class="host-dot">主机检测中</span>
         <span>仅本机可访问</span>
       </div>
+      </div>
     </aside>
 
     <main class="main-stage">
@@ -77,8 +80,10 @@
           <strong id="current-ticket">选择一个工单</strong>
         </div>
         <div class="top-actions">
-          <span id="connection-state" class="connection neutral">正在连接</span>
-          <span id="last-refresh" class="refresh-time">尚未刷新</span>
+          <div id="runtime-status" class="runtime-status" role="status" aria-label="连接与刷新状态">
+            <span id="connection-state" class="connection neutral">正在连接</span>
+            <span id="last-refresh" class="refresh-time">尚未刷新</span>
+          </div>
           <button id="refresh-button" class="icon-button" type="button" title="立即刷新全部状态">
             <span aria-hidden="true">↻</span><span>刷新</span>
           </button>
@@ -95,7 +100,9 @@
             <label id="doc-book-label">工程文档集<select id="doc-book" disabled aria-label="工程或模块文档集"></select></label>
             <label>分支 / 版本<select id="doc-version" disabled aria-label="分支或快照版本"></select></label>
           </div>
-          <div class="doc-tools">
+          <div id="doc-tools" class="doc-tools">
+            <button id="doc-tree-toggle" class="secondary-button" type="button" aria-expanded="true" aria-controls="doc-tree" aria-label="收起章节导航">收起章节</button>
+            <button id="doc-outline-toggle" class="secondary-button" type="button" aria-expanded="true" aria-controls="doc-outline" aria-label="收起章内目录">收起目录</button>
             <button id="doc-return-project" class="secondary-button" type="button" hidden>返回工程文档</button>
             <label class="doc-search-label"><span class="sr-only">搜索当前文档集标题和正文</span><input id="doc-search" type="search" maxlength="240" placeholder="搜索标题和正文" autocomplete="off"></label>
             <button id="doc-refresh" class="secondary-button" type="button">刷新目录</button>
@@ -123,7 +130,7 @@
               <button id="doc-next" class="secondary-button" type="button" disabled>下一章 →</button>
             </footer>
           </div>
-          <aside class="doc-outline" aria-label="章内目录"><h2>本章目录</h2><nav id="doc-toc"></nav></aside>
+          <aside id="doc-outline" class="doc-outline" aria-label="章内目录"><h2>本章目录</h2><nav id="doc-toc"></nav></aside>
         </div>
       </section>
 

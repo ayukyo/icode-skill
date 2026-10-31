@@ -6,6 +6,7 @@ from pathlib import Path
 import shutil
 import sys
 import zipfile
+import xml.etree.ElementTree as ET
 
 import pytest
 
@@ -218,3 +219,53 @@ def test_publication_permission_error_without_winner_is_preserved(prepared_runti
     assert exc.value is denied
     assert not bundle.exists()
     assert not list(root.glob('.stage-*'))
+
+
+def test_runtime_generates_framework_dpi_config_and_embeds_compatibility_manifest(prepared_runtime, monkeypatch):
+    root, archive, bundle = prepared_runtime
+    compile_host = runtime.subprocess.run
+    observed = []
+
+    def inspect_compile(command, **kwargs):
+        manifest_option = next((arg for arg in command if arg.startswith('/win32manifest:')), None)
+        assert manifest_option, 'Native host needs an embedded Windows compatibility manifest'
+        manifest_path = Path(manifest_option.split(':', 1)[1])
+        assert manifest_path.parent.parent.parent == root
+        manifest = ET.fromstring(manifest_path.read_bytes())
+        supported = manifest.find('.//{urn:schemas-microsoft-com:compatibility.v1}supportedOS')
+        assert supported.attrib['Id'] == '{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}'
+        assert not any('dpiAware' in element.tag for element in manifest.iter())
+        observed.append(manifest_path)
+        return compile_host(command, **kwargs)
+
+    monkeypatch.setattr(runtime.subprocess, 'run', inspect_compile)
+    runtime.ensure_native_runtime(cache_root=root, package_cache=archive, offline=True)
+    config = ET.fromstring((bundle / 'ICODEUI.exe.config').read_bytes())
+    assert config.find('startup/supportedRuntime').attrib == {'version': 'v4.0', 'sku': '.NETFramework,Version=v4.8'}
+    assert config.find('System.Windows.Forms.ApplicationConfigurationSection/add').attrib == {
+        'key': 'DpiAwareness', 'value': 'PerMonitorV2'}
+    assert len(observed) == 1 and not observed[0].exists()
+
+
+def test_config_tamper_is_rejected_even_when_cache_manifest_matches(prepared_runtime):
+    root, archive, bundle = prepared_runtime
+    runtime.ensure_native_runtime(cache_root=root, package_cache=archive, offline=True)
+    config = bundle / 'ICODEUI.exe.config'
+    assert config.is_file(), 'DPI configuration must be a required runtime payload'
+    config.write_bytes(b'<configuration/>')
+    path = bundle / 'manifest.json'
+    manifest = json.loads(path.read_text())
+    manifest['files'][config.name] = runtime.sha256(config)
+    path.write_text(json.dumps(manifest))
+    with pytest.raises(runtime.NativeRuntimeError, match='integrity'):
+        runtime.ensure_native_runtime(cache_root=root, package_cache=archive, offline=True)
+    assert config.read_bytes() == b'<configuration/>'
+
+
+@pytest.mark.parametrize('field', ['HOST_CONFIG', 'HOST_MANIFEST'])
+def test_runtime_identity_binds_generated_inputs(tmp_path, monkeypatch, field):
+    source, compiler = tmp_path / 'host.cs', tmp_path / 'csc.exe'
+    source.write_bytes(b'source'); compiler.write_bytes(b'compiler')
+    first = runtime.runtime_key(source, {}, compiler)
+    monkeypatch.setattr(runtime, field, getattr(runtime, field, '') + '\n', raising=False)
+    assert runtime.runtime_key(source, {}, compiler) != first

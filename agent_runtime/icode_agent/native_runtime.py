@@ -21,6 +21,29 @@ import zipfile
 HERE = Path(__file__).resolve().parent
 LOCK = HERE / 'native_runtime.lock.json'
 HOST_SOURCE = HERE / 'windows_ui_host.cs'
+# Keep generated inputs explicit: the cache identity and validation must not trust
+# a mutable cache manifest to opt the executable out of DPI awareness.
+HOST_CONFIG = '''<?xml version="1.0" encoding="utf-8"?>
+<configuration>
+  <startup><supportedRuntime version="v4.0" sku=".NETFramework,Version=v4.8" /></startup>
+  <System.Windows.Forms.ApplicationConfigurationSection>
+    <add key="DpiAwareness" value="PerMonitorV2" />
+  </System.Windows.Forms.ApplicationConfigurationSection>
+</configuration>
+'''
+# Framework owns DPI awareness through app.config; manifest DPI declarations
+# would override it. The embedded manifest only declares OS compatibility.
+HOST_MANIFEST = '''<?xml version="1.0" encoding="utf-8"?>
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+  <assemblyIdentity version="1.0.0.0" name="ICODE.UI" />
+  <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3"><security><requestedPrivileges>
+    <requestedExecutionLevel level="asInvoker" uiAccess="false" />
+  </requestedPrivileges></security></trustInfo>
+  <compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1"><application>
+    <supportedOS Id="{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}" />
+  </application></compatibility>
+</assembly>
+'''
 MAX_ARCHIVE_BYTES = 64 * 1024 * 1024
 MAX_UNPACKED_BYTES = 256 * 1024 * 1024
 DOTNET48_RELEASE = 528040
@@ -183,7 +206,7 @@ def obtain_package(pin: dict, path: Path, *, offline: bool) -> Path:
 
 def runtime_key(source: Path, pin: dict, compiler: Path) -> str:
     identity = {'source': sha256(source), 'sdk': pin, 'compiler': sha256(compiler),
-                'bootstrap': sha256(Path(__file__))}
+                'bootstrap': sha256(Path(__file__)), 'config': HOST_CONFIG, 'manifest': HOST_MANIFEST}
     return hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()[:24]
 
 
@@ -231,6 +254,7 @@ def _validate_bundle(bundle: Path, key: str, pin: dict) -> Path:
     try:
         manifest = json.loads((bundle / 'manifest.json').read_text(encoding='utf-8'))
         expected = {PurePosixPath(name).name: record['sha256'] for name, record in pin['files'].items()}
+        expected['ICODEUI.exe.config'] = hashlib.sha256(HOST_CONFIG.encode('utf-8')).hexdigest()
         if (not isinstance(manifest, dict) or not isinstance(manifest.get('files'), dict)
                 or manifest['identity'] != key or set(manifest['files']) != set(expected) | {'ICODEUI.exe'}):
             raise ValueError('identity mismatch')
@@ -268,11 +292,15 @@ def ensure_native_runtime(*, cache_root: Path | None = None, package_cache: Path
         extract_sdk(archive, stage, pin)
         _check_webview2(stage / 'WebView2Loader.dll')
         exe = stage / 'ICODEUI.exe'
+        (stage / 'ICODEUI.exe.config').write_bytes(HOST_CONFIG.encode('utf-8'))
+        manifest_source = stage / 'ICODEUI.manifest'
+        manifest_source.write_bytes(HOST_MANIFEST.encode('utf-8'))
         references = ['System.dll', 'System.Core.dll', 'System.Drawing.dll', 'System.Windows.Forms.dll',
                       'System.Web.Extensions.dll', str(stage / 'Microsoft.Web.WebView2.Core.dll'),
                       str(stage / 'Microsoft.Web.WebView2.WinForms.dll')]
         command = [str(compiler), '/nologo', '/target:exe', '/platform:x64',
-                   '/langversion:5', '/warnaserror', '/out:' + str(exe)]
+                   '/langversion:5', '/warnaserror', '/out:' + str(exe),
+                   '/win32manifest:' + str(manifest_source)]
         command.extend('/reference:' + name for name in references)
         command.append(str(HOST_SOURCE))
         try:
@@ -282,6 +310,7 @@ def ensure_native_runtime(*, cache_root: Path | None = None, package_cache: Path
             raise NativeRuntimeError('native UI host compilation failed: ' + str(exc)) from exc
         if result.returncode or not exe.is_file():
             raise NativeRuntimeError('native UI host compilation failed: ' + (result.stdout + result.stderr).decode('utf-8', errors='replace')[-3000:])
+        manifest_source.unlink()
         files = {path.name: sha256(path) for path in stage.iterdir() if path.is_file()}
         (stage / 'manifest.json').write_text(json.dumps({'schema_version': 1, 'identity': key, 'files': files}, indent=2) + '\n', encoding='utf-8')
         # Both directory move endpoints are verified children of this dedicated cache.

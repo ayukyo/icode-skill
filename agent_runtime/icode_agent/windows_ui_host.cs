@@ -9,6 +9,8 @@ using System.Diagnostics;
 using System.Drawing;
 using System.IO;
 using System.IO.Pipes;
+using System.Runtime.InteropServices;
+using System.Runtime.Versioning;
 using System.Security.AccessControl;
 using System.Security.Principal;
 using System.Text;
@@ -18,6 +20,8 @@ using System.Web.Script.Serialization;
 using System.Windows.Forms;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.WinForms;
+
+[assembly: TargetFramework(".NETFramework,Version=v4.8", FrameworkDisplayName = ".NET Framework 4.8")]
 
 internal static class NativeHostProgram
 {
@@ -326,6 +330,13 @@ internal sealed class SiteToolbarColors : ProfessionalColorTable
 
 internal sealed class NativeHostWindow : Form
 {
+    [DllImport("user32.dll")]
+    private static extern uint GetDpiForWindow(IntPtr window);
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetWindowDpiAwarenessContext(IntPtr window);
+    [DllImport("user32.dll")]
+    private static extern int GetAwarenessFromDpiAwarenessContext(IntPtr context);
+
     private sealed class PendingRequest
     {
         internal readonly TaskCompletionSource<Dictionary<string, object>> Completion =
@@ -350,6 +361,8 @@ internal sealed class NativeHostWindow : Form
     private readonly ToolStripTextBox address = new ToolStripTextBox();
     private readonly ToolStripButton back = new ToolStripButton("后退");
     private readonly ToolStripButton forward = new ToolStripButton("前进");
+    private readonly ToolStripButton settings = new ToolStripButton("设置");
+    private readonly ToolStripButton reload = new ToolStripButton("刷新");
     private bool closing;
     private bool ready;
     private long nextRequest;
@@ -365,20 +378,22 @@ internal sealed class NativeHostWindow : Form
         this.testScript = testScript;
         this.instanceId = instanceId;
         this.controlPipeName = controlPipeName;
+        SuspendLayout();
         Text = "ICODE";
         Width = 1240;
         Height = 860;
-        MinimumSize = new System.Drawing.Size(640, 480);
+        AutoScaleDimensions = new SizeF(96F, 96F);
+        AutoScaleMode = AutoScaleMode.Dpi;
+        StartPosition = FormStartPosition.CenterScreen;
         toolbar.Font = new Font("Segoe UI", 10F, FontStyle.Regular, GraphicsUnit.Point);
         toolbar.BackColor = SiteToolbarColors.Background;
         toolbar.ForeColor = SiteToolbarColors.Muted;
         toolbar.GripStyle = ToolStripGripStyle.Hidden;
         toolbar.Padding = new Padding(12, 8, 12, 8);
         toolbar.Renderer = new ToolStripProfessionalRenderer(new SiteToolbarColors()) { RoundedEdges = false };
-        ToolStripButton reload = new ToolStripButton("刷新");
         ToolStripButton copy = new ToolStripButton("复制链接");
         ToolStripButton home = new ToolStripButton("首页");
-        foreach (ToolStripButton button in new ToolStripButton[] { back, forward, reload, home, copy })
+        foreach (ToolStripButton button in new ToolStripButton[] { back, forward, reload, home, settings, copy })
         {
             button.Padding = new Padding(8, 5, 8, 5);
             button.Margin = new Padding(0, 0, 4, 0);
@@ -392,7 +407,7 @@ internal sealed class NativeHostWindow : Form
         address.BorderStyle = BorderStyle.FixedSingle;
         address.Margin = new Padding(8, 0, 12, 0);
         address.Text = NativeHostProgram.Origin + initialPath;
-        toolbar.Items.AddRange(new ToolStripItem[] { back, forward, reload, home, address, copy });
+        toolbar.Items.AddRange(new ToolStripItem[] { back, forward, reload, home, settings, address, copy });
         toolbar.Layout += delegate
         {
             // SizeChanged can run before ToolStrip updates its display area after a DPI-aware resize.
@@ -400,7 +415,7 @@ internal sealed class NativeHostWindow : Form
             int available = toolbar.ClientSize.Width - toolbar.Padding.Horizontal - address.Margin.Horizontal;
             foreach (ToolStripItem item in toolbar.Items)
                 if (item != address) available -= item.GetPreferredSize(Size.Empty).Width + item.Margin.Horizontal;
-            int width = Math.Max(120, available);
+            int width = Math.Max(LogicalPixels(120), available);
             if (address.Width != width) address.Width = width;
         };
         web.Dock = DockStyle.Fill;
@@ -410,6 +425,7 @@ internal sealed class NativeHostWindow : Form
         back.Click += delegate { if (web.CoreWebView2 != null && web.CanGoBack) web.GoBack(); };
         forward.Click += delegate { if (web.CoreWebView2 != null && web.CanGoForward) web.GoForward(); };
         reload.Click += delegate { if (web.CoreWebView2 != null) web.Reload(); };
+        settings.Click += async delegate { await OpenSettingsAsync(); };
         home.Click += delegate { Navigate(NativeHostProgram.Origin + initialPath); };
         copy.Click += delegate { try { Clipboard.SetText(address.Text); } catch (Exception error) { output.Error(error); } };
         address.KeyDown += delegate(object sender, KeyEventArgs args)
@@ -418,9 +434,47 @@ internal sealed class NativeHostWindow : Form
             args.SuppressKeyPress = true;
             Navigate(address.Text);
         };
-        Shown += async delegate { await InitializeAsync(); };
+        Shown += async delegate { FitWorkingArea(true); await InitializeAsync(); };
         FormClosing += delegate { StopPending(); };
         FormClosed += delegate { try { output.Event("closed"); } catch (Exception) { } };
+        ResumeLayout(true);
+    }
+
+    private int LogicalPixels(int value)
+    {
+        return (int)Math.Round(value * DeviceDpi / 96.0);
+    }
+
+    private void FitWorkingArea(bool center)
+    {
+        Rectangle work = Screen.FromHandle(Handle).WorkingArea;
+        MinimumSize = new Size(Math.Min(LogicalPixels(640), work.Width), Math.Min(LogicalPixels(480), work.Height));
+        if (WindowState != FormWindowState.Normal) return;
+        int width = Math.Min(Width, work.Width);
+        int height = Math.Min(Height, work.Height);
+        int left = center ? work.Left + (work.Width - width) / 2 : Math.Max(work.Left, Math.Min(Left, work.Right - width));
+        int top = center ? work.Top + (work.Height - height) / 2 : Math.Max(work.Top, Math.Min(Top, work.Bottom - height));
+        SetBounds(left, top, width, height);
+    }
+
+    protected override void OnDpiChanged(DpiChangedEventArgs args)
+    {
+        // Framework applies the suggested bounds and scales controls exactly once.
+        // Recompute only monitor constraints after that work has completed.
+        base.OnDpiChanged(args);
+        Post(delegate { FitWorkingArea(false); toolbar.PerformLayout(); });
+    }
+
+    private async Task OpenSettingsAsync()
+    {
+        if (closing || web.CoreWebView2 == null || !NativeHostProgram.IsOrigin(web.CoreWebView2.Source)) return;
+        try
+        {
+            // Fixed UI action, with an in-document origin check to guard navigation races.
+            // No host object, message bridge, or caller-provided JavaScript is exposed.
+            await web.CoreWebView2.ExecuteScriptAsync("if(location.origin==='https://icode.localhost'){var b=document.getElementById('settings-button');if(b)b.click();}");
+        }
+        catch (Exception error) { if (!closing) output.Error(error); }
     }
 
     protected override bool ProcessCmdKey(ref Message message, Keys keyData)
@@ -766,7 +820,25 @@ internal sealed class NativeHostWindow : Form
                 else if (action == "toolbar_layout")
                 {
                     // Observe the shown native controls only through the explicit test script.
+                    Rectangle work = Screen.FromHandle(Handle).WorkingArea;
+                    int settingsCount = 0;
+                    int refreshCount = 0;
+                    foreach (ToolStripItem item in toolbar.Items)
+                    {
+                        if (item.Text == settings.Text) settingsCount++;
+                        if (item.Text == reload.Text) refreshCount++;
+                    }
                     Dictionary<string, object> layout = new Dictionary<string, object> {
+                        { "native_dpi", GetDpiForWindow(Handle) }, { "form_dpi", DeviceDpi },
+                        { "dpi_awareness", GetAwarenessFromDpiAwarenessContext(GetWindowDpiAwarenessContext(Handle)) },
+                        { "window_state", WindowState.ToString() },
+                        { "window_left", Left }, { "window_right", Right },
+                        { "window_top", Top }, { "window_bottom", Bottom },
+                        { "work_left", work.Left }, { "work_right", work.Right },
+                        { "work_top", work.Top }, { "work_bottom", work.Bottom },
+                        { "work_width", work.Width }, { "work_height", work.Height },
+                        { "minimum_width", MinimumSize.Width }, { "minimum_height", MinimumSize.Height },
+                        { "settings_count", settingsCount }, { "refresh_count", refreshCount },
                         { "client_width", ClientSize.Width },
                         { "display_left", toolbar.DisplayRectangle.Left },
                         { "display_right", toolbar.DisplayRectangle.Right },
@@ -778,6 +850,17 @@ internal sealed class NativeHostWindow : Form
                     output.Send(new Dictionary<string, object> {
                         { "type", "event" }, { "event", "test_result" }, { "id", "toolbar_layout" },
                         { "result", NativeHostProgram.Serializer().Serialize(layout) } });
+                }
+                else if (action == "settings")
+                {
+                    settings.PerformClick();
+                    await Task.Delay(100, shutdown.Token);
+                }
+                else if (action == "window_state")
+                {
+                    string state = NativeHostProgram.Text(step, "state");
+                    if (state != "normal" && state != "maximized") throw new InvalidDataException("Invalid test window state");
+                    WindowState = state == "normal" ? FormWindowState.Normal : FormWindowState.Maximized;
                 }
                 else if (action == "screenshot")
                 {
