@@ -5,10 +5,36 @@ import json
 from pathlib import Path
 import sys
 import threading
+import os
+import shutil
+import subprocess
+
+import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "agent_runtime"))
 from icode_agent.ui_server import create_ui_server
+
+
+@pytest.mark.skipif(os.name == 'nt', reason='Bash static-asset contract runs on Linux CI')
+@pytest.mark.parametrize('asset,content,allowed', [
+    ('app.js', 'const native = location.origin === "https://icode.localhost";', True),
+    ('app.js', "const native = location.origin === 'https://icode.localhost';", True),
+    ('app.js', 'fetch("https://icode.localhost/private");', False),
+    ('app.js', 'const native = location.origin === "https://icode.localhost.evil.test";', False),
+    ('app.js', 'const native = location.origin === "https://icode.localhost"; fetch("https://cdn.test/a");', False),
+    ('index.html', '<script src="https://icode.localhost/app.js"></script>', False),
+    ('index.html', '<script>alert(1)</script>', False),
+    ('style.css', 'body { background: url(https://cdn.test/a.png); }', False),
+])
+def test_static_asset_contract_distinguishes_origin_identity_from_external_dependencies(tmp_path, asset, content, allowed):
+    for name, body in {'index.html': '<script src="/assets/app.js" defer></script>',
+                       'app.js': 'const local = true;', 'style.css': 'body { color: black; }'}.items():
+        (tmp_path / name).write_text(body, encoding='utf-8')
+    (tmp_path / asset).write_text(content, encoding='utf-8')
+    result = subprocess.run([shutil.which('bash') or 'bash', str(ROOT / 'tests/test_agent_ui_contract.sh'),
+                             '--assets-only', str(tmp_path)], capture_output=True, text=True, timeout=20)
+    assert (result.returncode == 0) is allowed, result.stdout + result.stderr
 
 
 def test_reader_vendor_files_match_pinned_manifest():

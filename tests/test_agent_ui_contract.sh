@@ -13,6 +13,32 @@ if [ "${ICODE_UI_TEST_NO_RG:-0}" = "1" ] || ! command -v rg >/dev/null 2>&1; the
   rg() { grep -E -r --binary-files=without-match "$@"; }
 fi
 
+check_static_assets() {
+  python3 - "$1" <<'PY'
+from pathlib import Path
+import re
+import sys
+
+root = Path(sys.argv[1])
+for name in ('index.html', 'app.js', 'style.css'):
+    path = root / name
+    if not path.is_file() or not path.stat().st_size:
+        raise SystemExit(1)
+    source = path.read_text(encoding='utf-8')
+    if name == 'app.js':
+        # The reserved native origin is an identity comparison, not a resource.
+        # Remove only that comparison, leaving other URLs on the same line checked.
+        source = re.sub(r'''(?<![\w.])location\.origin\s*===\s*(["'])https://icode\.localhost\1''', '', source)
+    if re.search(r'https?://|<script[^>]*>[^<]', source):
+        raise SystemExit(1)
+PY
+}
+
+if [ "${1:-}" = '--assets-only' ]; then
+  check_static_assets "${2:-agent_runtime/icode_agent/ui_assets}"
+  exit $?
+fi
+
 if python3 tools/icode_agent.py ui --help 2>/dev/null \
   | grep -q -- '--no-browser' \
   && python3 tools/icode_agent.py ui --help 2>/dev/null | grep -q -- '--ticket' \
@@ -139,13 +165,7 @@ else
   bad "UI 可能被配置为远程监听"
 fi
 
-if [ -s agent_runtime/icode_agent/ui_assets/index.html ] \
-  && [ -s agent_runtime/icode_agent/ui_assets/app.js ] \
-  && [ -s agent_runtime/icode_agent/ui_assets/style.css ] \
-  && ! rg -q 'https?://|<script[^>]*>[^<]' \
-    agent_runtime/icode_agent/ui_assets/index.html \
-    agent_runtime/icode_agent/ui_assets/app.js \
-    agent_runtime/icode_agent/ui_assets/style.css; then
+if check_static_assets agent_runtime/icode_agent/ui_assets; then
   ok "UI 静态资源随仓且无外链/内联脚本"
 else
   bad "UI 静态资源不完整或含外部依赖"
