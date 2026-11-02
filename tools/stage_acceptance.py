@@ -28,8 +28,9 @@ DISCOVERY_LIMITS = {"max_entries": 4096, "max_files": 512, "max_events": 32768,
                     # Full JSON decoding plus canonical hash verification of
                     # large candidate-snapshot history can exceed five seconds
                     # on Windows; both file and cumulative byte caps stay finite.
-                    # Keep a finite wall-clock cap; explicit limits may tighten it.
-                    "timeout_seconds": 30}
+                    # Match the enlarged 4GiB cumulative budget on Windows;
+                    # keep a finite wall-clock cap, which callers may tighten.
+                    "timeout_seconds": 120}
 
 
 def ctl():

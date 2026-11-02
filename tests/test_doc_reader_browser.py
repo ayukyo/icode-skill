@@ -128,6 +128,75 @@ class DocReaderBrowserTest(unittest.TestCase):
         self.page.locator("#doc-body h1").wait_for(timeout=10000)
         self.page.wait_for_function("document.querySelector('#doc-content').getAttribute('aria-busy') === 'false'", timeout=10000)
 
+    def test_compact_panel_icons_reclaim_navigation_and_survive_workspace_roundtrip(self):
+        controls = ('sidebar-toggle', 'doc-tree-toggle', 'doc-outline-toggle')
+        labels = ('工程导航', '章节导航', '章内目录')
+        panels = ('.sidebar', '#doc-tree', '#doc-outline')
+        for origin in ('http://reader.test', 'https://icode.localhost'):
+            with self.subTest(origin=origin):
+                self.page.goto(origin + '/?view=docs')
+                self.page.locator('#doc-body h1').wait_for()
+                self.page.evaluate("localStorage.removeItem('icode-doc-panels:v1')")
+                self.page.reload()
+                self.page.locator('#doc-body h1').wait_for()
+                self.page.evaluate("window.panelGroup = document.getElementById('panel-layout-controls')")
+                for control in controls:
+                    button = self.page.locator('#' + control)
+                    self.assertEqual(button.locator('svg').count(), 1, 'layout controls need static SVG icons')
+                    self.assertEqual(button.inner_text().strip(), '', 'icons must not retain visible text')
+                    bounds = button.bounding_box()
+                    self.assertEqual((bounds['width'], bounds['height']), (28, 28))
+                    icon = button.locator('svg').bounding_box()
+                    self.assertEqual((icon['width'], icon['height']), (16, 16))
+                self.assertEqual(self.page.locator('#panel-layout-controls').evaluate('el => el.parentElement.id'), 'doc-tools')
+                self.assertEqual(self.page.locator('#sidebar-toggle').get_attribute('aria-controls'), 'sidebar-navigation')
+                initial_main = self.page.locator('.main-stage').bounding_box()
+                initial_content = self.page.locator('#doc-content').bounding_box()
+                # All independent combinations retain reachable restore icons and correct semantics.
+                for mask in (1, 3, 7, 5, 4, 6, 2, 0):
+                    for index, (control, panel, label) in enumerate(zip(controls, panels, labels)):
+                        collapsed = bool(mask & (1 << index))
+                        button = self.page.locator('#' + control)
+                        if button.get_attribute('aria-expanded') != str(not collapsed).lower():
+                            button.click()
+                        action = ('展开' if collapsed else '收起') + label
+                        self.assertEqual(button.get_attribute('title'), action)
+                        self.assertEqual(button.get_attribute('aria-label'), action)
+                        self.assertEqual(button.get_attribute('aria-expanded'), str(not collapsed).lower())
+                        self.assertEqual(self.page.locator(panel).is_hidden(), collapsed)
+                        self.assertTrue(button.is_visible())
+                        self.assertEqual(button.locator('svg').count(), 1)
+                    if mask & 1:
+                        self.assertIsNone(self.page.locator('.sidebar').bounding_box())
+                        main = self.page.locator('.main-stage').bounding_box()
+                        self.assertEqual(main['x'], 0)
+                        self.assertAlmostEqual(main['width'] - initial_main['width'], initial_main['x'], delta=1)
+                        self.assertGreater(self.page.locator('#doc-content').bounding_box()['width'], initial_content['width'])
+                # Moving the one existing group must preserve focus and event listeners.
+                self.page.locator('#doc-outline-toggle').focus()
+                self.page.locator('#workspace-tickets').evaluate('el => el.click()')
+                self.assertEqual(self.page.evaluate('document.activeElement.id'), 'sidebar-toggle')
+                self.assertTrue(self.page.locator('#panel-layout-controls').evaluate("el => el === window.panelGroup && el.parentElement.matches('.topbar')"))
+                self.assertTrue(self.page.locator('#doc-tree-toggle').is_hidden())
+                self.assertTrue(self.page.locator('#doc-outline-toggle').is_hidden())
+                self.page.locator('#sidebar-toggle').click()
+                self.assertIsNone(self.page.locator('.sidebar').bounding_box())
+                self.assertEqual(self.page.locator('.main-stage').bounding_box()['x'], 0)
+                self.page.locator('#sidebar-toggle').press('Enter')
+                self.page.locator('#workspace-docs').click()
+                self.assertTrue(self.page.locator('#panel-layout-controls').evaluate("el => el === window.panelGroup && el.parentElement.id === 'doc-tools'"))
+                self.page.locator('#sidebar-toggle').press('Space')
+                for width, height in ((390, 844), (624, 394), (900, 480)):
+                    self.page.set_viewport_size(dict(width=width, height=height))
+                    self.assertIsNone(self.page.locator('.sidebar').bounding_box())
+                    self.assertEqual(self.page.locator('.main-stage').bounding_box()['x'], 0)
+                    self.assertEqual(self.page.locator('.main-stage').bounding_box()['y'], 0)
+                    self.assertTrue(self.page.locator('#sidebar-toggle').is_visible())
+                    self.assertTrue(self.page.evaluate('document.documentElement.scrollWidth <= innerWidth'))
+                self.page.locator('#sidebar-toggle').click()
+                self.assertTrue(self.page.locator('.sidebar').is_visible())
+                self.page.set_viewport_size(dict(width=1440, height=960))
+
     def test_independent_reader_renders_markdown_navigation_and_identity(self):
         self.open_reader()
         self.assertEqual(self.page.locator("#doc-body h1").inner_text(), "中文标题")
@@ -152,7 +221,8 @@ class DocReaderBrowserTest(unittest.TestCase):
         self.assertTrue(self.page.locator('.doc-outline').is_visible())
         self.assertEqual(self.page.locator('#doc-tree-toggle').get_attribute('aria-expanded'), 'false')
         self.page.locator('#sidebar-toggle').click()
-        self.assertLess(self.page.locator('.sidebar').bounding_box()['width'], 64)
+        self.assertIsNone(self.page.locator('.sidebar').bounding_box())
+        self.assertEqual(self.page.locator('.main-stage').bounding_box()['x'], 0)
         self.assertTrue(self.page.locator('#sidebar-toggle').is_visible())
         self.page.locator('#doc-focus').click()
         self.assertTrue(self.page.locator('.doc-outline').is_hidden())

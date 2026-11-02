@@ -29,8 +29,29 @@ def test_native_reader_uses_monitor_dpi_and_preserves_panels_across_restart(tmp_
         f'第 {i} 段：正文与矢量图随显示器适配，保持清晰阅读。' for i in range(120))
     chapter.write_text(source, encoding='utf-8')
     screenshot = tmp_path / 'dpi-reader.png'
+    expanded_screenshot = tmp_path / 'compact-panel-expanded.png'
     first_script = tmp_path / 'first.json'
     first_script.write_text(json.dumps([
+        {'action': 'script', 'id': 'compact-panel', 'script': r'''(async()=>{
+const wait=async(f)=>{const end=Date.now()+25000;while(!f()){if(Date.now()>end)throw Error('DOM timeout');await new Promise(r=>setTimeout(r,60));}};
+await wait(()=>document.getElementById('workspace-docs'));document.getElementById('workspace-docs').click();
+await wait(()=>document.querySelector('#doc-body h1'));
+const ids=['sidebar-toggle','doc-tree-toggle','doc-outline-toggle'];
+for(const id of ids){
+ const button=document.getElementById(id),rect=button.getBoundingClientRect(),svg=button.querySelector('svg');
+ if(!svg||button.textContent.trim()||rect.width!==28||rect.height!==28)throw Error('Expected compact SVG control: '+id);
+ const icon=svg.getBoundingClientRect();if(icon.width!==16||icon.height!==16)throw Error('Expected 16px SVG: '+id);
+ if(button.title!==button.getAttribute('aria-label')||!button.title.startsWith('收起'))throw Error('Missing accessible action: '+id);
+}
+const before=document.querySelector('.main-stage').getBoundingClientRect();
+document.getElementById('sidebar-toggle').click();
+const aside=document.querySelector('.sidebar'),after=document.querySelector('.main-stage').getBoundingClientRect();
+if(aside.getClientRects().length||after.x!==0||Math.abs(after.width-before.width-before.x)>1)throw Error('Collapsed navigation still occupies layout');
+const restore=document.getElementById('sidebar-toggle');
+if(!restore.getClientRects().length||restore.title!=='展开工程导航')throw Error('Restore icon is unavailable');
+restore.click();
+return {icons:true,zeroNavigation:true,reclaimed:after.width-before.width};})()'''},
+        {'action': 'screenshot', 'path': str(expanded_screenshot)},
         {'action': 'script', 'id': 'read-panels', 'script': r'''(async()=>{
 const wait=async(f)=>{const end=Date.now()+25000;while(!f()){if(Date.now()>end)throw Error('DOM timeout');await new Promise(r=>setTimeout(r,60));}};
 await wait(()=>document.getElementById('workspace-docs'));document.getElementById('workspace-docs').click();
@@ -49,6 +70,8 @@ for(const [id,element,key] of [['sidebar-toggle',document.body,'sidebarCollapsed
  if(element.dataset[key]!=='true')document.getElementById(id).click();
 }
 if(document.body.dataset.sidebarCollapsed!=='true'||root.dataset.treeCollapsed!=='true'||root.dataset.outlineCollapsed!=='true')throw Error('Panels did not collapse');
+if(document.querySelector('.sidebar').getClientRects().length||document.querySelector('.main-stage').getBoundingClientRect().x!==0)throw Error('Collapsed navigation has residual layout');
+if(!controls.every(id=>document.getElementById(id).getClientRects().length&&document.getElementById(id).querySelector('svg')))throw Error('Restore SVG controls are unavailable');
 document.getElementById('doc-focus').click();document.getElementById('doc-focus').click();
 if(document.body.dataset.sidebarCollapsed!=='true'||root.dataset.treeCollapsed!=='true'||root.dataset.outlineCollapsed!=='true')throw Error('Focus overwrote manual panel preferences');
 if(route!==location.href||body!==document.getElementById('doc-body')||historyLength!==history.length)throw Error('Layout changed routing or document');
@@ -102,6 +125,8 @@ return {settings:true};})()'''},
         process.stderr.close()
     assert awareness == 2, 'The real window must be per-monitor DPI aware'
     reading = json.loads(next(e['result'] for e in events if e.get('id') == 'read-panels'))
+    compact = json.loads(next(e['result'] for e in events if e.get('id') == 'compact-panel'))
+    assert compact['icons'] and compact['zeroNavigation'] and compact['reclaimed'] > 200
     assert reading['transport'] == 'native'
     assert abs(reading['dpr'] - dpi / 96) < .02
     assert reading['viewportScale'] == 1
@@ -136,8 +161,13 @@ for(const [id,element,key] of [['sidebar-toggle',document.body,'sidebarCollapsed
 await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
 const content=document.getElementById('doc-content'),grid=document.querySelector('.doc-reader-grid');
 const style=getComputedStyle(content),rect=content.getBoundingClientRect(),bounds=grid.getBoundingClientRect();
+document.getElementById('sidebar-toggle').click();
+const main=document.querySelector('.main-stage').getBoundingClientRect();
+const zeroNavigation=!document.querySelector('.sidebar').getClientRects().length&&main.x===0&&main.y===0;
+if(!zeroNavigation||!document.getElementById('sidebar-toggle').getClientRects().length)throw Error('Narrow navigation did not release its layout');
+document.getElementById('sidebar-toggle').click();
 return {width:innerWidth,height:innerHeight,inner:content.clientHeight-parseFloat(style.paddingTop)-parseFloat(style.paddingBottom),
-bottom:rect.bottom,gridBottom:bounds.bottom,overflow:document.documentElement.scrollWidth>innerWidth};})()'''},
+bottom:rect.bottom,gridBottom:bounds.bottom,zeroNavigation,overflow:document.documentElement.scrollWidth>innerWidth};})()'''},
         ])
     reopen_steps.append({'action': 'close'})
     second_script.write_text(json.dumps(reopen_steps), encoding='utf-8')
@@ -152,11 +182,13 @@ bottom:rect.bottom,gridBottom:bounds.bottom,overflow:document.documentElement.sc
                      and event.get('id') != 'short-ready']
     assert len(short_layouts) == 3
     assert all(item['inner'] > 50 and item['bottom'] <= item['gridBottom'] + 1
-               and not item['overflow'] for item in short_layouts), short_layouts
+               and item['zeroNavigation'] and not item['overflow'] for item in short_layouts), short_layouts
     assert chapter.read_text(encoding='utf-8') == source
     evidence = ROOT / 'docs/nbl/verification'
     evidence.mkdir(parents=True, exist_ok=True)
     (evidence / 'reading-clarity-dpi.png').write_bytes(png)
+    (evidence / 'compact-panel-expanded.png').write_bytes(expanded_screenshot.read_bytes())
+    (evidence / 'compact-panel-collapsed.png').write_bytes(png)
     (evidence / 'reading-clarity-integrated.json').write_text(json.dumps(
         dict(dpi=dpi, awareness=awareness, page=reading, capture=dict(width=width, height=height),
              restored=restored, short_layouts=short_layouts, doc_unchanged=True), ensure_ascii=False, indent=2), encoding='utf-8')
@@ -232,6 +264,9 @@ def test_actual_duplicate_cli_focuses_window_and_recovers_stale_registration(tmp
         reused = json.loads(second.stdout)
         assert reused['reused'] and reused['pid'] == ready['pid']
         assert reused['window_id'] == ready['window_id'] and reused['instance_id'] == ready['instance_id']
+        registration = next((home / '.claude/icode_data').glob('ui_native_*.json'))
+        old_record = json.loads(registration.read_text(encoding='utf-8'))
+        assert 'token' not in old_record
         snapshot = subprocess.run(['powershell', '-NoProfile', '-Command',
             '@{processes=@(Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name);'
             'listeners=@(Get-NetTCPConnection -State Listen | Select-Object OwningProcess,LocalAddress,LocalPort)}'
@@ -256,9 +291,6 @@ def test_actual_duplicate_cli_focuses_window_and_recovers_stale_registration(tmp
         evidence = ROOT / 'docs/nbl/verification'
         evidence.mkdir(parents=True, exist_ok=True)
         (evidence / 'native-process-listeners.json').write_text(audit, encoding='utf-8')
-        registration = next((home / '.claude/icode_data').glob('ui_native_*.json'))
-        old_record = json.loads(registration.read_text(encoding='utf-8'))
-        assert 'token' not in old_record
         output, error = process.communicate(timeout=15)
         assert process.returncode == 0, output + error
         assert not registration.exists(), 'normal window close must remove its own registration'

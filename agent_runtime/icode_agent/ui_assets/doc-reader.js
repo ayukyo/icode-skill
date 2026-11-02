@@ -102,18 +102,19 @@
   const applyPanels = () => {
     const collapsed = focusSnapshot && state.reading ? { sidebar: true, tree: true, outline: true } : panels;
     const definitions = [
-      ["sidebar", "sidebar-toggle", "sidebar-navigation", "工程导航", "导航"],
-      ["tree", "doc-tree-toggle", "doc-tree", "章节导航", "章节"],
-      ["outline", "doc-outline-toggle", "doc-outline", "章内目录", "目录"],
+      ["sidebar", "sidebar-toggle", "sidebar-navigation", "工程导航"],
+      ["tree", "doc-tree-toggle", "doc-tree", "章节导航"],
+      ["outline", "doc-outline-toggle", "doc-outline", "章内目录"],
     ];
-    definitions.forEach(([key, buttonId, panelId, label, shortLabel]) => {
+    definitions.forEach(([key, buttonId, panelId, label]) => {
       const button = byId(buttonId), panel = byId(panelId);
       // Never leave keyboard focus in a region that is about to disappear.
       if (collapsed[key] && panel.contains(document.activeElement)) button.focus({ preventScroll: true });
       panel.hidden = collapsed[key];
       button.setAttribute("aria-expanded", String(!collapsed[key]));
-      button.setAttribute("aria-label", `${collapsed[key] ? "展开" : "收起"}${label}`);
-      button.textContent = `${collapsed[key] ? "展开" : "收起"}${shortLabel}`;
+      const actionLabel = `${collapsed[key] ? "展开" : "收起"}${label}`;
+      button.setAttribute("aria-label", actionLabel);
+      button.title = actionLabel;
     });
     document.body.dataset.sidebarCollapsed = String(collapsed.sidebar);
     root.dataset.treeCollapsed = String(collapsed.tree);
@@ -181,6 +182,8 @@
   };
   const setWorkspace = (workspace) => {
     rememberScroll();
+    const controls = byId("panel-layout-controls");
+    const focusedControl = controls.contains(document.activeElement) ? document.activeElement : null;
     if (state.reading && workspace !== "docs") {
       // Hidden readers cannot finish a navigation or rewrite the ticket URL.
       // Keep completed DOM intact; pendingRoute records an interrupted selection.
@@ -191,8 +194,17 @@
       clearTimeout(state.searchTimer);
     }
     state.reading = workspace === "docs";
+    // Move the original controls and listeners to the toolbar visible in this workspace.
+    const toolbar = state.reading ? byId("doc-tools") : document.querySelector(".topbar");
+    if (controls.parentElement !== toolbar) toolbar.prepend(controls);
+    byId("doc-tree-toggle").hidden = !state.reading;
+    byId("doc-outline-toggle").hidden = !state.reading;
     document.body.dataset.workspace = workspace;
     root.hidden = !state.reading;
+    if (focusedControl) {
+      const target = state.reading || focusedControl.id === "sidebar-toggle" ? focusedControl : byId("sidebar-toggle");
+      target.focus({ preventScroll: true });
+    }
     applyPanels();
     byId("workspace-docs").setAttribute("aria-selected", String(state.reading));
     byId("workspace-tickets").setAttribute("aria-selected", String(!state.reading));

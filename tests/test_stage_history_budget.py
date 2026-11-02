@@ -166,11 +166,19 @@ class HistoryDiscoveryBudgetTests(unittest.TestCase):
 
     def test_default_time_budget_still_has_finite_upper_bound(self):
         self.write_ticket(100)
-        clock = itertools.chain([0], itertools.repeat(31))
+        clock = itertools.chain([0], itertools.repeat(self.stage.DISCOVERY_LIMITS["timeout_seconds"] + 1))
         with mock.patch.object(self.stage.time, "monotonic", side_effect=clock):
             with self.assertRaisesRegex(self.api.ControlError, "time budget") as error:
                 self.stage.discover_stage_history(self.project)
         self.assertEqual(error.exception.extra["discovery"]["limit"], "timeout_seconds")
+
+    def test_default_time_budget_admits_large_history_authentication(self):
+        self.write_ticket(100)
+        # A complete authenticated scan can exceed 30 seconds on Windows
+        # while remaining inside the declared 1GiB/file, 4GiB total budget.
+        clock = itertools.chain([0], itertools.repeat(61))
+        with mock.patch.object(self.stage.time, "monotonic", side_effect=clock):
+            self.assertIsNone(self.stage.discover_stage_history(self.project))
 
     def test_explicit_five_second_limit_still_rejects_slow_scan(self):
         self.write_ticket(100)
