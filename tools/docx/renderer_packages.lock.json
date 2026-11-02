@@ -2,7 +2,7 @@
   "schema_version": 1,
   "packages": [
     {
-      "id": "linux-x86_64-lo26.8.2-poppler22.02.0-14",
+      "id": "linux-x86_64-lo26.8.2-poppler22.02.0-15",
       "os": "linux",
       "arch": "x86_64",
       "libc": "glibc",
@@ -37,26 +37,26 @@
           "provenance": "https://download.documentfoundation.org/libreoffice/stable/26.8.2/deb/x86_64/LibreOffice_26.8.2_Linux_x86-64_deb.tar.gz.mirrorlist"
         },
         {
-          "name": "poppler-utils_22.02.0-2ubuntu0.14_amd64.deb",
+          "name": "poppler-utils_22.02.0-2ubuntu0.15_amd64.deb",
           "kind": "deb",
-          "bytes": 185976,
-          "sha256": "5e2579fac5478529967f7955283676906f2692419117c5a49d2439ec5bea2498",
+          "bytes": 185954,
+          "sha256": "2a51ac8e1fa1db1754509ecd26dda45b11783030dab4f7fc88dc2027536b2cd0",
           "urls": [
-            "https://snapshot.ubuntu.com/ubuntu/20261020T000000Z/pool/main/p/poppler/poppler-utils_22.02.0-2ubuntu0.14_amd64.deb",
-            "https://archive.ubuntu.com/ubuntu/pool/main/p/poppler/poppler-utils_22.02.0-2ubuntu0.14_amd64.deb"
+            "https://security.ubuntu.com/ubuntu/pool/main/p/poppler/poppler-utils_22.02.0-2ubuntu0.15_amd64.deb",
+            "https://archive.ubuntu.com/ubuntu/pool/main/p/poppler/poppler-utils_22.02.0-2ubuntu0.15_amd64.deb"
           ],
-          "provenance": "Ubuntu jammy-security signed APT Packages metadata"
+          "provenance": "Ubuntu jammy-security signed InRelease and Packages metadata (2026-11-01)"
         },
         {
-          "name": "libpoppler118_22.02.0-2ubuntu0.14_amd64.deb",
+          "name": "libpoppler118_22.02.0-2ubuntu0.15_amd64.deb",
           "kind": "deb",
-          "bytes": 1079142,
-          "sha256": "7cb48217cbd05e22248a801021410353b1e50d3cd6f864f907273c915ed78d2c",
+          "bytes": 1079190,
+          "sha256": "7d33df0c6e529931997b4fcd1f23a1a4ff2a4790d37dc6255089e128f7da5e0c",
           "urls": [
-            "https://snapshot.ubuntu.com/ubuntu/20261020T000000Z/pool/main/p/poppler/libpoppler118_22.02.0-2ubuntu0.14_amd64.deb",
-            "https://archive.ubuntu.com/ubuntu/pool/main/p/poppler/libpoppler118_22.02.0-2ubuntu0.14_amd64.deb"
+            "https://security.ubuntu.com/ubuntu/pool/main/p/poppler/libpoppler118_22.02.0-2ubuntu0.15_amd64.deb",
+            "https://archive.ubuntu.com/ubuntu/pool/main/p/poppler/libpoppler118_22.02.0-2ubuntu0.15_amd64.deb"
           ],
-          "provenance": "Ubuntu jammy-security signed APT Packages metadata"
+          "provenance": "Ubuntu jammy-security signed InRelease and Packages metadata (2026-11-01)"
         }
       ]
     }
