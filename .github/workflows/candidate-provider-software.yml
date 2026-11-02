@@ -63,7 +63,9 @@ jobs:
       matrix:
         os: [ubuntu-22.04, windows-latest]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+    # Includes the provider contracts plus the complete 123-case legacy suite;
+    # real Git/process fixtures on Windows can exceed 20 minutes in aggregate.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
