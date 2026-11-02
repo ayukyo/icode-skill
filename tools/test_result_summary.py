@@ -141,11 +141,14 @@ def summarize_report(raw, workspace, *, limits=None):
             if name == "skipped":
                 stack[-1]["explicit_skip"] = True
         status, result = attrs.get("status"), attrs.get("result")
-        if name == "testcase" and (status not in {None, "run", "notrun"}
+        if name == "testcase" and (status not in {None, "run", "notrun", "fail"}
                 or result not in {None, "completed", "skipped", "suppressed"}
                 or (status == "notrun" and result == "completed") or (status == "run" and result == "suppressed")):
             raise ReportError("unknown/conflicting testcase status/result")
         outcomes = {"skipped"} if name == "testcase" and (status == "notrun" or result in {"skipped", "suppressed"}) else set()
+        # CTest emits status="fail"; it must never fall through to a passing case.
+        if name == "testcase" and status == "fail":
+            outcomes.add("failed")
         stack.append({"name": name, "counts": dict.fromkeys(INTERNAL_COUNTS, 0), "declared": declared, "outcomes": outcomes,
                       "status": status, "result": result, "explicit_skip": False})
 

@@ -73,6 +73,30 @@ class ReportTests(unittest.TestCase):
             with self.subTest(attrs=attrs):
                 self.assert_rejected('<testsuite><testcase ' + attrs + '/></testsuite>', "status|result")
 
+    def test_ctest_fail_status_preserves_failed_case_counts(self):
+        api = load_tool("test_result_summary")
+        for detail in ('<failure message="assertion failed"/>', ''):
+            with self.subTest(detail=detail):
+                try:
+                    result = self.report('<testsuite tests="2" failures="1" skipped="0">'
+                                         '<testcase status="run"/>'
+                                         '<testcase status="fail">' + detail + '</testcase></testsuite>')
+                except api.ReportError as error:
+                    self.fail("Valid CTest fail status must produce failed counts: " + str(error))
+                self.assertEqual((result["total"], result["passed"], result["failed"], result["outcome"]),
+                                 (2, 1, 1, "fail"))
+                with self.assertRaisesRegex(api.ReportError, "cannot be downgraded"):
+                    api.validate_summary(result, "pass")
+
+    def test_ctest_fail_status_cannot_hide_conflicting_outcomes(self):
+        for attrs, detail in (('status="fail"', '<skipped/>'),
+                              ('status="fail"', '<error/>'),
+                              ('status="fail" result="skipped"', ''),
+                              ('status="fail" result="suppressed"', '')):
+            with self.subTest(attrs=attrs, detail=detail):
+                self.assert_rejected('<testsuite><testcase ' + attrs + '>' + detail
+                                     + '</testcase></testsuite>', "conflicting")
+
     def test_disabled_counter_conflicts_are_rejected(self):
         self.assert_rejected('<testsuite tests="1" disabled="0">'
                              '<testcase status="notrun" result="suppressed"/></testsuite>', "count mismatch")

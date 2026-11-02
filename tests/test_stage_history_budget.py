@@ -3,6 +3,7 @@
 No Git repository, device, or real control ledger is touched.
 """
 import importlib.util
+import itertools
 import json
 from pathlib import Path
 import shutil
@@ -74,11 +75,50 @@ class HistoryDiscoveryBudgetTests(unittest.TestCase):
                              {"max_file_bytes": per_file, "max_total_bytes": cumulative}):
             self.assertIsNone(self.stage.discover_stage_history(self.project))
 
+    def test_default_single_file_budget_admits_grown_authenticated_history(self):
+        # Scale both default byte caps equally while retaining an actual,
+        # authenticated metadata/ledger pair and all ordinary read checks.
+        self.write_ticket(1100)
+        scale = 256 * 1024
+        bounds = {key: self.stage.DISCOVERY_LIMITS[key] // scale
+                  for key in ("max_file_bytes", "max_total_bytes")}
+        with mock.patch.dict(self.stage.DISCOVERY_LIMITS, bounds):
+            try:
+                result = self.stage.discover_stage_history(self.project)
+            except self.api.ControlError as error:
+                self.fail("Grown authenticated history inside the supported budget was rejected: " + str(error))
+        self.assertIsNone(result)
+
     def test_single_file_above_old_default_is_accepted(self):
         # A legitimate ledger can outgrow the previous 64 MiB limit while
         # remaining within the bounded discovery budget.
         self.write_ticket(64 * 1024 * 1024 + 1024)
         self.assertIsNone(self.stage.discover_stage_history(self.project))
+
+    def test_default_budget_admits_candidate_history_beyond_previous_file_cap(self):
+        self.write_ticket(3000)
+        scale = 256 * 1024
+        bounds = {key: self.stage.DISCOVERY_LIMITS[key] // scale
+                  for key in ("max_file_bytes", "max_total_bytes")}
+        with mock.patch.dict(self.stage.DISCOVERY_LIMITS, bounds):
+            try:
+                result = self.stage.discover_stage_history(self.project)
+            except self.api.ControlError as error:
+                self.fail("Authenticated history inside supported file capacity rejected: " + str(error))
+        self.assertIsNone(result)
+
+    def test_default_budget_admits_multiple_grown_candidate_histories(self):
+        for index in range(3):
+            self.write_ticket(1400, ticket=self.ticket.with_name(".icode_output_" + str(index + 1)))
+        scale = 256 * 1024
+        bounds = {key: self.stage.DISCOVERY_LIMITS[key] // scale
+                  for key in ("max_file_bytes", "max_total_bytes")}
+        with mock.patch.dict(self.stage.DISCOVERY_LIMITS, bounds):
+            try:
+                result = self.stage.discover_stage_history(self.project)
+            except self.api.ControlError as error:
+                self.fail("Authenticated histories inside supported total capacity rejected: " + str(error))
+        self.assertIsNone(result)
 
     def test_cumulative_history_above_old_default_is_accepted(self):
         self.write_ticket(33 * 1024 * 1024)
@@ -113,6 +153,31 @@ class HistoryDiscoveryBudgetTests(unittest.TestCase):
         with self.assertRaisesRegex(self.api.ControlError, "budget"):
             self.stage.discover_stage_history(
                 self.project, limits={"max_file_bytes": 50})
+
+    def test_default_time_budget_admits_complete_scan_beyond_five_seconds(self):
+        self.write_ticket(100)
+        clock = itertools.chain([0], itertools.repeat(6))
+        with mock.patch.object(self.stage.time, "monotonic", side_effect=clock):
+            try:
+                result = self.stage.discover_stage_history(self.project)
+            except self.api.ControlError as error:
+                self.fail("A complete scan inside the revised budget was rejected: " + str(error))
+        self.assertIsNone(result)
+
+    def test_default_time_budget_still_has_finite_upper_bound(self):
+        self.write_ticket(100)
+        clock = itertools.chain([0], itertools.repeat(31))
+        with mock.patch.object(self.stage.time, "monotonic", side_effect=clock):
+            with self.assertRaisesRegex(self.api.ControlError, "time budget") as error:
+                self.stage.discover_stage_history(self.project)
+        self.assertEqual(error.exception.extra["discovery"]["limit"], "timeout_seconds")
+
+    def test_explicit_five_second_limit_still_rejects_slow_scan(self):
+        self.write_ticket(100)
+        clock = itertools.chain([0], itertools.repeat(6))
+        with mock.patch.object(self.stage.time, "monotonic", side_effect=clock):
+            with self.assertRaisesRegex(self.api.ControlError, "time budget"):
+                self.stage.discover_stage_history(self.project, limits={"timeout_seconds": 5})
 
 
 if __name__ == "__main__":
