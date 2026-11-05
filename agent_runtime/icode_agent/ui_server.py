@@ -1,5 +1,6 @@
 """ICODE Agent Runtime 的本地、单工单 Web UI 服务。"""
 
+import copy
 import importlib.util
 import json
 import os
@@ -474,7 +475,9 @@ class AgentUIService:
             **public,
             **self._public_policy(policy),
             "cockpit": self._cockpit_projection(target),
-            "stage": self._stage_projection(target),
+            # action-policy already projected this ticket's stage layer. Reuse it
+            # instead of running the (potentially very expensive) discovery twice.
+            "stage": self._stage_projection(target, policy.get("stage")),
         }
 
     def _stage_control(self):
@@ -495,9 +498,13 @@ class AgentUIService:
             self._stage_module = module
         return self._stage_module
 
-    def _stage_projection(self, target: ResolvedTicket) -> Dict:
+    def _stage_projection(self, target: ResolvedTicket, base=None) -> Dict:
         try:
-            result = self._stage_control().stage_projection(target.out_dir)
+            # ``base`` is the stage projection from the action-policy call made for
+            # this same request. It is the same function over the same control
+            # files, so re-running it only repeats expensive history discovery.
+            result = copy.deepcopy(base) if isinstance(base, dict) else \
+                self._stage_control().stage_projection(target.out_dir)
         except Exception as exc:
             raise ControlPlaneError("阶段状态不可验证") from exc
         report = result.get("report")

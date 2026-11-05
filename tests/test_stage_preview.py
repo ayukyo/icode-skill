@@ -136,13 +136,23 @@ def dashboard(tmp_path):
         yield server
 
 
+@contextmanager
+def patched_stage(fake):
+    """Ticket detail reuses the stage projection carried by action-policy."""
+    def projection(_lifecycle, target):
+        return {"stage": fake.stage_projection(target.out_dir)}
+    with patch.object(ui_server.AgentUIService, "_stage_control", return_value=fake), \
+            patch.object(ui_server.ControlLifecycle, "projection", projection):
+        yield
+
+
 def preview_url(fake, index=0):
     return f"/api/v1/stage-previews/M2-UI-1/{index}?report_sha256={fake.review['report_sha256']}"
 
 
 def test_report_lists_safe_indices_and_endpoint_serves_exact_png(tmp_path):
     fake = setup_frozen(tmp_path)
-    with patch.object(ui_server.AgentUIService, "_stage_control", return_value=fake), dashboard(tmp_path) as server:
+    with patched_stage(fake), dashboard(tmp_path) as server:
         status, _, body = request(server, "/api/v1/tickets/M2-UI-1")
         assert status == 200
         previews = json.loads(body)["ticket"]["stage"]["report"]["previews"]
@@ -166,7 +176,7 @@ def test_real_jpeg_is_served_by_content_even_with_png_file_extension(tmp_path):
     image = base64.b64decode(
         "/9j//gAPTGF2YzYzLjEuMTAyAP/bAEMACAQEBAQEBQUFBQUFBgYGBgYGBgYGBgYGBgcHBwgICAcHBwYGBwcICAgICQkJCAgICAkJCgoKDAwLCw4ODhERFP/EAE0AAQEAAAAAAAAAAAAAAAAAAAAGAQEBAQAAAAAAAAAAAAAAAAAABgcQAQAAAAAAAAAAAAAAAAAAAAARAQAAAAAAAAAAAAAAAAAAAAD/wAARCAACAAQDARIAAhIAAxIA/9oADAMBAAIRAxEAPwCLEmN/H//Z")
     fake = setup_frozen(tmp_path, image=image)
-    with patch.object(ui_server.AgentUIService, "_stage_control", return_value=fake), dashboard(tmp_path) as server:
+    with patched_stage(fake), dashboard(tmp_path) as server:
         status, headers, body = request(server, preview_url(fake))
         assert status == 200 and body == image
         assert headers["Content-Type"] == "image/jpeg"
@@ -177,7 +187,7 @@ def test_preview_list_has_bounded_representative_frames(tmp_path):
     frames = fake.bundle["visual"]["frame_sets"][0]["frames"]
     for index in range(1, 8):
         frames.append({**copy.deepcopy(frames[0]), "id": f"frame-{index + 1}"})
-    with patch.object(ui_server.AgentUIService, "_stage_control", return_value=fake), dashboard(tmp_path) as server:
+    with patched_stage(fake), dashboard(tmp_path) as server:
         status, _, body = request(server, "/api/v1/tickets/M2-UI-1")
         assert status == 200
         previews = json.loads(body)["ticket"]["stage"]["report"]["previews"]
@@ -187,14 +197,14 @@ def test_preview_list_has_bounded_representative_frames(tmp_path):
 
 def test_preview_refuses_an_oversize_file_before_serving_bytes(tmp_path):
     fake = setup_frozen(tmp_path, image=b"x" * (16 * 1024 * 1024 + 1))
-    with patch.object(ui_server.AgentUIService, "_stage_control", return_value=fake), dashboard(tmp_path) as server:
+    with patched_stage(fake), dashboard(tmp_path) as server:
         assert request(server, preview_url(fake))[0] == 409
 
 
 @pytest.mark.parametrize("token,host,expected", [(False, None, 403), (True, "foreign.invalid", 421)])
 def test_preview_keeps_http_token_and_host_checks(tmp_path, token, host, expected):
     fake = setup_frozen(tmp_path)
-    with patch.object(ui_server.AgentUIService, "_stage_control", return_value=fake), dashboard(tmp_path) as server:
+    with patched_stage(fake), dashboard(tmp_path) as server:
         status, _, _ = request(server, preview_url(fake), token=token, host=host)
         assert status == expected
 
@@ -204,7 +214,7 @@ def test_preview_keeps_http_token_and_host_checks(tmp_path, token, host, expecte
     "?report_sha256=" + "c" * 64 + "&report_sha256=" + "d" * 64])
 def test_preview_rejects_missing_stale_or_injected_report_query(tmp_path, suffix):
     fake = setup_frozen(tmp_path)
-    with patch.object(ui_server.AgentUIService, "_stage_control", return_value=fake), dashboard(tmp_path) as server:
+    with patched_stage(fake), dashboard(tmp_path) as server:
         status, _, body = request(server, "/api/v1/stage-previews/M2-UI-1/0" + suffix)
         assert status in {400, 409}
         assert fake.image not in body
@@ -214,7 +224,7 @@ def test_preview_rejects_missing_stale_or_injected_report_query(tmp_path, suffix
     ("M2-UI-1", "0%2f..%2fframes%2fpreview.png"), ("M2-UI-1", "%2e%2e"), ("M2-UI-1", "0.png")])
 def test_preview_is_catalog_scoped_and_accepts_only_an_index(tmp_path, ticket, index):
     fake = setup_frozen(tmp_path)
-    with patch.object(ui_server.AgentUIService, "_stage_control", return_value=fake), dashboard(tmp_path) as server:
+    with patched_stage(fake), dashboard(tmp_path) as server:
         status, _, _ = request(server, preview_url(fake).replace("M2-UI-1/0", ticket + "/" + index))
         assert status in {400, 409}
 
@@ -222,7 +232,7 @@ def test_preview_is_catalog_scoped_and_accepts_only_an_index(tmp_path, ticket, i
 @pytest.mark.parametrize("mutation", ["replace", "delete", "bundle", "report", "review", "ledger"])
 def test_preview_rechecks_current_bytes_and_protected_review(tmp_path, mutation):
     fake = setup_frozen(tmp_path)
-    with patch.object(ui_server.AgentUIService, "_stage_control", return_value=fake), dashboard(tmp_path) as server:
+    with patched_stage(fake), dashboard(tmp_path) as server:
         if mutation == "replace": (fake.root / fake.image_path).write_bytes(png(6, 2))
         elif mutation == "delete": (fake.root / fake.image_path).unlink()
         elif mutation == "bundle": (fake.root / "bundle.json").write_text("{}")
@@ -245,14 +255,14 @@ def test_review_change_during_preview_read_is_rejected(tmp_path):
             fake.program["reviews"]["first"][-1]["report_sha256"] = "d" * 64
         return resolve(directory)
     fake._resolve = changing_resolve
-    with patch.object(ui_server.AgentUIService, "_stage_control", return_value=fake), dashboard(tmp_path) as server:
+    with patched_stage(fake), dashboard(tmp_path) as server:
         assert request(server, preview_url(fake))[0] == 409
 
 
 def test_preview_rejects_frozen_observation_for_other_image(tmp_path):
     fake = setup_frozen(tmp_path)
     fake.receipt["frame_results"][0]["input_sha256"] = "sha256:" + "d" * 64
-    with patch.object(ui_server.AgentUIService, "_stage_control", return_value=fake), dashboard(tmp_path) as server:
+    with patched_stage(fake), dashboard(tmp_path) as server:
         assert request(server, preview_url(fake))[0] == 409
         status, _, body = request(server, "/api/v1/tickets/M2-UI-1")
         stage = json.loads(body)["ticket"]["stage"]
@@ -262,7 +272,7 @@ def test_preview_rejects_frozen_observation_for_other_image(tmp_path):
 @pytest.mark.parametrize("path", ["../external.png", ".ssh/key.png", "frames/preview.png:secret", "frames/../preview.png"])
 def test_frozen_item_still_cannot_read_private_ads_or_escape_paths(tmp_path, path):
     fake = setup_frozen(tmp_path, image_path=path)
-    with patch.object(ui_server.AgentUIService, "_stage_control", return_value=fake), dashboard(tmp_path) as server:
+    with patched_stage(fake), dashboard(tmp_path) as server:
         status, _, _ = request(server, preview_url(fake))
         assert status == 409
 
@@ -271,7 +281,7 @@ def test_frozen_absolute_external_path_is_rejected(tmp_path):
     outside = tmp_path / "external.png"
     outside.write_bytes(png())
     fake = setup_frozen(tmp_path, image_path=str(outside))
-    with patch.object(ui_server.AgentUIService, "_stage_control", return_value=fake), dashboard(tmp_path) as server:
+    with patched_stage(fake), dashboard(tmp_path) as server:
         assert request(server, preview_url(fake))[0] == 409
 
 
@@ -279,7 +289,7 @@ def test_frozen_absolute_external_path_is_rejected(tmp_path):
 def test_preview_refuses_windows_parent_junction(tmp_path):
     import _winapi
     fake = setup_frozen(tmp_path)
-    with patch.object(ui_server.AgentUIService, "_stage_control", return_value=fake), dashboard(tmp_path) as server:
+    with patched_stage(fake), dashboard(tmp_path) as server:
         external = tmp_path / "junction-target"
         external.mkdir()
         (external / "preview.png").write_bytes(fake.image)
@@ -298,7 +308,7 @@ def test_preview_refuses_windows_parent_junction(tmp_path):
 @pytest.mark.parametrize("link_parent", [False, True])
 def test_preview_refuses_file_or_parent_symlink(tmp_path, link_parent):
     fake = setup_frozen(tmp_path)
-    with patch.object(ui_server.AgentUIService, "_stage_control", return_value=fake), dashboard(tmp_path) as server:
+    with patched_stage(fake), dashboard(tmp_path) as server:
         external = tmp_path / "outside"
         external.mkdir()
         (external / "preview.png").write_bytes(fake.image)
@@ -321,7 +331,7 @@ def test_preview_refuses_file_or_parent_symlink(tmp_path, link_parent):
                          ids=["svg", "raw", "short-png", "pixel-budget"])
 def test_preview_only_serves_bounded_real_png_jpeg(tmp_path, image):
     fake = setup_frozen(tmp_path, image=image)
-    with patch.object(ui_server.AgentUIService, "_stage_control", return_value=fake), dashboard(tmp_path) as server:
+    with patched_stage(fake), dashboard(tmp_path) as server:
         assert request(server, preview_url(fake))[0] == 409
 
 

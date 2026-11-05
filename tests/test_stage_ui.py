@@ -1,6 +1,7 @@
 """HTTP confirmation origin and payload boundary; no device or Git mutation."""
 import http.client
 import json
+from contextlib import contextmanager
 from pathlib import Path
 import sys
 from unittest.mock import patch
@@ -42,6 +43,22 @@ def payload(**updates):
             "decision": "confirm", "request_id": "stage-ui-1", **updates}
 
 
+@contextmanager
+def stage_service(fake):
+    """Serve the fake stage layer through the same action-policy projection.
+
+    Ticket detail reuses the stage projection already carried by
+    ``action-policy``; the fake must therefore be injected there as well as in
+    the confirmation adapter.
+    """
+    def projection(_lifecycle, target):
+        return {"stage": fake.stage_projection(target.out_dir),
+                "revision": {"token": "a" * 64}, "allowed_actions": []}
+    with patch.object(ui_server.AgentUIService, "_stage_control", return_value=fake, create=True), \
+            patch.object(ui_server.ControlLifecycle, "projection", projection):
+        yield
+
+
 def request(server, method, path, data=None, *, origin=True, token=True):
     host, port = server.server_address
     headers = {"Host": f"{host}:{port}", "Content-Type": "application/json"}
@@ -59,7 +76,7 @@ def request(server, method, path, data=None, *, origin=True, token=True):
 
 def test_stage_projection_and_report_are_available_for_review(tmp_path):
     fake = StageControl()
-    with patch.object(ui_server.AgentUIService, "_stage_control", return_value=fake, create=True), dashboard(tmp_path) as server:
+    with stage_service(fake), dashboard(tmp_path) as server:
         status, result = request(server, "GET", "/api/v1/tickets/M2-UI-1")
         assert status == 200
         assert result["ticket"]["stage"]["challenge"]["challenge_id"] == "challenge"

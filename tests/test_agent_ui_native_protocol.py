@@ -162,7 +162,8 @@ def fake_host(tmp_path, monkeypatch, dispatcher, source):
         return child
     monkeypatch.setattr(native.subprocess, 'Popen', start)
     monkeypatch.setattr(native, 'AgentUIService', lambda **kwargs: dispatcher.service)
-    monkeypatch.setattr(native, 'NATIVE_TIMEOUT_SECONDS', .4)
+    monkeypatch.setattr(native, 'NATIVE_READY_TIMEOUT_SECONDS', .4)
+    monkeypatch.setattr(native, 'NATIVE_REQUEST_TIMEOUT_SECONDS', .4)
     return native, children, commands
 
 
@@ -260,7 +261,7 @@ def test_native_pipe_returns_large_binary_without_truncation(dispatcher, tmp_pat
         'emit({"type":"event","event":"ready","pid":os.getpid(),"window_id":123})\n'
         'emit({"type":"event","event":"closed"})\n')
     from icode_agent.ui_server import UIResponse
-    monkeypatch.setattr(native, 'NATIVE_TIMEOUT_SECONDS', 5)
+    monkeypatch.setattr(native, 'NATIVE_REQUEST_TIMEOUT_SECONDS', 5)
     monkeypatch.setattr(native.AgentUIInMemoryDispatcher, 'dispatch',
                         lambda *a: UIResponse(200, {'Content-Type':'application/octet-stream'}, bytes(range(256))*8192))
     assert run_host(native, tmp_path) == 0

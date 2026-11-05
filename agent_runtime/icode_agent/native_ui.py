@@ -19,7 +19,14 @@ from .ui_server import AgentUIInMemoryDispatcher, AgentUIService, NATIVE_UI_ORIG
 
 MAX_NATIVE_MESSAGE_BYTES = 32 * 1024 * 1024
 MAX_NATIVE_INFLIGHT = 16
-NATIVE_TIMEOUT_SECONDS = 30
+# Starting the local host is quick, so a short deadline still catches a wedged start.
+NATIVE_READY_TIMEOUT_SECONDS = 30
+# A single page request may run one or more control-plane projections. Stage
+# history discovery has its own 120-second budget (stage_acceptance.
+# DISCOVERY_LIMITS), and one ticket detail projects the control plane twice on
+# large projects. The request ceiling must cover that documented worst case;
+# otherwise a legitimately slow projection tears down the whole window.
+NATIVE_REQUEST_TIMEOUT_SECONDS = 300
 _REPARSE_POINT = 0x400
 # Match the host's fail-closed policy while leaving the caller's environment intact.
 _WEBVIEW2_ENV_OVERRIDES = frozenset({
@@ -184,7 +191,7 @@ class _NativeSession:
         self._start(self._write)
         self._put(self.writes, (None, _encode(init)))
         ready = False
-        ready_deadline = time.monotonic() + NATIVE_TIMEOUT_SECONDS
+        ready_deadline = time.monotonic() + NATIVE_READY_TIMEOUT_SECONDS
         while True:
             now = time.monotonic()
             if not ready and now >= ready_deadline:
@@ -209,7 +216,7 @@ class _NativeSession:
                     raise NativeUIError('原生 UI 请求 ID 重复')
                 if len(self.pending) >= MAX_NATIVE_INFLIGHT:
                     raise NativeUIError('原生 UI 请求超过并发上限')
-                self.pending[request_id] = time.monotonic() + NATIVE_TIMEOUT_SECONDS
+                self.pending[request_id] = time.monotonic() + NATIVE_REQUEST_TIMEOUT_SECONDS
                 self._start(self._request, request)
                 # Finished threads do not accumulate for the lifetime of the window.
                 self.threads = [thread for thread in self.threads if thread.is_alive()]
