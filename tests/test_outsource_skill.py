@@ -25,7 +25,9 @@ class OutsourceSkillTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.temporary = tempfile.TemporaryDirectory(prefix="icode-outsource-skill-")
-        cls.base = Path(cls.temporary.name)
+        # Windows CI may supply an 8.3 TEMP alias (RUNNER~1); compare the
+        # canonical path identity returned by the installed resolver.
+        cls.base = Path(cls.temporary.name).resolve(strict=True)
         cls.target = cls.base / "installed-skills"
         cls.run_cli("tools/install_skill_pack.py", "--manifest", MANIFEST,
                     "--target-root", cls.target, "--dry-run")
