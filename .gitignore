@@ -38,6 +38,7 @@
 /tools/ppt/scripts/__pycache__/
 /tools/docx/__pycache__/
 /tools/__pycache__/
+/tools/outsource/__pycache__/
 /agent_runtime/**/__pycache__/
 /agent_runtime/**/*.pyc
 

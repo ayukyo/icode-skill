@@ -74,6 +74,8 @@ python3 tools/icode_control.py inspection --dir <out_dir> --step <code|deepcheck
 - 静态源码：`{"kind":"source","path":"<check成员>","start_line":1,"end_line":2,"source_sha256":"<真实hash>","excerpt":"<逐字完整行段>"}`。允许静态 review 作证据，不强制所有物理测试完成；reason 应说明实际推理和验证边界。
 - 真实文件产物：`{"kind":"test|simulation|runtime","path":"<安全的工程相对文件>","sha256":"<真实hash>","simulated":false,"evidence_boundary":"<具体证明范围>"}`。simulation 必须 `simulated=true`，其它 kind 必须 false；文件须可读且 hash 当前一致，不能把模拟记录当实机通过。产物可位于 `.icode_output`（源码引用仍拒绝此目录），越界、符号链接、Git 内部、凭据/密钥路径始终拒绝。
 
+源码 hash 与 excerpt 必须来自同一份原始字节：先 `data = path.read_bytes()`，计算 `sha256(data)`，再对 `data.decode("utf-8")` 截取完整行段并保留 LF/CRLF。不要用默认 `read_text()` 的换行转换结果构造 excerpt；换行不符仍按原有证据漂移规则拒绝。
+
 assess 复用同一步骤未终结 attempt、真实 before_write、artifact 回执与幂等保护；相同 request 重放保留后来进度，换结论或 check/phase 复用 request 拒绝且不写清单。所有新 prepare 的真实 writer 事件签发 `inspection_checks_version=1`，即使 checks 为空；控制面据该事件要求新版字段，删字段或自报 legacy 不能降级。真实旧 v1 清单/旧回执仍可只读解释，不补造专项历史；需新结论则重新入轮。跨阶段同范围自然新增 assessment 不改变规则身份。
 
 ## 跨步骤冗余声明

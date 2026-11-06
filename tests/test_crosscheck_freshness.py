@@ -6,6 +6,8 @@ from pathlib import Path
 import subprocess
 import sys
 
+import pytest
+
 from test_crosscheck import workspace, run_tool, write_fresh, write_json, fresh_payload, tree_digest
 
 
@@ -120,22 +122,42 @@ def test_checks_marker_prevents_removing_checks_version(workspace):
     assert failed["gate_id"] == "inspection_worklist"
 
 
-def test_assess_records_real_source_cells_and_freeze_makes_them_immutable(workspace):
+@pytest.mark.parametrize("line_ending", [b"\n", b"\r\n"], ids=["lf", "crlf"])
+def test_assess_records_real_source_cells_and_freeze_makes_them_immutable(workspace, line_ending):
     root, _, env = workspace
     source = root / "src/feature.c"
-    source.write_text("unsigned timestamp = (unsigned) clock;\n")
+    source.write_bytes(b"unsigned timestamp = (unsigned) clock;" + line_ending)
     started = run_tool(env, "start", "--workspace", root, "--ticket", "demo-1")
     directory = Path(started["crosscheck_dir"])
     worklist = directory / "crosscheck_round_1.worklist.json"
     report = json.loads(worklist.read_text())
     check = report["checks"][0]
+    # Hash and excerpt must describe the same bytes. Text-mode reads translate
+    # CRLF to LF, which invalidates otherwise unchanged Windows source evidence.
+    source_bytes = source.read_bytes()
     evidence = {"kind": "source", "path": "src/feature.c", "start_line": 1, "end_line": 1,
-                "source_sha256": hashlib.sha256(source.read_bytes()).hexdigest(), "excerpt": source.read_text()}
+                "source_sha256": hashlib.sha256(source_bytes).hexdigest(), "excerpt": source_bytes.decode("utf-8")}
     assessment = {"cells": {item: {"status": "handled", "reason": "Reviewed fixture timestamp declaration; no runtime proof",
                                    "evidence": [evidence]} for item in check["required_items"]}}
     before_identity = report["checks"][0]["check_id"]
     # Assessment is meaningful only after the actual source member was Read.
     run_tool(env, "inspection", "--dir", directory, "--round", "1", "--phase", "read", "--path", "src/feature.c")
+    before_assessment = worklist.read_bytes()
+    for mismatch in ("hash", "text", "line_ending"):
+        invalid = json.loads(json.dumps(assessment))
+        ref = invalid["cells"][check["required_items"][0]]["evidence"][0]
+        if mismatch == "hash":
+            ref["source_sha256"] = "0" * 64
+        elif mismatch == "text":
+            ref["excerpt"] = ref["excerpt"].replace("clock", "other_clock")
+        else:
+            old_ending, new_ending = ("\r\n", "\n") if line_ending == b"\r\n" else ("\n", "\r\n")
+            ref["excerpt"] = ref["excerpt"].replace(old_ending, new_ending)
+        rejected = run_tool(env, "inspection", "--dir", directory, "--round", "1", "--phase", "assess",
+                            "--check-id", check["check_id"], "--assessment-json", json.dumps(invalid), expected=1)
+        assert rejected["gate_id"] == "inspection_worklist"
+        assert "source evidence hash/excerpt drift" in rejected["error"]
+        assert worklist.read_bytes() == before_assessment
     run_tool(env, "inspection", "--dir", directory, "--round", "1", "--phase", "assess", "--check-id", check["check_id"], "--assessment-json", json.dumps(assessment))
     updated = json.loads(worklist.read_text())
     assert updated["checks"][0]["check_id"] == before_identity and updated["checks"][0]["results"]["fresh"] == assessment

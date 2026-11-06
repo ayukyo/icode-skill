@@ -25,6 +25,7 @@ ICode 是可供 Claude Code、Codex、CodeBuddy 与 WorkBuddy 使用的开源 AI
 | 调试 / 日志根因分析 | `/icode log` | 先核对源码与现场版本，不凭相似日志断言根因。 |
 | 证据化验证 | `/icode verify --listen` 或 `/icode verify --test <target>` | 单独使用时针对设备现有版本，不隐式编译、部署。 |
 | 断点续接 / 本地工单管理 | 续接已绑定 ICODE 工单或 `/icode ui` | 原宿主会话继续可用；UI 执行器当前支持 Claude/Codex。 |
+| 同机多个 AI 工具外包协作 | `/icode outsource` 或 `icode-outsource` | 人只转交绝对 request.md；独立执行、范围与资源协调，详见[外包步骤](steps/outsource.md)。 |
 
 目录登录不等于收录，收录不等于推荐或完整安装。见[当前发现与分发的技术边界](docs/agent-skill-discovery.md)；正式使用请走[源码安装器](#安装)，不要只下载 `SKILL.md`。
 
@@ -71,7 +72,7 @@ WorkBuddy 使用独立技能根 `~/.workbuddy/skills/` 与命令桥 `~/.workbudd
 
 安装器通过所有权标记管理共享技能：内容一致的旧副本可以无损接管；内容不同的未托管的同名技能会在任何宿主写入前拒绝，不会静默覆盖。运行配置和缓存继续保留。
 
-证据摄取、邮件导出接入（`tools/email_intake.py`）、技术文档文件接入（`tools/document_intake.py`）、媒体路由/证据记录（`tools/media_router.py`）、项目内 debug catalog、三基线解析、验证债务、多仓 handoff 矩阵和 `/icode learn` 属于 **ICODE 内置工具/步骤**：`--client all` 会随 ICODE 本体同时复制到 Claude Code 与 Codex；CodeBuddy 复用 Claude 技能根，不作为独立项写入 `skill-packs/manifest.json`。现有 16 个跨项目共享 Skill（含 `email-evidence-intake`、`technical-document-intake`、`hardware-spec-contract-audit`、`schematic-interface-audit`、`mcu-hardware-software-contract-audit` 及嵌入式/摄像头能力）仍由 manifest 独立安装，并继续使用 ownership/hash 冲突保护。
+证据摄取、邮件导出接入（`tools/email_intake.py`）、技术文档文件接入（`tools/document_intake.py`）、媒体路由/证据记录（`tools/media_router.py`）、项目内 debug catalog、三基线解析、验证债务、多仓 handoff 矩阵和 `/icode learn` 属于 **ICODE 内置工具/步骤**：`--client all` 会随 ICODE 本体同时复制到 Claude Code 与 Codex；CodeBuddy 复用 Claude 技能根，不作为独立项写入 `skill-packs/manifest.json`。跨项目共享 Skill（含 `icode-outsource`、`email-evidence-intake`、`technical-document-intake`、`hardware-spec-contract-audit`、`schematic-interface-audit`、`mcu-hardware-software-contract-audit` 及嵌入式/摄像头能力）按 manifest 独立安装，并继续使用 ownership/hash 冲突保护。
 
 历史上的 Claude skills 目录直装方式继续兼容。Claude Code 发现 ICODE 后，执行同一个统一命令：
 
@@ -291,6 +292,7 @@ Windows 上使用 Linux 工具链时复用 [WSL 构建合同](references/wsl_bui
 | 命令 | 功能 |
 | ---- | ---- |
 | `/icode help` | 帮助：命令一览、全能力自然语言示例与组合/续接用法 |
+| `/icode outsource [需求或绝对 request.md]` | [同机 AI 外包独立步骤](steps/outsource.md)：发单、认领、消息、冻结交付与可恢复接入；不自动唤醒模型，不推进父工单状态 |
 | `/icode log [零散信息...]` | 可选入口：确定性证据清单 + debug 本地复用 + 逐仓现场基线 → 日志根因分析 → 修复需求 `00_init.md` |
 | `/icode init [--guide] [<粗略需求或指南约束>]` | 常规：新建步骤 0 工单并多轮形成初稿；`--guide`：复用最新合格 init，刷新 `deliverables/guide.md` 与内部证据审计，不新建工单 |
 | `/icode start <需求>` | 全流程：创建/复用目录 → 步骤 1→6 |

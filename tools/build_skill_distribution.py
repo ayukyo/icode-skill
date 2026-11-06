@@ -127,7 +127,11 @@ def component_for(path):
         return "docx"
     if name.startswith("agent_runtime/") or name == "tools/icode_agent.py":
         return "ui"
-    if (name == ".gitignore" or name.startswith("docs/")
+    # Publishing/website maintenance belongs with developer resources, so the
+    # bounded core retains runtime tools without raising its import budget.
+    if (name in {".gitignore", "tools/build_public_site.py", "tools/notify_indexnow.py",
+                 "tools/render_brand_assets.py", "tools/prepare_skill_listing.py",
+                 "tools/release_promotion.py"} or name.startswith("docs/")
             or (name.startswith("skill-packs/") and name != "skill-packs/manifest.json")):
         return "support"
     if name.startswith("mcp/") and not (

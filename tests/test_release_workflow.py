@@ -22,7 +22,8 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertEqual(self.data['permissions'], {'contents': 'read'})
         jobs = self.data['jobs']
         self.assertEqual(jobs['renderer']['uses'], './.github/workflows/docx-renderer.yml')
-        self.assertEqual(jobs['publish']['needs'], 'renderer')
+        self.assertEqual(jobs['outsource']['uses'], './.github/workflows/outsource-software.yml')
+        self.assertEqual(set(jobs['publish']['needs']), {'renderer', 'outsource'})
         self.assertEqual(jobs['publish']['permissions'], {'contents': 'write'})
         self.assertNotIn('if', jobs['publish'])  # No always() bypass of failed qualification.
         steps = jobs['publish']['steps']
@@ -35,6 +36,19 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertIn('--target "$GITHUB_SHA"', publish['run'])
         self.assertIn('.tar.gz.sha256', publish['run'])
         self.assertNotIn('--clobber', publish['run'])
+
+    def test_outsource_qualification_covers_both_platforms_and_exact_evidence(self):
+        data = yaml.safe_load((ROOT / '.github/workflows/outsource-software.yml').read_text())
+        triggers = data.get('on', data.get(True))
+        self.assertIn('workflow_call', triggers)
+        job = data['jobs']['software']
+        self.assertEqual(set(job['strategy']['matrix']['os']), {'ubuntu-22.04', 'windows-latest'})
+        self.assertFalse(job['strategy']['fail-fast'])
+        commands = '\n'.join(step.get('run', '') for step in job['steps'])
+        for suite in ('store', 'workspace', 'cli', 'skill', 'review'):
+            self.assertIn('tests/test_outsource_' + suite + '.py', commands)
+        self.assertIn('test_assess_records_real_source_cells_and_freeze_makes_them_immutable', commands)
+        self.assertIn('tools/validate_skill_pack.py', commands)
 
     def test_lightweight_and_component_assets_are_built_and_uploaded_together(self):
         steps = self.data['jobs']['publish']['steps']

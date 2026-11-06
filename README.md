@@ -8,7 +8,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE.txt)
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-Skill-8A2BE2.svg)](SKILL.md)
-[![Version](https://img.shields.io/badge/version-v2.37.1-blue.svg)](SKILL.md)
+[![Version](https://img.shields.io/badge/version-v2.38.0-blue.svg)](SKILL.md)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/ayukyo/icode-skill/issues)
 
 </div>
@@ -55,6 +55,7 @@ The bilingual public site can be built locally. See [site preview and opt-in pub
 | Debugging / log root-cause analysis | `/icode log` | Check source and runtime provenance before claiming a cause. |
 | Evidence-based verification | `/icode verify --listen` or `/icode verify --test <target>` | These standalone stages use the device's existing version; no implicit build/deploy. |
 | Resumable tickets / local ticket manager | Resume a bound ICODE ticket or `/icode ui` | Existing host chat remains supported; UI runners currently support Claude/Codex. |
+| Delegate work between local AI tools | `/icode outsource` or `icode-outsource` | Share the absolute request.md entry; isolated execution and resource coordination use a separate lifecycle. See the [workflow](steps/outsource.md). |
 
 Directory login is not listing, and listing is not a recommendation or a complete installation. See the [current discovery and distribution boundaries](docs/agent-skill-discovery.md); use the [source installer](#installation), not a downloaded `SKILL.md` alone.
 
@@ -196,7 +197,7 @@ The shared [local path policy](references/mcp_path_access.md) uses platform defa
 
 [WSL builds](references/wsl_build.md) reuse the existing workflow with verified distribution, path mappings, source/snapshot, cache, toolchain and artifacts. [Test report evidence](references/evidence_and_verification.md#测试报告证据) distinguishes actual passing cases from zero/all-skipped runs. Public-library changes reuse the cross-layer audit for API, binary ABI and consumer compatibility.
 
-Evidence intake, email export intake (`tools/email_intake.py`), technical-document intake (`tools/document_intake.py`), media routing/evidence (`tools/media_router.py`), the project-local debug catalog, runtime baseline resolution, verification debt, the multi-repo handoff matrix, and `/icode learn` are **bundled ICODE tools/steps**. They are copied with the ICODE directory to Claude Code and Codex by `--client all`; CodeBuddy reuses the Claude skill root. They are not standalone entries in `skill-packs/manifest.json`. The sixteen reusable cross-project Skills—including `email-evidence-intake`, `technical-document-intake`, `hardware-spec-contract-audit`, `schematic-interface-audit`, `mcu-hardware-software-contract-audit`, and the embedded/camera capabilities—remain separately installed from that manifest with the same ownership/hash collision protection.
+Evidence intake, email export intake (`tools/email_intake.py`), technical-document intake (`tools/document_intake.py`), media routing/evidence (`tools/media_router.py`), the project-local debug catalog, runtime baseline resolution, verification debt, the multi-repo handoff matrix, and `/icode learn` are **bundled ICODE tools/steps**. They are copied with the ICODE directory to Claude Code and Codex by `--client all`; CodeBuddy reuses the Claude skill root. They are not standalone entries in `skill-packs/manifest.json`. Reusable cross-project Skills—including `icode-outsource`, `email-evidence-intake`, `technical-document-intake`, `hardware-spec-contract-audit`, `schematic-interface-audit`, `mcu-hardware-software-contract-audit`, and the embedded/camera capabilities—are separately installed as declared by that manifest, with the same ownership/hash collision protection.
 
 The historical direct-Claude clone remains supported as a compatibility path. After Claude Code discovers ICODE, run the same unified command:
 
@@ -305,6 +306,7 @@ The seven local services add no public `/icode` commands; their machine-readable
 | Command | Description |
 | --- | --- |
 | `/icode help` | Help: commands, natural-language examples, combinations and continuation |
+| `/icode outsource [request or absolute request.md]` | [Independent local AI outsourcing](steps/outsource.md): publish, claim, exchange messages, freeze delivery and recover integration; no automatic model wakeup or parent-ticket completion |
 | `/icode log [scattered info...]` | Optional entry: deterministic evidence manifest + project-local debug reuse + per-repo runtime baseline → root-cause analysis → fix requirement `00_init.md`; auto-generates a bounded cross-audience brief |
 | `/icode init [--guide] [<rough req or guide constraints>]` | Normal: new Step 0 ticket and multi-turn draft; `--guide`: reuse the latest eligible init and refresh `deliverables/guide.md` plus its internal evidence audit |
 | `/icode start <req>` | Full flow: create/reuse dir → steps 1–6 |

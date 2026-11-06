@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "icode:outsource-contract:v1",
+  "title": "Same-machine outsourcing contract",
+  "type": "object",
+  "required": ["schema_version", "title", "goal", "requester", "projects", "acceptance", "constraints"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "title": {"type": "string", "minLength": 1},
+    "goal": {"type": "string", "minLength": 1},
+    "requester": {"type": "string", "minLength": 1},
+    "parent_ref": {"type": "string"},
+    "projects": {
+      "type": "array", "minItems": 1,
+      "items": {
+        "type": "object", "required": ["root", "read_paths", "write_paths"],
+        "properties": {
+          "root": {"type": "string", "minLength": 1},
+          "read_paths": {"type": "array", "items": {"type": "string", "minLength": 1}},
+          "write_paths": {"type": "array", "items": {"type": "string", "minLength": 1}}
+        },
+        "additionalProperties": false
+      }
+    },
+    "acceptance": {
+      "type": "array", "minItems": 1,
+      "items": {
+        "type": "object", "required": ["id", "check"],
+        "properties": {"id": {"type": "string", "minLength": 1}, "check": {"type": "string", "minLength": 1}},
+        "additionalProperties": false
+      }
+    },
+    "constraints": {"type": "array", "items": {"type": "string", "minLength": 1}},
+    "resources": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+    "depends_on": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true}
+  },
+  "additionalProperties": false
+}

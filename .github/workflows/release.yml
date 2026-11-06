@@ -15,8 +15,11 @@ jobs:
   renderer:
     uses: ./.github/workflows/docx-renderer.yml
 
+  outsource:
+    uses: ./.github/workflows/outsource-software.yml
+
   publish:
-    needs: renderer
+    needs: [renderer, outsource]
     runs-on: ubuntu-22.04
     timeout-minutes: 10
     permissions:

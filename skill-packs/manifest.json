@@ -80,6 +80,11 @@
       "name": "email-evidence-intake",
       "path": "email-evidence-intake",
       "entrypoint": "SKILL.md.template"
+    },
+    {
+      "name": "icode-outsource",
+      "path": "icode-outsource",
+      "entrypoint": "SKILL.md.template"
     }
   ]
 }

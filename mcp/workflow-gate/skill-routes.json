@@ -402,6 +402,27 @@
         "verdict"
       ],
       "fallback": "For explicit webmail URLs, use the already logged-in browser first and never require IMAP credentials. If login expired, ask only for browser re-login; if no browser is available, request a bounded EML/MSG export. Use the mailbox observer only for unattended access or explicit IMAP scope; preserve missing thread regions and unsaved attachments as gaps, never fetch remote resources or treat message claims as implementation proof."
+    },
+    {
+      "skill": "icode-outsource",
+      "triggers": [
+        "same_machine_ai_outsource_publish",
+        "exact_request_md_handoff",
+        "requester_parent_delivery_recovery",
+        "outsource_delivery_integration"
+      ],
+      "steps": ["outsource"],
+      "input_contract": [
+        "explicit intent and authorization boundaries",
+        "exact absolute request.md for worker or saved requester and optional parent_ref for requester",
+        "bounded multi-project read and write paths acceptance and constraints"
+      ],
+      "output_contract": [
+        "absolute request.md and bound requester identity",
+        "actual delivery integration and acceptance states",
+        "evidence references resource ownership and unresolved boundaries"
+      ],
+      "fallback": "If the actual ICODE skill root or outsource runtime is unavailable, report the exact missing dependency and stop dependent actions. Do not use latest, write main-ticket metadata/index/status, invent Runtime/UI actions, or silently switch to a stale global installation."
     }
   ]
 }

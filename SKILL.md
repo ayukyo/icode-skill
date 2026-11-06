@@ -3,7 +3,7 @@ name: icode
 description: ICODE 端到端编码工作流，适配 Claude Code、Codex、CodeBuddy、WorkBuddy。用户调用 /icode、$icode，或说“使用 ICODE”“用 icode 帮我”“让 ICODE”“Use ICODE”完成开发、日志分析、设计/代码审查、证据验证、独立复评、文档/Word/PPT、学习、工单管理等任务时使用；也用于已绑定 ICODE 工单的续接。Use when users explicitly request ICODE for an AI coding workflow, ticket-based development, code review, log analysis, documentation, or evidence verification; also use to resume a bound ICODE ticket. 支持自然语言目标与限制，不要求背命令；能力咨询只解释不执行。保留全部 /icode 子命令，复用既有步骤与安全门禁，不接管未指定 ICODE 的普通请求。
 ---
 
-**版本**: v2.37.1
+**版本**: v2.38.0
 
 # ICode 全流程编码工作流（步骤 0 + 1~6）
 
@@ -65,6 +65,7 @@ Windows 上裸 `python` / `python3` 常解析到 `%LOCALAPPDATA%\Microsoft\Windo
 | `[可选步骤7]` `/icode readme` | 一次性生成交付报告（自己看）+ `_brief.md` 跨领域简报（给其它模块/测试/产品） | 用最新目录 |
 | `[独立]` `/icode patch [问题或新需求...]` | 追加修改：轻量四段式；不改变 status；`--listen` 可在修改后自动监听 | 用最新目录 |
 | `[独立复评]` `/icode crosscheck [--ticket <id>\|<工单路径>]` | 用户自行换 Agent/模型后完整复评 completed 工单；项目内隔离、多轮追加、原工单与代码零回写 | 否（写 `.icode_output/.crosscheck/`） |
+| `[独立协作]` `/icode outsource [自然语言\|绝对 request.md]` | 同机 AI 发布/认领/交付/接入；人只转交入口，发起端按 requester/parent_ref 找回结果；[步骤](steps/outsource.md) | 否（独立共享 board，不写主工单状态） |
 | `[独立]` `/icode verify [--build] [--deploy] [--listen\|--test <target>] [自然语言]` / `/icode verify --plan [--ticket <id>]` | **分阶段构建/部署/监听/测试**：选项按顺序只执行各自阶段，可组合；无选项先识别自然语言意图。结果逐阶段记 `verification_runs`，不自动升级 delivery_verdict（[steps/verify.md](steps/verify.md)） | 否（无工单单独 build 只写工程构建报告；plan 只写派生报告） |
 | `[学习]` `/icode learn [--project <path>] [--ticket <id>] [--since <ISO-8601>]` | 从项目内观测生成复用/组合/增强/新建/工具化/no-action 建议，不直接创建或发布 Skill（[steps/learn.md](steps/learn.md)） | 否（写 `.icode_output/learn/` 派生报告） |
 | `[学习]` `/icode study [--ticket <id>] [--library <目录>] [主题]` | 从已写代码提炼通用技术文章，按卷/章保存在用户自己的知识库；源码溯源留在库外（[steps/study.md](steps/study.md)） | 否（写用户配置的知识库） |
@@ -92,7 +93,7 @@ DOC按当前工作区生成；模块族与精确版本快照、旧库保护及�
 
 ## 控制面（工单 schema v3，vNext）
 
-**新工单一律 schema v3**，经 `tools/icode_control.py create` 原子创建 metadata+出生事件；状态、metadata、事件、步骤端口/边界回检/回执、验证、索引与关闭均由控制面执行，**禁止绕过直写**。文中凡称“写/更新/追加 metadata”，除专用控制字段外，均指 `metadata-update`。机器真源：[mcp/workflow-gate/gates.json](mcp/workflow-gate/gates.json) + [schemas/](schemas/)；执行器含 `step/artifact/operation/policy/trace` 等子命令。完整契约见 [references/control_plane.md](references/control_plane.md) 与 [references/execution_model.md](references/execution_model.md)。 审查轮次与Read/Dedup声明按[inspection_evidence](references/inspection_evidence.md)；新trace v2，旧证据未跟踪不补造。legacy 工单只读，变更前须迁移。**`crosscheck` 是明确例外**：它不是工单，独立工具只读解析目标并仅写项目 `.crosscheck/`，不进入本控制面状态机。
+**新工单一律 schema v3**，经 `tools/icode_control.py create` 原子创建 metadata+出生事件；状态、metadata、事件、步骤端口/边界回检/回执、验证、索引与关闭均由控制面执行，**禁止绕过直写**。文中凡称“写/更新/追加 metadata”，除专用控制字段外，均指 `metadata-update`。机器真源：[mcp/workflow-gate/gates.json](mcp/workflow-gate/gates.json) + [schemas/](schemas/)；执行器含 `step/artifact/operation/policy/trace` 等子命令。完整契约见 [references/control_plane.md](references/control_plane.md) 与 [references/execution_model.md](references/execution_model.md)。 审查轮次与Read/Dedup声明按[inspection_evidence](references/inspection_evidence.md)；新trace v2，旧证据未跟踪不补造。legacy 工单只读，变更前须迁移。**`crosscheck` 是明确例外**：它不是工单，独立工具只读解析目标并仅写项目 `.crosscheck/`，不进入本控制面状态机。**`outsource` 是独立协作例外**：按 [外包合同](references/outsource_contract.md) 使用独立 SQLite board，不回写主工单 metadata/index/status，不进入 Runtime/UI 动作。
 
 可选 Agent Runtime 位于 [agent_runtime/](agent_runtime/README.md)，只在用户显式调用 `/icode ui`（含等价的自然语言打开工作台请求）或 `python3 tools/icode_agent.py` 时工作；Windows 默认打开 WebView2 网页窗口，通过私有管道通信，不建立 UI TCP 监听；Linux/macOS 及显式 `--browser`、`--port`、`--no-browser` 使用 HTTP，默认 `127.0.0.1:8765`（默认端口占用则自动换空闲 loopback 端口）。不要求 `--dir`，无参数重复调用复用已存活的全局实例；自动刷新默认 30 秒且可在设置中调整。它是 Codex/Claude Code CLI 的受控管理入口，不替代两者当前主会话；步骤合法性、revision、执行根和 Agent 前后回执仍由控制面决定。
 
@@ -320,6 +321,7 @@ test -f "{ICODE_OUT_DIR}/03_plan_final.md" && python3 -c "import json,sys; d=jso
 | 7 | `readme` | [steps/07_readme.md](steps/07_readme.md) |
 | patch | `patch` | [steps/08_patch.md](steps/08_patch.md)（独立步骤，主流程后/中途追加修改，不参与 1~6 推进） |
 | crosscheck | `crosscheck` | [steps/crosscheck.md](steps/crosscheck.md)（completed 工单外部只读复评；多轮追加，不写原工单/代码） |
+| outsource | `outsource` | [steps/outsource.md](steps/outsource.md)（同机 AI 外包独立生命周期；不写 ICODE 主工单） |
 | verify | `verify` | [steps/verify.md](steps/verify.md)（独立构建/实机验证，不改源码；结果记 `verification_runs`，不自动升级 delivery_verdict） |
 | learn | `learn` | [steps/learn.md](steps/learn.md)（独立学习报告；不直接创建、安装或同步 Skill） |
 | study | `study` | [steps/study.md](steps/study.md)（独立通用技术文章；用户知识库按卷章管理，私有来源留库外） |
