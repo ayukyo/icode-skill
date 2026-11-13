@@ -1,6 +1,7 @@
 from pathlib import Path
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -9,6 +10,78 @@ from test_runtime import ROOT
 
 @unittest.skipUnless(os.name == 'posix', 'Bash installer integration runs on Linux/WSL')
 class InstallerTests(unittest.TestCase):
+    def _empty_stub_environment(self, home):
+        tools = home / 'bin'; tools.mkdir()
+        for name in ('bash', 'dirname', 'basename', 'mkdir', 'rsync', 'cp', 'find', 'grep', 'uname', 'rm'):
+            executable = shutil.which(name)
+            if executable:
+                (tools / name).symlink_to(executable)
+        for name in ('python3', 'python'):
+            stub = tools / name
+            stub.write_text('#!/bin/sh\nexit 0\n'); stub.chmod(0o755)
+        environment = {**os.environ, 'HOME': str(home), 'USERPROFILE': str(home), 'PATH': str(tools),
+                       'ICODE_MCP_TARGET_BASE': str(home / 'target'), 'ICODE_MCP_SELECTED_HOSTS': 'claude'}
+        environment.pop('ICODE_PYTHON_BIN', None)
+        (home / '.claude.json').write_text('{"mcpServers":{}}')
+        return tools, environment
+
+    def test_empty_python_stubs_fail_before_any_installation_write(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary)
+            _, environment = self._empty_stub_environment(home)
+            registry = home / '.claude.json'; before = registry.read_bytes()
+            result = subprocess.run(['bash', str(ROOT / 'mcp/icode-local/install.sh')],
+                                    env=environment, capture_output=True, text=True, timeout=20)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertFalse((home / 'target').exists(), result.stdout + result.stderr)
+            self.assertEqual(registry.read_bytes(), before)
+
+    def test_explicit_valid_python_bypasses_empty_python_stubs_for_all_phases(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary)
+            _, environment = self._empty_stub_environment(home)
+            environment['ICODE_PYTHON_BIN'] = sys.executable
+            target = home / 'target/icode-local'
+            runtime = target / '.venv/bin'; runtime.mkdir(parents=True)
+            (runtime / 'python').symlink_to(sys.executable)
+            pip = runtime / 'pip'; pip.write_text('#!/bin/sh\nexit 0\n'); pip.chmod(0o755)
+            result = subprocess.run(['bash', str(ROOT / 'mcp/icode-local/install.sh')],
+                                    env=environment, capture_output=True, text=True, timeout=20)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn('"action": "preflight"', result.stdout)
+            self.assertIn('"action": "setup-profile"', result.stdout)
+            self.assertTrue((target.parent / 'icode-evidence/server.py').is_file())
+            self.assertEqual(json.loads((target / 'config.json').read_text()), {'module_configs': {}})
+            entry = json.loads((home / '.claude.json').read_text())['mcpServers']['icode-local']
+            self.assertEqual(entry['env']['ICODE_LOCAL_CONFIG'], str(target / 'config.json'))
+
+    def test_py_launcher_is_reused_for_preflight_venv_setup_and_registration(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary)
+            tools, environment = self._empty_stub_environment(home)
+            log = home / 'python-steps.jsonl'; environment['PYTHON_STEPS'] = str(log)
+            launcher = tools / 'py'
+            launcher.write_text(
+                f'#!{sys.executable}\nimport json,os,pathlib,sys\n'
+                'assert sys.argv[1] == "-3"\nargs=sys.argv[2:]\n'
+                'with open(os.environ["PYTHON_STEPS"],"a") as stream: stream.write(json.dumps(args)+"\\n")\n'
+                'if args[:2] == ["-m", "venv"]:\n'
+                ' path=pathlib.Path(args[2])/"bin";path.mkdir(parents=True)\n'
+                f' (path/"python").symlink_to({sys.executable!r})\n'
+                ' pip=path/"pip";pip.write_text("#!/bin/sh\\nexit 0\\n");pip.chmod(0o755)\n'
+                f'else: os.execv({sys.executable!r}, [{sys.executable!r}, *args])\n')
+            launcher.chmod(0o755)
+            result = subprocess.run(['bash', str(ROOT / 'mcp/icode-local/install.sh')],
+                                    env=environment, capture_output=True, text=True, timeout=20)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            calls = [json.loads(line) for line in log.read_text().splitlines()]
+            self.assertTrue(any(len(args) > 1 and args[1] == 'preflight' for args in calls))
+            self.assertTrue(any(args and Path(args[0]).name == 'stage_payload.py' for args in calls))
+            self.assertTrue(any(args[:2] == ['-m', 'venv'] for args in calls))
+            self.assertTrue(any(len(args) > 1 and args[1] == 'setup-profile' for args in calls))
+            self.assertTrue(any(args and Path(args[0]).name == 'register_python_mcp.py' for args in calls))
+            self.assertIn('icode-local', json.loads((home / '.claude.json').read_text())['mcpServers'])
+
     def test_cli_profile_reads_only_selected_fake_codex_and_writes_paths(self):
         with tempfile.TemporaryDirectory() as temporary:
             home = Path(temporary)
