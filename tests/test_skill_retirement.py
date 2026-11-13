@@ -22,7 +22,9 @@ class SkillRetirementTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        self.base = Path(self.temp.name)
+        # Windows runners may spell TEMP via an 8.3 alias. Match the installer's
+        # canonical paths so injected rename failures hit the intended file.
+        self.base = Path(self.temp.name).resolve()
         self.packs = self.base / "packs"
         self.packs.mkdir()
         self.root = self.base / "host" / "skills"
