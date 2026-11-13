@@ -14,10 +14,9 @@ description: ICODE 端到端编码工作流，适配 Claude Code、Codex、CodeB
 - **步骤 0（可选）**：需求初稿对话，落档为 `00_init.md`；`init --guide` 派生新人指南
 - **步骤 1~6**：拟定计划 → 审查 → 定稿 → 编码 → 复检 → 终审
 
-> **主流程步骤真源（防误用，唯一真源 = `steps/` 目录，启动强制 Read）**：步骤编号 / 产物文件名 / `completed_steps` 合法值**一律以 `steps/*.md` 实时清单为准**（`ls steps/*.md` 完整列出，含主流程与辅助入口 log / doc / docx / limit / status / install / list / bak / verify / learn / study / crosscheck，及精简全流程入口 fast）——**本块仅示意，steps/ 演进后以目录为准，勿依赖写死**。`/icode start` / `/icode fast` / `/icode plan` 进入第一步**先 `ls steps/*.md`** 核对，不按"编码→测试→部署"直觉推断
-> - 当前主流程示意（以 `ls steps/*.md` 为准）：`00_init → 01_plan → 02_review → 03_merge → 04_code → 05_deepcheck → 06_audit → 07_readme → 08_patch`；**不存在 `03_code` / `04_test` / `05_deploy`**（测试验证在 04_code 子段，部署/回归归 07_readme / 08_patch / verify）
-> - 辅助独立步骤（doc / docx / log / limit / status / install / list / bak / verify / learn / study / crosscheck）不参与 1~6 推进；**fast 为精简全流程（非辅助独立步骤）**——参与 1~6 但各步缩略（见命令表 fast 行）
-> - **强制**：产物命名 + `completed_steps` 写号**对照 `ls steps/*.md` 实时结果**（如入口含 `log` → 可写 `"log"`），不在清单 → 停下核对，禁止自造产物占位；steps/ 目录与本文档不一致时**以 steps/ 目录为准**
+> **主流程步骤真源**：`/icode start` / `/icode fast` / `/icode plan` 进入第一步先 `ls steps/*.md`，按实时清单核对步骤编号、产物文件名及 `completed_steps`；不在清单则停止核对，禁止自造占位，本文与目录不一致时以目录为准。
+> - 主流程示意：`00_init → 01_plan → 02_review → 03_merge → 04_code → 05_deepcheck → 06_audit → 07_readme → 08_patch`；不存在 `03_code` / `04_test` / `05_deploy`。测试在 code，部署/回归按 readme / patch / verify。
+> - 辅助独立步骤不参与 1~6 推进；**fast 为精简全流程**，参与全部六步（见命令表）。
 
 ## 通用约定（对话语言）
 
@@ -162,16 +161,7 @@ Windows/WSL 构建按需加载 [WSL 构建合同](references/wsl_build.md)；本
 | **L3·重要** | 重要检查项未通过 | **警告**，记入 metadata，**流程继续**（user 后续可手动回看） | plan §10 checklist ❌ > 3 条 / audit §6.7 视角 A 失败 / 步骤 4 编译失败（带 `code_compile_failed=true`）/ **worktree 创建失败**（降级原地 + metadata 记 `wt_degraded=true`，见「目录管理·worktree 决策与创建」④） |
 | **L4·参考** | 软性建议 | **柔性提示**，不影响流程 | limit 不存在 / cheap-research 未装 / 可选视觉增强不可用（严格视觉目标按[专用合同](references/serial_evidence_stages.md)阻断验收）/ init 末轮理解核对清单用户不回复 |
 
-**各步骤声明的 L1/L2 检查项**：详见对应 step 文件头部的「本步骤 L1/L2 检查项声明」段（已声明 7 个：plan / review / merge / code / deepcheck / audit / patch）。
-- `steps/01_plan.md` 头部 → L1（前置产物缺失）/ L2（§3 缺失 + §10 ❌ > 3）
-- `steps/02_review.md` 头部 → L1（前置产物缺失）/ L2（触达 `absolute_cap`，警告+记 metadata+继续）
-- `steps/03_merge.md` 头部 → L1（`03_plan_final.md` 不是完整计划副本——定稿机器硬校验不通过，禁止进入步骤4）
-- `steps/04_code.md` 头部 → L1（前置产物缺失）/ L2（Code Review Fix 全失败）
-- `steps/05_deepcheck.md` 头部 → L1（前置产物缺失）
-- `steps/06_audit.md` 头部 → L1（前置产物缺失）
-- `steps/08_patch.md` 头部 → L1（无最新工单目录 / 入口态）/ L2（复检发现新引入问题，警告+记 metadata+继续）
-
-**L3·重要** 检查项（不强制阻断，警告后流程继续）也已在各 step 头部声明段标注。
+**各步骤声明的 L1/L2 检查项**：执行时必须读取 plan / review / merge / code / deepcheck / audit / patch 文件头部「本步骤 L1/L2 检查项声明」及 L3 声明；检查内容与级别以对应步骤为准。
 
 > **新增/修改检查项时**：明确标注其 L 级别，写在 step 文件头部声明段。不明确的不算 L1-L4（默认按现有流程行为）。
 
@@ -212,7 +202,7 @@ python3 -c "import sys; sys.path.insert(0,'{ICODE_SKILL_ROOT}/tools'); import ic
 
 ### 根因优先决策准则（修复缺陷逻辑本身，优先于规避/绕过/补丁/开关）
 
-> 多方案并存时，**第一优先 = 修正缺陷逻辑本身（root cause）**；规避 / 重试 / 打补丁 / 加配置开关 = 降级选项，仅在根因不可行（须给出**可验证**的不可行论证）时选用。「保持安全门控」与「修正错误逻辑」**不是互斥**——根因方案在红线内部保持安全属性，而非因红线直接排除根因选项。细则落点：[steps/01_plan.md](steps/01_plan.md) §4 ADR（选型排序 + 强制判定问题）、[steps/log.md](steps/log.md)（根因多候选 → 诊断先行）、[steps/08_patch.md](steps/08_patch.md)（旁路修复后强制回主验收闭环）。
+> 优先修正缺陷逻辑本身（root cause），在安全红线内解决；仅有可验证的不可行论证时才采用规避、重试、补丁或开关。细则见 [plan §4 ADR](steps/01_plan.md)、[log 根因诊断](steps/log.md)及 [patch 主验收闭环](steps/08_patch.md)。
 
 ### 全流程串联规则
 
