@@ -7,6 +7,7 @@ crosscheck round is invoked here. A report does not establish new evidence.
 import argparse
 from datetime import datetime, timezone
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
@@ -253,4 +254,8 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
+    # Match the control-plane UTF-8 CLI wire without changing imported streams.
+    for stream in (sys.stdout, sys.stderr):
+        if isinstance(stream, io.TextIOWrapper):
+            stream.reconfigure(encoding="utf-8")
     sys.exit(main())

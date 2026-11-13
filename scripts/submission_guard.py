@@ -40,6 +40,7 @@ scripts/submission_guard.py — worktree 提交契约机器闸门（提案 workt
 import argparse
 import hashlib
 import importlib.util
+import io
 import json
 import os
 import re
@@ -1548,4 +1549,8 @@ def main(argv: list[str]) -> int:
 
 
 if __name__ == "__main__":
+    # Diagnostics must retain their gate exit code on legacy Windows code pages.
+    for stream in (sys.stdout, sys.stderr):
+        if isinstance(stream, io.TextIOWrapper):
+            stream.reconfigure(encoding="utf-8")
     sys.exit(main(sys.argv[1:]))

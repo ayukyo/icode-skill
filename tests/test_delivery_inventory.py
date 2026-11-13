@@ -44,6 +44,21 @@ def inventory(path, meta):
     return guard.build_submission_inventory(meta, path)
 
 
+def test_pending_cli_utf8_wire_with_legacy_stdio_encoding(inventory_repo):
+    repo, path, _ = inventory_repo
+    transaction = path.parent / ".icontrol_txn.json"
+    transaction.write_text('{"unfinished":true}', encoding="utf-8")
+    before = {str(p): p.read_bytes() for p in repo.rglob("*") if p.is_file()}
+    for encoding in ("cp1252:strict", "utf-8:strict"):
+        proc = subprocess.run([sys.executable, "-B", str(ROOT / "scripts/submission_guard.py"),
+            "submit-check", "--metadata", str(path)], capture_output=True,
+            env=dict(os.environ, PYTHONIOENCODING=encoding), timeout=60)
+        assert proc.returncode == 2, proc.stdout + proc.stderr
+        assert "pending_transaction" in proc.stdout.decode("utf-8")
+        assert proc.stderr == b""
+        assert {str(p): p.read_bytes() for p in repo.rglob("*") if p.is_file()} == before
+
+
 @pytest.fixture
 def lx_inventory(inventory_repo, monkeypatch):
     """Real Git index/HEAD; only the Windows reparse metadata reader is injected."""
@@ -240,7 +255,7 @@ def test_in_place_submit_check_has_inventory_without_submission_contract(invento
     (repo / "unknown.cpp").write_text("changed\n")
     before = path.read_bytes()
     proc = subprocess.run([sys.executable, "-B", str(ROOT / "scripts/submission_guard.py"),
-                           "submit-check", "--metadata", str(path)], capture_output=True, text=True)
+                           "submit-check", "--metadata", str(path)], capture_output=True, text=True, encoding="utf-8")
     assert proc.returncode == 2 and "unknown.cpp" in proc.stdout
     assert path.read_bytes() == before
 
@@ -254,7 +269,7 @@ def test_enabled_submit_check_requires_real_review_and_verification(inventory_re
     path = ticket / ".ico_metadata.json"
     before = path.read_bytes(), (ticket / ".ico_events.jsonl").read_bytes()
     proc = subprocess.run([sys.executable, "-B", str(ROOT / "scripts/submission_guard.py"), "submit-check", "--metadata", str(path)],
-                          capture_output=True, text=True)
+                          capture_output=True, text=True, encoding="utf-8")
     assert proc.returncode == 2 and "review" in proc.stdout
     assert before == (path.read_bytes(), (ticket / ".ico_events.jsonl").read_bytes())
 
@@ -265,7 +280,7 @@ def test_submit_check_never_recovers_pending_transaction(inventory_repo):
     transaction.write_text('{"unfinished":true}')
     before = path.read_bytes(), transaction.read_bytes()
     proc = subprocess.run([sys.executable, "-B", str(ROOT / "scripts/submission_guard.py"),
-                           "submit-check", "--metadata", str(path)], capture_output=True, text=True)
+                           "submit-check", "--metadata", str(path)], capture_output=True, text=True, encoding="utf-8")
     assert proc.returncode == 2 and "pending_transaction" in proc.stdout
     assert before == (path.read_bytes(), transaction.read_bytes())
 

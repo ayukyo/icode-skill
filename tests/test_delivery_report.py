@@ -1,6 +1,7 @@
 import hashlib
 import importlib.util
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -23,12 +24,30 @@ def digest(root):
             for path in root.rglob("*") if path.is_file()}
 
 
+def test_report_cli_utf8_wire_with_legacy_stdio_encoding(inventory_repo):
+    repo, path, meta = inventory_repo
+    meta["requirement"] = "保留中文目标和验收边界"
+    path.write_text(json.dumps(meta), encoding="utf-8")
+    before = digest(repo)
+    markdown = path.parent / "delivery_validation_report.md"
+    for encoding in ("cp1252:strict", "utf-8:strict"):
+        proc = subprocess.run([sys.executable, "-B", str(ROOT / "tools/icode_delivery.py"),
+            "--dir", str(path.parent), "--markdown", str(markdown)], capture_output=True,
+            env=dict(os.environ, PYTHONIOENCODING=encoding), timeout=60)
+        assert proc.returncode == 0, proc.stdout + proc.stderr
+        assert json.loads(proc.stdout.decode("utf-8"))["goal"] == meta["requirement"]
+        assert proc.stderr == b""
+        assert meta["requirement"] in markdown.read_text(encoding="utf-8")
+        markdown.unlink()
+        assert digest(repo) == before
+
+
 def test_markdown_only_creates_exactly_one_derived_report(inventory_repo):
     repo, path, _ = inventory_repo
     before = digest(repo)
     markdown = path.parent / "delivery_validation_report.md"
     proc = subprocess.run([sys.executable, "-B", str(ROOT / "tools/icode_delivery.py"),
-        "--dir", str(path.parent), "--markdown", str(markdown)], capture_output=True, text=True)
+        "--dir", str(path.parent), "--markdown", str(markdown)], capture_output=True, text=True, encoding="utf-8")
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert set(digest(repo)) - set(before) == {str(markdown.relative_to(repo))}
     assert "# 工单概览" in markdown.read_text(encoding="utf-8")
@@ -56,7 +75,7 @@ def test_pending_legacy_transaction_forbids_persisting_markdown(inventory_repo):
     (path.parent / ".icontrol_txn.json").write_text('{}')
     before = digest(repo)
     proc = subprocess.run([sys.executable, "-B", str(ROOT / "tools/icode_delivery.py"),
-        "--dir", str(path.parent), "--markdown", str(path.parent / "delivery_validation_report.md")], capture_output=True, text=True)
+        "--dir", str(path.parent), "--markdown", str(path.parent / "delivery_validation_report.md")], capture_output=True, text=True, encoding="utf-8")
     assert proc.returncode == 1 and before == digest(repo)
 
 
@@ -71,7 +90,7 @@ def test_markdown_only_preserves_source_hardlink_and_formal_artifact_aliases(inv
     before = digest(repo)
     for output in (alias, formal, path.parent / "06_audit.md", repo / "delivery_report.md"):
         proc = subprocess.run([sys.executable, "-B", str(ROOT / "tools/icode_delivery.py"),
-            "--dir", str(path.parent), "--markdown", str(output)], capture_output=True, text=True)
+            "--dir", str(path.parent), "--markdown", str(output)], capture_output=True, text=True, encoding="utf-8")
         assert proc.returncode == 1 and before == digest(repo)
 
 
@@ -88,7 +107,7 @@ def test_markdown_only_rejects_symlink_alias(inventory_repo):
         raise
     before = digest(repo)
     proc = subprocess.run([sys.executable, "-B", str(ROOT / "tools/icode_delivery.py"),
-        "--dir", str(path.parent), "--markdown", str(alias)], capture_output=True, text=True)
+        "--dir", str(path.parent), "--markdown", str(alias)], capture_output=True, text=True, encoding="utf-8")
     assert proc.returncode == 1 and before == digest(repo)
 
 
@@ -165,12 +184,12 @@ def test_report_output_cannot_overwrite_source_or_ticket_artifacts(inventory_rep
     before = digest(repo)
     for output in (repo / "source.py", path, artifact, path.parent / "code_worklist.json"):
         proc = subprocess.run([sys.executable, "-B", str(ROOT / "tools/icode_delivery.py"), "--dir", str(path.parent),
-                               "--output", str(output)], capture_output=True, text=True)
+                               "--output", str(output)], capture_output=True, text=True, encoding="utf-8")
         assert proc.returncode == 1, proc.stdout + proc.stderr
     assert before == digest(repo)
     output = path.parent / "delivery_report.json"
     proc = subprocess.run([sys.executable, "-B", str(ROOT / "tools/icode_delivery.py"), "--dir", str(path.parent),
-                           "--output", str(output)], capture_output=True, text=True)
+                           "--output", str(output)], capture_output=True, text=True, encoding="utf-8")
     assert proc.returncode == 0 and output.is_file()
     assert set(digest(repo)) - set(before) == {str(output.relative_to(repo))}
 
@@ -208,13 +227,13 @@ def test_named_report_formal_delivery_collision_and_hardlink_are_rejected(invent
     tool = delivery()
     before = digest(repo)
     proc = subprocess.run([sys.executable, "-B", str(ROOT / "tools/icode_delivery.py"), "--dir", str(path.parent),
-                           "--output", str(path.parent / "delivery_report.json"), "--markdown", str(formal)], capture_output=True, text=True)
+                           "--output", str(path.parent / "delivery_report.json"), "--markdown", str(formal)], capture_output=True, text=True, encoding="utf-8")
     assert proc.returncode == 1 and before == digest(repo)
     alias = path.parent / "delivery_report_alias.json"
     alias.hardlink_to(repo / "source.py")
     before = digest(repo)
     proc = subprocess.run([sys.executable, "-B", str(ROOT / "tools/icode_delivery.py"), "--dir", str(path.parent),
-                           "--output", str(alias)], capture_output=True, text=True)
+                           "--output", str(alias)], capture_output=True, text=True, encoding="utf-8")
     assert proc.returncode == 1 and before == digest(repo)
 
 
@@ -228,7 +247,7 @@ def test_crosscheck_artifact_hardlink_is_protected_as_source(inventory_repo):
     before = digest(repo)
     delivery()
     proc = subprocess.run([sys.executable, "-B", str(ROOT / "tools/icode_delivery.py"), "--dir", str(path.parent),
-                           "--output", str(alias)], capture_output=True, text=True)
+                           "--output", str(alias)], capture_output=True, text=True, encoding="utf-8")
     assert proc.returncode == 1 and before == digest(repo)
 
 
@@ -244,7 +263,7 @@ def test_markdown_output_contains_independent_direct_and_provenance_facts(invent
     markdown = path.parent / "delivery_validation_report.md"
     delivery()
     proc = subprocess.run([sys.executable, "-B", str(ROOT / "tools/icode_delivery.py"), "--dir", str(path.parent),
-                           "--output", str(output), "--markdown", str(markdown)], capture_output=True, text=True)
+                           "--output", str(output), "--markdown", str(markdown)], capture_output=True, text=True, encoding="utf-8")
     assert proc.returncode == 0, proc.stdout + proc.stderr
     content = markdown.read_text(encoding="utf-8")
     assert all(value in content for value in ("Target built", "Binary executed", "original-source", "artifact-sha", "SN=fixture", "source.log", "not_run"))
@@ -254,7 +273,7 @@ def test_controlled_artifact_receipt_protects_old_formal_report_after_role_chang
     repo, _, _ = inventory_repo
     ticket = repo / ".icode_output/.icode_output_2"
     def control(*args):
-        proc = subprocess.run([sys.executable, "-B", str(ROOT / "tools/icode_control.py"), *map(str, args)], capture_output=True, text=True)
+        proc = subprocess.run([sys.executable, "-B", str(ROOT / "tools/icode_control.py"), *map(str, args)], capture_output=True, text=True, encoding="utf-8")
         assert proc.returncode == 0, proc.stdout + proc.stderr
         return json.loads(proc.stdout)
     control("create", "--dir", ticket, "--ticket-id", "receipt-1", "--birth", "plan", "--requirement", "artifact protection",
@@ -270,5 +289,5 @@ def test_controlled_artifact_receipt_protects_old_formal_report_after_role_chang
     before = digest(repo)
     delivery()
     proc = subprocess.run([sys.executable, "-B", str(ROOT / "tools/icode_delivery.py"), "--dir", str(ticket),
-                           "--output", str(ticket / "delivery_report.json"), "--markdown", str(formal)], capture_output=True, text=True)
+                           "--output", str(ticket / "delivery_report.json"), "--markdown", str(formal)], capture_output=True, text=True, encoding="utf-8")
     assert proc.returncode == 1 and before == digest(repo)

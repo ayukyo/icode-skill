@@ -14,7 +14,7 @@ description: ICODE 端到端编码工作流，适配 Claude Code、Codex、CodeB
 - **步骤 0（可选）**：需求初稿对话，落档为 `00_init.md`；`init --guide` 派生新人指南
 - **步骤 1~6**：拟定计划 → 审查 → 定稿 → 编码 → 复检 → 终审
 
-> **主流程步骤真源**：`/icode start` / `/icode fast` / `/icode plan` 进入第一步先 `ls steps/*.md`，按实时清单核对步骤编号、产物文件名及 `completed_steps`；不在清单则停止核对，禁止自造占位，本文与目录不一致时以目录为准。
+> **主流程步骤真源**：`/icode start` / `/icode fast` / `/icode plan` 进入第一步先 `ls steps/*.md`，按实时清单核对步骤编号、产物文件名及 `completed_steps`；不在清单则停下核对，禁止自造占位，本文与目录不一致时以目录为准。
 > - 主流程示意：`00_init → 01_plan → 02_review → 03_merge → 04_code → 05_deepcheck → 06_audit → 07_readme → 08_patch`；不存在 `03_code` / `04_test` / `05_deploy`。测试在 code，部署/回归按 readme / patch / verify。
 > - 辅助独立步骤不参与 1~6 推进；**fast 为精简全流程**，参与全部六步（见命令表）。
 
