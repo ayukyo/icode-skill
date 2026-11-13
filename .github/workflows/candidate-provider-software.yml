@@ -3,6 +3,7 @@ on:
   push:
     branches: [main]
     paths:
+      - 'SKILL.md'
       - 'tools/lint_workflow_contract.py'
       - 'tools/icode_candidate.py'
       - 'tools/icode_control.py'

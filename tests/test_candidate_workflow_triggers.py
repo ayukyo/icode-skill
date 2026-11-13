@@ -47,6 +47,9 @@ class CandidateWorkflowTriggers(unittest.TestCase):
     def test_candidate_source_triggers_inspection(self):
         self.assert_trigger("tools/icode_candidate.py")
         self.assert_trigger("tests/test_candidate_workflow_triggers.py")
+        # The candidate job executes shell contracts that read the public router.
+        candidate_workflow = WORKFLOW.with_name("candidate-provider-software.yml")
+        self.assertIn("SKILL.md", push_paths(candidate_workflow.read_text(encoding="utf-8")))
 
     def test_candidate_provider_test_triggers_inspection(self):
         self.assert_trigger("tests/test_candidate_git_provider_unit.py")
