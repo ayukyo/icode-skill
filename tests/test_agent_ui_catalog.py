@@ -10,7 +10,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "agent_runtime"))
 
-from icode_agent.ticket_catalog import CatalogError, TicketCatalog
+from icode_agent.ticket_catalog import CatalogError, TicketCatalog, read_ticket_metadata
 from icode_agent.ui_settings import DEFAULT_SETTINGS, SettingsError, UISettingsStore
 
 
@@ -136,7 +136,7 @@ def test_resolve_requires_unique_v3_identity_and_matching_metadata(tmp_path):
     assert resolved.executable is True
 
     metadata_path = out_dir / ".ico_metadata.json"
-    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    metadata = read_ticket_metadata(out_dir)
     metadata["ticket_id"] = "OTHER"
     metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
     with pytest.raises(CatalogError, match="身份不一致"):

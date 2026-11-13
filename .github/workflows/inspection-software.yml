@@ -10,6 +10,23 @@ on:
       - 'tools/test_result_summary.py'
       - 'tools/verification_evidence.py'
       - 'tools/icode_delivery.py'
+      - 'tools/fast_policy.py'
+      - 'tools/ticket_context.py'
+      - 'tools/candidate_storage.py'
+      - 'tools/stage_acceptance.py'
+      - 'tools/verification_debt.py'
+      - 'tools/lint_*'
+      - 'tools/debug_catalog.py'
+      - 'tools/learn.py'
+      - 'tools/propose_skill_candidates.py'
+      - 'tools/tb/scripts/tb_watch.py'
+      - 'scripts/submission_guard.py'
+      - 'agent_runtime/icode_agent/**'
+      - 'schemas/ticket-metadata.schema.json'
+      - 'mcp/workflow-gate/gates.json'
+      - 'steps/**'
+      - 'references/**'
+      - 'SKILL.md'
       - 'tools/build_skill_distribution.py'
       - 'mcp/icode-local-index/**'
       - 'mcp/_lib/local_mcp_common.py'
@@ -29,7 +46,14 @@ on:
       - 'tests/test_local_mcp_access_policy.py'
       - 'tests/test_workspace_access_policy.py'
       - 'tests/test_test_result_summary.py'
-      - 'tests/test_delivery_report.py'
+      - 'tests/test_delivery*'
+      - 'tests/test_fast*'
+      - 'tests/test_overview_checkpoint.py'
+      - 'tests/test_ticket*'
+      - 'tests/test_candidate_storage*'
+      - 'tests/data/candidate_reader_raw_io_allowlist.json'
+      - 'tests/test_control_plane*'
+      - 'tests/test_stage*'
       - 'tests/test_skill_distribution.py'
       - 'skill-packs/cross-layer-contract-audit/**'
       - 'mcp/workflow-gate/skill-routes.json'
@@ -74,9 +98,23 @@ jobs:
         run: python -m pytest -p no:anyio tests/test_local_index_lifecycle.py tests/test_local_mcp_suite.py tests/test_local_mcp_paths.py tests/test_local_mcp_access_policy.py tests/test_workspace_access_policy.py tests/test_test_result_summary.py tests/test_delivery_report.py tests/test_environment_diagnostics.py tests/test_claude_registry_unit.py tests/test_field_verification_continuity.py -q
       - name: Shared skill and route contract
         run: python tools/validate_skill_pack.py --manifest skill-packs/manifest.json --routes mcp/workflow-gate/skill-routes.json --list
+      - name: Fast admission and derived ticket overview contracts
+        run: python -m pytest -p no:anyio tests/test_fast_policy.py tests/test_fast_admission.py tests/test_overview_checkpoint.py tests/test_delivery_report.py tests/test_delivery_pending_path.py tests/test_ticket_context.py tests/test_ticket_material_ui.py tests/test_fast_patch_crosscheck.py -q
+      - name: Candidate storage roundtrip and recovery contracts
+        run: python -m pytest -p no:anyio tests/test_candidate_storage.py tests/test_candidate_storage_control.py tests/test_candidate_storage_stage.py tests/test_candidate_storage_faults.py tests/test_candidate_storage_readers.py tests/test_candidate_storage_doc_contract.py -q
       - name: Offline distribution resource contract
         if: runner.os == 'Linux'
         run: python -m pytest -p no:anyio tests/test_skill_distribution.py -q
+      - name: Existing control and reasoning shell contracts
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          bash tests/test_fast_risk_upgrade_contract.sh
+          bash tests/test_thinking_gate_contract.sh
+          bash tests/test_tdd_workflow_contract.sh
+          bash tests/test_control_plane_metadata_contract.sh
+          bash tests/test_control_plane_transition_contract.sh
+          bash tests/test_control_plane_regression_contract.sh
   software:
     strategy:
       fail-fast: false

@@ -3,8 +3,22 @@
 
 import argparse
 import json
+import importlib.util
 from collections import defaultdict
 from pathlib import Path
+
+
+_CONTROL_MODULE = None
+
+
+def control_module():
+    global _CONTROL_MODULE
+    if _CONTROL_MODULE is None:
+        spec = importlib.util.spec_from_file_location("readonly_control", Path(__file__).with_name("icode_control.py"))
+        loaded = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(loaded)
+        _CONTROL_MODULE = loaded
+    return _CONTROL_MODULE
 
 
 def load_runs(root, diagnostics=None):
@@ -23,10 +37,12 @@ def load_runs(root, diagnostics=None):
                 diagnostics.append({"path": str(path), "error": "symlink_metadata_skipped"})
             continue
         try:
-            metadata = json.loads(resolved.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
+            metadata = control_module().read_metadata_readonly(resolved.parent)
+        except (OSError, ValueError, control_module().ControlError) as exc:
             if diagnostics is not None:
                 diagnostics.append({"path": str(path), "error": str(exc)})
+            else:
+                raise ValueError(f"metadata blocked: {path}: {exc}") from exc
             continue
         if not isinstance(metadata, dict):
             if diagnostics is not None:
@@ -89,11 +105,14 @@ def main():
     args = parser.parse_args()
     if args.min_occurrences < 3:
         parser.error("--min-occurrences 不能小于 3")
-    rows = load_runs(args.root)
+    diagnostics = []
+    rows = load_runs(args.root, diagnostics)
     report = {
         "schema_version": 1,
         "root": str(Path(args.root).resolve()),
         "min_occurrences": args.min_occurrences,
+        "status": "partial" if diagnostics else "complete",
+        "errors": diagnostics,
         "observations": len(rows),
         "candidates": build_candidates(rows, args.min_occurrences),
         "read_only": True,

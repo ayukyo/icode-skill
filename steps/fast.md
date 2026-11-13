@@ -1,174 +1,59 @@
-# 命令 fast — 精简全流程（plan → review(1轮无对抗) → merge → code → deepcheck(Reverse 单阶段) → audit）
+# 命令 fast — 精简全流程
 
-**命令**: `/icode fast <需求>`
-**目标**: 保留全流程 6 步结构，每步只跑最关键的最小动作，链路耗时约为全流程的 65%
-**会话**: 主会话
+**命令**：`/icode fast <需求>`。主会话依次完成 plan → review → merge → code → deepcheck → audit。
+**目标**：保留六阶段及固定产物，减少重复阅读和长文改写。实际耗时改善须由基准测量，不预设百分比。
 
-> **条件硬门**：阶段计划、严格证据或视觉目标命中时先读 [串口、证据与阶段验收真源](../references/serial_evidence_stages.md)。fast 只缩减既定审查节奏，不减少原始证据、多帧实际查看或可信阶段确认；自动串联和中断恢复均须重核当前阶段守卫，前序未接受不得启动后继实施。
+## 必要执行入口
 
-## 与全流程（`/icode start`）的差异
+1. 按 [目录与 metadata 共享规则](../references/dir_and_metadata.md) 决定复用/新建和出生事务。复用入口态有歧义时依原合同询问；不重置既有 full。
+2. 创建时记录 `mode="fast"`、`max_rounds=1`、`risk_profile={policy_version:2,requested_mode:"fast",effective_mode:"fast",override:false}`，其余 schema/trace 版本按共享模板。缺分类只表示尚待调查，不能先认定 full；出生后先执行 plan。
+3. plan 调查现有实现、调用链与验收边界，冻结现有 `scope_contract`，再补齐全部 catalog 风险事实与 classification，调用 `tools/fast_policy.py` 的 `assess_fast_risk(metadata, catalog)`。
+4. 进入 review/merge/code/patch 前必须有效分类；控制面实读分类引用文件并核验路径/hash，linter 校验结构和分流。未决语义 `blocked`，未解决重大增量 `replan`，依结果解决决策或回计划，不能把改用 full 当作用户已决定。
+5. `route=full` 时经控制面记录 `risk_profile.effective_mode="full"` 后走完整流程；`route=fast` 才使用各主步骤的「fast 必要执行」小节。每步仍依原执行模型 start/check/artifact/finish/transition，不合并阶段，不伪造跳过回执。
 
-| 维度 | full（默认） | fast |
+机器真源为 [workflow catalog](../mcp/workflow-gate/gates.json) 的 `fast_risk_upgrade`，纯评估接口只返回 `route/reasons/required_checks`，不写 metadata，不证明证据已真实执行。词表、必需检查映射与准入步骤只从 catalog 读，不从本文件另造常量。
+
+## 风险分类与有效模式
+
+- **旧策略**：无 `risk_profile.policy_version` 或版本 1，继续原九风险 flag 任一命中升级 full / 显式 override 的语义，不静默重解释旧工单。
+- **策略 2**：少量跨文件、已知缓存/观察者/注册表、真实环境验证等普通风险，只增加 catalog 指定专项检查；范围已界定且证据有效时可保持 fast。专项检查未完成必须保留阻断或验证债务，不能因 fast 豁免。
+- **必须 full**：新架构、影响不可界定、破坏接口、不可逆迁移、独立对抗需求，按 catalog 稳定 flag 分流。用户要求 full 或本运行已有效 full 时不自动降级。
+- **硬门保持**：override 只记录显式风险接受，不豁免未决语义、重大增量、身份影响、真实环境证据、原始证据与阶段确认。需要真实设备时必须绑定设备/环境/制品，缺证据不得 verified。
+- **未知不等于 full**：未知版本、错误类型、未调查或缺少可核验证据的 bounded 声明返回 blocked；plan 可继续调查，编码前必须得到有效评估。
+
+`mode` / `requested_mode` 记录用户请求；所有行为、coverage、UI 与 MCP gate 使用同一 `effective_mode(metadata)` 解析结果。非法值显示 `unknown` 并由评估阻断，不能用显示解析代替准入。显式 `/icode review N` 升级时先登记 full，再按 N 轮与对抗执行；升级后 deepcheck 同样走 full。
+
+classification 结构及 canonical scope 摘要、引用根与校验边界见 [risk_profile 字段族](../references/dir_and_metadata.md)。证据建议引用 ticket 内已冻结 `01_plan.md` 或 `03_plan_final.md`；workspace 引用用于确有必要的调查材料，正常源码变化导致引用失效时须真实重新核验，不能改 hash 冒充已读。
+
+## 六阶段必要动作与产物
+
+| 阶段 | 必要动作 | 固定产物 |
 |---|---|---|
-| 步骤2 review 轮数 | 默认3轮，可自动延长至 `max(10, N×2)` | **固定 1 轮** |
-| 步骤2 review 对抗验证 | 3 质疑者（证据/替代/充分性）独立 spawn | **跳过对抗** |
-| 步骤5 deepcheck 阶段 | Reverse → Fixed → Free 三阶段循环 | **只跑 Reverse 阶段** |
-| 步骤5 deepcheck Free 对抗 | 3 质疑者 | 不适用（不跑 Free） |
-| 入口警告 | 无 | **打印警告，用户自负其责** |
-| `metadata.mode` | `"full"`（默认，可省略） | `"fast"` |
+| [plan](01_plan.md#fast-必要执行) | 短合同；调查后分类；保留需求、范围红线、调用链、实现点、验收、风险和适用 TDD | `01_plan.md` |
+| [review](02_review.md#fast-必要执行) | 一轮独立视角；发现/位置/证据/处置，clean 写简短结论；首轮真实 JSON/manifest | `02_review.md` |
+| [merge](03_merge.md#fast-必要执行) | 无语义变化时机械复制已批准完整计划，只叠加采纳差异与偏差备忘 | `03_plan_final.md` |
+| [code](04_code.md#fast-必要执行) | 实施、适用 RED→GREEN/回归、Code Review Fix；记录测试及偏差 | `04_code_review_fix.md` |
+| [deepcheck](05_deepcheck.md#fast-必要执行) | Reverse 独立实际 Read、调用链、专项检查和差异；只减重复正文 | `05_deepcheck.md` |
+| [audit](06_audit.md#fast-必要执行) | 独立 Audit Read、追溯矩阵与新裁决，突出债务和结论 | `06_audit.md` |
 
-**保留一致的产物结构**：fast 与 full 产出**同样命名**的产物文件（`01_plan.md` / `02_review.md` / `03_plan_final.md` / `04_code_review_fix.md` / `05_deepcheck.md` / `06_audit.md`）。差异只在每步**动作的最小集**——下游所有步骤（merge/audit/readme）无需感知模式差异。
+首轮 `review_round_1.json` / `review_manifest.json`、code/deepcheck/audit worklist 与 coverage 回执继续依 [审查证据合同](../references/inspection_evidence.md)。不移动、删除这六份固定产物，不用摘要替代完整最终计划。fast review 一轮无对抗；有效 full 恢复原多轮与对抗。fast deepcheck 仅 Reverse；有效 full 恢复 Reverse/Fixed/Free。
 
-## 适用场景
+## 共享规则与条件加载
 
-- 单文件或少量文件改动（建议 < 5 文件）
-- 已有相似工程经验、不需要多轮审查收敛
-- 改动边界清晰、不涉及架构变更或新协议引入
-- 紧急修复、对交付速度敏感
+本表为导航，规则仍由链接目标维护；各主步骤的必要小节与对应条件段构成同一执行合同。
 
-**不适用场景**（建议回退到 `/icode start` 全流程）：跨模块重构、新架构引入、安全敏感模块改动、跨协议/跨仓集成、需要对抗验证防确认偏误的场景。
+| 条件 | 首次必读/失效重载真源 |
+|---|---|
+| 所有任务 | [目录/出生/metadata](../references/dir_and_metadata.md)、[工程接入](../references/project_intake.md)、[思考与共享规则复用](../references/thinking_core.md) |
+| 语义选择/身份/生命周期/真实环境风险 | [workflow catalog](../mcp/workflow-gate/gates.json)、[证据分层](../references/evidence_and_verification.md)及该主步骤命中的条件段 |
+| 严格原始证据/视觉目标/阶段计划 | [串口、证据与阶段验收真源](../references/serial_evidence_stages.md)，保留实际多帧查看和可信阶段确认 |
+| review/Reverse/Audit | [审查清单](../references/inspection_worklist.md)、[审查证据](../references/inspection_evidence.md) |
+| 外部库、日志、patch、跨仓或并发等 | 各主步骤对应条件段及其引用；条件命中必须完整履行 |
 
-## 执行流程
+共享规则首次完整 Read，后续按 thinking_core 的有效复用机制引用已有来源，不逐步重复粘贴。规则版本、需求、候选、调用链或验证合同变化时重载。源码实际 Read 和 review/Reverse/Audit 的独立判断不可缓存冒充。
 
-### 1. 目录决策（与 `/icode start` 复用规则一致）
+## 思考与 MCP 边界
 
-完整脚本见 [references/dir_and_metadata.md「复用 / 创建新目录决策」段](../references/dir_and_metadata.md)（**真源**，禁止独立定义或微改）：`REUSE=2`（入口态有歧义）→ 问用户"复用 / 新建"，按答复定；`REUSE=0`（非入口态）→ 带参新建、无参报错。
+等级由 [reasoning catalog](../mcp/reasoning-gate/gates.json) 决定，不能因 fast 全部降 L1。新语义、复杂修改、根因分析和重构仍执行 sequential-thinking 至少 3 步；review/Reverse/Audit 各自保留独立判断。当前只复用 merge 既有 L1；尚无足够机器事实证明其他步骤可降级，维持 L2。
 
-复用语义：复用入口态目录时，命令参数作补充输入，主体需求取自 `00_init.md`。
-
-> **历史检索 + 段零工程文档检索**：委托给串联执行的 [01_plan.md](01_plan.md) 步骤2（plan 步骤2，非 icode 步骤4），fast 不单独检索。原因：slice 与 plan 完全相同（历史 `adr_risks` / 段零 `section:<file>`），`_inject_cache.json` 按 `(source, ref_id, slice)` 去重兜底，fast 单独检索是冗余动作（检索白跑，注入被 plan 截胡），与 fast 省 token 目标矛盾。详见 [SKILL.md](../SKILL.md)「历史检索复用」段。
-
-> **段零只读当前分支子目录是反交叉污染设计，不要误读为"被覆盖"**：详见 [steps/doc.md](doc.md) 顶部「⚠️ 多分支设计·反偷懒强约束」段（`dir_and_metadata.md`「段零·工程文档检索」段），跨分支不交叉读是为防止跨分支借鉴失真；用户反馈"看不到其他分支文档"时**默认不是 bug**，应先 `ls project_docs/<id>/` 看是否有多分支子目录再判。
-### 2. 创建 metadata
-
-`/icode fast` 新建目录时，`.ico_metadata.json` 写入：
-
-```json
-{
-  "requirement": "{用户输入的原始需求}",
-  "created_at": "当前时间",
-  "status": "init_in_progress",
-  "completed_steps": [],
-  "code_files": [],
-  "requirement_summary": "{基于完整计划的一句话摘要，≤100 token}",
-  "requirement_points": [],
-  "keywords": "{≤8个技术关键词数组，从需求/计划技术栈提炼，不得为空--空 keywords 工单无法被段一粗筛命中}",
-  "indexed": false,
-  "ticket_id": "{在 create 前生成的非空唯一 ID}",
-  "mode": "fast",
-  "max_rounds": 1,
-  "schema_version": 3,
-  "workflow_gate_schema_version": 1,
-  "thinking_gate_schema_version": 1,
-  "mcp_gate_schema_version": 2
-}
-```
-
-> **控制面接线（schema v3）**：先生成非空 `ticket_id`，将其他字段传给 `python3 tools/icode_control.py create --dir {ICODE_OUT_DIR} --ticket-id <id> --requirement '<原始需求>' --birth plan --metadata-json '<json>'`，原子产生 `init_in_progress` + `ticket_created`。计划产物/合同完成后调 `transition --to plan_done`，工具自动追加 `"1"`；索引写入走 `index-write`。禁止把 `plan_done` 直写为出生态。
-
-**新增字段**（仅 fast 模式有值，full 模式可省略或留空，默认 `"full"`）：
-- `mode`：工单模式，`"fast"` / `"full"`（默认 `"full"`）
-- `max_rounds`：步骤2 软上限，fast 固定为 1（full 默认 3）
-- **`risk_profile`**（workflow gate·快速模式风险自动升级，写 metadata）：fast 模式创建/续跑时**自动风险识别**，命中任一 `fast_risk_triggers`（见 [mcp/workflow-gate/gates.json](../mcp/workflow-gate/gates.json)）→ `effective_mode` 自动设为 `"full"`（走全流程），否则保持 `"fast"`。风险标志（词表）：
-  - `cross_component`（跨组件修改）/ `persistent_identity_change`（持久化实体身份变化）/ `dependency_migration`（依赖关系迁移）/ `async_observer_or_cache`（异步观察者、缓存或注册表参与）/ `restart_replay_semantics`（重启、恢复或重放语义受影响）/ `external_consumer_change`（外部消费者行为变化）/ `real_env_verification`（需要真实环境验证）/ `unresolved_semantic_decision`（出现尚未解决的语义决策）/ `major_requirement_delta`（执行中发生重大需求增量）
-  - 低风险、单文件、纯计算且无外部状态变化 → 保持 `effective_mode="fast"`
-- **`risk_profile.override`**：用户显式覆盖自动升级时记 `true` 并记录风险接受事实（`effective_mode` 仍按用户覆盖值）；**未 override 且 `effective_mode != full` 时 lint 判违规**（见 [tools/lint_workflow_contract.py](../tools/lint_workflow_contract.py)）
-
-结构示例：
-```json
-{
-  "risk_profile": {
-    "requested_mode": "fast",
-    "effective_mode": "full",
-    "triggers": ["cross_component", "async_observer_or_cache"],
-    "risk_flags": {"cross_component": true, "persistent_identity_change": false, "async_observer_or_cache": true},
-    "override": false
-  }
-}
-```
-
-复用入口态目录时，沿用现有 metadata，只追加/更新 `mode="fast"`、`max_rounds=1`，并按上方规则写入/刷新 `risk_profile`。
-
-### 3. 入口警告
-
-启动时打印（**不阻塞**）：
-
-```
-⚠️ /icode fast 模式：
-   - 步骤2 review 固定 1 轮无对抗验证
-   - 步骤5 deepcheck 只跑 Reverse 阶段（跳过 Fixed/Free）
-   - **不省略步骤4 TDD 准入门 RED→GREEN**（测试驱动门禁与 full 一致，小改动常用快速契约测试）
-   - 依赖 plan+1 轮 review+Reverse 单阶段+audit 四道关卡
-   - 复杂需求（跨模块/新架构/安全敏感）建议改用 /icode start 全流程
-```
-
-### 4. 串联执行
-
-> **workflow gate 自动升级（fast 风险命中时强制走 full 流程）**：串联前运行 `python3 tools/lint_workflow_contract.py {ICODE_OUT_DIR} --step fast --json`——若 `risk_profile.effective_mode=full`（命中风险自动升级）→ **按 `/icode start` 全流程执行**（步骤2 多轮 + 对抗、步骤5 三阶段），并打印 `▶ fast 命中风险标志（<triggers>），自动升级 full 模式`；`effective_mode=fast` 且未命中风险 → 按下方 fast 精简流程执行；`effective_mode != full` 且 `override != true` → 违规，提示用户记录风险接受或改 full（不得静默继续 fast）。
-
-按以下顺序调用对应步骤文件：
-
-| 顺序 | 命令 | 步骤文件 | 产出 | status 转换 |
-|---|---|---|---|---|
-| 1 | 步骤1 plan | `steps/01_plan.md` | `01_plan.md` | → `plan_done` |
-| 2 | 步骤2 review | `steps/02_review.md` | `02_review.md` | → `review_done` |
-| 3 | 步骤3 merge | `steps/03_merge.md` | `03_plan_final.md` | → `plan_finalized` |
-| 4 | 步骤4 code（含 **TDD 准入门 RED→GREEN**（见 [steps/04_code.md](04_code.md)「TDD 准入门」——fast **不省略** RED→GREEN 门禁）+ 末尾 1.5 "Code Review Fix" 4 维度复检） | `steps/04_code.md` | 代码文件 + `04_code_review_fix.md` | → `code_done` |
-| 5 | 步骤5 deepcheck | `steps/05_deepcheck.md` | `05_deepcheck.md` | → `deepcheck_done` |
-| 6 | 步骤6 audit | `steps/06_audit.md` | `06_audit.md` | → `completed` |
-
-**步骤2/5 的 fast 模式行为**（由各自步骤文件读 `metadata.mode` 字段判定）：
-
-- **步骤2 review**：检测到 `mode=="fast"` 时，按**是否带参 N**区分两种场景（详见 [steps/02_review.md](02_review.md) 顶部「fast 模式行为」段）：
-  - **场景一·自动串联**（`/icode fast` 调起、未带参 N，`FAST_LOCKED=true`）：`max_rounds` 强制 1、跳过步骤 2.5.5 对抗（issue 直接标 `confirmed`，**降级为单视角审查**）、循环控制 `total_rounds >= 1` 直接终止。输出 `▶ 步骤2 fast 模式：1 轮审查，无对抗验证`
-  - **场景二·单步升级**（fast 工单上显式跑 `/icode review N`，`FAST_LOCKED=false`）：**N 优先级最高**——按 N 轮跑 + 恢复对抗验证 + 走正常 (a)(b)(c) 循环控制，与 full 模式一致（这是 fast→full 升级机制，用户显式表达升级意图）
-
-- **步骤4 code（含末尾 1.5 "Code Review Fix"）**：fast 模式下也执行 1.5 复检（**4 维度对所有工单都触发**，不分模式）——同事提示词的工程化复检机制不因 fast 而省略。差异：fast 模式下复检节奏紧凑，但仍产出 `04_code_review_fix.md` 并落盘 `code_review_fix_with_issues` 字段。详见 [steps/04_code.md](04_code.md)「1.5 子段」
-
-- **步骤5 deepcheck**：检测到 `mode=="fast"` 时
-  - 跑完 Reverse 阶段后**直接终止**（不切换到 Fixed / Free）
-  - 跳过 Free 阶段 A6 独立 3 质疑者 spawn（不适用）
-  - 输出标记：`▶ 步骤5 fast 模式：仅 Reverse 阶段`
-  - **读取 `04_code_review_fix.md`**（若存在）作为补充参考：若 `code_review_fix_with_issues=true`，deepcheck 入口输出警告⚠️，Reverse 阶段重点关注 4 维度未通过项
-
-## 中断续跑
-
-复用现有 metadata 续跑机制。fast 模式下 `completed_steps` 预期：`["1","2","3","4","5","6"]`。
-
-续跑判定（找 1~6 范围最大已完成步骤推进）天然兼容：每步都会落盘 `status` 与对应计数器，中断后重启可从断点恢复。
-
-## 与 full 模式的切换
-
-- **fast → full 升级**：**允许**。用户能在 fast 工单上单独跑 `/icode review N` 或 `/icode deepcheck` 补全剩余步骤。**单步命令仍读 `mode` 字段，但用户用参数 N 显式表达升级意图时，参数优先级最高**（详见 [references/dir_and_metadata.md](../references/dir_and_metadata.md)「步骤2/5 读 mode 字段的契约」段）。已走完 fast 的工单再跑 `/icode review 5` 会被识别为 `status=completed` 重新审查（按步骤 2.3 规则），不破坏数据。
-- **full → fast 降级**：**不允许**（单步命令不强制按 fast 模式执行；用户若想走 fast 应改用 `/icode fast` 重启链路）。
-- **同一工单跨模式混跑**：未限制，`completed_steps` 与 `status` 反映实际走过的步骤。
-
-## 与其他命令的关系
-
-- `/icode help`：输出时包含 fast 命令说明
-- `/icode status`：识别 `mode` 字段，输出「工单模式：fast/full」
-- `/icode readme`：步骤7 不区分模式，统一生成交付报告 + 跨领域简报（两份）
-
-## 反偷懒约束
-
-fast 模式的"精简"不等于"偷懒"：
-
-1. **每步仍按分级思考 reasoning gate 执行**（按 [references/mcp_per_step.md](../references/mcp_per_step.md)「通用前置·分级思考」段执行：L1 记决策字段，L2 用 sequential-thinking，L0 不强制；缺证据视为不合规）
-2. **每步仍必须产出对应产物文件**（不跳过 01_plan.md / 02_review.md / 03_plan_final.md / 04_code_review_fix.md / 05_deepcheck.md / 06_audit.md）；**plan 步骤1 前置 limit 硬基线的 `{ICODE_OUT_DIR}/limit_checkpoint.md` 阶段块照常落盘**（读 limit 的当场留痕是**审计刚性**，不因 fast 精简跳过——即使本工程无 limit 也追加记录"无"，见 [01_plan.md](01_plan.md) 前置 limit 硬基线第 4 项）
-3. **入口警告必须如实打印**（不静默跳过提示）
-4. **跳过对抗验证不是"省略证据"**，而是承认 fast 模式下没有对抗资源——用户自负其责
-5. **fast 模式不能用于：声称"做了深度审查"**——明确"1 轮无对抗"的边界，避免误导后续读者
-## MCP 推荐（强证据二元化）
-| MCP | 推荐级别 | 用途 |
-|-----|----------|------|
-| context7 | 🟢* | 库 API 核对--涉及第三方库时 |
-| vision-bridge | 🟢* | UI 截图--用户给图时 |
-| memory | 🟢* | read_graph 查跨工单记忆--有历史工单时 |
-| playwright | ⚪ | fast 模式不跑 E2E |
-| **cheap-research** | 🟢* | **降本增强**：review（dedup `review.dedup` extract + 审查输出压缩 `review.result_summary` summarize）+ audit（仓库事实候选 `audit.repo_facts` propose_repo_facts + 差异摘要 `audit.plan_diff` diff_summary）等**正文有执行点**的子任务。**fast deepcheck 只跑 Reverse，Fixed/Dedup 阶段不到达**：`deepcheck.fixed_scan` / `deepcheck.dedup` 必须记 `decision=skipped_stage_not_reached, evidence={mode:fast, phase:reverse}`，fast 的 dedup 责任由 review 承担（review gate 不因 fast 豁免）。plan/code 无正文执行点（标 ⚪），不做。未装走 Agent(model="haiku") 兜底，不阻塞。**不接管决策**：3 质疑者对抗/架构决策/终审裁决/修复方案一律不走（零灰区原则）。详见 [mcp_per_step.md](../references/mcp_per_step.md) |
-
-**强制约束**：🟢/🟢*/⚪ 语义 + 双保险机制（执行步骤内嵌 + thinking_core gate）详见 [SKILL.md「MCP 调用覆盖强制化」](../SKILL.md) + [references/mcp_per_step.md「双保险机制」](../references/mcp_per_step.md)；本步骤表内的 🟢/🟢* 标注按上方真源判定。
-
-## 条件证据合同
-
-fast单轮仍写review_round_1.json与review_manifest.json（后续clean详细JSON豁免不适用于首轮），counts三类及真实origin attempt按[审查证据合同](../references/inspection_evidence.md)。有效模式仍为fast时，deepcheck只填Reverse阶段Read声明与deepcheck_coverage.json；risk_profile.effective_mode=full时改为Reverse/Fixed/Free三阶段。Audit另填独立Audit覆盖声明，不能复用Reverse的Read当Audit。未进入Fixed/Dedup的trace必须mode=fast/phase=reverse。
+机械复制和派生矩阵可由脚本完成，但不等于语义审查完成。cheap-research 的条件与 trace 沿用 [MCP 每步规则](../references/mcp_per_step.md)，不重复调用已经履行且输入未变的 gate。未进入 Fixed/Dedup 时仍写 `skipped_stage_not_reached`，证据为有效 `mode=fast/phase=reverse`；升级 full 不得借用户请求 fast 跳阶段。

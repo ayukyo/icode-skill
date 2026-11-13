@@ -129,8 +129,14 @@ def load_json(path, label):
     if path.is_symlink():
         raise CrosscheckError(f"{label} 不得是符号链接: {path}", gate_id="crosscheck_symlink")
     try:
-        with path.open("r", encoding="utf-8") as stream:
-            value = json.load(stream, parse_constant=reject_nonfinite)
+        if path.name == METADATA_NAME:
+            try:
+                value = control_module().read_metadata_readonly(path.parent)
+            except control_module().ControlError as exc:
+                raise CrosscheckError(f"{label} blocked: {path}: {exc}") from exc
+        else:
+            with path.open("r", encoding="utf-8") as stream:
+                value = json.load(stream, parse_constant=reject_nonfinite)
     except FileNotFoundError:
         raise CrosscheckError(f"{label} 不存在: {path}")
     except (OSError, UnicodeError, ValueError, json.JSONDecodeError) as exc:

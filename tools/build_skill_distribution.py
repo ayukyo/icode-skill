@@ -125,7 +125,7 @@ def component_for(path):
         return "ppt"
     if name.startswith(("tools/docx/", "references/docx_")) or name == "steps/docx.md":
         return "docx"
-    if name.startswith("agent_runtime/") or name == "tools/icode_agent.py":
+    if name.startswith("agent_runtime/") or name in {"tools/icode_agent.py", "tools/selfcheck_agent_ui.sh"}:
         return "ui"
     # These helpers only install Node MCP services; shared workflow gates do
     # not import them. Keep them beside the locked packages in the MCP payload.
@@ -136,7 +136,8 @@ def component_for(path):
     # bounded core retains runtime tools without raising its import budget.
     if (name in {".gitignore", "tools/build_public_site.py", "tools/notify_indexnow.py",
                  "tools/render_brand_assets.py", "tools/prepare_skill_listing.py",
-                 "tools/release_promotion.py"} or name.startswith("docs/")
+                 "tools/release_promotion.py", "tools/check_skill_evaluation.py",
+                 "tools/check_skill_discovery.py"} or name.startswith("docs/")
             or (name.startswith("skill-packs/") and name != "skill-packs/manifest.json")):
         return "support"
     if name.startswith("mcp/") and not (

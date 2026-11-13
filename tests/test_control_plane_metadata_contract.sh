@@ -42,6 +42,9 @@ EOF
 if $CTL validate --dir "$D" --skip-linters | grep -q 'metadata_schema'; then ok "词表外 status 被拒"; else bad "词表外 status 未拦截"; fi
 
 # 4) debug 孪生（debug:true）→ index-write 拒绝（debug 隔离）
+# The preceding malformed ordinary fixture has no ledger. Remove it before a
+# separate birth: stage discovery correctly rejects unauthenticated history.
+reset_dir
 DD="$T/.icode_output/.debug/.icode_output_1"; mkdir -p "$DD"
 $CTL create --dir "$DD" --ticket-id meta-debug --requirement r --birth debug-log >/dev/null
 if $CTL index-write --ticket-dir "$DD" --index "$T/idx.json" 2>/dev/null | grep -q 'debug 孪生工单走 .debug 隔离域'; then
@@ -68,8 +71,13 @@ if $CTL transition --dir "$D" --to completed --delivery-verdict verification_pen
     | grep -Eq 'step_receipt|门禁未通过'; then
   ok "completed 门禁未过 → fail-closed 状态不前移（completed_requires_all_gates）"
 else bad "completed 未跑门禁即通过"; fi
-if grep -q '"status": "completed"' "$D/.ico_metadata.json" 2>/dev/null; then
-  bad "门禁失败后 status 仍被前移"; else ok "门禁失败后 status 保持原值"; fi
+if python3 - "$D" <<'PY'
+import sys
+sys.path.insert(0, 'tools')
+from icode_control import read_metadata_readonly
+assert read_metadata_readonly(sys.argv[1])['status'] == 'deepcheck_done'
+PY
+then ok "门禁失败后 status 保持原值"; else bad "门禁失败后 status 仍被前移"; fi
 
 # 7) schema 文件本身可被外部 jsonschema 消费（draft-07 合法）
 if python3 - <<'PY' 2>/dev/null

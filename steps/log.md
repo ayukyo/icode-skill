@@ -443,7 +443,9 @@
 ```bash
 python3 -c "
 import json,re,sys,os
-# ① 前置读留痕存在性（L1 维度④）：limit_checkpoint.md 缺失 或 无 log 阶段块标题锚点 = "步骤1 未按'先读索引→精读命中'留痕" = 按未读处理
+sys.path.insert(0,'{ICODE_SKILL_ROOT}/tools')
+import icode_control as ctl
+# ① 前置读留痕存在性（L1 维度④）：limit_checkpoint.md 缺失 或 无 log 阶段块标题锚点 = 步骤1 未按'先读索引→精读命中'留痕 = 按未读处理
 cp='{ICODE_OUT_DIR}/limit_checkpoint.md'
 if not os.path.exists(cp):
     print('❌ limit_checkpoint.md 缺失（前置 limit 红线检查点的读留痕，步骤1 进入步骤2 之前必须落盘；§2.3/limit_refs 是事后产物不能替代，严格口径按未读）')
@@ -463,7 +465,7 @@ if not ('limit 红线对照' in s2 or '本工程无 limit 红线' in s2):
     sys.exit(1)
 # ③ 引用完整性：只扫 §2 + §6（limit 对照唯二落点），避免 §0/§3 里业务'红线 N'（如安全距离）误判
 cited={int(n) for n in re.findall(r'红(?:线)?\s*(\d+)',s2+' '+s6)}
-refs={int(r['redline_no']) for r in json.load(open('{ICODE_OUT_DIR}/.ico_metadata.json')).get('limit_refs',[]) if 'redline_no' in r}
+refs={int(r['redline_no']) for r in ctl.read_metadata_readonly('{ICODE_OUT_DIR}').get('limit_refs',[]) if 'redline_no' in r}
 missing=cited-refs
 print('limit_checkpoint: 存在 | §2.3 存在: 是 | 报告引用红线:',sorted(cited),'| limit_refs 记录:',sorted(refs),'| 缺失:',sorted(missing) if missing else '无')
 sys.exit(1 if missing else 0)
@@ -482,7 +484,9 @@ sys.exit(1 if missing else 0)
 ```bash
 python3 -c "
 import json,re,sys,os
-m=json.load(open('{ICODE_OUT_DIR}/.ico_metadata.json'))
+sys.path.insert(0,'{ICODE_SKILL_ROOT}/tools')
+import icode_control as ctl
+m=ctl.read_metadata_readonly('{ICODE_OUT_DIR}')
 runs=m.get('runtime_code_baselines',[])
 txt=open('{ICODE_OUT_DIR}/log_analysis.md',encoding='utf-8').read()
 # 限定 §2 章节切片，避免结论/正文其他位置的 'unknown' 字样误触发放行（同 9.5 sec() 切片法）

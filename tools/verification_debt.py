@@ -66,7 +66,13 @@ def now_iso() -> str:
 
 def load_json(path: Path, label: str) -> Dict[str, Any]:
     try:
-        value = json.loads(path.read_text(encoding="utf-8"))
+        if path.name == METADATA_NAME:
+            try:
+                value = evidence_module().control_module().read_metadata_readonly(path.parent)
+            except evidence_module().control_module().ControlError as exc:
+                raise VerificationDebtError(f"{label} blocked: {path}: {exc}") from exc
+        else:
+            value = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError as exc:
         raise VerificationDebtError(f"{label} 不存在: {path}") from exc
     except OSError as exc:
@@ -216,9 +222,10 @@ def _metadata_from_index_pointer(entry: Dict[str, Any], pointer_name: str) -> Op
                     continue
             else:
                 resolved_candidate.relative_to(pointer)
-            value = json.loads(resolved_candidate.read_text(encoding="utf-8"))
         except (OSError, RuntimeError, ValueError, json.JSONDecodeError):
             continue
+        # Codec/pending failures are evidence errors, not an absent pointer.
+        value = load_json(resolved_candidate, "archive/backup metadata")
         if not isinstance(value, dict):
             continue
         actual_ticket = value.get("ticket_id")

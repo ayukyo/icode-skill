@@ -393,7 +393,13 @@ class ActionPolicyProviderTests(unittest.TestCase):
 
     def test_corrupt_event_and_metadata_are_still_rejected_without_writes(self):
         provider = self.seal()
+        # Exercise the original inline diagnostics in both halves. The V2
+        # closed-wrapper early rejection is covered by storage-specific tests.
+        metadata = self.f.meta()
+        events = ctl.read_events(self.f.ticket)[0]
+        ctl.atomic_write_json(self.f.ticket / ctl.METADATA_NAME, metadata)
         path = self.f.ticket / ctl.EVENTS_NAME
+        path.write_text("".join(json.dumps(event) + "\n" for event in events), encoding="utf-8", newline="\n")
         original_events = path.read_bytes()
         rows = path.read_text(encoding="utf-8").splitlines()
         event = json.loads(rows[-1])

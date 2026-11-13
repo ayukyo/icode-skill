@@ -239,6 +239,13 @@ class CandidateContextTests(unittest.TestCase):
                      "--environment", "host", "--candidate-id", candidate, "--layer", "host", "--consumer", "test",
                      "--scenario", "unit", "--baseline", "fixture", "--evidence", "fixture.log", "--request-id", "history")
         self.bind()
+        # This case preserves legacy inline diagnostic aggregation. V2 damaged
+        # envelopes are rejected earlier by the storage-specific regression.
+        legacy_meta = self.meta()
+        legacy_events = ctl.read_events(self.ticket)[0]
+        ctl.atomic_write_json(self.ticket / ctl.METADATA_NAME, legacy_meta)
+        (self.ticket / ctl.EVENTS_NAME).write_text(
+            "".join(json.dumps(event) + "\n" for event in legacy_events), encoding="utf-8", newline="\n")
         path, before = self.ticket / ctl.EVENTS_NAME, self.frozen()
         _events, problems = invoke(ctl.verify_event_chain, self.ticket, self.meta(), provider=self.provider, required=True)
         self.assertTrue(any("candidate_provider_context" in issue for issue in problems), problems)

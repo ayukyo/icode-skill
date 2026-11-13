@@ -45,11 +45,15 @@ def run_summary(run):
     return result
 
 
-def build_delivery_report(out_dir, meta=None):
+def build_delivery_report(out_dir, meta=None, *, include_crosscheck=True):
     out_dir = Path(out_dir).expanduser().resolve()
     meta = ctl.load_metadata(out_dir) if meta is None else meta
+    profile = meta.get("risk_profile")
+    if profile is not None and not isinstance(profile, dict):
+        raise ValueError("risk_profile must be an object or null")
+    profile = profile or {}
     issues = []
-    if (out_dir / ctl.TXN_NAME).exists():
+    if os.path.lexists(out_dir / ctl.TXN_NAME):
         issues.append("pending_transaction")
     enabled = (meta.get("candidate_tracking") or {}).get("mode") == "enabled"
     context = ctl.verification_context(out_dir, meta)
@@ -62,14 +66,19 @@ def build_delivery_report(out_dir, meta=None):
     if enabled and context["reasons"]:
         review = dict(review, ok=False, state="blocked", reasons=context["reasons"])
     verification = ctl.verification_evidence_module().assess(meta, context)
-    inventory = guard.build_submission_inventory(meta, out_dir / ctl.METADATA_NAME)
+    # Inventory hashes untracked files, including prior crosscheck findings.
+    # A fresh independent context must never take that code path.
+    inventory = guard.build_submission_inventory(meta, out_dir / ctl.METADATA_NAME) if include_crosscheck else {
+        "ok": False, "repositories": [], "intended": [], "side_effects": [], "unknown": [],
+        "suggested_exclusions": [], "violations": ["inventory_withheld_for_fresh"]}
     verification_debt = debt.analyze_ticket(meta, out_dir, context=context)
-    try:
-        optional_review = crosscheck.crosscheck_freshness(out_dir)
-    except crosscheck.CrosscheckError as exc:
-        # An invalid optional report cannot certify a result. It remains outside
-        # the main delivery gate; corruption is clearly reported for the user.
-        optional_review = dict(exc.report(), read_only=True, required=False, state="blocked")
+    optional_review = {"read_only": True, "required": False, "state": "withheld_for_fresh"}
+    if include_crosscheck:
+        try:
+            optional_review = crosscheck.crosscheck_freshness(out_dir)
+        except crosscheck.CrosscheckError as exc:
+            # Optional review corruption never certifies the main gate.
+            optional_review = dict(exc.report(), read_only=True, required=False, state="blocked")
     runs = [run_summary(run) for run in meta.get("verification_runs") or [] if isinstance(run, dict)]
     verification = dict(verification, contract=meta.get("verification_contract"),
                         debt=verification_debt, runs=runs)
@@ -82,8 +91,27 @@ def build_delivery_report(out_dir, meta=None):
     # Legacy reviews remain untracked observations; only enabled tickets acquire
     # candidate review requirements. Optional crosscheck never enters this gate.
     ok = not issues and inventory["ok"] and verification["ok"] and (review["ok"] if enabled else True)
+    patches = meta.get("patch_history") or []
+    latest_patch = ({key: patches[-1][key] for key in ("patch_no", "patch", "n", "at", "time", "summary", "description", "status", "files")
+                     if key in patches[-1]} if patches and isinstance(patches[-1], dict) else None)
+    materials = [{"role": role, "path": name, "exists": (out_dir / name).is_file()}
+                 for role, name in (("工单概览", "delivery_validation_report.md"),
+                    ("最终计划", "03_plan_final.md"), ("追加修改", "08_patch.md"),
+                    ("验收证据", "06_audit.md"), ("实现证据", "04_code_review_fix.md"),
+                    ("独立复检", "05_deepcheck.md"))]
     return {"schema_version": 1, "read_only": True, "derived": True, "ok": ok,
             "generated_at": datetime.now(timezone.utc).isoformat(), "ticket_id": meta.get("ticket_id"),
+            "metadata_revision": ctl.canonical_digest(meta),
+            "goal": meta.get("requirement") or meta.get("requirement_summary") or "untracked",
+            "mode": {"requested": profile.get("requested_mode") or meta.get("mode") or "untracked",
+                     "effective": ctl.workflow_effective_mode(meta) or "untracked",
+                     "reasons": profile.get("routing_reasons") or profile.get("triggers") or profile.get("risk_flags") or []},
+            "latest_patch": latest_patch, "materials": materials,
+            "declared_changes": meta.get("code_files") or [],
+            "next_actions": (["独立读取需求、最终计划、审计与必要代码；提交库存尚未评估"] if not include_crosscheck else
+                ["先完成或恢复未完成事务，再刷新概览"] if "pending_transaction" in issues else
+                ["补齐当前候选评审或验证债务；按最终计划核对证据"] if not ok else
+                ["按需查看最终计划、patch 与原始证据；生成概览不构成新验证"]),
             "status": meta.get("status"), "delivery_verdict": meta.get("delivery_verdict"),
             "candidate": {"state": review["state"], "candidate_id": review.get("candidate_id"), "enabled": enabled},
             "internal_review": review, "verification": verification,
@@ -92,12 +120,26 @@ def build_delivery_report(out_dir, meta=None):
 
 
 def markdown_report(report):
-    lines = ["# ICODE delivery report", "", "> 派生只读事实；生成报告不等同于执行验证。", "",
-             f"- 工单：`{report['ticket_id']}`；当前状态：`{report['status']}`",
+    binding = {key: report.get(key) for key in ("ticket_id", "generated_at", "metadata_revision", "candidate")}
+    mode = report.get("mode") or {}
+    lines = ["# 工单概览", "", "> 派生只读事实；生成报告不等同于执行验证。", "",
+             "<!-- icode-overview-binding " + json.dumps(binding, ensure_ascii=True, separators=(',', ':')) + " -->", "",
+             f"- 生成时间：`{report.get('generated_at', 'untracked')}`；metadata revision：`{report.get('metadata_revision', 'untracked')}`",
+             f"- 目标：{report.get('goal', 'untracked')}",
+             f"- 工单：`{report['ticket_id']}`；流程状态：`{report['status']}`（与当前验收分别记录）",
+             f"- 请求模式：`{mode.get('requested', 'untracked')}`；有效模式：`{mode.get('effective', 'untracked')}`；理由：{json.dumps(mode.get('reasons') or 'untracked', ensure_ascii=False)}",
              f"- 候选：`{report['candidate']['candidate_id'] or report['candidate']['state']}`",
+             f"- 当前验收：评审 `{report['internal_review']['state']}` / 验证 `{report['verification']['state']}`；已登记交付结论：`{report.get('delivery_verdict') or 'untracked'}`",
+             f"- 当前主门禁：`{'satisfied' if report['ok'] else 'not_satisfied'}`（untracked 仍表示缺少历史依据）",
              f"- 内部评审：`{report['internal_review']['state']}`",
              f"- 验证：`{report['verification']['state']}`",
-             f"- 可选 crosscheck：`{report['crosscheck']['state']}`（不进入主门禁）", ""]
+             f"- 可选 crosscheck 时效：`{report['crosscheck']['state']}`（不进入主门禁，不自动重跑）",
+             "- 最近 patch：" + json.dumps(report.get("latest_patch") or "untracked", ensure_ascii=False),
+             "- 验证边界/债务：" + json.dumps(report['verification']['debt'], ensure_ascii=False, separators=(',', ':')),
+             "- 问题：" + json.dumps(report.get('issues') or [], ensure_ascii=False), "",
+             "## 下一步", "", *["- " + action for action in report.get("next_actions") or []], "",
+             "## 必要材料", "", *[f"- [{item['role']}]({item['path']})" + ("（尚无文件 / untracked）" if not item['exists'] else "")
+                 for item in report.get("materials") or [] if item['role'] != "工单概览"], "", "## 改动与验证来源", ""]
     observations = report.get("environment_observations")
     if observations:
         lines.extend(["- 环境能力观测（既有 trace 统计，不替代门禁或会话验证）：" +
@@ -138,7 +180,7 @@ def validate_outputs(out_dir, output, markdown):
     extensions. The common validator also detects symlink and hardlink aliases.
     """
     out_dir = Path(out_dir).expanduser().resolve()
-    destinations = [(output, ".json")] + ([(markdown, ".md")] if markdown else [])
+    destinations = ([(output, ".json")] if output else []) + ([(markdown, ".md")] if markdown else [])
     for value, suffix in destinations:
         path = Path(value).expanduser()
         if path.suffix != suffix or not (path.stem in {"delivery_report", "delivery_validation_report"} or path.stem.startswith("delivery_report_")):
@@ -147,6 +189,8 @@ def validate_outputs(out_dir, output, markdown):
             raise ValueError("输出不得覆盖原 crosscheck 产物")
     protected = [p for p in out_dir.rglob("*") if p.is_file() and not (p.stem in {"delivery_report", "delivery_validation_report"} or p.stem.startswith("delivery_report_"))]
     meta = ctl.load_metadata(out_dir)
+    if os.path.lexists(out_dir / ctl.TXN_NAME):
+        raise ValueError("事务未完成时只能stdout查询，不能写入报告")
     workspace = ctl.execution_workspace(out_dir, meta)
     project_root = crosscheck.derive_project_root(out_dir, meta)
     crosscheck_root = project_root / ".icode_output/.crosscheck"
@@ -162,7 +206,7 @@ def validate_outputs(out_dir, output, markdown):
             protected.extend((out_dir / value, workspace / value))
     if meta.get("schema_version") == 3 or (meta.get("candidate_tracking") or {}).get("mode") == "enabled":
         events, problems = ctl.verify_event_chain(out_dir, meta)
-        if problems or (out_dir / ctl.TXN_NAME).exists():
+        if problems or os.path.lexists(out_dir / ctl.TXN_NAME):
             raise ValueError("事件链或事务未完成时只能stdout查询，不能写入报告")
         for event in events:
             if event.get("event_type") != "artifact_written":
@@ -175,23 +219,32 @@ def validate_outputs(out_dir, output, markdown):
     if (workspace / ".git").exists():
         raw = guard._inventory_git(workspace, "ls-files", "--cached", "--others", "--exclude-standard", "-z")
         protected.extend(workspace / os.fsdecode(p) for p in raw.split(b"\0") if p and ".icode_output" not in Path(os.fsdecode(p)).parts)
-    return debt.validate_report_paths(Path(output), Path(markdown) if markdown else None,
-                                     allowed_root=out_dir, protected_sources=protected)
+    validated = debt.validate_report_paths(Path(output or markdown), Path(markdown) if output and markdown else None,
+                                          allowed_root=out_dir, protected_sources=protected)
+    return validated if output else (None, validated[0])
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dir", required=True, help="工单目录；只读默认输出JSON到stdout")
     parser.add_argument("--output", help="按需写入工单内delivery_report[_名称].json")
-    parser.add_argument("--markdown", help="按需写入delivery_report[_名称].md；要求--output")
+    parser.add_argument("--markdown", help="按需写入工单概览 Markdown；可独立使用，不伴随 JSON")
     args = parser.parse_args(argv)
     try:
-        if args.markdown and not args.output:
-            raise ValueError("--markdown 要求 --output")
-        outputs = validate_outputs(args.dir, args.output, args.markdown) if args.output else None
+        outputs = validate_outputs(args.dir, args.output, args.markdown) if args.output or args.markdown else None
         report = build_delivery_report(args.dir)
         if outputs:
-            debt.write_reports(report, outputs[0], outputs[1], markdown_report)
+            # Recheck after potentially expensive source observation: an alias
+            # or pending transaction may have appeared while facts were read.
+            outputs = validate_outputs(args.dir, args.output, args.markdown)
+            # All destinations were checked before any write. Preserve the
+            # existing atomic pair writer while allowing either format alone.
+            documents = []
+            if outputs[0]:
+                documents.append((outputs[0], json.dumps(report, ensure_ascii=False, indent=2) + "\n"))
+            if outputs[1]:
+                documents.append((outputs[1], markdown_report(report)))
+            debt.atomic_write_pair(documents)
         print(json.dumps(report, ensure_ascii=False, indent=2, allow_nan=False))
         return 0  # Query success; report.ok carries delivery qualification.
     except (ValueError, OSError, ctl.ControlError, debt.VerificationDebtError) as exc:

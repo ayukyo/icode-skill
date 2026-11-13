@@ -432,6 +432,9 @@ class HistoryTests(unittest.TestCase):
         self.linear_history()
         provider = self.seal()
         events = ctl.read_events(self.ticket)[0]
+        # Preserve the old inline schema/hash/proof aggregation contract;
+        # strict V2 envelope failures have separate storage regressions.
+        ctl.atomic_write_json(self.ticket / ctl.METADATA_NAME, self.meta())
         events[-1]["schema_version"] = 2
         (self.ticket / ctl.EVENTS_NAME).write_text("".join(json.dumps(e) + "\n" for e in events),
                                                 encoding="utf-8", newline="\n")

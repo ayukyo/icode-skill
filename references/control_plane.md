@@ -7,10 +7,20 @@
 
 ## 1. vNext 判定与 legacy 适配
 
-- **vNext 工单**：metadata 顶层含 `"schema_version": 3`。新工单一律出生即 vNext（模板已内置）。
+- **vNext 工单**：还原后的逻辑 metadata 顶层含 `"schema_version": 3`。新工单一律出生即 vNext，并绑定风险策略 `policy_version=2`；`create` 不能请求策略 1 或用缺版本进入历史兼容分支。无策略版本 / 版本 1 的兼容仅适用于已存在的历史工单。
 - **legacy 工单**：无 schema_version 字段的历史工单。控制面对其**只读适配**：`validate` 以宽松模式报告（不阻断只读审计），`transition/event/close-phase/index-write/snapshot` 拒绝变更（exit 3），提示先迁移。
 - **迁移**：`python3 tools/icode_control.py migration --dir <out_dir>` 先 dry-run 出三分类报告（auto / needs_human / unmigratable），`--apply` 仅在 needs_human 为空时执行（备份 `.pre-v3.bak` + 追加 `migration_applied` 事件）。**禁止把 legacy 工单静默伪装成 vNext 合规工单**——needs_human 非空必须人工修正后迁移。
 - **vNext metadata 核心字段禁止任意新增顶层 key**；专用/实验字段一律进 `extensions.<namespace>`（如 `extensions.agent`、`extensions.experimental`）。违例由 validate 的 `metadata_schema` 门禁报告。
+
+### 1.1 物理 storage v2 与只读逻辑对象
+
+新建工单使用闭集物理外壳 `{"storage_version":2,"kind":"metadata","value":完整逻辑对象}`；事件行及事务文件对应 `kind="event" / "transaction"`。逻辑 metadata schema=3、candidate=1、event=1、事务=1 及全部既有 ID / hash 算法保持不变，hash 依据还原后的完整对象计算，不能针对外壳或 ref 计算。下方与共享模板列出的字段均指逻辑对象，不能直接对磁盘顶层做字段判断。
+
+codec 仅替换完整候选 snapshot 的 `manifest/index_manifest/untracked_manifest` 数组槽。引用是内容摘要；定义首次自然出现在同票已提交事件链的 inline 数组中，后续可用引用。定义不从别票、索引、外部路径、pending journal 或 metadata 自报内容获取；坏引用、未知外壳版本和损坏事件链必须失败，不能当 legacy 空值继续。没有 blob 库、额外权威索引或后台服务。历史 inline 文件保持可读，不批量迁移或重写旧事件前缀。
+
+可执行字段检查统一按 [SKILL.md「票据逻辑读取约定」](../SKILL.md) 从**实际加载技能根**的 `tools` 导入 `icode_control`，调用 `read_metadata_readonly(out_dir)`。该 adapter 在读前 / 读后拒绝 pending，不写、不建锁、不恢复；中央 writer 内部 `load_metadata` 不能作为只读资格判定的替代。现有专用 CLI 继续使用，不另建 metadata dump CLI。index、active pointer、crosscheck 容器等独立 JSON 不套用票据外壳；原始 `Read` 仍可独立读取物理证据，不能把展开再序列化的内容冒充原始字节。
+
+受控 writer 保留原事务顺序：journal → 仅引用已提交定义的 metadata（新数组暂 inline）→ append 事件 → 同事务内 compact metadata → 删除 journal。恢复只由既有持锁 writer 入口执行；归档必须包含本地完整 ledger 以便自给还原，原事件字节与归档 manifest 的原字节校验继续保留。物理减重不改变业务门禁，也不构成 LLM 加速或实机验收的证据。
 
 ## 2. 工单身份解析
 
@@ -216,4 +226,10 @@ Git checkout 和逐仓提交契约由 `steps/reopen.md` 先创建/校验；然�
 
 `scripts/submission_guard.py submit-check --metadata <file>` 在原地无提交契约时仍枚举本地源码库存。intended 仅由声明 code_files/related/命名文件种子确定，宽审查目录不是整目录提交授权；显式 `excluded_side_effects` 为 side_effects。`.so`、build、IDE/agent 与日志等启发式只能给 suggested_exclusions，未确认仍 unknown 并阻断，不能用自由文字 handoff 白名单绕过。排除边界经专用 candidate capture 登记后进入候选 ID，声明源码不能排除。工具正确处理 -z rename/delete/staged/unstaged/mode/binary 和子仓，不删除或 restore 生成物。enabled 工单还必须满足当前 code/deepcheck/audit review 与 verification_applicability，fast 不省 deepcheck；保持旧 remote/G3 检查和退出码。
 
-交付报告按需提供 `--output <out_dir>/delivery_validation_report.json [--markdown <out_dir>/delivery_validation_report.md]`（兼容 delivery_report[_名称]），只允许派生输出，正式交付角色与任何真实 artifact 回执均受保护。直接执行结果由 binary_exit_code 独立派生，runner/CI 不能代替 binary result；文档复用保留 origin 的实际源码/制品来源。crosscheck 为可选事实，not_run 中性、stale 不自动重跑，不加入主门禁。人工经验记录使用 [escape_taxonomy.md](escape_taxonomy.md)，不会自动创建 rule/skill 或同步。
+`delivery_validation_report.md` 是对人展示的“工单概览”，复用这一派生路径，不另建同义 README。单独 `--markdown <out_dir>/delivery_validation_report.md` 只写 Markdown；按需独立 `--output <out_dir>/delivery_validation_report.json` 或同时指定两者，旧调用与 delivery_report[_名称] 继续兼容。正式交付角色、真实 artifact 回执、源码及其 hardlink/symlink 别名均受保护；pending 事务或坏事件链只准 stdout，不允许持久化稳定概览。生成投影不建立 artifact 回执、不开 round、不构成验证。
+
+概览记录目标、流程 status 与当前验收的独立事实、请求/有效模式及理由、改动、最新 patch、验证边界和债务、可选 crosscheck 时效、下一步和最终计划/patch/阶段证据链接。`generated_at`、权威 metadata 的规范摘要 `metadata_revision`、当前 candidate identity 共同绑定投影；缺历史依据显示 untracked。`status=completed` 本身不能证明当前验收仍有效；追加 patch 或候选变化使历史投影 stale。状态查询与 UI 打开概览时按需检查，不能靠不断重写旧 completed 消除过期。
+
+机器上下文入口 `tools/ticket_context.py` 提供 `build_ticket_context(out_dir, *, purpose='general')->dict` 和 CLI `--dir`；只保留身份、状态、计数、有限改动路径与材料导航，不输出 manifest/index_manifest 或全部 run 正文。`overview_freshness(out_dir,snapshot)` 可比较保存的绑定与当前权威。独立复评 fresh 必须显式用 `purpose='crosscheck_fresh'` / `--purpose crosscheck_fresh`：在读取前分支排除旧 crosscheck 和工单概览内容，连会 hash 旧 finding 的提交库存扫描也不执行；库存为 `inventory_withheld_for_fresh`，不声称主门禁通过。原工单需求/计划/audit 仍按原合同可读。普通视图可显示旧 crosscheck 时效，fresh 不提供旧裁决或 finding，不把“读后过滤”冒充独立。
+
+UI 优先工单概览，其后是最终计划、patch 和阶段证据；按已解析 ticket 身份及白名单材料名称读取，复用现有文档安全 reader、会话鉴权和大小限制，拒绝任意路径、JSON 控制面、链接/重解析点和 hardlink。Markdown 以文本显示，不执行 HTML；不新增后台服务。完整报告的直接执行结果仍由 binary_exit_code 独立派生，runner/CI 不能代替 binary result；文档复用保留 origin 的实际源码/制品来源。crosscheck 为可选事实，not_run 中性、stale 不自动重跑，不加入主门禁。人工经验记录使用 [escape_taxonomy.md](escape_taxonomy.md)，不会自动创建 rule/skill 或同步。

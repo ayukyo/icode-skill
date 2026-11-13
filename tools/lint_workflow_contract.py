@@ -11,8 +11,9 @@ lint_workflow_contract.py —— workflow gate（工作流硬门禁）运行时�
 - 需求增量强制升级（requirement_delta_escalation）：
     存在 severity=major 且 needs_replan=true 且未 resolved → 当前阶段阻断并路由回 plan/review；
     patch 不得静默吸收重大增量。
-- 快速模式风险自动升级（fast_risk_upgrade）：
-    metadata.mode == fast 且命中任一风险标志，但 risk_profile.effective_mode != full 且 override != true → 违规。
+- 版本化快速模式风险分流（fast_risk_upgrade）：
+    legacy 保持九标志/full/override；v2 bounded 追加专项检查，硬风险 full，
+    未决语义 blocked、重大增量 replan，未知分类不阻断 plan 调查但阻断后续准入。
 - 生命周期验收合同（acceptance_contract）：
     涉及权威状态/实体身份变化时，验收矩阵必须覆盖 required_phases × required_consumers 全部必填单元；
     只验证直接查询不能 delivery_verdict=verified。
@@ -62,11 +63,6 @@ DELTA_CLASSIFICATIONS = {
 ACCEPTANCE_PHASES = ["immediate", "converged", "restart", "replay"]
 ACCEPTANCE_CONSUMERS = [
     "direct_query", "aggregate_selector", "persistent_reference", "external_projection",
-]
-FAST_RISK_TRIGGERS = [
-    "cross_component", "persistent_identity_change", "dependency_migration",
-    "async_observer_or_cache", "restart_replay_semantics", "external_consumer_change",
-    "real_env_verification", "unresolved_semantic_decision", "major_requirement_delta",
 ]
 # step → 需要检查的 gate 集合（gates.json blocked_steps 为真源；此处聚合便于一步判定）
 # 集合与 gates.json state_machine.gate_policy.step_by_target 一一对应：
@@ -127,7 +123,12 @@ def evidence_module():
 
 
 def load_json(path: Path) -> Any:
-    """读取并解析 JSON，失败抛 ValueError（由调用方转成报告）"""
+    """Read resource JSON; controlled metadata uses the readonly adapter."""
+    if path.name == ".ico_metadata.json":
+        try:
+            return evidence_module().control_module().read_metadata_readonly(path.parent)
+        except evidence_module().control_module().ControlError as exc:
+            raise ValueError(f"metadata blocked: {exc}") from exc
     return json.loads(path.read_text(encoding="utf-8"))
 
 
@@ -400,12 +401,23 @@ def validate_requirement_deltas(metadata: Dict, catalog: Dict) -> List[str]:
 
 
 def validate_fast_risk(metadata: Dict, catalog: Dict) -> List[str]:
-    """快速模式风险自动升级：mode=fast 且命中风险但未升级/未 override → 违规。"""
+    """Versioned routing: v2 bounded checks; legacy nine-flag semantics unchanged."""
     issues: List[str] = []
+    rp = metadata.get("risk_profile")
+    if isinstance(rp, dict) and "policy_version" in rp and (type(rp["policy_version"]) is not int or rp["policy_version"] != 1):
+        # File-location import also works for callers loading this CLI by spec.
+        spec = importlib.util.spec_from_file_location("icode_fast_policy", Path(__file__).with_name("fast_policy.py"))
+        policy = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(policy)
+        assessment = policy.assess_fast_risk(metadata, catalog)
+        if assessment["route"] in ("blocked", "replan"):
+            return ["fast_policy " + assessment["route"] + ": " + ",".join(assessment["reasons"])]
+        if assessment["route"] == "full" and policy.effective_mode(metadata) != "full":
+            return ["fast_policy full upgrade required: " + ",".join(assessment["reasons"])]
+        return []
     mode = metadata.get("mode", "full")
     if mode != "fast":
         return issues
-    rp = metadata.get("risk_profile")
     if rp is None:
         # fast 无 risk_profile：无风险声明视为无风险，但缺字段在 strict 下由外层补 legacy/强制判定
         return issues
@@ -417,10 +429,11 @@ def validate_fast_risk(metadata: Dict, catalog: Dict) -> List[str]:
     effective_mode = rp.get("effective_mode")
     flags = rp.get("risk_flags") or {}
     hit = False
+    risk_triggers = catalog["constants"]["fast_risk_triggers"]
     if isinstance(flags, dict):
-        hit = any(flags.get(t, False) for t in FAST_RISK_TRIGGERS)
+        hit = any(flags.get(t, False) for t in risk_triggers)
     if isinstance(triggers, list):
-        hit = hit or any(t in FAST_RISK_TRIGGERS for t in triggers)
+        hit = hit or any(t in risk_triggers for t in triggers)
     if hit:
         if effective_mode != catalog["fast_risk_upgrade"]["effective_mode_full"] and override is not True:
             issues.append(
@@ -681,7 +694,12 @@ def validate_delivery_evidence(metadata: Dict, catalog: Dict, out_dir=None) -> L
 def build_report(out_dir: Path, step_filter: Optional[str], metadata: Dict,
                  catalog: Dict, legacy: bool, strict: bool) -> Dict:
     """构造校验报告。"""
-    gates_to_check = STEP_GATES.get(step_filter, ALL_GATES) if step_filter else ALL_GATES
+    gates_to_check = list(STEP_GATES.get(step_filter, ALL_GATES) if step_filter else ALL_GATES)
+    rp = metadata.get("risk_profile")
+    if isinstance(rp, dict) and "policy_version" in rp and (type(rp["policy_version"]) is not int or rp["policy_version"] != 1) \
+            and step_filter in catalog["fast_risk_upgrade"]["policy_v2"]["admission_steps"] \
+            and "fast_risk" not in gates_to_check:
+        gates_to_check.append("fast_risk")
     report = {
         "out_dir": str(out_dir),
         "ticket_id": metadata.get("ticket_id", ""),
@@ -725,7 +743,7 @@ def build_report(out_dir: Path, step_filter: Optional[str], metadata: Dict,
         # strict 下缺失判 fail（vNext 流程步骤会登记，缺 = 未登记）。
         # risk_profile 是 fast 模式专属字段（见 steps/fast.md「fast 入口写 risk_profile」，
         # schema 允许 null）：full/未声明 mode 的工单缺失不受 fast_risk gate 约束
-        # （validate_fast_risk 对 mode!=fast 直接返回 []），故缺字段判定须带 mode 守卫，
+        # （legacy validate_fast_risk 对 mode!=fast 直接返回 []），故缺字段判定须带 mode 守卫，
         # 否则 close/archive 全量 strict 扫描会误伤所有非 fast 工单。
         # impact_contract/acceptance_contract 是可选条件字段：validator 已内置
         # 「缺失 = 不涉及身份变化/生命周期 = pass」语义，缺失不应判 fail。

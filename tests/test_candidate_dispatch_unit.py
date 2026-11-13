@@ -340,6 +340,12 @@ class CandidateDispatchTests(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertNotEqual(before, f.frozen())
         self.assertFalse((f.ticket / ctl.TXN_NAME).exists())
+        # Preserve this legacy chain diagnostic test's original schema/hash
+        # aggregation target; v2 malformed envelopes are covered separately.
+        metadata = ctl.load_metadata(f.ticket)
+        events = ctl.read_events(f.ticket)[0]
+        ctl.atomic_write_json(f.ticket / ctl.METADATA_NAME, metadata)
+        (f.ticket / ctl.EVENTS_NAME).write_text("".join(json.dumps(e) + "\n" for e in events), encoding="utf-8")
         events_path = f.ticket / ctl.EVENTS_NAME
         rows = [json.loads(line) for line in events_path.read_text(encoding="utf-8").splitlines()]
         rows[-1]["schema_version"] = 2

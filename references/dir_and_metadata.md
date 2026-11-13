@@ -89,7 +89,8 @@ if [ -n "$LAST" ]; then
   CAND="$WORKSPACE_ROOT/.icode_output/.icode_output_${LAST}"
   # 判定最新目录是否为"入口态"：有 .ico_metadata.json + 00_init.md，且无 01_plan.md
   if [ -f "$CAND/.ico_metadata.json" ] && [ -f "$CAND/00_init.md" ] && [ ! -f "$CAND/01_plan.md" ]; then
-    STATUS=$(grep -oP '"status"\s*:\s*"\K[^"]+' "$CAND/.ico_metadata.json")
+    # {ICODE_SKILL_ROOT} 先解析为本次实际加载的技能根，不能使用业务工程根。
+    STATUS=$(python3 -c "import sys; sys.path.insert(0,'{ICODE_SKILL_ROOT}/tools'); import icode_control as ctl; print(ctl.read_metadata_readonly(sys.argv[1]).get('status',''))" "$CAND") || exit 1
     # 入口态：init_in_progress 或 log_done
     case "$STATUS" in
       init_in_progress|log_done) REUSE=2 ;;  # 2 = 有歧义，需问用户
@@ -134,9 +135,11 @@ elif [ -f "$WORKSPACE_ROOT/.icode_output/.active_ticket.json" ]; then
   # reopen 后产物的永久控制根在归档目录，新 checkout 只放身份指针。
   ICODE_OUT_DIR=$(python3 - "$WORKSPACE_ROOT/.icode_output/.active_ticket.json" <<'PY'
 import json, pathlib, sys
+sys.path.insert(0, '{ICODE_SKILL_ROOT}/tools')
+import icode_control as ctl
 p=json.load(open(sys.argv[1], encoding="utf-8"))
 root=pathlib.Path(p["control_root"]).resolve()
-m=json.load(open(root/".ico_metadata.json", encoding="utf-8"))
+m=ctl.read_metadata_readonly(root)
 assert m.get("ticket_id")==p.get("ticket_id"), "active ticket pointer 与 metadata 身份不一致"
 assert pathlib.Path(m.get("artifact_root") or "").resolve()==root, "artifact_root 不一致"
 print(root)
@@ -320,6 +323,8 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
 
 ## .ico_metadata.json 模板
 
+以下模板描述**完整逻辑 metadata**。新建工单实际文件由控制面写为 storage v2 envelope，字段读取统一走 [SKILL.md「票据逻辑读取约定」](../SKILL.md)；物理协议、同票 ledger 引用及只读 / writer 边界见 [控制面契约 §1.1](control_plane.md#11-物理-storage-v2-与只读逻辑对象)。不要把模板复制到已有票据覆盖控制文件。
+
 入口命令（init/log）和步骤1常规新建目录时创建。完整字段定义见 SKILL.md「元信息文件」段，此处仅列入口创建时的最小模板：
 
 > **`schema_version` 字段（vNext 控制面，schema v3）**：所有新建工单一律先确定非空唯一 `ticket_id`，再用 `tools/icode_control.py create` 原子产生 `schema_version:3` metadata + `ticket_created` 事件；三个 gate schema 版本均为 `1`。旧工单无 schema_version = legacy（只读适配，不静默伪装 vNext）。
@@ -366,7 +371,33 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
 >
 > **`acceptance_contract` 字段族**（生命周期验收合同，可选，默认 `null`，详见 SKILL.md「可选字段」段）：任何**改变权威状态或实体身份**的修改必须覆盖四阶段 × 四类消费者的验收矩阵。结构 `{requires_lifecycle, authoritative_state_change, scope, invariants, matrix}`——`matrix` 每项 `{scenario, phase, consumer, expected, evidence, status}`。`phase` ∈ `immediate`（权威提交立即完成后）/ `converged`（异步投影与运行时状态收敛后）/ `restart`（进程重启并恢复后）/ `replay`（相同操作重复执行或重放后）；`consumer` ∈ `direct_query`（直接查询）/ `aggregate_selector`（聚合或批量选择）/ `persistent_reference`（依赖记录的归属解析）/ `external_projection`（外部投影与持久化恢复）。**门禁（机器判定）**：涉及生命周期/身份变化时矩阵必须覆盖全部 `phases × consumers` 必填单元（空 cell = 验证不完整），**只验证直接查询不能 `delivery_verdict=verified`**。字段缺失视为 `null`（不强制，向后兼容）。写入点：plan §4.5；消费点：deepcheck 一致性核对 + audit 终审验收
 >
-> **`risk_profile` 字段族**（快速模式风险档案，可选，默认 `null`，详见 SKILL.md「可选字段」段）：fast 模式风险自动升级记录。结构 `{requested_mode, effective_mode, triggers, risk_flags, override}`——`requested_mode`=`fast`（用户请求）/ `effective_mode`=`fast`|`full`（实际生效）/ `triggers`=命中风险标志数组（词表见 [mcp/workflow-gate/gates.json](../mcp/workflow-gate/gates.json) `fast_risk_triggers`：`cross_component`/`persistent_identity_change`/`dependency_migration`/`async_observer_or_cache`/`restart_replay_semantics`/`external_consumer_change`/`real_env_verification`/`unresolved_semantic_decision`/`major_requirement_delta`）/ `risk_flags`=各标志 bool 映射 / `override`=bool（用户显式覆盖自动升级时记 `true` 并记录风险接受事实）。**门禁（机器判定）**：`mode=fast` 且命中任一风险但 `effective_mode != full` 且 `override != true` → 违规（须自动升级 full 或显式 override）。低风险、单文件、纯计算且无外部状态变化仍可保持 fast。写入点：fast 模式创建/续跑时
+### risk_profile 字段族
+
+版本化快速模式风险档案，可选 null；字段 `requested_mode` 记录用户请求，`effective_mode` 记录实际模式。共享解析器为 `tools/fast_policy.py:effective_mode(metadata)`，full 优先且本运行不自动降级；未知显示 unknown，准入由 `assess_fast_risk(metadata,catalog)` 明确 blocked。风险词表、检查映射、理由码与准入步骤只从 [workflow catalog](../mcp/workflow-gate/gates.json) 读取。
+
+无 `policy_version` 或版本 1 保留原九 flag 命中 full / 显式 override 语义，不迁移或重新解释历史。新 fast 出生用版本 2，plan 先调查，再写以下结构（示意中的 flags 必须由 catalog 全量生成，不可省略为默认 false）：
+
+完整风险事实表用于 fast 资格判定。full 可保留已知布尔风险子集（含空表），声明的真实风险仍需对应专项合同；未决语义、重大增量、未知标志或非法类型仍阻断。
+
+```json
+{
+  "policy_version": 2,
+  "requested_mode": "fast",
+  "effective_mode": "fast",
+  "risk_flags": {"由 catalog 枚举的每项风险事实": false},
+  "triggers": [],
+  "override": false,
+  "classification": {
+    "scope": "bounded",
+    "scope_digest": "现有 scope_contract 的 canonical JSON SHA256，64位小写hex",
+    "evidence_refs": [{"scope": "ticket", "path": "01_plan.md", "sha256": "实际文件SHA256"}]
+  }
+}
+```
+
+`scope_contract` 沿用现有 summary/at/source_step 合同；摘要算法为 UTF-8 的 `json.dumps(scope_contract, sort_keys=True, separators=(",",":"), ensure_ascii=False, allow_nan=False)` 后 SHA256。`classification.scope` 为 bounded/unbounded；引用 scope 为 ticket/workspace，path 必须相对对应根且不能逃逸，hash 为 64 位小写 hex。建议引用已冻结 ticket 计划，以免普通源码实施使调查证据无端失效；reopen 后 ticket 根与执行 workspace 根分别解析，不假设同目录。
+
+纯函数只能核验类型/词表/范围摘要和引用形状，不能证明实读；控制面准入必须按当前 ticket/execution_workspace 实际读取引用并核对 hash。自由文字“范围明确/放心”不构成证据。出生时可缺分类供 plan 调查；进入 review/merge/code/patch 前必须有效。未决语义 blocked，未解决重大增量 replan，硬 full 风险/既有 full 不降级；override 不豁免语义、身份、真实环境与阶段硬门。普通跨文件/缓存/真实环境事实可 bounded fast，但 required_checks 继续按原证据合同完成。
 >
 > **`workload_estimate` 字段族**（工作量评估，v2 新增）：由步骤 0 init 收尾时自动评估，辅助用户决定走 `/icode start` 还是 `/icode fast`。详见 SKILL.md「workload_estimate 字段族」与 [steps/00_init.md](../steps/00_init.md)「步骤 9 工作量评估」段：
 > - `workload_estimate`（可选，枚举，默认 `"medium"`）：工作量等级。`"small"` 建议 `/icode fast`，`"medium"` 建议 `/icode start`，`"large"` **必须** `/icode start`
@@ -494,6 +525,7 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
   "indexed": false,
   "ticket_id": "{在 create 前生成的非空唯一 ID}",
   "mode": "fast",
+  "risk_profile": {"policy_version": 2, "requested_mode": "fast", "effective_mode": "fast", "override": false},
   "max_rounds": 1,
   "template_version": "v1.1",
   "migration_log": [],
@@ -504,26 +536,11 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
 }
 ```
 
-**`mode` 字段**（新增，可选，默认 `"full"`）：
+**`mode` 字段**（可选，默认 `"full"`）：记录入口请求；行为使用 `tools/fast_policy.py` 的 `effective_mode(metadata)`。有效 full 的 review 为默认多轮+对抗、deepcheck 为三阶段；有效 fast 为单轮无对抗与 Reverse。缺失保持旧 full 默认，非法值显示 unknown 并阻断准入，不静默当 fast/full。
 
-- `"full"`：全流程模式（`/icode start`），步骤2 review 默认 3 轮 + 对抗，步骤5 deepcheck 三阶段循环
-- `"fast"`：精简模式（`/icode fast`），步骤2 review 固定 1 轮无对抗，步骤5 deepcheck 只跑 Reverse
-- **字段缺失**视为 `"full"`（向后兼容旧 metadata）
+**`max_rounds` 字段**：full 默认 3；有效 fast 自动串联固定 1。显式 `/icode review N` 按原参数优先规则升级审查，并先记录有效 full；该运行后续 deepcheck 同样 full。既有 full 不因再次请求 fast 自动降级。
 
-**`max_rounds` 字段**（新增，可选）：
-
-- 步骤2 review 软上限轮数。`"full"` 默认 3；`"fast"` 下区分场景（见下「步骤2/5 读 mode 字段的契约」）
-- 用户可通过 `/icode review N` 临时覆盖（仅本轮）。`mode="fast"` 时：自动串联（`/icode fast` 调起、未带参 N）固定 1 轮；fast 工单上显式跑 `/icode review N`（带参）则 N 生效触发升级（场景二）
-- 字段缺失视为 3（向后兼容）
-
-**步骤2/5 读 mode 字段的契约**：
-
-- 步骤2 review：开头读 metadata.mode，若 `"fast"` 则按「是否带参 N」区分两种场景（详见 [steps/02_review.md](../steps/02_review.md)「fast 模式行为（区分两种场景）」段）——自动串联锁死1轮无对抗；单步命令 `/icode review N` 触发升级跑 N 轮+对抗
-- 步骤5 deepcheck：开头读 metadata.mode，若 `"fast"` 则只跑 Reverse 阶段（详见 [steps/05_deepcheck.md](../steps/05_deepcheck.md)「fast 模式降级」段）
-- 单步命令（`/icode review N` / `/icode deepcheck`）独立调用时**仍读 mode 字段**——这是 fast→full 升级机制的核心：
-  - **fast→full 升级**：fast 工单上用户主动跑 `/icode review 5` 想做更深度审查时，**参数 N 覆盖 mode**（意图明确优先于工单模式），按 full 模式跑 N 轮+对抗（**此场景下 fast 的 `param_max_rounds` 忽略被绕开**——用户用参数显式表达升级意图，参数优先级最高）
-  - **full→fast 降级**：不允许——单步命令不强制按 fast 模式执行（用户若想走 fast 应改用 `/icode fast` 重启链路，而不是在 full 工单上强制 fast 降级）
-  - 单步命令读 mode 字段只用于 **状态显示**（如 `▶ 步骤2 检测到 fast 模式，但 N=5 显式升级，按 5 轮执行`），不强制降级
+**步骤2/5 读 mode 字段的契约**：这里的“读 mode”统一指解析有效模式，不能仅凭请求 `metadata.mode` 执行 fast 分支。review/deepcheck、coverage、thinking/MCP 与 UI 使用同一解析结果；未知分类先完成调查与准入，不通过不得编码。详情见 [fast 策略](../steps/fast.md)。
 
 ## 重复模式状态（patterns.json，跨工单聚合）
 

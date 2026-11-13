@@ -71,7 +71,7 @@ python3 tools/icode_control.py check-outputs --dir <out> --step review
 }
 ```
 
-按 `risk_profile.effective_mode`（未声明时按mode）选择阶段：full deepcheck的Reverse/Fixed/Free，实际fast仅Reverse，audit只用独立 `audit` phase；fast请求升级full后仍须三个阶段。每个必需阶段声明metadata.code_files的全部文件及当前hash。修改代码后重新复检，不能将旧Read hash改成新值冒充重读。
+按 `tools/fast_policy.py` 的 `effective_mode(metadata)` 统一选择阶段：full deepcheck的Reverse/Fixed/Free，实际fast仅Reverse，audit只用独立 `audit` phase；fast请求升级full后仍须三个阶段。每个必需阶段声明metadata.code_files的全部文件及当前hash。修改代码后重新复检，不能将旧Read hash改成新值冒充重读。
 
 `review_scope`依project_intake包含受影响代码及调用/导入/提供者/等价候选；large/huge遵守预算，在明确范围内完成，不自动扩大vendor全树。Dedup按声明范围计算catalog/分类/实际出现家族与逐家族语义裁决，范围内缺任何环节结果即partial/degraded。`complete_within_scope`不能写“全SDK/固定23类全部通过”。Audit可引用有效且源hash未漂移的Dedup结果，但Audit的Read独立完成。
 
@@ -90,3 +90,7 @@ python3 tools/icode_control.py check-outputs --dir <out> --step review
 v2另按catalog内全部gate的明确分支复算确定性资格，阈值只读catalog constants；自报eligible或threshold与已声明事实冲突即失败。deepcheck阶段依据须符合有效模式，升级full不能借请求fast跳过。此一致性检查不替代对事实来源真实性的独立审查。
 
 偏差先记metadata.code_deviations稳定id与plan_said/actual_done/reason/source refs，各报告引用同id；没有偏差才能[]。item schema约束结构，跨报告语义一致性仍由终审核对，不用关键词猜测。历史补记写真实事后时间和来源。
+
+## fast 的表达压缩边界
+
+plan 的短合同、review 的发现清单、merge 的完整计划机械复制和 code/deepcheck/audit 的差异正文，均不改变本合同的实际 Read、origin attempt、worklist、coverage 与 artifact 要求。catalog `required_checks` 是必须补齐的检查清单，评估返回清单不等于检查完成。Reverse/Audit 分别真实独立读取并记本轮回执，不能共享一条“已审”声明。矩阵可从有效账本生成，但新验收裁决仍由本轮独立审查形成；缺真实环境或阶段接受继续保留债务。

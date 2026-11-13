@@ -3,7 +3,7 @@ name: icode
 description: ICODE 端到端编码工作流，适配 Claude Code、Codex、CodeBuddy、WorkBuddy。用户调用 /icode、$icode，或说“使用 ICODE”“用 icode 帮我”“让 ICODE”“Use ICODE”完成开发、日志分析、设计/代码审查、证据验证、独立复评、文档/Word/PPT、学习、工单管理等任务时使用；也用于已绑定 ICODE 工单的续接。Use when users explicitly request ICODE for an AI coding workflow, ticket-based development, code review, log analysis, documentation, or evidence verification; also use to resume a bound ICODE ticket. 支持自然语言目标与限制，不要求背命令；能力咨询只解释不执行。保留全部 /icode 子命令，复用既有步骤与安全门禁，不接管未指定 ICODE 的普通请求。
 ---
 
-**版本**: v2.41.0
+**版本**: v2.42.0
 
 # ICode 全流程编码工作流（步骤 0 + 1~6）
 
@@ -187,10 +187,12 @@ Windows/WSL 构建按需加载 [WSL 构建合同](references/wsl_build.md)；本
 
 > 锚点保留小节：`元信息文件` / `可选字段` / `verdict 字段族` / `workload_estimate 字段族` / `status 字段枚举` / `status 写回校验` / `全局索引` / `模板`
 
-**status 写回校验（强制，防词表外值落盘）**：每步写 `.ico_metadata.json` 前，必须先对照上方词表校验 `status` 在枚举内（`completed_steps` 中的步骤号须是 `steps/*.md` 清单里存在的合法值），词表外值直接判不合规、拒绝写回并修正。校验用一行命令：
+**票据逻辑读取约定**：下列可执行片段中的 `{ICODE_SKILL_ROOT}` 必须先替换为**本次实际加载的 ICODE 技能目录绝对路径**（即本 `SKILL.md` 所在目录，按 Codex / Claude 等当前宿主实际安装位置解析，不能使用业务工程根代替）。从该目录的 `tools` 导入 `icode_control` 后调用 `read_metadata_readonly(工单目录)`；它兼容旧 inline 与新 storage v2 envelope，并只从同票已提交事件链还原候选数组。读取前后发现 pending 或遇到坏引用必须停止，不能用默认空对象、跳过或成功提示继续；不加锁、不恢复、不写回。原始 `Read` 可独立查看物理文件，但字段判断必须使用还原后的逻辑对象。全局 index、active pointer、crosscheck 容器等独立 JSON 保留原读取协议；逻辑 schema / ID / hash 均不变，历史 inline 不主动重写。
+
+**status 写回校验（强制，防词表外值落盘）**：每步写 `.ico_metadata.json` 前，必须先对照上方词表校验 `status` 在枚举内（`completed_steps` 中的步骤号须是 `steps/*.md` 清单里存在的合法值），词表外值直接判不合规、拒绝写回并修正。按上面的技能根约定替换占位符后执行：
 
 ```bash
-python3 -c "import json,sys; d=json.load(open('{ICODE_OUT_DIR}/.ico_metadata.json')); valid={'init_in_progress','plan_done','review_in_progress','review_done','plan_finalized','code_in_progress','code_done','deepcheck_in_progress','deepcheck_done','completed','log_in_progress','log_done','debug_in_progress','debug_done'}; s=d.get('status'); print('status:', s); sys.exit(0 if s in valid else 1)"
+python3 -c "import sys; sys.path.insert(0,'{ICODE_SKILL_ROOT}/tools'); import icode_control as ctl; d=ctl.read_metadata_readonly('{ICODE_OUT_DIR}'); valid={'init_in_progress','plan_done','review_in_progress','review_done','plan_finalized','code_in_progress','code_done','deepcheck_in_progress','deepcheck_done','completed','log_in_progress','log_done','debug_in_progress','debug_done'}; s=d.get('status'); print('status:', s); sys.exit(0 if s in valid else 1)"
 ```
 
 
@@ -232,7 +234,7 @@ python3 -c "import json,sys; d=json.load(open('{ICODE_OUT_DIR}/.ico_metadata.jso
 校验命令示例（推进到步骤4 前）：
 
 ```bash
-test -f "{ICODE_OUT_DIR}/03_plan_final.md" && python3 -c "import json,sys; d=json.load(open('{ICODE_OUT_DIR}/.ico_metadata.json')); sys.exit(0 if d.get('status')=='plan_finalized' else 1)" || echo "❌ 前一步产物缺失/状态异常，停止串联"
+test -f "{ICODE_OUT_DIR}/03_plan_final.md" && python3 -c "import sys; sys.path.insert(0,'{ICODE_SKILL_ROOT}/tools'); import icode_control as ctl; d=ctl.read_metadata_readonly('{ICODE_OUT_DIR}'); sys.exit(0 if d.get('status')=='plan_finalized' else 1)" || { echo "❌ 前一步产物缺失/状态异常，停止串联"; exit 1; }
 ```
 
 > 与「前置文件校验」表（本段下方）的关系：前置校验表是**单步命令**入口的 L1 检查，本门禁是 **start/fast 自动串联**时每步转换点的强制复查——两者共用同一产物判据，自动串联下不因"上一步刚跑完"而跳过复查（本轮实测教训：自动串联下 `03_plan_final.md` 缺失仍推进到步骤6）。
@@ -263,10 +265,12 @@ test -f "{ICODE_OUT_DIR}/03_plan_final.md" && python3 -c "import json,sys; d=jso
 - **语义决策门禁**：`semantic_decisions` 存在 `status != resolved` 且非 `diagnosis_only` → `plan/code/patch` 阻断；诊断可结束但须显式 `diagnosis_only=true`
 - **身份变化影响合同**：`identity_change=true` 且 `completeness != complete` → `code/deploy/audit-verified` 阻断；9 维必答必带证据
 - **需求增量回流**：`requirement_deltas` 分类 `needs_user_confirm`/`needs_replan` → 冻结点，未分流不得继续扩大设计/验收矩阵
-- **快速模式自动升级**：`mode=fast` 命中 `fast_risk_triggers` 且 `effective_mode != full` 且 `override != true` → 违规
+- **快速模式风险分流**：新 fast 工单登记 `risk_profile.policy_version=2`，先在 plan 界定范围，再依据当前范围证据分流；范围明确的跨文件、缓存或实机任务可保持 fast，必须落实对应影响、生命周期和实机验收合同。新架构、无界影响、破坏接口、不可逆迁移或必需独立对抗评审才升级 full；未决语义/重大增量先 blocked/replan，不自动转 start。编码准入校验范围摘要与真实证据 hash；`override` 不绕过硬门，full 不回退 fast。缺策略版本或显式版本1的旧工单沿用原风险规则，详见 [steps/fast.md](steps/fast.md)。
 - **生命周期验收**：涉及生命周期/身份变化时 `acceptance_contract.matrix` 必须覆盖全部 `phases × consumers` 必填单元，只验证直接查询不能 `delivery_verdict=verified`
 
 字段族定义与写入点见 [references/dir_and_metadata.md](references/dir_and_metadata.md)（scope_contract / requirement_deltas / semantic_decisions / impact_contract / acceptance_contract / risk_profile / delivery_verdict）。
+
+**工单阅读入口**：优先查看现有 `delivery_validation_report.md`（工单概览），完成主流程或 patch 后刷新同一文件，不额外生成 JSON。实时紧凑事实用 `python3 tools/ticket_context.py --dir <工单目录>`；概览只汇总现有证据，状态、候选或验收变更后可能过时，不能代替真实 Read 或验证。独立 crosscheck fresh 使用 `--purpose crosscheck_fresh`，不读取旧概览与旧裁决；completed 的 fast 工单可以直接 patch/crosscheck，不因后续使用这两项升级 full。六阶段、最终计划及原始验收材料仍保留原路径。
 
 ## 历史检索复用（锚点保留，内容已迁移）
 

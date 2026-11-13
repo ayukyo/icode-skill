@@ -396,10 +396,11 @@ class DistributionTests(unittest.TestCase):
 
     def test_release_maintenance_moves_to_support_while_outsource_stays_in_core(self):
         maintenance = ("build_public_site", "notify_indexnow", "render_brand_assets",
-                       "prepare_skill_listing", "release_promotion")
+                       "prepare_skill_listing", "release_promotion", "check_skill_evaluation", "check_skill_discovery")
         runtime = ("tools/icode_outsource.py", "tools/outsource/__init__.py",
                    "tools/outsource/cli.py", "tools/outsource/common.py",
-                   "tools/outsource/store.py", "tools/outsource/workspace.py")
+                   "tools/outsource/store.py", "tools/outsource/workspace.py",
+                   "tools/fast_policy.py", "tools/ticket_context.py", "tools/candidate_storage.py")
         for name in (*("tools/" + item + ".py" for item in maintenance), *runtime):
             self.put(name, "# bounded resource\n")
         self.git("add", ".")
@@ -415,6 +416,18 @@ class DistributionTests(unittest.TestCase):
                 self.assertEqual(archive.read(name), (self.source / name).read_bytes())
         for name in runtime:
             self.assertEqual((skill / name).read_bytes(), (self.source / name).read_bytes())
+
+    def test_native_ui_selfcheck_ships_with_ui_component(self):
+        name = "tools/selfcheck_agent_ui.sh"
+        self.put(name, "#!/bin/sh\n# UI qualification only\n")
+        self.git("add", ".")
+        result = self.build_core()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        skill = self.output / "skills/icode"
+        metadata = json.loads((skill / "components.json").read_text(encoding="utf-8"))
+        with zipfile.ZipFile(self.base / "components" / metadata["components"]["ui"]["archive"]) as archive:
+            self.assertEqual(archive.read(name), (self.source / name).read_bytes())
+        self.assertFalse((skill / name).exists())
 
     def test_component_install_dry_run_exact_restore_and_idempotency(self):
         result = self.build_core()

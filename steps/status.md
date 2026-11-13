@@ -24,10 +24,11 @@
 严格证据或阶段计划命中时按 [串口、证据与阶段验收真源](../references/serial_evidence_stages.md)展示当前文件重核结果、阶段报告/challenge 和阻断原因；阶段信息读取 `icode_control.stage_projection`，不从普通 metadata 猜接受状态。坏引用保留 blocked，查询不确认、不重放动作、不写第二套阶段状态。
 
 1. 执行目录管理中的「检测最新目录」逻辑，确定 `ICODE_OUT_DIR`
-2. 读取 `.ico_metadata.json`
+2. 默认先运行 `python3 tools/ticket_context.py --dir {ICODE_OUT_DIR}` 读取紧凑权威投影；不把整份 metadata、源码 manifest 或全部验证历史注入上下文。确需拓扑、方向标注等额外字段时，再定点读取 `.ico_metadata.json` 对应字段。
 3. 运行 `python3 tools/icode_control.py trace --dir {ICODE_OUT_DIR} --limit 10`；成功时把开放 step/operation 与最近轨迹并入摘要，失败时明确标「执行轨迹不可验证」，不得用猜测补齐。
-   再运行 `python3 tools/icode_delivery.py --dir {ICODE_OUT_DIR}` 读取派生交付事实：当前候选 ID、内部 code/deepcheck/audit 新鲜度、验证合同/债务、run 的实际 build/deploy/runtime 来源、直接测试的四项独立事实，以及 intended/side_effects/unknown 提交库存。查询执行成功与报告 `ok` 分开：stdout 查询退出 0 不代表已满足交付；`legacy_untracked` 不补造评审。未完成事务或事件链不一致显示 blocked，禁止查询时恢复事务、建锁或改工单。
-   同时展示 `environment_observations` 的思考/MCP 降级统计；`untracked`/`partial` 如实保留，出现问题给出 `status --doctor` 入口。统计口径与会话验证边界见上述共享参考。
+   紧凑视图包含当前候选 ID、内部评审新鲜度、验证状态/债务计数、改动范围、请求/有效模式及理由、最新 patch、下一步与材料导航。需要具体 run 的实际 build/deploy/runtime 来源、直接测试四项独立事实或完整提交库存时，再运行 `python3 tools/icode_delivery.py --dir {ICODE_OUT_DIR}`。查询执行成功与报告 `ok` 分开：stdout 查询退出 0 不代表已满足交付；`legacy_untracked` 不补造评审。未完成事务或事件链不一致显示 blocked，禁止查询时恢复事务、建锁或改工单。
+   人的默认阅读入口是 `{ICODE_OUT_DIR}/delivery_validation_report.md`（工单概览）；展示 `overview.state` 与生成时间，`stale` 时明确概览已过期、`untracked` 时不能声称已核验。缺失时提供按需生成命令 `python3 tools/icode_delivery.py --dir {ICODE_OUT_DIR} --markdown {ICODE_OUT_DIR}/delivery_validation_report.md`；查询本身不生成文件。需要设计→最终计划、追加修改→patch、追溯→阶段证据，按 `materials` 导航，不要求一口气读全部材料。
+   详细事实中的 `environment_observations` 表示思考/MCP 降级统计；`untracked`/`partial` 如实保留，出现问题给出 `status --doctor` 入口。统计口径与会话验证边界见上述共享参考。
    可选 crosscheck 仅显示事实：没有记录为中性 `not_run`，不推荐、不阻塞；有效历史可显示 `current(pass|changes_recommended)`，源码漂移显示 `stale`，无候选的旧记录附 `legacy_untracked`。不自动启动或重跑 crosscheck，也不把其结果加入主门禁。
 4. 输出状态摘要：
 
@@ -35,7 +36,7 @@
 最新工单: .icode_output_N (ticket_id)
 需求: {requirement}
 状态: {status}（{status中文说明}）
-模式: {mode 字段读取方式：直接读 metadata.mode 字段，缺失或空值视为 "full"（默认）；fast 模式下显示「fast（精简：review 1轮无对抗 + deepcheck 仅 Reverse）」}
+模式: {紧凑视图 mode.requested / mode.effective / mode.reasons 分别展示请求模式、有效模式和理由，缺历史依据为 untracked；不能以请求 fast 推断实际仍 fast}
 方向结论: {verdict 字段读取方式：直接读 metadata.verdict 字段，缺失视为 "unknown"；显示 verdict + verdict_reason 摘要（若有）}
 验证结论: {delivery_verdict 字段读取方式：直接读 metadata.delivery_verdict 字段，缺失视为 "未回填"；显示枚举值，verified=已验证 / verification_pending=流程完成但验证待完成 / blocked=验证被外部阻塞 / not_applicable=不需要该类验证。注意与"方向结论"正交：方向结论答"方案方向对不对"，验证结论答"验证动作完成没"；worktree 工单标注 verified 时提示核对 target 身份（O-6/O-7）}
 范围契约: {scope_contract 字段读取方式：直接读 metadata.scope_contract，缺失视为 "未冻结"；显示 summary 摘要（截断 ≤60 字）+ 冻结时间。requirement_deltas 读取：缺失视为 []；存在未分流条目（classification 未定 / needs_user_confirm 未确认 / needs_replan 未重审）时显示「⚠️ 有 N 条未分流语义变更」——提示先分流再继续} 
@@ -160,12 +161,14 @@ worktree: {worktree_path 字段读取方式：读 metadata.active_checkout（缺
 ```bash
 python3 -c "
 import json,sys,os,glob
+sys.path.insert(0,'{ICODE_SKILL_ROOT}/tools')
+import icode_control as ctl
 d='.icode_output/.icode_output_'+('N' if len(sys.argv)<2 else sys.argv[1])
 req=['00_init.md','01_plan.md','02_review.md','03_plan_final.md','04_code_review_fix.md','05_deepcheck.md','06_audit.md']
 p=[f for f in req if os.path.exists(os.path.join(d,f))]
 missing=[f for f in ['01_plan.md','02_review.md','03_plan_final.md','04_code_review_fix.md','05_deepcheck.md','06_audit.md'] if not os.path.exists(os.path.join(d,f))]
 json_cnt=len(glob.glob(os.path.join(d,'review_round_*.json')))
-m=json.load(open(os.path.join(d,'.ico_metadata.json')))
+m=ctl.read_metadata_readonly(d)
 valid={'init_in_progress','plan_done','review_in_progress','review_done','plan_finalized','code_in_progress','code_done','deepcheck_in_progress','deepcheck_done','completed','log_in_progress','log_done'}
 st=m.get('status'); bad=st not in valid
 cf=m.get('code_files'); empty_cf=not cf
@@ -211,7 +214,7 @@ python3 tools/verification_debt.py pending \
 
 ## 思考分级（L0：不强制思考）
 
-单工单交付摘要默认由 `python3 tools/icode_delivery.py --dir <out_dir>` 只输出 stdout。按需附 `--output <out_dir>/delivery_validation_report.json --markdown <out_dir>/delivery_validation_report.md`，也兼容 `delivery_report[_名称]`；只写可重建派生文件，不覆盖正式 delivery_files、受控 artifact 回执、源码、metadata/events/index 或 crosscheck 产物。生成报告不执行构建/验证，不改变状态，不自动提交或清理生成物。
+机器摘要默认由 `python3 tools/ticket_context.py --dir <out_dir>` 只输出紧凑 stdout。人的工单概览按需使用 `python3 tools/icode_delivery.py --dir <out_dir> --markdown <out_dir>/delivery_validation_report.md`，仅写这份 Markdown；需要 JSON 时才附 `--output <out_dir>/delivery_validation_report.json`，旧 JSON 单输出与 JSON+Markdown 调用、`delivery_report[_名称]` 均兼容。只覆盖同一可重建派生路径，不覆盖正式 delivery_files、受控 artifact 回执、源码、metadata/events/index 或 crosscheck 产物。pending 事务禁止持久化，stdout 仍可只读报告阻断；不伪造 artifact 回执，不执行构建/验证，不改变状态，不自动提交或清理生成物。
 
 默认只读模式、`--scan`、`--validate` 与 `--pending` 为 **L0（确定性执行，不强制思考）**。`--verdict` 标注模式是结构化字段写入（非思考/审查/编码），同样为 **L0**，但须遵守本文件「反偷懒」约束。
 ## MCP 推荐

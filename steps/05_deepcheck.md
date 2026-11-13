@@ -7,11 +7,17 @@
 > **共享技能路由**：Reverse 前读取 [references/skill_routing.md](../references/skill_routing.md)，用命中技能的输出合同补充逆推与生命周期复检，不替代三阶段主检查。
 > **证据习惯真源**：消费者逆推、无日志上游 gate、跨轮残留和未观测边界统一执行 [references/evidence_and_verification.md](../references/evidence_and_verification.md)。
 
+## fast 必要执行
+
+按 `tools/fast_policy.py` 的 `effective_mode(metadata)` 判定：仅有效 fast 执行 Reverse，已升级 full 必须执行下面 Reverse/Fixed/Free。Reverse 先独立完整 Read 当前关联实现/接口/调用方/测试，再逆推并与最终计划及 patch 对比；沿用 required_checks、审查清单和 coverage，不复用 code/review 的阅读当本轮回执。
+
+报告集中记录范围、差异、发现、专项检查结论和债务，引用已有计划/测试/账本，无须重写长篇设计。Audit 仍需另作独立 Read。未进入 Fixed/Dedup 的 trace 沿用真实有效模式，不能用请求 fast 掩盖 full 的缺失阶段。
+
 ## 阶段覆盖与合规结束（强制）
 
 先执行 [审查清单合同](../references/inspection_worklist.md)：本轮 prepare 联审实现/头文件/调用方/测试；Reverse、Fixed、Free 各自实际重新 Read 后逐文件登记 phase（effective fast 仅 Reverse）。触发共享变体/消费者或 timestamp 专项时，各 required_phase 独立完成全部 required_items，并以 `inspection --phase assess --read-phase <reverse|fixed|free> --check-id <ID> --assessment-json '<完整对象>'` 登记具体结论、理由及真实引用；不得用上一阶段结论或 prepare/read 代替。N/A 须具体理由，漏项/未完成只留明确债务走 degraded。源码 findings 给校验后的行段/hash，遗漏保持债务，不可称全审完成。清单与原有 coverage 声明并行必需，修复改变源码后重新入轮审查。
 
-执行前读取[审查证据合同](../references/inspection_evidence.md)。只有实际完成本轮各阶段Read后，才写阶段覆盖声明及实际源hash：deepcheck写 `deepcheck_coverage.json`，audit写 `audit_coverage.json`，登记本attempt真实artifact回执。声明必须覆盖metadata.code_files全部文件；按risk_profile.effective_mode（未声明时按mode）：full为Reverse/Fixed/Free，实际fast仅Reverse，audit为独立Audit；fast升级full不可省阶段。已有hash/工具调用/历史确认行均不代替本轮Read。
+执行前读取[审查证据合同](../references/inspection_evidence.md)。只有实际完成本轮各阶段Read后，才写阶段覆盖声明及实际源hash：deepcheck写 `deepcheck_coverage.json`，audit写 `audit_coverage.json`，登记本attempt真实artifact回执。声明必须覆盖metadata.code_files全部文件；按 `effective_mode(metadata)` 统一解析：full为Reverse/Fixed/Free，实际fast仅Reverse，audit为独立Audit；fast升级full不可省阶段。已有hash/工具调用/历史确认行均不代替本轮Read。
 
 预算耗尽或有未观察项：写 `coverage_status=partial|degraded`、`unobserved`、`debt_reason`；finish用degraded而非success，报告不得称流程规范全部通过，验证债务保留。控制面success拒绝缺声明、缺阶段、过期hash或未完成Dedup；degraded也要求真实声明回执与原因。编译成功不消除审查债务。
 
@@ -28,7 +34,7 @@
 
 **L3·重要**（矩阵段定义）：Reverse/Fixed/Free 任一阶段发现 issue → 进修复循环（最多 2 轮，clean 后退出）；阶段间切换不阻断。
 
-> **fast 模式降级**（`metadata.mode == "fast"`）：fast 模式下本步骤**只跑 Reverse 阶段**，完成后直接终止，不切换 Fixed / Free。详见 [steps/fast.md](fast.md)。具体行为：
+> **fast 模式降级**（`effective_mode(metadata) == "fast"`）：fast 模式下本步骤**只跑 Reverse 阶段**，完成后直接终止，不切换 Fixed / Free。详见 [steps/fast.md](fast.md)。具体行为：
 >
 > - Reverse 跑完后，`deepcheck_phase` **不切到 `"fixed"`**，状态直接置 `deepcheck_done`
 > - 跳过 Fixed 7 维度检查（业务一致性 / 异常处理 / 边界等深度维度）
@@ -128,7 +134,7 @@ Read `metadata.tdd`（缺失/`not_assessed` → 本段跳过；工单含行为�
 - Fixed → Free：Fixed 首次全 clean 后切换
 - Free：单次完整执行后终止
 
-> **fast 模式特例**（`metadata.mode == "fast"`，最高优先级）：Reverse 完成后**不切换 Fixed，直接终止**。`deepcheck_phase` 保留 `"reverse"`，状态置 `deepcheck_done`，`completed_steps` 追加 `"5"`。即使 Reverse 发现 has_issues 走修复循环，修复完仍只重跑 Reverse（不切 Fixed/Free）——fast 模式的核心检查职责交给 audit。
+> **fast 模式特例**（`effective_mode(metadata) == "fast"`，最高优先级）：Reverse 完成后**不切换 Fixed，直接终止**。`deepcheck_phase` 保留 `"reverse"`，状态置 `deepcheck_done`，`completed_steps` 追加 `"5"`。即使 Reverse 发现 has_issues 走修复循环，修复完仍只重跑 Reverse（不切 Fixed/Free）——fast 模式的核心检查职责交给 audit。
 
 ## 关键：代码新鲜度
 
@@ -244,7 +250,7 @@ Free 阶段一次性完整覆盖全部 15 个角度。
 > - 输出 = `{pattern: [{file, line, snippet}], ...}`，主代理只看命中 + 上下文，**不替代 7 维度判定**
 > - **gate 绑定**：本预扫 = gate `deepcheck.fixed_scan`（tool=scan_patterns）。**full 模式进入 Fixed 且功能点非空** → eligible=true 必须 called/cache_hit/degraded_after_attempt/unavailable_before_call；**功能点为空** → eligible=false `skipped_not_eligible`；**fast 模式不进入 Fixed** → eligible=false `skipped_stage_not_reached`（见顶部「fast 模式降级」段）
 > - **前提契约（§2 空降级）**：`03_plan_final.md` §2 功能需求为空或不存在 → `patterns=[]` → scan_patterns 退化为无操作（不报错）；写 `▶ scan_patterns 跳过：03_plan_final.md §2 无功能需求`
-> - **fast 模式行为**：`metadata.mode == "fast"` 时**不跑 Fixed 阶段**（[steps/05_deepcheck.md](05_deepcheck.md) §「fast 模式降级」段）→ scan_patterns 预扫不触发，但**必须**在 `.mcp_gate_trace.jsonl` 记 `skipped_stage_not_reached`（缺记录 = 转换校验失败）
+> - **fast 模式行为**：`effective_mode(metadata) == "fast"` 时**不跑 Fixed 阶段**（[steps/05_deepcheck.md](05_deepcheck.md) §「fast 模式降级」段）→ scan_patterns 预扫不触发，但**必须**在 `.mcp_gate_trace.jsonl` 记 `skipped_stage_not_reached`（缺记录 = 转换校验失败）
 > - **降级**：cheap-research 不可用 → 走原流程（主代理自扫）；写 `[降级-scan_patterns 不可用]`。trace 按 [thinking_core.md](../references/thinking_core.md)「cheap-research 执行门（gate）流程」区分实际失败与未暴露；未暴露记 `unavailable_before_call/attempted=false/result=unavailable` 及完整 `availability`，不伪造调用。
 
 7 维度逐项检查（**每维度必须列 file:line 证据 + 评分理由 ≥2 句实质，不得只概括**）：
@@ -373,7 +379,7 @@ Free 阶段一次性完整覆盖全部 15 个角度。
 - **实时落盘**：`status = deepcheck_in_progress`，写入当前 `deepcheck_total_rounds`/`deepcheck_clean_rounds`/`deepcheck_phase` 到 metadata
 - **阶段切换时重置 `deepcheck_clean_rounds = 0`**（每个阶段独立计数）
 - Reverse 阶段：单次执行后始终进入 Fixed，不参与循环
-  > **fast 模式特例**（`metadata.mode == "fast"`，最高优先级，命中即跳过 Fixed/Free）：Reverse 单次执行后**直接终止**——`deepcheck_phase` 保留 `"reverse"`，状态置 `deepcheck_done`，`completed_steps` 追加 `"5"`。即使发现 has_issues 走修复循环，修复完仍只重跑 Reverse（不切 Fixed/Free）。
+  > **fast 模式特例**（`effective_mode(metadata) == "fast"`，最高优先级，命中即跳过 Fixed/Free）：Reverse 单次执行后**直接终止**——`deepcheck_phase` 保留 `"reverse"`，状态置 `deepcheck_done`，`completed_steps` 追加 `"5"`。即使发现 has_issues 走修复循环，修复完仍只重跑 Reverse（不切 Fixed/Free）。
 - has_issues → 修复 → `deepcheck_clean_rounds = 0`。**阶段分流**：Reverse/Fixed 阶段 → 回到**当前阶段**重新执行（重新读代码）；**Free 阶段 → 修复后直接终止**（Free 一次性完整覆盖，不重跑——重跑会重复 15 角度检查）
 - 无 issues → `deepcheck_clean_rounds += 1`
   - Fixed 首次全 clean（`deepcheck_clean_rounds` 达 1）→ 切换 `deepcheck_phase = "free"`，`deepcheck_clean_rounds = 0`

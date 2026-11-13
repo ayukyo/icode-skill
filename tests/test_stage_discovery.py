@@ -21,7 +21,17 @@ def ordinary_project():
         case.doCleanups()
 
 
+def legacy_inline_ticket(case, directory):
+    """Preserve old inline fault fixtures without damaging a v2 envelope."""
+    metadata = case.ctl.load_metadata(directory)
+    events, _ = case.ctl.read_events(directory)
+    (directory / case.ctl.METADATA_NAME).write_text(json.dumps(metadata), encoding="utf-8")
+    (directory / case.ctl.EVENTS_NAME).write_text(
+        "".join(json.dumps(event) + "\n" for event in events), encoding="utf-8")
+
+
 def damage_unrelated_metric(case):
+    legacy_inline_ticket(case, case.first)
     path = case.first / case.ctl.METADATA_NAME
     metadata = json.loads(path.read_text(encoding="utf-8"))
     metadata["ticket_id"] = "copied-malformed-ticket"
@@ -41,6 +51,21 @@ def test_old_nonstage_metric_damage_does_not_enable_or_block_an_unrelated_ticket
     assert created["ok"] is True
 
 
+def test_legacy_inline_fixture_preserves_logical_metadata_events_and_hashes(ordinary_project):
+    case = ordinary_project
+    case.enable()
+    metadata = case.ctl.load_metadata(case.first)
+    events, _ = case.ctl.read_events(case.first)
+
+    legacy_inline_ticket(case, case.first)
+
+    assert json.loads((case.first / case.ctl.METADATA_NAME).read_text(encoding="utf-8")) == metadata
+    assert [json.loads(line) for line in (case.first / case.ctl.EVENTS_NAME).read_text(
+        encoding="utf-8").splitlines()] == events
+    assert case.ctl.load_metadata(case.first) == metadata
+    assert case.ctl.verify_event_chain(case.first, metadata) == (events, [])
+
+
 def test_real_stage_history_with_metric_damage_still_blocks_after_locator_directory_loss(ordinary_project):
     case = ordinary_project
     case.enable()
@@ -53,6 +78,7 @@ def test_real_stage_history_with_metric_damage_still_blocks_after_locator_direct
 
 def test_other_ordinary_ticket_corrupt_ledger_reports_unknown_without_mutation(ordinary_project):
     case = ordinary_project
+    legacy_inline_ticket(case, case.first)
     path = case.first / case.ctl.EVENTS_NAME
     path.write_bytes(path.read_bytes() + b'{broken json}\n')
     before = {p: p.read_bytes() for p in case.project.rglob('*') if p.is_file()}
@@ -121,9 +147,12 @@ def test_discovery_unsafe_debug_path_identifies_the_link(ordinary_project):
     assert error.value.extra['recovery']['action'] == 'inspect_control_path'
 
 
-def test_bound_ticket_damaged_coordinator_json_identifies_ledger(ordinary_project):
+@pytest.mark.parametrize('storage_format', ['legacy', 'v2'])
+def test_bound_ticket_damaged_coordinator_json_identifies_ledger(ordinary_project, storage_format):
     case = ordinary_project
     case.enable()
+    if storage_format == 'legacy':
+        legacy_inline_ticket(case, case.coord)
     path = case.coord / case.ctl.EVENTS_NAME
     path.write_bytes(path.read_bytes() + b'{broken json}\n')
     view = case.ctl.stage_projection(case.second)
@@ -133,13 +162,17 @@ def test_bound_ticket_damaged_coordinator_json_identifies_ledger(ordinary_projec
     assert str(path) in view['reasons'][0]
 
 
-def test_bound_ticket_invalid_coordinator_metadata_identifies_metadata(ordinary_project):
+@pytest.mark.parametrize('storage_format', ['legacy', 'v2'])
+def test_bound_ticket_invalid_coordinator_metadata_identifies_metadata(ordinary_project, storage_format):
     case = ordinary_project
     case.enable()
+    if storage_format == 'legacy':
+        legacy_inline_ticket(case, case.coord)
     path = case.coord / case.ctl.METADATA_NAME
-    meta = json.loads(path.read_text(encoding='utf-8'))
+    physical = json.loads(path.read_text(encoding='utf-8'))
+    meta = physical['value'] if storage_format == 'v2' else physical
     meta['status'] = 'invalid-status'
-    path.write_text(json.dumps(meta), encoding='utf-8')
+    path.write_text(json.dumps(physical), encoding='utf-8')
     view = case.ctl.stage_projection(case.second)
     assert view['state'] == 'unknown'
     assert view['discovery']['path'] == str(path)
@@ -176,20 +209,24 @@ def test_non_object_stage_metadata_is_unknown_and_read_only(ordinary_project, da
 @pytest.mark.parametrize('damaged_ticket,missing_locator', [('coordinator', False), ('child', False), ('child', True)])
 @pytest.mark.parametrize('field', ['extensions', 'extensions.verification'])
 @pytest.mark.parametrize('value', [['broken'], 'broken'])
-def test_non_object_nested_stage_metadata_is_unknown(ordinary_project, damaged_ticket, missing_locator, field, value):
+@pytest.mark.parametrize('storage_format', ['legacy', 'v2'])
+def test_non_object_nested_stage_metadata_is_unknown(ordinary_project, damaged_ticket, missing_locator, field, value, storage_format):
     case = ordinary_project
     case.enable()
+    directory = case.coord if damaged_ticket == 'coordinator' else case.second
+    if storage_format == 'legacy':
+        legacy_inline_ticket(case, directory)
     if missing_locator:
         marker = case.ctl.stage_module().locator_path(case.project).parent
         marker.rename(marker.with_name('saved-stage-reference'))
-    directory = case.coord if damaged_ticket == 'coordinator' else case.second
     path = directory / case.ctl.METADATA_NAME
-    metadata = json.loads(path.read_text(encoding='utf-8'))
+    physical = json.loads(path.read_text(encoding='utf-8'))
+    metadata = physical['value'] if storage_format == 'v2' else physical
     if field == 'extensions':
         metadata['extensions'] = value
     else:
         metadata.setdefault('extensions', {})['verification'] = value
-    path.write_text(json.dumps(metadata), encoding='utf-8')
+    path.write_text(json.dumps(physical), encoding='utf-8')
     before = {p: p.read_bytes() for p in case.project.rglob('*') if p.is_file()}
 
     view = case.ctl.stage_projection(case.second)
@@ -209,13 +246,17 @@ def test_non_object_nested_stage_metadata_is_unknown(ordinary_project, damaged_t
 
 
 @pytest.mark.parametrize('extensions', ['missing', None, {}, {'verification': None}])
-def test_optional_nested_metadata_keeps_ordinary_ticket_compatible(ordinary_project, extensions):
+@pytest.mark.parametrize('storage_format', ['legacy', 'v2'])
+def test_optional_nested_metadata_keeps_ordinary_ticket_compatible(ordinary_project, extensions, storage_format):
     case = ordinary_project
+    if storage_format == 'legacy':
+        legacy_inline_ticket(case, case.second)
     path = case.second / case.ctl.METADATA_NAME
-    metadata = json.loads(path.read_text(encoding='utf-8'))
+    physical = json.loads(path.read_text(encoding='utf-8'))
+    metadata = physical['value'] if storage_format == 'v2' else physical
     if extensions == 'missing':
         metadata.pop('extensions', None)
     else:
         metadata['extensions'] = extensions
-    path.write_text(json.dumps(metadata), encoding='utf-8')
+    path.write_text(json.dumps(physical), encoding='utf-8')
     assert case.ctl.stage_projection(case.second)['state'] == 'not_enabled'

@@ -33,7 +33,13 @@ if $CTL transition --dir "$D" --to completed --delivery-verdict verification_pen
 # 2) 非法跳转 → fail-closed
 if $CTL transition --dir "$D" --to code_done --skip-gates 2>/dev/null | grep -q 'state_machine'; then
   ok "非法跳转被拒（fail-closed）"; else bad "非法跳转未被拒"; fi
-if grep -q '"status": "code_done"' "$D/.ico_metadata.json"; then bad "非法跳转改了 status"; else ok "非法跳转后 status 未变"; fi
+if python3 - "$D" <<'PY'
+import sys
+sys.path.insert(0, 'tools')
+from icode_control import read_metadata_readonly
+assert read_metadata_readonly(sys.argv[1])['status'] == 'completed'
+PY
+then ok "非法跳转后 status 未变"; else bad "非法跳转改了 status"; fi
 
 # 3) 未知目标状态 → exit 2 参数错误
 $CTL transition --dir "$D" --to nope --skip-gates >/dev/null 2>&1; rc=$?

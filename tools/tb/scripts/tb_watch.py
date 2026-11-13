@@ -28,6 +28,7 @@
   停止：python3 tb_watch.py --config watch.json --stop   （读 pid 文件 SIGTERM 优雅退出）
 """
 import argparse, hashlib, importlib.util, json, os, re, shutil, signal, subprocess, sys, time
+from pathlib import Path
 
 # Windows 下 stdout/stderr 默认 locale 编码(gbk)，中文日志/JSON 会乱码或报错；强制 UTF-8 输出
 try:
@@ -37,6 +38,18 @@ except Exception:
     pass
 
 _STOP = False
+_CONTROL_MODULE = None
+
+
+def _control_module():
+    global _CONTROL_MODULE
+    if _CONTROL_MODULE is None:
+        spec = importlib.util.spec_from_file_location(
+            "watch_readonly_control", Path(__file__).resolve().parents[2] / "icode_control.py")
+        loaded = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(loaded)
+        _CONTROL_MODULE = loaded
+    return _CONTROL_MODULE
 
 
 def _stop_handler(signum, frame):
@@ -380,11 +393,10 @@ def scan_debug_worktickets(project_dir):
         md_path = os.path.join(dbg_root, name, ".ico_metadata.json")
         if not os.path.exists(md_path):
             continue
-        try:
-            with open(md_path, encoding="utf-8") as f:
-                meta = json.load(f)
-        except (json.JSONDecodeError, OSError):
-            continue
+        # A broken baseline must stop detection, otherwise it becomes a new ticket.
+        meta = _control_module().read_metadata_readonly(Path(md_path).parent)
+        if not isinstance(meta, dict):
+            raise ValueError(f"metadata must be a JSON object: {md_path}")
         if not meta.get("debug"):
             continue
         ts = meta.get("tb_source")

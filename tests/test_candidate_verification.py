@@ -294,7 +294,9 @@ class VerificationTests(unittest.TestCase):
 
     def test_metadata_new_risk_requires_contract_without_query_migration(self):
         self.call("metadata-update", "--dir", self.ticket, "--set-json", '{"verification_contract":null}', "--request-id", "remove-contract")
-        self.call("metadata-update", "--dir", self.ticket, "--set-json", '{"risk_profile":{"triggers":["real_env_verification"]}}', "--request-id", "new-risk")
+        profile = dict(self.meta()["risk_profile"], triggers=["real_env_verification"])
+        self.call("metadata-update", "--dir", self.ticket, "--set-json", json.dumps({"risk_profile": profile}), "--request-id", "new-risk")
+        self.assertEqual(self.meta()["risk_profile"]["policy_version"], 2)
         self.assertIsInstance(self.meta().get("verification_contract"), dict, "new real-env risk must seed a pending contract")
         self.assertTrue(self.meta()["verification_contract"]["requirements_pending"])
         self.assertFalse(self.applicability()["ok"])
@@ -639,7 +641,8 @@ class VerificationTests(unittest.TestCase):
 
     def test_risk_seed_metadata_update_is_idempotent(self):
         self.call("metadata-update", "--dir", self.ticket, "--set-json", '{"verification_contract":null}')
-        args = ["metadata-update", "--dir", self.ticket, "--set-json", '{"risk_profile":{"flags":{"real_env_verification":true}}}', "--request-id", "seed-risk"]
+        profile = dict(self.meta()["risk_profile"], flags={"real_env_verification": True})
+        args = ["metadata-update", "--dir", self.ticket, "--set-json", json.dumps({"risk_profile": profile}), "--request-id", "seed-risk"]
         self.call(*args)
         before = self.frozen()
         self.assertTrue(self.call(*args)["already_applied"])

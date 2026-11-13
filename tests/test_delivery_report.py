@@ -23,6 +23,75 @@ def digest(root):
             for path in root.rglob("*") if path.is_file()}
 
 
+def test_markdown_only_creates_exactly_one_derived_report(inventory_repo):
+    repo, path, _ = inventory_repo
+    before = digest(repo)
+    markdown = path.parent / "delivery_validation_report.md"
+    proc = subprocess.run([sys.executable, "-B", str(ROOT / "tools/icode_delivery.py"),
+        "--dir", str(path.parent), "--markdown", str(markdown)], capture_output=True, text=True)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert set(digest(repo)) - set(before) == {str(markdown.relative_to(repo))}
+    assert "# 工单概览" in markdown.read_text(encoding="utf-8")
+
+
+def test_overview_binds_revision_goal_modes_and_keeps_completed_separate(inventory_repo):
+    _, path, meta = inventory_repo
+    meta.update(status="completed", requirement="保留真实验收边界", mode="fast",
+        risk_profile={"requested_mode": "fast", "effective_mode": "full", "triggers": ["new_architecture"]},
+        patch_history=[{"patch_no": 7, "time": "2026-11-13", "description": "patch after completion"}])
+    path.write_text(json.dumps(meta), encoding="utf-8")
+    tool = delivery()
+    report = tool.build_delivery_report(path.parent)
+    assert report["goal"] == meta["requirement"]
+    assert report["metadata_revision"] == tool.ctl.canonical_digest(meta)
+    assert report["mode"]["requested"] == "fast" and report["mode"]["effective"] == "full"
+    assert report["latest_patch"]["description"] == "patch after completion"
+    assert report["latest_patch"]["patch_no"] == 7
+    content = tool.markdown_report(report)
+    assert all(value in content for value in ("当前验收", "untracked", "下一步", "03_plan_final.md", "08_patch.md"))
+
+
+def test_pending_legacy_transaction_forbids_persisting_markdown(inventory_repo):
+    repo, path, _ = inventory_repo
+    (path.parent / ".icontrol_txn.json").write_text('{}')
+    before = digest(repo)
+    proc = subprocess.run([sys.executable, "-B", str(ROOT / "tools/icode_delivery.py"),
+        "--dir", str(path.parent), "--markdown", str(path.parent / "delivery_validation_report.md")], capture_output=True, text=True)
+    assert proc.returncode == 1 and before == digest(repo)
+
+
+def test_markdown_only_preserves_source_hardlink_and_formal_artifact_aliases(inventory_repo):
+    repo, path, meta = inventory_repo
+    alias = path.parent / "delivery_report_alias.md"
+    alias.hardlink_to(repo / "source.py")
+    formal = path.parent / "delivery_validation_report.md"
+    formal.write_text("formal artifact")
+    meta["delivery_files"] = {"report": formal.name}
+    path.write_text(json.dumps(meta))
+    before = digest(repo)
+    for output in (alias, formal, path.parent / "06_audit.md", repo / "delivery_report.md"):
+        proc = subprocess.run([sys.executable, "-B", str(ROOT / "tools/icode_delivery.py"),
+            "--dir", str(path.parent), "--markdown", str(output)], capture_output=True, text=True)
+        assert proc.returncode == 1 and before == digest(repo)
+
+
+def test_markdown_only_rejects_symlink_alias(inventory_repo):
+    import os
+    import pytest
+    repo, path, _ = inventory_repo
+    alias = path.parent / "delivery_report_alias.md"
+    try:
+        alias.symlink_to(repo / "source.py")
+    except OSError as exc:
+        if os.name == "nt" and getattr(exc, "winerror", None) == 1314:
+            pytest.skip("Windows symlink privilege unavailable; real link case runs on Linux")
+        raise
+    before = digest(repo)
+    proc = subprocess.run([sys.executable, "-B", str(ROOT / "tools/icode_delivery.py"),
+        "--dir", str(path.parent), "--markdown", str(alias)], capture_output=True, text=True)
+    assert proc.returncode == 1 and before == digest(repo)
+
+
 def test_report_has_neutral_optional_crosscheck_and_no_writes(inventory_repo):
     repo, path, meta = inventory_repo
     before = digest(repo)

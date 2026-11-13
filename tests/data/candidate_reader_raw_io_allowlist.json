@@ -1,0 +1,262 @@
+{
+  "scripts/submission_guard.py": [
+    [
+      "scan",
+      "Call(func=Attribute(value=Name(id='path', ctx=Load()), attr='open', ctx=Load()), args=[Constant(value='rb')], keywords=[])"
+    ]
+  ],
+  "tools/verification_debt.py": [
+    [
+      "_backup_file",
+      "Call(func=Attribute(value=Name(id='path', ctx=Load()), attr='open', ctx=Load()), args=[Constant(value='rb')], keywords=[])"
+    ],
+    [
+      "load_json",
+      "Call(func=Attribute(value=Name(id='json', ctx=Load()), attr='loads', ctx=Load()), args=[Call(func=Attribute(value=Name(id='path', ctx=Load()), attr='read_text', ctx=Load()), args=[], keywords=[keyword(arg='encoding', value=Constant(value='utf-8'))])], keywords=[])"
+    ],
+    [
+      "load_json",
+      "Call(func=Attribute(value=Name(id='path', ctx=Load()), attr='read_text', ctx=Load()), args=[], keywords=[keyword(arg='encoding', value=Constant(value='utf-8'))])"
+    ]
+  ],
+  "tools/icode_crosscheck.py": [
+    [
+      "__enter__",
+      "Call(func=Attribute(value=Attribute(value=Name(id='self', ctx=Load()), attr='path', ctx=Load()), attr='open', ctx=Load()), args=[Constant(value='a+')], keywords=[keyword(arg='encoding', value=Constant(value='utf-8'))])"
+    ],
+    [
+      "atomic_write",
+      "Call(func=Attribute(value=Name(id='os', ctx=Load()), attr='open', ctx=Load()), args=[Attribute(value=Name(id='path', ctx=Load()), attr='parent', ctx=Load()), Attribute(value=Name(id='os', ctx=Load()), attr='O_RDONLY', ctx=Load())], keywords=[])"
+    ],
+    [
+      "cmd_inspection",
+      "Call(func=Attribute(value=Name(id='json', ctx=Load()), attr='loads', ctx=Load()), args=[Attribute(value=Name(id='args', ctx=Load()), attr='assessment_json', ctx=Load())], keywords=[keyword(arg='parse_constant', value=Name(id='reject_nonfinite', ctx=Load()))])"
+    ],
+    [
+      "cmd_start",
+      "Call(func=Attribute(value=Name(id='json', ctx=Load()), attr='loads', ctx=Load()), args=[Attribute(value=Name(id='args', ctx=Load()), attr='baselines_json', ctx=Load())], keywords=[])"
+    ],
+    [
+      "cmd_start",
+      "Call(func=Attribute(value=Name(id='json', ctx=Load()), attr='loads', ctx=Load()), args=[Attribute(value=Name(id='args', ctx=Load()), attr='baselines_json', ctx=Load())], keywords=[])"
+    ],
+    [
+      "cmd_validate",
+      "Call(func=Attribute(value=Name(id='findings_path', ctx=Load()), attr='read_bytes', ctx=Load()), args=[], keywords=[])"
+    ],
+    [
+      "cmd_validate",
+      "Call(func=Attribute(value=Name(id='report_path', ctx=Load()), attr='read_bytes', ctx=Load()), args=[], keywords=[])"
+    ],
+    [
+      "ensure_round_markdown",
+      "Call(func=Attribute(value=Name(id='markdown_path', ctx=Load()), attr='read_bytes', ctx=Load()), args=[], keywords=[])"
+    ],
+    [
+      "file_digest",
+      "Call(func=Attribute(value=Call(func=Name(id='Path', ctx=Load()), args=[Name(id='path', ctx=Load())], keywords=[]), attr='open', ctx=Load()), args=[Constant(value='rb')], keywords=[])"
+    ],
+    [
+      "load_json",
+      "Call(func=Attribute(value=Name(id='json', ctx=Load()), attr='load', ctx=Load()), args=[Name(id='stream', ctx=Load())], keywords=[keyword(arg='parse_constant', value=Name(id='reject_nonfinite', ctx=Load()))])"
+    ],
+    [
+      "load_json",
+      "Call(func=Attribute(value=Name(id='path', ctx=Load()), attr='open', ctx=Load()), args=[Constant(value='r')], keywords=[keyword(arg='encoding', value=Constant(value='utf-8'))])"
+    ],
+    [
+      "resolve_with_control",
+      "Call(func=Attribute(value=Name(id='json', ctx=Load()), attr='loads', ctx=Load()), args=[Attribute(value=Name(id='process', ctx=Load()), attr='stdout', ctx=Load())], keywords=[keyword(arg='parse_constant', value=Name(id='reject_nonfinite', ctx=Load()))])"
+    ],
+    [
+      "write_if_changed",
+      "Call(func=Attribute(value=Name(id='path', ctx=Load()), attr='read_bytes', ctx=Load()), args=[], keywords=[])"
+    ]
+  ],
+  "tools/lint_thinking_gate.py": [
+    [
+      "load_json",
+      "Call(func=Attribute(value=Name(id='json', ctx=Load()), attr='loads', ctx=Load()), args=[Call(func=Attribute(value=Name(id='path', ctx=Load()), attr='read_text', ctx=Load()), args=[], keywords=[keyword(arg='encoding', value=Constant(value='utf-8'))])], keywords=[])"
+    ],
+    [
+      "load_json",
+      "Call(func=Attribute(value=Name(id='path', ctx=Load()), attr='read_text', ctx=Load()), args=[], keywords=[keyword(arg='encoding', value=Constant(value='utf-8'))])"
+    ],
+    [
+      "read_trace_lines",
+      "Call(func=Attribute(value=Name(id='json', ctx=Load()), attr='loads', ctx=Load()), args=[Name(id='raw', ctx=Load())], keywords=[])"
+    ],
+    [
+      "read_trace_lines",
+      "Call(func=Attribute(value=Name(id='trace_path', ctx=Load()), attr='read_text', ctx=Load()), args=[], keywords=[keyword(arg='encoding', value=Constant(value='utf-8'))])"
+    ]
+  ],
+  "tools/lint_mcp_coverage.py": [
+    [
+      "load_json",
+      "Call(func=Attribute(value=Name(id='json', ctx=Load()), attr='loads', ctx=Load()), args=[Call(func=Attribute(value=Name(id='path', ctx=Load()), attr='read_text', ctx=Load()), args=[], keywords=[keyword(arg='encoding', value=Constant(value='utf-8'))])], keywords=[])"
+    ],
+    [
+      "load_json",
+      "Call(func=Attribute(value=Name(id='path', ctx=Load()), attr='read_text', ctx=Load()), args=[], keywords=[keyword(arg='encoding', value=Constant(value='utf-8'))])"
+    ],
+    [
+      "read_trace_lines",
+      "Call(func=Attribute(value=Name(id='json', ctx=Load()), attr='loads', ctx=Load()), args=[Name(id='raw', ctx=Load())], keywords=[])"
+    ],
+    [
+      "read_trace_lines",
+      "Call(func=Attribute(value=Name(id='trace_path', ctx=Load()), attr='read_text', ctx=Load()), args=[], keywords=[keyword(arg='encoding', value=Constant(value='utf-8'))])"
+    ]
+  ],
+  "tools/lint_workflow_contract.py": [
+    [
+      "load_json",
+      "Call(func=Attribute(value=Name(id='json', ctx=Load()), attr='loads', ctx=Load()), args=[Call(func=Attribute(value=Name(id='path', ctx=Load()), attr='read_text', ctx=Load()), args=[], keywords=[keyword(arg='encoding', value=Constant(value='utf-8'))])], keywords=[])"
+    ],
+    [
+      "load_json",
+      "Call(func=Attribute(value=Name(id='path', ctx=Load()), attr='read_text', ctx=Load()), args=[], keywords=[keyword(arg='encoding', value=Constant(value='utf-8'))])"
+    ],
+    [
+      "scan_sensitive",
+      "Call(func=Attribute(value=Name(id='json', ctx=Load()), attr='loads', ctx=Load()), args=[Name(id='obj', ctx=Load())], keywords=[keyword(arg='object_pairs_hook', value=Lambda(args=arguments(posonlyargs=[], args=[arg(arg='pairs')], kwonlyargs=[], kw_defaults=[], defaults=[]), body=ListComp(elt=Dict(keys=[Name(id='key', ctx=Load())], values=[Name(id='value', ctx=Load())]), generators=[comprehension(target=Tuple(elts=[Name(id='key', ctx=Store()), Name(id='value', ctx=Store())], ctx=Store()), iter=Name(id='pairs', ctx=Load()), ifs=[], is_async=0)]))), keyword(arg='parse_constant', value=Attribute(value=Call(func=Attribute(value=Call(func=Name(id='evidence_module', ctx=Load()), args=[], keywords=[]), attr='control_module', ctx=Load()), args=[], keywords=[]), attr='reject_nonfinite_json', ctx=Load()))])"
+    ]
+  ],
+  "tools/debug_catalog.py": [
+    [
+      "_hash_file",
+      "Call(func=Attribute(value=Name(id='path', ctx=Load()), attr='open', ctx=Load()), args=[Constant(value='rb')], keywords=[])"
+    ],
+    [
+      "_load_object",
+      "Call(func=Attribute(value=Name(id='json', ctx=Load()), attr='loads', ctx=Load()), args=[Call(func=Attribute(value=Name(id='path', ctx=Load()), attr='read_text', ctx=Load()), args=[], keywords=[keyword(arg='encoding', value=Constant(value='utf-8'))])], keywords=[])"
+    ],
+    [
+      "_load_object",
+      "Call(func=Attribute(value=Name(id='path', ctx=Load()), attr='read_text', ctx=Load()), args=[], keywords=[keyword(arg='encoding', value=Constant(value='utf-8'))])"
+    ]
+  ],
+  "tools/propose_skill_candidates.py": [],
+  "tools/learn.py": [
+    [
+      "_load_json",
+      "Call(func=Attribute(value=Name(id='json', ctx=Load()), attr='loads', ctx=Load()), args=[Call(func=Attribute(value=Name(id='path', ctx=Load()), attr='read_text', ctx=Load()), args=[], keywords=[keyword(arg='encoding', value=Constant(value='utf-8'))])], keywords=[])"
+    ],
+    [
+      "_load_json",
+      "Call(func=Attribute(value=Name(id='path', ctx=Load()), attr='read_text', ctx=Load()), args=[], keywords=[keyword(arg='encoding', value=Constant(value='utf-8'))])"
+    ]
+  ],
+  "tools/tb/scripts/tb_watch.py": [
+    [
+      "_append_log",
+      "Call(func=Name(id='open', ctx=Load()), args=[Name(id='log_file', ctx=Load()), Constant(value='a')], keywords=[keyword(arg='encoding', value=Constant(value='utf-8'))])"
+    ],
+    [
+      "_check_mount_health",
+      "Call(func=Name(id='open', ctx=Load()), args=[Constant(value='/proc/sys/fs/file-max')], keywords=[])"
+    ],
+    [
+      "_write_stop_marker",
+      "Call(func=Name(id='open', ctx=Load()), args=[Call(func=Name(id='_stop_marker_path', ctx=Load()), args=[Name(id='cfg', ctx=Load())], keywords=[]), Constant(value='w')], keywords=[])"
+    ],
+    [
+      "acquire_lock",
+      "Call(func=Name(id='open', ctx=Load()), args=[Name(id='lock_path', ctx=Load()), Constant(value='w')], keywords=[])"
+    ],
+    [
+      "detect_project",
+      "Call(func=Attribute(value=Name(id='json', ctx=Load()), attr='load', ctx=Load()), args=[Name(id='f', ctx=Load())], keywords=[])"
+    ],
+    [
+      "detect_project",
+      "Call(func=Attribute(value=Name(id='json', ctx=Load()), attr='load', ctx=Load()), args=[Name(id='f', ctx=Load())], keywords=[])"
+    ],
+    [
+      "detect_project",
+      "Call(func=Name(id='open', ctx=Load()), args=[Name(id='manifest_path', ctx=Load())], keywords=[keyword(arg='encoding', value=Constant(value='utf-8'))])"
+    ],
+    [
+      "detect_project",
+      "Call(func=Name(id='open', ctx=Load()), args=[Name(id='mp', ctx=Load())], keywords=[keyword(arg='encoding', value=Constant(value='utf-8'))])"
+    ],
+    [
+      "load_config",
+      "Call(func=Attribute(value=Name(id='json', ctx=Load()), attr='load', ctx=Load()), args=[Name(id='f', ctx=Load())], keywords=[])"
+    ],
+    [
+      "load_config",
+      "Call(func=Name(id='open', ctx=Load()), args=[Name(id='path', ctx=Load())], keywords=[keyword(arg='encoding', value=Constant(value='utf-8'))])"
+    ],
+    [
+      "run_probe",
+      "Call(func=Attribute(value=Name(id='json', ctx=Load()), attr='load', ctx=Load()), args=[Name(id='f', ctx=Load())], keywords=[])"
+    ],
+    [
+      "run_probe",
+      "Call(func=Name(id='open', ctx=Load()), args=[Name(id='probe_file', ctx=Load())], keywords=[keyword(arg='encoding', value=Constant(value='utf-8'))])"
+    ],
+    [
+      "scan_debug_halfdone",
+      "Call(func=Attribute(value=Name(id='json', ctx=Load()), attr='load', ctx=Load()), args=[Name(id='f', ctx=Load())], keywords=[])"
+    ],
+    [
+      "scan_debug_halfdone",
+      "Call(func=Name(id='open', ctx=Load()), args=[Name(id='mp', ctx=Load())], keywords=[keyword(arg='encoding', value=Constant(value='utf-8'))])"
+    ],
+    [
+      "stop_daemon",
+      "Call(func=Name(id='open', ctx=Load()), args=[Name(id='pid_file', ctx=Load())], keywords=[])"
+    ],
+    [
+      "stop_daemon",
+      "Call(func=Name(id='open', ctx=Load()), args=[Name(id='pid_file', ctx=Load())], keywords=[])"
+    ],
+    [
+      "write_pid",
+      "Call(func=Name(id='open', ctx=Load()), args=[Call(func=Attribute(value=Attribute(value=Name(id='os', ctx=Load()), attr='path', ctx=Load()), attr='join', ctx=Load()), args=[Name(id='watch_dir', ctx=Load()), Constant(value='watch.pid')], keywords=[]), Constant(value='w')], keywords=[])"
+    ],
+    [
+      "write_report",
+      "Call(func=Name(id='open', ctx=Load()), args=[Name(id='report_path', ctx=Load()), Constant(value='w')], keywords=[keyword(arg='encoding', value=Constant(value='utf-8'))])"
+    ]
+  ],
+  "agent_runtime/icode_agent/ticket_catalog.py": [
+    [
+      "_read_json",
+      "Call(func=Attribute(value=Name(id='json', ctx=Load()), attr='loads', ctx=Load()), args=[Call(func=Attribute(value=Name(id='path', ctx=Load()), attr='read_text', ctx=Load()), args=[], keywords=[keyword(arg='encoding', value=Constant(value='utf-8'))])], keywords=[])"
+    ],
+    [
+      "_read_json",
+      "Call(func=Attribute(value=Name(id='path', ctx=Load()), attr='read_text', ctx=Load()), args=[], keywords=[keyword(arg='encoding', value=Constant(value='utf-8'))])"
+    ]
+  ],
+  "agent_runtime/icode_agent/backends/openai_responses.py": [],
+  "agent_runtime/icode_agent/ui_server.py": [
+    [
+      "_load_json_projection",
+      "Call(func=Attribute(value=Name(id='json', ctx=Load()), attr='loads', ctx=Load()), args=[Call(func=Attribute(value=Name(id='path', ctx=Load()), attr='read_text', ctx=Load()), args=[], keywords=[keyword(arg='encoding', value=Constant(value='utf-8'))])], keywords=[])"
+    ],
+    [
+      "_load_json_projection",
+      "Call(func=Attribute(value=Name(id='path', ctx=Load()), attr='read_text', ctx=Load()), args=[], keywords=[keyword(arg='encoding', value=Constant(value='utf-8'))])"
+    ],
+    [
+      "_read_json_body",
+      "Call(func=Attribute(value=Name(id='json', ctx=Load()), attr='loads', ctx=Load()), args=[Call(func=Attribute(value=Name(id='body', ctx=Load()), attr='decode', ctx=Load()), args=[Constant(value='utf-8')], keywords=[])], keywords=[])"
+    ],
+    [
+      "do_GET",
+      "Call(func=Attribute(value=BinOp(left=Name(id='ASSET_ROOT', ctx=Load()), op=Div(), right=Constant(value='index.html')), attr='read_text', ctx=Load()), args=[], keywords=[keyword(arg='encoding', value=Constant(value='utf-8'))])"
+    ],
+    [
+      "do_GET",
+      "Call(func=Attribute(value=Name(id='path', ctx=Load()), attr='read_bytes', ctx=Load()), args=[], keywords=[])"
+    ],
+    [
+      "ticket_material",
+      "Call(func=Attribute(value=Name(id='json', ctx=Load()), attr='loads', ctx=Load()), args=[Call(func=Attribute(value=Name(id='binding', ctx=Load()), attr='group', ctx=Load()), args=[Constant(value=1)], keywords=[])], keywords=[])"
+    ]
+  ]
+}

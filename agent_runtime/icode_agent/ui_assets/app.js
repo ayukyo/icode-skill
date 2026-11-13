@@ -496,10 +496,31 @@
     cockpit.artifacts.forEach((artifact) => {
       const item = document.createElement("li");
       const name = document.createElement("strong");
-      name.textContent = artifact.name;
+      name.textContent = artifact.title || artifact.name;
       const meta = document.createElement("span");
       meta.textContent = `${artifact.role} · ${artifact.size} B`;
       item.append(name, meta);
+      if (artifact.material_id) {
+        const open = document.createElement("button");
+        open.type = "button";
+        open.textContent = artifact.title === "工单概览" ? "阅读工单概览" : "查看材料";
+        const preview = document.createElement("pre");
+        preview.hidden = true;
+        open.addEventListener("click", async () => {
+          if (!preview.hidden) { preview.hidden = true; return; }
+          open.disabled = true;
+          try {
+            const payload = await api(`/api/v1/ticket-materials/${encodeURIComponent(state.selectedTicketId)}/${encodeURIComponent(artifact.material_id)}`);
+            const freshness = payload.material.freshness;
+            const label = freshness ? ({current: "时效：当前投影", stale: "时效：已过期，请刷新工单概览", untracked: "时效：未跟踪", blocked: "时效：无法核对"}[freshness.state] || freshness.state) + "\n\n" : "";
+            // Untrusted Markdown remains text; no HTML, file URL or scripts run.
+            preview.textContent = label + payload.material.markdown;
+            preview.hidden = false;
+          } catch (error) { preview.textContent = error.message; preview.hidden = false; }
+          finally { open.disabled = false; }
+        });
+        item.append(open, preview);
+      }
       artifacts.append(item);
     });
   };

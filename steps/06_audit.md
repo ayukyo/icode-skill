@@ -10,11 +10,17 @@
 > **证据习惯真源**：主代理决定性证据复核、claim ledger 和交付分层统一执行 [references/evidence_and_verification.md](../references/evidence_and_verification.md)。
 > **条件验收**：严格原始证据、视觉目标或阶段计划按 [串口、证据与阶段验收真源](../references/serial_evidence_stages.md)复查当前文件和实际多帧回执；provider success 不等于图像通过。终审报告与阶段报告分别履行既有职责，AI 必需项全通过后才生成当前阶段待确认快照，用户确认不能把 fail/inconclusive 改为 pass。
 
+## fast 必要执行
+
+有效 fast 的 Audit 独立 Read 当前完整关联范围、最终计划和元信息，保留本轮 audit phase、worklist 与真实 artifact 回执；Reverse 已读、hash 一致或上轮绿灯均不代替。按原七维、追溯与 catalog `required_checks` 作新的验收判断。
+
+矩阵/材料清单可从有效账本机械生成，人工正文只补新发现、差异、未闭环、证据边界与交付裁决，不再复述计划或前几步长文。机器汇总不证明阅读或实机通过；必要真实环境、原始证据与阶段确认保持原硬门。复杂裁决仍按 catalog L2，不因 fast 降级。
+
 ## 阶段覆盖与合规结束（强制）
 
 先执行 [审查清单合同](../references/inspection_worklist.md)，生成 `audit_worklist.json`；独立联审真实实现/接口/调用方/测试，不复用 deepcheck 阅读。实际 Read 后逐文件登记 audit phase；触发共享变体/消费者或 timestamp 专项时，独立逐项评估完整 required_items，以 `inspection --phase assess --read-phase audit --check-id <ID> --assessment-json '<完整对象>'` 登记结论、理由与真实引用。缺项/阶段或 pending/fail 不得 success，N/A 也须具体理由；静态审查/模拟证据须说明边界，不能升级为实机已验证。源码 findings 校验行段/hash，无定位猜测保留 needs_more_evidence。清单与原有 coverage 并行必需，遗漏不能 success，审查不替代交付分层证据。
 
-执行前读取[审查证据合同](../references/inspection_evidence.md)。只有实际完成本轮各阶段Read后，才写阶段覆盖声明及实际源hash：deepcheck写 `deepcheck_coverage.json`，audit写 `audit_coverage.json`，登记本attempt真实artifact回执。声明必须覆盖metadata.code_files全部文件；按risk_profile.effective_mode（未声明时按mode）：full为Reverse/Fixed/Free，实际fast仅Reverse，audit为独立Audit；fast升级full不可省阶段。已有hash/工具调用/历史确认行均不代替本轮Read。
+执行前读取[审查证据合同](../references/inspection_evidence.md)。只有实际完成本轮各阶段Read后，才写阶段覆盖声明及实际源hash：deepcheck写 `deepcheck_coverage.json`，audit写 `audit_coverage.json`，登记本attempt真实artifact回执。声明必须覆盖metadata.code_files全部文件；按 `effective_mode(metadata)` 统一解析：full为Reverse/Fixed/Free，实际fast仅Reverse，audit为独立Audit；fast升级full不可省阶段。已有hash/工具调用/历史确认行均不代替本轮Read。
 
 预算耗尽或有未观察项：写 `coverage_status=partial|degraded`、`unobserved`、`debt_reason`；finish用degraded而非success，报告不得称流程规范全部通过，验证债务保留。控制面success拒绝缺声明、缺阶段、过期hash或未完成Dedup；degraded也要求真实声明回执与原因。编译成功不消除审查债务。
 
@@ -388,7 +394,7 @@ python3 tools/icode_control.py check-outputs --dir {ICODE_OUT_DIR} --step audit
 - **禁止 try/except 静默**：Read JSON 失败时输出"[schema 读取失败-原因 X]"，绝不含糊
 - **禁止与其他段合并**：本段独立 H2 标题，便于将来 grep 工具检索"## schema 状态汇总"
 
-**自动化要求**：实现可用 Bash + python 一行（例如 `python3 -c "import json,sys; d=json.load(open(sys.argv[1])); ..."` 嵌入式调用）；如失败则降级为手工填写模板 + 标 `[未自动化]`。
+**自动化要求**：实现可用 Bash + python 一行（例如 `python3 -c "import pathlib,sys; sys.path.insert(0,'{ICODE_SKILL_ROOT}/tools'); import icode_control as ctl; d=ctl.read_metadata_readonly(pathlib.Path(sys.argv[1]).parent); ..."` 嵌入式调用，参数为 metadata 文件路径；技能根按 [SKILL.md「票据逻辑读取约定」](../SKILL.md) 先解析）；仅展示格式生成失败可降级为手工填写模板 + 标 `[未自动化]`。pending / 坏引用 / 逻辑读取失败必须停止，不能手工填空值继续资格判断。
 ## 决策锚点（步骤6 完成后写）
 
 步骤6 终审后，若 `metadata.anchors_enabled != false`，最终刷新 `.decision_anchors.json`：刷新 `deviations` + `open_risks`（终审汇总）。详见 [references/decision_anchors.md](../references/decision_anchors.md)。

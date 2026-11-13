@@ -350,7 +350,10 @@ class BuildStartProviderTests(unittest.TestCase):
         self.assertFalse((f.ticket / ctl.TXN_NAME).exists())
         self.assertNotEqual(before, f.frozen())
         path = f.ticket / ctl.EVENTS_NAME
-        rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+        # Keep this original multi-diagnostic negative on legacy logical rows;
+        # V2 rejects damaged wrappers before the event-chain business gate.
+        rows = ctl.read_events(f.ticket)[0]
+        ctl.atomic_write_json(f.ticket / ctl.METADATA_NAME, f.meta())
         rows[-1]["schema_version"] = 2
         path.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8", newline="\n")
         corrupt = f.frozen()

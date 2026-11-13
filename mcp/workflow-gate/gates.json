@@ -116,7 +116,7 @@
     "lightweight_allowed": "仅处理不改变合同的实现缺陷"
   },
   "fast_risk_upgrade": {
-    "doc": "快速模式风险自动升级：fast 模式命中任一风险标志时 effective_mode 自动设为 full；允许用户显式 override 但必须记录风险接受事实（risk_profile.override=true）。低风险、单文件、纯计算且无外部状态变化的任务仍可保持 fast。",
+    "doc": "版本化 fast 分流真源。缺 policy_version 或版本 1 保持原九标志升级/override 语义；版本 2 先由 plan 调查冻结范围，再按结构化分类与证据引用分流。普通风险增加专项检查，不自动 full；硬风险 full，未决语义 blocked，重大增量 replan。override 不豁免硬门。",
     "effective_mode_full": "full",
     "risk_flags": {
       "cross_component": "跨组件修改",
@@ -129,8 +129,29 @@
       "unresolved_semantic_decision": "出现尚未解决的语义决策",
       "major_requirement_delta": "执行中发生重大需求增量"
     },
-    "block_condition": "metadata.mode == fast 且任一 risk flag 为 true 且 (risk_profile.effective_mode != full 且 override != true) → 违规（须记录风险接受或自动升级 full）",
-    "keeps_fast_allowed": "低风险、单文件、纯计算且无外部状态变化"
+    "block_condition": "legacy（无 policy_version 或 1）：metadata.mode == fast 且任一旧 risk flag 为 true 且 effective_mode != full 且 override != true → 违规；policy2：按纯 assess_fast_risk 分流，blocked/replan 或 required full 未登记升级时禁止准入，override 不豁免硬门",
+    "keeps_fast_allowed": "legacy 原策略；v2 有可核验范围证据的 bounded 修改可 fast，但必需专项检查保持",
+    "policy_v2": {
+      "evidence_limits": {"max_files": 32, "max_bytes": 8388608, "timeout_seconds": 5},
+      "full_flags": ["new_architecture", "unbounded_impact", "breaking_interface_change", "irreversible_migration", "independent_adversarial_required"],
+      "blocked_flags": ["unresolved_semantic_decision"],
+      "replan_flags": ["major_requirement_delta"],
+      "required_checks": {
+        "cross_component": ["caller_provider_review"],
+        "persistent_identity_change": ["identity_impact", "lifecycle_acceptance"],
+        "dependency_migration": ["identity_impact", "caller_provider_review", "lifecycle_acceptance"],
+        "async_observer_or_cache": ["lifecycle_acceptance"],
+        "restart_replay_semantics": ["lifecycle_acceptance"],
+        "external_consumer_change": ["caller_provider_review", "lifecycle_acceptance"],
+        "real_env_verification": ["real_environment_verification"]
+      },
+      "reason_codes": ["invalid_metadata", "invalid_catalog", "invalid_profile", "unsupported_policy_version", "invalid_mode", "invalid_flags", "invalid_triggers", "invalid_override", "invalid_semantic_decisions", "invalid_requirement_deltas", "unresolved_semantic_decision", "major_requirement_delta", "full_preserved", "missing_classification", "invalid_classification", "missing_scope_contract", "scope_digest_mismatch", "invalid_evidence_refs", "unbounded_scope", "bounded_scope", "legacy_risk_upgrade", "legacy_override", "legacy_fast", "legacy_full"],
+      "classification_ref_scopes": ["ticket", "workspace"],
+      "classification_scopes": ["bounded", "unbounded"],
+      "classification_required_scope_fields": ["summary", "at", "source_step"],
+      "admission_steps": ["review", "merge", "code", "patch"],
+      "doc": "所有 flags 必须来自 legacy risk_flags 与 full_flags 并集且显式 bool；classification 绑定 scope_contract canonical JSON SHA256，并引用 scope/path/sha256。纯评估只验证形状与合同摘要，控制面准入必须实读引用文件并校验 hash。plan 开始与调查不以未知分类阻断；进入 review/merge/code/patch 前分类必须有效。"
+    }
   },
   "acceptance_contract": {
     "doc": "生命周期验收合同：任何改变权威状态或实体身份的修改，必须覆盖四个阶段（即时/异步收敛/重启恢复/重复执行）与四类消费者（直接查询/聚合选择/依赖归属/外部投影）。只验证直接查询不能把任务标记为 verified。矩阵中任何必填单元为空 = 验证不完整。",

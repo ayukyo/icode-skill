@@ -22,8 +22,8 @@ from .backends.openai_responses import OpenAIResponsesBackend
 from .coordinator import AgentCoordinator, ControlPlaneError, LifecycleAmbiguityError
 from .host_runner import ControlLifecycle, HostJobRunner, HostRunnerError
 from .models import AgentRequest, CapabilityError
-from .ticket_catalog import CatalogError, ResolvedTicket, TicketCatalog
-from .doc_catalog import DocCatalog, DocLibraryError
+from .ticket_catalog import CatalogError, ResolvedTicket, TicketCatalog, read_ticket_metadata
+from .doc_catalog import DocCatalog, DocLibraryError, MAX_CHAPTER_BYTES
 from .ui_settings import SettingsError, UISettingsStore
 
 
@@ -73,8 +73,14 @@ COCKPIT_ARTIFACTS = frozenset({
     "00_init.md", "log_analysis.md", "01_plan.md", "02_review.md",
     "03_plan_final.md", "04_code_review_fix.md", "05_deepcheck.md",
     "06_audit.md", "07_readme.md", "08_patch.md", "ticket_snapshot.json",
-    "archive_manifest.json", "doc_worklist.json", "_brief.md",
+    "archive_manifest.json", "doc_worklist.json", "_brief.md", "delivery_validation_report.md",
 })
+MATERIAL_TITLES = {
+    "delivery_validation_report.md": "工单概览",
+    "03_plan_final.md": "最终计划", "08_patch.md": "追加修改",
+    "06_audit.md": "验收证据", "05_deepcheck.md": "独立复检证据",
+    "04_code_review_fix.md": "实现证据",
+}
 PROGRESS_STEPS = (
     ("0", "需求确认"),
     ("1", "制定计划"),
@@ -380,6 +386,8 @@ class AgentUIService:
 
     @staticmethod
     def _load_json_projection(path: Path) -> Dict:
+        if path.name == ".ico_metadata.json":
+            return read_ticket_metadata(path.parent)
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, ValueError, TypeError):
@@ -405,7 +413,14 @@ class AgentUIService:
         return progress
 
     def _cockpit_projection(self, target: ResolvedTicket) -> Dict:
-        metadata = self._load_json_projection(target.out_dir / ".ico_metadata.json")
+        try:
+            metadata = self._load_json_projection(target.out_dir / ".ico_metadata.json")
+        except CatalogError as exc:
+            return {
+                "delivery": {"verdict": "blocked", "close_state": None},
+                "verification": {"status": "blocked", "error": str(exc)},
+                "progress": [], "artifacts": [], "blockers": [str(exc)],
+            }
         snapshot = self._load_json_projection(target.out_dir / "ticket_snapshot.json")
         runs = metadata.get("verification_runs") or []
         if not isinstance(runs, list):
@@ -424,7 +439,8 @@ class AgentUIService:
                           if isinstance(value, str) and Path(value).name == value
                           and value.endswith(".md")} if isinstance(delivery, dict) else set()
         try:
-            children = sorted(target.out_dir.iterdir(), key=lambda item: item.name)
+            priority = {name: i for i, name in enumerate(MATERIAL_TITLES)}
+            children = sorted(target.out_dir.iterdir(), key=lambda item: (priority.get(item.name, 100), item.name))
         except OSError:
             children = []
         for child in children:
@@ -432,12 +448,17 @@ class AgentUIService:
                     or child.is_symlink():
                 continue
             try:
-                size = child.stat().st_size
+                info = child.stat()
+                size = info.st_size
             except OSError:
                 continue
             role = "snapshot" if child.name == "ticket_snapshot.json" else (
                 "report" if child.suffix == ".md" else "control")
-            artifacts.append({"name": child.name, "role": role, "size": size})
+            artifact = {"name": child.name, "role": role, "size": size,
+                        "title": MATERIAL_TITLES.get(child.name, child.name)}
+            if child.suffix == ".md" and info.st_nlink == 1:
+                artifact["material_id"] = child.name
+            artifacts.append(artifact)
         verdict = metadata.get("delivery_verdict")
         if verdict not in {
                 "verified", "verification_pending", "blocked", "not_applicable"}:
@@ -456,6 +477,43 @@ class AgentUIService:
             "artifacts": artifacts,
             "blockers": pending[:20] if isinstance(pending, list) else [],
         }
+
+    def ticket_material(self, ticket_id: str, name: str) -> Dict:
+        """Only a discovered ticket Markdown role is readable, never a path."""
+        if not name or name != Path(name).name or any(value in name for value in ("/", "\\", "%")):
+            raise DocLibraryError()
+        target = self.catalog.resolve(ticket_id)
+        materials = self._cockpit_projection(target)["artifacts"]
+        if not any(item.get("material_id") == name for item in materials):
+            raise DocLibraryError()
+        reader = DocCatalog(target.out_dir)
+        source = reader._safe(target.out_dir / name)
+        if source.stat().st_nlink != 1:
+            raise DocLibraryError()
+        body = reader._read(source, MAX_CHAPTER_BYTES)
+        # A hardlink created during the read must not expand the allowed roots.
+        if source.stat().st_nlink != 1:
+            raise DocLibraryError()
+        try:
+            markdown = body.decode("utf-8-sig")
+        except UnicodeError as exc:
+            raise DocLibraryError("材料不是有效 UTF-8", 409) from exc
+        material = {"name": name, "title": MATERIAL_TITLES.get(name, name), "markdown": markdown}
+        if name == "delivery_validation_report.md":
+            binding = re.search(r"<!-- icode-overview-binding (\{[^\n]*\}) -->", markdown)
+            snapshot = {}
+            try:
+                snapshot = json.loads(binding.group(1)) if binding else {}
+            except ValueError:
+                pass
+            spec = importlib.util.spec_from_file_location("ui_ticket_context", self.coordinator.control_path.parent / "ticket_context.py")
+            context = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(context)
+            try:
+                material["freshness"] = context.overview_freshness(target.out_dir, snapshot)
+            except (ValueError, OSError, context.delivery.ctl.ControlError):
+                material["freshness"] = {"state": "blocked", "reasons": ["overview_source_unavailable"]}
+        return {"ok": True, "material": material}
 
     def ticket_detail(self, ticket_id: str) -> Dict:
         public = self.catalog.public_ticket(ticket_id)
@@ -975,6 +1033,12 @@ class AgentUIRequestHandler(BaseHTTPRequestHandler):
                     status=(query.get("status") or [None])[0],
                 )
                 self._send_json(200, {"ok": True, **result})
+                return
+            if path.startswith("/api/v1/ticket-materials/"):
+                segments = unquote(path[len("/api/v1/ticket-materials/"):]).split("/")
+                if parsed.query or len(segments) != 2 or not segments[0] or "\\" in segments[0]:
+                    raise UIRequestError("材料路径必须包含工单和已登记材料名称")
+                self._send_json(200, self.server.service.ticket_material(*segments))
                 return
             if path.startswith("/api/v1/stage-previews/"):
                 segments = unquote(path[len("/api/v1/stage-previews/"):]).split("/")

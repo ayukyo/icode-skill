@@ -523,12 +523,13 @@ class StageAcceptanceTests(unittest.TestCase):
         for key in ("max_entries", "max_files", "max_events", "max_file_bytes", "max_total_bytes"):
             with self.subTest(budget=key), self.assertRaisesRegex(self.ctl.ControlError, "budget"):
                 stage.discover_stage_history(self.project, limits={key: 1})
-        with mock.patch.object(stage.time, "monotonic", side_effect=[0, 31]), self.assertRaisesRegex(self.ctl.ControlError, "time budget"):
+        with mock.patch.object(stage.time, "monotonic", side_effect=[0, stage.DISCOVERY_LIMITS["timeout_seconds"] + 1]), self.assertRaisesRegex(self.ctl.ControlError, "time budget"):
             stage.discover_stage_history(self.project)
         path = self.coord / self.ctl.METADATA_NAME
         original = path.read_bytes()
         metadata = json.loads(original)
-        metadata.setdefault("extensions", {})["stage_program"] = {"forged": True}
+        logical = metadata["value"] if metadata.get("storage_version") == 2 else metadata
+        logical.setdefault("extensions", {})["stage_program"] = {"forged": True}
         path.write_text(json.dumps(metadata), encoding="utf-8")
         with self.assertRaisesRegex(self.ctl.ControlError, "mirrors disagree"):
             stage.discover_stage_history(self.project)

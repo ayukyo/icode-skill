@@ -9,6 +9,12 @@
 >
 > **工单执行模型（ticket-scoped 执行步骤必做）**：完整 Read [execution_model.md](execution_model.md)，按 `step start → 边界 check → artifact/operation 回执 → step finish → transition` 执行。输入漂移必须按机器返回 route 回流；有副作用动作禁止盲重试。无工单目录的 help/install/list 等纯辅助入口不创建伪执行事件；`verify --plan` 只生成派生计划，也不创建验证执行事件。
 
+## fast 的必要加载与机械动作边界
+
+fast 使用各主步骤的「fast 必要执行」小节及命中的条件规则；共享规则首次完整 Read 与失效重载继续执行本文件原合同，后续引用真实已有读取来源，避免重复粘贴。规则版本、需求、候选、调用链或验证合同变化时重新加载；摘要/缓存不代替首次必要源码实读，更不能冒充 review/Reverse/Audit 各自独立 Read。
+
+统一用 `tools/fast_policy.py` 的 `effective_mode(metadata)` 解析模式；未知显示 unknown 并回到有效分类，不按命令名猜测。思考等级继续从 reasoning catalog 读取：复杂修改、新语义、根因分析、重构至少 L2 与三步 sequential-thinking，不能仅因 fast 降为 L1。当前 merge 已有 L1 决策记录；对其他步骤尚无充分可机器核验的机械事实，不新增降级条件，保留 L2。机械复制已批准计划、从有效账本生成矩阵不需要模型重写，但也不替代本步骤语义裁决或独立证据。
+
 ## 强证据化总览
 
 本节为强证据化机制索引——列出 4 项机制 + 落地点，避免机制散落各 step 文件后无人能找全。各机制的真源仍在对应文件，本节只起导航作用。

@@ -161,7 +161,15 @@ def discover_stage_history(project, *, limits=None, tolerate=None):
                         context["path"] = str(meta_path)
                         reject("stage discovery found an orphan ledger; locator state is unknown", "missing_control_metadata")
                     continue
-                meta = api.strict_json_loads(read(meta_path).decode("utf-8"))
+                storage = api.storage_module()
+                try:
+                    raw_meta = storage.strict_json_loads(read(meta_path))
+                    provisional, typed_meta = storage._unwrap(raw_meta, "metadata")
+                except storage.StorageError as exc:
+                    if isinstance(exc.__cause__, json.JSONDecodeError):
+                        raise exc.__cause__ from None
+                    reject("stage discovery candidate storage metadata: " + str(exc), "invalid_candidate_storage")
+                meta = provisional
                 if not isinstance(meta, dict):
                     reject("stage discovery metadata is not an object")
                 context["ticket_id"] = meta.get("ticket_id")
@@ -174,9 +182,9 @@ def discover_stage_history(project, *, limits=None, tolerate=None):
                     context["path"] = str(directory / api.TXN_NAME)
                     reject("stage discovery found a pending transaction; recover its control ledger first", "pending_transaction")
                 if not os.path.lexists(events_path):
-                    if tolerant:
+                    if tolerant and not typed_meta:
                         continue
-                    if api.is_vnext(meta) or has_marker:
+                    if typed_meta or api.is_vnext(meta) or has_marker:
                         context["path"] = str(events_path)
                         reject("stage discovery cannot authenticate metadata without its ledger", "missing_control_ledger")
                     continue  # Ordinary legacy tickets had no vNext ledger.
@@ -186,7 +194,7 @@ def discover_stage_history(project, *, limits=None, tolerate=None):
                     "stage: stage discovery metadata/protected writer ledger mirrors disagree",
                 }
                 try:
-                    events, previous, seen = [], api.GENESIS_HASH, set()
+                    raw_events = []
                     for line_number, line in enumerate(read(events_path).splitlines(), 1):
                         context["line"] = line_number
                         if not line.strip():
@@ -195,7 +203,27 @@ def discover_stage_history(project, *, limits=None, tolerate=None):
                         counts["events"] += 1
                         if counts["events"] > bounds["max_events"]:
                             reject("stage history discovery event budget exhausted", "discovery_budget_exhausted", limit="max_events")
-                        event = api.strict_json_loads(line.decode("utf-8"))
+                        try:
+                            raw_events.append(storage.strict_json_loads(line))
+                        except storage.StorageError as exc:
+                            if isinstance(exc.__cause__, json.JSONDecodeError):
+                                raise exc.__cause__ from None
+                            reject("stage discovery candidate storage JSON: " + str(exc), "invalid_candidate_storage")
+                    typed_events = any(storage.is_envelope(event) for event in raw_events)
+                    if typed_meta or typed_events:
+                        codec_limits = storage.StorageLimits(max_raw_bytes=bounds["max_total_bytes"],
+                            max_events=bounds["max_events"],
+                            timeout_seconds=max(0, bounds["timeout_seconds"] - (time.monotonic() - started)))
+                        try:
+                            ledger = api.decode_control_ledger(raw_events, limits=codec_limits)
+                            meta = storage.decode_document(raw_meta, kind="metadata", registry=ledger.registry,
+                                                           limits=codec_limits)
+                        except (storage.StorageError, api.ControlError) as exc:
+                            reject("stage discovery control ledger hash/schema/identity is damaged; candidate storage: " + str(exc), "invalid_candidate_storage")
+                        raw_events = ledger.events
+                        context["ticket_id"] = meta.get("ticket_id")
+                    events, previous, seen = [], api.GENESIS_HASH, set()
+                    for event in raw_events:
                         if api.check_schema(event, event_schema) or event["event_id"] in seen \
                                 or (events and event.get("ticket_id") != events[0].get("ticket_id")) or event["previous_event_hash"] != previous \
                                 or event["event_hash"] != api.canonical_event_hash(event):
@@ -1239,6 +1267,9 @@ def projection(directory, *, git_provider=None, require_git_provider=False, _met
             result["discovery"] = {"reason": details.get("reason", "unresolved_stage_control"), "message": str(exc),
                                    "path": path, "control_root": details.get("control_root", str(Path(directory).resolve())),
                                    "coordinator_root": details.get("coordinator_root")}
+            for key in ("ticket_id", "line", "column"):
+                if key in details:
+                    result["discovery"][key] = details[key]
             result["recovery"] = {"action": details.get("recovery_action", "inspect_control_state"), "path": path,
                                   "message": "Restore the authenticated locator or control records identified by this error, then retry.",
                                   "read_only_actions": ["status", "trace", "check", "inspect"]}

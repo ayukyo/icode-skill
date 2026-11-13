@@ -663,7 +663,41 @@
     "semantic_decisions": { "type": ["array", "null"] },
     "impact_contract": { "type": ["object", "null"] },
     "acceptance_contract": { "type": ["object", "null"] },
-    "risk_profile": { "description": "快速模式风险档案（对象）：{requested_mode, effective_mode, triggers, risk_flags, override}，见 mcp/workflow-gate/gates.json fast_risk_upgrade", "type": ["object", "null"] },
+    "risk_profile": {
+      "description": "版本1保留既有风险升级语义；版本2按已冻结范围分类，引用真实证据，专项检查仍由原合同执行。",
+      "type": ["object", "null"],
+      "properties": {"policy_version": {"type": "integer", "enum": [1, 2]}},
+      "if": {"type": "object", "required": ["policy_version"], "properties": {"policy_version": {"const": 2}}},
+      "then": {
+        "properties": {
+          "requested_mode": {"enum": ["fast", "full"]},
+          "effective_mode": {"enum": ["fast", "full"]},
+          "override": {"type": "boolean"},
+          "risk_flags": {"type": "object", "additionalProperties": {"type": "boolean"}},
+          "triggers": {"type": "array", "items": {"type": "string"}},
+          "classification": {
+            "type": "object", "required": ["scope", "scope_digest", "evidence_refs"],
+            "properties": {
+              "scope": {"enum": ["bounded", "unbounded"]},
+              "scope_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+              "evidence_refs": {
+                "type": "array", "minItems": 1,
+                "items": {
+                  "type": "object", "required": ["scope", "path", "sha256"],
+                  "properties": {
+                    "scope": {"enum": ["ticket", "workspace"]},
+                    "path": {"type": "string", "minLength": 1},
+                    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+                  },
+                  "additionalProperties": false
+                }
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      }
+    },
     "diagnosis_only": { "type": ["boolean", "null"] },
     "anchors_enabled": { "type": ["boolean", "null"] },
     "tdd": {

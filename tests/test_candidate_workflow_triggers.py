@@ -54,6 +54,11 @@ class CandidateWorkflowTriggers(unittest.TestCase):
     def test_candidate_workflow_triggers_inspection(self):
         self.assert_trigger(".github/workflows/candidate-provider-software.yml")
 
+    def test_fast_and_storage_sources_trigger_continuity_checks(self):
+        for name in ("tools/fast_policy.py", "tools/ticket_context.py", "tools/candidate_storage.py"):
+            with self.subTest(path=name):
+                self.assert_trigger(name)
+
 
 if __name__ == "__main__":
     unittest.main()

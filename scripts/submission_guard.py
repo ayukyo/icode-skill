@@ -463,8 +463,11 @@ def build_contract(repo_path: Path, source_repo_path: Path, worktree_branch: str
 
 def load_metadata(metadata_path: Path) -> dict:
     try:
-        return json.loads(metadata_path.read_text(encoding="utf-8"))
+        return control_module().read_metadata_readonly(metadata_path.parent)
     except Exception as e:
+        if getattr(e, "extra", {}).get("gate_id") == "pending_transaction":
+            print(f"❌ pending_transaction: {e}")
+            sys.exit(2)
         print(f"❌ 无法解析 metadata {metadata_path}: {e}", file=sys.stderr)
         sys.exit(1)
 
@@ -520,6 +523,9 @@ def derive_candidates(meta: dict) -> list[dict]:
 def cmd_migrate(args) -> int:
     meta_path = Path(args.metadata).expanduser()
     meta = load_metadata(meta_path)
+    if meta.get("schema_version") == 3 or control_module()._storage_enabled(meta_path.parent):
+        print("❌ Controlled metadata requires the control-plane writer; legacy migration is blocked", file=sys.stderr)
+        return 2
     existing = meta.get("submission_contracts") or []
     if existing:
         print("ℹ️ 已有 submission_contracts（非空），跳过迁移（幂等）")

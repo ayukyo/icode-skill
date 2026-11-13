@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import importlib.util
 import os
 import re
 import sys
@@ -56,9 +57,28 @@ def _debug_root(project: Path) -> Path:
     return resolved
 
 
+_CONTROL_MODULE = None
+
+
+def control_module():
+    global _CONTROL_MODULE
+    if _CONTROL_MODULE is None:
+        spec = importlib.util.spec_from_file_location("readonly_control", Path(__file__).with_name("icode_control.py"))
+        loaded = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(loaded)
+        _CONTROL_MODULE = loaded
+    return _CONTROL_MODULE
+
+
 def _load_object(path: Path) -> dict[str, Any]:
     try:
-        value = json.loads(path.read_text(encoding="utf-8"))
+        if path.name == ".ico_metadata.json":
+            try:
+                value = control_module().read_metadata_readonly(path.parent)
+            except control_module().ControlError as exc:
+                raise CatalogError(f"metadata blocked: {path}: {exc}") from exc
+        else:
+            value = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise CatalogError(f"无法读取 JSON {path}: {exc}") from exc
     if not isinstance(value, dict):
@@ -260,8 +280,8 @@ def rebuild_catalog(project: str | Path) -> dict[str, Any]:
             continue
         try:
             metadata = _load_object(metadata_path)
-        except CatalogError:
-            skipped.append({"debug_dir": str(twin), "reason": "metadata_invalid"})
+        except CatalogError as exc:
+            skipped.append({"debug_dir": str(twin), "reason": "metadata_invalid", "error": str(exc)})
             continue
         record = _ticket_record(twin.resolve(), metadata_path.resolve(), metadata)
         if record is not None:

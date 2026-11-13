@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import json
 import re
 from dataclasses import dataclass
@@ -11,6 +12,25 @@ from typing import Dict, Iterable, List, Optional
 
 
 VNEXT_OUT_DIR = re.compile(r"^\.icode_output/(?:\.debug/)?\.icode_output_[0-9]+$")
+_CONTROL_MODULE = None
+
+
+def read_ticket_metadata(out_dir: Path):
+    """Read logical metadata without recovery, locking, or provider disclosure."""
+    global _CONTROL_MODULE
+    if _CONTROL_MODULE is None:
+        spec = importlib.util.spec_from_file_location(
+            "catalog_control", Path(__file__).resolve().parents[2] / "tools/icode_control.py")
+        loaded = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(loaded)
+        _CONTROL_MODULE = loaded
+    try:
+        value = _CONTROL_MODULE.read_metadata_readonly(out_dir)
+    except Exception as exc:
+        raise CatalogError(f"metadata blocked: {exc}") from exc
+    if not isinstance(value, dict):
+        raise CatalogError("metadata must be a JSON object")
+    return value
 
 
 class CatalogError(RuntimeError):
@@ -33,6 +53,8 @@ def _project_id(project_path: Path) -> str:
 
 
 def _read_json(path: Path, label: str):
+    if path.name == ".ico_metadata.json":
+        return read_ticket_metadata(path.parent)
     try:
         return json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:

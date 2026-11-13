@@ -39,6 +39,7 @@ import sys
 import re
 import json
 import argparse
+import importlib.util
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
 
@@ -62,8 +63,26 @@ REQUIRED_FIELDS = [
 ]
 
 
+_CONTROL_MODULE = None
+
+
+def control_module():
+    global _CONTROL_MODULE
+    if _CONTROL_MODULE is None:
+        spec = importlib.util.spec_from_file_location("readonly_control", Path(__file__).with_name("icode_control.py"))
+        loaded = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(loaded)
+        _CONTROL_MODULE = loaded
+    return _CONTROL_MODULE
+
+
 def load_json(path: Path) -> Any:
     """读取并解析 JSON，失败抛 ValueError（由调用方转成报告）"""
+    if path.name == ".ico_metadata.json":
+        try:
+            return control_module().read_metadata_readonly(path.parent)
+        except control_module().ControlError as exc:
+            raise ValueError(f"metadata blocked: {exc}") from exc
     return json.loads(path.read_text(encoding="utf-8"))
 
 
@@ -283,7 +302,12 @@ def eligibility_issues(row: Dict, gate: Dict, constants: Dict, metadata: Dict) -
         issues.append(f"{gid}: evidence.threshold 与 catalog {key} 不一致")
     profile = metadata.get("risk_profile")
     effective = profile.get("effective_mode") if isinstance(profile, dict) else None
-    if effective not in ("fast", "full"):
+    if isinstance(profile, dict) and profile.get("policy_version") == 2:
+        spec = importlib.util.spec_from_file_location("coverage_fast_policy", Path(__file__).with_name("fast_policy.py"))
+        policy = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(policy)
+        effective = policy.effective_mode(metadata)
+    elif effective not in ("fast", "full"):
         effective = metadata.get("mode")
     if "mode" in evidence and effective in ("fast", "full") and evidence["mode"] != effective:
         issues.append(f"{gid}: evidence.mode 与有效模式 {effective} 不一致")

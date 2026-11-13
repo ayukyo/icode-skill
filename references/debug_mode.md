@@ -94,7 +94,11 @@ debug 工单 **不参与主流程**——所有主流程步骤（plan/review/mer
 
 ```python
 # 各主流程 step 的 L1 检测段统一加：
-metadata = read_metadata()
+# 先按 SKILL.md 的票据逻辑读取约定替换实际技能根；ICODE_OUT_DIR / step_name 由调用步骤解析。
+import sys
+sys.path.insert(0, '{ICODE_SKILL_ROOT}/tools')
+import icode_control as ctl
+metadata = ctl.read_metadata_readonly(ICODE_OUT_DIR)
 if metadata.get("debug") is True:
     error_exit(
         # 路径直接用已解析的 ICODE_OUT_DIR（debug 工单 = .icode_output/.debug/.icode_output_N）；

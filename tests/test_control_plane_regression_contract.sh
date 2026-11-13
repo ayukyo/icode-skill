@@ -43,7 +43,10 @@ if $CTL metadata-update --dir "$DMETA" --set-json '{"keywords":["controlled"]}' 
       | grep -q already_applied \
    && python3 - "$DMETA/.ico_metadata.json" <<'PY'
 import json,sys
-d=json.load(open(sys.argv[1])); assert d["keywords"]==["controlled"]
+from pathlib import Path
+sys.path.insert(0, 'tools')
+from icode_control import read_metadata_readonly
+d=read_metadata_readonly(Path(sys.argv[1]).parent); assert d["keywords"]==["controlled"]
 assert d["requirement_points"]==["p1"]
 PY
 then ok "metadata-update 原子 set/append 且幂等"
@@ -54,8 +57,9 @@ if $CTL metadata-update --dir "$DMETA" --set-json '{"status":"completed"}' 2>/de
 else bad "metadata-update 可绕过 transition"; fi
 python3 - "$DMETA/.ico_metadata.json" <<'PY'
 import json,sys
-p=sys.argv[1]; d=json.load(open(p)); d["requirement_summary"]="bypass"
-json.dump(d,open(p,"w"),ensure_ascii=False,indent=2)
+p=sys.argv[1]; physical=json.load(open(p)); d=physical['value'] if 'storage_version' in physical else physical
+d["requirement_summary"]="bypass"
+json.dump(physical,open(p,"w"),ensure_ascii=False,indent=2)
 PY
 if $CTL validate --dir "$DMETA" --skip-linters 2>/dev/null \
     | grep -q metadata_hash_after; then
@@ -63,35 +67,45 @@ if $CTL validate --dir "$DMETA" --skip-linters 2>/dev/null \
 else bad "非状态 metadata 直写未被检测"; fi
 
 # 2) 直写完成态不得伪装成出生态。
+cp "$D1/.ico_metadata.json" "$T/reg-1-original.json"
 python3 - "$D1/.ico_metadata.json" <<'PY'
 import json, sys
-p=sys.argv[1]; d=json.load(open(p)); d["status"]="plan_done"; d["completed_steps"]=["1"]
-json.dump(d,open(p,"w"),ensure_ascii=False,indent=2)
+p=sys.argv[1]; physical=json.load(open(p)); d=physical['value'] if 'storage_version' in physical else physical
+d["status"]="plan_done"; d["completed_steps"]=["1"]
+json.dump(physical,open(p,"w"),ensure_ascii=False,indent=2)
 PY
 if $CTL validate --dir "$D1" --skip-linters 2>/dev/null | grep -q 'status_event_consistency'; then
   ok "绕过 transition 直写 plan_done 被拦截"
 else bad "直写 plan_done 未被拦截"; fi
+cp "$T/reg-1-original.json" "$D1/.ico_metadata.json"
 
 # 3) 即使重算 hash，非法事件 schema 仍必须拒绝。
 D2="$WS/.icode_output/.icode_output_2"
 $CTL create --dir "$D2" --ticket-id reg-2 --requirement r --birth plan >/dev/null
+cp "$D2/.ico_events.jsonl" "$T/reg-2-original.jsonl"
 python3 - "$D2/.ico_events.jsonl" <<'PY'
 import hashlib,json,sys
-p=sys.argv[1]; e=json.loads(open(p).readline()); e["timestamp"]="bad"
+p=sys.argv[1]; physical=json.loads(open(p).readline()); e=physical['value'] if 'storage_version' in physical else physical
+e["timestamp"]="bad"
 m={k:v for k,v in e.items() if k!="event_hash"}
 e["event_hash"]=hashlib.sha256(json.dumps(m,ensure_ascii=False,sort_keys=True,separators=(",",":")).encode()).hexdigest()
-open(p,"w").write(json.dumps(e,ensure_ascii=False,sort_keys=True)+"\n")
+open(p,"w").write(json.dumps(physical,ensure_ascii=False,sort_keys=True)+"\n")
 PY
 if $CTL validate --dir "$D2" --skip-linters 2>/dev/null | grep -q 'event_schema'; then
   ok "非法事件即使自洽 hash 仍被 schema 拒绝"
 else bad "非法事件 schema 未被校验"; fi
+cp "$T/reg-2-original.jsonl" "$D2/.ico_events.jsonl"
 
 # 3b) 字段合法且重算 hash 的非法生命周期事件也必须被语义校验拒绝。
 D11="$WS/.icode_output/.debug/.icode_output_11"
 $CTL create --dir "$D11" --ticket-id debug:reg-11 --requirement r --birth debug-log >/dev/null
+cp "$D11/.ico_events.jsonl" "$T/reg-11-original.jsonl"
 python3 - "$D11/.ico_events.jsonl" <<'PY'
 import hashlib,json,sys,uuid
-p=sys.argv[1]; rows=[json.loads(x) for x in open(p) if x.strip()]; prev=rows[-1]["event_hash"]
+from pathlib import Path
+sys.path.insert(0, 'tools')
+from icode_control import read_events
+p=sys.argv[1]; rows=read_events(Path(p).parent)[0]; prev=rows[-1]["event_hash"]
 e={"schema_version":1,"event_id":str(uuid.uuid4()),"ticket_id":"debug:reg-11","request_id":None,
    "timestamp":"2026-09-07T00:00:00","actor":"icode","event_type":"state_changed",
    "payload":{"from":"init_in_progress","to":"completed","delivery_verdict":"verified"},
@@ -103,6 +117,7 @@ PY
 if $CTL validate --dir "$D11" --skip-linters 2>/dev/null | grep -q 'event_semantics'; then
   ok "自洽 hash 的非法生命周期事件被拒绝"
 else bad "非法生命周期事件绕过语义校验"; fi
+cp "$T/reg-11-original.jsonl" "$D11/.ico_events.jsonl"
 
 # 4) 生产环境 --skip-gates 必须 fail-closed。
 D3="$WS/.icode_output/.icode_output_3"
@@ -221,7 +236,10 @@ if $CTL record-verification --dir "$D4" --kind listen --outcome inconclusive \
     --evidence 'window:no-trigger' --request-id verify-1 | grep -q already_applied \
    && python3 - "$D4/.ico_metadata.json" <<'PY'
 import json,sys
-d=json.load(open(sys.argv[1])); assert len(d["verification_runs"])==1; assert "patch_history" not in d
+from pathlib import Path
+sys.path.insert(0, 'tools')
+from icode_control import read_metadata_readonly
+d=read_metadata_readonly(Path(sys.argv[1]).parent); assert len(d["verification_runs"])==1; assert "patch_history" not in d
 PY
 then ok "verify 记录原子幂等且不写 patch_history"
 else bad "verify/patch 分离契约失败"; fi
@@ -239,7 +257,13 @@ else bad "实际 metadata 字段形状被误拒"; fi
 IDX="$T/index.json"; PIDS=""; count=20
 for n in $(seq 20 $((20+count-1))); do
   d="$WS/.icode_output/.icode_output_$n"
-  $CTL create --dir "$d" --ticket-id "reg-$n" --requirement r --birth init >/dev/null
+  $CTL create --dir "$d" --ticket-id "reg-$n" --requirement r --birth init >/dev/null || exit 1
+done
+# Birth scans intentionally reject another ticket's pending transaction. Build
+# all fixtures before testing concurrent index updates so this case measures
+# the index writer rather than a separate stage-discovery admission gate.
+for n in $(seq 20 $((20+count-1))); do
+  d="$WS/.icode_output/.icode_output_$n"
   ($CTL index-write --ticket-dir "$d" --index "$IDX" >/dev/null) & PIDS="$PIDS $!"
 done
 all_ok=1

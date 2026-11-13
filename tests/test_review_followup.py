@@ -67,7 +67,7 @@ def test_new_ticket_requires_step_even_without_start(ticket):
     out, run = ticket
     result = run("transition", "--to", "plan_done", success=False)
     assert result["gate_id"] == "step_receipt"
-    assert json.loads((out / ".ico_metadata.json").read_text())["status"] == "init_in_progress"
+    assert control.read_metadata_readonly(out)["status"] == "init_in_progress"
 
 
 def test_complete_step_transitions_and_validates(ticket):
@@ -95,7 +95,7 @@ def test_validate_detects_missing_completed_output(ticket):
 def test_historical_birth_is_not_retroactively_required(ticket):
     out, run = ticket
     # Model an existing pre-version birth. Rehash only this isolated fixture.
-    rows = [json.loads(s) for s in (out / ".ico_events.jsonl").read_text().splitlines()]
+    rows = control.read_events(out)[0]
     rows[0]["payload"].pop("execution_contract_version", None)
     previous = control.GENESIS_HASH
     for row in rows:
@@ -141,7 +141,8 @@ def test_readonly_validation_rejects_duplicate_delivery_mapping(ticket):
     out, run = ticket
     path = out / ".ico_metadata.json"
     metadata = json.loads(path.read_text())
-    metadata["delivery_files"] = {"report":"same.md", "brief":"same.md"}
+    logical = metadata["value"] if "storage_version" in metadata else metadata
+    logical["delivery_files"] = {"report":"same.md", "brief":"same.md"}
     path.write_text(json.dumps(metadata))
     result = run("validate", success=False)
     assert any(v["path"] == "$.delivery_files" for v in result["violations"])

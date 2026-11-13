@@ -90,12 +90,14 @@ ln -sfn "$SNAP_DIR" "$BAK_ROOT/latest"
 ```python
 python3 - "$SNAP_DIR" <<'PY'
 import json, os, sys, glob, datetime
+sys.path.insert(0, '{ICODE_SKILL_ROOT}/tools')
+import icode_control as ctl
 SNAP_DIR = sys.argv[1]
 idx_path = os.path.expanduser("~/.claude/icode_data/index.json")
 if not os.path.exists(idx_path):
     print("索引不存在，跳过 backup_path 更新（备份文件已落盘）")
     sys.exit(0)
-with open(idx_path) as f:
+with open(idx_path, encoding="utf-8") as f:
     idx = json.load(f)
 by_id = {t.get("ticket_id"): t for t in idx["tickets"]}
 updated = []
@@ -103,15 +105,14 @@ for d in sorted(glob.glob(os.path.join(SNAP_DIR, ".icode_output_*"))):
     meta = os.path.join(d, ".ico_metadata.json")
     if not os.path.isfile(meta):
         continue
-    with open(meta) as f:
-        tid = json.load(f).get("ticket_id", "")
+    tid = ctl.read_metadata_readonly(d).get("ticket_id", "")
     if tid and tid in by_id and by_id[tid].get("backup_path") != d:
         by_id[tid]["backup_path"] = d
         updated.append(tid)
 if updated:
     idx["updated_at"] = datetime.datetime.now().astimezone().isoformat(timespec="seconds")
     tmp = idx_path + ".bak_tmp"
-    with open(tmp, "w") as f:
+    with open(tmp, "w", encoding="utf-8") as f:
         json.dump(idx, f, ensure_ascii=False, indent=2)
     os.replace(tmp, idx_path)  # 原子写，防写中断损坏
     print(f"更新 backup_path: {len(updated)} 条")
@@ -120,7 +121,7 @@ else:
 PY
 ```
 
-> 索引回写只扫快照内顶层 `.icode_output_*/`；debug 位于 `.debug/`，crosscheck 位于 `.crosscheck/` 且无 `.ico_metadata.json`，两者都不会被 glob 当作正式工单。其文件照常备份，仅不写 `backup_path`。
+> 先按 [SKILL.md「票据逻辑读取约定」](../SKILL.md) 解析 `{ICODE_SKILL_ROOT}`。索引回写只扫快照内顶层 `.icode_output_*/`；debug 位于 `.debug/`，crosscheck 位于 `.crosscheck/` 且无 `.ico_metadata.json`，两者都不会被 glob 当作正式工单。其文件照常备份，仅不写 `backup_path`。存在的票据若 pending、引用损坏或事件链不可还原，立即非零退出，本轮不写索引；无 metadata / 空 ticket_id 的原有跳过规则不变。
 
 ## 6. 收尾报告
 

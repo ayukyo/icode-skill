@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from propose_skill_candidates import load_runs
+from propose_skill_candidates import control_module, load_runs
 
 
 SCHEMA_VERSION = 1
@@ -192,11 +192,11 @@ def classify_candidate(
 
 def _related_ticket_observations(metadata_path: Path) -> dict[str, int]:
     try:
-        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {"claims": 0, "requirement_deltas": 0, "patches": 0, "deviations": 0}
+        metadata = control_module().read_metadata_readonly(metadata_path.parent)
+    except (OSError, ValueError, control_module().ControlError) as exc:
+        raise LearnError(f"metadata blocked: {metadata_path}: {exc}") from exc
     if not isinstance(metadata, dict):
-        return {"claims": 0, "requirement_deltas": 0, "patches": 0, "deviations": 0}
+        raise LearnError(f"metadata must be a JSON object: {metadata_path}")
     return {
         "claims": len(metadata.get("claims") or []),
         "requirement_deltas": len(metadata.get("requirement_deltas") or []),

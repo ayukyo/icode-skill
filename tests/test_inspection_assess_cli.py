@@ -1,10 +1,16 @@
 """Assessment uses real attempts, writer receipts and replay protection."""
 import copy
 import json
+import importlib.util
+from pathlib import Path
 import pytest
 
 from test_inspection_integration import cli, inspected
 from test_inspection_checks import CLOCK_SOURCE, assessment
+
+_spec = importlib.util.spec_from_file_location("assess_receipt_control", Path(__file__).resolve().parents[1] / "tools/icode_control.py")
+control = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(control)
 
 
 def prepare(root, out, source=CLOCK_SOURCE):
@@ -30,7 +36,7 @@ def test_prepare_writer_marks_attempt_even_without_trigger(inspected):
     root, out = inspected
     _, report = prepare(root, out, "int a(void) { return 1; }\n")
     assert report.get("checks_version") == 1
-    events = [json.loads(line) for line in (out / ".ico_events.jsonl").read_text(encoding="utf-8").splitlines()]
+    events = control.read_events(out)[0]
     prepares = [e for e in events if e.get("request_id") == "prep"]
     assert len(prepares) == 1
     assert prepares[0]["payload"].get("inspection_checks_version") == 1

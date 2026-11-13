@@ -22,6 +22,7 @@ from icode_agent.coordinator import (
     LifecycleAmbiguityError,
 )
 from icode_agent.models import AgentRequest, CapabilityError
+from icode_agent.ticket_catalog import read_ticket_metadata
 
 
 CONTROL = ROOT / "tools" / "icode_control.py"
@@ -75,7 +76,7 @@ def request(out_dir: Path, **overrides) -> AgentRequest:
 
 
 def load_metadata(out_dir: Path) -> dict:
-    return json.loads((out_dir / ".ico_metadata.json").read_text(encoding="utf-8"))
+    return read_ticket_metadata(out_dir)
 
 
 def test_fake_backend_success_records_terminal_lifecycle(tmp_path):

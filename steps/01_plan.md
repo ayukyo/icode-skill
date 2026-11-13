@@ -8,6 +8,12 @@
 > **证据习惯真源**：证据缺口、完整链路、状态生命周期和验收分层统一执行 [references/evidence_and_verification.md](../references/evidence_and_verification.md)。
 > **工程接入门**：读取 [references/project_intake.md](../references/project_intake.md)，先解析实际工程根；大型/超大型 SDK 仓先做静态画像并限定扫描范围，多根或发现预算截断时 L1 阻断。
 
+## fast 必要执行
+
+有效 fast 的计划采用短合同，保留既有 10 个编号章节与 §4.5 测试/四维设计锚点，每节只写本任务必要事实、实现点和验收；无关条件标 N/A 并给简短理由，不展开未命中的长模板。需求、范围/红线、现有调用链、A/B/C 实施边界、异常、验证与风险必须自包含。下面共享前置、硬门和命中条件仍完整执行；首次共享规则读取及后续复用按 [thinking_core](../references/thinking_core.md)，不复制规则正文到计划。
+
+policy2 入口先调查并冻结现有 `scope_contract`，然后按 [fast 分类真源](../mcp/workflow-gate/gates.json) 补齐风险事实、绑定范围摘要及可核验引用，调用 `assess_fast_risk(metadata,catalog)`。未知只阻断后续准入，不阻断当前计划调查；不得尚未调查就自动 full。进入 review/code 前分类有效，`blocked/replan` 按原因处理，`full` 记录升级后走完整流程。旧策略不静默改版，已有效 full 不降级。
+
 ## 本步骤 L1/L2 检查项声明
 
 按 SKILL.md「强制阻断边界矩阵」定义，本步骤触发的检查项：
@@ -399,7 +405,7 @@
    - **`semantic_decisions`**：把 init §5「语义决策识别」标出的候选 + 本计划 §4 ADR 中出现的**会改变外部行为的策略选择**写入（每条 `{dimension, alternatives, selected, evidence, user_confirmed, status}`）。用户已明确选择的 → `status=resolved, user_confirmed=true`；用户未确认的策略 → `status=open`（**不得以"最保守/最安全/通常如此"替用户选**；未 resolved 时 plan/code/patch 被 lint 阻断，见「定稿机器硬校验」后追加的 workflow gate 校验）。本轮只做诊断的策略未定 → 标 `diagnosis_only=true`
    - **`impact_contract`**：计划涉及**实体身份变化**（合并/删除/去重/重命名/重新分配、实体替代、依赖归属变化、权威状态与运行时投影不一致、旧身份提交后不应继续被查询/枚举/执行）时，**必须**填 `identity_change=true` + 9 维影响清单每项 `{status, evidence}` + `completeness=complete`；不涉及 → 不写或 `identity_change=false`（向后兼容）。**9 维**：`authoritative_writer`（哪个组件决定最终实体集合）/ `persistent_references`（哪些依赖记录保存身份、如何迁移）/ `derived_metadata`（归属/计数/汇总是否重算）/ `runtime_indexes`（缓存/注册表/索引是否删除淘汰身份）/ `queries_and_selectors`（单项/全选/批量是否只返回存活）/ `async_links`（观察者乱序/延迟刷新短暂错误态）/ `recovery_paths`（重启/重放/幂等重试相同结果）/ `external_projections`（下游身份/顺序/数量一致）/ `rollback_and_failure`（中途失败权威与派生保持原样）
    - **`acceptance_contract`**：计划**改变权威状态或实体身份**时，**必须**生成验收矩阵（`matrix` 每项 `{scenario, phase, consumer, expected, evidence, status}`），覆盖 4 阶段（`immediate`/`converged`/`restart`/`replay`）× 4 消费者（`direct_query`/`aggregate_selector`/`persistent_reference`/`external_projection`）全部必填单元；场景种子见 gates.json `scenario_seed`（等价/单向包含/部分关联/仅边界接触/无关联/一新实体关联多既有实体/多输入传递关联/存在依赖记录/失败重试回滚）。不涉及生命周期 → 不写（向后兼容）
-   - **`risk_profile`**：`mode=fast` 且命中任一 `fast_risk_triggers` 风险 → 写 `{requested_mode:"fast", effective_mode:"full", triggers:[...], risk_flags:{...}, override}`（自动升级 full；用户显式覆盖记 `override=true` 并记录风险接受事实）
+   - **`risk_profile`**：按 [版本化 fast 分类合同](fast.md#风险分类与有效模式) 写入；新 policy2 必须调查后绑定 `scope_contract` 及分类证据再评估，普通风险补专项检查，硬风险 full、未决语义 blocked、重大增量 replan；无版本/1 继续旧九 flag 与 override 语义，不能将旧 full 自动改 fast
 
 6. **检索留痕**（检索可审计，防"检索成为会话内不可验证行为"）：若全局索引 `~/.claude/icode_data/index.json` 存在，`{ICODE_OUT_DIR}/_inject_cache.json` **必须存在**（即使 `injections` 为空数组，缓存文件也应已创建，见「执行步骤」第 2 步「注入防重复」）或本工单**显式声明** `[检索跳过-原因]`（如"全局索引无候选"）；两者皆无 → 标注检索留痕缺失（重做场景复盘盲区）
 
@@ -408,6 +414,8 @@
 ```bash
 python3 -c "
 import json,re,sys,os
+sys.path.insert(0,'{ICODE_SKILL_ROOT}/tools')
+import icode_control as ctl
 # ① 前置读留痕存在性（L1 维度④）：limit_checkpoint.md 缺失 或 无 plan 阶段块标题锚点 = init/start/fast 汇聚的步骤1 未按'先读索引→精读命中'留痕 = 按未读处理
 cp='{ICODE_OUT_DIR}/limit_checkpoint.md'
 if not os.path.exists(cp):
@@ -416,8 +424,8 @@ if not os.path.exists(cp):
 if '阶段块：plan前置硬基线' not in open(cp,encoding='utf-8').read():
     print('❌ limit_checkpoint.md 缺「阶段块：plan前置硬基线」标题（本工单 plan 前置已读 LIMIT 的锚点；仅存在其他阶段块如 log 不算 plan 已读）')
     sys.exit(1)
-refs={int(r['redline_no']) for r in json.load(open('{ICODE_OUT_DIR}/.ico_metadata.json')).get('limit_refs',[]) if 'redline_no' in r}
-txt=open('{ICODE_OUT_DIR}/01_plan.md').read()
+refs={int(r['redline_no']) for r in ctl.read_metadata_readonly('{ICODE_OUT_DIR}').get('limit_refs',[]) if 'redline_no' in r}
+txt=open('{ICODE_OUT_DIR}/01_plan.md',encoding='utf-8').read()
 cited={int(n) for n in re.findall(r'红(?:线)?\s*(\d+)',txt)}
 missing=cited-refs
 print('limit_checkpoint: plan前置块存在 | 计划引用红线:',sorted(cited),'| limit_refs 记录:',sorted(refs),'| 缺失:',sorted(missing) if missing else '无')

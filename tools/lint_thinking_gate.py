@@ -41,6 +41,7 @@ lint_thinking_gate.py —— reasoning gate（分级思考）运行时校验器
 """
 import sys
 import json
+import importlib.util
 import argparse
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -80,8 +81,26 @@ STEP_KEY_MAP = {
 }
 
 
+_CONTROL_MODULE = None
+
+
+def control_module():
+    global _CONTROL_MODULE
+    if _CONTROL_MODULE is None:
+        spec = importlib.util.spec_from_file_location("readonly_control", Path(__file__).with_name("icode_control.py"))
+        loaded = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(loaded)
+        _CONTROL_MODULE = loaded
+    return _CONTROL_MODULE
+
+
 def load_json(path: Path) -> Any:
     """读取并解析 JSON，失败抛 ValueError（由调用方转成报告）"""
+    if path.name == ".ico_metadata.json":
+        try:
+            return control_module().read_metadata_readonly(path.parent)
+        except control_module().ControlError as exc:
+            raise ValueError(f"metadata blocked: {exc}") from exc
     return json.loads(path.read_text(encoding="utf-8"))
 
 

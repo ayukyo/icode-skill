@@ -260,7 +260,10 @@ class _ControlReadObservation:
         with self._reader(path) as (text, reader):
             yield text
             record = (self._identity(self._ordinary(Path(path))), reader.byte_count, reader.digest.hexdigest())
-        self.files[Path(path).name] = record
+        name = Path(path).name
+        if name in self.files and self.files[name] != record:
+            raise ControlError("stage observation repeated control read changed", gate_id="stage_gate")
+        self.files[name] = record
 
     def bind(self, directory, meta, events):
         if Path(directory).absolute() != self.directory or set(self.files) != {METADATA_NAME, EVENTS_NAME}:
@@ -298,15 +301,157 @@ class _ControlReadObservation:
         return self.objects
 
 
-def load_json(path, what, *, _observation=None):
+def _load_raw_json(path, what, *, _observation=None):
+    control_source = {"control_path": str(path), "control_root": str(Path(path).parent)} \
+                     if Path(path).name in {METADATA_NAME, TXN_NAME} else {}
     try:
         source = open(path, "r", encoding="utf-8") if _observation is None else _observation.text(path)
         with source as f:
+            if Path(path).name in {METADATA_NAME, TXN_NAME}:
+                return storage_module().strict_json_loads(f.read())
             return json.load(f, parse_constant=reject_nonfinite_json)
     except FileNotFoundError:
-        raise ControlError(f"{what} 不存在: {path}", exit_code=1, path=str(path))
+        raise ControlError(f"{what} 不存在: {path}", exit_code=1, path=str(path), **control_source)
     except (json.JSONDecodeError, ValueError) as exc:
-        raise ControlError(f"{what} JSON 解析失败: {path}: {exc}", exit_code=1, path=str(path))
+        if control_source:
+            syntax = exc if isinstance(exc, json.JSONDecodeError) else exc.__cause__
+            control_source.update(reason="invalid_control_json" if isinstance(syntax, json.JSONDecodeError)
+                                  else "invalid_candidate_storage", recovery_action="repair_control_ledger")
+            if isinstance(syntax, json.JSONDecodeError):
+                control_source.update(line=syntax.lineno, column=syntax.colno)
+        raise ControlError(f"{what} JSON 解析失败: {path}: {exc}", exit_code=1, path=str(path), **control_source) from exc
+
+
+_STORAGE_MODULE = None
+
+
+def storage_module():
+    global _STORAGE_MODULE
+    if _STORAGE_MODULE is None:
+        spec = importlib.util.spec_from_file_location("control_candidate_storage", SKILL_ROOT / "tools/candidate_storage.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        _STORAGE_MODULE = module
+    return _STORAGE_MODULE
+
+
+def _logical_ledger_validator(event, prior, *, event_schema=None, seen_ids=None):
+    """The unchanged logical envelope contract, without recursive ledger reads."""
+    errors = check_schema(event, event_schema if event_schema is not None else
+                          load_json(SCHEMA_EVENT, "ticket-event.schema.json"))
+    if errors:
+        raise ValueError("event_schema: " + "; ".join(errors))
+    duplicate_id = event["event_id"] in seen_ids if seen_ids is not None else \
+                   any(old["event_id"] == event["event_id"] for old in prior)
+    if duplicate_id:
+        raise ValueError("duplicate event_id")
+    if prior and event["ticket_id"] != prior[0]["ticket_id"]:
+        raise ValueError("ledger ticket identity mismatch")
+    previous = prior[-1]["event_hash"] if prior else GENESIS_HASH
+    if event["previous_event_hash"] != previous or event["event_hash"] != canonical_event_hash(event):
+        raise ValueError("event_hash or previous_event_hash mismatch")
+    if seen_ids is not None:
+        seen_ids.add(event["event_id"])
+
+
+def decode_control_ledger(records, *, limits=None):
+    """Pure adapter also used by stage's independently bounded raw reader."""
+    try:
+        schema = load_json(SCHEMA_EVENT, "ticket-event.schema.json")
+        seen = set()
+        def validator(event, prior):
+            _logical_ledger_validator(event, prior, event_schema=schema, seen_ids=seen)
+        return storage_module().decode_events(records, limits=limits,
+                       logical_event_validator=validator)
+    except storage_module().StorageError as exc:
+        raise ControlError("candidate storage ledger: " + str(exc), gate_id="candidate_storage") from exc
+
+
+def _committed_ledger(out_dir, *, _observation=None):
+    path = Path(out_dir) / EVENTS_NAME
+    try:
+        records, _ = _read_raw_events(out_dir, _observation=_observation)
+        return decode_control_ledger(records)
+    except ControlError as exc:
+        exc.extra.setdefault("path", str(path))
+        exc.extra.setdefault("control_path", exc.extra["path"])
+        exc.extra.setdefault("control_root", str(path.parent))
+        exc.extra.setdefault("reason", "invalid_candidate_storage")
+        exc.extra.setdefault("recovery_action", "repair_control_ledger")
+        raise
+
+
+def load_json(path, what, *, _observation=None):
+    raw = _load_raw_json(path, what, _observation=_observation)
+    path = Path(path)
+    kinds = {METADATA_NAME: "metadata", TXN_NAME: "transaction"}
+    if path.name not in kinds or not storage_module().is_envelope(raw):
+        return raw
+    try:
+        ledger = _committed_ledger(path.parent, _observation=_observation)
+    except ControlError as exc:
+        # A typed metadata read can fail in its ledger before yielding metadata.
+        # This identity is diagnostic only; it never grants qualification.
+        if kinds[path.name] == "metadata" and isinstance(raw.get("value"), dict):
+            exc.extra.setdefault("ticket_id", raw["value"].get("ticket_id"))
+        raise
+    try:
+        value = storage_module().decode_document(raw, kind=kinds[path.name], registry=ledger.registry)
+    except storage_module().StorageError as exc:
+        raise ControlError("candidate storage document: " + str(exc), gate_id="candidate_storage",
+                           path=str(path), control_path=str(path), control_root=str(path.parent),
+                           reason="invalid_candidate_storage", recovery_action="repair_control_ledger") from exc
+    if path.name == METADATA_NAME and ledger.events and value.get("ticket_id") != ledger.events[0]["ticket_id"]:
+        raise ControlError("candidate storage metadata/ledger ticket mismatch", gate_id="candidate_storage",
+                           path=str(path), control_path=str(path), control_root=str(path.parent),
+                           reason="invalid_candidate_storage", recovery_action="repair_control_ledger")
+    return value
+
+
+def read_metadata_readonly(out_dir):
+    """Stable read adapter; pending definitions never authorize a readonly view."""
+    directory = Path(out_dir)
+    if os.path.lexists(directory / TXN_NAME):
+        raise ControlError("控制面事务待恢复，拒绝只读资格判断", gate_id="pending_transaction")
+    value = load_metadata(directory)
+    if os.path.lexists(directory / TXN_NAME):
+        raise ControlError("读取期间出现控制面事务", gate_id="pending_transaction")
+    return value
+
+
+def _storage_enabled(out_dir, *, new_metadata=None):
+    directory = Path(out_dir)
+    for name in (METADATA_NAME, TXN_NAME):
+        path = directory / name
+        if path.is_file():
+            raw = _load_raw_json(path, "candidate storage mode")
+            if storage_module().is_envelope(raw):
+                # The decoder, not a version-looking flag, authorizes v2.
+                storage_module()._unwrap(raw, "metadata" if name == METADATA_NAME else "transaction")
+                return True
+            if name == METADATA_NAME:
+                return False
+    return isinstance(new_metadata, dict) and new_metadata.get("schema_version") == 3
+
+
+def _encode_control_document(value, kind, registry, enabled):
+    if not enabled:
+        return value
+    try:
+        return storage_module().encode_document(value, kind=kind, committed_registry=registry)
+    except storage_module().StorageError as exc:
+        raise ControlError("candidate storage encode: " + str(exc), gate_id="candidate_storage") from exc
+
+
+def write_metadata(out_dir, value, *, registry=None, enabled=None):
+    """Typed physical writer; callers retain the original lock/transaction guard."""
+    if enabled is None:
+        enabled = _storage_enabled(out_dir, new_metadata=value)
+    if registry is None and enabled:
+        registry = _committed_ledger(out_dir).registry
+    physical = _encode_control_document(value, "metadata", registry, enabled)
+    atomic_write_json(Path(out_dir) / METADATA_NAME, physical)
+    return physical
 
 
 _ATOMIC_REPLACE_ATTEMPTS = 5
@@ -331,7 +476,12 @@ def atomic_write_json(path, obj):
     fd, tmp = tempfile.mkstemp(prefix=path.name + ".", suffix=".tmp", dir=str(path.parent))
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(obj, f, ensure_ascii=False, indent=2)
+            typed_control = path.name in {METADATA_NAME, TXN_NAME} and storage_module().is_envelope(obj)
+            if typed_control:
+                storage_module()._unwrap(obj, "metadata" if path.name == METADATA_NAME else "transaction")
+                json.dump(obj, f, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
+            else:
+                json.dump(obj, f, ensure_ascii=False, indent=2)
             f.write("\n")
             f.flush()
             os.fsync(f.fileno())
@@ -681,6 +831,159 @@ def load_metadata(out_dir, *, _observation=None):
         load_json(out_dir / METADATA_NAME, "工单 metadata", _observation=_observation)
 
 
+_FAST_POLICY_MODULE = None
+_FAST_CONTRACT_MODULE = None
+
+
+def fast_policy_module():
+    global _FAST_POLICY_MODULE
+    if _FAST_POLICY_MODULE is None:
+        spec = importlib.util.spec_from_file_location("control_fast_policy", SKILL_ROOT / "tools/fast_policy.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        _FAST_POLICY_MODULE = module
+    return _FAST_POLICY_MODULE
+
+
+def protect_fast_policy_update(before, after):
+    """A supported policy and an already-full run cannot silently downgrade."""
+    old = before.get("risk_profile") or {}
+    new = after.get("risk_profile") or {}
+    old_version = old.get("policy_version") if isinstance(old, dict) else None
+    new_version = new.get("policy_version") if isinstance(new, dict) else None
+    if old_version == 2 and (type(new_version) is not int or new_version != 2):
+        raise ControlError("fast policy version cannot downgrade", gate_id="fast_policy_version")
+    if new_version == 2 and fast_policy_module().effective_mode(before) == "full" \
+            and fast_policy_module().effective_mode(after) != "full":
+        raise ControlError("effective full run cannot downgrade to fast", gate_id="fast_policy_mode")
+
+
+def workflow_effective_mode(meta):
+    profile = meta.get("risk_profile")
+    if isinstance(profile, dict) and profile.get("policy_version") == 2:
+        return fast_policy_module().effective_mode(meta)
+    effective = profile.get("effective_mode") if isinstance(profile, dict) else None
+    return effective if effective in ("fast", "full") else meta.get("mode", "full")
+
+
+def _fast_reference_context(base, path):
+    """Bind the chosen root and ordinary ancestors without sibling timestamps."""
+    parents = []
+    for parent in path.parents:
+        info = parent.lstat()
+        if stat.S_ISLNK(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400 \
+                or not stat.S_ISDIR(info.st_mode):
+            raise ValueError("linked or nonordinary reference parent")
+        parents.append((str(parent), info.st_dev, info.st_ino, info.st_mode))
+    root = base.resolve(strict=True)
+    if not path.resolve(strict=True).is_relative_to(root):
+        raise ValueError("reference escapes root")
+    return str(root), tuple(parents)
+
+
+def fast_policy_admission(out_dir, meta, step):
+    """Check v2 routing and real reference bytes; legacy admission is unchanged.
+
+    A risk assessment selects mandatory work, rather than certifying that work.
+    Plan investigation is allowed before classification. Implementation requires
+    a scope-bound classification plus the original applicable contracts.
+    """
+    profile = meta.get("risk_profile")
+    version = profile.get("policy_version", 1) if isinstance(profile, dict) else 1
+    if type(version) is int and version == 1:
+        return {"ok": True, "legacy": True}
+    if step not in {"review", "merge", "code", "patch", "deepcheck", "audit", "audit-verified", "deploy"}:
+        return {"ok": True, "route": "investigation", "reasons": [], "required_checks": []}
+    catalog = load_json(SKILL_ROOT / "mcp/workflow-gate/gates.json", "workflow gate catalog")
+    policy = fast_policy_module()
+    result = policy.assess_fast_risk(meta, catalog)
+    reasons = list(result["reasons"]) if result["route"] in {"blocked", "replan"} else []
+    if result["route"] == "full" and policy.effective_mode(meta) != "full":
+        reasons.append("full_required")
+    deadline = None
+    if result["route"] == "fast":
+        # Do not resolve links before checking them: a relative spelling must
+        # remain inside the chosen control or active checkout root throughout.
+        refs = profile["classification"]["evidence_refs"]
+        limits = catalog["fast_risk_upgrade"]["policy_v2"]["evidence_limits"]
+        if len(refs) > limits["max_files"]:
+            return dict(result, ok=False, reasons=["evidence_budget_exceeded"])
+        deadline = time.monotonic() + limits["timeout_seconds"]
+        total_bytes = 0
+        for ref in refs:
+            base = Path(out_dir) if ref["scope"] == "ticket" else execution_workspace(out_dir, meta)
+            path = base / ref["path"]
+            try:
+                info = path.lstat()
+                if stat.S_ISLNK(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
+                    raise ValueError("linked reference")
+                parents = _fast_reference_context(base, path)
+                before = path.stat()
+                if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1:
+                    raise ValueError("nonordinary reference")
+                if not path.resolve().is_relative_to(base.resolve()):
+                    raise ValueError("reference escapes root")
+                total_bytes += before.st_size
+                if total_bytes > limits["max_bytes"] or time.monotonic() >= deadline:
+                    reasons.append("evidence_budget_exceeded")
+                    break
+                digest = hashlib.sha256()
+                flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0)
+                with os.fdopen(os.open(path, flags), "rb") as handle:
+                    opened = os.fstat(handle.fileno())
+                    if (opened.st_dev, opened.st_ino, opened.st_size, opened.st_mtime_ns, opened.st_ctime_ns) != \
+                            (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns, before.st_ctime_ns):
+                        raise ValueError("reference changed while opening")
+                    if _fast_reference_context(base, path) != parents:
+                        raise ValueError("reference parent changed while opening")
+                    for block in iter(lambda: handle.read(1024 * 1024), b""):
+                        if time.monotonic() >= deadline:
+                            raise ValueError("reference read deadline exceeded")
+                        digest.update(block)
+                    if os.fstat(handle.fileno()).st_nlink != 1:
+                        raise ValueError("reference acquired another link")
+                if path.is_symlink() or getattr(path.lstat(), "st_file_attributes", 0) & 0x400:
+                    raise ValueError("reference replaced by a link")
+                after = path.stat()
+                if (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns, before.st_ctime_ns) != \
+                        (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns, after.st_ctime_ns):
+                    reasons.append("evidence_changed_during_read")
+                elif digest.hexdigest() != ref["sha256"]:
+                    reasons.append("evidence_hash_mismatch")
+                if _fast_reference_context(base, path) != parents:
+                    raise ValueError("reference parent changed during read")
+            except (OSError, ValueError):
+                reasons.append("invalid_evidence_file")
+    if step in {"code", "patch", "deploy", "audit-verified"}:
+        global _FAST_CONTRACT_MODULE
+        if _FAST_CONTRACT_MODULE is None:
+            spec = importlib.util.spec_from_file_location("control_fast_contract", SKILL_ROOT / "tools/lint_workflow_contract.py")
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            _FAST_CONTRACT_MODULE = module
+        checks = result["required_checks"]
+        if "identity_impact" in checks:
+            impact = meta.get("impact_contract")
+            if not isinstance(impact, dict) or impact.get("identity_change") is not True \
+                    or _FAST_CONTRACT_MODULE.validate_identity_change(meta, catalog):
+                reasons.append("missing_identity_impact")
+        if "lifecycle_acceptance" in checks:
+            acceptance = meta.get("acceptance_contract")
+            if not isinstance(acceptance, dict) or acceptance.get("requires_lifecycle") is not True \
+                    or not _FAST_CONTRACT_MODULE.matrix_complete(acceptance, catalog)[0]:
+                reasons.append("missing_lifecycle_acceptance")
+        if "real_environment_verification" in checks:
+            contract = meta.get("verification_contract")
+            if not isinstance(contract, dict) or contract.get("required") is not True \
+                    or contract.get("requirements_pending") is True \
+                    or any(not isinstance(contract.get(key), list) or not contract[key] for key in
+                           ("required_layers", "required_consumers", "required_scenarios")):
+                reasons.append("missing_real_environment_contract")
+    if deadline is not None and time.monotonic() >= deadline:
+        reasons.append("evidence_budget_exceeded")
+    return dict(result, ok=not reasons, reasons=list(dict.fromkeys(reasons)) or result["reasons"])
+
+
 def is_vnext(meta):
     return meta.get("schema_version") == 3
 
@@ -966,7 +1269,7 @@ def canonical_event_hash(event):
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
-def read_events(out_dir, *, _observation=None):
+def _read_raw_events(out_dir, *, _observation=None):
     path = Path(out_dir) / EVENTS_NAME
     events = []
     if not path.exists():
@@ -974,6 +1277,9 @@ def read_events(out_dir, *, _observation=None):
     if not path.is_file():
         raise ControlError(f"事件日志路径存在但不是普通文件: {path}", exit_code=1,
                            gate_id="event_log_path")
+    storage_limits = storage_module().StorageLimits()
+    if path.stat().st_size > storage_limits.max_raw_bytes:
+        raise ControlError("candidate storage budget exceeded: max_raw_bytes", gate_id="candidate_storage")
     try:
         source = open(path, "r", encoding="utf-8") if _observation is None else _observation.text(path)
         with source as f:
@@ -981,14 +1287,30 @@ def read_events(out_dir, *, _observation=None):
                 line = line.strip()
                 if not line:
                     continue
+                if len(events) >= storage_limits.max_events:
+                    raise ControlError("candidate storage budget exceeded: max_events", gate_id="candidate_storage")
                 try:
-                    events.append(strict_json_loads(line))
-                except (json.JSONDecodeError, ValueError):
+                    events.append(storage_module().strict_json_loads(line))
+                except (json.JSONDecodeError, ValueError) as exc:
+                    syntax = exc if isinstance(exc, json.JSONDecodeError) else exc.__cause__
+                    details = {"path": str(path), "control_path": str(path), "control_root": str(path.parent),
+                               "line": lineno, "recovery_action": "repair_control_ledger",
+                               "reason": "invalid_control_json" if isinstance(syntax, json.JSONDecodeError)
+                                         else "invalid_candidate_storage"}
+                    if isinstance(syntax, json.JSONDecodeError):
+                        details["column"] = syntax.colno
                     raise ControlError(f"事件日志第 {lineno} 行 JSON 解析失败（可能被截断/篡改）: {path}",
-                                       exit_code=1, event_chain_broken_at_line=lineno)
+                                       exit_code=1, event_chain_broken_at_line=lineno, **details) from exc
     except OSError as exc:
         raise ControlError(f"事件日志读取失败: {path}: {exc}", exit_code=1,
                            gate_id="event_log_io")
+    return events, path
+
+
+def read_events(out_dir, *, _observation=None):
+    events, path = _read_raw_events(out_dir, _observation=_observation)
+    if any(storage_module().is_envelope(event) for event in events):
+        events = decode_control_ledger(events).events
     return events, path
 
 
@@ -1026,7 +1348,12 @@ def prepare_event(out_dir, meta, event_type, payload, request_id=None, actor="ic
 def append_prepared_event(out_dir, event):
     path = Path(out_dir) / EVENTS_NAME
     try:
-        atomic_append_line(path, json.dumps(event, ensure_ascii=False, sort_keys=True) + "\n")
+        physical = event
+        if _storage_enabled(out_dir):
+            ledger = _committed_ledger(out_dir)
+            _logical_ledger_validator(event, ledger.events)
+            physical, _ = storage_module().encode_event(event, committed_registry=ledger.registry)
+        atomic_append_line(path, json.dumps(physical, ensure_ascii=False, sort_keys=True) + "\n")
     except OSError as exc:
         raise ControlError(f"事件日志追加失败: {path}: {exc}", exit_code=1,
                            gate_id="event_log_io")
@@ -2075,8 +2402,7 @@ def inspection_worklist_issues(out_dir, meta, step, attempt=None, allow_incomple
         if chain_issues:
             issues.append("event chain invalid")
         profile = meta.get("risk_profile")
-        effective = profile.get("effective_mode") if isinstance(profile, dict) else None
-        effective = effective if effective in ("full", "fast") else meta.get("mode", "full")
+        effective = workflow_effective_mode(meta)
         if report.get("mode") != effective:
             issues.append("effective_mode mismatch")
         if current_attempt is not None:
@@ -2271,9 +2597,7 @@ def inspection_coverage_issues(out_dir, meta, step, attempt=None, allow_incomple
     if dedup == "not_eligible" and (not isinstance(report.get("dedup_reason"), str) or not report["dedup_reason"].strip()):
         issues.append(f"{step}_coverage:dedup_reason")
     profile = meta.get("risk_profile")
-    effective_mode = profile.get("effective_mode") if isinstance(profile, dict) else None
-    if effective_mode not in ("fast", "full"):
-        effective_mode = meta.get("mode")
+    effective_mode = workflow_effective_mode(meta)
     phases = ["audit"] if step == "audit" else ["reverse"] if effective_mode == "fast" else ["reverse", "fixed", "free"]
     reads = report.get("read_phases")
     workspace = execution_workspace(out_dir, meta)
@@ -2613,6 +2937,9 @@ def recover_pending_transaction(out_dir):
     txn_path = out_dir / TXN_NAME
     if not txn_path.is_file():
         return None
+    # Parsing a legacy line is not proof that the event was never appended.
+    # Authenticate the entire committed ledger before either recovery branch.
+    events = _committed_ledger(out_dir).events
     txn = load_json(txn_path, "控制面事务日志")
     before = txn.get("before_metadata")
     after = txn.get("after_metadata")
@@ -2620,29 +2947,57 @@ def recover_pending_transaction(out_dir):
     if (before is not None and not isinstance(before, dict)) or not isinstance(after, dict) or not isinstance(event, dict):
         raise ControlError("控制面事务日志结构损坏，拒绝自动恢复", exit_code=1,
                            gate_id="transaction_recovery", transaction=str(txn_path))
+    if (type(txn.get("schema_version")) is not int or txn["schema_version"] != 1
+            or event.get("ticket_id") != after.get("ticket_id")
+            or (before is not None and before.get("ticket_id") != after.get("ticket_id"))
+                or not isinstance(event.get("payload"), dict)
+                or event["payload"].get("metadata_hash_after") != metadata_hash(after)):
+        raise ControlError("控制面事务日志身份或 after hash 损坏", gate_id="transaction_recovery")
+    prior = events
+    for index, committed in enumerate(events):
+        if committed.get("event_hash") == event.get("event_hash"):
+            prior = events[:index]
+            break
+    prior_hashes = [(item.get("payload") or {}).get("metadata_hash_after") for item in prior]
+    prior_hashes = [value for value in prior_hashes if value is not None]
+    if prior_hashes and metadata_hash(before) != prior_hashes[-1]:
+        raise ControlError("控制面事务 before 与已提交 metadata projection 不符", gate_id="transaction_recovery")
+    try:
+        _logical_ledger_validator(event, prior)
+    except (ValueError, TypeError) as exc:
+        raise ControlError("控制面事务事件损坏: " + str(exc), gate_id="transaction_recovery") from exc
     meta_path = out_dir / METADATA_NAME
     current = load_json(meta_path, "工单 metadata") if meta_path.is_file() else None
-    events, _ = read_events(out_dir)
     event_present = any(e.get("event_hash") == event.get("event_hash") for e in events)
     current_hash = metadata_hash(current)
     if event_present:
-        if current is None or current_hash == metadata_hash(before):
-            atomic_write_json(meta_path, after)
-        elif current_hash != metadata_hash(after):
+        if current is not None and current_hash not in {metadata_hash(before), metadata_hash(after)}:
             raise ControlError("事务事件已落盘但 metadata 已被并发改写，拒绝猜测恢复", exit_code=1,
                                gate_id="transaction_recovery")
+        _finalize_committed_metadata(out_dir, after)
         txn_path.unlink()
         return "completed"
     if current_hash == metadata_hash(after):
         if before is None:
             meta_path.unlink(missing_ok=True)
         else:
-            atomic_write_json(meta_path, before)
+            write_metadata(out_dir, before)
     elif current_hash != metadata_hash(before):
         raise ControlError("事务事件未落盘且 metadata 已被并发改写，拒绝猜测恢复", exit_code=1,
                            gate_id="transaction_recovery")
     txn_path.unlink()
     return "rolled_back"
+
+
+def _finalize_committed_metadata(out_dir, after):
+    """An appended event always completes after, including physical compaction."""
+    enabled = _storage_enabled(out_dir, new_metadata=after)
+    ledger = _committed_ledger(out_dir) if enabled else None
+    physical = _encode_control_document(after, "metadata", ledger.registry if ledger else None, enabled)
+    path = Path(out_dir) / METADATA_NAME
+    current = _load_raw_json(path, "compact metadata") if path.is_file() else None
+    if current != physical:
+        atomic_write_json(path, physical)
 
 
 def commit_metadata_and_event(out_dir, before, after, event_type, payload,
@@ -2678,6 +3033,8 @@ def commit_metadata_and_event(out_dir, before, after, event_type, payload,
             stage_token["proposed_contract"] = copy.deepcopy(after.get("verification_contract") or {})
         # Keep only the copied contract across preparation and publication reads.
         del state
+    if before is not None:
+        protect_fast_policy_update(before, after)
     require_valid_metadata(after)
     event_payload = dict(payload)
     event_payload["metadata_hash_after"] = metadata_hash(after)
@@ -2691,17 +3048,29 @@ def commit_metadata_and_event(out_dir, before, after, event_type, payload,
     if access:
         _candidate_context_guard(out_dir, before, git_provider, require_git_provider)
     txn_path = out_dir / TXN_NAME
-    atomic_write_json(txn_path, {
+    enabled = _storage_enabled(out_dir, new_metadata=after)
+    registry = _committed_ledger(out_dir).registry if enabled else None
+    if enabled:
+        try:
+            _, prospective = storage_module().encode_event(event, committed_registry=registry)
+            # Before publishing anything, prove that final metadata can resolve
+            # exclusively from prior definitions plus this natural event.
+            storage_module().encode_document(after, kind="metadata", committed_registry=prospective,
+                                             require_definitions=True)
+        except storage_module().StorageError as exc:
+            raise ControlError("candidate storage preflight: " + str(exc), gate_id="candidate_storage") from exc
+    journal = {
         "schema_version": 1,
         "created_at": now_iso(),
         "before_metadata": before,
         "after_metadata": after,
         "event": event,
-    })
+    }
+    atomic_write_json(txn_path, _encode_control_document(journal, "transaction", registry, enabled))
     try:
         if access:
             _candidate_context_guard(out_dir, before, git_provider, require_git_provider)
-        atomic_write_json(out_dir / METADATA_NAME, after)
+        write_metadata(out_dir, after, registry=registry, enabled=enabled)
         if access:
             before_publish()
             _candidate_context_guard(out_dir, before, git_provider, require_git_provider)
@@ -2709,24 +3078,29 @@ def commit_metadata_and_event(out_dir, before, after, event_type, payload,
             before_append()
         _stage_publication_check(stage_token, git_provider=git_provider, require_git_provider=require_git_provider)
         append_prepared_event(out_dir, event)
+        _finalize_committed_metadata(out_dir, after)
     except BaseException:
         # append 的 write 已成功但 fsync/返回失败时，事件可能已落盘。
         # 此时应以事件链为准完成 metadata，不能回滚成「新事件+旧状态」。
         event_absence_confirmed = False
         try:
-            events, _ = read_events(out_dir)
+            events = _committed_ledger(out_dir).events
             if any(item.get("event_hash") == event.get("event_hash") for item in events):
-                atomic_write_json(out_dir / METADATA_NAME, after)
+                _finalize_committed_metadata(out_dir, after)
                 txn_path.unlink(missing_ok=True)
                 return event
             event_absence_confirmed = True
         except BaseException:
             pass
         try:
+            if not event_absence_confirmed:
+                # Broken/uncertain append or failed postappend compaction cannot
+                # authorize rollback. Keep journal and current logical after.
+                raise
             if before is None:
                 (out_dir / METADATA_NAME).unlink(missing_ok=True)
             else:
-                atomic_write_json(out_dir / METADATA_NAME, before)
+                write_metadata(out_dir, before, registry=registry, enabled=enabled)
             if event_absence_confirmed:
                 txn_path.unlink(missing_ok=True)
         except BaseException:
@@ -2739,7 +3113,7 @@ def commit_metadata_and_event(out_dir, before, after, event_type, payload,
 
 # ---------------------------------------------------------------- 门禁 linter（复用三现有 linter）
 
-def run_gate_linters(out_dir, to_status=None, delivery_verdict=None, legacy=False, step=None):
+def run_gate_linters(out_dir, to_status=None, delivery_verdict=None, legacy=False, step=None, *, metadata=None):
     sm = load_state_machine()
     lint_cfg = sm["gate_policy"]["gate_linters"]
     # step 真源 = gates.json state_machine.gate_policy.step_by_target（7 项全量：
@@ -2751,6 +3125,11 @@ def run_gate_linters(out_dir, to_status=None, delivery_verdict=None, legacy=Fals
     # completed + delivery_verdict=verified → 用较严的 audit-verified 变体（含交付证据门）
     if step == "audit" and delivery_verdict == "verified":
         step = "audit-verified"
+    if metadata is not None or (Path(out_dir) / METADATA_NAME).is_file():
+        admission = fast_policy_admission(out_dir, metadata if metadata is not None else load_metadata(out_dir), step)
+        if not admission["ok"]:
+            return [{"gate_id": "fast_risk_admission", "ok": False, "fail_closed": True,
+                     "report": admission}]
     results = []
     for gate_id, cmd in lint_cfg.items():
         full_cmd = list(cmd)
@@ -2861,6 +3240,20 @@ def _cmd_create_plain(args):
     }
     status, completed_steps, debug = birth[args.birth]
     meta = dict(seed)
+    if meta.get("risk_profile") is not None and not isinstance(meta["risk_profile"], dict):
+        raise ControlError("risk_profile 必须是 JSON 对象或 null", exit_code=2,
+                           gate_id="fast_risk_profile")
+    profile = dict(meta.get("risk_profile") or {})
+    if "policy_version" in profile and (type(profile["policy_version"]) is not int or profile["policy_version"] != 2):
+        raise ControlError("新工单必须使用风险策略版本2；历史兼容仅适用于已有工单", exit_code=2,
+                           gate_id="fast_risk_profile")
+    # Bind the policy at every new birth, including initially full tickets, so
+    # later updates cannot opt back into historical admission by omitting it.
+    initial_mode = "fast" if meta.get("mode") == "fast" else "full"
+    profile["policy_version"] = 2
+    profile.setdefault("requested_mode", initial_mode)
+    profile.setdefault("effective_mode", initial_mode)
+    meta["risk_profile"] = profile
     if verification_evidence_module().real_env_risk(meta) and meta.get("verification_contract") is None:
         meta["verification_contract"] = verification_evidence_module().pending_contract()
     if verification_evidence_module().build_starts(meta):
@@ -3312,7 +3705,7 @@ def cmd_validate(args):
 
     # 三 linter：vNext 一律 --strict（fail-closed）；legacy 宽松（不阻断只读审计）
     if not args.skip_linters:
-        for report in run_gate_linters(out_dir, legacy=legacy):
+        for report in run_gate_linters(out_dir, legacy=legacy, metadata=meta):
             if report["ok"]:
                 continue
             entry = {
@@ -3545,7 +3938,7 @@ def cmd_transition(args):
     gate_reports = []
     gates_skipped = bool(args.skip_gates)
     if to_status in sm["gate_policy"]["gated_targets"] and not meta.get("debug") and not gates_skipped:
-        gate_reports = run_gate_linters(out_dir, to_status, args.delivery_verdict)
+        gate_reports = run_gate_linters(out_dir, to_status, args.delivery_verdict, metadata=meta)
         failed = [g for g in gate_reports if not g["ok"]]
         if failed:
             print(json.dumps({
@@ -4221,12 +4614,12 @@ def handoff_close_control_root(source_dir, meta):
         raise ControlError(f"归档控制根不存在: {archive_dir}", exit_code=1,
                            gate_id="archive_exists")
     with DirLock(archive_dir):
-        atomic_write_json(archive_dir / METADATA_NAME, meta)
         events_path = source_dir / EVENTS_NAME
         if not events_path.is_file():
             raise ControlError("源工单事件链不存在，无法交接",
                                exit_code=1, gate_id="event_chain")
         atomic_write_bytes(archive_dir / EVENTS_NAME, events_path.read_bytes())
+        write_metadata(archive_dir, meta, enabled=_storage_enabled(source_dir))
         refresh_archive_manifest_control_files(archive_dir, meta.get("ticket_id"))
     return archive_dir
 
@@ -6470,6 +6863,11 @@ def cmd_step(args, *, git_provider=None, require_git_provider=False, inspection_
             raise ControlError("现有事件链不完整，拒绝记录步骤", exit_code=1,
                                gate_id="event_chain", violations=problems)
 
+        if args.phase != "finish" or args.outcome in {"success", "degraded"}:
+            admission = fast_policy_admission(out_dir, meta, args.step)
+            if not admission["ok"]:
+                raise ControlError("fast scope/risk admission failed", gate_id="fast_risk_admission",
+                                   assessment=admission)
         if args.phase == "start":
             attempt = args.attempt or derived_attempt("step", args.request)
             snapshot, missing = capture_step_inputs(out_dir, meta, model, args.step, **candidate_access)
@@ -6668,7 +7066,7 @@ def cmd_step(args, *, git_provider=None, require_git_provider=False, inspection_
             # checks. Keep one authoritative completion boundary for them too.
             if access:
                 raise ControlError("code final linter is not enabled", gate_id="candidate_business_propagation_pending")
-            failed = [g for g in run_gate_linters(out_dir, step=args.step) if not g["ok"]]
+            failed = [g for g in run_gate_linters(out_dir, step=args.step, metadata=meta) if not g["ok"]]
             if failed:
                 raise ControlError("独立步骤完成门禁未通过", gate_id="step_gates",
                                    failed_gates=failed)
@@ -6841,7 +7239,7 @@ def cmd_inspection(args, *, git_provider=None, require_git_provider=False, inspe
                     baselines = {".": meta["candidate_tracking"]["base"]}
                 report = helper.build_worklist(workspace, meta.get("code_files") or [], step=args.step,
                     ticket_id=meta["ticket_id"], attempt=args.attempt,
-                    mode=(meta.get("risk_profile") or {}).get("effective_mode") or meta.get("mode", "full"),
+                    mode=workflow_effective_mode(meta),
                     related=args.related, scopes=args.scope, baselines=baselines,
                     **({"max_files": max_files} if max_files is not None else {}), **inspection_access)
                 if (meta.get("candidate_tracking") or {}).get("mode") == "enabled":
@@ -8021,6 +8419,26 @@ def build_parser():
     return ap
 
 
+def refresh_ticket_overview(out_dir):
+    """Refresh one derived Markdown at stable checkpoints, never workflow state.
+
+    Delivery query failures remain visible but cannot undo a committed workflow
+    result. The report writer owns path safety and pending-transaction checks.
+    """
+    path = Path(out_dir) / "delivery_validation_report.md"
+    try:
+        spec = importlib.util.spec_from_file_location("checkpoint_delivery", SKILL_ROOT / "tools/icode_delivery.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        with contextlib.redirect_stdout(io.StringIO()):
+            code = module.main(["--dir", str(out_dir), "--markdown", str(path)])
+        if code == 0:
+            return {"state": "generated", "path": path.name}
+        return {"state": "unavailable", "reason": "delivery_query_failed"}
+    except Exception as exc:  # Derived output must not turn a committed action into a retry.
+        return {"state": "unavailable", "reason": type(exc).__name__}
+
+
 def main(*, git_provider=None, require_git_provider=False, inspection_provider_factory=None):
     import contextlib
     import io
@@ -8067,13 +8485,21 @@ def main(*, git_provider=None, require_git_provider=False, inspection_provider_f
                     require_git_provider, deadline=policy_deadline)
             except (candidate_module().CandidateError, OSError, UnicodeError) as exc:
                 raise ControlError(str(exc), gate_id="candidate_provider_context") from exc
+        try:
+            payload = json.loads(out)
+        except (ValueError, TypeError):
+            payload = None
+        checkpoint = ((args.cmd == "transition" and getattr(args, "to", None) == "completed") or
+                      (args.cmd == "step" and getattr(args, "step", None) == "patch" and
+                       getattr(args, "phase", None) == "finish" and
+                       getattr(args, "outcome", None) in {"success", "degraded"}))
+        if checkpoint and code == 0 and isinstance(payload, dict) and payload.get("ok") is True:
+            payload["overview"] = ({"state": "deferred", "reason": "provider_context_required"} if access
+                                   else refresh_ticket_overview(Path(args.dir).resolve()))
+            out = json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
         sys.stdout.write(out)
         sys.stdout.flush()
         if code == 0:
-            try:
-                payload = json.loads(out)
-            except (ValueError, TypeError):
-                payload = None
             if isinstance(payload, dict) and payload.get("ok") is False:
                 return 1
         return code

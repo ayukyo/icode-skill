@@ -4,6 +4,7 @@ from typing import Any, Dict
 
 from .base import BackendError, BackendResult
 from ..models import AgentRequest, validate_request
+from ..ticket_catalog import CatalogError, read_ticket_metadata
 
 
 def _usage_to_dict(usage: Any) -> Dict[str, Any] | None:
@@ -78,12 +79,9 @@ class OpenAIResponsesBackend:
 
 def _ticket_id(request: AgentRequest) -> str:
     """只读取本地身份；不把 ticket 路径或正文发送给 provider。"""
-    import json
-
-    metadata_path = request.ticket_dir / ".ico_metadata.json"
     try:
-        data = json.loads(metadata_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
+        data = read_ticket_metadata(request.ticket_dir)
+    except CatalogError as exc:
         raise BackendError("无法读取工单 ticket_id", code="ticket_identity") from exc
     ticket_id = data.get("ticket_id")
     if not isinstance(ticket_id, str) or not ticket_id:
