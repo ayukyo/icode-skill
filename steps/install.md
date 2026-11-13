@@ -11,11 +11,11 @@
 
 重装按当前发行收敛已退役的受管项：共享技能保留既有 `.icode-skill-owner.json` 格式，以独立发布摘要判断是否被用户改写；可安全退役的整项移入扫描根外的 `.icode-skill-archive`。缺历史摘要、归属不明或已改写项保留并报告冲突。MCP 按每宿主注册摘要回执识别归属，旧版本仅在实际注册与导出 entry 完整一致时接管；先验证所选新版全部注册，再注销退役项，并将配置/运行时归档到 `~/.local/state/icode/mcp-install/`。回执不保存凭据正文。
 
-根安装器在源码同步前规划 MCP 变更，保留旧入口直到新版安装成功；失败不注销旧注册。`--preview` 零写入，`--basic` 不修改 MCP 注册/回执；内部安装器的 `--no-delete` 保留退役项；单 MCP 维护不清理其他服务。未选择宿主、自建服务和用户修改不会被作为受管退役自动清理。普通 `sync-to-global.sh` 只同步技能并保留旧 MCP 代码，不代替 MCP 安装收敛。真实配置冲突、注册验证或归档失败必须明确报告；不得把配置已写入当作宿主已重载，也不得自动杀死其他会话进程。
+根安装器在源码同步前规划 MCP 变更，保留旧入口直到新版安装成功；失败不注销旧注册。`--preview` 零写入，`--basic` 不修改 MCP 注册/回执；内部安装器的 `--no-delete` 保留退役项。单 MCP 维护只处理该项及清单明确声明的替代成员：安装 `icode-local` 可迁移其五个旧模块，不能清理其他服务。被统一服务复用的业务代码和原配置保留，旧虚拟环境/缓存与恢复快照归档到扫描根外。未选择宿主、自建服务和用户修改不会被作为受管退役自动清理。普通 `sync-to-global.sh` 只同步技能并保留旧 MCP 代码，不代替 MCP 安装收敛。真实配置冲突、注册验证或归档失败必须明确报告；不得把配置已写入当作宿主已重载，也不得自动杀死其他会话进程。
 
 **内置能力与独立 Skill 的安装边界**：`tools/evidence_intake.py`、`tools/email_intake.py`、`tools/document_intake.py`、`tools/media_router.py`、`tools/icode_crosscheck.py`、`debug_catalog.py`、`runtime_baseline.py`、`verification_debt.py`、`learn.py`、`scripts/submission_guard.py handoff` 及 `steps/learn.md` / `steps/crosscheck.md` 都属于 ICODE 本体，随 ICODE 目录一次复制到所选宿主，**不**写入 `skill-packs/manifest.json`。manifest 声明当前 16 个需要在技能根顶层独立发现的跨项目共享 Skill（含邮件证据与 MCU 软硬件契约审计）；`--client all` 会同时安装到 Claude Code、Codex，并检测到对应目录时追加 CodeBuddy（共享 Claude 技能根）与 WorkBuddy（独立 `~/.workbuddy/skills` 根），各自只增加独立命令桥和 MCP 配置。
 
-**当前 13 个声明的 MCP**：
+**当前 9 个默认 MCP**（以 `mcp/servers.json` 为准）：
 
 | MCP | 形态 | 对 icode 工作流的增益 | KEY |
 |---|---|---|---|
@@ -25,12 +25,8 @@
 | **context7** | npm | 库文档实时查询，步骤 0/1/4 | ❌ |
 | **playwright** ⚠️ | npm | 浏览器自动化，步骤 5/6（**仅前端项目**） | ❌ |
 | **cheap-research** | Python venv | 便宜 LLM 推理降本（各步骤正文执行点的候选/压缩/结构化提取子任务），未装走 Agent(model="haiku") 兜底 | ✅ 推荐装（LLM 类工具需配三件套；本地/网络类工具不依赖） |
-| **icode-evidence** | Python venv | 文件 hash/行号回指、日志时间线、文档语料清单 | ❌ |
-| **icode-workspace** | Python venv | 多 Git 根、worktree、构建输入和制品来源观测 | ❌ |
+| **icode-local** | 一份 Python venv | workspace/evidence/index/health/policy 五模块，28 个聚合及前缀工具 | ❌ |
 | **icode-device-observe** | Python venv | 命名 profile 的 SSH/ADB/fixture 只读设备观测 | ❌ |
-| **icode-mcp-health** | Python venv | 安装后 manifest、入口、工具 schema 和敏感字段健康检查 | ❌ |
-| **icode-mcp-policy** | Python venv | step→server/tool 路由与最小权限机器真源 | ❌ |
-| **icode-local-index** | Python venv | 大型源码/日志/文档的可重建 SQLite FTS 索引 | ❌ |
 | **icode-mail-observe** | Python venv | 可选的无人值守/邮箱范围搜索 IMAP 适配器；普通网页链接直接复用已登录浏览器 | ❌（仅启用 IMAP 时需自行配置邮箱凭据） |
 
 > 完整说明见各 `mcp/<name>/README.md`。**vision-bridge 需配 KEY（三件套）才能用**；cheap-research 分三类 capability——`local` 6 个（describe_capabilities / scan_patterns / trace_refs / validate_migration_ops / parse_project_id / scan_modules）+ `fetch` 1 个（fetch_remote）**不依赖 LLM provider，未配 KEY 也照常可用**，仅 `llm` 8 个（summarize / retrieve_similar / fill_template / extract / propose_repo_facts / diff_summary / generate_filename / select_template）需配三件套。其余无需 KEY 即可安装。
@@ -41,7 +37,7 @@
 
 | 命令 | 行为 |
 |---|---|
-| `/icode install` | 安装 ICODE、全部共享技能和 13 个 MCP；默认只面向 Claude Code |
+| `/icode install` | 安装 ICODE、全部共享技能和 9 个默认 MCP；默认只面向 Claude Code |
 | `/icode install <name>` | 安装 ICODE、全部共享技能，但只安装指定 MCP |
 | `/icode install --client codex` | 安装到 Codex skills 根，生成共享 entry 并只注册所选 Codex 宿主 |
 | `/icode install --client codebuddy` | 安装到共享的 Claude skills 根，发布 `~/.codebuddy/commands/icode.md`，并注册 CodeBuddy MCP（`~/.codebuddy/mcp.json`） |
@@ -53,7 +49,7 @@
 **对称卸载**（虽然不是 `/icode` 命令，但同样属于本步骤的核心操作）：
 
 ```bash
-./mcp/uninstall.sh                     # 一键卸载所有 13 个 mcp（默认只清 Claude Code）
+./mcp/uninstall.sh                     # 一键卸载当前默认 MCP（默认只清 Claude Code）
 ./mcp/uninstall.sh <name>              # 只卸载指定 mcp
 ./mcp/uninstall.sh --client codex      # 卸载 + 同时清 Codex 注册
 ./mcp/uninstall.sh --client codebuddy  # 卸载 + 同时清 CodeBuddy 注册
@@ -72,7 +68,7 @@
    - 对 CodeBuddy 从仓库版本化模板发布 `~/.codebuddy/commands/icode.md`；同内容可接管，不同内容的未托管命令在任何 Skill 写入前拒绝，普通同步不修改 `mcp.json`
    - 安装后校验发布 hash，并确保 ICODE 内没有可发现的嵌套技能入口
 4. 未指定公开 `--basic`（即内部未传 `--skip-mcp`）时，根安装器再调用已安装 ICODE 内的 `mcp/install.sh`；该脚本会：
-   - 扫描 `mcp/*/install.sh`（含 13 个声明的子工程，**新加 mcp 自动被识别**）
+   - 按 `mcp/servers.json` 的九项发行清单选择入口；旧版本无清单时兼容扫描 `mcp/*/install.sh`。保留的五个业务兼容目录不再次进入默认安装
    - 逐个 `bash <子工程>/install.sh`，每个子工程 install.sh 自带：
      - 环境探测（Python/Node/npx/uv 等）
      - **缺啥补啥**（如 vision-bridge 建 venv；npm 类懒加载）
@@ -168,7 +164,7 @@
 
 ## 卸载时机
 
-卸载 13 个 mcp 用 `mcp/uninstall.sh`（顶层脚本）。**注意**：
+卸载当前默认 MCP 用 `mcp/uninstall.sh`（顶层脚本）。**注意**：
 - 移除 `~/.claude.json` 注册项（经共享模块 `claude_registry.unregister`，同时清理 `~/.claude/icode_data/mcp_entries/<name>.json` 导出）
 - `--client codex|all` 时同时 `codex mcp remove <name>`（未注册幂等跳过）
 - `--client codebuddy|all` 时同时从 `~/.codebuddy/mcp.json` 移除对应节点，保留其他宿主设置和 MCP；损坏 JSON 失败关闭
@@ -180,6 +176,6 @@
 
 本步骤为 **L0（确定性执行，不强制思考）**（见 [references/mcp_per_step.md](../references/mcp_per_step.md)「通用前置·分级思考」段）：安装脚本 + 配置校验，无 LLM 分析子任务，不调用 sequential-thinking。除下述健康/策略复检外，其余 MCP 本步骤不调用。
 
-`icode-mcp-health` 与 `icode-mcp-policy` 是本步骤的条件后端：安装完成后的新会话可用前者做 manifest/入口复检、用后者校验路由真源；当前安装进程仍以 shell 契约测试和 JSON/语法检查完成首次验收，不能反向依赖“刚注册但尚未热加载”的 MCP。
+统一 `icode-local` 的 `health_*` 与 `policy_*` 是本步骤的条件后端；旧宿主的 `icode-mcp-health` 与 `icode-mcp-policy` 继续兼容。安装完成后的新会话可做 manifest/入口及路由复检；当前安装进程仍以 shell 契约测试和 JSON/语法检查完成首次验收，不能反向依赖“刚注册但尚未热加载”的 MCP。
 
 **强制约束**：🟢/🟢*/⚪ 语义 + 双保险机制（执行步骤内嵌 + thinking_core gate）详见 [SKILL.md「MCP 调用覆盖强制化」](../SKILL.md) + [references/mcp_per_step.md「双保险机制」](../references/mcp_per_step.md)；本步骤表内的 🟢/🟢* 标注按上方真源判定。

@@ -166,6 +166,7 @@ if [[ "$SKIP_MCP" == false ]]; then
     export ICODE_MCP_RECONCILE_PLAN
     export ICODE_MCP_RECONCILE_ROOT_OWNER=1
     export ICODE_DEFER_SKILL_RETIREMENT=1
+    "${DOCX_PYTHON[@]}" "$RECONCILE" profile-preflight --plan "$ICODE_MCP_RECONCILE_PLAN"
   fi
 fi
 

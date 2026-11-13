@@ -37,6 +37,14 @@ on:
       - 'mcp/workflow-gate/skill-routes.json'
       - 'mcp/icode-workspace/**'
       - 'mcp/_lib/**'
+      - 'mcp/icode-local/**'
+      - 'mcp/servers.json'
+      - 'mcp/install.sh'
+      - 'mcp/uninstall.sh'
+      - 'mcp/icode-mcp-health/**'
+      - 'mcp/icode-mcp-policy/server.py'
+      - 'tests/test_local_mcp_replacement_install.py'
+      - 'tests/test_local_mcp_policy_health_transport.py'
       - 'mcp/icode-mcp-policy/policy.json'
       - 'references/**'
       - 'steps/**'
@@ -106,7 +114,7 @@ jobs:
           python-version: '3.11'
       - name: Prepare Windows browser test runtime
         run: |
-          python -m pip install --disable-pip-version-check pytest==9.0.3 PyYAML==6.0.2 playwright==1.64.1
+          python -m pip install --disable-pip-version-check pytest==9.0.3 PyYAML==6.0.2 playwright==1.64.1 -r mcp/icode-local/requirements.txt
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python -m playwright install chromium --only-shell
       - name: Windows HTTP document reader compatibility
@@ -117,6 +125,11 @@ jobs:
         run: node tests/test_doc_reader_core.js
       - name: Windows installer and unavailable MCP gate regressions
         run: python -m pytest -p no:anyio tests/test_mcp_install_reconcile.py tests/test_skill_retirement.py tests/test_claude_registry_unit.py tests/test_thinking_gate_unavailable.py tests/test_mcp_gate_unavailable.py -q
+      - name: Windows unified local MCP and replacement contracts
+        run: |
+          python -m pytest -p no:anyio mcp/icode-local/tests tests/test_local_mcp_replacement_install.py tests/test_local_mcp_policy_health_transport.py -q
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python mcp/icode-local/tests/verify_stdio.py
       - name: Prepare pinned WebView2 host in external cache
         run: |
           $hostExe = python -c "import sys;sys.path.insert(0,'agent_runtime');from icode_agent.native_runtime import ensure_native_runtime;print(ensure_native_runtime())"
@@ -196,6 +209,18 @@ jobs:
               print(f'{profile}: {count} / {CORE_MAX_FILES} files')
               if count > CORE_MAX_FILES:
                   raise SystemExit(f'{profile} exceeds the import file budget')
+          with zipfile.ZipFile(root / f'icode-v{version}-mcp.zip') as archive:
+              names = set(archive.namelist())
+              catalog = json.loads(archive.read('mcp/servers.json'))
+              if len(catalog['servers']) != 9:
+                  raise SystemExit('Default MCP catalog must contain nine services')
+              required = {'mcp/icode-local/' + name for name in
+                          ('server.py', 'profile.py', 'stage_payload.py', 'requirements.txt', 'tools_manifest.json')}
+              required.update('mcp/' + name + '/install.sh' for name in catalog['servers'])
+              required.update('mcp/' + name + '/server.py' for name in
+                              catalog['replacements']['icode-local']['members'].values())
+              if not required <= names:
+                  raise SystemExit('MCP component is missing unified runtime or compatibility dependencies')
           PY
       - name: Document reader browser acceptance
         env:
@@ -211,6 +236,8 @@ jobs:
           retention-days: 7
       - name: Offline regression tests
         run: |
+          python3 -m pytest -p no:anyio mcp/icode-local/tests tests/test_local_mcp_replacement_install.py tests/test_local_mcp_policy_health_transport.py -q
+          python3 mcp/icode-local/tests/verify_stdio.py
           python3 -m pytest -p no:anyio tests/test_install_reconciliation_entrypoints.py tests/test_mcp_install_reconcile.py tests/test_skill_retirement.py tests/test_claude_registry_unit.py tests/test_thinking_gate_unavailable.py tests/test_mcp_gate_unavailable.py -q
           python3 -m unittest discover -s tests -p 'test_public_site*.py' -v
           python3 -m unittest discover -s tests -p test_notify_indexnow.py -v

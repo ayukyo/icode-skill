@@ -101,16 +101,19 @@ else
 fi
 
 LOCAL_MCP_SERVERS=(
-  icode-evidence
-  icode-workspace
+  icode-local
   icode-device-observe
   icode-mail-observe
+)
+COMPATIBILITY_MCP_MODULES=(
+  icode-evidence
+  icode-workspace
   icode-mcp-health
   icode-mcp-policy
   icode-local-index
 )
 LOCAL_MCP_OK="$ALL_INSTALLED"
-for name in "${LOCAL_MCP_SERVERS[@]}"; do
+for name in "${LOCAL_MCP_SERVERS[@]}" "${COMPATIBILITY_MCP_MODULES[@]}"; do
   for relative in server.py install.sh uninstall.sh config.example.json tools_manifest.json; do
     if [[ ! -f "$CLAUDE_ROOT/icode/mcp/$name/$relative" ]] \
       || [[ ! -f "$AGENTS_ROOT/icode/mcp/$name/$relative" ]]; then
@@ -118,12 +121,60 @@ for name in "${LOCAL_MCP_SERVERS[@]}"; do
     fi
   done
 done
+for installed_mcp in "$CLAUDE_ROOT/icode/mcp" "$AGENTS_ROOT/icode/mcp"; do
+  for relative in requirements.txt profile.py stage_payload.py; do
+    if [[ ! -f "$installed_mcp/icode-local/$relative" ]]; then
+      LOCAL_MCP_OK=false
+    fi
+  done
+  for relative in install_reconcile.py register_python_mcp.py; do
+    if [[ ! -f "$installed_mcp/_lib/$relative" ]]; then
+      LOCAL_MCP_OK=false
+    fi
+  done
+done
 if "$LOCAL_MCP_OK" \
   && [[ -f "$CLAUDE_ROOT/icode/mcp/_lib/local_mcp_common.py" ]] \
   && [[ -f "$AGENTS_ROOT/icode/mcp/_lib/install_local_python_mcp.sh" ]]; then
-  ok "all-client install bundles seven keyless local MCP services and shared runtime"
+  ok "all-client install bundles three keyless local MCP services, five compatibility modules and shared runtime"
 else
-  bad "all-client install bundles seven keyless local MCP services and shared runtime"
+  bad "all-client install bundles three keyless local MCP services, five compatibility modules and shared runtime"
+fi
+
+if "$ALL_INSTALLED" && python3 - "$CLAUDE_ROOT/icode/mcp" "$AGENTS_ROOT/icode/mcp" <<'PY'
+import json
+from pathlib import Path
+import sys
+
+members = {"workspace": "icode-workspace", "evidence": "icode-evidence",
+           "index": "icode-local-index", "health": "icode-mcp-health",
+           "policy": "icode-mcp-policy"}
+defaults = {"icode-local", "icode-device-observe", "icode-mail-observe",
+            "cheap-research", "vision-bridge", "context7", "memory",
+            "playwright", "sequential-thinking"}
+for value in sys.argv[1:]:
+    root = Path(value)
+    catalog = json.loads((root / "servers.json").read_text(encoding="utf-8"))
+    assert set(catalog) == {"schema_version", "servers", "replacements"}
+    assert type(catalog["schema_version"]) is int and catalog["schema_version"] == 1
+    assert len(catalog["servers"]) == 9 and set(catalog["servers"]) == defaults
+    assert {name for name in catalog["servers"] if name.startswith("icode-")} == {
+        "icode-local", "icode-device-observe", "icode-mail-observe"}
+    assert catalog["replacements"] == {
+        "icode-local": {"members": members, "retain_payload": True}}
+    manifest = json.loads((root / "icode-local/tools_manifest.json").read_text(encoding="utf-8"))
+    expected_tools = {"describe_capabilities"}
+    for prefix, directory in members.items():
+        legacy = json.loads((root / directory / "tools_manifest.json").read_text(encoding="utf-8"))
+        expected_tools.update(prefix + "_" + tool["name"] for tool in legacy["tools"])
+    assert manifest["server"] == "icode-local"
+    assert len(manifest["tools"]) == len(expected_tools) == 28
+    assert {tool["name"] for tool in manifest["tools"]} == expected_tools
+PY
+then
+  ok "installed catalogs declare nine defaults, three local services and all 28 unified tools"
+else
+  bad "installed catalogs declare nine defaults, three local services and all 28 unified tools"
 fi
 
 COMMAND_CONTRACT_OK="$ALL_INSTALLED"
@@ -240,6 +291,10 @@ mkdir -p "$REAL_MCP_SOURCE"
   | tar -xf - -C "$REAL_MCP_SOURCE"
 find "$REAL_MCP_SOURCE/mcp" -mindepth 2 -type f -name install.sh -delete
 mkdir -p "$REAL_MCP_SOURCE/mcp/fixture-mcp"
+# This fixture intentionally replaces the distribution, so its strict catalog
+# must describe its own single service rather than the production defaults.
+printf '{"schema_version":1,"servers":["fixture-mcp"],"replacements":{}}\n' \
+  >"$REAL_MCP_SOURCE/mcp/servers.json"
 cat >"$REAL_MCP_SOURCE/mcp/fixture-mcp/install.sh" <<'SH'
 #!/usr/bin/env bash
 printf 'called\n' >"$MCP_CHILD_TRACE"
@@ -288,6 +343,8 @@ claude_registry.register("fixture-mcp", {"command": sys.executable, "args": ["-c
 PY
 SH
 mkdir -p "$MCP_SOURCE/mcp/fixture-mcp"
+printf '{"schema_version":1,"servers":["fixture-mcp"],"replacements":{}}\n' \
+  >"$MCP_SOURCE/mcp/servers.json"
 printf '#!/usr/bin/env bash\nexit 0\n' >"$MCP_SOURCE/mcp/fixture-mcp/install.sh"
 chmod +x "$MCP_SOURCE/mcp/install.sh"
 git -C "$MCP_SOURCE" init -q

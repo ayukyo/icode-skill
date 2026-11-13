@@ -7,6 +7,8 @@ import json
 import os
 import re
 import subprocess
+from contextlib import contextmanager
+from contextvars import ContextVar
 from pathlib import Path, PureWindowsPath
 from typing import Any, TypedDict
 
@@ -76,12 +78,55 @@ def fail(code: str, message: str, *, exc: Exception | None = None, config_env: s
     return result
 
 
+_MODULE_PROFILE: ContextVar[tuple[Path, bool] | None] = ContextVar("icode_module_profile", default=None)
+_PROFILE_MODULES = {
+    "ICODE_WORKSPACE_CONFIG": "workspace", "ICODE_EVIDENCE_CONFIG": "evidence",
+    "ICODE_LOCAL_INDEX_CONFIG": "index", "ICODE_MCP_HEALTH_CONFIG": "health",
+    "ICODE_MCP_POLICY_CONFIG": "policy",
+}
+
+
+@contextmanager
+def module_config_profile(path: Path, *, required: bool = True):
+    """Scope the unified profile to this invocation; standalone servers are unchanged."""
+    token = _MODULE_PROFILE.set((path, required))
+    try:
+        yield
+    finally:
+        _MODULE_PROFILE.reset(token)
+
+
 def load_config(env_name: str, server_dir: Path, defaults: dict[str, Any]) -> dict[str, Any]:
     """读取配置并做浅合并；配置损坏时明确失败，不静默退回。"""
     raw = os.environ.get(env_name)
+    explicit = env_name in os.environ
     path = expand_path(raw) if raw else server_dir / "config.json"
+    profile = _MODULE_PROFILE.get()
+    if explicit and not raw:
+        raise ValueError(f"Empty explicit configuration path: {env_name}")
+    if not explicit and profile is not None and env_name in _PROFILE_MODULES:
+        profile_path, required = profile
+        profile_path = expand_path(profile_path)
+        if profile_path.exists() or required:
+            data = json.loads(profile_path.read_text(encoding="utf-8"))
+            if not isinstance(data, dict) or not isinstance(data.get("module_configs"), dict):
+                raise ValueError("module_configs must be an object")
+            mapping = data["module_configs"]
+            if set(mapping) - set(_PROFILE_MODULES.values()):
+                raise ValueError("module_configs contains an unknown module")
+            if any(not isinstance(value, str) or not value.strip() for value in mapping.values()):
+                raise ValueError("module_configs paths must be nonempty strings")
+            module = _PROFILE_MODULES[env_name]
+            if module in mapping:
+                value = mapping[module]
+                if not isinstance(value, str) or not value.strip():
+                    raise ValueError(f"Invalid module configuration path: {module}")
+                path = expand_path(value, base_dir=profile_path.parent)
+                explicit = True
     config = dict(defaults)
     if not path.exists():
+        if explicit:
+            raise FileNotFoundError(f"Explicit configuration is missing: {path}")
         return config
     data = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(data, dict):

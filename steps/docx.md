@@ -45,7 +45,7 @@
 ## 3. 与现有 MCP 的边界
 
 - P0 单个本地 Markdown：不强制 MCP；文件路径、hash、相对图片由本地构建器记录。
-- P1 使用工单、日志、附件或知识库：按 `icode-mcp-policy` 的 `docx` 路由先用 **icode-evidence** 回读并记录 hash；语料超过常规 `rg` 范围时再使用 **icode-local-index** 找候选，命中仍须回读原文件。
+- P1 使用工单、日志、附件或知识库：按 `icode-mcp-policy` 逻辑模块的 `docx` 路由，优先用 **icode-local.evidence_*** 回读并记录 hash；语料超过常规 `rg` 范围时再用 **icode-local.index_*** 找候选。旧宿主的 **icode-evidence** / **icode-local-index** 入口继续兼容；命中仍须回读原文件。
 - 不新增 DOCX MCP，也不把本地文档内容发送到远程服务。`cheap-research`、vision、浏览器等只在其既有明确条件成立时使用，不能替代来源核验。
 
 ## 4. 构建、结构验收与视觉验收

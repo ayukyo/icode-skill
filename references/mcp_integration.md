@@ -1,6 +1,6 @@
 # MCP 工具集成与降级路径
 
-> icode 工作流可调用 13 个 MCP（`/icode install` 一键安装）：6 个既有通用/模型辅助 MCP，加 7 个 ICODE 自建免 Key 本地 MCP。**用户可能不装全部**，每个 MCP 都是**可选 + 降级**的。
+> 默认发行提供 9 个 MCP（`/icode install` 一键安装）：6 个通用/模型辅助 MCP，加 `icode-local`、设备观测、邮件观测 3 个本地服务。五个通用本地模块由一个 `icode-local` 进程承载。**用户可能不装全部**，每个 MCP 都是**可选 + 降级**的。
 >
 > 安装入口：`/icode install`（详见 [steps/install.md](../steps/install.md)）
 >
@@ -19,7 +19,7 @@
 
 ---
 
-## 13 个 MCP 的强证据 + 降级路径
+## 9 个默认 MCP 的强证据 + 降级路径
 
 ### ① sequential-thinking（**L2/L3 复杂推理依赖**）
 
@@ -78,9 +78,13 @@
 - **触发场景详见**：[mcp_per_step.md](mcp_per_step.md) 强证据场景表 + 15 工具入参/出参 schema（见 [mcp/cheap-research/server.py](../mcp/cheap-research/server.py)）
 - **当前状态**：15 工具已在 dev_repo 完成，核心契约测试见 [mcp/cheap-research/tests/](../mcp/cheap-research/tests/)；**未同步到已安装目录**（等用户指令）。历史自检数字不作承诺，以当前 tests/ 实跑为准
 
-### ICODE 自建免 Key 本地 MCP（⑦～⑬）
+### ICODE 自建免 Key 本地 MCP（⑦～⑨）
 
-这 7 个服务不增加公开 `/icode` 命令，只作为现有步骤的条件后端。路由、工具白名单和 operation 权限的机器真源是 [`mcp/icode-mcp-policy/policy.json`](../mcp/icode-mcp-policy/policy.json)；服务缺失或调用失败时退回 `Read/rg/git/file/readelf/ssh/adb/SQLite`、已登录网页邮箱或 `.eml/.msg` 离线接入等当前机制，并显式记录降级，不阻断步骤。
+默认运行 `icode-local`、`icode-device-observe`、`icode-mail-observe` 三个服务，不增加公开 `/icode` 命令。发行清单为 [`mcp/servers.json`](../mcp/servers.json)。原 workspace、evidence、local-index、health、policy 目录保留业务代码、独立入口及各自配置，作为兼容模块，不会因目录仍在而重复默认安装。
+
+统一服务提供 27 个带模块前缀的原工具，另有一个静态聚合 `describe_capabilities`。例如 `mcp__icode-local__workspace_resolve_project`、`mcp__icode-local__evidence_inspect_file`、`mcp__icode-local__index_query_index`、`mcp__icode-local__health_validate_manifest`、`mcp__icode-local__policy_evaluate_call`。模块按实际调用懒加载；只列工具不扫描工程、不建索引、不启动五个子服务。
+
+路由、工具白名单和 operation 权限的机器真源仍是 [`mcp/icode-mcp-policy/policy.json`](../mcp/icode-mcp-policy/policy.json)。新物理服务/前缀工具通过 transport 映射执行原逻辑模块的 step、condition 与 operation 规则；下表旧名字表示逻辑模块及旧安装兼容身份。各模块配置和路径权限独立，不合并允许根。当前宿主只暴露旧工具时可沿用对应旧入口；新旧均不可用时退回 `Read/rg/git/file/readelf/ssh/adb/SQLite`、已登录网页邮箱或 `.eml/.msg` 等确定性机制，显式记录降级。
 
 | MCP | 核心工具 | 主要步骤 | 硬边界 |
 |---|---|---|---|

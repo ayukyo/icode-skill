@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# mcp/ 顶层一键卸载:扫描 mcp/*/uninstall.sh,逐一执行。
+# mcp/ 顶层一键卸载:按发行 catalog 选择默认项，旧版无 catalog 时扫描。
 # 与 mcp/install.sh 对称。
 # 用法:
 #   ./mcp/uninstall.sh                    # 扫描 + 全部卸载(默认只清 Claude Code)
@@ -32,18 +32,36 @@ case "$client" in
 esac
 
 # 探测 Python 解释器(Codex 分支跑 client_registry.py 用; 与子工程 uninstall 探测模式一致)
-PYTHON_BIN=""
-for _py in python3 python; do
-  if command -v "$_py" >/dev/null 2>&1; then
-    PYTHON_BIN="$_py"
-    break
-  fi
-done
+_py_ok() { [ "$("$@" -c 'print(1)' 2>/dev/null)" = "1" ]; }
+PYTHON_BIN=()
+if [ -n "${ICODE_PYTHON_BIN:-}" ] && _py_ok "$ICODE_PYTHON_BIN"; then
+  PYTHON_BIN=("$ICODE_PYTHON_BIN")
+elif { [ -n "${MSYSTEM:-}" ] || case "$(uname -s 2>/dev/null)" in MINGW*|MSYS*) true;; *) false;; esac; } \
+   && _py_ok py -3; then
+  PYTHON_BIN=(py -3)
+elif _py_ok python3; then
+  PYTHON_BIN=(python3)
+elif _py_ok py -3; then
+  PYTHON_BIN=(py -3)
+elif _py_ok python; then
+  PYTHON_BIN=(python)
+fi
 
 # 扫描所有 mcp/*/uninstall.sh
 shopt -s nullglob
 uninstallers=("$HERE"/*/uninstall.sh)
 shopt -u nullglob
+if [ -f "$HERE/servers.json" ]; then
+  if [ ${#PYTHON_BIN[@]} -eq 0 ]; then
+    echo "❌ MCP catalog requires a working Python interpreter" >&2
+    exit 1
+  fi
+  desired_names="$("${PYTHON_BIN[@]}" "$HERE/_lib/install_reconcile.py" desired --source-root "$HERE/..")"
+  uninstallers=()
+  while IFS= read -r name; do
+    [ -z "$name" ] || uninstallers+=("$HERE/$name/uninstall.sh")
+  done <<<"$desired_names"
+fi
 
 if [ ${#uninstallers[@]} -eq 0 ]; then
   echo "ℹ️  mcp/ 下没有子工程(未找到 * /uninstall.sh)"
@@ -89,11 +107,11 @@ for un in "${uninstallers[@]}"; do
   fi
   # Codex 分支: 与子工程卸载结果独立(对称清理), 未注册幂等跳过
   if [ "$client" = "codex" ] || [ "$client" = "all" ]; then
-    if [ -z "$PYTHON_BIN" ]; then
+    if [ ${#PYTHON_BIN[@]} -eq 0 ]; then
       echo "   ⚠️ 未找到 python3/python，跳过 Codex 清理（client_registry.py 需 Python）"
       fail_count=$((fail_count + 1))
       failed+=("$name(codex:no-python)")
-    elif "$PYTHON_BIN" "$HERE/_lib/client_registry.py" codex-unregister "$name"; then
+    elif "${PYTHON_BIN[@]}" "$HERE/_lib/client_registry.py" codex-unregister "$name"; then
       :
     else
       fail_count=$((fail_count + 1))
@@ -102,11 +120,11 @@ for un in "${uninstallers[@]}"; do
   fi
   # CodeBuddy 分支不依赖 entry 导出；子工程卸载可能已先清理该文件。
   if [ "$client" = "codebuddy" ] || [ "$client" = "all" ]; then
-    if [ -z "$PYTHON_BIN" ]; then
+    if [ ${#PYTHON_BIN[@]} -eq 0 ]; then
       echo "   ⚠️ 未找到 python3/python，跳过 CodeBuddy 清理（client_registry.py 需 Python）"
       fail_count=$((fail_count + 1))
       failed+=("$name(codebuddy:no-python)")
-    elif "$PYTHON_BIN" "$HERE/_lib/client_registry.py" codebuddy-unregister "$name"; then
+    elif "${PYTHON_BIN[@]}" "$HERE/_lib/client_registry.py" codebuddy-unregister "$name"; then
       :
     else
       fail_count=$((fail_count + 1))
@@ -115,11 +133,11 @@ for un in "${uninstallers[@]}"; do
   fi
   # WorkBuddy 分支不依赖 entry 导出；子工程卸载可能已先清理该文件。
   if [ "$client" = "workbuddy" ] || [ "$client" = "all" ]; then
-    if [ -z "$PYTHON_BIN" ]; then
+    if [ ${#PYTHON_BIN[@]} -eq 0 ]; then
       echo "   ⚠️ 未找到 python3/python，跳过 WorkBuddy 清理（client_registry.py 需 Python）"
       fail_count=$((fail_count + 1))
       failed+=("$name(workbuddy:no-python)")
-    elif "$PYTHON_BIN" "$HERE/_lib/client_registry.py" workbuddy-unregister "$name"; then
+    elif "${PYTHON_BIN[@]}" "$HERE/_lib/client_registry.py" workbuddy-unregister "$name"; then
       :
     else
       fail_count=$((fail_count + 1))

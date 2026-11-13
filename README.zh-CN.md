@@ -68,7 +68,9 @@ cd ~/icode-skill
 
 重装会按最新发行收敛受管 Skill/MCP：未被用户改写的旧共享技能归档到技能扫描目录外；所选新版 MCP 全部安装并通过注册校验后，才注销已证明归属的退役 MCP。用户改写、归属不明、旧共享技能缺历史摘要的项保留并报告冲突，不冒充全部同步成功。当前共享技能成功更新后会记录发布摘要，供后续退役判断。MCP 摘要回执与配置/运行时私有归档位于 `~/.local/state/icode/mcp-install/`，共享技能归档位于 `<skills-root-parent>/.icode-skill-archive/`；回执不保存凭据正文。
 
-`--dry-run` 预览而不写入；`--no-delete` 暂缓退役；`--skip-mcp` 不改 MCP 注册和回执；仅选择一个 MCP 不清理其他服务。单独同步技能时保留旧 MCP 代码用于恢复。注册变化在宿主重载或新会话后生效，安装器不会结束其他会话的进程。
+`--dry-run` 预览而不写入；`--no-delete` 暂缓退役；`--skip-mcp` 不改 MCP 注册和回执。单项安装只处理该项及发行清单明确声明的替代成员，不清理无关服务。单独同步技能时保留旧 MCP 代码用于恢复。注册变化在宿主重载或新会话后生效，安装器不会结束其他会话的进程。
+
+默认 MCP 清单见 [`mcp/servers.json`](mcp/servers.json)，由 13 项收敛为 9 项。`icode-local` 在一个 Python 进程中复用 workspace、evidence、local-index、health、policy 五个模块；原工具增加模块前缀，另有统一能力描述。旧模块代码和原配置继续保留，各自的允许路径与索引/探针权限不合并；新服务验证成功后才退役受管旧注册并归档旧虚拟环境。设备、邮件与第三方 MCP 仍独立运行；不同宿主会话仍可能各启动一份统一服务。
 
 CodeBuddy 复用 `~/.claude/skills/`，不会产生第三份 ICODE 副本；安装器会把版本化模板 [`integrations/codebuddy/commands/icode.md`](integrations/codebuddy/commands/icode.md) 原子发布为 `~/.codebuddy/commands/icode.md`，从而提供 `/icode ...`。命令桥使用独立所有权标记：同内容旧文件可接管，不同内容的未托管文件会在任何 Skill 写入前拒绝覆盖。其 MCP 独立注册到 `~/.codebuddy/mcp.json`。
 
@@ -178,9 +180,9 @@ python3 tools/lint_mcp_coverage.py <out_dir> --step review --strict
 
 详见 [mcp/cheap-research/README.md](mcp/cheap-research/README.md)。
 
-### 其他 11 个 MCP（4 个通用 + 7 个 ICODE 本地服务）
+### 其他 7 个 MCP（4 个通用 + 3 个 ICODE 本地服务）
 
-除 vision-bridge / cheap-research 外，`/icode install` 还会安装 4 个通用工作流工具和 7 个免 Key 的 ICODE 本地服务：
+除 vision-bridge / cheap-research 外，`/icode install` 还会安装 4 个通用工作流工具和 3 个免 Key 本地服务。以下七个本地逻辑模块由统一 `icode-local`、设备、邮件三个 transport 承载：
 
 - **sequential-thinking**——分级思考 reasoning gate 的 L2/L3 载体：复杂修改/重构/重设计前结构化思考 3~5 步（L0/L1 步骤不调用；每步先列本步必调 MCP 再实际调用）
 - **memory**——跨工程知识图谱（`mcp__memory__read_graph`），历史检索/段零注入时唤起，跨会话回看过去工单与工程文档
@@ -194,7 +196,7 @@ python3 tools/lint_mcp_coverage.py <out_dir> --step review --strict
 - **icode-local-index**——大型源码/日志/文档的可重建 SQLite 全文索引，命中仍须回读原文件
 - **icode-mail-observe**——可选的无人值守只读 IMAP 邮件/线程接入；普通网页邮件链接默认使用已登录浏览器
 
-这 7 个本地服务不新增 `/icode` 公开命令，机器路由见 [mcp/icode-mcp-policy/policy.json](mcp/icode-mcp-policy/policy.json)。每个 MCP 都有显式强证据触发条件 + 声明的优雅降级路径（详见 [SKILL.md「MCP 工具集」](SKILL.md)）；缺失任一都不阻断工作流。
+这 7 个逻辑模块不新增 `/icode` 公开命令。五个通用模块实际通过 `icode-local` 的 `workspace_`、`evidence_`、`index_`、`health_`、`policy_` 前缀调用，旧服务名是兼容身份；设备和邮件保持独立。机器路由见 [mcp/icode-mcp-policy/policy.json](mcp/icode-mcp-policy/policy.json)。每个模块都有显式强证据触发条件 + 声明的优雅降级路径（详见 [SKILL.md「MCP 工具集」](SKILL.md)）；缺失任一都不阻断工作流。
 
 共享本地路径检查使用[平台默认与显式白名单](references/mcp_path_access.md)：`allowed_roots: null` 时，Windows 按请求读取本地磁盘并保护已知凭据路径，Linux 保持用户目录默认；非空数组保持显式限制。旧安装的 `$HOME` 白名单仍生效，普通同步不覆盖真实配置。服务执行信任、设备远端根和受管写入权限单独管理。
 

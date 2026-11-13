@@ -90,5 +90,3 @@ Thumbs.db
 
 # --- 9. WorkBuddy 本地工作记忆（个人日志，不入库）---
 .workbuddy/
-.worktrees/
-docs/

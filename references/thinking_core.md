@@ -113,7 +113,7 @@ N. **强制思考前置**（不可跳过，缺证据视为不合规；按 [refer
 1. **分级**：按 [mcp_per_step.md](mcp_per_step.md)「默认等级表」+ `mcp/reasoning-gate/gates.json` 升级触发器确定本步等级（L0～L3），把等级与触发原因写入 `{ICODE_OUT_DIR}/.thinking_gate_trace.jsonl`（每 step 最终一行；schema/词表见 [thinking_detail.md](thinking_detail.md)「thinking gate trace」段）。
 2. 输出 `ultrathink` 触发词（触发更长的内部推理 budget）——**L0/L1 可省略**（纯机器门禁/决策记录不依赖推理预算）。
 3. **加载本步骤适用的 references**：按「共享规则加载」首次实读或失效重载，实际 Read 后输出 `📖 已 Read references/xxx.md`；满足复用条件时引用已有来源，不伪造本步新 Read。
-4. **ICODE 本地 MCP 路由门（所有等级）**：读取 `mcp/icode-mcp-policy/policy.json` 当前 step 的 routes；若 `icode-mcp-policy.evaluate_call` 当前会话可见则用它复核目标 server/tool/operation，否则直接按同一 JSON 判定。只有 condition 被当前事实满足才调用目标服务；`required=true` 的命中项在工具可见时必须先实际调用；工具未暴露时记录发现依据，随后按 [mcp_integration.md](mcp_integration.md) 的底层确定性工具降级。policy 缺失/损坏时默认拒绝新增 MCP 调用，不影响原有 Read/rg/git/ssh/adb 路径。不得为探测 MCP 而读取无关工程文件。
+4. **ICODE 本地 MCP 路由门（所有等级）**：读取 `mcp/icode-mcp-policy/policy.json` 当前 step 的 routes；优先用当前可见的 `icode-local.policy_evaluate_call` 复核目标 server/tool/operation，旧宿主兼容 `icode-mcp-policy.evaluate_call`；二者均未暴露时直接按同一 JSON 及 transport 映射判定。统一服务的模块前缀仅改变调用名，不改变逻辑模块权限。只有 condition 被当前事实满足才调用目标服务；`required=true` 的命中项在工具可见时必须先实际调用；工具未暴露时记录发现依据，随后按 [mcp_integration.md](mcp_integration.md) 的底层确定性工具降级。policy 缺失/损坏时默认拒绝新增 MCP 调用，不影响原有 Read/rg/git/ssh/adb 路径。不得为探测 MCP 而读取无关工程文件。
 5. **MCP 调用 gate**（L2/L3 不可跳过）：在结构化思考开始前，先处理本步 🟢 MCP（按 [mcp_per_step.md](mcp_per_step.md)「强证据场景判定」）：
    - 列出本步满足强证据场景的 🟢 MCP（**不含 sequential-thinking**，它由第 5 步承载；其余 🟢 MCP 由本 gate + 各 step 执行步骤内嵌点承载）
    - 对每个 🟢 MCP：**若该工具已在工具列表直接可见（完整 schema）则直接调用**，不可见才 ToolSearch 取 `mcp__<name>__<tool>` schema -> **实际调用一次** -> 把调用结果（成功/空/失败）写进思考块「MCP 调用」段

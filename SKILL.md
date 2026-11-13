@@ -3,7 +3,7 @@ name: icode
 description: ICODE 端到端编码工作流，适配 Claude Code、Codex、CodeBuddy、WorkBuddy。用户调用 /icode、$icode，或说“使用 ICODE”“用 icode 帮我”“让 ICODE”“Use ICODE”完成开发、日志分析、设计/代码审查、证据验证、独立复评、文档/Word/PPT、学习、工单管理等任务时使用；也用于已绑定 ICODE 工单的续接。Use when users explicitly request ICODE for an AI coding workflow, ticket-based development, code review, log analysis, documentation, or evidence verification; also use to resume a bound ICODE ticket. 支持自然语言目标与限制，不要求背命令；能力咨询只解释不执行。保留全部 /icode 子命令，复用既有步骤与安全门禁，不接管未指定 ICODE 的普通请求。
 ---
 
-**版本**: v2.39.0
+**版本**: v2.40.0
 
 # ICode 全流程编码工作流（步骤 0 + 1~6）
 
@@ -294,7 +294,7 @@ test -f "{ICODE_OUT_DIR}/03_plan_final.md" && python3 -c "import json,sys; d=jso
 
 ## MCP 调用覆盖强制化（锚点保留，内容已迁移）
 
-> MCP 分级语义（🟢/🟢*/⚪）、双保险机制、每步骤推荐表、分级思考 L0-L3、cheap-research 覆盖门 全部收敛到 [references/mcp_per_step.md](references/mcp_per_step.md) + [references/mcp_integration.md](references/mcp_integration.md) + [references/thinking_core.md](references/thinking_core.md)（真源）。7 个 ICODE 本地 MCP 的 step→server/tool/operation 机器真源为 [mcp/icode-mcp-policy/policy.json](mcp/icode-mcp-policy/policy.json)，不新增公开 `/icode` 命令。标题保留为锚点。
+> MCP 分级语义（🟢/🟢*/⚪）、双保险机制、每步骤推荐表、分级思考 L0-L3、cheap-research 覆盖门 全部收敛到 [references/mcp_per_step.md](references/mcp_per_step.md) + [references/mcp_integration.md](references/mcp_integration.md) + [references/thinking_core.md](references/thinking_core.md)（真源）。7 个本地逻辑模块默认由 `icode-local`、设备、邮件 3 个服务承载，step→server/tool/operation 及 transport 映射的机器真源仍为 [mcp/icode-mcp-policy/policy.json](mcp/icode-mcp-policy/policy.json)，不新增公开 `/icode` 命令。标题保留为锚点。
 
 > 锚点保留小节：`MCP 调用覆盖强制化` / `MCP 工具集` / `cheap-research 15 工具会话内缓存` / `降级标签格式规范` / `工具调用模式规范`
 

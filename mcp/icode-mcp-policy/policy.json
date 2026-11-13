@@ -129,5 +129,149 @@
     "list": [
       {"server": "icode-local-index", "condition": "查询已有本地索引", "required": false, "operations": ["read"]}
     ]
+  },
+  "transport": {
+    "server": "icode-local",
+    "members": {
+      "workspace": "icode-workspace",
+      "evidence": "icode-evidence",
+      "index": "icode-local-index",
+      "health": "icode-mcp-health",
+      "policy": "icode-mcp-policy"
+    },
+    "tools": {
+      "workspace_describe_capabilities": {
+        "server": "icode-workspace",
+        "tool": "describe_capabilities"
+      },
+      "workspace_resolve_project": {
+        "server": "icode-workspace",
+        "tool": "resolve_project"
+      },
+      "workspace_inspect_project_profile": {
+        "server": "icode-workspace",
+        "tool": "inspect_project_profile"
+      },
+      "workspace_inspect_workspace": {
+        "server": "icode-workspace",
+        "tool": "inspect_workspace"
+      },
+      "workspace_inspect_repo_matrix": {
+        "server": "icode-workspace",
+        "tool": "inspect_repo_matrix"
+      },
+      "workspace_inspect_build_inputs": {
+        "server": "icode-workspace",
+        "tool": "inspect_build_inputs"
+      },
+      "workspace_inspect_artifact": {
+        "server": "icode-workspace",
+        "tool": "inspect_artifact"
+      },
+      "evidence_describe_capabilities": {
+        "server": "icode-evidence",
+        "tool": "describe_capabilities"
+      },
+      "evidence_inspect_file": {
+        "server": "icode-evidence",
+        "tool": "inspect_file"
+      },
+      "evidence_read_evidence": {
+        "server": "icode-evidence",
+        "tool": "read_evidence"
+      },
+      "evidence_verify_digest": {
+        "server": "icode-evidence",
+        "tool": "verify_digest"
+      },
+      "evidence_build_timeline": {
+        "server": "icode-evidence",
+        "tool": "build_timeline"
+      },
+      "evidence_inspect_corpus": {
+        "server": "icode-evidence",
+        "tool": "inspect_corpus"
+      },
+      "index_describe_capabilities": {
+        "server": "icode-local-index",
+        "tool": "describe_capabilities"
+      },
+      "index_build_index": {
+        "server": "icode-local-index",
+        "tool": "build_index"
+      },
+      "index_query_index": {
+        "server": "icode-local-index",
+        "tool": "query_index"
+      },
+      "index_index_status": {
+        "server": "icode-local-index",
+        "tool": "index_status"
+      },
+      "health_describe_capabilities": {
+        "server": "icode-mcp-health",
+        "tool": "describe_capabilities"
+      },
+      "health_inventory_servers": {
+        "server": "icode-mcp-health",
+        "tool": "inventory_servers"
+      },
+      "health_validate_manifest": {
+        "server": "icode-mcp-health",
+        "tool": "validate_manifest"
+      },
+      "health_probe_python_server": {
+        "server": "icode-mcp-health",
+        "tool": "probe_python_server"
+      },
+      "health_scan_sensitive_payload": {
+        "server": "icode-mcp-health",
+        "tool": "scan_sensitive_payload"
+      },
+      "health_diagnose_registration": {
+        "server": "icode-mcp-health",
+        "tool": "diagnose_registration"
+      },
+      "policy_describe_capabilities": {
+        "server": "icode-mcp-policy",
+        "tool": "describe_capabilities"
+      },
+      "policy_list_step_policy": {
+        "server": "icode-mcp-policy",
+        "tool": "list_step_policy"
+      },
+      "policy_evaluate_call": {
+        "server": "icode-mcp-policy",
+        "tool": "evaluate_call"
+      },
+      "policy_validate_policy": {
+        "server": "icode-mcp-policy",
+        "tool": "validate_policy"
+      },
+      "describe_capabilities": {
+        "routes": [
+          {
+            "server": "icode-workspace",
+            "tool": "describe_capabilities"
+          },
+          {
+            "server": "icode-evidence",
+            "tool": "describe_capabilities"
+          },
+          {
+            "server": "icode-local-index",
+            "tool": "describe_capabilities"
+          },
+          {
+            "server": "icode-mcp-health",
+            "tool": "describe_capabilities"
+          },
+          {
+            "server": "icode-mcp-policy",
+            "tool": "describe_capabilities"
+          }
+        ]
+      }
+    }
   }
 }

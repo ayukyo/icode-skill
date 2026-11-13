@@ -171,6 +171,9 @@ fi
 # Host discovery is frozen before root synchronization can create command
 # bridge directories. Register only hosts included in this plan's success gate.
 selected_hosts="$("${PYTHON_BIN[@]}" "$RECONCILE" hosts --plan "$ICODE_MCP_RECONCILE_PLAN")"
+ICODE_MCP_SELECTED_HOSTS="$(printf '%s' "$selected_hosts" | tr '\n' ',')"
+export ICODE_MCP_SELECTED_HOSTS
+"${PYTHON_BIN[@]}" "$RECONCILE" profile-preflight --plan "$ICODE_MCP_RECONCILE_PLAN"
 claude_enabled=false
 codex_enabled=false
 codebuddy_enabled=false

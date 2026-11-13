@@ -8,7 +8,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE.txt)
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-Skill-8A2BE2.svg)](SKILL.md)
-[![Version](https://img.shields.io/badge/version-v2.39.0-blue.svg)](SKILL.md)
+[![Version](https://img.shields.io/badge/version-v2.40.0-blue.svg)](SKILL.md)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/ayukyo/icode-skill/issues)
 
 </div>
@@ -189,7 +189,9 @@ Use `./install.sh --dry-run --client all` for a zero-write preflight, or `--skip
 
 Reinstallation also reconciles retired managed skills and MCPs. Unchanged owned skills are archived outside the discovery roots; obsolete owned MCP registrations are removed only after the selected replacement set has installed and passed registration checks. User changes, unknown ownership and missing legacy skill digests are retained and reported as conflicts. MCP receipts and private configuration/runtime archives live under `~/.local/state/icode/mcp-install/`; shared skill archives live under `<skills-root-parent>/.icode-skill-archive/`. Receipts contain registration hashes, not credential values.
 
-`--dry-run` previews retirement without writes. `--no-delete` defers retirement, `--skip-mcp` leaves MCP registrations and receipts alone, and selecting one MCP never retires other services. Plain skill synchronization retains old MCP code for recovery. Configuration changes require a host reload or a new session; installation does not terminate other sessions' processes.
+`--dry-run` previews retirement without writes. `--no-delete` defers retirement and `--skip-mcp` leaves MCP registrations and receipts alone. A single-service install handles only that service and its explicitly declared replacement members. Plain skill synchronization retains old MCP code for recovery. Configuration changes require a host reload or a new session; installation does not terminate other sessions' processes.
+
+The default [`MCP catalog`](mcp/servers.json) contains nine services. One `icode-local` Python process serves the workspace, evidence, index, health and policy modules, replacing five default processes. Original tools use module prefixes and share an aggregate capability description. Module code and configurations remain compatible, with separate path and write/probe permissions. Verified migration retires managed old registrations and archives obsolete virtual environments. Device, mail and third-party MCPs remain separate; independent host sessions may still start their own unified service.
 
 CodeBuddy scans `~/.claude/skills/`, so it reuses that ICODE copy rather than creating a third one. The installer atomically publishes the versioned [`integrations/codebuddy/commands/icode.md`](integrations/codebuddy/commands/icode.md) template as `~/.codebuddy/commands/icode.md`, providing `/icode ...`; a separate ownership marker permits identical-file adoption and rejects conflicting unmanaged commands before any Skill root is changed. CodeBuddy MCP entries remain isolated in `~/.codebuddy/mcp.json`.
 
@@ -287,9 +289,9 @@ python3 tools/lint_mcp_coverage.py <out_dir> --json       # machine-readable rep
 python3 tools/lint_mcp_coverage.py <out_dir> --step review --strict
 ```
 
-### The Other 11 MCPs (4 general + 7 ICODE-local services)
+### The Other 7 MCPs (4 general + 3 ICODE-local services)
 
-Besides vision-bridge and cheap-research, `/icode install` installs 4 general workflow utilities and 7 API-key-free ICODE-local services:
+Besides vision-bridge and cheap-research, `/icode install` installs 4 general workflow utilities and 3 API-key-free local services. The seven local logical modules below are served by `icode-local`, device and mail transports:
 
 - **sequential-thinking** — the L2/L3 carrier of the tiered reasoning gate: structured 3~5-step thinking before complex / refactor / redesign tasks (L0/L1 steps do not call it; each step lists its required MCPs first, then calls them)
 - **memory** — cross-project knowledge graph (`mcp__memory__read_graph`), recalled during search/injection so past tickets and project docs resurface across sessions
@@ -303,7 +305,7 @@ Besides vision-bridge and cheap-research, `/icode install` installs 4 general wo
 - **icode-local-index** — rebuildable SQLite full-text index for large local corpora; every hit must be verified against the source file
 - **icode-mail-observe** — optional unattended read-only IMAP message/thread intake; ordinary explicit webmail links use the already logged-in browser instead
 
-The seven local services add no public `/icode` commands; their machine-readable routing source is [`mcp/icode-mcp-policy/policy.json`](mcp/icode-mcp-policy/policy.json). Each MCP has an explicit strong-evidence trigger and a declared graceful-downgrade path (see [SKILL.md「MCP 工具集」](SKILL.md)); none blocks the workflow when missing.
+These seven logical modules add no public `/icode` commands. The five generic modules listed above run through one `icode-local` service with `workspace_`, `evidence_`, `index_`, `health_` and `policy_` tool prefixes; only device and mail remain separate local processes. Legacy module/server names remain compatibility identities. Their machine-readable routing source is [`mcp/icode-mcp-policy/policy.json`](mcp/icode-mcp-policy/policy.json). Each has an explicit strong-evidence trigger and a declared graceful-downgrade path (see [SKILL.md「MCP 工具集」](SKILL.md)); none blocks the workflow when missing.
 
 ## Commands
 

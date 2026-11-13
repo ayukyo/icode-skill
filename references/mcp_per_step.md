@@ -1,5 +1,7 @@
 # 步骤 × MCP 推荐矩阵（强证据二元化）
 
+> 默认本地 transport 为 `icode-local`：下表 `icode-workspace`、`icode-evidence`、`icode-local-index`、`icode-mcp-health`、`icode-mcp-policy` 是策略逻辑模块及兼容身份，实际调用分别使用 `workspace_`、`evidence_`、`index_`、`health_`、`policy_` 前缀。优先发现统一服务，旧宿主只暴露旧入口时继续兼容；两者均不可用再走声明的底层降级。模块触发条件及读写权限不因合并改变。
+
 > 每个 icode 步骤推荐使用的 MCP。推荐级别二元化，消除 🟡"应该调"模糊地带：🟢 必须调（强证据场景满足）/ ⚪ 不必调（不评估）。详见 [mcp_integration.md](mcp_integration.md)。代码符号/引用/调用点检索统一走 grep/Read/git grep 文本层（见 [anti_laziness.md](anti_laziness.md) 第 21 条）。
 
 审查范围、有效模式、条件轮次JSON、阶段Read/Dedup声明和v2门禁事实一致性按[审查证据合同](inspection_evidence.md)。工具履行不等于语义审查完成；缓存必须输入身份匹配，不因文件存在直接复用。

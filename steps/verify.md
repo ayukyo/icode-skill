@@ -182,6 +182,8 @@ python3 tools/icode_control.py build-start --dir "{ICODE_OUT_DIR}" \
 
 ## MCP 推荐
 
+本地路由中的 workspace/evidence/index/health/policy 逻辑模块优先通过统一 `icode-local` 的对应前缀工具调用；当前宿主只有旧独立工具时沿用兼容入口。权限、触发条件与证据要求见 `references/mcp_integration.md`，不能因服务合并扩大 operation。
+
 verify 为 **L1（短决策记录）**：结构化验证执行（判断+设备连接+日志分析），监听轮询的增量日志达到 `long_text_threshold_bytes` 时走 `verify.listen_log_summary` 规则（tool=summarize），见 [08_patch.md](08_patch.md) 与 [references/mcp_per_step.md](../references/mcp_per_step.md)。其它本地 MCP 按 `mcp/icode-mcp-policy/policy.json` 的 verify routes 按条件选用。非监听主动作也记录 `listen_mode=false/incremental_bytes=0` 的 not-eligible 判定；新工单 verify 的 finish 会校验本步骤 trace。无工单构建将等价决策记入 build_run，不创建工单。
 
 **强制约束**：🟢/🟢*/⚪ 语义 + 双保险机制（执行步骤内嵌 + thinking_core gate）详见 [SKILL.md「MCP 调用覆盖强制化」](../SKILL.md) + [references/mcp_per_step.md「双保险机制」](../references/mcp_per_step.md)。

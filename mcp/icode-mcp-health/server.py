@@ -33,6 +33,11 @@ DEFAULTS = {
 }
 SENSITIVE_KEY = re.compile(r"(?i)(api[_-]?key|access[_-]?token|secret|password|private[_-]?key|cookie|authorization)")
 SENSITIVE_VALUE = re.compile(r"(?i)(-----BEGIN [A-Z ]*PRIVATE KEY-----|AKIA[0-9A-Z]{16}|bearer\s+[A-Za-z0-9._~+/=-]{12,})")
+LOCAL_MEMBERS = {
+    "workspace": "icode-workspace", "evidence": "icode-evidence",
+    "index": "icode-local-index", "health": "icode-mcp-health",
+    "policy": "icode-mcp-policy",
+}
 mcp = FastMCP(SERVER_NAME)
 
 
@@ -51,23 +56,58 @@ def describe_capabilities() -> dict[str, Any]:
 @mcp.tool(annotations=READ_ONLY_ANNOTATIONS)
 def inventory_servers(mcp_root: str) -> dict[str, Any]:
     try:
-        root = resolve_allowed_path(mcp_root, _config())
+        config = _config()
+        root = resolve_allowed_path(mcp_root, config)
+        catalog_path = root / "servers.json"
+        if catalog_path.exists():
+            catalog_path = resolve_allowed_path(catalog_path, config)
+            catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
+            _validate_catalog(catalog)
+            names = catalog["servers"]
+            # Every derived directory is rechecked by the same access policy.
+            servers = [_inventory_entry(resolve_allowed_path(root / name, config)) for name in names]
+            compatibility = [_inventory_entry(resolve_allowed_path(root / name, config))
+                             for name in LOCAL_MEMBERS.values()]
+            excluded = {*names, *LOCAL_MEMBERS.values()}
+            rules = [_inventory_entry(resolve_allowed_path(child, config)) for child in sorted(root.iterdir())
+                     if child.is_dir() and not child.name.startswith(("_", ".")) and child.name not in excluded]
+            limit = int(config["max_servers"])
+            if not 1 <= limit <= 1000:
+                raise ValueError("invalid server limit")
+            return ok({"root": str(root), "servers": servers[:limit], "count": min(len(servers), limit),
+                       "compatibility_modules": compatibility, "rule_directories": rules,
+                       "catalog": str(catalog_path)})
         servers = []
         for child in sorted(root.iterdir()):
             if not child.is_dir() or child.name.startswith("_"):
                 continue
-            servers.append({
-                "name": child.name,
-                "installable": (child / "install.sh").is_file(),
-                "uninstallable": (child / "uninstall.sh").is_file(),
-                "manifest": (child / "tools_manifest.json").is_file(),
-                "python_server": (child / "server.py").is_file(),
-            })
-            if len(servers) >= int(_config()["max_servers"]):
+            servers.append(_inventory_entry(child))
+            if len(servers) >= int(config["max_servers"]):
                 break
         return ok({"root": str(root), "servers": servers, "count": len(servers)})
-    except (OSError, ValueError, PermissionError) as exc:
+    except (OSError, ValueError, TypeError, PermissionError) as exc:
         return fail("inventory_failed", str(exc), exc=exc, config_env="ICODE_MCP_HEALTH_CONFIG")
+
+
+def _inventory_entry(child: Path) -> dict[str, Any]:
+    return {"name": child.name,
+            "installable": (child / "install.sh").is_file(),
+            "uninstallable": (child / "uninstall.sh").is_file(),
+            "manifest": (child / "tools_manifest.json").is_file(),
+            "python_server": (child / "server.py").is_file()}
+
+
+def _validate_catalog(data: Any) -> None:
+    if not isinstance(data, dict) or set(data) != {"schema_version", "servers", "replacements"} or data["schema_version"] != 1:
+        raise ValueError("invalid server catalog schema")
+    names = data["servers"]
+    if not isinstance(names, list) or not names or any(
+            not isinstance(name, str) or not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", name) for name in names):
+        raise ValueError("invalid catalog server names")
+    if len(names) != len(set(names)) or "icode-local" not in names or set(names) & set(LOCAL_MEMBERS.values()):
+        raise ValueError("duplicate or replaced catalog servers")
+    if data["replacements"] != {"icode-local": {"members": LOCAL_MEMBERS, "retain_payload": True}}:
+        raise ValueError("invalid compatibility module catalog")
 
 
 @mcp.tool(annotations=READ_ONLY_ANNOTATIONS)
@@ -151,12 +191,15 @@ async def probe_python_server(server_dir: str) -> dict[str, Any]:
         compile(source, str(server), "exec")
         manifest_path = server.parent / "tools_manifest.json"
         manifest_tools: list[str] = []
+        manifest_specs: dict[str, Any] = {}
         manifest_errors: list[str] = []
         if manifest_path.exists():
             manifest_path = resolve_allowed_path(manifest_path, config)
             manifest_errors, data = _validate_manifest_file(manifest_path)
             if data and isinstance(data.get("tools"), list):
                 manifest_tools = [tool["name"] for tool in data["tools"] if isinstance(tool, dict) and "name" in tool]
+                manifest_specs = {tool["name"]: tool for tool in data["tools"]
+                                  if isinstance(tool, dict) and isinstance(tool.get("name"), str)}
         env = dict(os.environ)
         env["PYTHONDONTWRITEBYTECODE"] = "1"
         params = StdioServerParameters(command=sys.executable, args=[str(server)], env=env)
@@ -175,6 +218,15 @@ async def probe_python_server(server_dir: str) -> dict[str, Any]:
                 contract_errors.append(f"{tool['name']}: missing outputSchema")
             if not isinstance(tool.get("annotations"), dict):
                 contract_errors.append(f"{tool['name']}: missing annotations")
+            else:
+                spec = manifest_specs.get(tool["name"])
+                if spec is not None:
+                    for annotation, field in (("readOnlyHint", "read_only"),
+                                              ("openWorldHint", "network")):
+                        if tool["annotations"].get(annotation) is not spec.get(field):
+                            contract_errors.append(f"{tool['name']}: {annotation} does not match manifest")
+                if tool["annotations"].get("destructiveHint") is not False:
+                    contract_errors.append(f"{tool['name']}: destructiveHint must be false")
         return ok({
             "server": str(server),
             "syntax_ok": True,

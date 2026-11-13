@@ -22,9 +22,18 @@ import client_registry
 
 HOSTS = ("claude", "codex", "codebuddy", "workbuddy")
 CATALOG = ".icode-mcp-desired.json"
+DISTRIBUTION_CATALOG = "servers.json"
 RUNTIME = {".venv", ".cache", "__pycache__"}
 NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*\Z")
 CODEX_TIMEOUT_SECONDS = 30
+REPLACEMENT_PAYLOAD_FILES = ("server.py", "tools_manifest.json", "requirements.txt",
+                             "config.example.json", "install.sh", "uninstall.sh",
+                             "pyproject.toml", "README.md", "policy.json")
+MODULE_CONFIG_ENVS = {
+    "workspace": "ICODE_WORKSPACE_CONFIG", "evidence": "ICODE_EVIDENCE_CONFIG",
+    "index": "ICODE_LOCAL_INDEX_CONFIG", "health": "ICODE_MCP_HEALTH_CONFIG",
+    "policy": "ICODE_MCP_POLICY_CONFIG",
+}
 
 
 def _name(name):
@@ -51,8 +60,15 @@ def _safe(path, within=None):
 
 def _read(path, label):
     path = _safe(path)
+    def unique_object(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("duplicate JSON key")
+            result[key] = value
+        return result
     try:
-        value = json.loads(path.read_text(encoding="utf-8-sig"))
+        value = json.loads(path.read_text(encoding="utf-8-sig"), object_pairs_hook=unique_object)
     except (OSError, UnicodeError, ValueError) as exc:
         raise RuntimeError(f"invalid {label}") from exc
     if not isinstance(value, dict):
@@ -112,11 +128,57 @@ def _receipt(state):
     return data
 
 
+def _distribution(source_root):
+    """The shipped catalog defines defaults, not the recovery catalog."""
+    mcp = _safe(Path(source_root) / "mcp")
+    path = mcp / DISTRIBUTION_CATALOG
+    if not path.exists():
+        return None
+    data = _read(path, "distribution catalog")
+    names, replacements = data.get("servers"), data.get("replacements")
+    if (set(data) != {"schema_version", "servers", "replacements"}
+            or type(data.get("schema_version")) is not int or data["schema_version"] != 1
+            or not isinstance(names, list) or not isinstance(replacements, dict)):
+        raise RuntimeError("invalid distribution catalog schema")
+    try:
+        if len({_name(name) for name in names}) != len(names):
+            raise RuntimeError("duplicate distribution catalog server")
+        members_seen = set()
+        for replacement, record in replacements.items():
+            if (_name(replacement) not in names or not isinstance(record, dict)
+                    or set(record) != {"members", "retain_payload"}
+                    or type(record["retain_payload"]) is not bool
+                    or not isinstance(record["members"], dict) or not record["members"]):
+                raise RuntimeError("invalid replacement catalog record")
+            for prefix, member in record["members"].items():
+                _name(prefix)
+                _name(member)
+                if member in names or member in members_seen:
+                    raise RuntimeError("conflicting replacement catalog member")
+                members_seen.add(member)
+        for name in set(names) | members_seen:
+            if not _safe(mcp / name / "install.sh", within=mcp).is_file():
+                raise RuntimeError("missing distribution catalog installer")
+    except RuntimeError as exc:
+        raise RuntimeError("invalid distribution catalog entries") from exc
+    return data
+
+
 def desired(source_root, plan=None):
     if plan:
         return _load_plan(plan)["desired_names"]
     mcp = _safe(Path(source_root) / "mcp")
     catalog = mcp / CATALOG
+    distribution = _distribution(source_root)
+    if distribution is not None:
+        names = sorted(distribution["servers"])
+        if catalog.exists():
+            recovery = _read(catalog, "desired catalog")
+            if (set(recovery) != {"version", "desired_names"} or recovery.get("version") != 1
+                    or not isinstance(recovery.get("desired_names"), list)
+                    or sorted(recovery["desired_names"]) != names):
+                raise RuntimeError("distribution and recovery catalog conflict")
+        return names
     # A developer may clone directly into the installed skill directory. Git
     # updates then define the distribution; an older generated catalog must
     # not hide newly added installers. Copied installations still need it to
@@ -263,10 +325,8 @@ def _payload_owned(root, name, actual):
     return references({key: node.get(key) for key in ("command", "args", "env")})
 
 
-def _tree_digest(path):
-    if not path.exists():
-        return None
-    digest = hashlib.sha256()
+def _file_manifest(path):
+    result = {}
     for parent, directories, files in os.walk(_safe(path), followlinks=False):
         # Runtime can contain interpreter symlinks. It is moved as an opaque
         # directory, never traversed or copied during staged code preservation.
@@ -277,10 +337,244 @@ def _tree_digest(path):
             item = _safe(Path(parent) / name)
             if not stat.S_ISREG(item.stat().st_mode):
                 raise RuntimeError("refusing special file in MCP payload")
-            digest.update(item.relative_to(path).as_posix().encode("utf-8"))
-            digest.update(b"\0")
-            digest.update(hashlib.sha256(item.read_bytes()).digest())
+            result[item.relative_to(path).as_posix()] = hashlib.sha256(item.read_bytes()).hexdigest()
+    return result
+
+
+def _manifest_digest(manifest):
+    digest = hashlib.sha256()
+    for name, value in sorted(manifest.items()):
+        digest.update(name.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(bytes.fromhex(value))
     return digest.hexdigest()
+
+
+def _tree_digest(path):
+    return _manifest_digest(_file_manifest(path)) if path.exists() else None
+
+
+def _replacement_manifest(old, published):
+    files = _file_manifest(old)
+    files.update(_replacement_source_manifest(published))
+    return files
+
+
+def _replacement_source_manifest(published):
+    """Hash only declared business files, never source-local private data."""
+    result = {}
+    for name in REPLACEMENT_PAYLOAD_FILES:
+        item = _safe(published / name, within=published)
+        if not item.exists():
+            continue
+        if not stat.S_ISREG(item.stat().st_mode):
+            raise RuntimeError("refusing special file in replacement distribution")
+        result[name] = hashlib.sha256(item.read_bytes()).hexdigest()
+    return result
+
+
+def _archive_target(plan, root, name):
+    return Path(plan["state_root"]) / "archives" / plan["id"] / _hash(str(root))[:16] / name
+
+
+def check_runtime_dependencies(profile_path, module_dirs, *, module_configs=None):
+    """Reject archival of directories that still own active business data.
+
+    Directory names alone never prove that .cache/.venv are disposable. This
+    read-only gate is shared with profile preflight and repeated at retirement.
+    It does not rewrite configuration or persist configuration values.
+    """
+    directories = list(dict.fromkeys(_safe(path) for path in module_dirs))
+    runtimes = []
+    for directory in directories:
+        for parent, children, _ in os.walk(directory, followlinks=False):
+            for child in list(children):
+                item = _safe(Path(parent) / child, within=directory)
+                if child in RUNTIME:
+                    runtimes.append(item)
+                    children.remove(child)
+
+    def dependency(raw, *, base=None, directory=False):
+        if not isinstance(raw, (str, Path)) or not str(raw).strip():
+            raise RuntimeError("invalid runtime dependency path")
+        path = Path(os.path.expandvars(os.path.expanduser(str(raw))))
+        if not path.is_absolute():
+            if base is None:
+                raise RuntimeError("relative runtime dependency has no stable base")
+            path = base / path
+        path = _safe(path)
+        for module in directories:
+            if path.is_relative_to(module) and RUNTIME.intersection(path.relative_to(module).parts):
+                raise RuntimeError("active runtime dependency prevents archival")
+        if directory and any(runtime.is_relative_to(path) for runtime in runtimes):
+            raise RuntimeError("active runtime dependency overlaps archival")
+        return path
+
+    configs = {_safe(directory / "config.json") for directory in directories
+               if (directory / "config.json").exists()}
+    if module_configs is not None and not isinstance(module_configs, dict):
+        raise RuntimeError("invalid runtime dependency module configuration mapping")
+    references = list((module_configs or {}).values())
+    if profile_path is not None:
+        profile = dependency(profile_path)
+        value = _read(profile, "runtime dependency profile").get("module_configs")
+        if not isinstance(value, dict):
+            raise RuntimeError("invalid runtime dependency profile")
+        references.extend(dependency(raw, base=profile.parent) for raw in value.values())
+    for raw in references:
+        configs.add(dependency(raw))
+    # An original implementation can have a custom directory basename. The
+    # caller supplies possible implementation roots, not config-file bases.
+    policy_dirs = directories
+    for config_path in configs:
+        dependency(config_path)
+        config = _read(config_path, "runtime dependency configuration")
+        if "data_dir" in config:
+            dependency(config["data_dir"], directory=True)
+        if "policy_file" in config:
+            # Legacy policy paths are relative to the policy implementation,
+            # rather than an external config file. Check every retained policy
+            # location when multiple installation roots remain in the plan.
+            for base in policy_dirs or [config_path.parent]:
+                dependency(config["policy_file"], base=base)
+
+
+def check_payload_dependencies(source_mcp, module_dirs, *, profile_path=None, module_configs=None):
+    """Keep active config aliases from being replaced by distribution files."""
+    source_mcp = _safe(source_mcp)
+    directories = list(dict.fromkeys(_safe(path) for path in module_dirs))
+
+    def path_of(raw, *, base=None):
+        if not isinstance(raw, (str, Path)) or not str(raw).strip():
+            raise RuntimeError("invalid active payload dependency path")
+        path = Path(os.path.expandvars(os.path.expanduser(str(raw))))
+        if not path.is_absolute():
+            if base is None:
+                raise RuntimeError("relative active payload dependency has no stable base")
+            path = base / path
+        return _safe(path)
+
+    def check(path, *, policy=False):
+        for directory in directories:
+            if not path.is_relative_to(directory):
+                continue
+            relative = path.relative_to(directory)
+            # Both publishers preserve config.json, including nested copies.
+            if relative.name == "config.json":
+                continue
+            if directory.name != "icode-local" and relative.as_posix() not in REPLACEMENT_PAYLOAD_FILES:
+                continue
+            published = _safe(source_mcp / directory.name / relative, within=source_mcp)
+            if not published.is_file() or not path.exists() or path.read_bytes() == published.read_bytes():
+                continue
+            if policy:
+                original = _read(path, "active policy dependency")
+                updated = _read(published, "distributed policy dependency")
+                if ({key: value for key, value in original.items() if key != "transport"}
+                        == {key: value for key, value in updated.items() if key != "transport"}):
+                    continue
+            raise RuntimeError("changed active payload dependency prevents publication")
+
+    if module_configs is not None and not isinstance(module_configs, dict):
+        raise RuntimeError("invalid active payload dependency mapping")
+    configs = {path_of(raw) for raw in (module_configs or {}).values()}
+    configs.update(directory / "config.json" for directory in directories if (directory / "config.json").exists())
+    if profile_path is not None:
+        profile = path_of(profile_path)
+        check(profile)
+        mapping = _read(profile, "active payload profile").get("module_configs")
+        if not isinstance(mapping, dict):
+            raise RuntimeError("invalid active payload dependency profile")
+        configs.update(path_of(raw, base=profile.parent) for raw in mapping.values())
+    for config in configs:
+        check(config)
+        data = _read(config, "active payload configuration")
+        if "policy_file" in data:
+            for directory in directories:
+                check(path_of(data["policy_file"], base=directory), policy=True)
+    for directory in directories:
+        if directory.name == "icode-mcp-policy" and (directory / "policy.json").exists():
+            check(directory / "policy.json", policy=True)
+
+
+def _archive_dependency_inputs(plan, roots, *, module_dirs=None, replacements=None):
+    directories = module_dirs if module_dirs is not None else [
+        _payload(root, name) for root in roots for name in plan.get("retain_payload_names", [])
+        if str(_payload(root, name)) in plan.get("archive_eligible", [])]
+    if not directories:
+        return None
+    profiles, configs = set(), []
+    for root in roots:
+        profile = _payload(root, "icode-local") / "config.json"
+        if profile.exists() and "module_configs" in _read(profile, "runtime dependency profile"):
+            profiles.add(profile)
+    members = {prefix: member for record in (replacements if replacements is not None else plan.get("replacements", {})).values()
+               for prefix, member in record["members"].items()}
+    for host in HOSTS:
+        if host == "codex" and not client_registry.CODEX_BIN:
+            continue
+        node = _actual(host, "icode-local")
+        if node:
+            transport = node.get("transport", node)
+            raw = (transport.get("env") or {}).get("ICODE_LOCAL_CONFIG")
+            if raw:
+                path = Path(os.path.expandvars(os.path.expanduser(raw)))
+                if not path.is_absolute():
+                    cwd = transport.get("cwd", node.get("cwd"))
+                    if not cwd or not Path(cwd).is_absolute():
+                        raise RuntimeError("relative runtime dependency profile has no stable base")
+                    path = Path(cwd) / path
+                profiles.add(_safe(path))
+        for prefix, member in members.items():
+            legacy = _actual(host, member)
+            if not legacy:
+                continue
+            transport = legacy.get("transport", legacy)
+            raw = (transport.get("env") or {}).get(MODULE_CONFIG_ENVS.get(prefix))
+            if raw:
+                path = Path(os.path.expandvars(os.path.expanduser(raw)))
+                if not path.is_absolute():
+                    cwd = transport.get("cwd", legacy.get("cwd"))
+                    if not cwd or not Path(cwd).is_absolute():
+                        raise RuntimeError("relative runtime dependency config has no stable base")
+                    path = Path(cwd) / path
+                configs.append({prefix: _safe(path)})
+    return directories, profiles, configs
+
+
+def _check_publication_dependencies(plan, roots):
+    distribution = _distribution(plan["source_root"])
+    if distribution is None:
+        return
+    replacements = distribution["replacements"]
+    names = set(plan.get("retain_payload_names", [])) | set(replacements)
+    if not names:
+        return
+    directories = [_payload(root, name) for root in roots for name in names]
+    if not any(directory.exists() for directory in directories):
+        return
+    inputs = _archive_dependency_inputs(plan, roots, module_dirs=directories, replacements=replacements)
+    _, profiles, configs = inputs
+    source = _safe(Path(plan["source_root"]) / "mcp")
+    check_payload_dependencies(source, directories)
+    for profile in profiles:
+        check_payload_dependencies(source, directories, profile_path=profile)
+    for mapping in configs:
+        check_payload_dependencies(source, directories, module_configs=mapping)
+
+
+def _check_archive_dependencies(plan, roots):
+    inputs = plan.get("_active_dependency_inputs")
+    if inputs is None:
+        inputs = _archive_dependency_inputs(plan, roots)
+    if inputs is None:
+        return
+    directories, profiles, configs = inputs
+    check_runtime_dependencies(None, directories)
+    for profile in profiles:
+        check_runtime_dependencies(profile, directories)
+    for mapping in configs:
+        check_runtime_dependencies(None, directories, module_configs=mapping)
 
 
 def prepare(source_root, installed_roots, client, *, state_root=None, single=None,
@@ -290,17 +584,25 @@ def prepare(source_root, installed_roots, client, *, state_root=None, single=Non
     state = _state(state_root, [source, *roots])
     receipt = _receipt(state)
     distribution_names = desired(source)
+    distribution = _distribution(source)
+    replacements = distribution["replacements"] if distribution else {}
     names = distribution_names
     if single:
         if _name(single) not in names:
             raise RuntimeError("selected MCP is not in current distribution")
         names = [single]
     hosts = _hosts(client)
+    selected_replacements = {name: record for name, record in replacements.items() if name in names}
+    replacement_members = {member for record in selected_replacements.values() for member in record["members"].values()}
+    retained_payload_names = sorted({member for record in replacements.values() if record["retain_payload"]
+                                     for member in record["members"].values()})
     plan = {"version": 1, "id": uuid.uuid4().hex, "state_root": str(state),
             "source_root": str(source), "installed_roots": roots,
             "desired_names": names, "distribution_names": distribution_names,
             "hosts": hosts, "no_delete": bool(no_delete),
             "single": single, "retired": {}, "conflicts": [], "payloads": {},
+            "replacements": selected_replacements, "retain_payload_names": retained_payload_names,
+            "published_payloads": {}, "replacement_source_digests": {},
             "preserve_payloads": {}, "archive_eligible": []}
     # Sync must also keep unverified old code runnable. Keeping it does not
     # grant ownership: only payloads below are eligible for later archival.
@@ -319,8 +621,8 @@ def prepare(source_root, installed_roots, client, *, state_root=None, single=Non
     for host in hosts:
         owned = dict(receipt["hosts"].get(host, {}))
         # Only a complete host-specific equality can adopt legacy exports.
-        for name in sorted(legacy_names | set(owned) | set(names)):
-            if single and name != single:
+        for name in sorted(legacy_names | set(owned) | set(names) | replacement_members):
+            if single and name != single and name not in replacement_members:
                 continue
             actual = _actual(host, name)
             old = owned.get(name)
@@ -353,18 +655,35 @@ def prepare(source_root, installed_roots, client, *, state_root=None, single=Non
                     if root in eligible_roots:
                         plan["archive_eligible"].append(str(item))
     if not single:
-        owned_names = {name for records in plan["retired"].values() for name in records}
+        owned_names = {name for records in plan["retired"].values() for name in records} | set(retained_payload_names)
         reported_names = {item["name"] for item in plan["conflicts"]}
         for raw in plan["preserve_payloads"]:
             name = Path(raw).name
             if name not in owned_names | reported_names:
                 plan["conflicts"].append({"name": name, "reason": "unverified-payload"})
                 reported_names.add(name)
+    for raw in plan["preserve_payloads"]:
+        if Path(raw).name not in retained_payload_names:
+            continue
+        published = _payload(source, Path(raw).name)
+        plan["replacement_source_digests"][str(published)] = _manifest_digest(_replacement_source_manifest(published))
+        plan["published_payloads"][raw] = _manifest_digest(_replacement_manifest(Path(raw), published))
+    _check_publication_dependencies(plan, roots)
     if dry_run:
         return plan
     destination = state / "plans" / f"{plan['id']}.json"
     _private_dir(state)
     _write(destination, plan)
+    # Save original code, config and extensions before a staged publication can
+    # update them. Runtime remains live until the registration success gate.
+    for raw in plan["published_payloads"]:
+        old = Path(raw)
+        snapshot = _archive_target(plan, old.parent.parent, old.name) / "payload"
+        _private_dir(snapshot.parent)
+        _merge_payload(old, snapshot)
+        if _tree_digest(snapshot) != plan["preserve_payloads"][raw]:
+            raise RuntimeError("replacement recovery snapshot changed during preparation")
+        _restrict_archive(snapshot)
     return destination
 
 
@@ -382,6 +701,21 @@ def _load_plan(path):
         _name(name)
     for name in data.get("distribution_names", data["desired_names"]):
         _name(name)
+    distribution = _distribution(data["source_root"])
+    if distribution is not None:
+        names = sorted(distribution["servers"])
+        if (sorted(data.get("distribution_names", data["desired_names"])) != names
+                or not set(data["desired_names"]).issubset(names)
+                or (data.get("single") and data["desired_names"] != [data["single"]])
+                or (not data.get("single") and sorted(data["desired_names"]) != names)):
+            raise RuntimeError("MCP plan distribution catalog conflict")
+    if "replacements" in data:
+        replacements = distribution["replacements"] if distribution else {}
+        expected = {name: record for name, record in replacements.items() if name in data["desired_names"]}
+        retained = sorted({member for record in replacements.values() if record["retain_payload"]
+                           for member in record["members"].values()})
+        if data["replacements"] != expected or data.get("retain_payload_names") != retained:
+            raise RuntimeError("replacement plan catalog conflict")
     if any(host not in HOSTS for host in data["hosts"]):
         raise RuntimeError("invalid plan host")
     for host, services in data["retired"].items():
@@ -389,6 +723,9 @@ def _load_plan(path):
             raise RuntimeError("invalid plan retirement host")
         for name, record in services.items():
             _name(name)
+            if data.get("single") and name not in {member for record in data.get("replacements", {}).values()
+                                                   for member in record["members"].values()}:
+                raise RuntimeError("single MCP retirement outside replacement catalog")
             if not re.fullmatch(r"[0-9a-f]{64}", record["digest"]):
                 raise RuntimeError("invalid plan ownership digest")
             for root in record["roots"]:
@@ -405,6 +742,15 @@ def _load_plan(path):
             raise RuntimeError("invalid payload digest")
     if any(item not in data["payloads"] for item in data.get("archive_eligible", [])):
         raise RuntimeError("invalid archive ownership")
+    for raw, digest in data.get("published_payloads", {}).items():
+        if (raw not in data.get("preserve_payloads", {}) or Path(raw).name not in data.get("retain_payload_names", [])
+                or not re.fullmatch(r"[0-9a-f]{64}", digest)):
+            raise RuntimeError("invalid replacement publication digest")
+    for raw, digest in data.get("replacement_source_digests", {}).items():
+        if (_safe(raw) != _payload(data["source_root"], Path(raw).name)
+                or Path(raw).name not in data.get("retain_payload_names", [])
+                or not re.fullmatch(r"[0-9a-f]{64}", digest)):
+            raise RuntimeError("invalid replacement source identity")
     return data
 
 
@@ -433,6 +779,26 @@ def _merge_payload(source, target):
         return shutil.copy2(original, destination)
     shutil.copytree(source, target, ignore=shutil.ignore_patterns(*RUNTIME),
                     dirs_exist_ok=True, copy_function=copy_missing)
+
+
+def _merge_replacement(source, target, published):
+    """Publish trusted distribution code, keeping original configs/extensions."""
+    expected = _replacement_manifest(source, published)
+    for name, digest in _file_manifest(target).items():
+        if expected.get(name) != digest:
+            raise RuntimeError(f"replacement staged payload conflicts: {source.name}")
+    old_files = _file_manifest(source)
+    new_files = _replacement_source_manifest(published)
+    for name in expected:
+        destination = _safe(target / name, within=target)
+        if destination.exists():
+            continue
+        original = source / name if name in old_files and (
+            name not in new_files or Path(name).name == "config.json") else published / name
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(_safe(original), destination)
+    if _tree_digest(target) != _manifest_digest(expected):
+        raise RuntimeError(f"replacement publication verification failed: {source.name}")
 
 
 def preserve(plan_path, stage_root, *, installed_root=None, source_root=None):
@@ -471,6 +837,15 @@ def preserve(plan_path, stage_root, *, installed_root=None, source_root=None):
         if _tree_digest(source) != digest:
             raise RuntimeError(f"retired payload changed before preservation: {source.name}")
         target = _payload(stage, source.name)
+        if plan_path and raw in plan.get("published_payloads", {}):
+            _check_publication_dependencies(plan, plan["installed_roots"])
+            published = _payload(plan["source_root"], source.name)
+            if _manifest_digest(_replacement_source_manifest(published)) != plan["replacement_source_digests"].get(str(published)):
+                raise RuntimeError("replacement source changed before publication")
+            _merge_replacement(source, target, published)
+            if _tree_digest(target) != plan["published_payloads"][raw]:
+                raise RuntimeError("replacement staged publication drift")
+            continue
         _merge_payload(source, target)
         if _tree_digest(target) != digest:
             raise RuntimeError(f"retired staged payload conflicts: {source.name}")
@@ -507,6 +882,8 @@ def _remove(host, name):
 
 
 def _archive(plan, name, roots):
+    if name in plan.get("retain_payload_names", []):
+        _check_archive_dependencies(plan, roots)
     state = Path(plan["state_root"])
     moved = 0
     for root in roots:
@@ -515,29 +892,60 @@ def _archive(plan, name, roots):
             continue
         if str(source) not in plan.get("archive_eligible", []):
             continue
-        expected = plan["payloads"].get(str(source))
+        expected = plan.get("published_payloads", {}).get(str(source), plan["payloads"].get(str(source)))
         if expected is None or _tree_digest(source) != expected:
             raise RuntimeError(f"retired payload ownership changed: {name}")
-        target = state / "archives" / plan["id"] / _hash(str(root))[:16] / name
+        target = _archive_target(plan, root, name)
         _private_dir(target.parent)
+        if name in plan.get("retain_payload_names", []):
+            # The merged server lazily imports this business module in place.
+            # Preserve code/config and archive only its unused interpreter/cache.
+            # A private source snapshot makes partial moves recoverable; merging
+            # an identical subset allows retries without overwriting any edit.
+            _private_dir(target)
+            snapshot = target / "payload"
+            if not snapshot.exists():
+                _merge_payload(source, snapshot)
+            if _tree_digest(snapshot) != plan.get("preserve_payloads", plan["payloads"])[str(source)]:
+                raise RuntimeError(f"replacement snapshot conflicts: {name}")
+            _restrict_archive(snapshot)
+            for parent, directories, _ in os.walk(source, followlinks=False):
+                for directory in list(directories):
+                    runtime = _safe(Path(parent) / directory, within=source)
+                    if directory not in RUNTIME:
+                        continue
+                    directories.remove(directory)
+                    destination = _safe(target / "runtime" / runtime.relative_to(source), within=target)
+                    _private_dir(destination.parent)
+                    if destination.exists():
+                        raise RuntimeError(f"replacement runtime archive conflicts: {name}")
+                    _check_archive_dependencies(plan, roots)
+                    shutil.move(str(runtime), str(destination))
+                    _restrict_archive(destination)
+            _restrict_archive(target)
+            moved += 1
+            continue
         if target.exists():
             raise RuntimeError(f"archive target already exists: {name}")
         shutil.move(str(source), str(target))
-        os.chmod(target, 0o700)
-        # Data moved from discovery roots may contain credentials. Restrict
-        # regular files and directories without following runtime symlinks.
-        for parent, dirs, files in os.walk(target, followlinks=False):
-            os.chmod(parent, 0o700)
-            dirs[:] = [name for name in dirs if not (
-                stat.S_ISLNK((Path(parent) / name).lstat().st_mode)
-                or getattr((Path(parent) / name).lstat(), "st_file_attributes", 0) & 0x400)]
-            for item in files:
-                node = Path(parent) / item
-                metadata = node.lstat()
-                if stat.S_ISREG(metadata.st_mode) and not getattr(metadata, "st_file_attributes", 0) & 0x400:
-                    os.chmod(node, 0o700 if metadata.st_mode & 0o111 else 0o600)
+        _restrict_archive(target)
         moved += 1
     return moved
+
+
+def _restrict_archive(target):
+    """Restrict saved secrets without following interpreter symlinks."""
+    os.chmod(target, 0o700)
+    for parent, dirs, files in os.walk(target, followlinks=False):
+        os.chmod(parent, 0o700)
+        dirs[:] = [name for name in dirs if not (
+            stat.S_ISLNK((Path(parent) / name).lstat().st_mode)
+            or getattr((Path(parent) / name).lstat(), "st_file_attributes", 0) & 0x400)]
+        for item in files:
+            node = Path(parent) / item
+            metadata = node.lstat()
+            if stat.S_ISREG(metadata.st_mode) and not getattr(metadata, "st_file_attributes", 0) & 0x400:
+                os.chmod(node, 0o700 if metadata.st_mode & 0o111 else 0o600)
 
 
 def finish(plan_path, installed_roots=()):
@@ -554,6 +962,11 @@ def finish(plan_path, installed_roots=()):
                 raise RuntimeError(f"desired MCP verification failed: {host}/{name}")
             verified.setdefault(host, {})[name] = {"digest": _hash(actual), "roots": roots,
                 "payload_roots": [root for root in roots if _payload_owned(root, name, actual)]}
+    if not plan["no_delete"]:
+        plan["_active_dependency_inputs"] = _archive_dependency_inputs(plan, roots)
+        # Check the complete set before the first old registration or runtime
+        # changes, including profile switches that happened after prepare.
+        _check_archive_dependencies(plan, roots)
     for host, records in verified.items():
         receipt["hosts"].setdefault(host, {}).update(records)
     # Persist adopted retirement ownership before the first destructive host
@@ -563,7 +976,7 @@ def finish(plan_path, installed_roots=()):
     _write(state / "receipt.json", receipt)
     result = {"status": "complete", "registered": sum(map(len, verified.values())),
               "retired": 0, "archived": 0, "retained": 0, "conflicts": list(plan["conflicts"])}
-    if plan["single"]:
+    if plan["single"] and not plan.get("replacements"):
         return result
     retired_names = sorted({name for records in plan["retired"].values() for name in records})
     for name in retired_names:
@@ -576,7 +989,7 @@ def finish(plan_path, installed_roots=()):
             for root in roots:
                 item = _payload(root, name)
                 if (item.exists() and str(item) in plan.get("archive_eligible", [])
-                        and _tree_digest(item) != plan["payloads"].get(str(item))):
+                        and _tree_digest(item) != plan.get("published_payloads", {}).get(str(item), plan["payloads"].get(str(item)))):
                     raise RuntimeError("retired payload changed")
         except (RuntimeError, OSError):
             result["conflicts"].append({"name": name, "reason": "payload-drift"})
@@ -612,7 +1025,7 @@ def finish(plan_path, installed_roots=()):
                 result["retained"] += 1
                 continue
             result["archived"] += _archive(plan, name, roots)
-            if any(_payload(root, name).exists() for root in roots):
+            if name not in plan.get("retain_payload_names", []) and any(_payload(root, name).exists() for root in roots):
                 result["conflicts"].append({"name": name, "reason": "payload-conflict"})
                 continue
         except (RuntimeError, OSError, shutil.Error):
@@ -648,6 +1061,8 @@ def main(argv=None):
     listing.add_argument("--plan", type=Path)
     hosts = commands.add_parser("hosts")
     hosts.add_argument("--plan", required=True, type=Path)
+    profile = commands.add_parser("profile-preflight")
+    profile.add_argument("--plan", required=True, type=Path)
     keep = commands.add_parser("preserve")
     keep.add_argument("--plan", type=Path)
     keep.add_argument("--source-root", type=Path)
@@ -669,6 +1084,21 @@ def main(argv=None):
         elif args.command == "hosts":
             for host in _load_plan(args.plan)["hosts"]:
                 print(host)
+        elif args.command == "profile-preflight":
+            plan = _load_plan(args.plan)
+            if "icode-local" in plan["desired_names"]:
+                script = _safe(Path(plan["source_root"]) / "mcp/icode-local/profile.py")
+                if not script.is_file():
+                    raise RuntimeError("missing icode-local profile preflight")
+                for root in plan["installed_roots"]:
+                    try:
+                        result = subprocess.run([sys.executable, str(script), "preflight", "--target",
+                            str(_payload(root, "icode-local")), "--hosts", ",".join(plan["hosts"])],
+                            stdin=subprocess.DEVNULL, timeout=60, capture_output=True)
+                    except subprocess.TimeoutExpired as exc:
+                        raise RuntimeError("icode-local profile preflight timed out") from exc
+                    if result.returncode:
+                        raise RuntimeError("icode-local profile preflight failed; check selected host configuration paths")
         elif args.command == "preserve":
             preserve(args.plan, args.stage_root, installed_root=args.installed_root,
                      source_root=args.source_root)

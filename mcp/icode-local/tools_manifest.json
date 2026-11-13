@@ -1,0 +1,175 @@
+{
+  "server": "icode-local",
+  "api_key_required": false,
+  "purpose": "same-process local tools with independent module policies",
+  "tools": [
+    {
+      "name": "describe_capabilities",
+      "read_only": true,
+      "deterministic": true,
+      "network": false
+    },
+    {
+      "name": "workspace_describe_capabilities",
+      "read_only": true,
+      "deterministic": true,
+      "network": false
+    },
+    {
+      "name": "workspace_inspect_workspace",
+      "read_only": true,
+      "deterministic": true,
+      "network": false
+    },
+    {
+      "name": "workspace_resolve_project",
+      "read_only": true,
+      "deterministic": true,
+      "network": false
+    },
+    {
+      "name": "workspace_inspect_project_profile",
+      "read_only": true,
+      "deterministic": true,
+      "network": false
+    },
+    {
+      "name": "workspace_inspect_repo_matrix",
+      "read_only": true,
+      "deterministic": true,
+      "network": false
+    },
+    {
+      "name": "workspace_inspect_build_inputs",
+      "read_only": true,
+      "deterministic": true,
+      "network": false
+    },
+    {
+      "name": "workspace_inspect_artifact",
+      "read_only": true,
+      "deterministic": true,
+      "network": false
+    },
+    {
+      "name": "evidence_describe_capabilities",
+      "read_only": true,
+      "deterministic": true,
+      "network": false
+    },
+    {
+      "name": "evidence_inspect_file",
+      "read_only": true,
+      "deterministic": true,
+      "network": false
+    },
+    {
+      "name": "evidence_read_evidence",
+      "read_only": true,
+      "deterministic": true,
+      "network": false
+    },
+    {
+      "name": "evidence_verify_digest",
+      "read_only": true,
+      "deterministic": true,
+      "network": false
+    },
+    {
+      "name": "evidence_build_timeline",
+      "read_only": true,
+      "deterministic": true,
+      "network": false
+    },
+    {
+      "name": "evidence_inspect_corpus",
+      "read_only": true,
+      "deterministic": true,
+      "network": false
+    },
+    {
+      "name": "index_describe_capabilities",
+      "read_only": true,
+      "deterministic": true,
+      "network": false
+    },
+    {
+      "name": "index_build_index",
+      "read_only": false,
+      "deterministic": true,
+      "network": false
+    },
+    {
+      "name": "index_index_status",
+      "read_only": true,
+      "deterministic": true,
+      "network": false
+    },
+    {
+      "name": "index_query_index",
+      "read_only": true,
+      "deterministic": true,
+      "network": false
+    },
+    {
+      "name": "health_describe_capabilities",
+      "read_only": true,
+      "deterministic": true,
+      "network": false
+    },
+    {
+      "name": "health_inventory_servers",
+      "read_only": true,
+      "deterministic": true,
+      "network": false
+    },
+    {
+      "name": "health_diagnose_registration",
+      "read_only": true,
+      "deterministic": true,
+      "network": false
+    },
+    {
+      "name": "health_validate_manifest",
+      "read_only": true,
+      "deterministic": true,
+      "network": false
+    },
+    {
+      "name": "health_probe_python_server",
+      "read_only": true,
+      "deterministic": true,
+      "network": false
+    },
+    {
+      "name": "health_scan_sensitive_payload",
+      "read_only": true,
+      "deterministic": true,
+      "network": false
+    },
+    {
+      "name": "policy_describe_capabilities",
+      "read_only": true,
+      "deterministic": true,
+      "network": false
+    },
+    {
+      "name": "policy_validate_policy",
+      "read_only": true,
+      "deterministic": true,
+      "network": false
+    },
+    {
+      "name": "policy_list_step_policy",
+      "read_only": true,
+      "deterministic": true,
+      "network": false
+    },
+    {
+      "name": "policy_evaluate_call",
+      "read_only": true,
+      "deterministic": true,
+      "network": false
+    }
+  ]
+}

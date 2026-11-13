@@ -15,7 +15,7 @@
 
 ## 2. 工程根解析（fail-closed）
 
-优先调用 `icode-workspace.resolve_project(path, max_depth=2)`：
+优先调用 `icode-local.workspace_resolve_project(path, max_depth=2)`；旧宿主可回退兼容入口 `icode-workspace.resolve_project(path, max_depth=2)`：
 
 1. 路径位于 Git 仓内：使用当前 checkout 的 Git 根，模式为 `current_git`。
 2. 路径不在 Git 仓，但深度 2 内只有一个 Git 根：使用该根，模式为 `unique_nested_git`，并向用户显示“请求路径 → 实际工程根”。
@@ -34,7 +34,7 @@ MCP 不可用时可用只读 `git -C <path> rev-parse --show-toplevel` 与有界
 
 ## 3. 静态工程画像
 
-嵌入式或大仓命中时调用 `icode-workspace.inspect_project_profile(path, max_depth=2)`。它只允许读取：
+嵌入式或大仓命中时调用 `icode-local.workspace_inspect_project_profile(path, max_depth=2)`；旧入口 `icode-workspace.inspect_project_profile` 继续兼容。它只允许读取：
 
 - 固定参数的只读 Git 命令（如 `rev-parse`、`status`、`ls-files`、`worktree list`、`submodule status`）；
 - `git ls-files` 返回的受控路径清单；

@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "servers": [
+    "icode-local",
+    "icode-device-observe",
+    "icode-mail-observe",
+    "cheap-research",
+    "vision-bridge",
+    "context7",
+    "memory",
+    "playwright",
+    "sequential-thinking"
+  ],
+  "replacements": {
+    "icode-local": {
+      "members": {
+        "workspace": "icode-workspace",
+        "evidence": "icode-evidence",
+        "index": "icode-local-index",
+        "health": "icode-mcp-health",
+        "policy": "icode-mcp-policy"
+      },
+      "retain_payload": true
+    }
+  }
+}
