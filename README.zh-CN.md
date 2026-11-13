@@ -72,6 +72,8 @@ cd ~/icode-skill
 
 默认 MCP 清单见 [`mcp/servers.json`](mcp/servers.json)，由 13 项收敛为 9 项。`icode-local` 在一个 Python 进程中复用 workspace、evidence、local-index、health、policy 五个模块；原工具增加模块前缀，另有统一能力描述。旧模块代码和原配置继续保留，各自的允许路径与索引/探针权限不合并；新服务验证成功后才退役受管旧注册并归档旧虚拟环境。设备、邮件与第三方 MCP 仍独立运行；不同宿主会话仍可能各启动一份统一服务。
 
+默认四个 Node MCP 使用固定版本受管包，直接以 Node 启动 CLI；npm 只在安装和升级时执行，去掉会话中的 npx 启动层。版本及传递依赖见 `mcp/node-packages/`。迁移保留各客户端参数、环境和 memory 原图谱路径；旧包、数据和现有会话不会因更新而被清理，正常重载后使用新入口。
+
 CodeBuddy 复用 `~/.claude/skills/`，不会产生第三份 ICODE 副本；安装器会把版本化模板 [`integrations/codebuddy/commands/icode.md`](integrations/codebuddy/commands/icode.md) 原子发布为 `~/.codebuddy/commands/icode.md`，从而提供 `/icode ...`。命令桥使用独立所有权标记：同内容旧文件可接管，不同内容的未托管文件会在任何 Skill 写入前拒绝覆盖。其 MCP 独立注册到 `~/.codebuddy/mcp.json`。
 
 WorkBuddy 使用独立技能根 `~/.workbuddy/skills/` 与命令桥 `~/.workbuddy/commands/icode.md`（同一模板，所有权标记 artifact 为 `workbuddy-command`），MCP 独立注册到 `~/.workbuddy/mcp.json`。`--client workbuddy` 一次性安装以上全部；会话内工具语法以当前 WorkBuddy 实际暴露能力为准。

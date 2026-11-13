@@ -269,6 +269,18 @@ def _matches(host, actual, entry):
     return transport == expected
 
 
+def _node_managed(name):
+    """Narrow opt-in: only the four shipped locked npm server specifications."""
+    try:
+        import node_registration
+        if name not in node_registration.SERVERS:
+            return False
+        node_registration._packages().load_spec(name)
+    except (ImportError, RuntimeError, OSError, ValueError):
+        return False
+    return True
+
+
 def _hosts(client):
     if client not in (*HOSTS, "all"):
         raise RuntimeError("invalid MCP host selection")
@@ -603,7 +615,7 @@ def prepare(source_root, installed_roots, client, *, state_root=None, single=Non
             "single": single, "retired": {}, "conflicts": [], "payloads": {},
             "replacements": selected_replacements, "retain_payload_names": retained_payload_names,
             "published_payloads": {}, "replacement_source_digests": {},
-            "preserve_payloads": {}, "archive_eligible": []}
+            "preserve_payloads": {}, "archive_eligible": [], "node_entries": {}}
     # Sync must also keep unverified old code runnable. Keeping it does not
     # grant ownership: only payloads below are eligible for later archival.
     for root in roots:
@@ -630,6 +642,15 @@ def prepare(source_root, installed_roots, client, *, state_root=None, single=Non
             matches_old = old is not None and (actual is None or _hash(actual) == old["digest"])
             adopted = old is None and _matches(host, actual, entry)
             if name in names:
+                if _node_managed(name):
+                    import node_registration
+                    prior = node_registration._read_receipt(name)["hosts"].get(host)
+                    if prior and prior["status"] in ("migrated", "pending") and not node_registration.can_resume_host(name, host, actual):
+                        raise RuntimeError(f"desired MCP ownership conflict: {host}/{name}")
+                    # This snapshot authorizes only the child's read/retain or
+                    # recognized launch-field migration; never retirement.
+                    plan["node_entries"].setdefault(host, {})[name] = {"digest": _hash(actual)}
+                    continue
                 # A previous batch may have updated this desired child before
                 # another child failed. Its complete current export is also
                 # valid recovery evidence; retired items still require their
@@ -638,6 +659,9 @@ def prepare(source_root, installed_roots, client, *, state_root=None, single=Non
                     raise RuntimeError(f"desired MCP ownership conflict: {host}/{name}")
                 continue
             if old is None and actual is None:
+                continue
+            if old and old.get("retained_custom"):
+                plan["conflicts"].append({"host": host, "name": name, "reason": "retained-custom"})
                 continue
             if not (matches_old or adopted):
                 plan["conflicts"].append({"host": host, "name": name, "reason": "ownership"})
@@ -718,6 +742,14 @@ def _load_plan(path):
             raise RuntimeError("replacement plan catalog conflict")
     if any(host not in HOSTS for host in data["hosts"]):
         raise RuntimeError("invalid plan host")
+    for host, services in data.get("node_entries", {}).items():
+        if host not in data["hosts"] or not isinstance(services, dict):
+            raise RuntimeError("invalid managed Node plan host")
+        for name, record in services.items():
+            if (name not in data["desired_names"] or not _node_managed(name)
+                    or not isinstance(record, dict) or set(record) != {"digest"}
+                    or not re.fullmatch(r"[0-9a-f]{64}", record.get("digest", ""))):
+                raise RuntimeError("invalid managed Node plan snapshot")
     for host, services in data["retired"].items():
         if host not in data["hosts"] or not isinstance(services, dict):
             raise RuntimeError("invalid plan retirement host")
@@ -954,14 +986,27 @@ def finish(plan_path, installed_roots=()):
     state = _state(plan["state_root"], [plan["source_root"], *roots])
     receipt = _receipt(state)
     verified = {}
+    retained_custom = 0
     # The all-desired gate precedes any receipt or retirement write.
     for host in plan["hosts"]:
         for name in plan["desired_names"]:
             actual = _actual(host, name)
-            if not _matches(host, actual, _export(name)):
+            snapshot = plan.get("node_entries", {}).get(host, {}).get(name)
+            node_record = None
+            if snapshot is not None:
+                import node_registration
+                if not node_registration.verify_host(name, host, actual):
+                    raise RuntimeError(f"desired MCP verification failed: {host}/{name}")
+                node_record = node_registration._read_receipt(name)["hosts"][host]
+                if snapshot["digest"] not in (node_record.get("before_digest"), node_record["digest"]):
+                    raise RuntimeError(f"desired MCP snapshot conflict: {host}/{name}")
+            elif not _matches(host, actual, _export(name)):
                 raise RuntimeError(f"desired MCP verification failed: {host}/{name}")
             verified.setdefault(host, {})[name] = {"digest": _hash(actual), "roots": roots,
                 "payload_roots": [root for root in roots if _payload_owned(root, name, actual)]}
+            if node_record and node_record["status"] == "retained":
+                verified[host][name]["retained_custom"] = True
+                retained_custom += 1
     if not plan["no_delete"]:
         plan["_active_dependency_inputs"] = _archive_dependency_inputs(plan, roots)
         # Check the complete set before the first old registration or runtime
@@ -975,7 +1020,7 @@ def finish(plan_path, installed_roots=()):
         receipt["hosts"].setdefault(host, {}).update(records)
     _write(state / "receipt.json", receipt)
     result = {"status": "complete", "registered": sum(map(len, verified.values())),
-              "retired": 0, "archived": 0, "retained": 0, "conflicts": list(plan["conflicts"])}
+              "retired": 0, "archived": 0, "retained": retained_custom, "conflicts": list(plan["conflicts"])}
     if plan["single"] and not plan.get("replacements"):
         return result
     retired_names = sorted({name for records in plan["retired"].values() for name in records})

@@ -8,7 +8,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE.txt)
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-Skill-8A2BE2.svg)](SKILL.md)
-[![Version](https://img.shields.io/badge/version-v2.40.0-blue.svg)](SKILL.md)
+[![Version](https://img.shields.io/badge/version-v2.41.0-blue.svg)](SKILL.md)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/ayukyo/icode-skill/issues)
 
 </div>
@@ -192,6 +192,8 @@ Reinstallation also reconciles retired managed skills and MCPs. Unchanged owned 
 `--dry-run` previews retirement without writes. `--no-delete` defers retirement and `--skip-mcp` leaves MCP registrations and receipts alone. A single-service install handles only that service and its explicitly declared replacement members. Plain skill synchronization retains old MCP code for recovery. Configuration changes require a host reload or a new session; installation does not terminate other sessions' processes.
 
 The default [`MCP catalog`](mcp/servers.json) contains nine services. One `icode-local` Python process serves the workspace, evidence, index, health and policy modules, replacing five default processes. Original tools use module prefixes and share an aggregate capability description. Module code and configurations remain compatible, with separate path and write/probe permissions. Verified migration retires managed old registrations and archives obsolete virtual environments. Device, mail and third-party MCPs remain separate; independent host sessions may still start their own unified service.
+
+The four default Node MCPs use version-pinned managed packages and launch their CLI directly with Node. npm runs during installation and upgrades; host settings and existing memory graph paths are preserved. See `mcp/node-packages/` for the dependency locks. Existing sessions pick up the new entry after a normal reload.
 
 CodeBuddy scans `~/.claude/skills/`, so it reuses that ICODE copy rather than creating a third one. The installer atomically publishes the versioned [`integrations/codebuddy/commands/icode.md`](integrations/codebuddy/commands/icode.md) template as `~/.codebuddy/commands/icode.md`, providing `/icode ...`; a separate ownership marker permits identical-file adoption and rejects conflicting unmanaged commands before any Skill root is changed. CodeBuddy MCP entries remain isolated in `~/.codebuddy/mcp.json`.
 

@@ -1,0 +1,8 @@
+{
+  "name": "icode-node-sequential-thinking",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "@modelcontextprotocol/server-sequential-thinking": "1.0.0"
+  }
+}

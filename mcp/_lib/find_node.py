@@ -18,6 +18,7 @@ node 加进 PATH——这属于安装流程该自己解决的问题。
 
 用法:
     python3 find_node.py     # 成功: 输出 "node路径\tnpx路径"; 失败: stderr 报错, 退出码 1
+    python3 find_node.py --node-only  # 受管包只要求 Node；npx 不存在时输出空第二列
 """
 import glob
 import os
@@ -80,8 +81,10 @@ def find_node_npx() -> tuple[str | None, str | None]:
 
 def main() -> int:
     node, npx = find_node_npx()
-    if node and npx:
-        sys.stdout.write(f"{node}\t{npx}\n")
+    # Managed packages execute Node directly; npx remains required by legacy callers.
+    node_only = sys.argv[1:] == ["--node-only"]
+    if node and (npx or node_only):
+        sys.stdout.write(f"{node}\t{npx or ''}\n")
         return 0
     missing = []
     if not node:

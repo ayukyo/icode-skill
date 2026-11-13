@@ -29,6 +29,7 @@ if str(_LIB) not in sys.path:
     sys.path.insert(0, str(_LIB))
 from platform_entry import build_server_entry  # noqa: E402
 from claude_registry import register as _claude_register  # noqa: E402
+from node_registration import register_managed  # noqa: E402
 
 CLAUDE_JSON = Path.home() / ".claude.json"
 
@@ -87,6 +88,14 @@ def main():
         print(f"❌ node 不可执行: {raw_node}")
         print(f"   请确认 Node.js 已安装且 {raw_node} 在 PATH 上")
         sys.exit(1)
+    try:
+        managed = register_managed(SERVER_NAME, node_path, raw_npx, package)
+    except (RuntimeError, OSError, ValueError, TypeError):
+        # Do not print subprocess output or user configuration values.
+        print(f"managed-node {SERVER_NAME}: registration failed; configuration preserved or retryable", file=sys.stderr)
+        sys.exit(1)
+    if managed is not None:
+        sys.exit(managed)
     npx_path = _resolve_executable(raw_npx)
     if not npx_path:
         print(f"❌ npx 不可执行: {raw_npx}")

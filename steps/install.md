@@ -131,17 +131,19 @@
 - ✅ 公开 `--preview`（内部 `--dry-run`）零写入；重复安装内容幂等；运行时配置未被镜像删除
 - ✅ **未上传任何 KEY**：检查 `git diff` 仅含 markdown/bash/python，未含 api_key/token 字面量
 
-## 跨平台说明（2026-07-26 修复）
+## 跨平台 Node MCP 启动
 
-所有 npx 系 MCP（context7 / memory / playwright / sequential-thinking）通过 `mcp/_lib/platform_entry.py::build_server_entry()` 统一注册，主方案 `command=npx, args=[-y, pkg]` 在 Windows / Linux / macOS 三平台都能跑：
+默认 context7、memory、playwright、sequential-thinking 使用发行中固定版本及完整依赖锁，安装到用户私有受管运行时。npm 仅在安装/升级阶段执行；注册为绝对 `node` 路径加包声明的真实 CLI `.js`，日常启动不经过 npm/npx 或额外常驻代理。包、服务名和工具协议保持独立，默认服务总数仍为9。
 
-- **Windows**：`shutil.which("npx")` 解析到 `npx.cmd`（batch 文件），Claude Code 启动器可直接 spawn
-- **Linux/macOS**：`shutil.which("npx")` 解析到 `/usr/bin/npx`（npm 自带 shell 脚本），可执行
-- **Fallback**：当 `npx` 不可用时，注册项 `_fallback` 字段写入 `node + npx-cli.js` 路径（位于 node 同级 `node_modules/npm/bin/npx-cli.js`）
+重复安装先校验包及文件摘要；失败保留旧运行时和已存在注册，不能以缺失/损坏缓存冒充安装成功。受管包目录不放 memory 图谱，迁移必须保留原有效数据路径、各宿主环境变量及 CLI 参数。自定义实现默认保护；显式收编必须绑定具体宿主、服务和旧节点摘要，并备份原注册。
+
+旧 memory 使用相对路径或包内默认图谱时，安装器必须证明原 CLI 的位置；不能确认宿主原启动目录、缓存或本地包来源时会停止迁移。可在确认旧图谱位置后，在该宿主旧注册中明确设置绝对 `MEMORY_FILE_PATH` 再重试；不要为了通过安装而指向空图谱。
+
+Windows 可使用便携 Node；Python 探测验证真实执行结果并支持 `py -3`，不接受 WindowsApps 空入口。Linux/macOS 同样直接运行 Node CLI。显式使用其它 npm 实现时保留既有兼容安装路径，不能把未知包静默替换为默认固定版本。
 
 **修改 MCP 后的步骤**：
 1. 修改 `mcp/<name>/scripts/register_mcp.py` 或 `mcp/<name>/install.sh`
-2. `bash mcp/<name>/install.sh --uninstall && bash mcp/<name>/install.sh`
+2. `bash mcp/<name>/install.sh`，先完成包和原配置预检，再更新受管条目；不需要先删除旧注册
 3. **重启 Claude Code**（启动时同步加载 mcpServers，中途修改不生效）
 
 ## DOCX 自管运行时

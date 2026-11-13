@@ -4,6 +4,8 @@
 >
 > 安装入口：`/icode install`（详见 [steps/install.md](../steps/install.md)）
 >
+> context7、memory、playwright、sequential-thinking 默认通过固定版本受管 Node 包直启。npm 只在安装/升级阶段运行；注册名和工具协议保持原实现。当前会话未重载时不能把新注册当作已暴露工具，仍按下面的注册/可调用双条件判断。
+>
 > 步骤 × MCP 推荐矩阵：[mcp_per_step.md](mcp_per_step.md)
 >
 > **二元化**：推荐级别为 🟢 必须调 / ⚪ 不必调（无 🟡），按 [mcp_per_step.md](mcp_per_step.md)「强证据场景判定」执行。本文档的「强证据 + 降级路径」适用，下文各 MCP 的「触发场景」即强证据场景。

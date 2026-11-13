@@ -173,6 +173,7 @@ fi
 selected_hosts="$("${PYTHON_BIN[@]}" "$RECONCILE" hosts --plan "$ICODE_MCP_RECONCILE_PLAN")"
 ICODE_MCP_SELECTED_HOSTS="$(printf '%s' "$selected_hosts" | tr '\n' ',')"
 export ICODE_MCP_SELECTED_HOSTS
+export ICODE_MCP_RECONCILE_PLAN
 "${PYTHON_BIN[@]}" "$RECONCILE" profile-preflight --plan "$ICODE_MCP_RECONCILE_PLAN"
 claude_enabled=false
 codex_enabled=false
@@ -216,6 +217,18 @@ for installer in "${installers[@]}"; do
   fi
   if ICODE_MCP_EXPORT_ONLY="$export_only" bash "$installer"; then
     ok_count=$((ok_count + 1))
+    case "$name" in
+      context7|memory|playwright|sequential-thinking)
+        # The child has already handled frozen hosts independently. Copying a
+        # Claude export here would overwrite host-specific env and metadata.
+        if ! "${PYTHON_BIN[@]}" "$HERE/_lib/node_registration.py" verify --server "$name" --hosts "$ICODE_MCP_SELECTED_HOSTS"; then
+          fail_count=$((fail_count + 1))
+          failed+=("$name(managed-node)")
+        fi
+        echo ""
+        continue
+        ;;
+    esac
     # Codex 分支: 依赖子工程 install 成功导出的 entry
     if [ "$codex_enabled" = true ]; then
       if [ ${#PYTHON_BIN[@]} -eq 0 ]; then

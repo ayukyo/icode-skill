@@ -38,6 +38,13 @@ on:
       - 'mcp/icode-workspace/**'
       - 'mcp/_lib/**'
       - 'mcp/icode-local/**'
+      - 'mcp/node-packages/**'
+      - 'mcp/context7/**'
+      - 'mcp/memory/**'
+      - 'mcp/playwright/**'
+      - 'mcp/sequential-thinking/**'
+      - 'tests/test_node*.py'
+      - 'tests/verify_node_direct_stdio.py'
       - 'mcp/servers.json'
       - 'mcp/install.sh'
       - 'mcp/uninstall.sh'
@@ -104,7 +111,7 @@ jobs:
 
   windows-ui:
     runs-on: windows-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -112,6 +119,9 @@ jobs:
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: '3.11'
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
       - name: Prepare Windows browser test runtime
         run: |
           python -m pip install --disable-pip-version-check pytest==9.0.3 PyYAML==6.0.2 playwright==1.64.1 -r mcp/icode-local/requirements.txt
@@ -130,6 +140,12 @@ jobs:
           python -m pytest -p no:anyio mcp/icode-local/tests tests/test_local_mcp_replacement_install.py tests/test_local_mcp_policy_health_transport.py -q
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python mcp/icode-local/tests/verify_stdio.py
+      - name: Windows managed Node packages and direct stdio
+        run: |
+          python -m pytest -p no:anyio tests/test_node_packages.py tests/test_node_registration.py tests/test_node_direct_install.py -q
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $nodeExe = (Get-Command node).Source
+          python tests/verify_node_direct_stdio.py --node "$nodeExe" --runtime-root "$env:RUNNER_TEMP/icode-node-mcp"
       - name: Prepare pinned WebView2 host in external cache
         run: |
           $hostExe = python -c "import sys;sys.path.insert(0,'agent_runtime');from icode_agent.native_runtime import ensure_native_runtime;print(ensure_native_runtime())"
@@ -170,6 +186,9 @@ jobs:
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: '3.11'
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
       - name: Bind exact source
         id: source
         shell: bash
@@ -219,6 +238,12 @@ jobs:
               required.update('mcp/' + name + '/install.sh' for name in catalog['servers'])
               required.update('mcp/' + name + '/server.py' for name in
                               catalog['replacements']['icode-local']['members'].values())
+              required.update('mcp/_lib/' + name for name in
+                              ('node_packages.py', 'node_registration.py', 'install_managed_node_mcp.sh'))
+              required.add('mcp/node-packages/catalog.json')
+              for service in ('memory', 'sequential-thinking', 'context7', 'playwright'):
+                  required.update('mcp/node-packages/' + service + '/' + name for name in
+                                  ('package.json', 'package-lock.json'))
               if not required <= names:
                   raise SystemExit('MCP component is missing unified runtime or compatibility dependencies')
           PY
@@ -236,6 +261,7 @@ jobs:
           retention-days: 7
       - name: Offline regression tests
         run: |
+          python3 -m pytest -p no:anyio tests/test_node_packages.py tests/test_node_registration.py tests/test_node_direct_install.py -q
           python3 -m pytest -p no:anyio mcp/icode-local/tests tests/test_local_mcp_replacement_install.py tests/test_local_mcp_policy_health_transport.py -q
           python3 mcp/icode-local/tests/verify_stdio.py
           python3 -m pytest -p no:anyio tests/test_install_reconciliation_entrypoints.py tests/test_mcp_install_reconcile.py tests/test_skill_retirement.py tests/test_claude_registry_unit.py tests/test_thinking_gate_unavailable.py tests/test_mcp_gate_unavailable.py -q
@@ -256,6 +282,8 @@ jobs:
           python3 -m pytest -p no:anyio tests/test_build_preflight_safety.py -q
           bash tests/test_project_intake_contract.sh
           bash tests/test_control_plane_verify_doc_contract.sh
+      - name: Linux managed Node packages and direct stdio
+        run: python3 tests/verify_node_direct_stdio.py --node "$(command -v node)" --runtime-root "$RUNNER_TEMP/icode-node-mcp"
       - name: Build preview (no secrets, no deployment)
         if: steps.policy.outputs.publish != 'true'
         env:

@@ -1,0 +1,8 @@
+{
+  "name": "icode-node-context7",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "@upstash/context7-mcp": "4.7.0"
+  }
+}

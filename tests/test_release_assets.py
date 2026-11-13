@@ -100,6 +100,20 @@ class ReleaseAssetsTests(unittest.TestCase):
         self.assertIn("SkillHub", result.stderr)
         self.assertFalse(self.output.exists())
 
+    def test_managed_node_install_helpers_ship_with_mcp_component(self):
+        names = ('node_packages.py', 'node_registration.py', 'install_managed_node_mcp.sh')
+        for name in names:
+            self.fixture.put('mcp/_lib/' + name, '# isolated MCP installer fixture\n')
+        self.fixture.git('add', 'mcp/_lib')
+        self.success()
+        with zipfile.ZipFile(self.output / 'icode-v2.32.0-core.zip') as core:
+            for name in names:
+                self.assertNotIn('icode/mcp/_lib/' + name, core.namelist())
+            self.assertIn('icode/mcp/_lib/environment_diagnostics.py', core.namelist())
+        with zipfile.ZipFile(self.output / 'icode-v2.32.0-mcp.zip') as mcp:
+            for name in names:
+                self.assertIn('mcp/_lib/' + name, mcp.namelist())
+
     def test_import_archive_accepts_200_files_and_rejects_201(self):
         baseline = self.success()["profiles"]["core"]["files"]
         for index in range(200 - baseline):

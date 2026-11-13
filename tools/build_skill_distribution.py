@@ -127,6 +127,11 @@ def component_for(path):
         return "docx"
     if name.startswith("agent_runtime/") or name == "tools/icode_agent.py":
         return "ui"
+    # These helpers only install Node MCP services; shared workflow gates do
+    # not import them. Keep them beside the locked packages in the MCP payload.
+    if name in {"mcp/_lib/node_packages.py", "mcp/_lib/node_registration.py",
+                "mcp/_lib/install_managed_node_mcp.sh"}:
+        return "mcp"
     # Publishing/website maintenance belongs with developer resources, so the
     # bounded core retains runtime tools without raising its import budget.
     if (name in {".gitignore", "tools/build_public_site.py", "tools/notify_indexnow.py",
