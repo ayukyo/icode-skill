@@ -66,6 +66,10 @@ cd ~/icode-skill
 
 `./install.sh --dry-run --client all` 可做零写入预检；`--skip-mcp` 只安装 ICODE 和共享技能。ICODE 本体发布到 `<skills-root>/icode/`，每个共享技能从不可发现的源模板生成到顶层 `<skills-root>/<skill-name>/SKILL.md`，不会再出现嵌套同名技能。
 
+重装会按最新发行收敛受管 Skill/MCP：未被用户改写的旧共享技能归档到技能扫描目录外；所选新版 MCP 全部安装并通过注册校验后，才注销已证明归属的退役 MCP。用户改写、归属不明、旧共享技能缺历史摘要的项保留并报告冲突，不冒充全部同步成功。当前共享技能成功更新后会记录发布摘要，供后续退役判断。MCP 摘要回执与配置/运行时私有归档位于 `~/.local/state/icode/mcp-install/`，共享技能归档位于 `<skills-root-parent>/.icode-skill-archive/`；回执不保存凭据正文。
+
+`--dry-run` 预览而不写入；`--no-delete` 暂缓退役；`--skip-mcp` 不改 MCP 注册和回执；仅选择一个 MCP 不清理其他服务。单独同步技能时保留旧 MCP 代码用于恢复。注册变化在宿主重载或新会话后生效，安装器不会结束其他会话的进程。
+
 CodeBuddy 复用 `~/.claude/skills/`，不会产生第三份 ICODE 副本；安装器会把版本化模板 [`integrations/codebuddy/commands/icode.md`](integrations/codebuddy/commands/icode.md) 原子发布为 `~/.codebuddy/commands/icode.md`，从而提供 `/icode ...`。命令桥使用独立所有权标记：同内容旧文件可接管，不同内容的未托管文件会在任何 Skill 写入前拒绝覆盖。其 MCP 独立注册到 `~/.codebuddy/mcp.json`。
 
 WorkBuddy 使用独立技能根 `~/.workbuddy/skills/` 与命令桥 `~/.workbuddy/commands/icode.md`（同一模板，所有权标记 artifact 为 `workbuddy-command`），MCP 独立注册到 `~/.workbuddy/mcp.json`。`--client workbuddy` 一次性安装以上全部；会话内工具语法以当前 WorkBuddy 实际暴露能力为准。

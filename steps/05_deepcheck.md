@@ -242,10 +242,10 @@ Free 阶段一次性完整覆盖全部 15 个角度。
 > - exclude_dirs = `["node_modules", ".git", "build", ".icode_output"]`
 > - max_files = 50（**经验值**：工程 > 100 文件时降低单步 token；用户在 metadata 可调高/低）, max_matches = 100（**经验值**：单 pattern 最多 100 命中防 context 爆炸）
 > - 输出 = `{pattern: [{file, line, snippet}], ...}`，主代理只看命中 + 上下文，**不替代 7 维度判定**
-> - **gate 绑定**：本预扫 = gate `deepcheck.fixed_scan`（tool=scan_patterns）。**full 模式进入 Fixed 且功能点非空** → eligible=true 必须 called/cache_hit/degraded_after_attempt；**功能点为空** → eligible=false `skipped_not_eligible`；**fast 模式不进入 Fixed** → eligible=false `skipped_stage_not_reached`（见顶部「fast 模式降级」段）
+> - **gate 绑定**：本预扫 = gate `deepcheck.fixed_scan`（tool=scan_patterns）。**full 模式进入 Fixed 且功能点非空** → eligible=true 必须 called/cache_hit/degraded_after_attempt/unavailable_before_call；**功能点为空** → eligible=false `skipped_not_eligible`；**fast 模式不进入 Fixed** → eligible=false `skipped_stage_not_reached`（见顶部「fast 模式降级」段）
 > - **前提契约（§2 空降级）**：`03_plan_final.md` §2 功能需求为空或不存在 → `patterns=[]` → scan_patterns 退化为无操作（不报错）；写 `▶ scan_patterns 跳过：03_plan_final.md §2 无功能需求`
 > - **fast 模式行为**：`metadata.mode == "fast"` 时**不跑 Fixed 阶段**（[steps/05_deepcheck.md](05_deepcheck.md) §「fast 模式降级」段）→ scan_patterns 预扫不触发，但**必须**在 `.mcp_gate_trace.jsonl` 记 `skipped_stage_not_reached`（缺记录 = 转换校验失败）
-> - **降级**：cheap-research 不可用 → 跳过预扫，走原流程（主代理自扫）；写 `[降级-scan_patterns 不可用]` 并记 trace `decision=degraded_after_attempt, attempted=true`
+> - **降级**：cheap-research 不可用 → 走原流程（主代理自扫）；写 `[降级-scan_patterns 不可用]`。trace 按 [thinking_core.md](../references/thinking_core.md)「cheap-research 执行门（gate）流程」区分实际失败与未暴露；未暴露记 `unavailable_before_call/attempted=false/result=unavailable` 及完整 `availability`，不伪造调用。
 
 7 维度逐项检查（**每维度必须列 file:line 证据 + 评分理由 ≥2 句实质，不得只概括**）：
 1. 计划实施一致性 — 逐条对照每个功能点/接口/约束
@@ -275,7 +275,7 @@ Free 阶段一次性完整覆盖全部 15 个角度。
 >
 > - cheap-research 🟢（`mcp__cheap-research__extract` 可用）
 > - **函数数 ≥ 50**（阈值取自 `mcp/cheap-research/gates.json` 常量 `dedup_min_functions`，禁止在正文写死）
-> - **gate 绑定**：本阶段 = gate `deepcheck.dedup`（tool=extract）。**full 模式进入 Dedup 且函数数 ≥ 阈值** → eligible=true 必须 called/cache_hit/degraded_after_attempt；**函数数 < 阈值** → eligible=false `skipped_not_eligible`（evidence 含 function_count/threshold）；**fast 模式不进入 Dedup** → eligible=false `skipped_stage_not_reached`（evidence 含 mode/phase）。**函数 catalog 按受影响 Git 仓库定位、在声明review_scope内计算**：从 `metadata.code_files` 与 `01_plan.md` 候选文件解析所属仓库（`git -C <dir> rev-parse --show-toplevel` 去重）→ 按工程接入预算选择受影响模块+caller/import/provider/等价候选的review_scope → 每仓在该范围跑函数catalog → 记录每仓范围/函数数与合计数，gate evidence.function_count取每仓范围内函数数的最大值，任一受影响仓库 ≥ 阈值即对该仓运行 dedup
+> - **gate 绑定**：本阶段 = gate `deepcheck.dedup`（tool=extract）。**full 模式进入 Dedup 且函数数 ≥ 阈值** → eligible=true 必须 called/cache_hit/degraded_after_attempt/unavailable_before_call；**函数数 < 阈值** → eligible=false `skipped_not_eligible`（evidence 含 function_count/threshold）；**fast 模式不进入 Dedup** → eligible=false `skipped_stage_not_reached`（evidence 含 mode/phase）。**函数 catalog 按受影响 Git 仓库定位、在声明review_scope内计算**：从 `metadata.code_files` 与 `01_plan.md` 候选文件解析所属仓库（`git -C <dir> rev-parse --show-toplevel` 去重）→ 按工程接入预算选择受影响模块+caller/import/provider/等价候选的review_scope → 每仓在该范围跑函数catalog → 记录每仓范围/函数数与合计数，gate evidence.function_count取每仓范围内函数数的最大值，任一受影响仓库 ≥ 阈值即对该仓运行 dedup
 >
 > **任一不满足 → 整个 §9.4 跳过**，在思考块 `MCP 调用` 段写明降级原因 + 写 trace（不写产物文件）。
 >

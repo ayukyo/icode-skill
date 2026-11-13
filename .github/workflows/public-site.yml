@@ -115,6 +115,8 @@ jobs:
         run: python -m pytest -p no:anyio tests/test_doc_library.py tests/test_doc_reader_assets.py tests/test_doc_reader_browser.py tests/test_doc_reader_integration.py -q
       - name: Windows reader core behavior
         run: node tests/test_doc_reader_core.js
+      - name: Windows installer and unavailable MCP gate regressions
+        run: python -m pytest -p no:anyio tests/test_mcp_install_reconcile.py tests/test_skill_retirement.py tests/test_claude_registry_unit.py tests/test_thinking_gate_unavailable.py tests/test_mcp_gate_unavailable.py -q
       - name: Prepare pinned WebView2 host in external cache
         run: |
           $hostExe = python -c "import sys;sys.path.insert(0,'agent_runtime');from icode_agent.native_runtime import ensure_native_runtime;print(ensure_native_runtime())"
@@ -209,6 +211,7 @@ jobs:
           retention-days: 7
       - name: Offline regression tests
         run: |
+          python3 -m pytest -p no:anyio tests/test_install_reconciliation_entrypoints.py tests/test_mcp_install_reconcile.py tests/test_skill_retirement.py tests/test_claude_registry_unit.py tests/test_thinking_gate_unavailable.py tests/test_mcp_gate_unavailable.py -q
           python3 -m unittest discover -s tests -p 'test_public_site*.py' -v
           python3 -m unittest discover -s tests -p test_notify_indexnow.py -v
           python3 -m unittest discover -s tests -p 'test_release_promotion*.py' -v

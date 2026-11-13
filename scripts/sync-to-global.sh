@@ -401,7 +401,12 @@ for dst in "${ICODE_DIRS[@]}"; do
   preflight_icode_target "$dst"
 done
 PREFLIGHT_ARGS=(--manifest "$SKILL_PACK_MANIFEST" "${INSTALL_ROOT_ARGS[@]}" --dry-run)
-"$PYTHON_BIN" "$SKILL_PACK_INSTALLER" "${PREFLIGHT_ARGS[@]}" >/dev/null
+[[ "$NO_DELETE" == false ]] || PREFLIGHT_ARGS+=(--keep-extra)
+[[ "${ICODE_DEFER_SKILL_RETIREMENT:-}" != 1 ]] || PREFLIGHT_ARGS+=(--defer-retirement)
+if ! preflight_report="$("$PYTHON_BIN" "$SKILL_PACK_INSTALLER" "${PREFLIGHT_ARGS[@]}" 2>&1)"; then
+  printf '%s\n' "$preflight_report" >&2
+  exit 1
+fi
 
 if [[ "$SYNC_ENGINE" == "cp" ]]; then
   echo "⚠️ rsync 未使用，采用 cp/tar 增量同步；ICODE 目标独有文件不会删除。"
@@ -768,6 +773,15 @@ prepare_icode_stage() {
   sync_icode_payload "$stage" "$dst" || return 1
   remove_legacy_entrypoints "$stage" || return 1
   write_icode_marker "$stage" || return 1
+  # Keep still-registered old MCP code until the installation owner confirms
+  # replacements. A pure skill sync cannot silently break MCP registrations.
+  local preserve_args=(preserve --stage-root "$stage" --installed-root "$dst")
+  if [[ -n "${ICODE_MCP_RECONCILE_PLAN:-}" ]]; then
+    preserve_args+=(--plan "$ICODE_MCP_RECONCILE_PLAN")
+  else
+    preserve_args+=(--source-root "$DEV_REPO")
+  fi
+  "$PYTHON_BIN" "$DEV_REPO/mcp/_lib/install_reconcile.py" "${preserve_args[@]}" || return 1
   preserve_runtime_artifacts "$stage" "$dst" || return 1
   if ! has_icode_frontmatter "$stage/SKILL.md"; then
     echo "❌ ICODE 暂存结果缺少有效入口: $stage/SKILL.md" >&2
@@ -912,6 +926,7 @@ fi
 if [[ "$NO_DELETE" == true ]]; then
   INSTALL_ARGS+=(--keep-extra)
 fi
+[[ "${ICODE_DEFER_SKILL_RETIREMENT:-}" != 1 ]] || INSTALL_ARGS+=(--defer-retirement)
 "$PYTHON_BIN" "$SKILL_PACK_INSTALLER" "${INSTALL_ARGS[@]}"
 
 if [[ "$MODE" == "apply" ]]; then

@@ -41,3 +41,28 @@ def test_corrupt_input_is_backed_up_and_never_overwritten(tmp_path, raw):
     assert config.read_bytes() == raw
     assert [p.read_bytes() for p in tmp_path.glob("*.bak.*")] == [raw]
     assert not (tmp_path / "entries").exists()
+
+
+def test_export_only_does_not_touch_unselected_claude_config(tmp_path, monkeypatch):
+    module = registry()
+    config = tmp_path / "host.json"
+    original = b'{"mcpServers":{"demo":{"command":"claude-owned"}}}'
+    config.write_bytes(original)
+    monkeypatch.setenv("ICODE_MCP_EXPORT_ONLY", "1")
+    entry = {"command": "other-host-runtime", "args": []}
+    with patch.object(module, "CLAUDE_JSON", config), patch.object(module, "ENTRY_DIR", tmp_path / "entries"):
+        module.register("demo", entry)
+    assert config.read_bytes() == original
+    assert json.loads((tmp_path / "entries/demo.json").read_text(encoding="utf-8")) == entry
+
+
+def test_stale_fixed_temporary_files_are_never_overwritten(tmp_path):
+    module = registry()
+    config, entries = tmp_path / "host.json", tmp_path / "entries"
+    entries.mkdir()
+    config_temp, entry_temp = config.with_suffix(".json.tmp"), entries / "demo.json.tmp"
+    for path in (config_temp, entry_temp):
+        path.write_bytes(b"unrelated existing file")
+    with patch.object(module, "CLAUDE_JSON", config), patch.object(module, "ENTRY_DIR", entries):
+        module.register("demo", {"command": "python"})
+    assert config_temp.read_bytes() == entry_temp.read_bytes() == b"unrelated existing file"

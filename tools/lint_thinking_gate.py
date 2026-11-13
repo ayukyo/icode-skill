@@ -12,15 +12,16 @@ lint_thinking_gate.py —— reasoning gate（分级思考）运行时校验器
 分级模型（L0~L3）：
 - L0 确定性执行：机制 = deterministic_checks，不调用 sequential-thinking。
 - L1 简短决策：机制 = decision_record（写 .decision_anchors.json 决策摘要），不调用 sequential-thinking。
-- L2 复杂推理：机制 = sequential-thinking（3~5 步），attempted=true，result=success|degraded。
+- L2 复杂推理：机制 = sequential-thinking（3~5 步），可调用时 attempted=true，result=success|degraded。
 - L3 高风险对抗：机制 = sequential-thinking+adversarial，L2 基础上加独立对抗验证。
 
 判定模型：
 - 每个 in-scope 且 requires_trace=true 的 step 必须有最终 trace 行；没有 = missing（违规）。
 - tier 必须 >= default_tier（默认等级只是起点，只能向上升级，不能仅凭命令名向下降级）。
 - tier > default_tier 时 triggers 必须非空且全部来自 catalog 升级触发器枚举（禁止自然语言扩张）。
-- L2/L3 必须 mechanism ∈ {sequential-thinking, sequential-thinking+adversarial} 且 attempted=true；
-  result=degraded 时必须有 degraded_reason（真实调用失败证据），不能伪造 attempted=true。
+- L2/L3 必须保留对应 mechanism；可调用时 attempted=true。
+  result=degraded 必须有 degraded_reason；工具未暴露时仅允许带完整 availability
+  证据的 decision=unavailable_before_call / attempted=false，不能伪造尝试或成功。
 - L3 必须 mechanism=sequential-thinking+adversarial（独立对抗者，不能自问自答替代）。
 - L0/L1 出现 sequential-thinking 调用：记录 over_invoked=true（灰度观察项），默认不阻断；
   --strict 时升级为阻断（灰度收敛后启用）。
@@ -243,15 +244,31 @@ def validate_row(row: Dict, catalog_step: Optional[Dict], catalog: Dict,
         if expected_mech and mechanism != expected_mech and tier in ("L2", "L3"):
             issues.append(f"{tag} tier={tier} 但 mechanism={mechanism}，应为 {expected_mech}")
 
+    # 工具未暴露与实际调用失败分开记录。沿用 MCP coverage 的 availability
+    # 合同，保留 result=degraded，让旧诊断器继续显示降级而非工具成功。
+    unavailable = row.get("decision") == "unavailable_before_call"
+    if unavailable:
+        if tier not in ("L2", "L3") or row.get("attempted") is not False or result != "degraded":
+            issues.append(f"{tag} unavailable_before_call 必须为 L2/L3、attempted=false、result=degraded")
+        availability = row.get("availability")
+        if not isinstance(availability, dict) or availability.get("tool_visible") is not False:
+            issues.append(f"{tag} unavailable_before_call 缺工具不可见证据")
+        else:
+            for field in ("discovery_ref", "reason", "fallback", "evidence_ref"):
+                if not isinstance(availability.get(field), str) or not availability[field].strip():
+                    issues.append(f"{tag} availability 缺 {field}")
+            if availability.get("reason") not in {"not_exposed", "discovery_failed"}:
+                issues.append(f"{tag} availability.reason 非法")
+
     # L2/L3 履行要求
     if tier in ("L2", "L3"):
-        if row.get("attempted") is not True:
+        if not unavailable and row.get("attempted") is not True:
             issues.append(f"{tag} {tier} 必须 attempted=true（不能伪造未调用的成功）")
         if result == "degraded":
-            if row.get("attempted") is not True:
+            if not unavailable and row.get("attempted") is not True:
                 issues.append(f"{tag} degraded 但 attempted != true")
-            if not row.get("degraded_reason"):
-                issues.append(f"{tag} degraded 但 degraded_reason 为空（必须有真实调用失败证据）")
+            if not isinstance(row.get("degraded_reason"), str) or not row["degraded_reason"].strip():
+                issues.append(f"{tag} degraded 但 degraded_reason 为空（必须有真实失败或不可见证据）")
         elif result == "success":
             if row.get("attempted") is not True:
                 issues.append(f"{tag} success 但 attempted != true（伪造）")
@@ -441,9 +458,10 @@ def main() -> int:
         print(f"  ⚠️ trace 行错误: {terr}")
 
     if report["missing"] > 0 or report["schema_errors"] > 0:
-        print("\n## 复写指引：缺 trace / trace 字段错的 step，直接复制对应示范行补一行")
-        print("（追加到 `.thinking_gate_trace.jsonl` 末尾；mechanism/tier/triggers 只按本行模板切换，")
-        print("   `at` 换成当前 ISO-8601 时间；L2 必须 attempted=true+mechanism=sequential-thinking；")
+        print("\n## 修复指引：缺 trace / trace 字段错的 step，按真实执行证据补写最终记录")
+        print("（以下仅为 pending 起始模板；完成执行后再追加最终行到 `.thinking_gate_trace.jsonl`，")
+        print("   `at` 换成当前 ISO-8601 时间；L2 可调用时必须 attempted=true；")
+        print("   工具未暴露按 thinking_core.md 的 unavailable_before_call 合同留证，禁止照抄成功；")
         print("   L1 用 decision_record；L0 用 deterministic_checks）")
         for s in report["steps"]:
             if s["status"] not in ("missing", "invalid"):
@@ -458,8 +476,8 @@ def main() -> int:
                 "L0": "deterministic_checks",
             }
             mech = t_strings.get(dt, "decision_record")
-            result = "blocked" if dt in ("L0", "L1") else "success"
-            attempted = "false" if dt in ("L0", "L1") else "true"
+            result = "pending"
+            attempted = "false"
             print(f"\n# {step}（default_tier={dt}{'，参考触发: multiple_candidates' if dt in ('L2','L3') else ''}）")
             print('{"schema_version":1,"ticket_id":"%s","step":"%s","tier":"%s","default_tier":"%s",'
                   % (report.get("ticket_id") or "", step, dt, dt)

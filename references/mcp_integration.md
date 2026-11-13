@@ -24,7 +24,7 @@
 ### ① sequential-thinking（**L2/L3 复杂推理依赖**）
 
 - **强证据**：`mcp__sequential-thinking__sequentialthinking`（reasoning gate 判 L2/L3 时必调 3～5 步；L3 另加独立对抗）
-- **降级**：`### 结构化思考` 文字块（仅 L2/L3；必须有真实调用失败证据才能降级）
+- **降级**：`### 结构化思考` 文字块（仅 L2/L3）；可调用时须先真实尝试，失败记 `attempted=true/result=degraded`；未暴露时按 [thinking_core.md](thinking_core.md)「思考工具未暴露的 trace 合同」记 `decision=unavailable_before_call/attempted=false/result=degraded`，保留发现与替代证据
 - **触发场景**：**L2/L3 复杂推理/高风险对抗步骤**（plan/review/code/patch/log/deepcheck/audit 默认 L2；其余步骤命中升级触发器时升 L2/L3）。**L0/L1 不调用**，不进入可用性探测
 - **隐私**：注册默认注入 `DISABLE_THOUGHT_LOGGING=true`（禁止服务端把完整 `thought` 打到 stderr）；`thought` 本身仍不得含密钥/Cookie/设备凭据
 - **当前状态**：已装

@@ -150,7 +150,7 @@
 >
 > - cheap-research 🟢（`mcp__cheap-research__extract` 可用）
 > - **函数数 ≥ 50**（阈值取自 `mcp/cheap-research/gates.json` 常量 `dedup_min_functions`，禁止在正文写死）
-> - **gate 绑定**：本子阶段 = gate `review.dedup`（tool=extract）。**函数数按受影响 Git 仓库计算**（见下），任一受影响仓库 ≥ 阈值 → eligible=true 必须 called/cache_hit/degraded_after_attempt；**全部 < 阈值** → eligible=false `skipped_not_eligible`（evidence 含 function_count/threshold/rg_available/cheap_available）
+> - **gate 绑定**：本子阶段 = gate `review.dedup`（tool=extract）。**函数数按受影响 Git 仓库计算**（见下），任一受影响仓库 ≥ 阈值 → eligible=true 必须 called/cache_hit/degraded_after_attempt/unavailable_before_call；**全部 < 阈值** → eligible=false `skipped_not_eligible`（evidence 含 function_count/threshold/rg_available/cheap_available）
 >
 > **任一不满足 → 整个 §2.5.7 跳过**，在思考块 `MCP 调用` 段写明降级原因 + 写 trace `decision=skipped_not_eligible`（不写产物文件）。
 
@@ -481,7 +481,7 @@
    - 输出告警：`⚠️ 步骤2 触达硬上限{absolute_cap}轮仍有未解决问题，建议回到步骤1`
 
 5. **终止后更新 metadata**：`status = review_done`（**控制面接线**：经 `python3 tools/icode_control.py transition --dir {ICODE_OUT_DIR} --to review_done`——完成态门禁点，transition 会运行三 gate linter（`--strict`），任一失败状态不前移；下方第 7 步的 `--step review` 专项校验保持并行执行，两者互补），`completed_steps` 追加 `"2"`，保留 `extended_rounds` / `unresolved_issues_at_cap` / `pending_verification` 字段供后续步骤参考
-6. **审查输出压缩（供 merge 步骤消费）**（gate `review.result_summary`）：**先落结构化结论**——本轮有 issue 时已写 `review_round_{total_rounds}.json`；clean 轮不写 JSON 时，以 `02_review.md` 的结构化结论（轮次/总问题数/关键 HIGH/未解决标记）为摘要输入（**不得改去摘要 `01_plan.md` 并声称已履行本 gate**）。再调 `mcp__cheap-research__summarize` 压缩，摘要 ≈ 300-500 token，写入 `{ICODE_OUT_DIR}/_review_summary.md`。**gate trace**：review 已形成可消费结论文本 → `review.result_summary: eligible=true` 必须 called/cache_hit/degraded_after_attempt（evidence 含 `result_source`/`review_rounds`）；**降级**（cheap-research 不可用）：跳过，`_review_summary.md` 不存在时 merge 步骤直接读各轮 JSON 原文，并记 trace `decision=degraded_after_attempt, attempted=true`。
+6. **审查输出压缩（供 merge 步骤消费）**（gate `review.result_summary`）：**先落结构化结论**——本轮有 issue 时已写 `review_round_{total_rounds}.json`；clean 轮不写 JSON 时，以 `02_review.md` 的结构化结论（轮次/总问题数/关键 HIGH/未解决标记）为摘要输入（**不得改去摘要 `01_plan.md` 并声称已履行本 gate**）。再调 `mcp__cheap-research__summarize` 压缩，摘要 ≈ 300-500 token，写入 `{ICODE_OUT_DIR}/_review_summary.md`。**gate trace**：review 已形成可消费结论文本 → `review.result_summary: eligible=true` 必须 called/cache_hit/degraded_after_attempt/unavailable_before_call（evidence 含 `result_source`/`review_rounds`）；**降级**（cheap-research 不可用）：`_review_summary.md` 不存在时 merge 步骤直接读各轮 JSON 原文；trace 按 [thinking_core.md](../references/thinking_core.md)「cheap-research 执行门（gate）流程」区分实际失败与未暴露，未暴露记 `unavailable_before_call/attempted=false/result=unavailable` 及完整 `availability`，不伪造调用。
 7. **gate 转换校验**：置 `review_done` 前运行
    `python3 tools/lint_mcp_coverage.py {ICODE_OUT_DIR} --step review --strict`——`review.dedup` / `review.result_summary` 必须各有最终 trace 行，eligible 未履行不得标流程合规。
 8. **全流程模式**：

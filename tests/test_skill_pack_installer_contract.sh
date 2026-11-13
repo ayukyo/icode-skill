@@ -184,8 +184,12 @@ else
   bad "installed target passes the shared validator"
 fi
 
+# MSYS rewrites a literal '/' to its Git installation directory for native
+# Python. Pass Python's actual filesystem anchor to test the same safety gate.
+FILESYSTEM_ROOT="$(python3 -c 'from pathlib import Path; print(Path.cwd().anchor)')"
+FILESYSTEM_ROOT="${FILESYSTEM_ROOT%$'\r'}"
 if python3 "$INSTALLER" --manifest "$PACKS/manifest.json" \
-     --target-root / --dry-run >/dev/null 2>&1; then
+     --target-root "$FILESYSTEM_ROOT" --dry-run >/dev/null 2>&1; then
   bad "over-broad filesystem root is rejected"
 else
   ok "over-broad filesystem root is rejected"

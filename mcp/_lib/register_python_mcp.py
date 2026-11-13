@@ -20,7 +20,7 @@ def main() -> int:
         "env": {config_env: str(Path(cwd) / "config.json")},
     }
     register(name, entry)
-    print(f"✅ 已注册 {name}（配置仅保存路径，不保存密钥）")
+    print(f"✅ 已生成 {name} 启动条目（配置仅保存路径，不保存密钥）")
     return 0
 
 

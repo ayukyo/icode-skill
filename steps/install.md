@@ -9,6 +9,10 @@
 
 `/icode install` 是开源用户的统一安装入口：先安装或更新 ICODE 本体，再按 `skill-packs/manifest.json` 安装全部顶层共享技能，最后安装所选 MCP。新 clone、本机升级、新机器和 CI 初始化均使用同一入口；`mcp/install.sh` 只保留为 MCP 专项维护入口。
 
+重装按当前发行收敛已退役的受管项：共享技能保留既有 `.icode-skill-owner.json` 格式，以独立发布摘要判断是否被用户改写；可安全退役的整项移入扫描根外的 `.icode-skill-archive`。缺历史摘要、归属不明或已改写项保留并报告冲突。MCP 按每宿主注册摘要回执识别归属，旧版本仅在实际注册与导出 entry 完整一致时接管；先验证所选新版全部注册，再注销退役项，并将配置/运行时归档到 `~/.local/state/icode/mcp-install/`。回执不保存凭据正文。
+
+根安装器在源码同步前规划 MCP 变更，保留旧入口直到新版安装成功；失败不注销旧注册。`--preview` 零写入，`--basic` 不修改 MCP 注册/回执；内部安装器的 `--no-delete` 保留退役项；单 MCP 维护不清理其他服务。未选择宿主、自建服务和用户修改不会被作为受管退役自动清理。普通 `sync-to-global.sh` 只同步技能并保留旧 MCP 代码，不代替 MCP 安装收敛。真实配置冲突、注册验证或归档失败必须明确报告；不得把配置已写入当作宿主已重载，也不得自动杀死其他会话进程。
+
 **内置能力与独立 Skill 的安装边界**：`tools/evidence_intake.py`、`tools/email_intake.py`、`tools/document_intake.py`、`tools/media_router.py`、`tools/icode_crosscheck.py`、`debug_catalog.py`、`runtime_baseline.py`、`verification_debt.py`、`learn.py`、`scripts/submission_guard.py handoff` 及 `steps/learn.md` / `steps/crosscheck.md` 都属于 ICODE 本体，随 ICODE 目录一次复制到所选宿主，**不**写入 `skill-packs/manifest.json`。manifest 声明当前 16 个需要在技能根顶层独立发现的跨项目共享 Skill（含邮件证据与 MCU 软硬件契约审计）；`--client all` 会同时安装到 Claude Code、Codex，并检测到对应目录时追加 CodeBuddy（共享 Claude 技能根）与 WorkBuddy（独立 `~/.workbuddy/skills` 根），各自只增加独立命令桥和 MCP 配置。
 
 **当前 13 个声明的 MCP**：
@@ -39,7 +43,8 @@
 |---|---|
 | `/icode install` | 安装 ICODE、全部共享技能和 13 个 MCP；默认只面向 Claude Code |
 | `/icode install <name>` | 安装 ICODE、全部共享技能，但只安装指定 MCP |
-| `/icode install --client codex` | 安装到 Codex skills 根，并为 Codex 注册 MCP；MCP entry 仍先生成 Claude 真源 || `/icode install --client codebuddy` | 安装到共享的 Claude skills 根，发布 `~/.codebuddy/commands/icode.md`，并注册 CodeBuddy MCP（`~/.codebuddy/mcp.json`） |
+| `/icode install --client codex` | 安装到 Codex skills 根，生成共享 entry 并只注册所选 Codex 宿主 |
+| `/icode install --client codebuddy` | 安装到共享的 Claude skills 根，发布 `~/.codebuddy/commands/icode.md`，并注册 CodeBuddy MCP（`~/.codebuddy/mcp.json`） |
 | `/icode install --client workbuddy` | 安装到独立 WorkBuddy skills 根 `~/.workbuddy/skills`，发布 `~/.workbuddy/commands/icode.md`，并注册 WorkBuddy MCP（`~/.workbuddy/mcp.json`） |
 | `/icode install --client all` | 安装 Claude Code + Codex；检测到 `~/.codebuddy/` 时同时发布其命令桥并注册 MCP；检测到 `~/.workbuddy/` 时同样追加 WorkBuddy 技能根、命令桥与 MCP |
 | `/icode install --basic` | 只安装 ICODE 和共享技能，不创建 MCP 环境或注册项 |
@@ -71,7 +76,7 @@
    - 逐个 `bash <子工程>/install.sh`，每个子工程 install.sh 自带：
      - 环境探测（Python/Node/npx/uv 等）
      - **缺啥补啥**（如 vision-bridge 建 venv；npm 类懒加载）
-     - 写 `~/.claude.json` 的 `mcpServers.<name>` 段（经共享模块 `mcp/_lib/claude_registry.py`：原子写 + 损坏保护 + 回读校验 + 导出 entry 到 `~/.claude/icode_data/mcp_entries/<name>.json`）
+     - 经共享模块 `mcp/_lib/claude_registry.py` 导出 entry 到 `~/.claude/icode_data/mcp_entries/<name>.json`；只有选择 Claude 或 all 时才写 `~/.claude.json`，显式其他宿主仅导出，不改未选 Claude 的注册与回执
    - 失败项不阻塞后续；最终汇总成功/失败计数
    - **`--client codex|all` 时**：每个子工程成功后再 `python3 mcp/_lib/client_registry.py codex-register <name>`（读导出的 entry → `codex mcp add <name> [--env K=V ...] -- <cmd> [args]`，add 后回读 inspect 确认）。Codex 注册失败计入失败清单，不阻塞其他子工程
    - **显式 `--client codebuddy`，或 `all` 且检测到 CodeBuddy 时**：把同一 entry 合并到 `~/.codebuddy/mcp.json`；同名不一致、损坏 JSON 均失败关闭，不静默覆盖

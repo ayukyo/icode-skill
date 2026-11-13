@@ -59,11 +59,11 @@ def main():
     })
 
     _configure_utf8_stdout()
-    print(f"✅ 已注册 cheap-research 到 {CLAUDE_JSON}")
+    print(f"✅ 已生成 cheap-research MCP 启动条目")
     print(f"   python: {python_path}")
     print(f"   server: {server_py}")
     print(f"   config: {cr_dir}/config.json  (⚠️ 不含 KEY 留痕)")
-    print(f"   ⚠️ 重启 Claude Code 后生效")
+    print(f"   ⚠️ 重载所选宿主或新建会话后生效")
 
 
 if __name__ == "__main__":

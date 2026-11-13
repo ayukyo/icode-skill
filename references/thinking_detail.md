@@ -48,9 +48,38 @@
 词表约束（校验器 `python3 tools/lint_thinking_gate.py` 强制）：
 - `tier`：`L0`/`L1`/`L2`/`L3`，必须 ≥ `default_tier`（只能升级不能降级）
 - `mechanism`：`deterministic_checks`（L0）/ `decision_record`（L1）/ `sequential-thinking`（L2）/ `sequential-thinking+adversarial`（L3）
-- `result`：`success`/`degraded`/`blocked`；`degraded` 必须 `attempted=true` 且 `degraded_reason` 非空
+- `result`：`success`/`degraded`/`blocked`；`degraded` 必须有非空字符串 `degraded_reason`；实际调用失败记 `attempted=true`；工具未暴露时仅按 [thinking_core.md](thinking_core.md)「思考工具未暴露的 trace 合同」允许 `attempted=false`
 - `triggers`：只允许 `mcp/reasoning-gate/gates.json` 内稳定枚举，禁止自然语言扩张；`tier > default_tier` 时非空
 - **禁止保存**：thought 正文、密钥、Cookie、设备凭据、大段日志正文；L0/L1 出现 sequential-thinking 记 `over_invoked=true`（灰度观察项）
+
+工具未暴露时的最终记录示例（所有引用必须替换为本会话真实证据；不能照抄当作已完成）：
+
+```json
+{
+  "schema_version": 1,
+  "ticket_id": "工单号",
+  "step": "plan",
+  "tier": "L2",
+  "default_tier": "L2",
+  "triggers": [],
+  "mechanism": "sequential-thinking",
+  "decision": "unavailable_before_call",
+  "attempted": false,
+  "result": "degraded",
+  "degraded_reason": "实际宿主工具未暴露，已核实发现与注册状态",
+  "availability": {
+    "tool_visible": false,
+    "discovery_ref": "本会话工具发现与宿主配置核实记录引用",
+    "reason": "not_exposed",
+    "fallback": "structured_text",
+    "evidence_ref": "01_plan.md#结构化思考"
+  },
+  "over_invoked": false,
+  "at": "运行时 ISO-8601 时间"
+}
+```
+
+L3 保留 `mechanism=sequential-thinking+adversarial` 和升级触发器，替代证据包含独立对抗。不得把其他 MCP 的 `.mcp_gate_trace.jsonl` 的 `result=unavailable` 写进思考 trace；思考 trace 保留 `result=degraded`，以兼容既有诊断统计。
 
 ## 历史参考小节（仅 init/plan/log/start 历史检索命中时 Read）
 

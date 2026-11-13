@@ -96,11 +96,11 @@ def main():
     # 共享模块: 原子写 + 损坏保护 + 回读校验 + 导出 entry 供 Codex 注册分支读取
     _claude_register(SERVER_NAME, build_server_entry(node_path, npx_path, package))
 
-    print(f"✅ 已注册 {SERVER_NAME} 到 {CLAUDE_JSON}")
+    print(f"✅ 已生成 {SERVER_NAME} MCP 启动条目")
     print(f"   node: {node_path}")
     print(f"   npx:  {npx_path}")
     print(f"   pkg:  {package}")
-    print(f"   ⚠️ 重启 Claude Code 后生效")
+    print(f"   ⚠️ 重载所选宿主或新建会话后生效")
 
 
 if __name__ == "__main__":

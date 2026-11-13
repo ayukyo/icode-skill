@@ -62,6 +62,7 @@
 # --- 4. MCP 子工程：本地运行时配置（关键！防止 rsync --delete 误删）---
 /mcp/**/config.json
 /mcp/**/config.local.json
+/mcp/.icode-mcp-desired.json
 
 # --- 5. 凭证与日志/临时文件 ---
 *.cookie

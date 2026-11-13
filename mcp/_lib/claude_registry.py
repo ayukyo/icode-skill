@@ -16,6 +16,7 @@ import json
 import os
 import shutil
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -50,6 +51,7 @@ def _backup(path: Path) -> Path:
 
 def _read_cfg(path: Path) -> dict:
     """读 ~/.claude.json；不存在返回 {}；损坏/非对象 → 备份并报错，绝不覆盖。"""
+    _check_registry_path(path)
     if not path.exists():
         return {}
     try:
@@ -69,20 +71,39 @@ def _read_cfg(path: Path) -> dict:
     return data
 
 
+def _check_registry_path(path: Path) -> None:
+    for part in (path, *path.parents):
+        if (part.is_symlink() or (part.exists()
+                and getattr(part.lstat(), "st_file_attributes", 0) & 0x400)):
+            raise RuntimeError("注册路径不能包含符号链接或重解析点")
+
+
 def _write_cfg(path: Path, cfg: dict) -> None:
-    """原子写：先写 .tmp 再 os.replace，中途崩溃不损坏原文件。"""
-    tmp = path.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
-    os.replace(tmp, path)
+    """Private, unique staging files avoid clobbering an existing .tmp path."""
+    _check_registry_path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.icode-stage-", dir=path.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as stream:
+            json.dump(cfg, stream, ensure_ascii=False, indent=2)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.chmod(temporary, 0o600)
+        _check_registry_path(path)
+        os.replace(temporary, path)
+    finally:
+        try:
+            os.unlink(temporary)
+        except FileNotFoundError:
+            pass
 
 
 def export_entry(name: str, entry: dict) -> Path:
     """把 server 描述导出到 ENTRY_DIR/<name>.json（原子写），供 Codex 注册分支读取。"""
-    ENTRY_DIR.mkdir(parents=True, exist_ok=True)
+    _check_registry_path(ENTRY_DIR)
+    ENTRY_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
     target = ENTRY_DIR / f"{name}.json"
-    tmp = target.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(entry, ensure_ascii=False, indent=2), encoding="utf-8")
-    os.replace(tmp, target)
+    _write_cfg(target, entry)
     return target
 
 
@@ -109,6 +130,11 @@ def _mcp_servers(cfg: dict) -> dict:
 def register(name: str, entry: dict) -> dict:
     """幂等注册到 ~/.claude.json mcpServers.<name> + 导出 entry + 回读校验。"""
     _configure_utf8_stdout()  # 自保护: 报错分支也要在 GBK 控制台可读
+    # Other hosts consume the shared export without changing an unselected
+    # Claude registration and invalidating its managed installation receipt.
+    if os.environ.get("ICODE_MCP_EXPORT_ONLY") == "1":
+        export_entry(name, entry)
+        return entry
     cfg = _read_cfg(CLAUDE_JSON)
     _mcp_servers(cfg)[name] = entry
     _write_cfg(CLAUDE_JSON, cfg)

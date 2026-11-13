@@ -70,7 +70,7 @@ N. **强制思考前置**（不可跳过，缺证据视为不合规；按 [refer
 **思考载体（按等级）**：
 - **L0/L1**：不进入 sequential-thinking 可用性探测（避免 ToolSearch 与配置读取开销）。L0 只执行既有机器门禁；L1 输出 `.decision_anchors.json` 决策摘要（字段见 §6 L1 决策记录契约）。
 - **L2/L3**：**首选**调用 `sequential-thinking` MCP 工具（`mcp__sequential-thinking__sequentialthinking`）3～5 步（L3 另加独立对抗），每步对应该步骤声明的子项之一；**降级**（MCP 未配置/取不到/调用失败，判定见下节）时必须以显式的「### 结构化思考」文字块替代，逐项完成该步骤要求的子项。该文字块即为合规证据。
-- **L2/L3 未调用且没有真实调用失败证据 = 不合规**（trace 记录 `attempted=false` 或伪造 `success` 均为违规）。
+- **L2/L3 可调用却未调用，或未暴露但缺发现与替代证据 = 不合规**。工具未暴露时按下文 `unavailable_before_call` 合同诚实记录 `attempted=false`；不得伪造尝试或 `success`。
 
 > **判定 MCP 是否可用**（仅 L2/L3；L0/L1 不做发现探测）：先区分当前会话工具、宿主注册、独立服务握手三个事实，不能互相替代。
 >
@@ -95,6 +95,18 @@ N. **强制思考前置**（不可跳过，缺证据视为不合规；按 [refer
 > | 调用失败组 | 当前工具可见/发现成功，实际调用返回错误或超时 | `强制思考: 降级文字块（工具实际调用失败：<具体错误类别>）` |
 >
 > 不能满足分组事实时保留未知并继续取证；不得虚构 ToolSearch、调用尝试或成功。按原 trace 合同记录真实边界，不把独立协议客户端结果冒充当前会话调用。无论采用何种载体，思考本身与证据要求均不可省略。
+
+### 思考工具未暴露的 trace 合同
+
+配置缺失组、注册但未暴露组完成上述核实与结构化文字思考后，在 `.thinking_gate_trace.jsonl` 记 `decision=unavailable_before_call`、`attempted=false`、`result=degraded`，并填写非空 `degraded_reason` 和 `availability`：
+
+- `tool_visible=false`；直接可见工具禁止使用此分支。
+- `discovery_ref`：本会话工具目录/发现结果及实际宿主配置核实记录的引用；无 ToolSearch 不虚构调用。
+- `reason=not_exposed|discovery_failed`：按真实发现结果选择。
+- `fallback`：实际采用的结构化文字思考方法；L3 仍须独立对抗证据。
+- `evidence_ref`：已完成的结构化思考与 L3 对抗结果的引用。
+
+`tier/default_tier/triggers/mechanism` 保留原等级合同，不因工具缺失降到 L0/L1；`mechanism` 表示该等级要求的机制，实际替代载体由 `availability.fallback` 表达。沿用 `schema_version=1`，新增字段为条件必填；旧真实调用 trace 继续有效。`result=degraded` 只表示降级履行，不代表工具调用成功。完整示例见 [thinking_detail.md](thinking_detail.md)「thinking gate trace」。字段校验只检查声明一致性，不能独立证明工具不可见或思考完成，引用必须指向真实证据。
 
 ## 通用流程（每步执行）
 
@@ -130,13 +142,14 @@ N. **强制思考前置**（不可跳过，缺证据视为不合规；按 [refer
    - L0 → 执行既有机器门禁后更新 trace：`mechanism=deterministic_checks`、`attempted=true`、`result=success`。
    - L1 → 写 `.decision_anchors.json` 决策摘要后更新 trace：`mechanism=decision_record`、`attempted=true`、`result=success`。
    - L2/L3 → 实际调用 sequential-thinking（先可见性自检；不可见才 ToolSearch 取 schema）。调用成功后更新 trace：`attempted=true`、`result=success`、`mechanism=sequential-thinking`（L3 为 `sequential-thinking+adversarial`）；失败/超时 → `attempted=true`、`result=degraded`、`degraded_reason=<真实失败类别>`。
-4. **step 转换前运行 validator**：`python3 tools/lint_thinking_gate.py {ICODE_OUT_DIR} --step <step> --strict`——有 in-scope requires_trace step 未履行（missing / L2/L3 未调用 / tier 降级 / 触发词非法）时不得标记该步流程合规，先回补再转换。
+   - L2/L3 工具未暴露 → 完成发现核实与结构化文字思考后，按「思考工具未暴露的 trace 合同」记 `decision=unavailable_before_call`、`attempted=false`、`result=degraded` 与完整证据；不伪造实际调用失败。
+4. **step 转换前运行 validator**：`python3 tools/lint_thinking_gate.py {ICODE_OUT_DIR} --step <step> --strict`——有 in-scope requires_trace step 未履行（missing / L2/L3 未调用且无合法降级 / tier 降级 / 触发词非法）时不得标记该步流程合规，先回补再转换。
 
 **trace 行约束**（校验器强制）：
 
 - `tier`：`L0` / `L1` / `L2` / `L3`；`tier` 必须 ≥ `default_tier`（只能升级不能降级）
 - `mechanism`：`deterministic_checks` / `decision_record` / `sequential-thinking` / `sequential-thinking+adversarial`
-- `result`：`success` / `degraded` / `blocked`；`degraded` 必须 `attempted=true` 且 `degraded_reason` 非空
+- `result`：`success` / `degraded` / `blocked`；`degraded` 必须有非空字符串 `degraded_reason`；实际调用失败记 `attempted=true`，未暴露工具仅按上述 `unavailable_before_call` 合同允许 `attempted=false`
 - `triggers`：只允许 catalog 内稳定枚举，禁止随意自然语言扩张；`tier > default_tier` 时 `triggers` 必须非空
 - catalog的 `evidence_fields/evidence_types`是必需字段/类型合同；called必须attempted=true，cache_hit必须有效cache_key和input_digest；fast未进入阶段只需mode/phase且不得伪装为full跳过。真实调用结果的来源引用应保留，不能仅自报字符串证明调用。
 - 工具coverage只检查调用声明与形状，不能证明实际执行、输入覆盖、Read理解或Dedup语义裁决；阶段覆盖证据另按[审查证据合同](inspection_evidence.md)检查。历史不足不自动补造trace。

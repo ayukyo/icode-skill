@@ -8,7 +8,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE.txt)
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-Skill-8A2BE2.svg)](SKILL.md)
-[![Version](https://img.shields.io/badge/version-v2.38.0-blue.svg)](SKILL.md)
+[![Version](https://img.shields.io/badge/version-v2.39.0-blue.svg)](SKILL.md)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/ayukyo/icode-skill/issues)
 
 </div>
@@ -186,6 +186,10 @@ cd ~/icode-skill
 ```
 
 Use `./install.sh --dry-run --client all` for a zero-write preflight, or `--skip-mcp` when only ICODE and the shared skills are required. ICODE is installed as `<skills-root>/icode/`; each shared skill is generated from its source template at `<skills-root>/<skill-name>/SKILL.md`. Source templates cannot be discovered as nested skills.
+
+Reinstallation also reconciles retired managed skills and MCPs. Unchanged owned skills are archived outside the discovery roots; obsolete owned MCP registrations are removed only after the selected replacement set has installed and passed registration checks. User changes, unknown ownership and missing legacy skill digests are retained and reported as conflicts. MCP receipts and private configuration/runtime archives live under `~/.local/state/icode/mcp-install/`; shared skill archives live under `<skills-root-parent>/.icode-skill-archive/`. Receipts contain registration hashes, not credential values.
+
+`--dry-run` previews retirement without writes. `--no-delete` defers retirement, `--skip-mcp` leaves MCP registrations and receipts alone, and selecting one MCP never retires other services. Plain skill synchronization retains old MCP code for recovery. Configuration changes require a host reload or a new session; installation does not terminate other sessions' processes.
 
 CodeBuddy scans `~/.claude/skills/`, so it reuses that ICODE copy rather than creating a third one. The installer atomically publishes the versioned [`integrations/codebuddy/commands/icode.md`](integrations/codebuddy/commands/icode.md) template as `~/.codebuddy/commands/icode.md`, providing `/icode ...`; a separate ownership marker permits identical-file adoption and rejects conflicting unmanaged commands before any Skill root is changed. CodeBuddy MCP entries remain isolated in `~/.codebuddy/mcp.json`.
 

@@ -14,6 +14,7 @@ RUNTIME_NAMES = {"__pycache__", ".venv", ".cache"}
 RUNTIME_FILES = {"config.json", "config.local.json"}
 ENTRYPOINT = "SKILL.md.template"
 OWNER_MARKER = ".icode-skill-owner.json"
+PAYLOAD_RECEIPT = ".icode-skill-payload.json"
 
 
 class ValidationError(ValueError):
@@ -70,7 +71,7 @@ def iter_payload_files(root: Path):
         if any(part in RUNTIME_NAMES for part in rel.parts):
             continue
         if path.is_file() and path.name not in RUNTIME_FILES \
-                and path.name != OWNER_MARKER \
+                and path.name not in {OWNER_MARKER, PAYLOAD_RECEIPT} \
                 and path.suffix not in {".pyc", ".pyo"}:
             yield path, rel
 

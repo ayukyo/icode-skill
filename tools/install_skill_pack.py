@@ -21,6 +21,7 @@ sys.dont_write_bytecode = True
 
 from validate_skill_pack import (
     OWNER_MARKER,
+    PAYLOAD_RECEIPT,
     RUNTIME_FILES,
     RUNTIME_NAMES,
     ValidationError,
@@ -326,6 +327,7 @@ def expected_marker(name: str) -> dict:
 
 def read_marker(target: Path) -> dict | None:
     marker_path = target / OWNER_MARKER
+    component_no_links(marker_path)
     if not marker_path.exists():
         return None
     try:
@@ -338,7 +340,9 @@ def read_marker(target: Path) -> dict | None:
 
 
 def validate_target_root(raw: str) -> Path:
-    root = Path(raw).expanduser().resolve()
+    root = Path(raw).expanduser().absolute()
+    component_no_links(root)
+    root = root.resolve()
     if root == Path(root.anchor) or root == Path.home().resolve():
         raise InstallConflict(f"拒绝使用过宽的技能根目录: {root}")
     if root.exists() and (not root.is_dir() or root.is_symlink()):
@@ -346,7 +350,40 @@ def validate_target_root(raw: str) -> Path:
     return root
 
 
+def no_tree_links(root: Path) -> None:
+    """Only ordinary directories/files may be hashed, copied or archived."""
+    component_no_links(root)
+    if root.exists():
+        for path in root.rglob("*"):
+            component_no_links(path)
+            if not (path.is_dir() or stat.S_ISREG(path.lstat().st_mode)):
+                raise InstallConflict(f"技能包含非普通文件: {path}")
+
+
+def payload_receipt(row: dict) -> dict:
+    return {**expected_marker(row["name"]), "payload_digest": row["digest"]}
+
+
+def read_payload_receipt(target: Path) -> dict | None:
+    path = target / PAYLOAD_RECEIPT
+    component_no_links(path)
+    if not path.exists():
+        return None
+    try:
+        receipt = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise InstallConflict(f"技能摘要回执损坏: {path}") from exc
+    if (not isinstance(receipt, dict)
+            or set(receipt) != {"schema_version", "owner", "skill", "payload_digest"}
+            or {key: receipt[key] for key in expected_marker(target.name)} != expected_marker(target.name)
+            or not isinstance(receipt["payload_digest"], str)
+            or not re.fullmatch(r"[0-9a-f]{64}", receipt["payload_digest"])):
+        raise InstallConflict(f"技能摘要回执无效: {path}")
+    return receipt
+
+
 def classify_target(row: dict, target: Path, keep_extra: bool) -> str:
+    no_tree_links(target)
     if not target.exists():
         return "create"
     if not target.is_dir() or target.is_symlink():
@@ -355,6 +392,11 @@ def classify_target(row: dict, target: Path, keep_extra: bool) -> str:
     if marker is not None:
         if marker != expected_marker(row["name"]):
             raise InstallConflict(f"目标技能所有权冲突: {target}")
+        receipt = read_payload_receipt(target)
+        # A current legacy payload must acquire a digest before it can later
+        # qualify for automatic retirement. Keep the original marker contract.
+        if receipt is None or receipt != payload_receipt(row):
+            return "update"
         if keep_extra:
             try:
                 compare_source_files(
@@ -369,6 +411,49 @@ def classify_target(row: dict, target: Path, keep_extra: bool) -> str:
         return "adopt"
     raise InstallConflict(
         f"存在未托管的同名技能: {target}; 请先改名或移走后重试")
+
+
+def plan_retirements(root: Path, names: set[str], roots: list[Path],
+                     keep_extra: bool, defer_retirement: bool = False) -> list[dict]:
+    actions = []
+    if not root.exists():
+        return actions
+    for target in sorted(root.iterdir()):
+        if target.name in names or target.name == "icode":
+            continue
+        # Unmarked and foreign directories are outside our ownership boundary.
+        if not (target / OWNER_MARKER).exists() and not (target / OWNER_MARKER).is_symlink():
+            continue
+        action = {"root": root, "target": target, "action": "retained_conflict"}
+        try:
+            no_tree_links(target)
+            marker = read_marker(target)
+            if marker is not None and marker.get("owner") != OWNER:
+                continue
+            if marker != expected_marker(target.name) or not target.is_dir():
+                raise InstallConflict("所有权数据与技能目录不匹配")
+            if defer_retirement:
+                # The outer installer validates replacement MCP/runtime before
+                # a second ordinary invocation may archive these entrypoints.
+                action.update(action="retained", reason="defer-retirement")
+            elif keep_extra:
+                action.update(action="retained", reason="keep-extra")
+            else:
+                receipt = read_payload_receipt(target)
+                if receipt is None:
+                    raise InstallConflict("旧版技能缺少已发布摘要，需人工确认")
+                if installed_digest(target) != receipt["payload_digest"]:
+                    raise InstallConflict("技能内容已改写，保留用户修改")
+                archive = root.parent / ".icode-skill-archive" / root.name / uuid.uuid4().hex / target.name
+                component_no_links(archive)
+                if any(archive.is_relative_to(discovery) for discovery in roots):
+                    raise InstallConflict("归档路径必须位于技能发现根之外")
+                action.update(action="retire", archive=archive,
+                              receipt=receipt, digest=receipt["payload_digest"])
+        except (InstallConflict, OSError, UnicodeError) as exc:
+            action["reason"] = str(exc)
+        actions.append(action)
+    return actions
 
 
 def is_runtime_path(rel: Path) -> bool:
@@ -414,6 +499,8 @@ def prepare_stage(row: dict, root: Path, target: Path, keep_extra: bool) -> Path
                        sort_keys=True) + "\n",
             encoding="utf-8",
         )
+        (stage / PAYLOAD_RECEIPT).write_text(
+            json.dumps(payload_receipt(row), sort_keys=True) + "\n", encoding="utf-8")
         if keep_extra:
             compare_source_files(source_root, row["entrypoint"], stage)
         else:
@@ -438,6 +525,20 @@ def commit_stages(actions: list[dict]) -> None:
     try:
         for action in actions:
             target = action["target"]
+            no_tree_links(target)
+            if action["action"] == "retire":
+                # Recheck ownership and payload immediately before moving it.
+                if (read_marker(target) != expected_marker(target.name)
+                        or read_payload_receipt(target) != action["receipt"]
+                        or installed_digest(target) != action["digest"]):
+                    raise InstallConflict(f"退役技能在规划后发生变化: {target}")
+                archive = action["archive"]
+                component_no_links(archive)
+                archive.parent.mkdir(parents=True, exist_ok=False, mode=0o700)
+                component_no_links(archive)
+                target.rename(archive)
+                committed.append({"target": target, "archive": archive})
+                continue
             stage = action["stage"]
             backup = target.parent / (
                 f".{target.name}.icode-backup-{uuid.uuid4().hex}")
@@ -454,6 +555,9 @@ def commit_stages(actions: list[dict]) -> None:
             committed.append({"target": target, "backup": backup})
     except Exception:
         for item in reversed(committed):
+            if "archive" in item:
+                item["archive"].rename(item["target"])
+                continue
             remove_generated_tree(item["target"])
             backup = item["backup"]
             if backup is not None and backup.exists():
@@ -461,23 +565,28 @@ def commit_stages(actions: list[dict]) -> None:
         raise
     else:
         for item in committed:
-            backup = item["backup"]
+            backup = item.get("backup")
             if backup is not None:
                 remove_generated_tree(backup)
     finally:
         for action in actions:
-            remove_generated_tree(action["stage"])
+            if "stage" in action:
+                remove_generated_tree(action["stage"])
 
 
 def install(manifest: Path, raw_roots: list[str], dry_run: bool,
-            keep_extra: bool) -> list[dict]:
+            keep_extra: bool, *, defer_retirement: bool = False) -> list[dict]:
     rows = validate_skills(manifest)
+    for row in rows:
+        no_tree_links(Path(row["path"]))
     roots = []
     for raw in raw_roots:
         root = validate_target_root(raw)
         if root in roots:
             raise InstallConflict(f"目标技能根目录重复: {root}")
         roots.append(root)
+    if any(a != b and a.is_relative_to(b) for a in roots for b in roots):
+        raise InstallConflict("技能发现根不能相互嵌套")
 
     actions = []
     for root in roots:
@@ -489,19 +598,22 @@ def install(manifest: Path, raw_roots: list[str], dry_run: bool,
                 "target": target,
                 "action": classify_target(row, target, keep_extra),
             })
+        actions.extend(plan_retirements(root, {row["name"] for row in rows}, roots,
+                                        keep_extra, defer_retirement))
 
     if dry_run:
         return actions
 
     try:
         pending = [action for action in actions
-                   if action["action"] != "current"]
+                   if action["action"] in {"create", "update", "adopt"}]
+        retirements = [action for action in actions if action["action"] == "retire"]
         for root in {action["root"] for action in pending}:
             root.mkdir(parents=True, exist_ok=True)
         for action in pending:
             action["stage"] = prepare_stage(
                 action["row"], action["root"], action["target"], keep_extra)
-        commit_stages(pending)
+        commit_stages(pending + retirements)
     except Exception:
         for action in actions:
             stage = action.get("stage")
@@ -523,9 +635,11 @@ def main() -> int:
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--keep-extra", action="store_true",
                         help="更新已托管技能时保留目标独有文件")
+    parser.add_argument("--defer-retirement", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
     if args.component_root is not None or args.component is not None or args.component_archive is not None or args.component_cache is not None:
-        if not args.component_root or not args.component or args.manifest or args.target_root or args.keep_extra:
+        if (not args.component_root or not args.component or args.manifest or args.target_root
+                or args.keep_extra or args.defer_retirement):
             parser.error("component mode requires --component-root and --component; shared-skill options cannot be mixed")
         try:
             result = install_component(args.component_root, args.component, args.component_archive, args.dry_run, args.component_cache)
@@ -544,6 +658,7 @@ def main() -> int:
             args.target_root,
             args.dry_run,
             args.keep_extra,
+            defer_retirement=args.defer_retirement,
         )
     except (InstallConflict, OSError, UnicodeError, ValidationError) as exc:
         print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False),
@@ -552,12 +667,20 @@ def main() -> int:
     for action in actions:
         prefix = "would " if args.dry_run else ""
         print(f"{prefix}{action['action']}: {action['target']}")
+        if action.get("reason"):
+            print(f"  reason: {action['reason']}")
+        if action.get("archive"):
+            print(f"  archive: {action['archive']}")
+    conflicts = sum(action["action"] == "retained_conflict" for action in actions)
+    deferred = sum(action["action"] == "retained" for action in actions)
     print(json.dumps({
-        "ok": True,
+        "ok": not conflicts,
+        "converged": not conflicts and not deferred,
+        "conflicts": conflicts,
         "dry_run": args.dry_run,
         "targets": len(actions),
     }, ensure_ascii=False))
-    return 0
+    return 1 if conflicts else 0
 
 
 if __name__ == "__main__":

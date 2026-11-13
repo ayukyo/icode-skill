@@ -21,7 +21,9 @@ bad() { printf '  FAIL %s\n' "$1" >&2; FAIL=$((FAIL + 1)); }
 
 tree_hash() {
   local root="$1"
-  find "$root" -type f -print0 | sort -z | xargs -0 sha256sum \
+  # sync intentionally reaps committed backups asynchronously. They are
+  # temporary recovery copies, not persistent installation state.
+  find "$root" -type f -not -path '*/.icode-backup-*/*' -not -path '*/.icode-stage-*/*' -print0 | sort -z | xargs -0 sha256sum \
     | sha256sum | cut -d' ' -f1
 }
 
@@ -31,6 +33,7 @@ run_install() {
   local agents_root="$3"
   shift 3
   HOME="$fake_home" \
+  USERPROFILE="$fake_home" \
   CLAUDE_SKILLS_ROOT="$claude_root" \
   AGENTS_SKILLS_ROOT="$agents_root" \
   ICODE_DOCX_RUNTIME_ROOT="$TMP/docx-runtime" \
@@ -157,6 +160,8 @@ fi
 
 if "$ALL_INSTALLED"; then
   BEFORE_REPEAT="$(tree_hash "$FAKE_HOME")"
+  find "$FAKE_HOME" -type f -not -path '*/.icode-backup-*/*' -not -path '*/.icode-stage-*/*' -print0 \
+    | sort -z | xargs -0 sha256sum >"$TMP/before-repeat-files.txt"
 else
   BEFORE_REPEAT="missing"
 fi
@@ -167,6 +172,11 @@ if "$ALL_INSTALLED" \
   ok "repeated public installation is content-idempotent"
 else
   bad "repeated public installation is content-idempotent"
+  if "$ALL_INSTALLED"; then
+    find "$FAKE_HOME" -type f -not -path '*/.icode-backup-*/*' -not -path '*/.icode-stage-*/*' -print0 \
+      | sort -z | xargs -0 sha256sum >"$TMP/after-repeat-files.txt"
+    diff -u "$TMP/before-repeat-files.txt" "$TMP/after-repeat-files.txt" || true
+  fi
 fi
 
 DEFAULT_HOME="$TMP/home-default"
@@ -199,7 +209,7 @@ mkdir -p "$SELF_SOURCE"
 (cd "$ROOT" && tar --exclude=.git --exclude=.worktrees -cf - .) \
   | tar -xf - -C "$SELF_SOURCE"
 if [[ -x "$SELF_SOURCE/install.sh" ]] \
-  && HOME="$SELF_HOME" \
+  && HOME="$SELF_HOME" USERPROFILE="$SELF_HOME" \
      CLAUDE_SKILLS_ROOT="$SELF_HOME/.claude/skills" \
      AGENTS_SKILLS_ROOT="$SELF_HOME/.agents/skills" \
      ICODE_DOCX_RUNTIME_ROOT="$TMP/docx-runtime" \
@@ -233,12 +243,21 @@ mkdir -p "$REAL_MCP_SOURCE/mcp/fixture-mcp"
 cat >"$REAL_MCP_SOURCE/mcp/fixture-mcp/install.sh" <<'SH'
 #!/usr/bin/env bash
 printf 'called\n' >"$MCP_CHILD_TRACE"
+HERE="$(cd "$(dirname "$0")" && pwd)"
+python3 - "$HERE/../_lib" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+import claude_registry
+claude_registry.register("fixture-mcp", {"command": sys.executable, "args": ["-c", "pass"]})
+PY
 SH
 chmod 0644 "$REAL_MCP_SOURCE/mcp/install.sh" \
   "$REAL_MCP_SOURCE/mcp/fixture-mcp/install.sh"
+git -C "$REAL_MCP_SOURCE" init -q
+git -C "$REAL_MCP_SOURCE" add .
 REAL_MCP_HOME="$TMP/home-real-mcp"
 MCP_CHILD_TRACE="$TMP/mcp-child-trace.txt"
-if HOME="$REAL_MCP_HOME" MCP_CHILD_TRACE="$MCP_CHILD_TRACE" \
+if HOME="$REAL_MCP_HOME" USERPROFILE="$REAL_MCP_HOME" MCP_CHILD_TRACE="$MCP_CHILD_TRACE" \
      CLAUDE_SKILLS_ROOT="$REAL_MCP_HOME/.claude/skills" \
      AGENTS_SKILLS_ROOT="$REAL_MCP_HOME/.agents/skills" \
      ICODE_DOCX_RUNTIME_ROOT="$TMP/docx-runtime" \
@@ -260,12 +279,23 @@ if [[ "${1:-}" == "--check" ]]; then
   exit 0
 fi
 printf '%s\n' "$@" >"$MCP_TRACE"
+HERE="$(cd "$(dirname "$0")" && pwd)"
+python3 - "$HERE/_lib" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+import claude_registry
+claude_registry.register("fixture-mcp", {"command": sys.executable, "args": ["-c", "pass"]})
+PY
 SH
+mkdir -p "$MCP_SOURCE/mcp/fixture-mcp"
+printf '#!/usr/bin/env bash\nexit 0\n' >"$MCP_SOURCE/mcp/fixture-mcp/install.sh"
 chmod +x "$MCP_SOURCE/mcp/install.sh"
+git -C "$MCP_SOURCE" init -q
+git -C "$MCP_SOURCE" add .
 MCP_HOME="$TMP/home-mcp"
 MCP_TRACE="$TMP/mcp-args.txt"
 if [[ -x "$MCP_SOURCE/install.sh" ]] \
-  && HOME="$MCP_HOME" MCP_TRACE="$MCP_TRACE" \
+  && HOME="$MCP_HOME" USERPROFILE="$MCP_HOME" MCP_TRACE="$MCP_TRACE" \
      CLAUDE_SKILLS_ROOT="$MCP_HOME/.claude/skills" \
      AGENTS_SKILLS_ROOT="$MCP_HOME/.agents/skills" \
      ICODE_DOCX_RUNTIME_ROOT="$TMP/docx-runtime" \

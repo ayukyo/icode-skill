@@ -85,19 +85,19 @@ git rev-list --count <worktree_branch>..<目标基分支>     # 目标基分支 
 > - max_files = 10（README / CLAUDE.md / 入口 / 依赖清单 / 公共 API 头文件）
 > - 输出 = `{"candidate": true, "facts": [...]}` 候选事实列表（**候选不作数**，主代理必须 Read/rg 实证后才可用于终审）
 > - 主代理把候选逐条与代码实证比对，`match=false` 项作为终审重点复核（防止 patch / 实施改了入口忘改 README、声明与代码漂移）
-> - **gate trace**：audit 存在受影响仓库（`affected_repo_roots` 非空）→ `audit.repo_facts: eligible=true` 必须 called/cache_hit/degraded_after_attempt（evidence 含 affected_repo_roots）
+> - **gate trace**：audit 存在受影响仓库（`affected_repo_roots` 非空）→ `audit.repo_facts: eligible=true` 必须 called/cache_hit/degraded_after_attempt/unavailable_before_call（evidence 含 affected_repo_roots）
 > - **前提契约（关键文件全缺降级）**：README / CLAUDE.md / 入口文件**全部不存在** → propose_repo_facts 无对象可审 → 跳过本段；写 `▶ propose_repo_facts 跳过：工程无 README/CLAUDE.md/入口文件可审计` + trace `eligible=false, skipped_not_eligible, evidence={affected_repo_roots:[]}`
-> - **降级**：cheap-research 不可用 → 跳过预审，走原流程（主代理自审）；写 `[降级-propose_repo_facts 不可用]` + trace `decision=degraded_after_attempt, attempted=true`
+> - **降级**：cheap-research 不可用 → 走原流程（主代理自审）；写 `[降级-propose_repo_facts 不可用]`。trace 按 [thinking_core.md](../references/thinking_core.md)「cheap-research 执行门（gate）流程」区分实际失败与未暴露；未暴露记 `unavailable_before_call/attempted=false/result=unavailable` 及完整 `availability`，不伪造调用。
 
 4. **思考分级（L2：sequential-thinking）**（按 [references/mcp_per_step.md](../references/mcp_per_step.md)「通用前置·分级思考」段执行）：本步骤为 L2，调用 sequential-thinking（3~5 步）。思考职责 = 构建追溯矩阵（计划功能点→代码位置）→ 汇步骤历史 → 规划 6 维度审计策略
 5. 输出：`▶ 步骤6 终审开始`
 6. **重新读取所有代码文件**
-7. **计划vs代码差异摘要**（gate `audit.plan_diff`）：用已读取的 `03_plan_final.md` 内容（步骤2）和代码文件内容（步骤6），调 `mcp__cheap-research__diff_summary(text_a=计划文本, text_b=实现文本, focus="计划vs代码偏离")`，输出差异摘要（偏离项 + 未实现功能点 + 新增功能点，≤500 token）。**gate trace**：audit 存在计划文本与实现 diff → `audit.plan_diff: eligible=true` 必须 called/cache_hit/degraded_after_attempt（evidence 含 plan_source/code_sources）。**降级**（cheap-research 不可用）：主代理手动对比，不阻塞 + trace `decision=degraded_after_attempt, attempted=true`。**结果供 6.1 维度 2「执行精准度」+ 维度 3「方案偏离度」直接引用**。
+7. **计划vs代码差异摘要**（gate `audit.plan_diff`）：用已读取的 `03_plan_final.md` 内容（步骤2）和代码文件内容（步骤6），调 `mcp__cheap-research__diff_summary(text_a=计划文本, text_b=实现文本, focus="计划vs代码偏离")`，输出差异摘要（偏离项 + 未实现功能点 + 新增功能点，≤500 token）。**gate trace**：audit 存在计划文本与实现 diff → `audit.plan_diff: eligible=true` 必须 called/cache_hit/degraded_after_attempt/unavailable_before_call（evidence 含 plan_source/code_sources）。**降级**（cheap-research 不可用）：主代理手动对比；trace 按 [thinking_core.md](../references/thinking_core.md)「cheap-research 执行门（gate）流程」区分实际失败与未暴露，未暴露记 `unavailable_before_call/attempted=false/result=unavailable` 及完整 `availability`，不伪造调用。**结果供 6.1 维度 2「执行精准度」+ 维度 3「方案偏离度」直接引用**。
 8. **执行终审**
 
 > **全工单 gate 完整性校验（audit 收尾，不把 MCP 明细塞入 06_audit.md）**：终审前运行
 > `python3 tools/lint_mcp_coverage.py {ICODE_OUT_DIR} --json > {ICODE_OUT_DIR}/.mcp_gate_report.json`——
-> 若存在 eligible 未履行 gate：**自动串联** → L2 警告并回到对应步骤补执行；**单步 audit** → 报告 blocked/failed gate，**禁止把流程合规性写成通过**。仅当工具真实失败且已记录 `degraded_after_attempt` 时允许主流程降级继续。报告写入 `.mcp_gate_report.json`（辅助文件，不进正式产物）。
+> 若存在 eligible 未履行 gate：**自动串联** → L2 警告并回到对应步骤补执行；**单步 audit** → 报告 blocked/failed gate，**禁止把流程合规性写成通过**。工具真实失败记 `degraded_after_attempt`，未暴露且有完整发现与替代证据记 `unavailable_before_call`；两种合法降级均允许主流程继续，不能冒充工具成功。报告写入 `.mcp_gate_report.json`（辅助文件，不进正式产物）。
 
 ### 前置强制执行门（防"复用步骤5结论跳过审计"）
 

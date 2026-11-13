@@ -122,11 +122,11 @@ def main():
     # （DISABLE_THOUGHT_LOGGING=false）保留用户值，不反复覆盖（优化文档 §10.4）。
     _claude_register(SERVER_NAME, build_server_entry(node_path, npx_path, package, _existing_user_env()))
 
-    print(f"✅ 已注册 {SERVER_NAME} 到 {CLAUDE_JSON}")
+    print(f"✅ 已生成 {SERVER_NAME} MCP 启动条目")
     print(f"   node: {node_path}")
     print(f"   npx:  {npx_path}")
     print(f"   pkg:  {package}")
-    print(f"   ⚠️ 重启 Claude Code 后生效")
+    print(f"   ⚠️ 重载所选宿主或新建会话后生效")
 
 
 if __name__ == "__main__":
