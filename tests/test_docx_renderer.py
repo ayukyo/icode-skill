@@ -316,6 +316,11 @@ class RendererTests(unittest.TestCase):
         (source / 'scripts').mkdir(parents=True)
         (source / 'mcp').mkdir()
         shutil.copyfile(ROOT / 'install.sh', source / 'install.sh')
+        # The root installer now prepares reconciliation before syncing. Keep
+        # its real dependencies so this fixture reaches the renderer failure.
+        (source / 'mcp/_lib').mkdir()
+        for name in ('install_reconcile.py', 'claude_registry.py', 'client_registry.py'):
+            shutil.copyfile(ROOT / 'mcp/_lib' / name, source / 'mcp/_lib' / name)
         sync = source / 'scripts/sync-to-global.sh'
         sync.write_text('#!/bin/sh\nexit 0\n')
         sync.chmod(0o755)
@@ -330,10 +335,13 @@ class RendererTests(unittest.TestCase):
                 f'sys.exit({code})\n')
         (installed / 'mcp').mkdir()
         (installed / 'mcp/install.sh').write_text(f'#!/bin/sh\nprintf "mcp\\n" >> "{trace}"\n')
-        env = {**os.environ, 'GLOBAL_DIR': str(installed), 'AGENTS_DIR': str(self.base / 'codex'),
+        home = self.base / 'home'
+        home.mkdir()
+        env = {**os.environ, 'HOME': str(home), 'USERPROFILE': str(home),
+               'GLOBAL_DIR': str(installed), 'AGENTS_DIR': str(self.base / 'codex'),
                'ICODE_PYTHON_BIN': sys.executable}
         result = subprocess.run(['bash', str(source / 'install.sh'), '--client', 'claude'], env=env, capture_output=True, text=True)
-        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertEqual(trace.read_text().splitlines(), ['bootstrap_runtime.py', 'bootstrap_renderer.py'])
 
     def test_corrupt_manifest_marks_visual_failure_instead_of_pending(self):
