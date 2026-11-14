@@ -18,6 +18,10 @@ description: ICODE 端到端编码工作流，适配 Claude Code、Codex、CodeB
 > - 主流程示意：`00_init → 01_plan → 02_review → 03_merge → 04_code → 05_deepcheck → 06_audit → 07_readme → 08_patch`；不存在 `03_code` / `04_test` / `05_deploy`。测试在 code，部署/回归按 readme / patch / verify。
 > - 辅助独立步骤不参与 1~6 推进；**fast 为精简全流程**，参与全部六步（见命令表）。
 
+## lite 工作流
+
+`/icode lite <需求>` 或 `/icode lite --ticket <id>` 使用 [steps/lite.md](steps/lite.md) 的三阶段合同，并先读 [公共核心](references/core.md)；不得把 lite 规则用于 start/fast。lite 审核须独立执行并绑定候选与证据。
+
 ## 通用约定（对话语言）
 
 DOCX/PPT 技术图可复用 SVG 图源；按对应步骤读取受限校验、PNG 兼容输出和实验双表示合同。PPT 使用 SVG 时同时准备同版本 DOCX 组件。生成、结构、消费者兼容和最终视觉验收分别记录，不因包内有 SVG 就报告原生矢量已验收。
@@ -51,6 +55,7 @@ skill 内所有 `python3 tools/...` 命令执行前按平台解析：**Linux/mac
 | `[辅助]` `/icode install [--client claude\|codex\|codebuddy\|workbuddy\|all] [--basic\|--preview]` | ICODE、宿主命令桥与 MCP 一键安装；`--basic` 跳过 MCP，`--preview` 零写入预览 | 否 |
 | `[入口]` `/icode log [零散信息...]` | 日志根因分析→转修复需求；版本基线门；TB 复用/批量/`--debug`/`--worktree`；对外简报 | ✅ 每次都新建（同 TB 单复用除外） |
 | `[入口]` `/icode init [--guide] [<需求或指南约束>]` | 常规：新建并产出 `00_init.md`；`--guide`：复用最新合格 init，刷新新人指南+审计 | 常规 ✅；guide 否 |
+| `[流程]` `/icode lite [<需求>\|--ticket <id>]` | 原生三阶段：规划、实现测试、独立审核；见 [lite](steps/lite.md) | ✅ 新建 / 显式续跑 |
 | `[流程]` `/icode start <需求>` | 全流程：创建/复用目录 → 步骤1~6 串联；`--worktree` | ✅ 创建 / 复用 |
 | `[流程]` `/icode fast <需求>` | 精简全流程：plan→review(1轮无对抗)→merge→code→deepcheck(Reverse)→audit；`--worktree` | ✅ 创建 / 复用 |
 | `[流程]` `/icode plan <需求>` | 仅步骤1：拟定计划；`--worktree` | ✅ 创建 / 复用 |

@@ -109,7 +109,7 @@ def build_starts(meta):
 
 
 def event_runs(events):
-    return [{key: value for key, value in (event.get("payload") or {}).items() if key != "metadata_hash_after"}
+    return [{key: value for key, value in (event.get("payload") or {}).items() if key not in {"metadata_hash_after", "lite_invalidation"}}
             for event in events if event.get("event_type") == "verification_recorded"]
 
 
@@ -409,7 +409,7 @@ def required_cells(contract):
         return None
     keys = []
     for row in cells:
-        if not isinstance(row, dict) or set(row) != {"layer", "consumer", "scenario"}:
+        if not isinstance(row, dict) or not {"layer", "consumer", "scenario"}.issubset(row) or set(row) - {"layer", "consumer", "scenario", "criterion_ids", "external", "pending_reason"}:
             return None
         key = cell(row)
         if any(value not in dimensions[index] for index, value in enumerate(key)):
@@ -855,7 +855,7 @@ def event_issues(events, meta, candidate_api, *, git_provider=None, require_git_
                 problems.append("build_start_writer_bypassed")
         if event.get("event_type") != "verification_recorded":
             continue
-        run = {key: value for key, value in payload.items() if key != "metadata_hash_after"}
+        run = {key: value for key, value in payload.items() if key not in {"metadata_hash_after", "lite_invalidation"}}
         if tracking_enabled and (run.get("candidate") is None or run.get("environment") not in ENVIRONMENTS):
             problems.append("verification_candidate_environment_missing")
         if run.get("candidate") is not None and (not candidate_api.snapshot_identity_ok(run["candidate"]) or run.get("candidate_id") != run["candidate"].get("candidate_id")):

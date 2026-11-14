@@ -544,3 +544,6 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
 
 > **按需加载**：工程接入 / 模块族快照相关步骤，先 Read [ticket_storage_details.md](ticket_storage_details.md)「module_docs 工程模块库」段。
 
+## lite 模式
+
+新 mode=lite、workflow_version=1，真实 completed_steps 为 lite_prepare/lite_code/lite_review，状态按版本化 workflow profile 解析。不得填旧 1—6 或套入 fast 升级。原始 requirement 不可覆盖，需求增量仅追加；主报告 lite.md，归档保留受控审核原文及事件。详见 [lite](../steps/lite.md)。

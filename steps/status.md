@@ -224,3 +224,7 @@ python3 tools/verification_debt.py pending \
 **强制约束**：🟢/🟢*/⚪ 语义 + 双保险机制（执行步骤内嵌 + thinking_core gate）详见 [SKILL.md「MCP 调用覆盖强制化」](../SKILL.md) + [references/mcp_per_step.md「双保险机制」](../references/mcp_per_step.md)；本步骤表内的 🟢/🟢* 标注按上方真源判定。
 
 **派生报告按需生成**：`verification_debt.py` 默认只写 `--output` 指定的 JSON；需阅读或导出 Markdown 时再提供 `--markdown <路径>`。旧双文件调用仍兼容，不删除历史报告。
+
+## lite 状态
+
+mode=lite 时按 workflow_contract(meta) 展示三阶段与真实 completed_steps，completed 不映射旧 audit/六步。状态、candidate inspect、validate/snapshot 和派生 lite.md 共用真实控制面事实；不能把“代码已审核，外部验证待完成”显示成 verified。

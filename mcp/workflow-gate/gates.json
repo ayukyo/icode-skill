@@ -368,6 +368,522 @@
       "managed_write": "仅在幂等键和写后校验均存在时允许人工或上层编排重试。"
     }
   },
+  "workflow_profiles": {
+    "lite": {
+      "1": {
+        "step_order": [
+          "lite_prepare",
+          "lite_code",
+          "lite_review"
+        ],
+        "required_review_steps": [
+          "lite_review"
+        ],
+        "completion_step": "lite_review",
+        "human_artifacts": [
+          "lite.md"
+        ],
+        "state_machine": {
+          "doc": "vNext 工单（metadata.schema_version=3）状态机真源。tools/icode_control.py transition 按此判定合法性；steps/*.md 的状态写回必须经 `python3 tools/icode_control.py transition --dir <out_dir> --to <status>`，禁止绕过直写（validate 会校验 metadata.status 与最后一条 state_changed 事件一致性）。legacy 工单（metadata 无 schema_version）为只读适配对象，不走 transition（validate 报 legacy-untracked 不阻断只读审计）。",
+          "states": [
+            "lite_prepare_in_progress",
+            "lite_prepare_done",
+            "lite_code_in_progress",
+            "lite_code_done",
+            "lite_review_in_progress",
+            "completed"
+          ],
+          "terminal_states_of_ticket": [
+            "completed",
+            "debug_done"
+          ],
+          "transitions": [
+            {
+              "from": "lite_prepare_in_progress",
+              "to": "lite_prepare_done"
+            },
+            {
+              "from": "lite_prepare_done",
+              "to": "lite_code_in_progress"
+            },
+            {
+              "from": "lite_code_in_progress",
+              "to": "lite_code_done"
+            },
+            {
+              "from": "lite_code_done",
+              "to": "lite_review_in_progress"
+            },
+            {
+              "from": "lite_review_in_progress",
+              "to": "completed"
+            },
+            {
+              "from": "lite_code_in_progress",
+              "to": "lite_prepare_in_progress",
+              "lite_return": true
+            },
+            {
+              "from": "lite_code_done",
+              "to": "lite_prepare_in_progress",
+              "lite_return": true
+            },
+            {
+              "from": "lite_code_done",
+              "to": "lite_code_in_progress",
+              "lite_return": true
+            },
+            {
+              "from": "lite_review_in_progress",
+              "to": "lite_prepare_in_progress",
+              "lite_return": true
+            },
+            {
+              "from": "lite_review_in_progress",
+              "to": "lite_code_in_progress",
+              "lite_return": true
+            },
+            {
+              "from": "completed",
+              "to": "lite_prepare_in_progress",
+              "lite_return": true
+            },
+            {
+              "from": "completed",
+              "to": "lite_code_in_progress",
+              "lite_return": true
+            },
+            {
+              "from": "completed",
+              "to": "completed"
+            },
+            {
+              "from": "lite_prepare_done",
+              "to": "lite_prepare_in_progress",
+              "lite_return": true
+            }
+          ],
+          "gate_policy": {
+            "doc": "状态前移门禁分级：to 完成态（gated_targets）→ 依次运行三个 gate linter（vNext 工单一律 --strict），任一失败即 fail-closed 状态不前移；to 进行态（*_in_progress）→ 仅做状态机合法性判定，不跑 linter。completed 额外强制 delivery_verdict 显式回填。debug 孪生工单（metadata.debug=true）走 .debug 隔离域，不跑通用门禁。",
+            "gated_targets": [
+              "lite_prepare_done",
+              "lite_code_done",
+              "completed"
+            ],
+            "step_by_target": {
+              "lite_prepare_done": "lite_prepare",
+              "lite_code_done": "lite_code",
+              "completed": "lite_review"
+            },
+            "completed_step_by_target": {
+              "lite_prepare_done": "lite_prepare",
+              "lite_code_done": "lite_code",
+              "completed": "lite_review"
+            },
+            "gate_linters": {
+              "thinking_gate": [
+                "python3",
+                "tools/lint_thinking_gate.py",
+                "--strict",
+                "--json"
+              ],
+              "mcp_coverage": [
+                "python3",
+                "tools/lint_mcp_coverage.py",
+                "--strict",
+                "--json"
+              ],
+              "workflow_contract": [
+                "python3",
+                "tools/lint_workflow_contract.py",
+                "--strict",
+                "--json"
+              ]
+            },
+            "completed_requires": "transition --to completed 必须携带 --delivery-verdict ∈ {verified,verification_pending,blocked,not_applicable}（交付分层契约：宿主验证通过不得自动映射为 verified）"
+          },
+          "action_policy": {
+            "schema_version": 1,
+            "doc": "UI/Agent 宿主执行前的机器动作真源。action-policy 从本段、metadata 与事件链生成允许动作和 revision；前端推荐按钮不得自行维护第二套状态映射。project-scoped 的 init/start/fast 由可信 project catalog 单独路由，不伪装成既有 ticket action。",
+            "read_only_actions": [
+              "status"
+            ],
+            "actions": {
+              "verify": {
+                "statuses": [
+                  "lite_prepare_in_progress",
+                  "lite_prepare_done",
+                  "lite_code_in_progress",
+                  "lite_code_done",
+                  "lite_review_in_progress",
+                  "completed"
+                ],
+                "debug": "main",
+                "side_effect": "external_side_effect",
+                "variants": {
+                  "build": {
+                    "statuses": [
+                      "lite_prepare_in_progress",
+                      "lite_prepare_done",
+                      "lite_code_in_progress",
+                      "lite_code_done",
+                      "lite_review_in_progress",
+                      "completed"
+                    ],
+                    "side_effect": "managed_write"
+                  },
+                  "plan": {
+                    "statuses": [
+                      "lite_prepare_in_progress",
+                      "lite_prepare_done",
+                      "lite_code_in_progress",
+                      "lite_code_done",
+                      "lite_review_in_progress",
+                      "completed"
+                    ],
+                    "side_effect": "managed_write"
+                  },
+                  "intent": {
+                    "statuses": [
+                      "lite_prepare_in_progress",
+                      "lite_prepare_done",
+                      "lite_code_in_progress",
+                      "lite_code_done",
+                      "lite_review_in_progress",
+                      "completed"
+                    ],
+                    "side_effect": "managed_write"
+                  }
+                }
+              },
+              "bak": {
+                "statuses": [
+                  "lite_prepare_in_progress",
+                  "lite_prepare_done",
+                  "lite_code_in_progress",
+                  "lite_code_done",
+                  "lite_review_in_progress",
+                  "completed"
+                ],
+                "debug": "main",
+                "side_effect": "managed_write"
+              },
+              "status": {
+                "statuses": [
+                  "lite_prepare_in_progress",
+                  "lite_prepare_done",
+                  "lite_code_in_progress",
+                  "lite_code_done",
+                  "lite_review_in_progress",
+                  "completed"
+                ],
+                "debug": "both",
+                "side_effect": "read_only"
+              },
+              "lite": {
+                "statuses": [
+                  "lite_prepare_in_progress",
+                  "lite_prepare_done",
+                  "lite_code_in_progress",
+                  "lite_code_done",
+                  "lite_review_in_progress",
+                  "completed"
+                ],
+                "debug": "main",
+                "side_effect": "managed_write"
+              }
+            },
+            "recommended_by_status": {
+              "lite_prepare_in_progress": "lite",
+              "lite_prepare_done": "lite",
+              "lite_code_in_progress": "lite",
+              "lite_code_done": "lite",
+              "lite_review_in_progress": "lite",
+              "completed": null
+            }
+          },
+          "close_phases": [
+            "close_planned",
+            "archived",
+            "roots_verified",
+            "checkouts_removed",
+            "branches_removed",
+            "closed"
+          ],
+          "close_phase_doc": "关闭分阶段状态（metadata.close_state）。每阶段幂等（重放同阶段=已应用），禁止跨阶段跳转；用 tools/icode_control.py close-phase 记录。archived 成功后控制根从源 out_dir 交接到 archive_path，roots_verified 起必须在归档根续跑，保证源 checkout 删除后仍可留痕。closed 为终态，重复 close 对已 closed 工单只回放摘要不重复清理。"
+        },
+        "execution_model": {
+          "schema_version": 1,
+          "finish_gate_steps": [],
+          "doc": "借鉴行为树的端口、Reactive 边界检查、节点轨迹、Retry/Fallback 与长动作回执，但不引入行为树运行时、XML、全局黑板或常驻 tick。工单事件链是唯一执行账本；新出生事件 execution_contract_version=1 强制完成回执；无版本的历史工单仅在已 start 后强制，保持历史兼容。",
+          "boundaries": [
+            "before_write",
+            "after_wait",
+            "before_side_effect",
+            "before_transition"
+          ],
+          "input_kinds": [
+            "metadata_pointer",
+            "ticket_file",
+            "ticket_glob",
+            "metadata_files",
+            "workspace_git_head"
+          ],
+          "output_kinds": [
+            "metadata_pointer",
+            "ticket_file",
+            "ticket_glob",
+            "metadata_files",
+            "external_artifact"
+          ],
+          "step_outcomes": [
+            "success",
+            "failure",
+            "degraded",
+            "blocked",
+            "skipped"
+          ],
+          "step_contracts": {
+            "lite_prepare": {
+              "inputs": [
+                {
+                  "id": "requirement",
+                  "kind": "metadata_pointer",
+                  "value": "/requirement",
+                  "required": true,
+                  "protected": true
+                }
+              ],
+              "outputs": [],
+              "required_checks": [
+                "before_write",
+                "before_transition"
+              ],
+              "drift_routes": {
+                "default": "lite_prepare"
+              }
+            },
+            "lite_code": {
+              "inputs": [
+                {
+                  "id": "requirement",
+                  "kind": "metadata_pointer",
+                  "value": "/requirement",
+                  "required": true,
+                  "protected": true
+                },
+                {
+                  "id": "scope_contract",
+                  "kind": "metadata_pointer",
+                  "value": "/scope_contract",
+                  "required": true,
+                  "protected": true
+                },
+                {
+                  "id": "acceptance_contract",
+                  "kind": "metadata_pointer",
+                  "value": "/acceptance_contract",
+                  "required": true,
+                  "protected": true
+                },
+                {
+                  "id": "verification_contract",
+                  "kind": "metadata_pointer",
+                  "value": "/verification_contract",
+                  "required": true,
+                  "protected": true
+                },
+                {
+                  "id": "requirement_deltas",
+                  "kind": "metadata_pointer",
+                  "value": "/requirement_deltas",
+                  "required": false,
+                  "protected": true
+                },
+                {
+                  "id": "semantic_decisions",
+                  "kind": "metadata_pointer",
+                  "value": "/semantic_decisions",
+                  "required": false,
+                  "protected": true
+                },
+                {
+                  "id": "impact_contract",
+                  "kind": "metadata_pointer",
+                  "value": "/impact_contract",
+                  "required": false,
+                  "protected": true
+                }
+              ],
+              "outputs": [],
+              "required_checks": [
+                "before_write",
+                "before_transition"
+              ],
+              "drift_routes": {
+                "default": "lite_prepare"
+              }
+            },
+            "lite_review": {
+              "inputs": [
+                {
+                  "id": "requirement",
+                  "kind": "metadata_pointer",
+                  "value": "/requirement",
+                  "required": true,
+                  "protected": true
+                },
+                {
+                  "id": "scope_contract",
+                  "kind": "metadata_pointer",
+                  "value": "/scope_contract",
+                  "required": true,
+                  "protected": true
+                },
+                {
+                  "id": "acceptance_contract",
+                  "kind": "metadata_pointer",
+                  "value": "/acceptance_contract",
+                  "required": true,
+                  "protected": true
+                },
+                {
+                  "id": "verification_contract",
+                  "kind": "metadata_pointer",
+                  "value": "/verification_contract",
+                  "required": true,
+                  "protected": true
+                },
+                {
+                  "id": "requirement_deltas",
+                  "kind": "metadata_pointer",
+                  "value": "/requirement_deltas",
+                  "required": false,
+                  "protected": true
+                },
+                {
+                  "id": "semantic_decisions",
+                  "kind": "metadata_pointer",
+                  "value": "/semantic_decisions",
+                  "required": false,
+                  "protected": true
+                },
+                {
+                  "id": "impact_contract",
+                  "kind": "metadata_pointer",
+                  "value": "/impact_contract",
+                  "required": false,
+                  "protected": true
+                }
+              ],
+              "outputs": [],
+              "required_checks": [
+                "before_write",
+                "before_transition",
+                "after_wait"
+              ],
+              "drift_routes": {
+                "default": "lite_prepare"
+              }
+            },
+            "verify": {
+              "inputs": [
+                {
+                  "id": "requirement",
+                  "kind": "metadata_pointer",
+                  "value": "/requirement",
+                  "required": true,
+                  "protected": true
+                }
+              ],
+              "outputs": [],
+              "required_checks": [
+                "before_write",
+                "after_wait",
+                "before_transition"
+              ],
+              "drift_routes": {
+                "default": "lite_prepare"
+              }
+            }
+          },
+          "operation_classes": {
+            "read_only": {
+              "auto_retry": true,
+              "requires_idempotency": false,
+              "ambiguous_start_action": "retry"
+            },
+            "managed_write": {
+              "auto_retry": false,
+              "requires_idempotency": true,
+              "ambiguous_start_action": "verify_receipt"
+            },
+            "external_side_effect": {
+              "auto_retry": false,
+              "requires_idempotency": true,
+              "ambiguous_start_action": "verify_receipt"
+            },
+            "destructive_hardware": {
+              "auto_retry": false,
+              "requires_idempotency": true,
+              "ambiguous_start_action": "human_decision"
+            }
+          },
+          "failure_policies": {
+            "retryable_transport": {
+              "action": "retry",
+              "max_attempts": 3,
+              "backoff_seconds": [
+                0,
+                1,
+                3
+              ],
+              "conclusion_ceiling": "degraded"
+            },
+            "capability_unavailable": {
+              "action": "fallback",
+              "max_attempts": 1,
+              "backoff_seconds": [
+                0
+              ],
+              "conclusion_ceiling": "degraded"
+            },
+            "deterministic_failure": {
+              "action": "repair_then_retry",
+              "max_attempts": 1,
+              "backoff_seconds": [
+                0
+              ],
+              "conclusion_ceiling": "blocked"
+            },
+            "policy_schema_security": {
+              "action": "block",
+              "max_attempts": 0,
+              "backoff_seconds": [],
+              "conclusion_ceiling": "blocked"
+            },
+            "ambiguous_side_effect": {
+              "action": "verify_receipt",
+              "max_attempts": 0,
+              "backoff_seconds": [],
+              "conclusion_ceiling": "blocked"
+            },
+            "destructive_risk": {
+              "action": "human_decision",
+              "max_attempts": 0,
+              "backoff_seconds": [],
+              "conclusion_ceiling": "blocked"
+            }
+          },
+          "safety_overrides": {
+            "external_side_effect": "即使错误看似 retryable，也必须先核对远端/设备回执，禁止自动重放。",
+            "destructive_hardware": "任何失败均不自动重试，必须由人确认下一动作。",
+            "managed_write": "仅在幂等键和写后校验均存在时允许人工或上层编排重试。"
+          }
+        }
+      }
+    }
+  },
   "state_machine": {
     "doc": "vNext 工单（metadata.schema_version=3）状态机真源。tools/icode_control.py transition 按此判定合法性；steps/*.md 的状态写回必须经 `python3 tools/icode_control.py transition --dir <out_dir> --to <status>`，禁止绕过直写（validate 会校验 metadata.status 与最后一条 state_changed 事件一致性）。legacy 工单（metadata 无 schema_version）为只读适配对象，不走 transition（validate 报 legacy-untracked 不阻断只读审计）。",
     "states": ["log_in_progress","log_done","init_in_progress","plan_done","review_in_progress","review_done","plan_finalized","code_in_progress","code_done","deepcheck_in_progress","deepcheck_done","completed","debug_in_progress","debug_done"],

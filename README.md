@@ -371,3 +371,7 @@ MIT — see [LICENSE.txt](LICENSE.txt).
 ---
 
 [中文文档](README.zh-CN.md)
+
+### Native lightweight workflow
+
+`/icode lite <requirement>` uses three native stages: prepare, implement/test, and independent review. Resume with `/icode lite --ticket <id>`. It preserves planning depth and requires a fresh CLI reviewer bound to the final source candidate. Build-only evidence, fake PASS files, stale reviews, and failed required checks cannot complete a ticket. Only explicit external evidence gaps permit pending delivery. See [workflow](steps/lite.md). Full and fast retain their existing semantics. No token-saving percentage is claimed without measured task comparisons.

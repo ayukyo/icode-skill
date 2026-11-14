@@ -212,6 +212,7 @@
   ],
   "trace_schema_version": 2,
   "not_applicable_steps": [
+    "lite_prepare", "lite_code", "lite_review",
     "bak",
     "close",
     "code",

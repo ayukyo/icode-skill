@@ -70,6 +70,7 @@ STAGE_DECISION_REQUIRED = frozenset({
     "report_sha256", "revision", "decision", "request_id",
 })
 COCKPIT_ARTIFACTS = frozenset({
+    "lite.md",
     "00_init.md", "log_analysis.md", "01_plan.md", "02_review.md",
     "03_plan_final.md", "04_code_review_fix.md", "05_deepcheck.md",
     "06_audit.md", "07_readme.md", "08_patch.md", "ticket_snapshot.json",
@@ -400,7 +401,11 @@ class AgentUIService:
         status = metadata.get("status")
         current = STATUS_CURRENT_STEP.get(status, "0")
         progress = []
-        for step_id, label in PROGRESS_STEPS:
+        steps = PROGRESS_STEPS
+        if metadata.get("mode") == "lite":
+            steps = (("lite_prepare", "需求与方案"), ("lite_code", "实现与测试"), ("lite_review", "独立审核与验收"))
+            current = next((name for name, _ in steps if isinstance(status, str) and status.startswith(name + "_")), None)
+        for step_id, label in steps:
             if status in {"completed", "debug_done"}:
                 state = "done"
             elif step_id == current:

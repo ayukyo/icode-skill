@@ -45,8 +45,10 @@
           "type": "string",
           "pattern": "^\\.icode_output/(\\.debug/)?\\.icode_output_[0-9]+$"
         },
+        "mode": { "enum": ["full", "fast", "lite", null] },
+        "workflow_version": { "type": "integer" },
         "status": {
-          "enum": ["log_in_progress", "log_done", "init_in_progress", "plan_done", "review_in_progress", "review_done", "plan_finalized", "code_in_progress", "code_done", "deepcheck_in_progress", "deepcheck_done", "completed", "debug_in_progress", "debug_done", "archived", "backup"]
+          "enum": ["lite_prepare_in_progress", "lite_prepare_done", "lite_code_in_progress", "lite_code_done", "lite_review_in_progress", "log_in_progress", "log_done", "init_in_progress", "plan_done", "review_in_progress", "review_done", "plan_finalized", "code_in_progress", "code_done", "deepcheck_in_progress", "deepcheck_done", "completed", "debug_in_progress", "debug_done", "archived", "backup"]
         },
         "updated_at": { "type": "string" },
         "created_at": { "type": ["string", "null"] },

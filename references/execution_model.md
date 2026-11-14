@@ -179,3 +179,7 @@ python3 tools/icode_control.py trace --dir <out_dir> --limit 50
 code/deepcheck/audit 的新执行还必需 `<step>_worklist.json` 及本 attempt 真实回执，按 [inspection_worklist.md](inspection_worklist.md)准备关联单元、逐阶段实际 Read、校验源码 findings 位置与版本。full/start 与 fast 均在本 attempt/phase 真正读完一组后优先 `inspection --phase read --paths-json` 批量登记，保留1至256成员/64KiB上限与超限分组；code_review、reverse/fixed/free、audit 各自独立，旧 `--path` 兼容。批量只减少登记调用，不替代阅读、专项、覆盖和裁决。范围声明绑定回执，缺文件/缺 Read/源码漂移不能 success；degraded 不能绕过身份和版本错误。旧已完成合同不追溯补证据，进行中合同改变须 blocked 重入。
 
 review必需review_manifest.json，按每轮真实origin attempt保存轻量round digest回执；首轮和所有非clean轮要JSON，clean后续轮可省详细JSON。deepcheck/audit分别必需coverage JSON，缺Read阶段、旧hash或未观察项不能finish success；degraded也要真实声明回执和债务原因。终审只读产物检查统一调用 `icode_control.py check-outputs --dir <out> --step audit`。具体格式/历史合同兼容见[inspection_evidence](inspection_evidence.md)。
+
+## lite 三步执行
+
+mode/version 选择版本化步骤端口；lite_prepare/lite_code/lite_review 的 start/check/finish 校验当前状态与 attempt。必需步骤只接受 success，不接受 degraded。历史 finish 同请求可回放但不授权新执行。回退使下游旧回执失效；lite-review_<invocation>.json 不可变，lite.md 仅为派生主报告。

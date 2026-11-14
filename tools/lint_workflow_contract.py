@@ -69,6 +69,9 @@ ACCEPTANCE_CONSUMERS = [
 #   log/review/deepcheck/audit 为计划/质量阶段，identity_change 与 acceptance 只在
 #   code/deploy/audit-verified 生效（普通工单无身份变化/生命周期不得被这两个可选字段误杀）。
 STEP_GATES = {
+    "lite_prepare": ["semantic_decision", "requirement_delta"],
+    "lite_code": ["semantic_decision", "identity_change", "requirement_delta"],
+    "lite_review": ["identity_change", "requirement_delta"],
     "readme": [],
     "verify": [],
     "log": [],
@@ -694,6 +697,22 @@ def validate_delivery_evidence(metadata: Dict, catalog: Dict, out_dir=None) -> L
 def build_report(out_dir: Path, step_filter: Optional[str], metadata: Dict,
                  catalog: Dict, legacy: bool, strict: bool) -> Dict:
     """构造校验报告。"""
+    if metadata.get("mode") == "lite":
+        api = evidence_module().control_module()
+        try:
+            api.workflow_contract(metadata)
+            step = step_filter or ("lite_review" if metadata.get("status") == "completed" else None)
+            gates = api.lite_gate_reports(out_dir, metadata, step, metadata.get("delivery_verdict"))
+            return {"out_dir": str(out_dir), "ticket_id": metadata.get("ticket_id"), "legacy": False,
+                    "schema_version": 1, "strict": strict, "blocked": 0, "warnings": 0,
+                    "gates": [{"gate": g["gate_id"], "status": "pass", "issues": []} for g in gates],
+                    "sensitive_data": 0}
+        except api.ControlError as exc:
+            return {"out_dir": str(out_dir), "legacy": False, "schema_version": 1, "strict": strict,
+                    "blocked": 1, "warnings": 0, "sensitive_data": 0,
+                    "gates": [{"gate": exc.extra.get("gate_id", "lite_contract"),
+                               "status": "blocked", "issues": [str(exc)],
+                               "violations": exc.extra.get("violations", [])}]}
     gates_to_check = list(STEP_GATES.get(step_filter, ALL_GATES) if step_filter else ALL_GATES)
     rp = metadata.get("risk_profile")
     if isinstance(rp, dict) and "policy_version" in rp and (type(rp["policy_version"]) is not int or rp["policy_version"] != 1) \

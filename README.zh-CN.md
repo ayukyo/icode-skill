@@ -304,6 +304,7 @@ Windows 上使用 Linux 工具链时复用 [WSL 构建合同](references/wsl_bui
 | `/icode log [零散信息...]` | 可选入口：确定性证据清单 + debug 本地复用 + 逐仓现场基线 → 日志根因分析 → 修复需求 `00_init.md` |
 | `/icode init [--guide] [<粗略需求或指南约束>]` | 常规：新建步骤 0 工单并多轮形成初稿；`--guide`：复用最新合格 init，刷新 `deliverables/guide.md` 与内部证据审计，不新建工单 |
 | `/icode start <需求>` | 全流程：创建/复用目录 → 步骤 1→6 |
+| `/icode lite [需求或 --ticket <id>]` | 原生三阶段：充分需求与方案收敛 → 实现及行为验证 → 真实独立审核；一份 lite.md，审核绑定最终候选。仅外部缺口允许 pending，同版补证不重跑审核。见 [lite 规则](steps/lite.md)。 |
 | `/icode fast <需求>` | 精简全流程：plan→review(1轮无对抗)→merge→code→deepcheck(Reverse)→audit；不承诺固定耗时或费用比例 |
 | `/icode plan <需求>` | 仅步骤 1：拟定项目计划 |
 | `/icode review [N]` | 仅步骤 2：专项审查计划（N=软上限轮数，默认 3） |
