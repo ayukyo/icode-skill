@@ -9,13 +9,12 @@
 
 ## fast 必要执行
 
-按 `tools/fast_policy.py` 的 `effective_mode(metadata)` 判定：仅有效 fast 执行 Reverse，已升级 full 必须执行下面 Reverse/Fixed/Free。Reverse 先独立完整 Read 当前关联实现/接口/调用方/测试，再逆推并与最终计划及 patch 对比；沿用 required_checks、审查清单和 coverage，不复用 code/review 的阅读当本轮回执。
+有效 policy2 fast 的必要职责统一见 [deepcheck 必要合同](fast.md#fast-deepcheck)及其共享/条件引用；步骤开始的 compact 视图须来源校验有效。独立 Reverse Read、专项与 coverage 不省略。full/start、legacy、不支持或视图失效时按本文件及实际 effective_mode 执行，已有效 full 完整恢复 Reverse/Fixed/Free。
 
-报告集中记录范围、差异、发现、专项检查结论和债务，引用已有计划/测试/账本，无须重写长篇设计。Audit 仍需另作独立 Read。未进入 Fixed/Dedup 的 trace 沿用真实有效模式，不能用请求 fast 掩盖 full 的缺失阶段。
-
+<a id="deepcheck-coverage"></a>
 ## 阶段覆盖与合规结束（强制）
 
-先执行 [审查清单合同](../references/inspection_worklist.md)：本轮 prepare 联审实现/头文件/调用方/测试；Reverse、Fixed、Free 各自实际重新 Read 后逐文件登记 phase（effective fast 仅 Reverse）。触发共享变体/消费者或 timestamp 专项时，各 required_phase 独立完成全部 required_items，并以 `inspection --phase assess --read-phase <reverse|fixed|free> --check-id <ID> --assessment-json '<完整对象>'` 登记具体结论、理由及真实引用；不得用上一阶段结论或 prepare/read 代替。N/A 须具体理由，漏项/未完成只留明确债务走 degraded。源码 findings 给校验后的行段/hash，遗漏保持债务，不可称全审完成。清单与原有 coverage 声明并行必需，修复改变源码后重新入轮审查。
+先执行 [审查清单合同](../references/inspection_worklist.md)：本轮 prepare 联审实现/头文件/调用方/测试；Reverse、Fixed、Free 各自实际重新 Read 后优先用 `--paths-json` 按本 attempt/phase 批量登记（effective fast 仅 Reverse；full/start 保留全部阶段，分组/单文件兼容及边界见清单合同）。触发共享变体/消费者或 timestamp 专项时，各 required_phase 独立完成全部 required_items，并以 `inspection --phase assess --read-phase <reverse|fixed|free> --check-id <ID> --assessment-json '<完整对象>'` 登记具体结论、理由及真实引用；不得用上一阶段结论或 prepare/read 代替。N/A 须具体理由，漏项/未完成只留明确债务走 degraded。源码 findings 给校验后的行段/hash，遗漏保持债务，不可称全审完成。清单与原有 coverage 声明并行必需，修复改变源码后重新入轮审查。
 
 执行前读取[审查证据合同](../references/inspection_evidence.md)。只有实际完成本轮各阶段Read后，才写阶段覆盖声明及实际源hash：deepcheck写 `deepcheck_coverage.json`，audit写 `audit_coverage.json`，登记本attempt真实artifact回执。声明必须覆盖metadata.code_files全部文件；按 `effective_mode(metadata)` 统一解析：full为Reverse/Fixed/Free，实际fast仅Reverse，audit为独立Audit；fast升级full不可省阶段。已有hash/工具调用/历史确认行均不代替本轮Read。
 
@@ -203,6 +202,7 @@ Free 阶段一次性完整覆盖全部 15 个角度。
 
 **任一检查项不满足 → 不切换阶段**，必须回补。禁止"先切阶段再补"（切了就不会补了——实测踩坑模式）。
 
+<a id="deepcheck-reverse"></a>
 ### 阶段 1 — Reverse（逆推）
 
 **重新读取所有代码文件** + 输出 `📖 已 Read` 确认行。基于代码**逆推**需求规格——不允许参考计划或需求文档，只从代码推断。
@@ -396,6 +396,7 @@ Free 阶段一次性完整覆盖全部 15 个角度。
 **复检发现新问题的范围升级（scope_escalations，反偷懒第 33 条）**：Reverse/Fixed/Free 阶段发现**计划之外**的新问题拟纳入实施范围时，同样按 `scope_escalations` 分类并写 metadata——`A_now` 须给直接复发证据链（无证据回指默认 `B_confirm` 需用户确认，未获确认不得实施）/ `C_follow_up` 范围外 / `refuted` 丢弃。**不得因"复检发现"直接采纳实施**（与步骤2 over-design 审查对齐）。
 
 
+<a id="deepcheck-lifecycle"></a>
 ## 生命周期一致性复检（workflow gate·验收收敛，防"即时过了就部署"）
 
 > **目的**：对改变权威状态/实体身份的修改，只验证"权威提交立即完成后的直接查询"远远不够——必须覆盖**即时 / 异步收敛 / 重启恢复 / 重复执行**四阶段的一致性（P1 生命周期验收，见 [SKILL.md「工作流硬门禁」](../SKILL.md)）。本段把 `metadata.acceptance_contract` 的验收矩阵**逆推成复检角度**，逐项核对实际行为是否与 `expected` 一致：

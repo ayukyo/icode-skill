@@ -23,24 +23,24 @@ python3 tools/icode_control.py inspection --dir <out_dir> --step <code|deepcheck
   --attempt <attempt> --phase prepare [--related <file>] [--scope <dir>] [--baselines-json '<object>']
 ```
 
-生成 `code_worklist.json`、`deepcheck_worklist.json` 或 `audit_worklist.json`。prepare 不填 Read，不证明理解；同 attempt 恢复保留记录。逐单元共同审查所有 files，实际重新 Read 本阶段原文（删除文件读基线）后才登记：
-
-```bash
-python3 tools/icode_control.py inspection --dir <out_dir> --step <step> --attempt <attempt> \
-  --phase read --read-phase <phase> --path <相对文件>
-python3 tools/icode_control.py inspection --dir <out_dir> --step <step> --attempt <attempt> --phase check
-```
-
-phase：code=`code_review`；deepcheck effective full=`reverse/fixed/free`，实际 fast=`reverse`（风险升级 full 不可减阶段）；audit=独立 `audit`。本轮每文件每阶段阅读绑定冻结 sha256，不能复用上一步、上一轮或另模型阅读。prepare/read 自动登记 artifact 回执；手改 findings/债务后须重新 `artifact --path <step>_worklist.json`。成功 finish 强制完整清单+当前 attempt 真实回执；源码/基线漂移需 blocked 重入并重新审查，不可只改 hash。
-
-同一attempt/phase实际读完一组文件后，可把多次登记合为一次原生调用：
+生成 `code_worklist.json`、`deepcheck_worklist.json` 或 `audit_worklist.json`。prepare 不填 Read，不证明理解；同 attempt 恢复保留记录。full/start 与 fast 共用以下批量优先路径：逐单元共同审查所有 files，实际重新 Read 本阶段原文（删除文件读基线），完成同一 attempt/phase 的一组后才优先批量登记：
 
 ```bash
 python3 tools/icode_control.py inspection --dir <out_dir> --step <step> --attempt <attempt> \
   --phase read --read-phase <phase> --paths-json '["src/first.py","src/second.py"]' --request <本次幂等键>
+python3 tools/icode_control.py inspection --dir <out_dir> --step <step> --attempt <attempt> --phase check
 ```
 
-`--paths-json`仅用于read，与`--path`互斥；输入最多64KiB、1至256个唯一规范相对POSIX路径，不能重复、越界或包含点段。路径集合排序后绑定请求；同键换成员拒绝，精确重放返回原回执且保留后来进度。整批仍先校验全部冻结清单和每个成员，再一次替换、一个制品回执；参数或成员预验失败不部分登记。晚期provider/阶段发布拒绝沿既有失败与恢复边界保留原件，不能宣称清单与事件是跨文件原子事务；没有当前真实回执不得收口。
+phase：code=`code_review`；deepcheck effective full=`reverse/fixed/free`，实际 fast=`reverse`（风险升级 full 不可减阶段）；audit=独立 `audit`。各阶段独立读取、判断与登记；本轮每文件每阶段阅读绑定冻结 sha256/hash，不能复用上一步、上一轮或另模型阅读。prepare/read 自动登记 artifact 回执；手改 findings/债务后须重新 `artifact --path <step>_worklist.json`。成功 finish 强制完整清单+当前 attempt 真实回执；源码/基线漂移需 blocked 重入并重新审查，不可只改 hash。
+
+旧单文件 `--path` 保持兼容；本阶段实际 Read 一个文件后也可单独登记：
+
+```bash
+python3 tools/icode_control.py inspection --dir <out_dir> --step <step> --attempt <attempt> \
+  --phase read --read-phase <phase> --path <相对文件> --request <本次幂等键>
+```
+
+`--paths-json`仅用于read，与`--path`互斥；输入最多64KiB、1至256个唯一规范相对POSIX路径，超限分组，每组用独立请求键；不能重复、越界或包含点段。分组只合并登记，不能把 reverse/fixed/free/audit 合成一次语义审查。路径集合排序后绑定请求；同键换成员拒绝，精确重放返回原回执且保留后来进度。整批仍先校验全部冻结清单和每个成员，再一次替换、一个制品回执；参数或成员预验失败不部分登记。晚期provider/阶段发布拒绝沿既有失败与恢复边界保留原件，不能宣称清单与事件是跨文件原子事务；没有当前真实回执不得收口。
 
 批量只减少登记调用，不能替代本阶段逐文件实际Read、专项或验收。机器校验合法成员、阶段和版本；调用方仍负责实际阅读，不能把合法路径或登记回执称为宿主阅读证明。旧单文件参数及请求身份保持。
 

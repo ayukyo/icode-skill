@@ -866,6 +866,27 @@ def workflow_effective_mode(meta):
     return effective if effective in ("fast", "full") else meta.get("mode", "full")
 
 
+def step_execution_profile(meta, step):
+    """Project instructions only after admission; never persist this view."""
+    policy = fast_policy_module()
+    profile = meta.get("risk_profile") or {}
+    catalog = load_json(GATES_JSON, "workflow gate catalog") if (
+        policy.effective_mode(meta) == "fast" and profile.get("policy_version") == 2) else {}
+    result = policy.build_execution_profile(meta, step, catalog, SKILL_ROOT)
+    if result["state"] != "compact":
+        documents = {"init": "00_init.md", "plan": "01_plan.md", "review": "02_review.md",
+                     "merge": "03_merge.md", "code": "04_code.md", "deepcheck": "05_deepcheck.md",
+                     "audit": "06_audit.md", "readme": "07_readme.md", "patch": "08_patch.md"}
+        # A stale compact view must not loop through the main step's compact
+        # navigation. Read its applicable body/shared rules in the same mode.
+        result["fallback"] = {"route": "existing_step_rules",
+            "read_applicable_body_and_shared_rules": True, "ignore_compact_navigation": True,
+            "preserve_effective_mode": True}
+        if step in documents:
+            result["fallback"]["document"] = "steps/" + documents[step]
+    return result
+
+
 def _fast_reference_context(base, path):
     """Bind the chosen root and ordinary ancestors without sibling timestamps."""
     parents = []
@@ -6894,7 +6915,8 @@ def cmd_step(args, *, git_provider=None, require_git_provider=False, inspection_
                     expected_generation=(prior.get("payload") or {}).get("stage_generation"), **candidate_access)
                 result = {"ok": True, "already_applied": True, "step": args.step,
                           "attempt": attempt, "event_id": prior["event_id"],
-                          "input_digest": payload["input_digest"]}
+                          "input_digest": payload["input_digest"],
+                          "execution_profile": step_execution_profile(meta, args.step)}
                 _code_output(json.dumps(result, ensure_ascii=False, indent=2), out_dir, meta, access)
                 return 0
             # Exact request replay above returns its old receipt without
@@ -6932,7 +6954,8 @@ def cmd_step(args, *, git_provider=None, require_git_provider=False, inspection_
             _code_output(json.dumps({"ok": True, "step": args.step, "phase": "start",
                               "attempt": attempt, "event_id": event["event_id"],
                               "input_digest": payload["input_digest"],
-                              "required_checks": contract["required_checks"]},
+                              "required_checks": contract["required_checks"],
+                              "execution_profile": step_execution_profile(meta, args.step)},
                              ensure_ascii=False, indent=2), out_dir, meta, access)
             return 0
 

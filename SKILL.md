@@ -3,11 +3,11 @@ name: icode
 description: ICODE 端到端编码工作流，适配 Claude Code、Codex、CodeBuddy、WorkBuddy。用户调用 /icode、$icode，或说“使用 ICODE”“用 icode 帮我”“让 ICODE”“Use ICODE”完成开发、日志分析、设计/代码审查、证据验证、独立复评、文档/Word/PPT、学习、工单管理等任务时使用；也用于已绑定 ICODE 工单的续接。Use when users explicitly request ICODE for an AI coding workflow, ticket-based development, code review, log analysis, documentation, or evidence verification; also use to resume a bound ICODE ticket. 支持自然语言目标与限制，不要求背命令；能力咨询只解释不执行。保留全部 /icode 子命令，复用既有步骤与安全门禁，不接管未指定 ICODE 的普通请求。
 ---
 
-**版本**: v2.42.0
+**版本**: v2.43.0
 
 # ICode 全流程编码工作流（步骤 0 + 1~6）
 
-端到端编码工作流，将需求到交付拆解为严格步骤，每步可单独调用，方便你自行切换模型。**本文档是路由器**：内核规则内联，详细规则一律放 `steps/*.md` 与 `references/*.md`，需要时按路由表 Read（懒加载，省 token）。
+端到端编码工作流，每步可单独调用与切换模型。**本文是路由器**：内核规则内联，按需 Read `steps/*.md` 与 `references/*.md`。
 
 > **先判适用性，再读流程**：用户明确“不用 ICODE / Do not use ICODE”时，以下工作流不适用于本次请求；直接回答其普通问题，不套用 ICODE 专用术语、步骤或产物，也不附带工作流推荐。技能即使已被宿主加载，也不能覆盖用户退出意图；用户单独问 ICODE 概念时仅解释所问部分，不执行流程。
 
@@ -161,7 +161,7 @@ Windows/WSL 构建按需加载 [WSL 构建合同](references/wsl_build.md)；本
 | **L3·重要** | 重要检查项未通过 | **警告**，记入 metadata，**流程继续**（user 后续可手动回看） | plan §10 checklist ❌ > 3 条 / audit §6.7 视角 A 失败 / 步骤 4 编译失败（带 `code_compile_failed=true`）/ **worktree 创建失败**（降级原地 + metadata 记 `wt_degraded=true`，见「目录管理·worktree 决策与创建」④） |
 | **L4·参考** | 软性建议 | **柔性提示**，不影响流程 | limit 不存在 / cheap-research 未装 / 可选视觉增强不可用（严格视觉目标按[专用合同](references/serial_evidence_stages.md)阻断验收）/ init 末轮理解核对清单用户不回复 |
 
-**各步骤声明的 L1/L2 检查项**：执行时必须读取 plan / review / merge / code / deepcheck / audit / patch 文件头部「本步骤 L1/L2 检查项声明」及 L3 声明；检查内容与级别以对应步骤为准。
+**各步骤 L1/L2/L3 声明**：包括 compact 路径，执行时实读对应 step 头部声明并按原级别执行。
 
 > **新增/修改检查项时**：明确标注其 L 级别，写在 step 文件头部声明段。不明确的不算 L1-L4（默认按现有流程行为）。
 
@@ -255,7 +255,7 @@ test -f "{ICODE_OUT_DIR}/03_plan_final.md" && python3 -c "import sys; sys.path.i
 - **语义决策门禁**：`semantic_decisions` 存在 `status != resolved` 且非 `diagnosis_only` → `plan/code/patch` 阻断；诊断可结束但须显式 `diagnosis_only=true`
 - **身份变化影响合同**：`identity_change=true` 且 `completeness != complete` → `code/deploy/audit-verified` 阻断；9 维必答必带证据
 - **需求增量回流**：`requirement_deltas` 分类 `needs_user_confirm`/`needs_replan` → 冻结点，未分流不得继续扩大设计/验收矩阵
-- **快速模式风险分流**：新 fast 工单登记 `risk_profile.policy_version=2`，先在 plan 界定范围，再依据当前范围证据分流；范围明确的跨文件、缓存或实机任务可保持 fast，必须落实对应影响、生命周期和实机验收合同。新架构、无界影响、破坏接口、不可逆迁移或必需独立对抗评审才升级 full；未决语义/重大增量先 blocked/replan，不自动转 start。编码准入校验范围摘要与真实证据 hash；`override` 不绕过硬门，full 不回退 fast。缺策略版本或显式版本1的旧工单沿用原风险规则，详见 [steps/fast.md](steps/fast.md)。
+- **快速模式风险分流**：新 fast 登记 `risk_profile.policy_version=2`，plan 调查范围并绑定真实证据后分类；普通风险补专项，硬风险 full，未决语义 blocked、重大增量 replan。`override` 不绕过硬门，full 不降级，旧策略不重解释；详见 [fast 分类真源](steps/fast.md#风险分类与有效模式)。
 - **生命周期验收**：涉及生命周期/身份变化时 `acceptance_contract.matrix` 必须覆盖全部 `phases × consumers` 必填单元，只验证直接查询不能 `delivery_verdict=verified`
 
 字段族定义与写入点见 [references/dir_and_metadata.md](references/dir_and_metadata.md)（scope_contract / requirement_deltas / semantic_decisions / impact_contract / acceptance_contract / risk_profile / delivery_verdict）。
@@ -306,7 +306,7 @@ test -f "{ICODE_OUT_DIR}/03_plan_final.md" && python3 -c "import sys; sys.path.i
 | log | `log` | [steps/log.md](steps/log.md) |
 | 0 | `init` | [steps/00_init.md](steps/00_init.md) |
 | 1 | `plan` / `start` | [steps/01_plan.md](steps/01_plan.md) |
-| 1~6 | `fast` | [steps/fast.md](steps/fast.md)（编排）+ 各步骤文件（带 fast 降级分支） |
+| 1~6 | `fast` | [steps/fast.md](steps/fast.md)；compact 按阶段加载 |
 | 2 | `review` | [steps/02_review.md](steps/02_review.md) |
 | 3 | `merge` | [steps/03_merge.md](steps/03_merge.md) |
 | 4 | `code` | [steps/04_code.md](steps/04_code.md) |
@@ -329,7 +329,7 @@ test -f "{ICODE_OUT_DIR}/03_plan_final.md" && python3 -c "import sys; sys.path.i
 | - | `bak` | [steps/bak.md](steps/bak.md)（工程工单手动备份到全局，删工程前安全网；写索引 `backup_path`） |
 | - | `ui` | [steps/ui.md](steps/ui.md)（本地全局工单管理器 + 受控 ICODE 步骤入口） |
 
-**执行步骤时，必须先读取对应的 `steps/XX_*.md` 文件，按其中的详细指令执行。**
+**步骤开始路由**：先履行共享前置及原生 step start 准入；仅 `execution_profile.state=compact`、`effective_mode=fast`、`policy_version=2` 且来源校验有效时，读取 `rules` 全文及[共享合同](steps/fast.md#fast-shared-contract)和必读条件引用。`source_refs/source_digest` 仅版本绑定，不证明已 Read。full/start、升级 full、legacy、不支持响应或 `standard/unavailable`、视图失效时，必须读取对应 `steps/XX_*.md` 完整适用正文，忽略 compact 导航，保持真实模式。保留 required_checks、L1/L2 与独立判断，控制面错误仍阻断；原文丢失、安装根/规则/候选/需求变化按 thinking_core 重载。
 
 ## 决策锚点机制（步骤间思考传递）
 

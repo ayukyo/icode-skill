@@ -10,9 +10,7 @@
 
 ## fast 必要执行
 
-进入实现前先核验有效分类及其引用，`blocked/replan` 不得编码；有效 full 按完整规则执行。有效 fast 保留适用 TDD 的真实 RED→GREEN、回归、关联调用链与 Code Review Fix，fast 不产生测试豁免。catalog `required_checks` 纳入既有测试/工作清单和证据合同，未完成保留具体债务或阻断。
-
-`04_code_review_fix.md` 只写实际改动、四维核对、测试范围/结果及偏差/未闭环，引用最终计划与真实证据，不再复制整份需求和设计。源码实际 Read、原始失败、状态流转及 artifact 回执不压缩为一句“已检查”。
+有效 policy2 fast 的必要职责统一见 [code 必要合同](fast.md#fast-code)及其共享/条件引用；步骤开始的 compact 视图须来源校验有效。TDD、回归与四维 Code Review Fix 不省略。full/start、legacy、不支持或视图失效时按本文件完整规则执行。
 
 ## 本步骤 L1/L2 检查项声明
 
@@ -106,6 +104,7 @@
    - 计划中的伪代码和行号引用需要在此步骤展开为完整实现。读取引用的源文件获取完整上下文
 5. 输出步骤确认：`▶ 步骤4 编码开始`
 
+<a id="code-tdd"></a>
 ### TDD 准入门（RED 硬门，行为变更默认 required；测试驱动非实现后验证）
 
 > **目的**：把"测试通过"升级为"测试先证明能抓住问题（RED）、再证明修复有效（GREEN）、再证明未破坏相邻行为（regression）"。**RED 是准入证据，GREEN 不是交付终点**。测试形态不限于单元测试（unit/静态/契约/集成/特征/主机侧协议配置/设备侧行为均可），但"先取得有效失败证据、再改生产代码"不能因"配置修改/改动少/fast/patch"跳过。
@@ -132,6 +131,7 @@
 
 **4. 落盘**：RED/GREEN/regression 证据写入 `metadata.tdd`（结构见 [SKILL.md](../SKILL.md) metadata 段）：`{mode, baseline: {production_hashes: {<file>: <sha256>, ...}}, red: {cmd, exit_code, failure_class, expected, observed_excerpt, at}, green: {cmd, exit_code, at}, regression: {cmd, exit_code, at}, status}`。`baseline.production_hashes` = RED 阶段第 1 步记录的生产文件哈希基线（供 05_deepcheck 核验 RED 证据确在生产修改前取得；无生产文件修改时记 `{}`）。**O-6 用户自担验证（用户要求不跑测试）**：可完成代码修改，但 `tdd.status=blocked`（或确属豁免时 `exempt`）+ `delivery_verdict=verification_pending`，交付措辞"已完成代码修改，待实机验证/待用户验证"，不得写"已修复并验证"。
 
+<a id="code-implementation"></a>
 ### 编码实施
 
 严格按定稿计划实施编码。
@@ -185,9 +185,10 @@
 **用户语义变更实施核对（requirement_deltas，O-4 语义冻结）**：Read `metadata.requirement_deltas`（字段缺失视为 `[]`），存在未分流条目（`classification` 未定 / `needs_user_confirm` 未确认 / `needs_replan` 未重跑 plan）时**不得实施对应变更**——`clarification_only` 不改变实现；`a_now_with_evidence` 仅在 merge 定稿已纳入计划后实施；`needs_user_confirm` 未获 `user_confirm` 不得实施（先回步骤3 确认）；`needs_replan` 未重定稿不得实施（先回 plan）。**实施范围不得超出 scope_contract 冻结边界 + 已分流 delta/已确认 escalation 的并集**（超范围 = issue）。
 
 
+<a id="code-verification"></a>
 ## 强制操作（完成后必须执行）
 
-**关联审查工作清单**：Code Review Fix 前先完整登记本轮 `code_files`，执行 [审查清单合同](../references/inspection_worklist.md)，用 `inspection --step code --phase prepare` 建立联审单元。实际 Read 后逐文件登记 code_review；若清单触发共享变体/消费者或 timestamp 专项，对所有 required_items 给具体结论、理由与真实源码/测试引用，再 `inspection --phase assess --read-phase code_review --check-id <ID> --assessment-json '<完整对象>'`。prepare/read 不自动 pass，兄弟/unknown、失败路径、stop/start、整数符号/哨兵等缺项不能 success；不适用也须具体理由。修复导致源码变化则 blocked 重入、重建清单重审。`code_worklist.json` 与真实回执是新执行必需输出，编译成功不替代审查；源码 findings 的位置/版本必须校验。
+**关联审查工作清单**：Code Review Fix 前先完整登记本轮 `code_files`，执行 [审查清单合同](../references/inspection_worklist.md)，用 `inspection --step code --phase prepare` 建立联审单元。实际 Read 后优先用 `--paths-json` 按本 attempt 批量登记 code_review（full/start 与 fast 共享；分组/单文件兼容及边界见清单合同）；若清单触发共享变体/消费者或 timestamp 专项，对所有 required_items 给具体结论、理由与真实源码/测试引用，再 `inspection --phase assess --read-phase code_review --check-id <ID> --assessment-json '<完整对象>'`。prepare/read 不自动 pass，兄弟/unknown、失败路径、stop/start、整数符号/哨兵等缺项不能 success；不适用也须具体理由。修复导致源码变化则 blocked 重入、重建清单重审。`code_worklist.json` 与真实回执是新执行必需输出，编译成功不替代审查；源码 findings 的位置/版本必须校验。
 
 0. **git 状态快照（进工程后第一步，改动静止基线；O-2）**：改动报告前先建立"改动归属"基线，防止把"改动没被跟踪"误判为"改动丢失"：
    - 执行 `git -C <project_path> status --short`，并检查 `.git` 形态（`ls -ld <project_path>/.git`）做**三形态判别**：**目录**=普通 git 仓库 / **symlink**=repo 独立仓（`.git` 指向 repo 管理目录，父仓 `.gitignore` 忽略子仓，父仓根目录 `git diff` 恒为空）→ 标注「**repo 独立仓**」/ **普通文件**（内容以 `gitdir:` 开头）= **git worktree 成员** → 标注「**git worktree**」（`git status` 正常，勿误判为异常/独立仓损坏；`project_id` 归主仓见 [references/dir_and_metadata.md](../references/dir_and_metadata.md)「project_id 与 branch 语义」F1）

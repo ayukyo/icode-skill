@@ -12,13 +12,11 @@
 
 ## fast 必要执行
 
-有效 fast 的 Audit 独立 Read 当前完整关联范围、最终计划和元信息，保留本轮 audit phase、worklist 与真实 artifact 回执；Reverse 已读、hash 一致或上轮绿灯均不代替。按原七维、追溯与 catalog `required_checks` 作新的验收判断。
-
-矩阵/材料清单可从有效账本机械生成，人工正文只补新发现、差异、未闭环、证据边界与交付裁决，不再复述计划或前几步长文。机器汇总不证明阅读或实机通过；必要真实环境、原始证据与阶段确认保持原硬门。复杂裁决仍按 catalog L2，不因 fast 降级。
+有效 policy2 fast 的必要职责统一见 [audit 必要合同](fast.md#fast-audit)及其共享/条件引用；步骤开始的 compact 视图须来源校验有效。独立 Audit Read、七维追溯与新裁决不省略。full/start、legacy、不支持或视图失效时按本文件及真实 effective_mode 执行。
 
 ## 阶段覆盖与合规结束（强制）
 
-先执行 [审查清单合同](../references/inspection_worklist.md)，生成 `audit_worklist.json`；独立联审真实实现/接口/调用方/测试，不复用 deepcheck 阅读。实际 Read 后逐文件登记 audit phase；触发共享变体/消费者或 timestamp 专项时，独立逐项评估完整 required_items，以 `inspection --phase assess --read-phase audit --check-id <ID> --assessment-json '<完整对象>'` 登记结论、理由与真实引用。缺项/阶段或 pending/fail 不得 success，N/A 也须具体理由；静态审查/模拟证据须说明边界，不能升级为实机已验证。源码 findings 校验行段/hash，无定位猜测保留 needs_more_evidence。清单与原有 coverage 并行必需，遗漏不能 success，审查不替代交付分层证据。
+先执行 [审查清单合同](../references/inspection_worklist.md)，生成 `audit_worklist.json`；独立联审真实实现/接口/调用方/测试，不复用 deepcheck 阅读。实际 Read 后优先用 `--paths-json` 按本 attempt 批量登记 audit phase（full/start 与 fast 共享；分组/单文件兼容及边界见清单合同）；触发共享变体/消费者或 timestamp 专项时，独立逐项评估完整 required_items，以 `inspection --phase assess --read-phase audit --check-id <ID> --assessment-json '<完整对象>'` 登记结论、理由与真实引用。缺项/阶段或 pending/fail 不得 success，N/A 也须具体理由；静态审查/模拟证据须说明边界，不能升级为实机已验证。源码 findings 校验行段/hash，无定位猜测保留 needs_more_evidence。清单与原有 coverage 并行必需，遗漏不能 success，审查不替代交付分层证据。
 
 执行前读取[审查证据合同](../references/inspection_evidence.md)。只有实际完成本轮各阶段Read后，才写阶段覆盖声明及实际源hash：deepcheck写 `deepcheck_coverage.json`，audit写 `audit_coverage.json`，登记本attempt真实artifact回执。声明必须覆盖metadata.code_files全部文件；按 `effective_mode(metadata)` 统一解析：full为Reverse/Fixed/Free，实际fast仅Reverse，audit为独立Audit；fast升级full不可省阶段。已有hash/工具调用/历史确认行均不代替本轮Read。
 
@@ -117,6 +115,7 @@ git rev-list --count <worktree_branch>..<目标基分支>     # 目标基分支 
 
 **只有以上 5 步全部完成，才能进入 7 维度评分**。特别注意第 4 条——"步骤5 已查无新问题→步骤6 也无新问题"=跳过审计=不合规，禁止直接复用步骤5 结论。
 
+<a id="audit-dimensions"></a>
 ### 审核维度（7个，全部覆盖）
 
 1. **实施完整度** — 计划所有功能点 100% 落地，每个功能点必须给出代码证据位置。**三档实施范围核对**（反偷懒第 26 条）：Read `metadata.fix_tiers`（plan 落盘的三档分级）→ A 档必做项全部落地、B 档仅实施 `confirmed_B_fixes` 确认项、C 档未混入；字段缺失视为 null，从 `03_plan_final.md` §4.5 文本读。**测试核对**：Read `metadata.test_cmd`/`test_outcome`/`test_failures`--`test_outcome=pass` 仅强化实际已执行测试范围的完整度证据；`test_outcome=inconclusive`（零用例、全部跳过、报告无效或执行范围未证）不作为通过，列出待验证原因；验收合同要求的测试单元未闭合时不得 `delivery_verdict=verified`；`test_outcome=fail` -> 测试未通过的功能点不算 100% 落地，扣分并记入问题清单（按 6.2 强制修复流程）；`test_outcome=skipped` -> 标注"本工程无测试套件，完整度仅靠静态审查"，不扣分。**TDD 证据核对（Read `metadata.tdd`，缺失视为 `not_assessed`）**：`tdd.status` 达 `green_verified`/`regression_verified` 且 `red.failure_class=expected_assertion` → 有有效 RED，强化"测试先证明能抓住问题、再证明修复有效"的因果证据；`tdd.status` 缺失/`not_assessed` 且工单含行为变更 → 标注"无有效 RED 证据（仅最终测试通过，无法证明测试在修复前确实能识别缺陷）"，**该工单的 `delivery_verdict` 不得标 `verified`**（按下方判定降级）
@@ -204,6 +203,7 @@ git rev-list --count <worktree_branch>..<目标基分支>     # 目标基分支 
 
 **范围契约核对（scope_contract，O-4 语义冻结）**：Read `metadata.scope_contract`（缺失视为 null＝未冻结，跳过本核对，向后兼容旧工单）与 `metadata.requirement_deltas`（缺失视为 `[]`）：核对**实际代码/验收边界是否超出冻结契约 + 已分流 delta 的并集**——超出且无对应 delta/escalation 记录 = issue（超范围实施）；存在未分流 delta（`classification` 未定 / `needs_user_confirm` 未确认 / `needs_replan` 未重审）→ 6.2 强制修复前先完成分流。终审结论基于更新后的契约，`scope_contract.summary` 若因 delta 改变 → 同步刷新。
 
+<a id="audit-close"></a>
 ## 6.2 强制修复
 
 1. 读取 `06_audit.md` 中的问题清单
@@ -334,6 +334,7 @@ du -sh <各 worktree 路径>                                  # 空间占用
 - 补丁的完整记录（增量计划/实施/验证）在 `08_patch.md` 的对应 Patch N 段，本段仅摘要
 - **追问补充行**（与「patch 会话语义」配套）：同一 Patch N 内用户追问导致**代码修改或结论变化**时，在原补丁记录段内追加一行 `- Patch N 追问补充：<变化摘要>`（不新增段、不改原行）——与 `08_patch.md` 的「追问补充」小节对应；纯补充信息不改变结论 → 不追加
 
+<a id="audit-completion"></a>
 ## 完成前自检（必须填，未填项标 ❌=不合规）
 
 - □ 输出了 `📖 已 Read` 确认行（列出实际 Read 的代码文件）

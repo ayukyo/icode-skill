@@ -6,9 +6,7 @@
 
 ## fast 必要执行
 
-先用 `tools/fast_policy.py` 的 `effective_mode(metadata)` 读取有效模式；请求 fast 已升级 full 时执行下面 full 规则。有效 fast 一轮仍先形成独立视角，再实读计划与关联源码，逐项覆盖既有七维与 catalog `required_checks`，不把“少写”当作“少查”。报告只写发现、位置、证据、处置和未决项，clean 写简短有范围的结论；不复述完整计划。独立简要方案留在审查上下文，必要差异才写报告。
-
-首轮真实 `review_round_1.json` 与 `review_manifest.json` 仍必填，三类计数、origin attempt、artifact 回执及 Dedup 条件按 [审查证据合同](../references/inspection_evidence.md)。显式 `/icode review N` 先登记有效 full 后执行 N 轮与对抗；不能完成分类或出现新语义时先解决对应阻断。
+有效 policy2 fast 的必要职责统一见 [review 必要合同](fast.md#fast-review)及其共享/条件引用；步骤开始的 compact 视图须来源校验有效。独立首轮七维与真实回执不省略。full/start、显式 review N 升级、legacy、不支持或视图失效时按本文件完整规则执行。
 
 ## 本步骤 L1/L2 检查项声明
 
@@ -66,6 +64,7 @@
    - **续跑**（`total_rounds > 1`）思考职责：回顾历史轮次问题 → 增量审查范围界定 → 跨章节影响预判
 5. 输出步骤确认：`▶ 步骤2 审查开始（{max_rounds}轮内完成；如最后一轮仍有新问题，自动延长 +2 轮，最多扩展至 {absolute_cap} 轮）`
 
+<a id="review-first-round"></a>
 ### 首轮审查（`total_rounds == 1`）
 
 **步骤 2.1 — 独立编制计划**：
@@ -381,6 +380,7 @@
 **与 §2.5.5 对抗验证的衔接**（v1.1 取消 dedup 豁免）：dedup 只产出**疑似重复候选对**。会导致代码删除/合并的候选**必须进入** §2.5.5 对抗验证流程——删除/合并是破坏性动作，schema 只能约束输出形状、不能证明语义判断正确，单次 LLM 推理 + schema 强约束不足以免除验证；`trace_refs` 结果也只是文本引用候选，不能证明动态调用/反射/链接关系完整。纯重复提示（无删除动作）可保持轻量，不强制对抗。
 
 
+<a id="review-receipts"></a>
 **步骤 2.6 — 写入结果**：
 
 必须读取[审查证据合同](../references/inspection_evidence.md)。每个已完成轮次立即更新 `review_manifest.json` 并登记当前attempt的实际摘要回执；首轮始终写详细JSON，后续仅三类计数全部为0可省详细JSON。manifest记录真实 `origin_attempt`，计划修改导致blocked重入时保留原轮次来源，不把历史文件重登记为当时已写；新一轮完整review运行重置manifest运行边界。`total_rounds`可能是下一轮游标，manifest仅列已完成轮次。

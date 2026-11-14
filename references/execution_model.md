@@ -55,6 +55,29 @@ python3 tools/icode_control.py step --dir <out_dir> --step <step> --phase finish
 
 ## 3. 长动作与执行回执
 
+### 已完成语义工作的机械收尾合并调用
+
+fast 与 start 都可把已确定的连续机械动作放进同一次宿主 Bash/工具调用，**内部仍顺序执行原生命令，首个非零退出即停止**。实际审查、适用测试、必要 after_wait 和 before_write 已完成、产物已真实落盘后才可使用；不能把多个阶段的语义判断或实际 Read 合并。宿主不支持串行编排时继续原单步调用。
+
+下面是 plan 的可运行示例。一次 Bash 调用依次传入实际技能根、工单目录、真实 attempt、该次请求前缀四个参数；Python 解释器按平台解析，Windows 把 `PY=(python3)` 换为 `PY=(py -3)`，或单独放入已验证的 `ICODE_PYTHON_BIN` 绝对路径。其它步骤按现有目录的真实端口、检查和合法目标状态逐项组成序列，不发明缩略状态或少跑审查阶段。
+
+```bash
+# ICODE_CLOSEOUT_PLAN_V1
+set -euo pipefail
+SKILL_ROOT="${1:?actual skill root}"
+OUT_DIR="${2:?actual ticket directory}"
+ATTEMPT="${3:?actual open plan attempt}"
+PREFIX="${4:?request prefix for this attempt}"
+PY=(python3)
+CTL=("${PY[@]}" -B "$SKILL_ROOT/tools/icode_control.py")
+"${CTL[@]}" artifact --dir "$OUT_DIR" --step plan --attempt "$ATTEMPT" --path 01_plan.md --request "$PREFIX.artifact-plan"
+"${CTL[@]}" step --dir "$OUT_DIR" --step plan --phase check --attempt "$ATTEMPT" --boundary before_transition --request "$PREFIX.check"
+"${CTL[@]}" step --dir "$OUT_DIR" --step plan --phase finish --attempt "$ATTEMPT" --outcome success --evidence 01_plan.md --request "$PREFIX.finish"
+"${CTL[@]}" transition --dir "$OUT_DIR" --to plan_done --request "$PREFIX.transition"
+```
+
+每条命令仍产生自己的原生回执、执行当前生产门禁；这些请求共享可识别前缀，**不是一个跨文件原子事务或新的父请求协议**。中途失败可能已提交前缀事件，必须先查 `trace` 和当前输出，修复原因后只续未完成后缀；禁止盲目重跑整块或覆盖后续记录。已 finish 但 transition 未完成时，核验原回执与输入后仅恢复 transition。source/合同漂移、未知副作用或未完成事务继续走原阻断与恢复合同，不因在一段脚本中执行而豁免。
+
 构建、测试、远端读取、Git fetch/merge、设备监听/部署、文档转换、媒体解析等耗时或可中断动作使用 operation 回执。动作类别：
 
 | class | 典型动作 | 自动重试 |
@@ -127,6 +150,6 @@ python3 tools/icode_control.py trace --dir <out_dir> --limit 50
 
 ## 条件审查与阶段覆盖
 
-code/deepcheck/audit 的新执行还必需 `<step>_worklist.json` 及本 attempt 真实回执，按 [inspection_worklist.md](inspection_worklist.md)准备关联单元、逐阶段 Read、校验源码 findings 位置与版本。范围声明绑定回执，缺文件/缺 Read/源码漂移不能 success；degraded 不能绕过身份和版本错误。旧已完成合同不追溯补证据，进行中合同改变须 blocked 重入。
+code/deepcheck/audit 的新执行还必需 `<step>_worklist.json` 及本 attempt 真实回执，按 [inspection_worklist.md](inspection_worklist.md)准备关联单元、逐阶段实际 Read、校验源码 findings 位置与版本。full/start 与 fast 均在本 attempt/phase 真正读完一组后优先 `inspection --phase read --paths-json` 批量登记，保留1至256成员/64KiB上限与超限分组；code_review、reverse/fixed/free、audit 各自独立，旧 `--path` 兼容。批量只减少登记调用，不替代阅读、专项、覆盖和裁决。范围声明绑定回执，缺文件/缺 Read/源码漂移不能 success；degraded 不能绕过身份和版本错误。旧已完成合同不追溯补证据，进行中合同改变须 blocked 重入。
 
 review必需review_manifest.json，按每轮真实origin attempt保存轻量round digest回执；首轮和所有非clean轮要JSON，clean后续轮可省详细JSON。deepcheck/audit分别必需coverage JSON，缺Read阶段、旧hash或未观察项不能finish success；degraded也要真实声明回执和债务原因。终审只读产物检查统一调用 `icode_control.py check-outputs --dir <out> --step audit`。具体格式/历史合同兼容见[inspection_evidence](inspection_evidence.md)。

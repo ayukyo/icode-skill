@@ -48,6 +48,7 @@ on:
       - 'tests/test_test_result_summary.py'
       - 'tests/test_delivery*'
       - 'tests/test_fast*'
+      - 'tests/test_execution*'
       - 'tests/test_overview_checkpoint.py'
       - 'tests/test_ticket*'
       - 'tests/test_candidate_storage*'
@@ -100,6 +101,8 @@ jobs:
         run: python tools/validate_skill_pack.py --manifest skill-packs/manifest.json --routes mcp/workflow-gate/skill-routes.json --list
       - name: Fast admission and derived ticket overview contracts
         run: python -m pytest -p no:anyio tests/test_fast_policy.py tests/test_fast_admission.py tests/test_overview_checkpoint.py tests/test_delivery_report.py tests/test_delivery_pending_path.py tests/test_ticket_context.py tests/test_ticket_material_ui.py tests/test_fast_patch_crosscheck.py -q
+      - name: Source-bound execution profiles and ordinary closeout recipe
+        run: python -m pytest -p no:anyio tests/test_execution_profile.py tests/test_execution_profile_integration.py tests/test_fast_execution_contract.py tests/test_execution_closeout_recipe.py -q
       - name: Candidate storage roundtrip and recovery contracts
         run: python -m pytest -p no:anyio tests/test_candidate_storage.py tests/test_candidate_storage_control.py tests/test_candidate_storage_stage.py tests/test_candidate_storage_faults.py tests/test_candidate_storage_readers.py tests/test_candidate_storage_doc_contract.py -q
       - name: Offline distribution resource contract
