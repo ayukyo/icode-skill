@@ -470,7 +470,7 @@ git switch master                                # 或目标基分支
 # ⚠️ merge 前主工作区状态：带未提交改动且与 merge 文件重叠 → git 拒绝并中止（保护，先 stash 再 merge）；
 #    不重叠 → 允许 merge，未提交改动保留
 git merge icode/<ticket-slug>                    # 或走 PR
-# ⚠️ 若有业务子仓隔离（metadata.sub_worktrees 非空）：子仓改动先 commit + merge 回原子仓，再逐个 remove 子仓 worktree
+# ⚠️ 若有业务子仓隔离（metadata.sub_worktrees 非空）：子仓改动先由用户手动 commit + merge 回原子仓（ICODE 不代执 commit），再逐个 remove 子仓 worktree
 for sub in metadata.sub_worktrees:               # 每个子仓隔离 checkout
   (在子仓隔离 checkout 内) git add -A && git commit -m "<子仓改动>"   # 用户执行
   (在主工作区对应原子仓) git merge icode/<ticket-slug>-<子仓slug>
@@ -489,7 +489,7 @@ git worktree remove --force ../<repo>-wt-<ticket-slug>   # --force 仅限改动�
 - **严禁**未处理改动就 remove（会失败——失败是保护，绝不由 icode 自动 `--force`）
 - **回流前产物留档（close 阶段归档）**：07_readme 交付报告与产物都在 worktree 内，remove 后随之消失——06_audit 只准备 `archive_path`；**close 的 `archived` 阶段必须先复制并通过 manifest/hash + linter roundtrip，才能 remove**。未走该阶段不得直接 remove。
 - **改动涉及 submodule**：submodule 内改动需**在 worktree 内 submodule 里单独 commit**（主仓 `git add -A && git commit` 只更新 gitlink，不带 submodule 内部改动）
-- **业务子仓隔离回流（repo 工程，非 submodule）**：子仓隔离 checkout 在 super-worktree 内，remove super-worktree 会连子仓 checkout 一并消失——子仓改动须**先在里面 commit + merge 回原子仓**（见方案①循环），再 remove；勿直接 remove 把未回流子仓改动丢掉。子仓改动不随 super-worktree 产物归档（已 merge 回原子仓即持久）
+- **业务子仓隔离回流（repo 工程，非 submodule）**：子仓隔离 checkout 在 super-worktree 内，remove super-worktree 会连子仓 checkout 一并消失——子仓改动须**先由用户在里面手动 commit + merge 回原子仓（ICODE 不代执 commit，子仓与 super 一视同仁）**（见方案①循环），再 remove；勿直接 remove 把未回流子仓改动丢掉。子仓改动不随 super-worktree 产物归档（已 merge 回原子仓即持久）
 - 未完成工单：worktree 保留，`git worktree list` 可随时看到，`cd` 回去续跑
 
 ### 产物归档（自动，防 worktree remove 丢档）

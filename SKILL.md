@@ -3,7 +3,7 @@ name: icode
 description: ICODE 端到端编码工作流，适配 Claude Code、Codex、CodeBuddy、WorkBuddy。用户调用 /icode、$icode，或说“使用 ICODE”“用 icode 帮我”“让 ICODE”“Use ICODE”完成开发、日志分析、设计/代码审查、证据验证、独立复评、文档/Word/PPT、学习、工单管理等任务时使用；也用于已绑定 ICODE 工单的续接。Use when users explicitly request ICODE for an AI coding workflow, ticket-based development, code review, log analysis, documentation, or evidence verification; also use to resume a bound ICODE ticket. 支持自然语言目标与限制，不要求背命令；能力咨询只解释不执行。保留全部 /icode 子命令，复用既有步骤与安全门禁，不接管未指定 ICODE 的普通请求。
 ---
 
-**版本**: v2.43.0
+**版本**: v2.44.0
 
 # ICode 全流程编码工作流（步骤 0 + 1~6）
 
@@ -271,7 +271,7 @@ test -f "{ICODE_OUT_DIR}/03_plan_final.md" && python3 -c "import sys; sys.path.i
 
 ### 注意事项
 
-- **Git 安全**：禁止执行任何 Git 危险操作（`git reset --hard`、`git push --force` 等），**也禁止 `git commit` 和 `git push`**。**`git worktree add` / `git worktree remove` 允许执行**（不在禁止列）：创建/清理须用户确认（写操作影响 `.git`），**永不自动 `--force` remove**（未提交改动时 remove 失败是保护，见「目录管理·worktree 决策与创建」）
+- **Git 安全**：禁止执行任何 Git 危险操作（`git reset --hard`、`git push --force` 等），**也禁止 `git commit` 和 `git push`（含业务子仓，一视同仁）**。**`git worktree add` / `git worktree remove` 允许执行**（不在禁止列）：创建/清理须用户确认（写操作影响 `.git`），**永不自动 `--force` remove**（未提交改动时 remove 失败是保护，见「目录管理·worktree 决策与创建」）
 - **`.icode_output/` 父目录及其下的 `.icode_output_N/` 目录无需用户确认**：该目录下创建/写入/修改 `.md`/`.json`/`.log` 文件均为安全操作
 - **工程污染防护**：`.icode_output/` 是 icode 产物目录，建议在工程 `.gitignore` 中加入 `.icode_output/`，避免产物误提交；icode 本身**不自动修改工程的 `.gitignore`**（工程配置由用户掌控）。历史检索的全局索引位于 `~/.claude/icode_data/`，不在任何工程内，无污染风险；`/icode doc` 的工程文档库位于 `~/.claude/icode_data/project_docs/`，同样不在任何工程内、不写工程内任何文件（用户工程内已有 `doc/workflows/` 等历史文档时，忽略不读取不迁移不删除，从零生成到全局）
 
