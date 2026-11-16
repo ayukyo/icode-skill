@@ -493,14 +493,14 @@
       "references/skill_routing.md": "bcc1a99ee1326d828ec6ffc3a96755edac76c88525a351f9e759e41efc612fb7",
       "references/thinking_core.md": "ccd99df94b23a6d44cab13f5631849dda65812ed99f0be676c9fc4141f7d8077",
       "references/thinking_detail.md": "9e5e5c0b7befb4d1f34e96cdf12511bf31f110889953cbce6acb1320d89e278b",
-      "references/worktree_isolation.md": "a7c8576151e650c6245822f8d6a6c785eb6465b29f209c58cb2e83075df0706c",
-      "steps/01_plan.md": "53e922fafb058afaa5577a19b531272e6adec6bd631f9f9176ef889da8f36d97",
-      "steps/02_review.md": "f244b89caa3cbd5de5e6d87fc4c34c4304a6857f9e83ff3e3ecad8c3980b6418",
+      "references/worktree_isolation.md": "e5e502622c747dfe5b5547e83a4259a56443d7c340113dee23cd3ed4636b1b60",
+      "steps/01_plan.md": "191adb1daec20aaffafef0dbed0831f808b583f111f56d25156ba7513c35d185",
+      "steps/02_review.md": "a9d419ef8b4e30cfaa37cb277766c80ae0c280bab4c8808d6f75944b002c0c24",
       "steps/03_merge.md": "35aff4bb3635a7e379aecfe828bab16ddc885fa0dd2248a9eb6b4f7b0bf93558",
-      "steps/04_code.md": "755a7333b336a6a548462d2a7657efa00fec8df41fc755170f9d18928f6e2d57",
-      "steps/05_deepcheck.md": "c62cd2ce2301fe73957069c054d30308c428f7095019efb560bf750743c00ff2",
-      "steps/06_audit.md": "4e9ac1fa3ea397e0022dd2c3e9a174f38ac3416c16e37fcec2fee3f3c5277f1d",
-      "steps/fast.md": "870d9c0f85e61d50706101a1a78e751464d069abb72fdb8aaa97d4a0c0bde44c"
+      "steps/04_code.md": "1d6ce69fe3b7cccdb068625ebc6f5a4a8f8bdef4771b6d26db3e3197ead9c21b",
+      "steps/05_deepcheck.md": "9ada8c3e47fed261e68bb1c2467c5820e29cb06cd74faef366254fc060a2d27b",
+      "steps/06_audit.md": "324de53b2a85c5e8d88d4ae8a33ca1f464289a04698ddbc2fb706a65ec19ce1d",
+      "steps/fast.md": "3fae1afec84257511be21eaf8153d4285740670827b796ed71066529b894d9a9"
     },
     "phases": {
       "plan": {
