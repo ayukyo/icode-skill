@@ -164,6 +164,10 @@ python3 tools/icode_control.py trace --dir <out_dir> --limit 50
 - open side-effect operation：先核对真实状态，再补 finish；禁止直接重放。
 - 已 finish：使用回执，不重复执行；request 相同但 payload 不同会触发幂等冲突。
 
+`action-policy` 报 `open_execution` 且只允许 status，是禁止启动新的上层动作，不是禁止核查原 attempt。先确认原执行者及宿主进程状态；确需续接时对原 attempt 执行 `step --phase check`，输入未漂移且执行权可接续才继续；漂移或无法接续则按真实情况用原 attempt `finish --outcome blocked|failure`，再按控制面路由重入。open agent 须核实宿主结果后如实 `record-agent-result`，不得伪造结果；有副作用 operation 结果未知须先核验，不自动重放。
+
+全局索引权限与项目控制面分开：`index-write` 因权限失败时记录真实错误，保持 `indexed=false` 或展示索引未同步，不能直写索引或声称已同步。CLI 工单本地状态、事件合法且无其他硬门时可按用户授权继续本地流程，交付报告列索引债务；权限恢复后以 `index-write --ticket-dir <out_dir>` 原生入口受控重试。UI `create-next` 在出生前获取全局索引锁失败时未创建工单，应报告创建阻断，不能伪报已出生或绕过身份校验。
+
 `snapshot` 会带最近 10 条执行轨迹与开放 attempt，但 snapshot 只是可重建视图；事件链仍是真源。
 
 ## 6. 安全与兼容

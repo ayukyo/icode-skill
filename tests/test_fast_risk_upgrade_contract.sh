@@ -21,7 +21,7 @@ LINT="python3 tools/lint_workflow_contract.py"
 check_contains() {
   if grep -q "$2" "$1" 2>/dev/null; then ok "$3"; else bad "$3 ($1 缺: $2)"; fi
 }
-check_contains SKILL.md "risk_profile" "SKILL.md 定义 risk_profile"
+check_contains references/full_workflow.md "risk_profile" "完整流程合同定义 risk_profile"
 check_contains references/dir_and_metadata.md "risk_profile" "dir_and_metadata.md 定义 risk_profile 字段族"
 check_contains mcp/workflow-gate/gates.json "fast_risk_upgrade" "gates.json 含 fast_risk_upgrade"
 check_contains mcp/workflow-gate/gates.json "async_observer_or_cache" "gates.json 含 async_observer_or_cache 风险标志"

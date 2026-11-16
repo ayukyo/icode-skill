@@ -1746,7 +1746,9 @@ def validate_event_semantics(events, meta, *, candidate_api=None, git_provider=N
         transition = legal_transition(sm, source, target)
         if transition is None:
             problems.append(f"第 {idx} 行记录非法状态流转 {source!r} → {target!r}")
-        if transition and transition.get("review_return"):
+        if transition and (transition.get("review_return") or
+                           (source == "completed" and target == "review_in_progress"
+                            and "review_return" in payload)):
             if not review_return_payload_ok(payload) or not event.get("request_id"):
                 problems.append(f"第 {idx} 行审查恢复缺少修订、原因或请求身份")
             if (review_return_mirror.open_steps or review_return_mirror.open_operations
@@ -2095,9 +2097,16 @@ def trusted_execution_workspace(out_dir, meta):
     active_history = [item for item in (meta.get("checkout_history") or [])
                       if isinstance(item, dict) and item.get("state") == "active"]
     if active_history:
-        raise ControlError(
-            "checkout_history 与 active_checkout 出现双活动根",
-            exit_code=1, gate_id="execution_root_topology")
+        history_path = active_history[0].get("path") or active_history[0].get("worktree_path")
+        active_path = (active.get("path") or active.get("worktree_path")) if isinstance(active, dict) else None
+        if (len(active_history) != 1 or not isinstance(history_path, str) or not history_path.strip()
+                or not Path(history_path).is_absolute() or not Path(history_path).is_dir()
+                or not isinstance(active_path, str) or not active_path.strip()
+                or not Path(active_path).is_absolute() or not Path(active_path).is_dir()
+                or Path(history_path).resolve() != Path(active_path).resolve()):
+            raise ControlError(
+                "checkout_history 与 active_checkout 活动根不唯一或路径无效",
+                exit_code=1, gate_id="execution_root_topology")
 
     if isinstance(active, dict):
         if active.get("state") != "active":
@@ -2519,7 +2528,7 @@ def validate_step_outputs(out_dir, meta, model, step, allow_incomplete=False,
     if step == "review" and by_id.get("review_manifest", {}).get("exists"):
         missing.extend(review_evidence_issues(out_dir, meta))
     if check_inspections and step in ("deepcheck", "audit") and by_id.get("inspection_coverage", {}).get("exists"):
-        missing.extend(inspection_coverage_issues(out_dir, meta, step, allow_incomplete=allow_incomplete))
+        missing.extend(inspection_coverage_issues(out_dir, meta, step, allow_incomplete=allow_incomplete, **access))
     if check_inspections and by_id.get("inspection_worklist", {}).get("exists"):
         missing.extend(inspection_worklist_issues(out_dir, meta, step, allow_incomplete=allow_incomplete, **access))
     if access:
@@ -2787,7 +2796,127 @@ def review_evidence_issues(out_dir, meta, events=None, start=None, allow_legacy=
     return issues
 
 
-def inspection_coverage_issues(out_dir, meta, step, attempt=None, allow_incomplete=False):
+def dedup_attempt_has_mcp_evidence(out_dir, step, attempt):
+    """只有本 attempt 的成功 trace 才能支持本轮 MCP 去重声明。"""
+    if step != "deepcheck" or not attempt:
+        return False
+    path = Path(out_dir) / ".mcp_gate_trace.jsonl"
+    if path.is_symlink() or not path.is_file():
+        return False
+    try:
+        rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+        relevant = [row for row in rows if isinstance(row, dict) and row.get("gate_id") == "deepcheck.dedup"]
+        if not relevant:
+            return False
+        row = relevant[-1]
+        if row.get("attempt") != attempt or row.get("ticket_id") != load_metadata(out_dir).get("ticket_id"):
+            return False
+        if row.get("eligible") is not True or row.get("decision") not in {"called", "cache_hit"} or row.get("result") != "success":
+            return False
+        spec = importlib.util.spec_from_file_location("icode_dedup_gate", SKILL_ROOT / "tools/lint_mcp_coverage.py")
+        helper = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(helper)
+        catalog = load_json(SKILL_ROOT / "mcp/cheap-research/gates.json", "cheap gate catalog")
+        gate = next(item for item in catalog["gates"] if item.get("id") == "deepcheck.dedup")
+        return not helper.validate_row(row, gate, 1)
+    except (OSError, ValueError, TypeError, KeyError, StopIteration, ImportError, ControlError):
+        return False
+
+
+def dedup_code_files_covered(workspace, code_files, sources, helper):
+    """Documents stay in review coverage, but do not enter the function catalog."""
+    for name in code_files:
+        if not isinstance(name, str) or not name.strip():
+            return False
+        path = port_path(workspace, name)
+        if not path.is_relative_to(workspace):
+            return False
+        suffix = path.suffix.lower()
+        if suffix in helper._SOURCE_SUFFIXES:
+            if path.relative_to(workspace).as_posix() not in sources:
+                return False
+        elif suffix not in helper._NON_SOURCE_SUFFIXES and path.name not in helper._NON_SOURCE_NAMES:
+            return False
+    return True
+
+
+def audit_reuses_deepcheck_dedup(out_dir, meta, report, events, audit_start, *,
+                                  git_provider=None, require_git_provider=False,
+                                  inspection_provider_factory=None, inspection_deadline=None):
+    """Reuse only a receipted full deepcheck whose original source still matches."""
+    # This path's enumerator and historical checks have no protected-provider
+    # implementation. Refuse before *any* native Git or candidate access.
+    if (git_provider is not None or require_git_provider is not False
+            or inspection_provider_factory is not None or inspection_deadline is not None):
+        return False
+    try:
+        checked_events, problems = verify_event_chain(out_dir, meta)
+        if problems or checked_events != events:
+            return False
+        prior = events[:events.index(audit_start)]
+        starts = [e for e in prior if e.get("event_type") == "step_started"
+                  and (e.get("payload") or {}).get("step") == "deepcheck"]
+        if not starts:
+            return False
+        start = starts[-1]
+        payload = start["payload"]
+        attempt = payload.get("attempt")
+        if payload.get("dedup_evidence_version") != 1 or payload.get("effective_mode") != "full":
+            return False
+        finishes = [e for e in prior if e.get("event_type") == "step_finished"
+                    and (e.get("payload") or {}).get("step") == "deepcheck"
+                    and (e.get("payload") or {}).get("attempt") == attempt]
+        if len(finishes) != 1 or finishes[0]["payload"].get("outcome") != "success":
+            return False
+        finish = finishes[0]
+        path = Path(out_dir) / "deepcheck_coverage.json"
+        if path.is_symlink() or not path.is_file():
+            return False
+        digest = file_sha256(path)
+        middle = prior[prior.index(start) + 1:prior.index(finish)]
+        if not any(e.get("event_type") == "artifact_written" and
+                   (e.get("payload") or {}).get("step") == "deepcheck" and
+                   (e.get("payload") or {}).get("attempt") == attempt and
+                   (e.get("payload") or {}).get("output") == "inspection_coverage" and
+                   (e.get("payload") or {}).get("path") == str(path.resolve()) and
+                   (e.get("payload") or {}).get("sha256") == digest for e in middle):
+            return False
+        deep = load_json(path, "deepcheck coverage")
+        if (not isinstance(deep, dict) or deep.get("attempt") != attempt
+                or deep.get("review_scope") != report.get("review_scope")
+                or deep.get("dedup_status") != report.get("dedup_status")
+                or inspection_coverage_issues(out_dir, meta, "deepcheck", attempt)):
+            return False
+        spec = importlib.util.spec_from_file_location("icode_audit_dedup", SKILL_ROOT / "tools/manual_dedup_evidence.py")
+        helper = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(helper)
+        workspace = execution_workspace(out_dir, meta)
+        sources = helper.collect_sources(workspace, deep["review_scope"])
+        # Ignored source files cannot silently disappear from the denominator.
+        if not dedup_code_files_covered(workspace, meta.get("code_files", []), sources, helper):
+            return False
+        if deep.get("dedup_status") == "complete_within_scope" and "manual_dedup" not in deep:
+            # MCP trace alone does not bind every source in the declared scope.
+            receipt = (finish.get("payload") or {}).get("candidate_receipt") or {}
+            old = receipt.get("candidate")
+            if (receipt.get("attempt") != attempt or receipt.get("step") != "deepcheck"
+                    or receipt.get("event_id") != finish.get("event_id")
+                    or not candidate_module().snapshot_identity_ok(old)):
+                return False
+            before = {row["path"]: row.get("sha256") for row in old["manifest"]}
+            current = candidate_snapshot(out_dir, meta, events=events)
+            now = {row["path"]: row.get("sha256") for row in current["manifest"]}
+            if (not candidate_module().review_source_equivalence(old, current)["equivalent"]
+                    or any(before.get(name) != digest or now.get(name) != digest for name, digest in sources.items())):
+                return False
+        return True
+    except (ControlError, OSError, ValueError, TypeError, KeyError, IndexError, ImportError):
+        return False
+
+
+def inspection_coverage_issues(out_dir, meta, step, attempt=None, allow_incomplete=False,
+                               *, git_provider=None, require_git_provider=False,
+                               inspection_provider_factory=None, inspection_deadline=None):
     """Validate declared reads against current source; never equate a hash with a Read."""
     path = Path(out_dir) / f"{step}_coverage.json"
     if path.is_symlink() or not path.is_file():
@@ -2831,6 +2960,78 @@ def inspection_coverage_issues(out_dir, meta, step, attempt=None, allow_incomple
     phases = ["audit"] if step == "audit" else ["reverse"] if effective_mode == "fast" else ["reverse", "fixed", "free"]
     reads = report.get("read_phases")
     workspace = execution_workspace(out_dir, meta)
+    current_attempt = attempt or report.get("attempt")
+    events, _ = read_events(out_dir)
+    starts = [event for event in events if event.get("event_type") == "step_started"
+              and (event.get("payload") or {}).get("attempt") == current_attempt
+              and (event.get("payload") or {}).get("step") == step]
+    new_dedup_contract = len(starts) == 1 and (starts[0].get("payload") or {}).get("dedup_evidence_version") == 1
+    if dedup == "complete_within_scope" and "manual_dedup" not in report:
+        if new_dedup_contract:
+            proven = (audit_reuses_deepcheck_dedup(out_dir, meta, report, events, starts[0],
+                        git_provider=git_provider, require_git_provider=require_git_provider,
+                        inspection_provider_factory=inspection_provider_factory, inspection_deadline=inspection_deadline)
+                      if step == "audit" else dedup_attempt_has_mcp_evidence(out_dir, step, current_attempt))
+            if not proven:
+                issues.append(f"{step}_coverage:manual_dedup_required")
+    if (new_dedup_contract and step == "audit" and effective_mode != "fast"
+            and dedup == "not_eligible" and "manual_dedup" not in report
+            and not audit_reuses_deepcheck_dedup(out_dir, meta, report, events, starts[0],
+                    git_provider=git_provider, require_git_provider=require_git_provider,
+                    inspection_provider_factory=inspection_provider_factory, inspection_deadline=inspection_deadline)):
+        issues.append(f"{step}_coverage:dedup_not_eligible_unverified")
+    if ("manual_dedup" in report and dedup in {"complete_within_scope", "not_eligible"}) or (
+            new_dedup_contract and step == "deepcheck" and effective_mode != "fast" and dedup == "not_eligible"):
+        try:
+            spec = importlib.util.spec_from_file_location("icode_manual_dedup", SKILL_ROOT / "tools/manual_dedup_evidence.py")
+            helper = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(helper)
+            sources = helper.collect_sources(workspace, scope,
+                require_git_provider=bool(require_git_provider or git_provider is not None or inspection_provider_factory is not None))
+            if new_dedup_contract and not dedup_code_files_covered(
+                    workspace, meta.get("code_files") or [], sources, helper):
+                raise ValueError("code file absent from dedup source enumeration")
+            manual_issues = None
+            if "manual_dedup" in report:
+                manual_issues = helper.validate_report(report["manual_dedup"], workspace, meta.get("ticket_id"),
+                                                       current_attempt, scope, sources)
+                issues.extend(f"{step}_coverage:manual_dedup:{item}" for item in manual_issues)
+                if new_dedup_contract and step == "audit" and dedup == "not_eligible" and not manual_issues:
+                    threshold = load_json(SKILL_ROOT / "mcp/cheap-research/gates.json", "cheap gate catalog")["constants"]["dedup_min_functions"]
+                    count = sum(len(source["functions"]) for source in report["manual_dedup"]["sources"])
+                    if count >= threshold:
+                        issues.append(f"{step}_coverage:dedup_not_eligible_threshold={count}/{threshold}")
+            if new_dedup_contract and step == "deepcheck" and effective_mode != "fast" and dedup == "not_eligible":
+                import ast
+                count = 0
+                if any(Path(relative).suffix.lower() not in {".py", ".pyi"} for relative in sources):
+                    if manual_issues is None or manual_issues:
+                        raise ValueError("non-Python not_eligible requires verified manual catalog")
+                    count = sum(len(source["functions"]) for source in report["manual_dedup"]["sources"])
+                else:
+                    for relative in sources:
+                        data = helper._read_source(workspace / relative, helper._DEFAULT_SOURCE_MAX_BYTES)
+                        if hashlib.sha256(data).hexdigest() != sources[relative]:
+                            raise ValueError(f"source changed after enumeration: {relative}")
+                        tree = ast.parse(data, filename=relative)
+                        count += sum(isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) for node in ast.walk(tree))
+                catalog = load_json(SKILL_ROOT / "mcp/cheap-research/gates.json", "cheap gate catalog")
+                threshold = catalog["constants"]["dedup_min_functions"]
+                if count >= threshold:
+                    issues.append(f"{step}_coverage:dedup_not_eligible_threshold={count}/{threshold}")
+                trace_path = Path(out_dir) / ".mcp_gate_trace.jsonl"
+                if trace_path.is_symlink() or not trace_path.is_file():
+                    raise ValueError("not_eligible requires current attempt trace")
+                rows = [json.loads(line) for line in trace_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+                rows = [row for row in rows if isinstance(row, dict) and row.get("gate_id") == "deepcheck.dedup"]
+                trace = rows[-1] if rows else {}
+                evidence = trace.get("evidence") or {}
+                if (trace.get("attempt") != current_attempt or trace.get("ticket_id") != meta.get("ticket_id")
+                        or trace.get("decision") != "skipped_not_eligible" or trace.get("eligible") is not False
+                        or evidence.get("function_count") != count or evidence.get("threshold") != threshold):
+                    issues.append(f"{step}_coverage:dedup_not_eligible_trace")
+        except (OSError, ValueError, ImportError, KeyError, TypeError, SyntaxError) as exc:
+            issues.append(f"{step}_coverage:manual_dedup:{exc}")
     code_files = meta.get("code_files") or []
     if not isinstance(code_files, list) or not code_files or any(not isinstance(p, str) or not p.strip() for p in code_files):
         issues.append(f"{step}_coverage:empty_code_files")
@@ -4488,7 +4689,8 @@ def cmd_transition(args):
                              ensure_ascii=False, indent=2))
             return 0
 
-        is_review_return = bool(trans and trans.get("review_return"))
+        is_review_return = bool(trans and (trans.get("review_return") or
+                                           (current == "completed" and to_status == "review_in_progress")))
         if is_review_return:
             if not review_return_payload_ok(return_request) or not args.request_id:
                 raise ControlError("返回审查需要当前 revision、明确原因和 request-id",
@@ -7560,6 +7762,56 @@ def derived_attempt(prefix, request_id):
     return str(uuid.uuid4())
 
 
+def effective_workflow_mode(meta):
+    """请求模式用于追溯，执行模式优先使用已声明的有效模式。"""
+    profile = meta.get("risk_profile")
+    effective = profile.get("effective_mode") if isinstance(profile, dict) else None
+    if effective in ("fast", "full"):
+        return effective
+    return "fast" if meta.get("mode") == "fast" else "full"
+
+
+def step_mode_changed(start, meta, events):
+    """新 attempt 冻结有效模式；旧 attempt 仅在后续模式更新时保守回流。"""
+    if (start.get("payload") or {}).get("step") not in ("review", "deepcheck", "audit"):
+        return False
+    initial = (start.get("payload") or {}).get("effective_mode")
+    if initial not in ("fast", "full"):
+        return any(event.get("event_type") == "metadata_updated" and
+                   bool({"mode", "risk_profile"} & set(((event.get("payload") or {}).get("set") or {})))
+                   for event in events[events.index(start) + 1:])
+    if effective_workflow_mode(meta) != initial:
+        return True
+    subsequent = events[events.index(start) + 1:]
+    for index, event in enumerate(subsequent):
+        payload = event.get("payload") or {}
+        if event.get("event_type") != "metadata_updated":
+            continue
+        updates = payload.get("set") or {}
+        if "risk_profile" in updates:
+            candidate = dict(meta, risk_profile=updates["risk_profile"])
+            if effective_workflow_mode(candidate) != initial:
+                return True
+            profile = updates["risk_profile"]
+            if (not isinstance(profile, dict) or profile.get("effective_mode") not in ("fast", "full")) and any(
+                    later.get("event_type") == "metadata_updated" and
+                    "mode" in ((later.get("payload") or {}).get("set") or {})
+                    for later in subsequent[index + 1:]):
+                return True
+        if "mode" in updates:
+            candidate = dict(meta, mode=updates["mode"])
+            if effective_workflow_mode(candidate) != initial:
+                return True
+            # Earlier risk_profile values are not stored in old events. A later
+            # profile update can hide a temporary mode change, so fail closed.
+            if updates["mode"] != initial and any(
+                    later.get("event_type") == "metadata_updated" and
+                    "risk_profile" in ((later.get("payload") or {}).get("set") or {})
+                    for later in subsequent[index + 1:]):
+                return True
+    return False
+
+
 def cmd_step(args, *, git_provider=None, require_git_provider=False, inspection_provider_factory=None):
     """步骤端口快照、Reactive 边界复检和终结回执。"""
     out_dir = Path(args.dir).resolve()
@@ -7629,9 +7881,22 @@ def cmd_step(args, *, git_provider=None, require_git_provider=False, inspection_
                 "inputs": snapshot["inputs"],
                 "protected": snapshot["protected"],
             }
+            if args.step in ("review", "deepcheck", "audit"):
+                # 旧执行合同摘要不变，新增 attempt 单独冻结有效模式。
+                payload["effective_mode"] = effective_workflow_mode(meta)
+            if args.step in ("deepcheck", "audit"):
+                payload["dedup_evidence_version"] = 1
             if args.step in ("deepcheck", "audit", "lite_review") and \
                     (meta.get("candidate_tracking") or {}).get("mode") == "enabled":
                 payload["candidate_input"] = candidate_snapshot(out_dir, meta, events=events, **candidate_access)
+            prior_start = next((e for e in events if args.request and
+                                e.get("request_id") == args.request and
+                                e.get("event_type") == "step_started"), None)
+            if prior_start and "effective_mode" not in (prior_start.get("payload") or {}):
+                # 旧 attempt 重放不因新增可选冻结字段产生伪冲突。
+                payload.pop("effective_mode", None)
+            if prior_start and "dedup_evidence_version" not in (prior_start.get("payload") or {}):
+                payload.pop("dedup_evidence_version", None)
             prior = find_idempotent_event(events, args.request, "step_started", payload)
             if prior:
                 require_stage_action(out_dir, args.step if args.step in {"code", "patch", "fast", "verify", "deploy"} else "review",
@@ -7706,8 +7971,10 @@ def cmd_step(args, *, git_provider=None, require_git_provider=False, inspection_
             )
             if start_payload.get("contract_digest") != current["contract_digest"]:
                 changed.insert(0, "$contract")
+            if step_mode_changed(start, meta, events):
+                changed.append("effective_mode")
             routes = contract["drift_routes"]
-            route = next((routes[item] for item in changed if item in routes),
+            route = "review" if "effective_mode" in changed else next((routes[item] for item in changed if item in routes),
                          routes["default"])
             result_name = "blocked" if changed or missing else "pass"
             payload = {
@@ -7764,6 +8031,9 @@ def cmd_step(args, *, git_provider=None, require_git_provider=False, inspection_
             raise ControlError("step attempt 已终结，拒绝第二个终结结果", exit_code=1,
                                gate_id="step_attempt_finished",
                                existing=finished.get("payload"))
+        if args.outcome in {"success", "degraded"} and step_mode_changed(start, meta, events):
+            raise ControlError("步骤执行期间有效模式变化；请 blocked 终结后按新模式重新审查",
+                               gate_id="effective_mode_drift", route="review")
         gate_events = [event for event in attempt_events(events, args.attempt)
                        if event.get("event_type") == "gate_checked"]
         latest_checks = {}
@@ -8874,7 +9144,8 @@ def cmd_action_policy(args, *, git_provider=None, require_git_provider=False,
                        or name in {"deepcheck", "audit", "plan", "init", "log"}]
             if (meta.get("candidate_tracking") or {}).get("mode") != "enabled":
                 allowed = [name for name in allowed if name not in {"code", "patch", "fast"}]
-    return_required = bool((legal_transition(sm, status, "review_in_progress") or {}).get("review_return"))
+    return_transition = legal_transition(sm, status, "review_in_progress")
+    return_required = bool(return_transition and (return_transition.get("review_return") or status == "completed"))
     if return_required and review_return_problem(meta, events, stage):
         allowed = [name for name in allowed if name != "review"]
     # State permission alone must not recommend a step whose backend is absent.

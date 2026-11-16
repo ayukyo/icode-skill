@@ -22,7 +22,7 @@ DOCX/PPT 技术图可复用 SVG 图源；按对应步骤读取受限校验、PNG
 
 ## Python 解释器解析（跨平台硬规则）
 
-skill 内所有 `python3 tools/...` 形式的命令，执行前必须按平台解析解释器：**Linux/macOS 用 `python3`；Windows 用 `py -3`**（已设 `ICODE_PYTHON_BIN` 时以它为准）。本文档与 `steps/*.md` 中保留 `python3` 写法是跨平台通用形式，不逐处改写，执行时按本规则解析。
+skill 内所有 `python3 tools/...` 形式的命令执行前先选择并核实解释器：控制面最低 **Python 3.10**；显式设置 `ICODE_PYTHON_BIN` 时以该可执行文件为准，版本不足或不可执行须报告并停止，不静默换解释器。未设置时 Linux/macOS 从可用 `python3` 选择满足版本的解释器；Windows 以 `py -3` 解析并验证。验证 `import sys; print(sys.executable); print(sys.version_info[:2])` 有真实路径且版本满足要求；控制面及其子进程保持同一已验证解释器。文中的 `python3` 为平台通用形式，执行时替换为该解释器，不需修改 PATH。
 
 Windows 上裸 `python` / `python3` 常解析到 `%LOCALAPPDATA%\Microsoft\WindowsApps` 的应用执行别名（假 stub），表现为**退出码 0、无任何输出**。出现这种"静默成功"一律视为失败：改用 `py -3` 重跑同一命令，不得据此判定步骤完成，也不得把空输出当作通过证据。可用性判定：`py -3 -c "import sys; print(sys.executable)"` 有真实路径输出即可用。
 
@@ -131,7 +131,7 @@ Windows/WSL 构建按需加载 [WSL 构建合同](wsl_build.md)；本地 MCP 采
 | 步骤 | 产物文件名 | 备注 |
 |------|-----------|------|
 | 1 | `01_plan.md` | 计划全文 |
-| 2 | `02_review.md` + `review_round_{N}.json` + `_review_summary.md` | 多轮审查；每轮有 new_issues / pending_verification / refuted_issues 任一非空才写 JSON；`_review_summary.md` 为步骤2 末尾压缩摘要（供 merge 消费，cheap-research 不可用时跳过，详见 [steps/02_review.md](../steps/02_review.md) 步骤6） |
+| 2 | `02_review.md` + `review_round_{N}.json` + `_review_summary.md` | 多轮审查；首轮必须写 JSON；后续轮次有 new_issues / pending_verification / refuted_issues 任一非空时写 JSON；`_review_summary.md` 为步骤2 末尾压缩摘要（供 merge 消费，cheap-research 不可用时跳过，详见 [steps/02_review.md](../steps/02_review.md) 步骤5） |
 | 3 | `03_plan_final.md` | **完整计划副本**（复制 `01_plan.md` 全文 + 审查采纳标记 + 末尾「实现偏差备忘」空段），不是元数据摘要 |
 | 4 | `04_code_review_fix.md` | 步骤4 末尾 1.5「Code Review Fix」复检产物（所有工单都触发，不论入口） |
 | 5 | `05_deepcheck.md` | 三阶段复检 |
@@ -150,7 +150,7 @@ Windows/WSL 构建按需加载 [WSL 构建合同](wsl_build.md)；本地 MCP 采
 
 | 级别 | 含义 | 触发后行为 | 典型场景 |
 |---|---|---|---|
-| **L1·致命** | 阻塞流程的前置条件不满足 | **报错退出**，流程不可继续 | 按[工程接入合同](project_intake.md)确认目标解析失败（多根、预算截断或该入口不支持 non-git），不是仅凭宿主 cwd / 强制产物文件缺失 / MCP 完全不可用 / **双活动实现根**（同一工单存在两个 `state=active` 的 checkout，见「目录管理·worktree 生命周期」） |
+| **L1·致命** | 阻塞流程的前置条件不满足 | **报错退出**，流程不可继续 | 按[工程接入合同](project_intake.md)确认目标解析失败（多根、预算截断或该入口不支持 non-git），不是仅凭宿主 cwd / 强制产物文件缺失 / 特定步骤缺少不可替代的必要能力且无可执行替代 / **双活动实现根**（不同真实路径同时活动，见「目录管理·worktree 生命周期」）；外置 MCP 不可用按真实能力降级并保留未完成的证据债务 |
 | **L2·关键** | 重要约束未满足 | **警告 + 记入 metadata + 流程继续**（不阻塞等用户；用户事后审阅产物/audit 报告时可见，可手动回退）。icode 调性是 AI 自治 + 用户审阅，L2 不强制阻塞（避免 `/icode start` 串联时卡死）；02_review `absolute_cap` 触达同理，不再设例外 | plan §3 架构设计完全缺失 / review 触达 `absolute_cap` 仍有新问题 |
 | **L3·重要** | 重要检查项未通过 | **警告**，记入 metadata，**流程继续**（user 后续可手动回看） | plan §10 checklist ❌ > 3 条 / audit §6.7 视角 A 失败 / 步骤 4 编译失败（带 `code_compile_failed=true`）/ **worktree 创建失败**（降级原地 + metadata 记 `wt_degraded=true`，见「目录管理·worktree 决策与创建」④） |
 | **L4·参考** | 软性建议 | **柔性提示**，不影响流程 | limit 不存在 / cheap-research 未装 / 可选视觉增强不可用（严格视觉目标按[专用合同](serial_evidence_stages.md)阻断验收）/ init 末轮理解核对清单用户不回复 |
@@ -270,7 +270,7 @@ test -f "{ICODE_OUT_DIR}/03_plan_final.md" && python3 -c "import json,sys; d=jso
 
 ### 注意事项
 
-- **Git 安全**：禁止执行任何 Git 危险操作（`git reset --hard`、`git push --force` 等），**也禁止 `git commit` 和 `git push`**。**`git worktree add` / `git worktree remove` 允许执行**（不在禁止列）：创建/清理须用户确认（写操作影响 `.git`），**永不自动 `--force` remove**（未提交改动时 remove 失败是保护，见「目录管理·worktree 决策与创建」）
+- **Git 安全**：禁止执行任何 Git 危险操作（`git reset --hard`、`git push --force` 等），**也禁止 `git commit` 和 `git push`**。**`git worktree add` / `git worktree remove` 允许执行**（不在禁止列）：显式 `--worktree` 已授权创建；清理按已有授权、实际影响和受控关闭流程判断，**永不自动 `--force` remove**（未提交改动时 remove 失败是保护，见「目录管理·worktree 决策与创建」）
 - **`.icode_output/` 父目录及其下的 `.icode_output_N/` 目录无需用户确认**：该目录下创建/写入/修改 `.md`/`.json`/`.log` 文件均为安全操作
 - **工程污染防护**：`.icode_output/` 是 icode 产物目录，建议在工程 `.gitignore` 中加入 `.icode_output/`，避免产物误提交；icode 本身**不自动修改工程的 `.gitignore`**（工程配置由用户掌控）。历史检索的全局索引位于 `~/.claude/icode_data/`，不在任何工程内，无污染风险；`/icode doc` 的工程文档库位于 `~/.claude/icode_data/project_docs/`，同样不在任何工程内、不写工程内任何文件（用户工程内已有 `doc/workflows/` 等历史文档时，忽略不读取不迁移不删除，从零生成到全局）
 

@@ -68,3 +68,44 @@ def test_catalog_provider_condition_remains_compatible(tmp_path, gate):
     assert coverage.report_is_pass(result, False, True), result
     assert result["skipped_not_eligible"] == 1
     assert result["called"] == 0
+
+
+def test_visible_tool_denied_by_policy_can_degrade_honestly(tmp_path):
+    gate = next(g for g in CATALOG["gates"] if g["id"] == "audit.plan_diff")
+    evidence = dict(EVIDENCE[gate["id"]])
+    row = dict(schema_version=2, ticket_id="coverage-test", step=gate["step"],
+        gate_id=gate["id"], tool=gate["tool"], eligible=True, evidence=evidence,
+        decision="unavailable_before_call", attempted=False, result="unavailable",
+        at="2026-11-13T08:00:00Z", availability=dict(tool_visible=True,
+            reason="policy_denied", policy_ref="session:policy", discovery_ref="session:tools",
+            fallback="manual comparison", evidence_ref="06_audit.md"))
+    result = coverage.build_report(tmp_path, gate["step"], False,
+        dict(ticket_id="coverage-test", mcp_gate_schema_version=2, mode="full"), [row],
+        {**CATALOG, "gates": [gate]}, [])
+    assert coverage.report_is_pass(result, False, True), result
+
+
+@pytest.mark.parametrize("change", [
+    {"policy_ref": ""}, {"policy_ref": None}, {"reason": "not_exposed"},
+    {"tool_visible": False},
+])
+def test_policy_denied_needs_consistent_visibility_and_policy_evidence(change):
+    gate = next(g for g in CATALOG["gates"] if g["id"] == "audit.plan_diff")
+    availability = dict(tool_visible=True, reason="policy_denied", policy_ref="session:policy",
+                        discovery_ref="session:tools", fallback="manual comparison", evidence_ref="06_audit.md")
+    availability.update(change)
+    row = dict(schema_version=2, ticket_id="coverage-test", step=gate["step"], gate_id=gate["id"],
+        tool=gate["tool"], eligible=True, evidence=EVIDENCE[gate["id"]], decision="unavailable_before_call",
+        attempted=False, result="unavailable", at="2026-11-13T08:00:00Z", availability=availability)
+    assert coverage.validate_row(row, gate, 1)
+
+
+@pytest.mark.parametrize("reason", [[], {}])
+def test_unavailable_rejects_non_string_reason_without_exception(reason):
+    gate = next(g for g in CATALOG["gates"] if g["id"] == "audit.plan_diff")
+    row = dict(schema_version=2, ticket_id="coverage-test", step=gate["step"], gate_id=gate["id"],
+        tool=gate["tool"], eligible=True, evidence=EVIDENCE[gate["id"]], decision="unavailable_before_call",
+        attempted=False, result="unavailable", at="2026-11-13T08:00:00Z",
+        availability=dict(tool_visible=False, reason=reason, discovery_ref="session:tools",
+                          fallback="manual", evidence_ref="audit.md"))
+    assert any("availability.reason 非法" in issue for issue in coverage.validate_row(row, gate, 1))

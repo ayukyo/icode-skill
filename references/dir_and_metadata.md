@@ -33,7 +33,7 @@ skill 内所有 `python3 tools/...` 形式的命令，执行前必须按平台�
 WORKSPACE_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
 mkdir -p "$WORKSPACE_ROOT/.icode_output"   # 统一父目录，所有产物收纳于此（基于工作区根绝对路径）
 # ⚠️ 目录号必须由下方递增逻辑计算，禁止手写/硬编码 N（如 .icode_output_10）——手写绕过递增 = 拆除"max+1 防误复用"安全网（历史事故：误复用已有工单目录，覆盖其 metadata 与 00_init）
-LAST=$(ls -d "$WORKSPACE_ROOT"/.icode_output/.icode_output_* 2>/dev/null | grep -oP '(?<=\.icode_output_)\d+' | sort -n | tail -1)
+LAST=$(ls -d "$WORKSPACE_ROOT"/.icode_output/.icode_output_* 2>/dev/null | sed -nE 's#^.*/\.icode_output_([0-9]+)$#\1#p' | sort -n | tail -1)
 NEXT=${LAST:-0}; NEXT=$((NEXT + 1))
 ICODE_OUT_DIR="$WORKSPACE_ROOT/.icode_output/.icode_output_${NEXT}"
 # ——硬熔断① 建前检查（防误复用，L1 致命，阻塞流程）——
@@ -65,7 +65,7 @@ grep -qE '^[^#]*\.icode_output' "$WORKSPACE_ROOT/.gitignore" 2>/dev/null && echo
 # debug 忽略 --worktree 原地创建：cwd 在 worktree 内时 WORKSPACE_ROOT = worktree 根，产物落该 checkout 的 .icode_output/.debug/
 WORKSPACE_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
 mkdir -p "$WORKSPACE_ROOT/.icode_output/.debug"
-LAST=$(ls -d "$WORKSPACE_ROOT"/.icode_output/.debug/.icode_output_* 2>/dev/null | grep -oP '(?<=\.icode_output_)\d+' | sort -n | tail -1)
+LAST=$(ls -d "$WORKSPACE_ROOT"/.icode_output/.debug/.icode_output_* 2>/dev/null | sed -nE 's#^.*/\.icode_output_([0-9]+)$#\1#p' | sort -n | tail -1)
 NEXT=${LAST:-0}; NEXT=$((NEXT + 1))
 ICODE_OUT_DIR="$WORKSPACE_ROOT/.icode_output/.debug/.icode_output_${NEXT}"
 # 硬熔断① 建前检查：目标 debug 目录已存在 = 递增被绕过/目录号手写 → 中止
@@ -96,7 +96,7 @@ grep -qE '^[^#]*\.icode_output' "$WORKSPACE_ROOT/.gitignore" 2>/dev/null && echo
 # 禁止凭历史路径假设/硬编码另一副本绝对路径写产物（历史事故：工单被写入另一仓库副本，用户按路径找不到）
 WORKSPACE_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
 mkdir -p "$WORKSPACE_ROOT/.icode_output"
-LAST=$(ls -d "$WORKSPACE_ROOT"/.icode_output/.icode_output_* 2>/dev/null | grep -oP '(?<=\.icode_output_)\d+' | sort -n | tail -1)
+LAST=$(ls -d "$WORKSPACE_ROOT"/.icode_output/.icode_output_* 2>/dev/null | sed -nE 's#^.*/\.icode_output_([0-9]+)$#\1#p' | sort -n | tail -1)
 REUSE=0
 if [ -n "$LAST" ]; then
   CAND="$WORKSPACE_ROOT/.icode_output/.icode_output_${LAST}"
@@ -141,7 +141,7 @@ fi
 ```bash
 # 工作区根锚定（同「创建新目录」段）：ICODE_OUT_DIR 一律基于当前工作区根绝对路径，防 cwd 漂移误定位
 WORKSPACE_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
-LAST=$(ls -d "$WORKSPACE_ROOT"/.icode_output/.icode_output_* 2>/dev/null | grep -oP '(?<=\.icode_output_)\d+' | sort -n | tail -1)
+LAST=$(ls -d "$WORKSPACE_ROOT"/.icode_output/.icode_output_* 2>/dev/null | sed -nE 's#^.*/\.icode_output_([0-9]+)$#\1#p' | sort -n | tail -1)
 if [ -n "$LAST" ]; then
   ICODE_OUT_DIR="$WORKSPACE_ROOT/.icode_output/.icode_output_${LAST}"
 elif [ -f "$WORKSPACE_ROOT/.icode_output/.active_ticket.json" ]; then
@@ -290,7 +290,7 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
 
 入口命令（init/log）和步骤1常规新建目录时创建。完整字段定义见 SKILL.md「元信息文件」段，此处仅列入口创建时的最小模板：
 
-> **`schema_version` 字段（vNext 控制面，schema v3）**：所有新建工单一律先确定非空唯一 `ticket_id`，再用 `tools/icode_control.py create` 原子产生 `schema_version:3` metadata + `ticket_created` 事件；三个 gate schema 版本均为 `1`。旧工单无 schema_version = legacy（只读适配，不静默伪装 vNext）。
+> **`schema_version` 字段（vNext 控制面，schema v3）**：所有新建工单一律先确定非空唯一 `ticket_id`，再用 `tools/icode_control.py create` 原子产生 `schema_version:3` metadata + `ticket_created` 事件；`workflow_gate_schema_version` 和 `thinking_gate_schema_version` 为 `1`，`mcp_gate_schema_version` 为 `2`。旧工单无 schema_version = legacy（只读适配，不静默伪装 vNext）。
 
 > **`template_version` 字段**（schema 版本，自 [v1.1 升级](../steps/01_plan.md) 起所有新建工单默认带）：
 >
@@ -387,13 +387,7 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
 > - 默认值：缺失视为 `120`（120 秒）；`0` 或负数视为非法 → 静默回落 `120`（防误配 0 导致瞬时超时误降级）
 > - 写入约定：可在入口/步骤1 metadata 更新时按工程场景配置（如重型分析工单可调至 180-300；轻量可缩至 60）；建议最小不低于 30s（过短会过早触发重试链路）
 > - 字段缺失兼容：旧 metadata 无 `task_timeout_seconds` 视为 `120`，不阻塞后续步骤
-> **`no_spawn_env` flag 字段**（环境结构性无 spawn 工具标记，可选，默认 `false`）：
->
-> - 布尔类型，标记当前 icode 环境是否**结构性**不支持 Agent 工具 spawn（区别于 transient 失败/超时/截断）
-> - 默认值：缺失视为 `false`（环境有 spawn 工具但本轮未成功——属 transient 失败，走超时/重试链路）
-> - 判定方法：调 `ToolSearch(query="select:Agent")` 取 Agent 工具 schema，命中则 `false`，未命中则 `true`（详见 [adversarial.md](adversarial.md)「环境无 spawn 工具场景」flag 判定方法）
-> - 作用：决定是否允许"主代理代行三视角判断"——**仅** `no_spawn_env = true` 时允许；`false` 时**硬禁止**主代理代行（即使部分子代理未回结果，详见 [adversarial.md](adversarial.md)「环境无 spawn 工具场景」第 4 步 flag 门控）
-> - 字段缺失兼容：旧 metadata 无 `no_spawn_env` 视为 `false`，不阻塞现有 spawn 协议
+> **`no_spawn_env` 历史字段**：仅标记已证实的结构性无子代理能力；缺失不证明可调用。当前会话按 [宿主适配](host_adapters.md) 区分能力未暴露、上层策略禁止、容量不足与真实调用失败，禁止因为某个宿主工具名不可见直接下结论。无独立审查能力或无授权时可做明确标记的主代理事实复核，不能冒充独立裁决；判断性结论保留待验证。旧字段留作历史兼容，不覆盖当前实际能力或权限证据。
 
 ### `/icode log` 产出后
 
@@ -505,6 +499,7 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
 
 **步骤2/5 读 mode 字段的契约**：这里的“读 mode”统一指解析有效模式，不能仅凭请求 `metadata.mode` 执行 fast 分支。review/deepcheck、coverage、thinking/MCP 与 UI 使用同一解析结果；未知分类先完成调查与准入，不通过不得编码。详情见 [fast 策略](../steps/fast.md)。
 
+有效 full 不继承 fast 的单轮或跳阶段；已有 fast 审查或复检后升级 full 时，先终结开放 attempt，并受控返回 review 重获 full 回执。
 
 ## 重复模式状态（patterns.json，跨工单聚合）
 

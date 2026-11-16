@@ -20,7 +20,7 @@ description: ICODE 端到端编码工作流，适配 Claude Code、Codex、CodeB
 
 ## lite 工作流
 
-`/icode lite <需求>` 或 `/icode lite --ticket <id>` 使用 [steps/lite.md](steps/lite.md) 的三阶段合同，并先读 [公共核心](references/core.md)；不得把 lite 规则用于 start/fast。lite 审核须独立执行并绑定候选与证据。
+`/icode lite` 遵循 [lite 合同](steps/lite.md) 和 [公共核心](references/core.md)；审核须独立并绑定候选与证据，不用于 start/fast。
 
 ## 通用约定（对话语言）
 

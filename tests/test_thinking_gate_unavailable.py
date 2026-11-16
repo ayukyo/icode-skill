@@ -40,6 +40,27 @@ def test_unexposed_tool_allows_evidenced_fallback(step, tier):
     assert not issues(trace(step, tier))
 
 
+def test_visible_tool_denied_by_policy_has_honest_fallback():
+    row = trace()
+    row['availability'].update(tool_visible=True, reason='policy_denied',
+                               policy_ref='session:tool-policy')
+    assert not issues(row)
+
+
+@pytest.mark.parametrize('update', [
+    {'policy_ref': ''}, {'policy_ref': None}, {'tool_visible': False},
+    {'reason': 'not_exposed'},
+])
+def test_policy_denial_requires_visible_tool_and_policy_reference(update):
+    row = trace()
+    row['availability'].update(tool_visible=True, reason='policy_denied',
+                               policy_ref='session:tool-policy')
+    row['availability'].update(update)
+    if update == {'reason': 'not_exposed'}:
+        row['availability'].pop('policy_ref')
+    assert issues(row)
+
+
 @pytest.mark.parametrize("changes", [
     {"attempted": True}, {"attempted": "false"}, {"result": "success"},
     {"degraded_reason": None}, {"degraded_reason": " "}, {"decision": None},
@@ -102,3 +123,15 @@ def test_strict_cli_and_control_plane_accept_honest_degradation(tmp_path):
     checks = control.run_gate_linters(tmp_path, to_status="plan_done")
     check = next(row for row in checks if row["gate_id"] == "thinking_gate")
     assert check["ok"], check
+
+
+@pytest.mark.parametrize("reason", [[], {}])
+def test_unavailable_rejects_non_string_reason_without_exception(reason):
+    row = trace()
+    row["availability"]["reason"] = reason
+    assert any("availability.reason 非法" in issue for issue in issues(row))
+
+
+@pytest.mark.parametrize("trigger", [[], {}])
+def test_malformed_trigger_is_reported_without_exception(trigger):
+    assert any("triggers 含非法枚举" in issue for issue in issues(trace(triggers=[trigger])))

@@ -80,7 +80,7 @@ def test_production_recovery_keeps_history_and_invalidates_completion(ticket):
     assert policy["review_return_required"] is True
     result = recovery(ticket, policy["revision"]["token"])
     assert result["ok"] and result["to"] == "review_in_progress"
-    meta = json.loads((ticket / ".ico_metadata.json").read_text(encoding="utf-8"))
+    meta = control.load_metadata(ticket)
     assert meta["status"] == "review_in_progress"
     assert not set(meta["completed_steps"]) & {"2", "3", "4", "5", "6"}
     assert meta["delivery_verdict"] == "verification_pending"
@@ -172,3 +172,39 @@ def test_fresh_review_receipts_after_return_satisfy_original_gate(ticket):
     cli(ticket, "step", "--step", "review", "--phase", "finish", "--attempt", attempt,
         "--outcome", "success", "--evidence", "real isolated writer calls")
     cli(ticket, "check-outputs", "--step", "review")
+
+
+def test_completed_return_requires_quiescent_revision_and_invalidates_receipt(ticket):
+    test_fresh_review_receipts_after_return_satisfy_original_gate(ticket)
+    for state in ("review_done", "plan_finalized", "code_in_progress", "code_done",
+                  "deepcheck_in_progress", "deepcheck_done", "completed"):
+        extra = ["--delivery-verdict", "verification_pending"] if state == "completed" else []
+        cli(ticket, "transition", "--to", state, *extra, "--skip-gates", fixture=True)
+    meta = control.load_metadata(ticket)
+    events = control.read_events(ticket)[0]
+    assert control.completion_receipt_issues(ticket, meta, events, "review") == []
+    assert cli(ticket, "action-policy")["review_return_required"] is True
+    assert cli(ticket, "transition", "--to", "review_in_progress", ok=False)["gate_id"] == "review_return_request"
+    operation = cli(ticket, "operation", "--phase", "start", "--name", "open-read", "--opclass", "read_only",
+                    "--input", "fixture", "--request", "open-read")
+    assert recovery(ticket, request="completed-return", ok=False)["gate_id"] == "review_return_quiescence"
+    cli(ticket, "operation", "--phase", "finish", "--attempt", operation["attempt"],
+        "--outcome", "success", "--evidence", "finished", "--check", "done", "--request", "close-read")
+    recovery(ticket, request="completed-return")
+    meta = control.load_metadata(ticket)
+    events, problems = control.verify_event_chain(ticket, meta)
+    assert not problems
+    assert not set(meta["completed_steps"]) & {"2", "3", "4", "5", "6"}
+    assert control.completion_receipt_issues(ticket, meta, events, "review") == ["review:before_review_return"]
+
+
+def test_historical_completed_to_review_event_remains_valid(ticket):
+    cli(ticket, "transition", "--to", "completed", "--delivery-verdict", "verification_pending",
+        "--skip-gates", fixture=True)
+    before = control.load_metadata(ticket)
+    after = dict(before, status="review_in_progress", delivery_verdict="verification_pending")
+    control.commit_metadata_and_event(ticket, before, after, "state_changed", {
+        "from": "completed", "to": "review_in_progress", "delivery_verdict": None,
+        "note": "已完成工单按用户指令重新审查"})
+    _, problems = control.verify_event_chain(ticket, control.load_metadata(ticket))
+    assert not problems

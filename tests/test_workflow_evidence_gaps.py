@@ -325,7 +325,7 @@ def test_fast_upgraded_to_full_requires_three_phases(tmp_path, complete):
         assert "deepcheck_coverage:missing_phase=free" in issues
 
 
-def tracked_quality(tmp_path, degraded=True, finish=True):
+def tracked_quality(tmp_path, degraded=True, finish=True, audit_manual=True):
     out = tracked_review(tmp_path)
     manifest(out, counts=(0, 0, 0))
     register_review(out, "review-a", detail=True)
@@ -361,6 +361,19 @@ def tracked_quality(tmp_path, degraded=True, finish=True):
         if step == "deepcheck" and degraded:
             report.update(coverage_status="partial", read_phases={}, unobserved=["fixed/free"],
                           dedup_status="partial", dedup_unobserved=["groups"], debt_reason="budget")
+        if (step == "deepcheck" and not degraded) or (step == "audit" and audit_manual):
+            digest = control.file_sha256(tmp_path / "source.cpp")
+            report["manual_dedup"] = {"schema_version": 1, "ticket_id": meta["ticket_id"],
+                "attempt": attempt, "review_scope": ["."], "unobserved": [],
+                "sources": [{"path": "source.cpp", "sha256": digest, "read_sha256": digest,
+                    "language": "cpp", "catalog_method": "manual_read", "completeness": "complete_within_scope",
+                    "catalog_reason": "read source", "empty_reason": "no functions", "functions": []}],
+                "families": []}
+        if step == "deepcheck" and not degraded:
+            trace = {"ticket_id": meta["ticket_id"], "attempt": attempt, "gate_id": "deepcheck.dedup",
+                     "eligible": False, "decision": "skipped_not_eligible",
+                     "evidence": {"function_count": 0, "threshold": 50}}
+            (out / ".mcp_gate_trace.jsonl").write_text(json.dumps(trace) + "\n")
         (out / (step + "_coverage.json")).write_text(json.dumps(report))
         for name in ("05_deepcheck.md" if step == "deepcheck" else "06_audit.md", step + "_coverage.json"):
             cli(out, "artifact", "--step", step, "--attempt", attempt, "--path", name)
@@ -371,6 +384,13 @@ def tracked_quality(tmp_path, degraded=True, finish=True):
         cli(out, "step", "--step", step, "--phase", "finish", "--attempt", attempt,
             "--outcome", "degraded" if step == "deepcheck" and degraded else "success", "--evidence", "actual coverage")
     return out
+
+
+def test_audit_reuses_real_deepcheck_threshold_receipt(tmp_path):
+    out = tracked_quality(tmp_path, degraded=False, audit_manual=False)
+    audit = json.loads((out / "audit_coverage.json").read_text())
+    assert audit["dedup_status"] == "not_eligible" and "manual_dedup" not in audit
+    assert not control.inspection_coverage_issues(out, control.load_metadata(out), "audit", "audit-a")
 
 
 def test_actual_degraded_final_check_passes_with_debt_and_is_read_only(tmp_path):

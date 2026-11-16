@@ -10,7 +10,7 @@
 
 | 级别 | 符号 | 语义 | 触发条件 | 未调用的合规处理 |
 |------|------|------|---------|-----------------|
-| **必须调** | 🟢 | 强证据场景满足就**必须调用**（先实际调用一次，失败/空才能降级） | 强证据场景满足（见下表）+ MCP 在**当前宿主**注册（Claude Code = `~/.claude.json`；Codex = `codex mcp list`）且 工具可调用（列表直接可见 或 ToolSearch 可取 schema） | **降级声明**：在思考块「MCP 调用」段写明降级原因（MCP 不可用 / 调用返回空）|
+| **必须调** | 🟢 | 强证据场景满足且工具在当前会话可调用时**必须调用**（先实际调用一次，失败/空才能降级） | 强证据场景满足（见下表），工具直接可见或通过宿主支持的发现接口取得 schema，且上层允许调用；配置不可读不能否定会话已暴露的工具 | **降级声明**：区分未暴露、策略禁止和实际调用失败，记录真实依据及替代结果；注册状态未知时不猜测 |
 | **不必调** | ⚪ | 强证据场景不满足，**无需评估、无需声明** | 强证据场景不满足 | 无需说明 |
 
 ## 强证据场景判定
@@ -55,9 +55,9 @@
 
 | # | 禁区 | 反例 | 正确做法 |
 |---|------|------|---------|
-| 1 | **同一产物文件并发写** | 06_audit.md §6.7 三视角（A/B/C）写同一段 → 并发 3 spawn 同时改 §6.7 段内容 | **三 spawn 并发收集 facts**（仅 Read / 检索 / 评估，不写产物）→ **主代理顺序调和落地**（任一 spawn 返回 issue 也走顺序 §6.2 修复流程）；**等待按 [subagent_spawn_wait.md](subagent_spawn_wait.md) 通用契约**（后台 spawn + `TaskOutput` 阻塞等 + `INTEGRATION_WALL_CLOCK_DEADLINE_SECONDS=1200` 墙钟硬截止，禁止裸同步 spawn / 被动等通知 / 无限等待） |
+| 1 | **同一产物文件并发写** | 06_audit.md §6.7 三视角（A/B/C）写同一段 → 并发 3 spawn 同时改 §6.7 段内容 | **独立收集 facts**（仅 Read / 检索 / 评估，不写产物）→ **主代理顺序调和落地**；等待按 [subagent_spawn_wait.md](subagent_spawn_wait.md) 使用宿主支持的有界等待与墙钟截止。 |
 | 2 | **数据有依赖的后置调** | `retrieve_similar(query=从 summarize 提炼的症状, candidates=索引)` 依赖 `summarize(产物)` 的输出 → 把两者并发 | **串行**：先等 `summarize` 摘要出来，**再**触发 `retrieve_similar` |
-| 3 | **环境无 spawn 工具 / 无 MCP 工具时** | `ToolSearch(query="select:Agent")` 失败（no_spawn_env=true）时仍试图 spawn 3 质疑者 | **一律走 [references/adversarial.md](../references/adversarial.md)「环境无 spawn 工具」降级路径**：环境无 spawn → 主代理文字块自演 + 标 `[未验证-环境无spawn工具]`；环境无 MCP → 对机器 gate 保留真实 eligibility，按 unavailable_before_call 记录发现依据；未命中业务条件的推荐项仍为 ⚪ |
+| 3 | **无可授权的 spawn / MCP 能力时** | 未核对宿主能力和授权就调用子代理或 MCP | 按 [adversarial.md](adversarial.md) 区分未暴露、禁止、容量不足和失败；主代理事实复核须标注，不能冒充独立裁决。MCP gate 保留真实 eligibility 和不可用依据。 |
 
 **反之允许并发**（**不写文档，引擎自动批处理**）：
 - 阶段内多个**独立 Read 文件**（无依赖关系）——引擎自动并行
@@ -158,7 +158,7 @@
 
 
 - **cheap-research**（🟢*）：dedup 分类/找重复（`extract`，见 §2.5.7）+ 审查输出压缩（`summarize` 压缩审查结果供 merge 消费，见 [steps/02_review.md](../steps/02_review.md) 步骤 6）。其余（`diff_summary` 增量审查 / `fill_template` 维度结果 / `retrieve_similar` 历史 issue / `scan_patterns` / `trace_refs`）可作可选增强，非强证据场景不评估。**不接管决策**：3 质疑者对抗验证 / 审查意见合成走主会话（高风险）
-- **dedup 子阶段**：见 §2.5.7。**强证据** = cheap-research 🟢 + 函数数 ≥ `dedup_min_functions`（gates.json 常量）→ ripgrep 抽函数（catalog.json）+ `mcp__cheap-research__extract`（haiku 分类 + 高质量模型找 top 5 重复）。**降级**：函数数 < 阈值 / ripgrep 不可用 / cheap-research 不可用 → 整个 §2.5.7 跳过
+- **dedup 子阶段**：见 §2.5.7。**强证据** = cheap-research 🟢 + 函数数 ≥ `dedup_min_functions`（gates.json 常量）→ ripgrep 抽函数（catalog.json）+ `mcp__cheap-research__extract`（haiku 分类 + 高质量模型找 top 5 重复）。**降级**：工具不可用时可按 [审查证据合同](inspection_evidence.md) 真实执行人工等价去重；未能完成则保留去重债务。工具资格 trace 以机器 catalog 为准，不将人工工作记为 MCP 调用。
 
 ### 3 merge（合并审查意见）
 - **reasoning gate**：默认 L1（决策记录：逐条甄别审查意见 → 判断采纳/驳回 → 规划修改策略，写入 `.decision_anchors.json`）；存在冲突意见或跨模块歧义时升级 L2/L3
@@ -176,7 +176,7 @@
 
 
 - **cheap-research**（🟢*）：Fixed 预扫（`scan_patterns` 功能点×代码位置机械预扫，见 [steps/05_deepcheck.md](../steps/05_deepcheck.md) 步骤 5）+ dedup（`extract`，见 §9.4）。`diff_summary`（Reverse 阶段对比）/ `summarize`（阶段摘要压缩）可作可选增强，非强证据场景不评估。**不接管决策**：Fixed/Free 阶段 / 3 质疑者对抗（A6）走主会话（高风险）
-- **dedup 子阶段**：见 §9.4。**强证据** = cheap-research 🟢 + 声明review_scope内函数数 ≥ `dedup_min_functions`（gates.json 常量）→ 范围内完整dedup（5 阶段：抽取→分类→拆分→高质量模型逐类找重复→报告）。**降级**：函数数 < 阈值 → not-eligible；进入 full Dedup 且函数数达阈值时，工具不可用也保持 eligible，按 unavailable_before_call 或 degraded_after_attempt 留痕并声明未观测边界，不伪造去重完成。**复用**：检测 `categorized.json` 是否已由 §2 02_review 生成且scope/tool/参数/源码hash身份匹配 → 复用避免重跑分类（中间产物路径 `{ICODE_OUT_DIR}/<ticket>/dedup/{catalog,categorized,duplicates/*.json}`，与 mcp_integration 一致）
+- **dedup 子阶段**：见 §9.4。**强证据** = cheap-research 🟢 + 声明review_scope内函数数 ≥ `dedup_min_functions`（gates.json 常量）→ 范围内完整dedup（5 阶段：抽取→分类→拆分→高质量模型逐类找重复→报告）。**降级**：函数数 < 阈值 → not-eligible；进入 full Dedup 且函数数达阈值时，工具不可用也保持 eligible，按 unavailable_before_call 或 degraded_after_attempt 留痕，并可依[审查证据合同](inspection_evidence.md)真实执行人工等价去重；未完成须声明未观测边界，不伪造去重完成。**复用**：检测 `categorized.json` 是否已由 §2 02_review 生成且scope/tool/参数/源码hash身份匹配 → 复用避免重跑分类（中间产物路径 `{ICODE_OUT_DIR}/<ticket>/dedup/{catalog,categorized,duplicates/*.json}`，与 mcp_integration 一致）
 
 ### 6 audit（终审）
 - **playwright**：真实 UI 验证——仅前端工程时
@@ -230,7 +230,7 @@
 🟢 MCP 由两层强制驱动，确保真实触发（治本"只调某个必用项、其余 🟢 全跳过"问题）：
 
 1. **执行步骤内嵌**（A 层）：cheap-research 等在各 step 执行步骤主体里有独立的调用指令（非末尾推荐表），AI 顺序执行必然走到——复制 L2/L3 sequential-thinking 的强制模式
-2. **thinking_core MCP gate**（B 层）：L2/L3 思考前置流程里，思考块先列本步 🟢 MCP（工具已在列表直接可见则直接调用，不可见才 ToolSearch 取 schema）-> 实际调用 -> 结果进思考块。覆盖 context7/memory/vision-bridge/playwright
+2. **thinking_core MCP gate**（B 层）：L2/L3 思考前置流程里，思考块先列本步 🟢 MCP（工具直接可见且获授权则调用，不可见时仅使用宿主提供的发现接口）-> 实际调用 -> 结果进思考块。覆盖 context7/memory/vision-bridge/playwright
 
 两层任一触发即合规。cheap-research 走 A 层（执行步骤内嵌）+ B 层，其余 🟢 MCP 走 B 层（thinking_core gate）。
 
@@ -242,6 +242,6 @@
 - **vision-bridge 不可用**：按 [media_routing.md](media_routing.md) 处理；宿主已证明多模态则 native，未证明则 text_only 并标视觉缺口，禁止猜测或试探性注图
 - **playwright 不可用**：Bash + curl 兜底（无 JS 渲染），标降级
 - **memory 不可用**：本对话手动笔记兜底，标降级
-- **cheap-research 不可用**：主会话按原始证据兜底；只有宿主确实支持时才选用可用的低成本子代理，不绑定具体模型名。整体 token 节省幅度下降，但工作流不阻塞。**子代理兜底时按 [subagent_spawn_wait.md](subagent_spawn_wait.md) 通用契约等待**（后台 spawn + `TaskOutput` 阻塞等 + 20 分钟墙钟硬截止，禁止裸同步 spawn / 被动等通知 / 无限等待）
+- **cheap-research 不可用**：主会话按原始证据兜底；只有宿主确实支持时才选用可用的低成本子代理，不绑定具体模型名。子代理按 [subagent_spawn_wait.md](subagent_spawn_wait.md) 使用宿主可执行的有界等待；未完成的必要证据保留债务。
 
 **降级不是错误，但必须显式声明**：工具可调用时先实际尝试；工具未暴露时按 thinking_core 的 `unavailable_before_call` 记录发现依据、替代方法与结果引用，不伪造 attempted=true。

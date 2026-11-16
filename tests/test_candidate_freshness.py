@@ -1,5 +1,6 @@
 """Final-source candidates: real Git fixtures and control-plane receipts."""
 import importlib.util
+import ast
 import json
 import os
 from pathlib import Path
@@ -89,12 +90,36 @@ class CandidateTests(unittest.TestCase):
             self.call("artifact", "--dir", self.ticket, "--step", step, "--attempt", attempt,
                       "--path", "source.py", "--scope", "workspace")
         else:
+            if step == "deepcheck":
+                trace = {"schema_version": 2, "ticket_id": "candidate-1", "step": step,
+                         "gate_id": "deepcheck.dedup", "tool": "extract", "eligible": False,
+                         "attempt": attempt, "decision": "skipped_not_eligible", "attempted": False,
+                         "result": "not_applicable", "at": "2026-11-15T00:00:00Z",
+                         "evidence": {"mode": "full", "phase": "dedup", "function_count": 0, "threshold": 50}}
+                (self.ticket / ".mcp_gate_trace.jsonl").write_text(json.dumps(trace) + "\n", encoding="utf-8")
             phases = ["audit"] if step == "audit" else ["reverse", "fixed", "free"]
             coverage = {"schema_version": 1, "ticket_id": "candidate-1", "attempt": attempt,
                         "review_scope": ["."], "coverage_status": "complete_within_scope",
                         "unobserved": [], "dedup_unobserved": [], "dedup_status": "not_eligible",
                         "dedup_reason": "single fixture", "read_phases": {
                             phase: {"source.py": ctl.file_sha256(self.repo / "source.py")} for phase in phases}}
+            events, _ = ctl.read_events(self.ticket)
+            has_deepcheck = any(event.get("event_type") == "step_finished"
+                                and (event.get("payload") or {}).get("step") == "deepcheck"
+                                and (event.get("payload") or {}).get("outcome") == "success"
+                                for event in events)
+            if step == "audit" and not has_deepcheck:
+                # Standalone audit has no earlier receipt to reuse. Inspect the
+                # actual fixture source and declare its real empty catalog.
+                source = self.repo / "source.py"
+                tree = ast.parse(source.read_text(encoding="utf-8"))
+                self.assertFalse(any(isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                                     for node in ast.walk(tree)))
+                coverage["manual_dedup"] = {
+                    "schema_version": 1, "ticket_id": "candidate-1", "attempt": attempt,
+                    "review_scope": ["."], "unobserved": [], "sources": [{
+                        "path": "source.py", "sha256": ctl.file_sha256(source),
+                        "catalog_method": "python_ast", "functions": []}], "families": []}
             name = step + "_coverage.json"
             (self.ticket / name).write_text(json.dumps(coverage), encoding="utf-8", newline="\n")
             self.call("artifact", "--dir", self.ticket, "--step", step, "--attempt", attempt, "--path", name)

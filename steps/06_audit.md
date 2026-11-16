@@ -90,7 +90,7 @@ git rev-list --count <worktree_branch>..<目标基分支>     # 目标基分支 
 > - 输出 = `{"candidate": true, "facts": [...]}` 候选事实列表（**候选不作数**，主代理必须 Read/rg 实证后才可用于终审）
 > - 主代理把候选逐条与代码实证比对，`match=false` 项作为终审重点复核（防止 patch / 实施改了入口忘改 README、声明与代码漂移）
 > - **gate trace**：audit 存在受影响仓库（`affected_repo_roots` 非空）→ `audit.repo_facts: eligible=true` 必须 called/cache_hit/degraded_after_attempt/unavailable_before_call（evidence 含 affected_repo_roots）
-> - **前提契约（关键文件全缺降级）**：README / CLAUDE.md / 入口文件**全部不存在** → propose_repo_facts 无对象可审 → 跳过本段；写 `▶ propose_repo_facts 跳过：工程无 README/CLAUDE.md/入口文件可审计` + trace `eligible=false, skipped_not_eligible, evidence={affected_repo_roots:[]}`
+> - **关键文件全缺**：README / CLAUDE.md / 入口文件全部不存在时记录真实缺失情况，仍保留真实 `affected_repo_roots`；按机器资格和工具实际可用性调用或如实降级，不能将非空仓库改写为空以跳过 gate。必要事实无法核验时保留证据债务。
 > - **降级**：cheap-research 不可用 → 走原流程（主代理自审）；写 `[降级-propose_repo_facts 不可用]`。trace 按 [thinking_detail.md](../references/thinking_detail.md)「cheap-research 执行门（gate）流程」区分实际失败与未暴露；未暴露记 `unavailable_before_call/attempted=false/result=unavailable` 及完整 `availability`，不伪造调用。
 
 4. **思考分级（L2：sequential-thinking）**（按 [references/mcp_per_step.md](../references/mcp_per_step.md)「通用前置·分级思考」段执行）：本步骤为 L2，调用 sequential-thinking（3~5 步）。思考职责 = 构建追溯矩阵（计划功能点→代码位置）→ 汇步骤历史 → 规划 6 维度审计策略
@@ -211,13 +211,15 @@ git rev-list --count <worktree_branch>..<目标基分支>     # 目标基分支 
    - 每个问题用 Edit 工具修复，**禁止删除现有注释**
    - 修复后追加记录到 `06_audit.md` 的「修复日志」段
 3. 全部修复后做全局编译验证，最多 3 次
-4. 更新 `.ico_metadata.json`：`status = completed`（**控制面接线**：经 `python3 tools/icode_control.py transition --dir {ICODE_OUT_DIR} --to completed --delivery-verdict <verified|verification_pending|blocked|not_applicable>`——完成态门禁点 + **必须显式携带交付结论**，宿主验证通过不得自动映射为 verified；三 gate linter 任一失败状态不前移。下方第 7 步 delivery_verdict 人工判定结论即 transition 的 `--delivery-verdict` 取值来源；判定细则以第 7 步为准，见 [references/control_plane.md](../references/control_plane.md)）
+   - **最终候选变化时先回流**：若修复改变了受保护源码，按 [execution_model.md](../references/execution_model.md) 的输入漂移规则核对并以 `blocked` 结束旧 audit attempt；再只读检查当前候选及 code/deepcheck 回执的适用性。若当前候选缺少必需回执，先终结全部开放执行，从 `action-policy` 获取当前 revision，按 [control_plane.md §3.1](../references/control_plane.md) 受控返回 review，重新完成 review → merge → code → deepcheck → audit，直至回执适用最终候选。不要仅重跑 audit、改写 hash 或把旧回执当作新审查；没有源码漂移或确有可验证的等价证明时按实际检查结果继续，不无故回流。
+4. **核对最终输入**：在判定交付结论和转换 completed 前完成下列回写；若 `03_plan_final.md` 等受保护输入变化，按输入漂移合同结束旧 attempt，重新取得适用审查回执，不能让旧回执覆盖新内容。
 5. **回写实现偏差备忘到 `03_plan_final.md`**（不可跳过，详见下方「实现偏差备忘」规范）
 6. **worktree 工单归档准备（若 `metadata.active_checkout` 非 null，缺失按 [references/worktree_isolation.md §3.7](../references/worktree_isolation.md) 用 `worktree_path` 推导）**：确定并原子写入 `metadata.archive_path = ~/.claude/icode_data/worktree_archive/<project_id>/<ticket_id>/`，但此时只称“归档目标已准备”，不得称 archive complete。完整复制、manifest/hash 和三 linter roundtrip 统一在 `/icode worktree --close` 的 `close_planned → archived` 阶段完成（详见 [references/worktree_isolation.md](../references/worktree_isolation.md)「产物归档」）。
 7. **刷新最终状态与全局索引**：
    - 先按实际证据回填 metadata 的 `verdict` 字段族，并确定本次 `delivery_verdict` 取值；`delivery_verdict` 不先直写 metadata，只作为下一条 `transition --to completed --delivery-verdict ...` 的参数，由状态事务同步落盘。TDD 无有效 RED、target checkout 未参与验证、实机待办或用户自担验证时，均不得把交付结论写成 `verified`，应如实使用 `verification_pending/blocked/not_applicable`。
-   - `status=completed` 必须经 `python3 tools/icode_control.py transition --dir {ICODE_OUT_DIR} --to completed --delivery-verdict <verdict>`，由完成态门禁校验并写事件；禁止先直写 completed。
+   - 完成当前 audit attempt 的产物登记与边界检查、成功终结后，`status=completed` 必须经 `python3 tools/icode_control.py transition --dir {ICODE_OUT_DIR} --to completed --delivery-verdict <verdict>`，由完成态门禁校验并写事件；禁止先直写 completed。
    - 状态完成后调用 `python3 tools/icode_control.py index-write --ticket-dir {ICODE_OUT_DIR}` 同步 metadata 镜像字段；若需重置索引独有的 stale 字段，调用 `index-update --ticket-id <id> --set-json '{"stale":false,"stale_reason":null,"stale_checked_commit":null}'`。legacy 工单先 migration，禁止手工直改 index。
+   - 索引读写因权限失败时保留错误和真实状态，在交付中明确索引未同步及索引同步债务；不得把已有 `indexed=true` 当作本次同步成功。对 `indexed=false` 且索引无对应条目或只读失败的工单，按拓扑规范核对本地可信根及其余门禁后可继续本地完成；已读到冲突记录仍 fail-closed。权限恢复后用上述原生 `index-write` 受控重试并重新核对，不得直写索引。
    - 方向结论仍遵循：默认 `unknown`；实证有效可标 `verified`；被证伪/回退标 `disproved` 并填写 `verdict_reason/correct_direction`；被替代标 `superseded` 并填写 `superseded_by`。
 8. **G3 交付前在线契约检查（worktree 工单，`submission_contracts` 非空时）**：运行 `python3 scripts/submission_guard.py submit-check --metadata "{ICODE_OUT_DIR}/.ico_metadata.json"`，**不传内部 `--merge`**。该模式逐仓 fetch 冻结线上目标并执行只读冲突预检，不改变工作树、index 或本地分支；fetch 失败、契约漂移或冲突 → 总状态 blocked。发现线上领先/分叉时，本轮 audit 停止并提示显式运行 `/icode worktree --merge`，由该命令全仓预检后安全合并和复检，再重跑 audit。任何状态都不自动 commit/push；写 `metadata.submission_audit` 只缓存展示，判定始终实时重跑。
 9. 输出交付总结
@@ -343,7 +345,7 @@ du -sh <各 worktree 路径>                                  # 空间占用
 - □ 7 维度每维度有 file:line 证据 + 评分理由 ≥2 句实质（含 §6.7 原始需求收敛）
 - □ 测试结果已核对（§6.1 测试核对：`test_outcome` 值 + 失败项是否记入问题清单）
 - □ 无"无新问题""整体通过"等空泛结论（每条结论有具体证据）
-- □ 终审时确认了 verdict（默认 `unknown` 不阻塞流程；标注 `verified`/`disproved`/`superseded` 时回填 `verdict_reason`/`correct_direction`/`verdict_source`/`verdict_at`，双写 metadata + index 同步）
+- □ 终审时确认了 verdict（默认 `unknown` 不阻塞流程；标注 `verified`/`disproved`/`superseded` 时回填 `verdict_reason`/`correct_direction`/`verdict_source`/`verdict_at`；经原生入口同步索引，失败则如实记录索引同步债务）
 - □ workflow gate 验收门已跑（`lint_workflow_contract.py --step audit-verified`）：涉及生命周期/身份变化且矩阵缺单元时，`delivery_verdict` 未标 `verified`；`verified` 前提 = 矩阵无空 cell + `tdd` 有有效 RED（若有行为变更）
 
 ### 产物集完整性终检（完成前自检的机器命令）

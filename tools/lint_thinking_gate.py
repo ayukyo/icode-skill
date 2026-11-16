@@ -250,7 +250,7 @@ def validate_row(row: Dict, catalog_step: Optional[Dict], catalog: Dict,
             if isinstance(bucket, list):
                 valid_triggers.update(bucket)
         for tr in row["triggers"]:
-            if tr not in valid_triggers:
+            if not isinstance(tr, str) or tr not in valid_triggers:
                 issues.append(f"{tag} triggers 含非法枚举: {tr}（禁止随意自然语言扩张）")
 
     # 机制与等级匹配
@@ -270,13 +270,22 @@ def validate_row(row: Dict, catalog_step: Optional[Dict], catalog: Dict,
         if tier not in ("L2", "L3") or row.get("attempted") is not False or result != "degraded":
             issues.append(f"{tag} unavailable_before_call 必须为 L2/L3、attempted=false、result=degraded")
         availability = row.get("availability")
-        if not isinstance(availability, dict) or availability.get("tool_visible") is not False:
-            issues.append(f"{tag} unavailable_before_call 缺工具不可见证据")
+        if not isinstance(availability, dict):
+            issues.append(f"{tag} unavailable_before_call 缺工具可用性证据")
         else:
             for field in ("discovery_ref", "reason", "fallback", "evidence_ref"):
                 if not isinstance(availability.get(field), str) or not availability[field].strip():
                     issues.append(f"{tag} availability 缺 {field}")
-            if availability.get("reason") not in {"not_exposed", "discovery_failed"}:
+            reason = availability.get("reason")
+            if reason in ("not_exposed", "discovery_failed"):
+                if availability.get("tool_visible") is not False:
+                    issues.append(f"{tag} availability 缺工具不可见证据")
+            elif reason == "policy_denied":
+                if availability.get("tool_visible") is not True:
+                    issues.append(f"{tag} policy_denied 要求工具可见")
+                if not isinstance(availability.get("policy_ref"), str) or not availability["policy_ref"].strip():
+                    issues.append(f"{tag} policy_denied 缺策略依据")
+            else:
                 issues.append(f"{tag} availability.reason 非法")
 
     # L2/L3 履行要求

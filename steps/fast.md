@@ -108,6 +108,8 @@ classification 结构及 canonical scope 摘要、引用根与校验边界见 [r
 
 六段 compact 合同与本节及命中引用共同构成 fast 必要合同；稳定 FAST-* ID 表示职责，不代表已完成或 passed。首次必须实际加载本节及共享真源，后续仅按 thinking_core 复用仍完整保留的原文。步骤返回的 source_digest/source_refs 只是版本绑定，不能据此声称已读正文。完整 full/start 保留原多轮、对抗及 Reverse/Fixed/Free 强度；已有单步/不支持 compact 的入口仍可实读原步骤执行。
 
+**升级与续接**：已有 fast 审查或复检后升级 full，先终结开放 attempt 并按 action-policy/revision 受控返回 review，重新完成 full review、merge、code、deepcheck 和 audit；不得把 fast 覆盖冒充 full。
+
 通用前置不能跳过：解析真实 ticket/活动实现根与现有状态，拒绝 debug/关闭冻结/身份或路径错误；legacy 按控制面只读/迁移合同处理。受控 metadata、索引、事件、产物和状态只用既有 writer，目录/端口/schema/provider 错误仍 fail-closed，可选 profile 失败不能绕过准入。code/Reverse/Audit 的真实源码 Read、判断、专项 assessment 分阶段独立，静态规则复用不代表源码或上一阶段裁决复用。所有阶段保持原 L1/L2/L3 阻断/降级边界、L2 思考和 MCP trace 义务，输出确认、决策锚点及适用检索缓存仍按各真源。
 
 冻结输入/候选/范围/合同或源码漂移：按 execution_model 终结旧 attempt 为 blocked，按 route 重入并实际重新核验，禁止只改 hash；恢复先查真实 trace/open operations，副作用结果未知先核对，不盲重放。每阶段保留 start→边界 check→真实 artifact→finish→合法 transition；长动作成功/失败都写 operation 终态。缺上步真实产物/完成态停止串联，不直写完成态、不伪造 Read、成功或 skipped。

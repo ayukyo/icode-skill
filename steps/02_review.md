@@ -26,6 +26,8 @@
 > - **场景二·单步升级**（fast 工单上用户显式跑 `/icode review N`，**带了正整数 N**，`param_max_rounds` 非空）：视为 fast→full 升级意图，先经控制面记录 `risk_profile.effective_mode="full"`，**N 优先级最高**——`max_rounds = N`、`absolute_cap = max(10, N × 2)`、**恢复步骤 2.5.5 对抗验证**、走正常 (a)(b)(c) 循环控制（**不触发** fast 特例）。输出标记：`▶ 步骤2 fast 工单单步升级：按 N={N} 轮 + 对抗验证执行`
 > - **场景判定**：见步骤3「分步续跑检测」——以 `param_max_rounds` 是否非空区分（非空→场景二升级；空→场景一锁死1轮）
 
+**有效模式与升级续跑**：`effective_mode(metadata)` 以机器策略解析；有效 full 首次审查默认 3 轮（用户显式 N 优先），不沿用 fast 的 1。真实 full 审查中断续跑保留计数；已有 fast 审查后升级 full，须结束开放 attempt 并受控重入新 full review，旧 fast 轮次不能冒充 full。
+
 采用**独立计划对比 + 多轮循环审查**模式：
 - **首轮**：先基于原始需求独立编制简要计划，再与步骤1计划逐项对比，最后做7维度审查
 - **后续轮次**：**增量审查**，只审查上一轮修改的部分 + 跨章节影响分析。**软上限 N 轮**（N 由 `/icode review [N]` 指定，默认 3）；达到 N 但**仍有新问题**时**自动延长 +2 轮**，直到连续 2 轮无新问题，或触达**硬上限** `absolute_cap = max(10, N×2)`
@@ -128,21 +130,20 @@
 
 > **fast 场景一跳过对抗**（`FAST_LOCKED == true`，即 `/icode fast` 自动串联、未带参 N）：不 spawn 任何质疑者子代理，直接把步骤 2.5 产出 issue 标 `verification_status=confirmed` 计入 `new_issues`。`adversarial_verification` 字段写 `null` 并标注「fast 场景一：无对抗」。**这是设计上的单视角审查，由用户自负其责**——fast 入口警告已明示。
 >
-> **fast 场景二恢复对抗**（`FAST_LOCKED == false`，即 fast 工单上显式跑 `/icode review N` 升级）：**与 full 模式完全一致**——必须 spawn 3 个独立质疑者子代理做对抗验证，不得跳过。fast→full 升级一旦触发即恢复完整对抗流程。
+> **fast 场景二恢复对抗**（`FAST_LOCKED == false`，即 fast 工单上显式跑 `/icode review N` 增强本次审查）：**与 full 模式完全一致**——必须 spawn 3 个独立质疑者子代理做对抗验证，不得跳过。真实风险升级为 full 时也必须执行完整对抗。
 
 步骤 2.5 产出的 issue 清单是**主代理单视角**的结论，存在确认偏误风险。本步骤强制引入**独立质疑者**对每条 issue 做对抗验证，只有经对抗仍成立的 issue（或步骤 2.4 已实证验证为 `confirmed` 的 issue）才能进入 `new_issues`。
 
 **对抗模式**（3质疑者/subagent_type=schema 强制结构化/裁决优先级/诚实降级/独立性硬约束/零待对抗快速通道/子代理失败处理）——**必须先 Read [references/adversarial.md](../references/adversarial.md) 完整内容**（不得凭概述/记忆执行）。本步骤分析对象 = 步骤 2.5 产出的 issue（步骤 2.4 实证 issue 例外，已有铁证直接 `confirmed` 无需对抗）。**质疑者 prompt 组装后过 anti-coaching 扫描 + freshness 检查**（见 [references/adversarial.md](../references/adversarial.md)「输入契约」段）；续跑/增量轮**禁止**把历史对抗记录（上轮裁决/依据/Agent ID）喂给本轮质疑者。
 
-> **spawn 等待规格**（引用 [references/adversarial.md](../references/adversarial.md)「显式等待 + 超时机制」段）：spawn 3 质疑者必须**显式等 verdict**——统一走 `Agent` **后台 spawn（`run_in_background: true`）拿 task_id + `TaskOutput(task_id, block=true, timeout=...)` 阻塞等**（**首选**等待原语，超时把控制权交回主代理；宿主未提供时按 [subagent_spawn_wait.md](../references/subagent_spawn_wait.md)「等待原语探测与降级」执行）。**禁止**：后台 spawn 后被动等任务通知（挂死/断连永无通知，看门狗失守）/ `run_in_background: false` 裸同步 spawn 当唯一等待手段（`Agent` 工具无 timeout 参数，挂死卡死主代理）/ spawn 后不等待直接进下一步。**超时档位**：首次 spawn 走 10 分钟档（`TaskOutput(block=true, timeout=600000)`，`BACKGROUND_WATCHDOG_SECONDS=600`，超时判疑似断连 → `TaskStop` → 前台重来）；前台重来/重试走 `TIMEOUT_SECONDS = 120` 档（可由 metadata.task_timeout_seconds 覆盖，超时先 `TaskStop` 停句柄再重试 1 次，换措辞 + 可换 subagent_type 兜底），二次仍超时走 `[未验证-子代理对抗失败]`。**禁止**未等待就标 `[未验证-子代理对抗失败]`——该标签留给「确认失败」的子代理，不得给「仍在跑/返回晚」的子代理（2026-07-29 实测踩坑）。判定状态四态枚举（`sync_ok` / `timeout_retry_used` / `still_failed_after_retry` / `env_no_spawn`）必须写入 `adversarial_verification` 字段便于审计（详见 [references/adversarial.md](../references/adversarial.md)「显式等待 + 超时机制」段）。**防 `max_output_tokens` 截断**：质疑者 spawn 须含输出预算硬约束（verdict 第一动作/禁回显/总输出≤2000 token 宽松上限勿压紧，见 adversarial.md「spawn 规格要求」第 4 条）。
-> **整合墙钟硬截止**（引用 [references/adversarial.md](../references/adversarial.md)「整合墙钟硬截止」段，双保险第二层，防"等待质疑者返回后整合定稿"拖成几小时）：spawn 3 质疑者后对抗等待+整合阶段**墙钟上限 20 分钟**（`INTEGRATION_WALL_CLOCK_DEADLINE_SECONDS=1200`）。**3 质疑者必须一次性并行后台 spawn**（全拿 task_id 再逐个 `TaskOutput` 阻塞等，禁止串行 spawn——串行总等待放大 3 倍）；**到 deadline 无论还差几个未返回，立即强制收敛**：未返回者先 `TaskStop` 停句柄 → 按**已返回** verdict 执行裁决优先级整合 → 未返回者标 `[未验证-子代理对抗失败]` 计入 pending → **禁止为等最后一个质疑者延长 deadline / 无限等待**（宁可少验一条，不卡流程几小时）。
-> **子代理失败处理**（实测痛点：质疑者偶尔只返回开场白/被截断）：**禁止改由主代理自演裁决**。失败时按 adversarial.md「子代理失败处理」重试 2 次（含 1 次换 subagent_type）→仍失败诚实降级为 `[未验证-子代理对抗失败]` 计入 `pending_verification`，绝不伪造 `confirmed`。主代理 Read/Grep 实证铁证不算自演（属事实核查），判断性结论才必须独立 spawn。
+> **等待与失败处理**：按 [跨宿主等待合同](../references/subagent_spawn_wait.md) 使用当前宿主允许的启动、有限等待和停止能力；并发不足可分批，未返回不等于失败。三视角各自独立，失败或无法启动如实标待验证，不由主代理冒充独立裁决。
+> **子代理失败处理**：按对抗与跨宿主等待合同，在实际能力和授权允许时有界重试；仍未完成则计入 `pending_verification`，不得伪造 `confirmed`。
 
 > **log 阶段对抗验证结论复用**（针对方式D log→start 工单）：如果当前工单来自 `/icode log` 入口（`completed_steps` 含 `"log"`），log 阶段已对根因做对抗验证（3 质疑者独立 spawn），步骤2 **可复用**该结论，不需重新 spawn 3 质疑者对抗根因。但**仍需**对"步骤1 计划本身"（9 章节结构、ADR 合理性、错误处理充分性等）做 3 轮审查（不依赖对抗验证）。复用的具体方式：把 log_analysis.md 第 6 章「对抗分析记录」作为已确认的根因引用，在 review_round_*.json 中标注 "log_phase_adversarial=reused" 字段。
 
 **输入契约**（喂质疑者）：`01_plan.md` 路径 + 相关代码文件路径 + **`rg -in '<需求关键词>'` 命中的非计划文件**（质疑者看不到重叠文件就永远不会质疑必要性，grep 命中文件必须喂入——主代理自己都不知道已有等价实现时，只有重叠文件能让质疑者发现它）+ 待验证 issue 清单（含 `id`/`affected_sections`/`suggestion`/`rejection_risk`/`evidence_pointer`）。
 
-**输出对抗记录**：把每个质疑者的裁决 + 依据 + 最终状态汇总写入 `adversarial_verification` 字段（见步骤 2.6 JSON 结构）。**每个质疑者必须记录独立 spawn 的 Agent ID**（如 `agentId: ac32afbc15a278f3f`）——无 Agent ID=未独立 spawn=自演=不合规，必须重跑对抗。裁决结果分桶：`confirmed` 进 `new_issues`、`refuted` 进 `refuted_issues`、`needs_more_evidence` 进 `pending_verification`。
+**输出对抗记录**：真实启动的质疑者记录宿主返回的独立身份、裁决和证据。不可用或策略禁止时如实记录原因，无调用则无身份，不编造重试；判断性结论保持 `needs_more_evidence`。裁决结果分桶：`confirmed` 进 `new_issues`、`refuted` 进 `refuted_issues`、`needs_more_evidence` 进 `pending_verification`。
 
 
 **步骤 2.5.6 - over-design 审查（反偷懒第 26 条）**：检查 plan 修复方案是否分 A/B/C 三档呈现。检查点：①分档？②A 档真根因（非兜底）？③B 档标注"A 修复后触发概率"？④机制层修复是否被误归 B 档（应按"不改会复现吗"判定）？⑤A 档标"跨工程"是否有证据（非借跨工程逃避实施）？判定：B/C 混入 A 档主方案 = `confirmed` issue（需 plan 修订分档）。**核对 metadata.fix_tiers**：plan 未把分档落盘（字段缺失但 `03_plan_final.md` §4.5 有分档文本）→ 提示 plan 补落盘；落盘分档与文本分档不一致 → `confirmed` issue（需 plan 修订）。对抗质疑者追问补："这个修改点是 A 还是 B？B 在 A 修复后还会触发吗？机制层不改会复现吗？A 档标跨工程有证据吗？"
@@ -157,7 +158,7 @@
 > - **函数数 ≥ 50**（阈值取自 `mcp/cheap-research/gates.json` 常量 `dedup_min_functions`，禁止在正文写死）
 > - **gate 绑定**：本子阶段 = gate `review.dedup`（tool=extract）。**函数数按受影响 Git 仓库计算**（见下），任一受影响仓库 ≥ 阈值 → eligible=true 必须 called/cache_hit/degraded_after_attempt/unavailable_before_call；**全部 < 阈值** → eligible=false `skipped_not_eligible`（**evidence 字段以 `mcp/cheap-research/gates.json` 的 `gates[].evidence_fields` 为唯一真源，本段不维护清单副本**；`review.dedup` 当前为 `affected_repo_roots` / `function_count` / `threshold` / `rg_available` / `cheap_available` 五项，schema v2 下**缺任一字段判 invalid**）
 >
-> **任一不满足 → 整个 §2.5.7 跳过**，在思考块 `MCP 调用` 段写明降级原因 + 写 trace `decision=skipped_not_eligible`（不写产物文件）。
+> 函数数低于阈值时才按业务不适用跳过；达到阈值但工具不可用时按 [人工去重证据合同](../references/inspection_evidence.md) 真实完成等价审查，不能因工具缺失把业务风险标为已覆盖。MCP trace 按 catalog 如实记录工具资格；未完成保留去重债务。
 
 **执行步骤**（AI 直接照填）：
 
@@ -192,7 +193,7 @@
 
    输出按行解析 → catalog.json 格式：`[{file, name, line, signature, context}, ...]`。context 取函数定义行 + 后 5 行（用 `rg -A 5` 重抽或 Read 补足）。
 
-   **ripgrep 不可用**（未装）：整个 §2.5.7 跳过
+   **ripgrep 不可用**：使用受支持的其他方式枚举并核验；仍不能完整枚举时保留未观察债务，不得声称去重完成或低于阈值。
 2. **函数数判定**（阈值与分批）：
    - 函数数 < `dedup_min_functions`（gates.json 常量）→ 输出 `▶ §2.5.7 跳过：函数数 {N} < {阈值}，工程规模太小无需 dedup` + 写 trace `review.dedup: eligible=false, skipped_not_eligible`，整个 §2.5.7 结束
    - 函数数 > 500 → 分批（每批 100）。**理由**：high质量模型(用户配置)单次处理 5-10 函数合理，10000 函数全跑高质量模型不可能；500 函数通常分 ~30-50 sub_category，每个 5-15 函数，高质量模型 50 次 ≈ $0.04 cost。
@@ -371,7 +372,7 @@
 
 **降级路径**：
 
-- cheap-research 不可用 → 整个 §2.5.7 跳过，记 `[降级-cheap-research 不可用]`
+- cheap-research 不可用 → 按[人工去重证据合同](../references/inspection_evidence.md)执行等价审查；未完成标待验证并保留债务。
 - extract 返回 `schema_validation_failed` → 重试 1 次（自动改 instruction 加"严格按 schema 输出"），仍失败标"分类降级-单类跳过"
 - 高质量模型某类返回空数组 → 该类跳过（无重复），不报错
 
@@ -455,7 +456,7 @@
    > **fast 场景一特例**（`FAST_LOCKED == true`，即 `/icode fast` 自动串联、未带参 N，最高优先级，命中即跳过 (a)(b)(c)）：
    > `total_rounds >= 1` 时**直接终止**——fast 场景一固定 1 轮无对抗，不走延长逻辑与连续 2 轮 clean 收敛。状态置 `review_done`，`clean_rounds` 保留当前值，`completed_steps` 追加 `"2"`。即使 `has_new_issues == true`，场景一也不强制回到步骤1——用户自负其责（fast 入口警告已明示）。
    >
-   > **fast 场景二走正常循环**（`FAST_LOCKED == false`，即 fast 工单上显式跑 `/icode review N` 升级）：**不触发本特例**，落入下方 (a)(b)(c) 正常判定——可延长、可连续2轮clean收敛、可触达硬上限告警，与 full 模式一致。
+   > **fast 场景二走正常循环**（`FAST_LOCKED == false`，即 fast 工单上显式跑 `/icode review N` 增强本次审查）：**不触发本特例**，落入下方 (a)(b)(c) 正常判定——可延长、可连续2轮clean收敛、可触达硬上限告警，与 full 模式一致。
 
    **(a) 触达硬上限**（`total_rounds > absolute_cap`）：
    - **终止**。若最后一轮 `has_new_issues == true`，落盘告警（见下"触达硬上限处理"）；否则按"无新问题"正常终止
@@ -486,18 +487,18 @@
    - 在 metadata 中记录 `unresolved_issues_at_cap = true`
    - 输出告警：`⚠️ 步骤2 触达硬上限{absolute_cap}轮仍有未解决问题，建议回到步骤1`
 
-5. **终止后更新 metadata**：`status = review_done`（**控制面接线**：经 `python3 tools/icode_control.py transition --dir {ICODE_OUT_DIR} --to review_done`——完成态门禁点，transition 会运行三 gate linter（`--strict`），任一失败状态不前移；下方第 7 步的 `--step review` 专项校验保持并行执行，两者互补），`completed_steps` 追加 `"2"`，保留 `extended_rounds` / `unresolved_issues_at_cap` / `pending_verification` 字段供后续步骤参考
-6. **审查输出压缩（供 merge 步骤消费）**（gate `review.result_summary`）：**先落结构化结论**——本轮有 issue 时已写 `review_round_{total_rounds}.json`；clean 轮不写 JSON 时，以 `02_review.md` 的结构化结论（轮次/总问题数/关键 HIGH/未解决标记）为摘要输入（**不得改去摘要 `01_plan.md` 并声称已履行本 gate**）。再调 `mcp__cheap-research__summarize` 压缩，摘要 ≈ 300-500 token，写入 `{ICODE_OUT_DIR}/_review_summary.md`。**gate trace**：review 已形成可消费结论文本 → `review.result_summary: eligible=true` 必须 called/cache_hit/degraded_after_attempt/unavailable_before_call（evidence 含 `result_source`/`review_rounds`）；**降级**（cheap-research 不可用）：`_review_summary.md` 不存在时 merge 步骤直接读各轮 JSON 原文；trace 按 [thinking_detail.md](../references/thinking_detail.md)「cheap-research 执行门（gate）流程」区分实际失败与未暴露，未暴露记 `unavailable_before_call/attempted=false/result=unavailable` 及完整 `availability`，不伪造调用。
-7. **gate 转换校验**：置 `review_done` 前运行
+5. **审查输出压缩（供 merge 步骤消费）**（gate `review.result_summary`）：**先落结构化结论**——本轮有 issue 时已写 `review_round_{total_rounds}.json`；clean 轮不写 JSON 时，以 `02_review.md` 的结构化结论（轮次/总问题数/关键 HIGH/未解决标记）为摘要输入（**不得改去摘要 `01_plan.md` 并声称已履行本 gate**）。再调 `mcp__cheap-research__summarize` 压缩，摘要 ≈ 300-500 token，写入 `{ICODE_OUT_DIR}/_review_summary.md`。**gate trace**：review 已形成可消费结论文本 → `review.result_summary: eligible=true` 必须 called/cache_hit/degraded_after_attempt/unavailable_before_call（evidence 含 `result_source`/`review_rounds`）；**降级**（cheap-research 不可用）：`_review_summary.md` 不存在时 merge 步骤直接读各轮 JSON 原文；trace 按 [thinking_detail.md](../references/thinking_detail.md)「cheap-research 执行门（gate）流程」区分实际失败与未暴露，未暴露记 `unavailable_before_call/attempted=false/result=unavailable` 及完整 `availability`，不伪造调用。
+6. **gate 转换校验**：置 `review_done` 前运行
    `python3 tools/lint_mcp_coverage.py {ICODE_OUT_DIR} --step review --strict`——`review.dedup` / `review.result_summary` 必须各有最终 trace 行，eligible 未履行不得标流程合规。
+7. **结束与状态转换**：先完成本 attempt 所需产物登记、边界检查与 step finish，再经 `python3 tools/icode_control.py transition --dir {ICODE_OUT_DIR} --to review_done` 执行严格门禁；通过后追加 `completed_steps` 的 `"2"`，保留 `extended_rounds` / `unresolved_issues_at_cap` / `pending_verification`。门禁失败时状态不前移。
 8. **全流程模式**：
-   - 若 `unresolved_issues_at_cap == true`：**暂停**全流程串联，输出 `⚠️ 步骤2 存在未解决问题，请手动决定是否继续 /icode merge 或回到 /icode plan`
-   - 否则：**立即继续执行步骤3**
+   - 若 `unresolved_issues_at_cap == true`：输出警告并保留未解决问题及待验证项，交由 merge 和 audit 审阅；适用的 L1 门禁仍须通过。
+   - 按控制面允许的动作继续步骤3；不得将未解决事项标为已验证。
 ## MCP 推荐（强证据二元化）
 | MCP | 推荐级别 | 用途 |
 |-----|----------|------|
 | vision-bridge | 🟢* | 截图分析--用户给图时 |
-| **cheap-research** | 🟢* | **降本**：extract（dedup 函数分类 + 找重复，gate `review.dedup`，见 §2.5.7）+ summarize（审查输出压缩，gate `review.result_summary`，供 merge 步骤消费，见步骤 6）。其余（diff_summary 增量审查 / fill_template 维度结果 / retrieve_similar 历史 issue / scan_patterns / trace_refs）可作可选增强，非强证据场景不评估。不接管决策：3 质疑者对抗/审查合成走主会话 |
+| **cheap-research** | 🟢* | **降本**：extract（dedup 函数分类 + 找重复，gate `review.dedup`，见 §2.5.7）+ summarize（审查输出压缩，gate `review.result_summary`，供 merge 步骤消费，见步骤 5）。其余（diff_summary 增量审查 / fill_template 维度结果 / retrieve_similar 历史 issue / scan_patterns / trace_refs）可作可选增强，非强证据场景不评估。不接管决策：3 质疑者对抗/审查合成走主会话 |
 | context7 | ⚪ | 本步骤不推荐 |
 | memory | ⚪ | 本步骤不推荐 |
 | playwright | ⚪ | 本步骤不推荐 |

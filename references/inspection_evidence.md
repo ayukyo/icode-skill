@@ -75,6 +75,27 @@ python3 tools/icode_control.py check-outputs --dir <out> --step review
 
 `review_scope`依project_intake包含受影响代码及调用/导入/提供者/等价候选；large/huge遵守预算，在明确范围内完成，不自动扩大vendor全树。Dedup按声明范围计算catalog/分类/实际出现家族与逐家族语义裁决，范围内缺任何环节结果即partial/degraded。`complete_within_scope`不能写“全SDK/固定23类全部通过”。Audit可引用有效且源hash未漂移的Dedup结果，但Audit的Read独立完成。
 
+新 audit attempt 复用 deepcheck 去重时，必须引用本工单真实成功的 full deepcheck：范围一致、coverage 产物回执和摘要有效，当前源码及阈值与其证据一致；仅有 MCP 结果时还需可验证且覆盖范围的候选源码快照。也可提交本轮可验证的人工去重证据。旧 audit attempt 沿用其开始时合同；无法核实的来源须保留债务，不得冒充完成。
+
+### 无 cheap-research 的人工等价去重
+
+工具不可用时可由当前宿主按原始源码进行实际人工等价审查；不可将工具未暴露、摘要、grep命中或覆盖声明本身冒充语义审查。逐文件读完整范围，形成实际函数目录、家族分类、逐家族比较、结论和源码位置；任一范围/语言/文件/家族未读、截断、不可解析或预算耗尽，均保持 `partial|degraded` 和明确债务，不得写 `complete_within_scope`。保留现有对删除/合并候选的独立验证及授权约束。
+
+实现提供 `tools/manual_dedup_evidence.py`：`collect_sources(workspace, review_scope)` 按实际 Git 工作区的 tracked/unignored 文件有界枚举并计算摘要；未知文件类型、嵌套 Git、超预算和无法访问均失败，需缩小声明范围或保留债务。Git 忽略文件不在分母，不能据此声称覆盖这些文件；涉及忽略源码、非 Git 工程或受保护 Git provider 未接线时不可冒充完整。`validate_report(report, workspace, ticket_id, attempt, review_scope, expected_sources)` 将来源绑定当前工单、attempt、范围和独立枚举结果，校验源码摘要、函数/家族及引用。Python 用 AST 验证普通、异步及嵌套函数目录；JS/TS/Vue/C 等已识别语言使用 `manual_read`，按文件声明真实阅读、语言和完整性，并逐函数登记原始行号和逐字原文。**机器无法证明人工阅读、分类或语义完整，审查者仍须独立核对；空目录也须明确人工完成声明及理由。**
+
+若控制面当前合同支持 `manual_dedup`，将其作为当前步骤 coverage JSON 中的内嵌对象，并经现有 `inspection_coverage` artifact 回执绑定整个文件摘要；没有可验证接线时不得声称已通过机器门。来源对象示例（真实数据和摘要以实际读取为准）：
+
+```json
+{"schema_version":1,"ticket_id":"example-1","attempt":"真实attempt","review_scope":["src"],"unobserved":[],
+ "sources":[{"path":"src/view.ts","sha256":"实际sha256","read_sha256":"实际sha256","language":"typescript",
+   "catalog_method":"manual_read","completeness":"complete_within_scope","catalog_reason":"实际通读与编目依据",
+   "functions":[{"name":"render","line":1,"excerpt":"export function render() {}","family":"view"}]}],
+ "families":[{"name":"view","members":["src/view.ts:1:render"],"conclusion":"single",
+   "reason":"实际比较依据","evidence":["src/view.ts:1"]}]}
+```
+
+Python 文件用 `catalog_method=python_ast`、真实 `sha256` 及每个函数的 `name/line/family`；每个实际家族须给 `single/different/duplicates`、理由和所有成员的源码行引用。工具验收仅证明结构、版本、引用一致；不能把静态证据当作模型真正理解的证明。Audit 使用自己 attempt 的覆盖与独立 Read；如要引用 deepcheck 的人工去重，须独立验证原 attempt 真实 artifact 回执及当前范围和源码一致；未支持该可信回指时重新审查或保留债务，禁止直接改 attempt 复用。
+
 不足时填 `coverage_status=partial|degraded`、`unobserved`、`debt_reason`，以及 `dedup_status=partial|degraded` 与 `dedup_unobserved`；使用finish degraded，报告明确债务/下一步，不称合规全部通过。degraded也须真实声明回执与原因；success拒绝缺文件/阶段、旧hash和未完成项。允许显式降级结束与实现/构建通过同时存在，但不能升级delivery_verdict。
 
 **证据边界**：manifest/hash/回执只能校验代理的覆盖声明、来源及版本一致，不能自动证明实际Read、理解、语义判断或实机行为。遗漏仍需人工独立复核，不能用机器绿灯替代。

@@ -2,62 +2,13 @@
 
 > 本文件是 icode 所有"**spawn 子代理并等结果**"场景的**通用等待契约**——后台 spawn 方式、超时档位、墙钟硬截止。质疑者对抗是它的一个实例（质疑者特化规则见 [adversarial.md](adversarial.md)「显式等待 + 超时机制」「整合墙钟硬截止」两段，机械等待与墙钟规则与本契约逐条对齐）；本契约覆盖**非对抗** spawn 点：doc `99_code_facts_audit` 并行子代理、audit §6.7 三视角并发收集 facts、cheap-research 降级 `Agent(model="haiku")` 兜底、超大工单派子代理消化摘要、多个独立子任务并行启动等。**凡 spawn 子代理的步骤，默认适用本契约**（2026-08-23 实测：质疑者之外的其他子代理同样可挂死数小时，等待契约不止覆盖对抗场景）。
 
-## 为什么必须有等待契约
+## 机械等待与墙钟契约
 
-后台子代理挂死/断连时**永远不发任务通知**；`Agent` 工具**无 timeout 参数**。若主代理裸同步 spawn（等结果才继续）或被动等任务通知，挂死的子代理会把主代理卡住几小时（实测：子代理挂死数小时无逃生门）。等待契约保证：**任何 spawn 场景，从 spawn 到结果整合的墙钟上限 = 20 分钟，绝不无限等**。
+按 [宿主适配](host_adapters.md) 发现当前允许的后台启动、有限等待和停止能力。Claude 的 `Agent`/`TaskOutput` 仅为其宿主示例；Codex 使用实际暴露的 collaboration 启动、等待和停止接口。禁止虚构工具、模型类型或越过上层授权。若无可执行有界等待，记录未验证并停止依赖该结果的动作。
 
-## 机械等待契约（强制）
+相互独立的质疑者按宿主可用并发容量分批启动，每位必须是独立上下文，不互相传递结论。等待使用宿主原生有限超时，单次等待同时服从上层交互限制；未返回不等于失败。首次等待默认 600 秒、后续每次重试默认 120 秒（可由工单允许的配置覆盖），分段等待以遵守宿主单次等待上限；默认总墙钟预算 1200 秒，宿主更严格限制优先；超过预算先停止仍运行的句柄，不能停止则记录事实，未返回结果保留未验证。已返回 verdict 仍须主代理核对证据。失败在宿主能力和授权允许时最多重试 2 次，第一次更换表述、第二次在宿主支持且授权时换合适的代理类型；类型不可用、策略禁止或容量不足须如实记录，不伪造重试，不因型号或工具名不存在冒充失败，亦不允许主代理代行冒充独立裁决。
 
-1. **一律后台 spawn + 阻塞等**：`Agent` **后台 spawn（`run_in_background: true`）拿 task_id** → 紧跟 `TaskOutput(task_id, block=true, timeout=...)` **阻塞等结果**——**首选**等待原语，超时把控制权交回主代理。宿主未提供 `TaskOutput` 时不得裸同步 spawn 或被动等通知，按下方「等待原语探测与降级」执行
-2. **禁止裸同步 spawn**：`run_in_background: false` 同步 spawn 当唯一等待手段——`Agent` 工具**无 timeout 参数**，同步 spawn 挂死 = 主代理被整个工具调用卡死、无超时边界、**墙钟截止也救不了**（主循环被工具调用阻塞，代理自己无法执行任何超时；一旦误踩只能人工中断）。**⚠️ `Agent` 工具自身说明会诱导裸同步 spawn**（"只有下一步依赖结果时才用 `run_in_background: false`"）——对所有子代理**一律无效**，只认后台 spawn + `TaskOutput` 机械超时，不被工具提示带偏（实测踩坑：按工具提示同步 spawn 等子代理返回，挂死数小时无逃生门）
-3. **禁止被动等任务通知**：断连/挂死的子代理**永远不发通知**，主代理回合制空闲时无定时器，任何墙钟阈值都触发不了
-4. **并行 spawn 禁止串行**：相互独立的子代理必须一次性**并行后台 spawn 全部**（全拿 task_id 再逐个 `TaskOutput` 阻塞等）；禁止等一个返回再 spawn 下一个——串行总等待放大 N 倍、耗尽墙钟 deadline 预算
-5. **超时档位**（每子代理）：
-   - **首次 spawn**：`timeout = 600000`（10 分钟看门狗档，`BACKGROUND_WATCHDOG_SECONDS=600`）。超时 → 判「疑似断连/挂死」→ `TaskStop` → 前台重来
-   - **前台重来 / 重试**：`timeout = 120000`（`TIMEOUT_SECONDS=120`，可由 `.ico_metadata.json.task_timeout_seconds` 覆盖，见 [dir_and_metadata.md](dir_and_metadata.md)「`task_timeout_seconds` 字段」段）。超时 → 先 `TaskStop` 停句柄 → 重试 1 次（换措辞 + 可换 subagent_type 兜底）→ 二次仍超时 → 诚实降级
-6. **子代理失败处理**：失败（返回空 / 截断 / schema 不符 / 超时）→ 按对应步骤的降级标签（如 `[未验证-子代理失败]` / `[未验证-子代理对抗失败]`）**诚实降级**，**禁止主代理自演代替**——判断性结论自演 = 自己提的结论自己确认自己（既当运动员又当裁判）；主代理 Read/Grep 实证铁证不算自演（属事实核查），见 [adversarial.md](adversarial.md)「主代理实证 ≠ 自演」
-
-## 等待原语探测与降级（宿主差异，强制）
-
-> **为什么需要**：本契约的机械等待建立在 `TaskOutput` 上，但**并非所有宿主都暴露它**（实测：某宿主 `ToolSearch select:TaskOutput` 无命中，`Agent` 可用而等待原语不可用）。此时若仍按「`TaskOutput` 是唯一方式」字面执行，合规路径直接不存在——执行代理要么被动等通知（被本条契约禁止）、要么裸同步 spawn（被禁止），两条都是坑。
-
-**spawn 前必须先探测并记录 `wait_primitive`**（按优先级）：
-
-| 取值 | 判定 | 等待方式 |
-|---|---|---|
-| `task_output` | 工具列表直接可见，或 `ToolSearch select:TaskOutput` 命中 | 原契约：`TaskOutput(task_id, block=true, timeout)` 阻塞等 |
-| `monitor_until` | `TaskOutput` 不可用，但宿主提供 `Monitor`/等价「until 条件 + 超时」工具 | 一次条件阻塞调用表达「直到 N 个子代理终止或 deadline」，到点未满足 → `TaskStop` 未返回者 + 按 deadline 规则降级 |
-| `none` | 上述均不可用 | 见下方降级路径 |
-
-**`wait_primitive = none` 时的强制规则**：
-
-1. **仍并行后台 spawn**——保住并行收益与观测记录，不因缺原语退回串行。
-2. **禁止空闲等待**：spawn 后**在同一回合继续执行与该结果无关的工作**，不得以「等通知」占位空转，也不得只发一句「等待中」就结束回合。
-3. **整合点只认已到达的通知**：未到达者标 `[未验证-无等待原语-未收口]`，与被判失败的 `[未验证-子代理失败]` **区分开**——前者是能力缺失，后者是子代理真的坏了。
-4. **禁止声称「已等满 20 分钟」**：没有阻塞原语就无法证明等待发生过，该说法等同伪造 deadline 降级。
-5. **必须留痕**：把 `wait_primitive` 写进 trace（`.thinking_gate_trace.jsonl` / `.mcp_gate_trace.jsonl` 的 `availability`）与 `adversarial_verification`（或 `extensions.agent.spawns[].join_condition`，见下方观测记录契约），让审计能区分「没等」和「没法等」。
-6. **判断性结论不得因此升级**：依赖质疑者裁决的 issue，在 `none` 下仍只能停在原有降级标签，不得因「反正等不到」改标 `confirmed`。
-
-**探测本身要留证据**：记录实际做过的发现动作（工具列表快照 / `ToolSearch` 查询串与结果 / 宿主能力声明），不写「未暴露」四个字了事；空结果不等于未安装，但可作为本会话不可用的证据。
-
-## 墙钟硬截止（总闸，防"等子代理返回"拖成几小时）
-
-**常量**：`INTEGRATION_WALL_CLOCK_DEADLINE_SECONDS = 1200`（**20 分钟**，自首个子代理 spawn 起算，每轮/每批各自计时，互不影响）。正常子代理 1-2 分钟出结果，并行 20 分钟绰绰有余；20 分钟未收齐 = 有子代理挂死/极慢，不再容忍。
-
-**强制规则**：
-1. **deadline 强制收敛**：无论还差几个子代理未返回，20 分钟一到**立即**：
-   - 未返回者先 `TaskStop` 停句柄（停不掉也作废该句柄，不再等）
-   - 按**已返回**结果整合（缺结果不影响已收敛项；全缺按对应步骤的失败处理全量降级）
-   - 未返回者按失败处理诚实降级（如 `[未验证-子代理失败]` / `[未验证-子代理对抗失败]`），写入对应字段并注明"deadline 触发强制收敛"
-   - **禁止**为等最后一个子代理延长 deadline / 无限等待 / 以"还在跑"为由空转
-2. **措辞禁令**：凡"等待子代理返回后…"这类表述，必须显式带"最多等 20 分钟，超时按已返回结果整合、未返回者标降级"；禁止只写"等待…返回后…"（诱导被动/无限等待）
-3. **标签纪律**：deadline 降级 **≠** "未等待就标失败"——已等满 20 分钟（超出 10 分钟看门狗 + 重试档），属确认的收敛边界、非抢跑；"未等待就标失败"始终禁止
-
-> **为什么**：per-spawn 档位管"单个子代理怎么等"，墙钟截止管"整个 spawn 等待阶段最长多久"——后者是**总闸**。即使执行代理绕过 per-spawn 档位（重复 `TaskOutput` 再阻塞 / 被动等通知 / 等全部返回才整合），墙钟截止也能把总等待钉死在上限内。**唯一逃出墙钟的是裸同步 spawn**——那条路径只能靠上方"禁止裸同步 spawn"从源头杜绝，一旦误踩只能人工中断、无代理内逃生门。**宁可少收一条，不卡流程几小时**。
-
-## 与 adversarial.md 的关系
-
-质疑者对抗的「显式等待 + 超时机制」「整合墙钟硬截止」两段是**本契约的质疑者实例**——机械等待与墙钟规则与本契约**逐条对齐**（同一组常量：`BACKGROUND_WATCHDOG_SECONDS=600` / `TIMEOUT_SECONDS=120` / `INTEGRATION_WALL_CLOCK_DEADLINE_SECONDS=1200`）；质疑者特有内容（3 质疑者分工、verdict schema、anti-coaching、裁决优先级、`no_spawn_env` 代行门控）仅存于 adversarial.md。本契约与 adversarial.md 冲突时以本契约为准。
+质疑者角色、裁决优先级、独立性与真实性仍以 [adversarial.md](adversarial.md) 为准；结构性无能力、未暴露、策略禁止、容量不足及真实调用失败须分别留痕。
 
 ## 观测记录契约（spawn 留痕，防"子代理干了什么"不可审计）
 
@@ -95,5 +46,5 @@
 1. **spawn 前必写**：调用 `record-agent-spawn` 原子写入 `task_scope` / `expected_artifact` / `evidence_boundary` / `join_condition` / `backend` / `model` / `capabilities`（防"发出去了才想边界"）
 2. **收尾必补**：调用 `record-agent-result` 写 `result`（joined/timed_out/stopped/failed）+ `adopted`（yes/partial/no）+ `adoption_reason`；模型正文只存摘要——**采纳记录防"子代理结果被静默丢弃或伪造采纳"**
 3. **并发上限（每工单硬上限）**：控制面拒绝第四个开放 spawn；调用方排队串行。估算总 token 超软预算时先问用户，不无限并行
-4. **降级联动**：`deadline` 强制收敛 / `no_spawn_env` 代行时，对应 spawn 条记 `result=stopped|failed` + 注明触发原因，与 [adversarial.md](adversarial.md) 降级标签一致
+4. **降级联动**：仅对真实已启动且已终结的 spawn 如实记 `result=stopped|failed` 和原因；未启动不可伪造 spawn 或结果，未完成保持未验证。
 5. **校验入口**：`python3 tools/icode_control.py validate --dir <out_dir>` 严格校验 extensions.agent 结构、事件重建、终态配对与并发上限；真源 schema 见 [schemas/ticket-metadata.schema.json](../schemas/ticket-metadata.schema.json) `extensions`

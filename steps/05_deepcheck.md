@@ -21,6 +21,8 @@
 预算耗尽或有未观察项：写 `coverage_status=partial|degraded`、`unobserved`、`debt_reason`；finish用degraded而非success，报告不得称流程规范全部通过，验证债务保留。控制面success拒绝缺声明、缺阶段、过期hash或未完成Dedup；degraded也要求真实声明回执与原因。编译成功不消除审查债务。
 
 
+**有效模式**：优先取 `risk_profile.effective_mode`（合法值 `fast` / `full`），未声明回退 `metadata.mode`，仍缺失按 `full`。`mode` 保留用户原始请求；有效 full 执行 Reverse、Fixed、Free 全部阶段。
+
 ## 本步骤 L1/L2 检查项声明
 
 按 SKILL.md「强制阻断边界矩阵」定义，本步骤触发的检查项：
@@ -55,6 +57,10 @@
 ## 前置：统一拓扑门禁（共享检查器）
 
 > 进入复检前**必须**调用统一拓扑检查器（[references/worktree_isolation.md §3.8](../references/worktree_isolation.md)）。**来源一致性**：本步骤所有验证（Reverse 逆推 / Fixed 维度 / Free 角度 / 编译 / 测试）的代码 Read 路径、构建目录、二进制证据**必须来自活动 checkout**——若构建命令在 `superseded` 或旧 checkout 执行，即使测试通过，**不能作为当前活动实现的通过证据**（来源约束见 §3.8 第⑨步）。发现验证记录引用 superseded checkout → 按 blocked 处理，要求迁移或重新验证。
+
+## 前置：修复后的候选回流
+
+deepcheck 修复改变源码而使旧 code 候选回执失效时，先检查并终结开放 attempt，按 action-policy 和 revision 受控返回 review，重新取得当前候选的 code、deepcheck、audit 适用回执。源码未变化且候选回执仍适用时不无故回流；禁止伪造旧候选的审查。
 
 ## 前置：patch 配合
 
@@ -133,7 +139,7 @@ Read `metadata.tdd`（缺失/`not_assessed` → 本段跳过；工单含行为�
 - Fixed → Free：Fixed 首次全 clean 后切换
 - Free：单次完整执行后终止
 
-> **fast 模式特例**（`effective_mode(metadata) == "fast"`，最高优先级）：Reverse 完成后**不切换 Fixed，直接终止**。`deepcheck_phase` 保留 `"reverse"`，状态置 `deepcheck_done`，`completed_steps` 追加 `"5"`。即使 Reverse 发现 has_issues 走修复循环，修复完仍只重跑 Reverse（不切 Fixed/Free）——fast 模式的核心检查职责交给 audit。
+> **fast 模式特例**（`effective_mode(metadata) == "fast"`）：Reverse 后不进入 Fixed；修复源码时先受控回流并获得新的候选回执，再按新 attempt 的有效模式执行。
 
 ## 关键：代码新鲜度
 
@@ -158,13 +164,12 @@ Free 阶段一次性完整覆盖全部 15 个角度。**A3 异常处理完备性
 
 **必须先建立计划-代码追溯矩阵**（逐条列出计划功能点/接口/约束，标记代码对应位置和完成状态），再逐维度评估。禁止跳过追溯直接给"全部通过"。
 
-**Free 阶段 A6 深检/争议验证——必须独立 spawn 3 质疑者子代理**：若 Free 阶段发现任何深检 issue 或需争议性验证的点，**必须按 [references/adversarial.md](../references/adversarial.md) 模式独立 spawn 3 个质疑者子代理**（证据质疑者/替代解释者/充分性质疑者各一，不得合并 spawn，少任一视为不合规——见反偷懒第14条；**spawn 规格**：`subagent_type: "general-purpose"` + schema 强制结构化，**禁用 Explore** 防只调研不裁决被截断）。产物（`05_deepcheck.md` 的「对抗验证」段）必须记录每个质疑者的 **独立 spawn Agent ID** 作为调用证据。**质疑者 prompt 组装后过 anti-coaching 扫描 + freshness 检查**（见 [references/adversarial.md](../references/adversarial.md)「输入契约」段）。
+**Free 阶段 A6 深检/争议验证**：出现判断性 issue 时，按 [对抗合同](../references/adversarial.md) 和 [跨宿主等待合同](../references/subagent_spawn_wait.md)分别请求证据、替代和充分性三个独立视角；真实返回后核对证据并记录调用身份。宿主能力或授权不足时保留未验证，不伪装对抗完成。
 
-> **spawn 等待规格**（引用 [references/adversarial.md](../references/adversarial.md)「显式等待 + 超时机制」段）：spawn 3 质疑者必须**显式等 verdict**——统一走 `Agent` **后台 spawn（`run_in_background: true`）拿 task_id + `TaskOutput(task_id, block=true, timeout=...)` 阻塞等**（**首选**等待原语，超时把控制权交回主代理；宿主未提供时按 [subagent_spawn_wait.md](../references/subagent_spawn_wait.md)「等待原语探测与降级」执行）。**禁止**：后台 spawn 后被动等任务通知（挂死/断连永无通知，看门狗失守）/ `run_in_background: false` 裸同步 spawn 当唯一等待手段（`Agent` 工具无 timeout 参数，挂死卡死主代理）/ spawn 后不等待直接进下一步。**超时档位**：首次 spawn 走 10 分钟档（`TaskOutput(block=true, timeout=600000)`，`BACKGROUND_WATCHDOG_SECONDS=600`，超时判疑似断连 → `TaskStop` → 前台重来）；前台重来/重试走 `TIMEOUT_SECONDS = 120` 档（可由 metadata.task_timeout_seconds 覆盖，超时先 `TaskStop` 停句柄再重试 1 次，换措辞 + 可换 subagent_type 兜底），二次仍超时走 `[未验证-子代理对抗失败]`。**禁止**未等待就标 `[未验证-子代理对抗失败]`——该标签留给「确认失败」的子代理，不得给「仍在跑/返回晚」的子代理（2026-07-29 实测踩坑）。判定状态四态枚举（`sync_ok` / `timeout_retry_used` / `still_failed_after_retry` / `env_no_spawn`）必须写入 `adversarial_verification` 字段便于审计（详见 [references/adversarial.md](../references/adversarial.md)「显式等待 + 超时机制」段）。**防 `max_output_tokens` 截断**：质疑者 spawn 须含输出预算硬约束（verdict 第一动作/禁回显/总输出≤2000 token 宽松上限勿压紧，见 adversarial.md「spawn 规格要求」第 4 条）。
-> **整合墙钟硬截止**（引用 [references/adversarial.md](../references/adversarial.md)「整合墙钟硬截止」段，双保险第二层，防"等待质疑者返回后整合定稿"拖成几小时）：spawn 3 质疑者后对抗等待+整合阶段**墙钟上限 20 分钟**（`INTEGRATION_WALL_CLOCK_DEADLINE_SECONDS=1200`）。**3 质疑者必须一次性并行后台 spawn**（全拿 task_id 再逐个 `TaskOutput` 阻塞等，禁止串行 spawn——串行总等待放大 3 倍）；**到 deadline 无论还差几个未返回，立即强制收敛**：未返回者先 `TaskStop` 停句柄 → 按**已返回** verdict 执行裁决优先级整合 → 未返回者标 `[未验证-子代理对抗失败]` 计入 pending → **禁止为等最后一个质疑者延长 deadline / 无限等待**（宁可少验一条，不卡流程几小时）。
-> **主代理代行硬禁止**：`no_spawn_env = false` 时**禁止**主代理代行三视角判断！即使部分子代理未回结果（如 1/3 返回 verdict、2/3 超时），其余未回子代理必须按「子代理失败处理」失败链路降级（标 `[未验证-子代理对抗失败]`），不得"补齐"为代理代行。主代理代行**仅在** `no_spawn_env = true`（结构性无 spawn 工具）时允许——环境启动检测 `Agent` 工具不可用时置 true。
+> **等待与失败处理**：按 [跨宿主等待合同](../references/subagent_spawn_wait.md) 使用当前宿主允许的启动、有限等待和停止能力；并发不足可分批，未返回不等于失败。三视角各自独立，失败或无法启动如实标待验证，不由主代理冒充独立裁决。
+> **独立性边界**：主代理可进行事实核查，但无论能力缺失或策略禁止，都不得把主代理分析冒充独立视角；实际不可用或失败时如实保留待验证。
 
-子代理失败时按 adversarial.md「子代理失败处理」重试 2 次（含 1 次换 subagent_type）→仍失败诚实降级为 `[未验证-子代理对抗失败]`，**绝不改由主代理自演裁决**。
+子代理失败时按对抗合同及宿主实际授权进行有界重试；无法完成时如实保留待验证，禁止主代理冒充独立裁决。
 
 ## 执行步骤
 
@@ -172,13 +177,13 @@ Free 阶段一次性完整覆盖全部 15 个角度。**A3 异常处理完备性
 2. 读取 `03_plan_final.md` 和 `.ico_metadata.json`
    - 若 `.ico_metadata.json.code_compile_failed == true`，输出 `⚠️ 步骤4编译失败，仍继续复检` 警告；若 `test_failures == true`，输出 `⚠️ 步骤4测试未通过（test_outcome=fail），重点复检测试失败相关功能点` 警告；若 `test_outcome == "inconclusive"`，核查零用例、全部跳过、报告有效性与实际执行范围，保留验证债务，不能以复检代替缺失测试
 3. **思考分级（L2：sequential-thinking）**（按 [references/mcp_per_step.md](../references/mcp_per_step.md)「通用前置·分级思考」段执行）：本步骤为 L2，调用 sequential-thinking（3~5 步）。思考职责 = 梳理代码清单 → 回顾计划要点 → 制定逆推/Fixed/Free 检查策略
-4. **分步续跑**：若 `status == "deepcheck_in_progress"`，从 metadata 恢复 `deepcheck_total_rounds` / `deepcheck_clean_rounds` / `deepcheck_phase`，同时读取已存在的 `05_deepcheck.md`（若含「Reverse 逆推」段 **且 `metadata.patch_count` 为 0/缺失（无补丁修改）** 则跳过 Reverse；**有补丁（`patch_count > 0`）时不跳过**——补丁修改必须重新纳入 Reverse 逆推，重跑 Reverse 覆盖更新逆推段，再进入后续阶段）
+4. **分步续跑**：仅当 `status == "deepcheck_in_progress"` 且控制面确认仍为原开放 attempt、候选身份与该 attempt 的 worklist/Read 回执均有效时，恢复 `deepcheck_total_rounds` / `deepcheck_clean_rounds` / `deepcheck_phase`，按已验证的阶段证据续跑。旧报告存在及 `patch_count` 为 0 并不能证明本 attempt 已执行 Reverse。若原 attempt 已终结、候选发生变化或回执失效，按控制面规则终结/回流并开始新 attempt：重新生成当前 worklist、取得实际 Read 回执并从 Reverse 执行全部适用阶段；不可沿用旧报告跳过。
 5. 否则初始化 `deepcheck_clean_rounds = 0`, `deepcheck_total_rounds = 1`, `deepcheck_phase = "reverse"`, `status = deepcheck_in_progress`（**控制面接线**：经 `python3 tools/icode_control.py transition --dir {ICODE_OUT_DIR} --to deepcheck_in_progress`，进行态流转仅做状态机合法性判定，见 [references/control_plane.md](../references/control_plane.md)）
 6. 输出：`▶ 步骤5 复检开始`
 
 ### 前置强制执行门（防"只写结论不执行"）
 
-> **续跑跳过**：若步骤 2 读取的 `.ico_metadata.json` 中 `status` 已是 `"deepcheck_in_progress"`（说明是步骤 4 分步续跑恢复），跳过本门，直接进入恢复的 `deepcheck_phase` 对应阶段。
+> **续跑跳过**：仅原开放 attempt 且其候选、worklist 和实际 Read 回执经控制面验证有效，才能复用该 attempt 已完成的前置动作；仅凭 `deepcheck_in_progress` 状态不可跳过。新 attempt 必须重新完成本门和 Reverse。
 
 **非续跑时，在写入 05_deepcheck.md 任何内容之前，必须依次完成以下动作。未完成即写产物 = 跳过步骤 = 严重违规，不可交付。**
 
@@ -277,15 +282,17 @@ Free 阶段一次性完整覆盖全部 15 个角度。**A3 异常处理完备性
 
 ### 阶段 4 — Dedup（语义重复函数检测完整版）
 
+新 deepcheck attempt 的 `deepcheck.dedup` 最终 trace 行附 `attempt` = 当前 step attempt。声明完整时必须为 `called` 或合法 `cache_hit` 成功；旧 attempt 的调用不得冒充本轮。无该记录时按人工合同逐项完成并在本轮 coverage 登记 `manual_dedup`，否则保留债务。有效 full 声称 `not_eligible` 须有当前 attempt 的 `skipped_not_eligible` trace，函数数与当前范围独立核验一致；Python 用 AST 枚举，其他语言需附可信人工目录。未能确定函数数不得冒充低于阈值。旧 attempt 不追溯补写；audit 沿用既有可信复用合同。
+
 > **强证据场景判定**（详见 [references/mcp_per_step.md §5 deepcheck](../references/mcp_per_step.md)）：
 >
 > - cheap-research 🟢（`mcp__cheap-research__extract` 可用）
 > - **函数数 ≥ 50**（阈值取自 `mcp/cheap-research/gates.json` 常量 `dedup_min_functions`，禁止在正文写死）
 > - **gate 绑定**：本阶段 = gate `deepcheck.dedup`（tool=extract）。**full 模式进入 Dedup 且函数数 ≥ 阈值** → eligible=true 必须 called/cache_hit/degraded_after_attempt/unavailable_before_call；**函数数 < 阈值** → eligible=false `skipped_not_eligible`（evidence 含 function_count/threshold）；**fast 模式不进入 Dedup** → eligible=false `skipped_stage_not_reached`（evidence 含 mode/phase）。**函数 catalog 按受影响 Git 仓库定位、在声明review_scope内计算**：从 `metadata.code_files` 与 `01_plan.md` 候选文件解析所属仓库（`git -C <dir> rev-parse --show-toplevel` 去重）→ 按工程接入预算选择受影响模块+caller/import/provider/等价候选的review_scope → 每仓在该范围跑函数catalog → 记录每仓范围/函数数与合计数，gate evidence.function_count取每仓范围内函数数的最大值，任一受影响仓库 ≥ 阈值即对该仓运行 dedup
 >
-> **任一不满足 → 整个 §9.4 跳过**，在思考块 `MCP 调用` 段写明降级原因 + 写 trace（不写产物文件）。
+> 未达到函数阈值才按业务不适用跳过；达到阈值但工具不可用时按 [人工去重证据合同](../references/inspection_evidence.md) 真实完成等价审查，未完成必须保留债务，MCP trace 与人工覆盖分别记录。
 >
-> **复用 §2.5.7 产物**：检测 `{ICODE_OUT_DIR}/<ticket>/dedup/categorized.json` 是否存在（由 §2 02_review §2.5.7 生成）→ **复用避免重跑分类阶段**（节省 haiku 调用的 token）。
+> **复用 §2.5.7 产物**：检测 `{ICODE_OUT_DIR}/<ticket>/dedup/categorized.json` 是否存在（由 §2 02_review §2.5.7 生成）→ 仅输入身份经核验与当前一致时复用分类阶段；否则重跑。
 
 **执行步骤**（AI 直接照填）：
 
@@ -316,12 +323,12 @@ Free 阶段一次性完整覆盖全部 15 个角度。**A3 异常处理完备性
      "${REVIEW_SCOPE[@]}" | head -2000
    ```
 
-   **ripgrep 不可用**（未装）：整个 §9.4 跳过
+   **ripgrep 不可用**：使用受支持的替代枚举方式，按相同范围和预算完整建立函数目录；无法证明完整时按人工去重证据合同保留 degraded 债务，不得直接跳过或声称完整。
 3. **分类阶段**（如 categorized.json 不存在）：调 `mcp__cheap-research__extract`（haiku）**双层分类**（parent + sub）→ `dedup/categorized.json`。**双层 schema** + **后处理映射（只映射 parent_category）** 同 §2.5.7 第 3 步。
 4. **拆分阶段**：Claude 直接做——**按 sub_category 拆分** `categorized.json`（不按 parent_category——避免跨家族合并），**仅保留 3+ 函数的 sub_category**（< 3 不值得分析），输出 → `dedup/duplicates/<sub_category>.json`
 5. **找重复阶段（高质量模型逐类）**：同 §2.5.7 第 5 步——**简化 schema** + **主代理 try 链式解析**（同 §2.5.7 第 5 步的 5 种格式 A/B/C/D/E）+ **用 categorized.json 回填 file/line**
 
-   > **复用 §2.5.7 产物（新增）**：在跑高质量模型前，**`ls {ICODE_OUT_DIR}/<ticket>/dedup/duplicates/`** 拿已有的 sub_category 文件清单（文件名 = `<sub_category>.json`）。**已有 sub_category 文件直接复用其 `duplicates[]` 内容**（其 `duplicates[]` 已含 HIGH/MEDIUM/LOW 完整判定 + file:line 回填——这些由 §2.5.7 第 5 步保证，**不再二次跑高质量模型**），本阶段报告直接合并。仅对**未生成 sub_category 文件的**调用 `mcp__cheap-research__extract`——**用 §2.5.7 第 5 步完全相同的简化 schema（嵌套字段用 string 规避 array-of-array）+ 5 种格式 A/B/C/D/E 链式解析 + categorized.json 回填 file:line**（避免重新设计 schema 引入不一致）。**复用清单 + 新生清单**写到 `{ICODE_OUT_DIR}/<ticket>/dedup/dedup_reuse_log.json`（每条含 `{sub_category, source: "reuse"|"new", high_count, med_count, low_count, at}`，用于审计 + 节省日志）。
+   > **复用 §2.5.7 产物（新增）**：在跑高质量模型前，**`ls {ICODE_OUT_DIR}/<ticket>/dedup/duplicates/`** 拿已有的 sub_category 文件清单（文件名 = `<sub_category>.json`）。**输入身份经核验与当前一致的 sub_category 文件才可复用其 `duplicates[]` 内容**（其 `duplicates[]` 已含 HIGH/MEDIUM/LOW 完整判定 + file:line 回填——这些由 §2.5.7 第 5 步保证，**不再二次跑高质量模型**），本阶段报告直接合并。仅对**未生成 sub_category 文件的**调用 `mcp__cheap-research__extract`——**用 §2.5.7 第 5 步完全相同的简化 schema（嵌套字段用 string 规避 array-of-array）+ 5 种格式 A/B/C/D/E 链式解析 + categorized.json 回填 file:line**（避免重新设计 schema 引入不一致）。**复用清单 + 新生清单**写到 `{ICODE_OUT_DIR}/<ticket>/dedup/dedup_reuse_log.json`（每条含 `{sub_category, source: "reuse"|"new", high_count, med_count, low_count, at}`，用于审计 + 节省日志）。
    >
    > **阈值统一（新增）**：与 §2.5.7 第 4 步对齐——**只对 ≥3 函数的 sub_category 跑高质量模型**，< 3 直接跳过。**本阶段高质量模型调用范围** = §9.4 拆分阶段输出的**全部 ≥3 sub_category**减去 §2.5.7 已生成对应 `.json` 文件的 sub_category（即 §2.5.7 已跑过的 top 5 sub_category 不再跑，仅跑剩余的 ≥3 sub_category）。
    >
@@ -361,7 +368,7 @@ Free 阶段一次性完整覆盖全部 15 个角度。**A3 异常处理完备性
 
 **降级路径**：
 
-- cheap-research 不可用 → 整个 §9.4 跳过，记 `[降级-cheap-research 不可用]`
+- cheap-research 不可用 → 按[人工去重证据合同](../references/inspection_evidence.md)真实完成人工等价审查；未完成保留 degraded 债务。
 - 函数数 < `dedup_min_functions`（gates.json 常量）→ 输出 `▶ §9.4 跳过：函数数 {N} < {阈值}，工程规模太小无需 dedup`，整个 §9.4 结束
 - 函数数 > 500 → 分批（每批 100），合并结果
 - extract 返回 `schema_validation_failed` → 重试 1 次（自动改 instruction 加"严格按 schema 输出"），仍失败标"分类降级-单类跳过"
@@ -371,7 +378,7 @@ Free 阶段一次性完整覆盖全部 15 个角度。**A3 异常处理完备性
 
 **与 §5 A6 独立 3 质疑者 spawn 规则的衔接**（v1.1 取消 dedup 豁免）：dedup 只产出**疑似重复候选对**。会导致代码删除/合并的候选**必须进入** Free 阶段 A6 的 3 质疑者独立 spawn 流程——删除/合并是破坏性动作，schema 只能约束输出形状、不能证明语义判断正确，单次 LLM 推理 + schema 强约束不足以免除验证；`trace_refs` 结果也只是文本引用候选，不能证明动态调用/反射/链接关系完整。纯重复提示（无删除动作）可保持轻量，不强制对抗。A6 规则继续约束 Free 阶段深检 issue。
 
-**与循环控制段的关系**：dedup 是独立扫描，不参与 Reverse/Fixed/Free 的整体循环。dedup 内部修复循环（has_issues=true 时）——**修复前置（v1.1 取消豁免）**：任何"合并为 survivor + 删除其他实现"动作前，该候选必须已通过 §5 A6 独立 3 质疑者对抗（`verification_status == confirmed`），并完成影响面检查（该函数全部引用、调用方、测试和可见性，用 `rg`/`git grep` 实证；`trace_refs` 仅文本候选不作数）——**未对抗通过不得删除代码**：修复**重复函数本身**（合并为 survivor，删除其他实现）→ 重新调 ripgrep 抽新 catalog → 重新调高质量模型找剩余重复。修完 → 写 `dedup_report.md` + 追加 05_deepcheck.md 摘要 → 进入原「循环控制」段继续 Reverse/Fixed/Free 的整体判定。**绝不可让 dedup 的 issue 触发 Reverse/Fixed/Free 重跑**——重复函数修复与计划/代码逆推无关。
+**与循环控制段的关系**：dedup 可独立识别候选，但修复前仍须完成 §5 A6 独立对抗及引用、调用方、测试和可见性检查。任何源码修复都会改变候选身份：先终结开放 attempt，按 action-policy/revision 受控回到 review，再为更新的候选重新取得 code、deepcheck、audit 的适用回执，并重新执行适用阶段；不可沿用旧 catalog、覆盖或结论冒充当前候选。未修改源码时不因报告而无故回流。
 
 ### 循环控制
 
@@ -379,8 +386,8 @@ Free 阶段一次性完整覆盖全部 15 个角度。**A3 异常处理完备性
 - **实时落盘**：`status = deepcheck_in_progress`，写入当前 `deepcheck_total_rounds`/`deepcheck_clean_rounds`/`deepcheck_phase` 到 metadata
 - **阶段切换时重置 `deepcheck_clean_rounds = 0`**（每个阶段独立计数）
 - Reverse 阶段：单次执行后始终进入 Fixed，不参与循环
-  > **fast 模式特例**（`effective_mode(metadata) == "fast"`，最高优先级，命中即跳过 Fixed/Free）：Reverse 单次执行后**直接终止**——`deepcheck_phase` 保留 `"reverse"`，状态置 `deepcheck_done`，`completed_steps` 追加 `"5"`。即使发现 has_issues 走修复循环，修复完仍只重跑 Reverse（不切 Fixed/Free）。
-- has_issues → 修复 → `deepcheck_clean_rounds = 0`。**阶段分流**：Reverse/Fixed 阶段 → 回到**当前阶段**重新执行（重新读代码）；**Free 阶段 → 修复后直接终止**（Free 一次性完整覆盖，不重跑——重跑会重复 15 角度检查）
+  > **fast 模式特例**（`effective_mode(metadata) == "fast"`）：Reverse 后不进入 Fixed/Free；修复源码须先受控回流并重新取得回执，再依新 attempt 的有效模式执行。
+- has_issues 且修复源码 → 终结当前 attempt，按 action-policy/revision 受控回流 review；更新候选后重新获取适用回执，从 Reverse 重做适用阶段，不能保留修复前的 Free 覆盖。无源码修改时依原 attempt 的有效证据继续。
 - 无 issues → `deepcheck_clean_rounds += 1`
   - Fixed 首次全 clean（`deepcheck_clean_rounds` 达 1）→ 切换 `deepcheck_phase = "free"`，`deepcheck_clean_rounds = 0`
   - Free 完成后 → 终止
