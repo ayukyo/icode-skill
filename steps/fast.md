@@ -46,7 +46,7 @@ classification 结构及 canonical scope 摘要、引用根与校验边界见 [r
 
 - **FAST-PLAN-SCOPE**：解析实际工程根与需求来源，实读 init/log 输入、现有实现及 caller/import/test 调用链，检查已有等价功能后确定复用或修改。设计/思考前完成 LIMIT 索引与命中红线实读，在既有 `limit_checkpoint.md` 追加「阶段块：plan前置硬基线」四节（无 LIMIT 也如实记录），引用编号回填 `limit_refs`。保留目录复用、历史检索与 `_inject_cache.json` 留痕、工程结构快照及版本迁移合同。
 - **FAST-PLAN-DESIGN**：`01_plan.md` 自包含保留 10 个编号章节：概述、功能需求、架构设计、ADR、详细设计、异常处理、实现步骤、校验项、风险评估、需求质量清单；每节仅写本任务事实。§4.5 保留修复方案与四维设计（根因闭环、逻辑/扩大修改、竞态死锁、日志）及适用 TDD 测试合同：目标行为、命令、生产修改前 RED 预期、GREEN 标准、回归范围。A/B/C 分档、范围红线、现有调用链、实施点、边界异常、验收与风险不能省略；B 须确认、C 不实施。接口误用、端到端路径、状态机与前提假设命中时按原对应段完成推演。
-- **FAST-PLAN-GATES**：调查后冻结 `scope_contract`，补全部 catalog 风险事实、classification、范围摘要和真实路径/hash 引用，调用 `assess_fast_risk(metadata,catalog)`。未调查可继续 plan，review/merge/code 前必须有效分类；blocked 解决语义，replan 回计划，full 登记升级并执行完整流程。同步 semantic_decisions、身份 impact_contract 与生命周期 acceptance_contract；不替用户决定未决策略。完成十角度需求质量清单和具体代码断言验证（接口、路径、调用模式、等价实现、首次激活双侧校验），修正失败断言影响的计划。按原 L1/L2 边界运行 limit_refs 自检及 `lint_workflow_contract.py --step plan`，记录真实决策锚点、产物/索引，成功 finish 后合法 transition 到 plan_done。
+- **FAST-PLAN-GATES**：调查后冻结 `scope_contract`，补全部 catalog 风险事实、classification、范围摘要和真实路径/hash 引用，调用 `assess_fast_risk(metadata,catalog)`。未调查可继续 plan，review/merge/code 前必须有效分类；blocked 解决语义，replan 回计划，full 登记升级并执行完整流程。同步 semantic_decisions、身份 impact_contract 与生命周期 acceptance_contract；不替用户决定未决策略。完成十角度需求质量清单和具体代码断言验证（接口、路径、调用模式、等价实现、首次激活双侧校验），修正失败断言影响的计划。按原 L1/L2 边界运行 limit_refs 自检及 `lint_workflow_contract.py --step plan`，记录真实决策锚点、产物/索引；如需人工清偿枚举债务，按步骤 1 的计划候选章节与 `plan_candidates.json` 合同登记两份产物回执，成功 finish 后合法 transition 到 plan_done。
 <!-- ICODE:FAST:plan:END -->
 
 <!-- ICODE:FAST:review:BEGIN -->
@@ -57,7 +57,7 @@ classification 结构及 canonical scope 摘要、引用根与校验边界见 [r
 
 - **FAST-REVIEW-INDEPENDENT**：先只依据原始需求形成独立简要方案，不读取 `01_plan.md`；再实际 Read `01_plan.md` 对比遗漏/偏差/多余，通读关联源码与接口承诺，检索所有调用方和未被计划提及的消费者/等价实现。记录真实通读路径及发现，优先实证未验证断言，审查 TDD 是否验证外部行为、RED 是目标断言失败、首跑通过会停止复核、正常/边界/异常/复现场景齐备。
 - **FAST-REVIEW-SEVEN**：一轮逐项覆盖七维：逻辑合理性、流程完整性、场景覆盖度、风险遗漏、落地可行性、现有实现对照、必要性；核对 §4.5 四维设计与 A/B/C 分档、范围升级及 catalog 专项。身份变化独立搜索并核对九维影响与遗漏消费者，生命周期/跨模块枚举/真实环境等命中条件不得省略。发现写稳定 ID、位置、证据、建议、否决风险及处置；不能证实的保留 pending，clean 结论说明真实范围，不复述计划。
-- **FAST-REVIEW-RECEIPTS**：实际一轮无对抗，首轮 clean 也必须保存真实 `review_round_1.json`、`review_manifest.json`、三类计数、origin attempt、round digest 与 artifact 回执；Dedup/cheap-research 按适用条件及 trace 合同执行。不得事后伪造 review 已完成。显式 `/icode review N` 先登记 effective full，恢复原多轮、自动延长与独立对抗，后续 deepcheck 同步 full。完成本轮证据后 finish，再合法 transition 到 review_done。
+- **FAST-REVIEW-RECEIPTS**：实际一轮无对抗，首轮 clean 也必须保存真实 `review_round_1.json`、`review_manifest.json`、三类计数、origin attempt、round digest 与 artifact 回执；Dedup/cheap-research 按适用条件及 trace 合同执行；人工清偿枚举债务时按步骤 2 的逐仓范围、真实 review attempt 与 `review_dedup_evidence.json` 产物回执合同执行。不得事后伪造 review 已完成。显式 `/icode review N` 先登记 effective full，恢复原多轮、自动延长与独立对抗，后续 deepcheck 同步 full。完成本轮证据后 finish，再合法 transition 到 review_done。
 <!-- ICODE:FAST:review:END -->
 
 <!-- ICODE:FAST:merge:BEGIN -->
@@ -133,6 +133,8 @@ classification 结构及 canonical scope 摘要、引用根与校验边界见 [r
 
 ## 思考与 MCP 边界
 
-等级由 [reasoning catalog](../mcp/reasoning-gate/gates.json) 决定，不能因 fast 全部降 L1。新语义、复杂修改、根因分析和重构仍执行 sequential-thinking 至少 3 步；review/Reverse/Audit 各自保留独立判断。当前只复用 merge 既有 L1；尚无足够机器事实证明其他步骤可降级，维持 L2。
+等级由 [reasoning catalog](../mcp/reasoning-gate/gates.json) 决定，不能因 fast 全部降 L1。新语义、复杂修改、根因分析和重构在 sequential-thinking 可调用时执行至少 3 步。工具未暴露时按 [思考前置合同](../references/thinking_core.md)写结构化思考，记录 `unavailable_before_call` 与发现依据、替代方法及实际证据。review/Reverse/Audit 各自保留独立判断。当前只复用 merge 既有 L1；尚无足够机器事实证明其他步骤可降级，维持 L2。
 
 机械复制和派生矩阵可由脚本完成，但不等于语义审查完成。cheap-research 的条件与 trace 沿用 [MCP 每步规则](../references/mcp_per_step.md)，不重复调用已经履行且输入未变的 gate。未进入 Fixed/Dedup 时仍写 `skipped_stage_not_reached`，证据为有效 `mode=fast/phase=reverse`；升级 full 不得借用户请求 fast 跳阶段。
+
+前端验证适用时，按 [MCP 每步规则](../references/mcp_per_step.md)执行对应的浏览器交互或采集，并记录未观察到的 UI 行为。

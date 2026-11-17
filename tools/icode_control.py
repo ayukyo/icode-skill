@@ -109,7 +109,7 @@ import time
 import uuid
 import copy
 import types
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
 SKILL_ROOT = Path(__file__).resolve().parent.parent
@@ -155,7 +155,11 @@ CONTROLLED_BIRTH_FIELDS = {
     "completed_steps", "indexed", "debug", "project_path", "close_state",
     "delivery_verdict", "claims", "verification_runs", "control_plane_degraded",
     "workflow_gate_schema_version", "thinking_gate_schema_version",
-    "mcp_gate_schema_version",
+    "mcp_gate_schema_version", "mcp_gate_contract_version",
+    # 采纳边界只能由控制面为存量工单写入（adopt_gate_contract）；出生时禁止调用方
+    # 注入——未来时刻会把新工单的全部 trace 行伪装成历史行按 v1 解释；过去的历史
+    # 边界同理（把新工单全部行按当前合同过度约束之外，还可配合伪造采纳时刻）。
+    "mcp_gate_contract_adopted_at", "mcp_gate_contract_history_boundary",
 }
 
 # ---------------------------------------------------------------- 基础设施
@@ -2514,6 +2518,53 @@ def capture_step_inputs(out_dir, meta, model, step, *, git_provider=None, requir
     return captured
 
 
+# 从 cda2936 的步骤合同升级到新增可选枚举证据端口的合同。
+# 绑定新旧完整摘要，后续的端口定义、检查项或路由变化需要重新验证。
+COMPATIBLE_STEP_CONTRACT_UPGRADES = {
+    "plan": (
+        "5e35e5eca8ad8ff36fc06846a3eaf979f24f33dccd0a9ad7646739e2d9d505e1",
+        "fd05b95f25fe18cbaf57a54359fa3846d25b22b54601e30f5aacc515d8c1257e",
+    ),
+    "review": (
+        "2e4a1e550e281626826dda608ef940edbd634f28944f86e48afc600f3c7a3368",
+        "b7a5142cab10494f11eef10f3ce2bde45448cd08f60817b12d6b1dcd490d989e",
+    ),
+    "deepcheck": (
+        "367a3c124c8954d6996d2710e81df9c14061ca539d727b58ba7bf0e89b38cf58",
+        "d92a42475ca6e19db39b5eafa3a6ff0ef634ec8011b0ab08c9f3fd467a71da4c",
+    ),
+}
+
+
+def attempt_upgrade_compatible(start_payload, contract, captured_protected=None):
+    """仅已核验的合同升级可沿用旧 attempt 的受保护输入。"""
+    upgrade = COMPATIBLE_STEP_CONTRACT_UPGRADES.get(start_payload.get("step"))
+    if upgrade is None or (start_payload.get("contract_digest"), canonical_digest(contract)) != upgrade:
+        return False
+    old_inputs = start_payload.get("inputs")
+    if not isinstance(old_inputs, list) or not old_inputs:
+        return False
+    old_ids = {fact.get("id") for fact in old_inputs if isinstance(fact, dict)}
+    if not old_ids:
+        return False
+    current_ids = {port.get("id") for port in contract.get("inputs") or []}
+    if not current_ids.issuperset(old_ids):
+        return False  # 旧输入端口被移除 → 真实合同变更，不兼容
+    protected = start_payload.get("protected")
+    if not isinstance(protected, dict) or not protected:
+        return False
+    recorded = start_payload.get("input_digest")
+    if not isinstance(recorded, str) or re.fullmatch(r"[0-9a-f]{64}", recorded) is None:
+        return False
+    if canonical_digest(protected) != recorded:
+        return False  # 记录与摘要不自洽：无法区分升级与篡改
+    if captured_protected is not None:
+        for port_id, fact in protected.items():
+            if captured_protected.get(port_id) != fact:
+                return False  # 旧端口内容漂移 → 真实输入漂移
+    return True
+
+
 def validate_step_outputs(out_dir, meta, model, step, allow_incomplete=False,
                           *, git_provider=None, require_git_provider=False, inspection_provider_factory=None, inspection_deadline=None,
                           check_inspections=True):
@@ -3065,7 +3116,8 @@ def _authenticated_inspection_review(out_dir, meta, model, events, start):
     step, attempt = payload.get("step"), payload.get("attempt")
     contract = step_contract(model, step)
     finish = step_attempt_finished(events, attempt)
-    if payload.get("contract_digest") != canonical_digest(contract) or not finish \
+    digest_matches = payload.get("contract_digest") == canonical_digest(contract)
+    if (not digest_matches and not attempt_upgrade_compatible(payload, contract)) or not finish \
             or finish["payload"].get("outcome") not in ("success", "degraded"):
         return None
     first, last = events.index(start), events.index(finish)
@@ -3215,12 +3267,21 @@ def cmd_check_outputs(args, *, git_provider=None, require_git_provider=False, in
         completion = {policy["step_by_target"][target]: number for target, number in
                       policy["completed_step_by_target"].items() if target in policy["step_by_target"]}
         old_contract = bool(starts) and (starts[-1].get("payload") or {}).get("contract_digest") != canonical_digest(contract)
+        upgrade_only_drift = False
+        if old_contract and not access:
+            try:
+                captured, _capture_missing = capture_step_inputs(out_dir, meta, model, step)
+                upgrade_only_drift = attempt_upgrade_compatible(
+                    (starts[-1].get("payload") or {}), contract,
+                    captured_protected=captured.get("protected"))
+            except ControlError:
+                upgrade_only_drift = False
         latest_start = starts[-1] if starts else None
         attempt = (latest_start.get("payload") or {}).get("attempt") if latest_start else None
         finished = step_attempt_finished(events, attempt) if attempt is not None else None
         historical = bool(old_contract and finished and (finished.get("payload") or {}).get("outcome") in ("success", "degraded")) or (
                       not starts and completion.get(step) in (meta.get("completed_steps") or []))
-        if old_contract and not historical:
+        if old_contract and not historical and not upgrade_only_drift:
             problems.append(f"{step}:contract_drift_reenter")
         degraded = bool(finished and (finished.get("payload") or {}).get("outcome") == "degraded")
         superseded = inspection_superseded_by_current_review(out_dir, meta, model, events, step, latest_start) \
@@ -3431,11 +3492,108 @@ def _finalize_committed_metadata(out_dir, after):
         atomic_write_json(path, physical)
 
 
+GATE_CONTRACT_CATALOG = SKILL_ROOT / "mcp/cheap-research/gates.json"
+# 出生派生字段：由工具升级引入的出生字段。旧版本工具创建的工单缺这些字段，
+# 幂等重试比较时按当前出生值补齐（见 comparable_birth_metadata）。
+BIRTH_DERIVED_FIELDS = frozenset({"mcp_gate_contract_version"})
+
+
+def comparable_birth_metadata(current, expected_meta):
+    """幂等重试比较视图：对缺失的出生派生字段按当前出生值补齐。
+
+    request_id 幂等事件与事件链完整性由调用方先行校验；旧版本工具创建的
+    metadata 缺少升级后新增的出生字段（如 mcp_gate_contract_version），补齐后
+    比较使升级后的幂等重试返回 already_applied 而非 ticket_create_exists。
+    其余字段（含工单后续进展）仍要求精确一致。
+    """
+    comparable = dict(current)
+    for field in sorted(BIRTH_DERIVED_FIELDS):
+        if field not in comparable and field in expected_meta:
+            comparable[field] = expected_meta[field]
+    return comparable
+
+
+def gate_contract_open_attempt_start(events):
+    """升级采纳时未终结 attempt 的最早 start 时刻（aware datetime）；无则 None。
+
+    事件时间取 `timestamp`（now_iso 本地 naive），按本地时区解析后参与比较，
+    与采纳时刻（UTC aware）可比。
+    """
+    started = {}
+    for event in events:
+        payload = event.get("payload") or {}
+        if event.get("event_type") == "step_started":
+            attempt = payload.get("attempt")
+            if attempt is not None and attempt not in started:
+                started[attempt] = event.get("timestamp") or payload.get("at") or event.get("at")
+        elif event.get("event_type") == "step_finished":
+            started.pop(payload.get("attempt"), None)
+    times = [parse_control_timestamp(t) for t in started.values()]
+    times = [t for t in times if t is not None]
+    return min(times) if times else None
+
+
+def parse_control_timestamp(value):
+    """ISO-8601 → aware datetime；naive 按本地时区解释（now_iso 约定），无法解析返回 None。"""
+    if not isinstance(value, str) or not value.strip():
+        return None
+    text = value.strip()
+    if text.endswith(("Z", "z")):
+        text = text[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.astimezone()
+    return parsed
+
+
+def adopt_gate_contract(meta, events=None):
+    """存量工单续跑时绑定当前资格合同（就地修改并返回）。
+
+    旧版本工具创建的 metadata 缺少 `mcp_gate_contract_version`；其历史 trace 行
+    由 linter 按合同 v1 原始解释保留。为使续跑产生的新记录与历史记录可靠区分并被
+    强制采用当前合同，控制面在下一次 metadata 写入时补齐出生字段并记录采纳时刻
+    `mcp_gate_contract_adopted_at`（显式 UTC）。若采纳时存在升级前未终结的 attempt
+    （升级后、采纳前可能已写入新 trace），历史边界回退为 `mcp_gate_contract_history_boundary`
+    = 其最早 start 时刻：该时刻之后的行一律按当前合同解释（宁可过度约束也不让
+    旧式 skip 伪装成历史记录），该 attempt 须受控终结并重启后按当前合同重新留痕。
+    """
+    if meta.get("mcp_gate_contract_version") is None:
+        catalog = load_json(GATE_CONTRACT_CATALOG, "cheap gate catalog")
+        meta["mcp_gate_contract_version"] = catalog["contract_version"]
+        adopted_at = datetime.now(timezone.utc).isoformat()
+        meta["mcp_gate_contract_adopted_at"] = adopted_at
+        boundary = adopted_at
+        if events:
+            earliest_open = gate_contract_open_attempt_start(events)
+            if earliest_open:
+                boundary = earliest_open.isoformat()
+        meta["mcp_gate_contract_history_boundary"] = boundary
+    return meta
+
+
 def commit_metadata_and_event(out_dir, before, after, event_type, payload,
                               request_id=None, actor="icode", event_id=None, *,
                               git_provider=None, require_git_provider=False, before_publish=None,
                               before_append=None):
     """调用方持锁。事务日志 + metadata 原子替换 + event 追加；普通 I/O 失败回滚旧 metadata。"""
+    if event_type != "ticket_created" and isinstance(after, dict):
+        # 存量工单的每次控制面写入都是一次续跑：先绑定当前资格合同（幂等）。
+        # 采纳时检查未终结 attempt，历史边界回退到其最早 start（覆盖升级后、
+        # 采纳前写入的 trace）。
+        if after.get("mcp_gate_contract_version") is None:
+            try:
+                pending_events, chain_problems = verify_event_chain(out_dir, after, semantic=False)
+            except (OSError, ValueError, ControlError) as exc:
+                raise ControlError("无法验证事件链，拒绝采纳资格合同",
+                                   gate_id="event_chain_invalid") from exc
+            if chain_problems:
+                raise ControlError("事件链无效，拒绝采纳资格合同",
+                                   gate_id="event_chain_invalid",
+                                   violations=chain_problems)
+            adopt_gate_contract(after, events=pending_events)
     out_dir = Path(out_dir)
     access = ({"git_provider": git_provider, "require_git_provider": require_git_provider}
               if _candidate_access_requested(git_provider, require_git_provider) else {})
@@ -3630,6 +3788,10 @@ def run_gate_linters(out_dir, to_status=None, delivery_verdict=None, legacy=Fals
                  "cmd": full_cmd}
         if isinstance(report, dict):
             entry["report"] = report
+            if isinstance(report.get("enumeration_debt"), int):
+                # 枚举/去重债务必须从校验报告透传到门禁结果与状态推进输出：
+                # 门禁通过不代表债务已解决，调用方需要从推进结果看到它。
+                entry["enumeration_debt"] = report["enumeration_debt"]
         else:
             raw = (stdout or stderr or "")[-500:]
             entry["detail"] = "linter 未返回合法 JSON 对象" + (f": {raw}" if raw else "")
@@ -3638,6 +3800,70 @@ def run_gate_linters(out_dir, to_status=None, delivery_verdict=None, legacy=Fals
             entry["hint"] = f"修复后重试: {' '.join(full_cmd)}"
         results.append(entry)
     return results
+
+
+_GATE_COVERAGE_MODULE = None
+
+
+def gate_coverage_module():
+    """加载 cheap-research 覆盖校验器（跨步骤债务余额与其共享同一实现）。"""
+    global _GATE_COVERAGE_MODULE
+    if _GATE_COVERAGE_MODULE is None:
+        spec = importlib.util.spec_from_file_location(
+            "icode_gate_coverage", SKILL_ROOT / "tools/lint_mcp_coverage.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        _GATE_COVERAGE_MODULE = module
+    return _GATE_COVERAGE_MODULE
+
+
+def last_recorded_gate_enumeration_debt(out_dir):
+    """事件链中最近一次记录的债务余额；返回 (是否记录过, 值)。"""
+    try:
+        events, _problems = read_events(out_dir)
+    except Exception:
+        return False, None
+    for event in reversed(events):
+        if event.get("event_type") != "state_changed":
+            continue
+        payload = event.get("payload") or {}
+        if "gate_enumeration_debt" in payload:
+            return True, payload.get("gate_enumeration_debt")
+    return False, None
+
+
+def ticket_enumeration_debt(out_dir, meta):
+    """工单级未解决枚举/去重债务余额；返回 None 表示无法判定（不是清偿）。
+
+    与单次状态推进的门禁报告不同：报告只看被推进步骤的 in-scope gates，
+    review 产生的债务在后续 plan_finalized/completed 推进的报告中会归零；
+    余额跨步骤持续存在，交付结论反映的是工单尚未清偿的债务。清偿要求债务
+    gate 出现通过资格与证据校验的有效最终记录（pending/中断/非法行不清偿；
+    unavailable/degraded 还需 availability.evidence_ref 指向工单目录内真实
+    存在的人工等价证据文件）。trace 不存在时结合事件链判定：从未记录过债务
+    或最近记录为 0 → 确认无债务（0）；曾记录未清偿/未知债务且 trace 缺失 →
+    无法核实（None）——trace 丢失不得被报告为债务归零。trace 不可读/含
+    不完整 JSON 同样返回 None。
+    """
+    path = Path(out_dir) / ".mcp_gate_trace.jsonl"
+    if path.is_symlink():
+        return None  # 符号链接的 trace 不可作为证据读取，无法确认债务状态
+    if not path.is_file():
+        recorded, value = last_recorded_gate_enumeration_debt(out_dir)
+        if not recorded or value == 0:
+            return 0  # 从未记录过债务 / 最近已确认清偿：确认无债务
+        return None  # 曾记录未清偿（或未知）债务且 trace 缺失：无法核实
+    try:
+        rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()
+                if line.strip()]
+    except (OSError, ValueError):
+        return None  # 不可读/不完整 JSON：未知，不得当作清偿
+    if any(not isinstance(row, dict) or row.get("ticket_id") != meta.get("ticket_id") for row in rows):
+        return None  # 他单或非对象记录不能作为本工单的确定余额
+    try:
+        return gate_coverage_module().ticket_enumeration_debt(rows, meta, out_dir=Path(out_dir))
+    except (TypeError, AttributeError):
+        return None
 
 
 # ---------------------------------------------------------------- 子命令实现
@@ -4039,6 +4265,7 @@ def _cmd_create_plain(args):
         meta["verification_contract"] = verification_evidence_module().pending_contract()
     if verification_evidence_module().build_starts(meta):
         raise ControlError("build-start receipts cannot be seeded at ticket creation", gate_id="build_start_writer")
+    _cheap_catalog = load_json(GATE_CONTRACT_CATALOG, "cheap gate catalog")
     meta.update({
         "schema_version": 3,
         "ticket_id": args.ticket_id,
@@ -4050,7 +4277,10 @@ def _cmd_create_plain(args):
         "project_path": str(workspace),
         "workflow_gate_schema_version": 1,
         "thinking_gate_schema_version": 1,
-        "mcp_gate_schema_version": load_json(SKILL_ROOT / "mcp/cheap-research/gates.json", "cheap gate catalog")["trace_schema_version"],
+        "mcp_gate_schema_version": _cheap_catalog["trace_schema_version"],
+        # 资格合同版本绑定于出生（受保护字段，事后不可改写）：新工单的 trace 行按合同 v2
+        # 解释；存量工单无此字段，其历史行按合同 v1 旧语义解释，不追溯改判。
+        "mcp_gate_contract_version": _cheap_catalog["contract_version"],
     })
     # 完成态 transition 走 --strict，linter 要求 requirement_deltas 显式存在；而
     # references/dir_and_metadata.md 声明「可选，缺失视为 []」。新工单在出生处补空数组，
@@ -4126,7 +4356,7 @@ def _cmd_create_plain(args):
                 events, args.request_id, "ticket_created", payload)
             comparable_meta = dict(meta)
             comparable_meta["created_at"] = current.get("created_at")
-            if prior and current == comparable_meta:
+            if prior and comparable_birth_metadata(current, comparable_meta) == comparable_meta:
                 print(json.dumps({"ok": True, "already_applied": True,
                                   "ticket_id": args.ticket_id,
                                   "event_id": prior["event_id"], "out_dir": str(out_dir)},
@@ -4761,6 +4991,9 @@ def cmd_transition(args):
     # 门禁：完成态跑三 linter（debug 孪生跳过）；completed 强制显式 delivery_verdict
     gate_reports = []
     gates_skipped = bool(args.skip_gates)
+    # 工单级未解决债务余额：跨步骤按当前有效 trace 汇总，不随被推进步骤变化；
+    # 对债务 gate 真实重做（最后一条不再携带债务状态）即清偿归零。
+    enumeration_debt_balance = ticket_enumeration_debt(out_dir, meta)
     if to_status in sm["gate_policy"]["gated_targets"] and not meta.get("debug") and not gates_skipped:
         gate_reports = run_gate_linters(out_dir, to_status, args.delivery_verdict, metadata=meta)
         failed = [g for g in gate_reports if not g["ok"]]
@@ -4768,7 +5001,9 @@ def cmd_transition(args):
             print(json.dumps({
                 "ok": False, "fail_closed": True, "status": current,
                 "error": f"门禁未通过，状态不前移（{current!r} → {to_status!r} 被拒绝）",
-                "failed_gates": [{"gate_id": g["gate_id"], "detail": g.get("detail") or
+                "failed_gates": [{"gate_id": g["gate_id"],
+                                  "enumeration_debt": g.get("enumeration_debt"),
+                                  "detail": g.get("detail") or
                                   json.dumps(g.get("report", {}), ensure_ascii=False)[:600],
                                   "hint": g.get("hint")} for g in failed],
                 "gate_reports": gate_reports,
@@ -4841,6 +5076,11 @@ def cmd_transition(args):
             meta2["completed_steps"] = completed_steps
         if args.delivery_verdict:
             meta2["delivery_verdict"] = args.delivery_verdict
+        # 债务余额无条件进入 state_changed 事件 payload（可持续追踪）与状态推进
+        # 输出：门禁通过不代表债务已解决，0 显式证明清偿，null 表示 trace 不可读
+        # 无法判定（不得当作清偿），交付结论必须可见。
+        transition_payload["gate_enumeration_debt"] = enumeration_debt_balance
+        transition_payload["gate_enumeration_debt_unknown"] = enumeration_debt_balance is None
         event = commit_metadata_and_event(
             out_dir, before_meta, meta2, "state_changed", transition_payload,
             request_id=args.request_id)
@@ -4855,6 +5095,8 @@ def cmd_transition(args):
     print(json.dumps({"ok": True, "from": current, "to": to_status,
                       "delivery_verdict": args.delivery_verdict,
                       "gates_skipped": gates_skipped,
+                      "enumeration_debt": enumeration_debt_balance,
+                      "enumeration_debt_unknown": enumeration_debt_balance is None,
                       "event_id": event["event_id"],
                       "index_refresh": index_refresh,
                       "gates": [{g["gate_id"]: g["ok"]} for g in gate_reports]},
@@ -5644,7 +5886,8 @@ METADATA_UPDATE_PROTECTED = {
     "indexed", "delivery_verdict", "claims", "verification_runs", "close_state",
     "control_plane_degraded", "debug", "project_path",
     "workflow_gate_schema_version", "thinking_gate_schema_version",
-    "mcp_gate_schema_version",
+    "mcp_gate_schema_version", "mcp_gate_contract_version",
+    "mcp_gate_contract_adopted_at", "mcp_gate_contract_history_boundary",
 }
 CLOSE_BOOKKEEPING_FIELDS = {
     "artifact_root", "archive_path", "backup_path", "worktree_path", "worktree_branch",
@@ -7844,6 +8087,19 @@ def cmd_step(args, *, git_provider=None, require_git_provider=False, inspection_
             raise ControlError("现有事件链不完整，拒绝记录步骤", exit_code=1,
                                gate_id="event_chain", violations=problems)
 
+        # 续跑入口先固定资格合同边界（幂等）：step start/check/finish 走 append_event，
+        # 不经过 metadata 提交；若不在生成新 trace 之前通过受控事务采纳合同，本次
+        # attempt 写出的未标版本记录会在 lint 时按 v1 解释，且其时间早于之后才发生的
+        # 采纳时刻而被永久当作历史行。边界必须早于本次续跑产生的任何新 trace。
+        if meta.get("mcp_gate_contract_version") is None:
+            before_meta = copy.deepcopy(meta)
+            adopt_gate_contract(meta, events=events)
+            commit_metadata_and_event(out_dir, before_meta, meta, "metadata_updated",
+                {"gate_contract_adoption": {
+                    "version": meta["mcp_gate_contract_version"],
+                    "adopted_at": meta["mcp_gate_contract_adopted_at"],
+                    "history_boundary": meta["mcp_gate_contract_history_boundary"]}})
+
         if meta.get("mode") == "lite" and args.phase == "finish" and args.request:
             finished_replay = step_attempt_finished(events, args.attempt)
             if finished_replay and finished_replay.get("request_id") == args.request:
@@ -7897,6 +8153,27 @@ def cmd_step(args, *, git_provider=None, require_git_provider=False, inspection_
                 payload.pop("effective_mode", None)
             if prior_start and "dedup_evidence_version" not in (prior_start.get("payload") or {}):
                 payload.pop("dedup_evidence_version", None)
+            prior_payload = prior_start.get("payload") or {} if prior_start else {}
+            # 跨版本幂等重放必须核对完整请求身份：同 request 但换了 attempt
+            # 是不同执行，不得重放旧事件（否则调用方按新 attempt 找不到启动事件）。
+            same_attempt = bool(prior_start) and prior_payload.get("attempt") == attempt
+            same_step = prior_payload.get("step") == args.step if prior_start else False
+            if same_attempt and same_step and attempt_upgrade_compatible(
+                    prior_payload, contract, captured_protected=snapshot["protected"]):
+                # 工具升级为步骤合同新增端口后，同请求重试的 contract_digest 与受保护
+                # 输入集合都会变化；旧记录自洽且是当前捕获输入的子集 → 重放而非
+                # 输入漂移/伪冲突。返回原事件中的 attempt，绝不虚构新 attempt。
+                require_stage_action(out_dir, args.step if args.step in {"code", "patch", "fast", "verify", "deploy"} else "review",
+                    expected_generation=prior_payload.get("stage_generation"), **candidate_access)
+                result = {"ok": True, "already_applied": True, "step": args.step,
+                          "attempt": prior_payload.get("attempt"),
+                          "event_id": prior_start["event_id"],
+                          "input_digest": prior_payload.get("input_digest"),
+                          "contract_digest": prior_payload.get("contract_digest"),
+                          "contract_drift_replayed": True,
+                          "execution_profile": step_execution_profile(meta, args.step)}
+                _code_output(json.dumps(result, ensure_ascii=False, indent=2), out_dir, meta, access)
+                return 0
             prior = find_idempotent_event(events, args.request, "step_started", payload)
             if prior:
                 require_stage_action(out_dir, args.step if args.step in {"code", "patch", "fast", "verify", "deploy"} else "review",
@@ -7965,12 +8242,20 @@ def cmd_step(args, *, git_provider=None, require_git_provider=False, inspection_
                                    allowed=model["boundaries"])
             current, missing = capture_step_inputs(out_dir, meta, model, args.step, **candidate_access)
             old_protected = start_payload.get("protected") or {}
-            changed = sorted(
-                key for key in set(old_protected) | set(current["protected"])
-                if old_protected.get(key) != current["protected"].get(key)
-            )
-            if start_payload.get("contract_digest") != current["contract_digest"]:
-                changed.insert(0, "$contract")
+            # 工具升级只新增端口时，旧 attempt 记录的 contract_digest 与受保护输入
+            # 集合都会变化；这是升级而非真实漂移，兼容时按启动时合同继续本
+            # attempt 的边界检查（新增端口只约束升级后启动的新 attempt）。
+            upgrade_compatible = attempt_upgrade_compatible(
+                start_payload, contract, captured_protected=current["protected"])
+            if upgrade_compatible:
+                changed = []
+            else:
+                changed = sorted(
+                    key for key in set(old_protected) | set(current["protected"])
+                    if old_protected.get(key) != current["protected"].get(key)
+                )
+                if start_payload.get("contract_digest") != current["contract_digest"]:
+                    changed.insert(0, "$contract")
             if step_mode_changed(start, meta, events):
                 changed.append("effective_mode")
             routes = contract["drift_routes"]
@@ -8034,6 +8319,11 @@ def cmd_step(args, *, git_provider=None, require_git_provider=False, inspection_
         if args.outcome in {"success", "degraded"} and step_mode_changed(start, meta, events):
             raise ControlError("步骤执行期间有效模式变化；请 blocked 终结后按新模式重新审查",
                                gate_id="effective_mode_drift", route="review")
+        if args.outcome in {"success", "degraded"} and start_payload.get("contract_digest") != canonical_digest(contract):
+            current, _ = capture_step_inputs(out_dir, meta, model, args.step, **candidate_access)
+            if not attempt_upgrade_compatible(start_payload, contract, captured_protected=current["protected"]):
+                raise ControlError("步骤合同漂移；请 blocked 终结后重新进入步骤",
+                                   gate_id="step_contract_drift")
         gate_events = [event for event in attempt_events(events, args.attempt)
                        if event.get("event_type") == "gate_checked"]
         latest_checks = {}
@@ -8215,7 +8505,10 @@ def cmd_inspection(args, *, git_provider=None, require_git_provider=False, inspe
         if start["payload"].get("step") != args.step or step_attempt_finished(events, args.attempt):
             raise ControlError("工作清单须关联同一步骤的未终结 attempt", gate_id="inspection_worklist")
         current, missing = capture_step_inputs(out_dir, meta, model, args.step, **candidate_access)
-        if missing or current["protected"] != start["payload"].get("protected") or current["contract_digest"] != start["payload"].get("contract_digest"):
+        upgrade_only_drift = attempt_upgrade_compatible(
+            start["payload"], contract, captured_protected=current.get("protected"))
+        if missing or (not upgrade_only_drift and (current["protected"] != start["payload"].get("protected")
+                or current["contract_digest"] != start["payload"].get("contract_digest"))):
             raise ControlError("执行合同或受保护输入漂移，先 blocked 重入", gate_id="inspection_worklist")
         if not any(e.get("event_type") == "gate_checked" and (e.get("payload") or {}).get("attempt") == args.attempt
                    and (e.get("payload") or {}).get("boundary") == "before_write"
@@ -8341,6 +8634,65 @@ def cmd_inspection(args, *, git_provider=None, require_git_provider=False, inspe
     _code_output(json.dumps(dict(ok=True, output="inspection_worklist", path=str(target), resumed=resumed,
                           event_id=event["event_id"], sha256=payload["sha256"], already_applied=bool(prior)), ensure_ascii=False), out_dir, meta, access)
     return 0
+
+
+def manual_dedup_verification_record(out_dir, meta, attempt, target, digest):
+    """受控登记人工去重证据时，当场对当前源码完成完整校验并返回验证回执。
+
+    报告摘要只能证明文件未变，不能证明报告曾经有效；因此完整校验（结构、
+    函数目录、家族/去重结论、范围覆盖）必须在源码仍与报告一致的登记时刻完成，
+    并把结果写入受事件链保护的 artifact 回执。后续 code 阶段修改源码后，
+    lint 以该回执维持 review 时的清偿，无需也无法用新源码重验旧报告。
+    校验不通过 → 拒绝登记（不完整报告不得作为受控证据）。
+    """
+    spec = importlib.util.spec_from_file_location("control_manual_dedup",
+                                                  SKILL_ROOT / "tools/manual_dedup_evidence.py")
+    helper = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(helper)
+    report = load_json(target, "review dedup evidence")
+    if not isinstance(report, dict):
+        raise ControlError("人工去重证据必须是 JSON 对象", gate_id="review_dedup_evidence")
+    workspace_value = meta.get("project_path")
+    if not isinstance(workspace_value, str) or not workspace_value:
+        raise ControlError("人工去重证据缺少工单工程根", gate_id="review_dedup_evidence")
+    workspace = Path(workspace_value).resolve()
+    entries = report.get("repositories")
+    if entries is None:
+        # 文档单仓格式：报告本身即 manual_dedup 报告，或包一层 {"manual_dedup": 报告}。
+        repositories = [{"repo_root": ".",
+                         "manual_dedup": report.get("manual_dedup", report)}]
+    elif isinstance(entries, list) and entries             and all(isinstance(e, dict) and isinstance(e.get("repo_root"), str) for e in entries):
+        repositories = entries
+    else:
+        raise ControlError("人工去重证据 repositories 结构非法", gate_id="review_dedup_evidence")
+    record = {"version": 1, "ticket_id": meta.get("ticket_id"), "attempt": attempt,
+              "report_sha256": digest, "repositories": []}
+    for entry in repositories:
+        report_part = entry.get("manual_dedup", entry)
+        # 文档格式把 review_scope 放在内层报告；外层同名键仅作兼容旧写法。
+        scope = entry.get("review_scope")
+        if scope is None and isinstance(report_part, dict):
+            scope = report_part.get("review_scope")
+        root_raw = entry["repo_root"] if "repo_root" in entry else "."
+        repo = (Path(root_raw) if Path(root_raw).is_absolute() else workspace / Path(root_raw)).resolve()
+        if not repo.is_dir():
+            raise ControlError(f"人工去重证据仓库根不存在: {root_raw}", gate_id="review_dedup_evidence")
+        if not isinstance(scope, list) or not scope or any(not isinstance(s, str) or not s.strip() for s in scope):
+            raise ControlError("人工去重证据缺有效 review_scope", gate_id="review_dedup_evidence")
+        try:
+            sources = helper.collect_sources(repo, scope)
+        except (helper.EvidenceError, OSError, ValueError, UnicodeError) as exc:
+            raise ControlError(f"人工去重证据源码枚举失败: {exc}", gate_id="review_dedup_evidence") from exc
+        errors = helper.validate_report(report_part, repo, meta.get("ticket_id"), attempt, scope, sources)
+        if errors:
+            raise ControlError("人工去重证据完整校验未通过", gate_id="review_dedup_evidence",
+                               violations=errors[:8])
+        record["repositories"].append({
+            "repo_root": str(repo), "review_scope": list(scope),
+            "function_count": sum(len(source["functions"]) for source in report_part["sources"]),
+            "sources": dict(sources),
+        })
+    return record
 
 
 def declared_output_path(out_dir, meta, contract, target):
@@ -8486,6 +8838,12 @@ def cmd_artifact(args, *, git_provider=None, require_git_provider=False, inspect
                 "sha256": file_sha256(target),
                 "size": target.stat().st_size,
             }
+            if output_id in ("review_dedup_evidence", "deepcheck_dedup_evidence"):
+                # 完整校验必须在源码仍与报告一致的登记时刻完成，结果进入受控回执；
+                # 摘要只能证明文件未变，不能证明报告曾经有效。review 与 deepcheck
+                # 的人工去重证据共用同一登记合同。
+                payload["manual_dedup_verification"] = manual_dedup_verification_record(
+                    out_dir, meta, args.attempt, target, payload["sha256"])
             if output_id == "review_manifest":
                 issues = review_evidence_issues(out_dir, meta)
                 if issues:

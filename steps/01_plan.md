@@ -4,6 +4,18 @@
 **产出**: `{ICODE_OUT_DIR}/01_plan.md`
 **会话**: 主会话
 
+**人工去重债务可追溯清偿的计划输入**：在 plan attempt 内，把全部拟新增、修改或删除的源码路径写入 `{ICODE_OUT_DIR}/plan_candidates.json`：`{"schema_version":1,"ticket_id":"<本工单>","attempt":"<plan attempt>","files":["<相对项目根或绝对路径>"]}`。同时在 `01_plan.md` 中写且只写一次以下章节，JSON 内容须与清单文件一致：
+
+````text
+<!-- icode:plan-candidates -->
+```json
+{"schema_version":1,"ticket_id":"<本工单>","attempt":"<plan attempt>","files":["<相对项目根或绝对路径>"]}
+```
+<!-- /icode:plan-candidates -->
+````
+
+文件清单须与计划一致，不能只列审查范围的一部分；无可核实清单时后续人工去重保留债务。计划完成前通过控制面分别为 `01_plan.md` 和 `plan_candidates.json` 执行 `artifact --step plan --attempt <plan attempt> --path <文件名>` 登记，成功结束 plan 后才进入 review。旧计划缺少这些回执时先真实重做并登记计划，不能补造历史回执。
+
 > **共享技能路由**：现状调研前读取 [references/skill_routing.md](../references/skill_routing.md)，按风险事实加载命中技能；技能结论须由主代理复核后进入 ADR。
 > **证据习惯真源**：证据缺口、完整链路、状态生命周期和验收分层统一执行 [references/evidence_and_verification.md](../references/evidence_and_verification.md)。
 > **工程接入门**：读取 [references/project_intake.md](../references/project_intake.md)，先解析实际工程根；大型/超大型 SDK 仓先做静态画像并限定扫描范围，多根或发现预算截断时 L1 阻断。

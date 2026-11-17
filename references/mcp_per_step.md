@@ -158,7 +158,7 @@
 
 
 - **cheap-research**（🟢*）：dedup 分类/找重复（`extract`，见 §2.5.7）+ 审查输出压缩（`summarize` 压缩审查结果供 merge 消费，见 [steps/02_review.md](../steps/02_review.md) 步骤 6）。其余（`diff_summary` 增量审查 / `fill_template` 维度结果 / `retrieve_similar` 历史 issue / `scan_patterns` / `trace_refs`）可作可选增强，非强证据场景不评估。**不接管决策**：3 质疑者对抗验证 / 审查意见合成走主会话（高风险）
-- **dedup 子阶段**：见 §2.5.7。**强证据** = cheap-research 🟢 + 函数数 ≥ `dedup_min_functions`（gates.json 常量）→ ripgrep 抽函数（catalog.json）+ `mcp__cheap-research__extract`（haiku 分类 + 高质量模型找 top 5 重复）。**降级**：工具不可用时可按 [审查证据合同](inspection_evidence.md) 真实执行人工等价去重；未能完成则保留去重债务。工具资格 trace 以机器 catalog 为准，不将人工工作记为 MCP 调用。
+- **dedup 子阶段**：见 §2.5.7。**强证据** = cheap-research 🟢 + 函数数 ≥ `dedup_min_functions`（gates.json 常量）→ ripgrep 抽函数（catalog.json）+ `mcp__cheap-research__extract`（haiku 分类 + 高质量模型找 top 5 重复）。**降级**：函数数 < 阈值 → not-eligible；达到阈值时工具不可用也保持 eligible，按 unavailable_before_call 或 degraded_after_attempt 留痕，并可依[审查证据合同](inspection_evidence.md)真实执行人工等价去重；未能完成则声明未观测边界并保留去重债务，不伪造去重完成。工具资格 trace 以机器 catalog 为准，不将人工工作记为 MCP 调用。
 
 ### 3 merge（合并审查意见）
 - **reasoning gate**：默认 L1（决策记录：逐条甄别审查意见 → 判断采纳/驳回 → 规划修改策略，写入 `.decision_anchors.json`）；存在冲突意见或跨模块歧义时升级 L2/L3

@@ -24,29 +24,41 @@ def call(out, command, *args):
 
 def start_review(tmp_path):
     out = tmp_path / ".icode_output/.icode_output_1"
-    profile = {"requested_mode": "fast", "effective_mode": "fast", "triggers": [],
-               "risk_flags": {}, "override": False}
+    plan = "fixture plan"
+    catalog = json.loads((ROOT / "mcp/workflow-gate/gates.json").read_text(encoding="utf-8"))
+    risk = catalog["fast_risk_upgrade"]
+    scope = {"summary": "Bounded review fixture", "at": "2026-11-13T00:00:00Z", "source_step": "plan"}
+    scope_digest = hashlib.sha256(json.dumps(
+        scope, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    profile = {
+        "policy_version": 2, "requested_mode": "fast", "effective_mode": "fast",
+        "triggers": [], "risk_flags": dict.fromkeys([*risk["risk_flags"], *risk["policy_v2"]["full_flags"]], False),
+        "override": False,
+        "classification": {"scope": "bounded", "scope_digest": scope_digest, "evidence_refs": [
+            {"scope": "ticket", "path": "01_plan.md", "sha256": hashlib.sha256(plan.encode()).hexdigest()}]},
+    }
     code, result = call(out, "create", "--ticket-id", "mode-test-1",
                         "--requirement", "review fixture", "--birth", "plan",
-                        "--metadata-json", json.dumps({"mode": "fast", "risk_profile": profile}))
+                        "--metadata-json", json.dumps({"mode": "fast", "risk_profile": profile,
+                                                       "scope_contract": scope}))
     assert code == 0, result
-    (out / "01_plan.md").write_text("fixture plan", encoding="utf-8")
+    (out / "01_plan.md").write_text(plan, encoding="utf-8")
     assert call(out, "transition", "--to", "plan_done", "--skip-gates")[0] == 0
     assert call(out, "transition", "--to", "review_in_progress")[0] == 0
     code, result = call(out, "step", "--step", "review", "--phase", "start", "--request", "review-start")
     assert code == 0, result
-    return out, result["attempt"]
+    return out, result["attempt"], profile
 
 
 def upgrade(out):
-    profile = {"requested_mode": "fast", "effective_mode": "full", "triggers": ["cross_component"],
+    profile = {"policy_version": 2, "requested_mode": "fast", "effective_mode": "full", "triggers": ["cross_component"],
                "risk_flags": {"cross_component": True}, "override": False}
     code, result = call(out, "metadata-update", "--set-json", json.dumps({"risk_profile": profile}))
     assert code == 0, result
 
 
 def test_review_attempt_blocks_on_effective_mode_change(tmp_path):
-    out, attempt = start_review(tmp_path)
+    out, attempt, _ = start_review(tmp_path)
     upgrade(out)
     code, result = call(out, "step", "--step", "review", "--phase", "check", "--attempt", attempt,
                         "--boundary", "before_write", "--request", "check-upgrade")
@@ -59,14 +71,14 @@ def test_review_attempt_blocks_on_effective_mode_change(tmp_path):
 
 
 def test_review_attempt_allows_unchanged_effective_mode(tmp_path):
-    out, attempt = start_review(tmp_path)
+    out, attempt, _ = start_review(tmp_path)
     code, result = call(out, "step", "--step", "review", "--phase", "check", "--attempt", attempt,
                         "--boundary", "before_write")
     assert code == 0 and result["result"] == "pass"
 
 
 def test_mode_change_after_check_cannot_finish_success(tmp_path):
-    out, attempt = start_review(tmp_path)
+    out, attempt, _ = start_review(tmp_path)
     assert call(out, "step", "--step", "review", "--phase", "check", "--attempt", attempt,
                 "--boundary", "before_write")[0] == 0
     upgrade(out)
@@ -75,12 +87,11 @@ def test_mode_change_after_check_cannot_finish_success(tmp_path):
     assert code == 1 and result["gate_id"] == "effective_mode_drift"
 
 
-def test_temporary_upgrade_cannot_be_hidden_by_reverting_metadata(tmp_path):
-    out, attempt = start_review(tmp_path)
+def test_upgraded_v2_review_cannot_revert_effective_mode(tmp_path):
+    out, attempt, profile = start_review(tmp_path)
     upgrade(out)
-    profile = {"requested_mode": "fast", "effective_mode": "fast", "triggers": [],
-               "risk_flags": {}, "override": False}
-    assert call(out, "metadata-update", "--set-json", json.dumps({"risk_profile": profile}))[0] == 0
+    code, result = call(out, "metadata-update", "--set-json", json.dumps({"risk_profile": profile}))
+    assert code == 1 and result["gate_id"] == "fast_policy_mode", result
     code, result = call(out, "step", "--step", "review", "--phase", "check", "--attempt", attempt,
                         "--boundary", "before_write")
     assert code == 1 and "effective_mode" in result["changed_inputs"]
@@ -89,8 +100,9 @@ def test_temporary_upgrade_cannot_be_hidden_by_reverting_metadata(tmp_path):
 def test_full_mode_instructions_override_requested_fast():
     review = (ROOT / "steps/02_review.md").read_text(encoding="utf-8")
     deepcheck = (ROOT / "steps/05_deepcheck.md").read_text(encoding="utf-8")
-    assert "有效模式 == \"full\"" in review
-    assert "有效模式 == \"fast\"" in deepcheck
+    assert "有效 full 首次审查默认 3 轮" in review
+    assert "须结束开放 attempt 并受控重入新 full review" in review
+    assert 'effective_mode(metadata) == "fast"' in deepcheck
     assert "metadata.mode == \"fast\"" not in deepcheck
 
 

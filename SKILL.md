@@ -159,10 +159,12 @@ Windows/WSL 构建按需加载 [WSL 构建合同](references/wsl_build.md)；本
 
 | 级别 | 含义 | 触发后行为 | 典型场景 |
 |---|---|---|---|
-| **L1·致命** | 阻塞流程的前置条件不满足 | **报错退出**，流程不可继续 | 按[工程接入合同](references/project_intake.md)确认目标解析失败（多根、预算截断或该入口不支持 non-git），不是仅凭宿主 cwd / 强制产物文件缺失 / MCP 完全不可用 / **双活动实现根**（同一工单存在两个 `state=active` 的 checkout，见「目录管理·worktree 生命周期」） |
+| **L1·致命** | 必要前置不满足 | **报错退出** | [工程接入失败](references/project_intake.md) / 强制产物缺失 / 必要能力缺失且无可执行替代 / **双活动实现根**（见「目录管理」） |
 | **L2·关键** | 重要约束未满足 | **警告 + 记入 metadata + 流程继续**（不阻塞等用户；用户事后审阅产物/audit 报告时可见，可手动回退）。icode 调性是 AI 自治 + 用户审阅，L2 不强制阻塞（避免 `/icode start` 串联时卡死）；02_review `absolute_cap` 触达同理，不再设例外 | plan §3 架构设计完全缺失 / review 触达 `absolute_cap` 仍有新问题 |
 | **L3·重要** | 重要检查项未通过 | **警告**，记入 metadata，**流程继续**（user 后续可手动回看） | plan §10 checklist ❌ > 3 条 / audit §6.7 视角 A 失败 / 步骤 4 编译失败（带 `code_compile_failed=true`）/ **worktree 创建失败**（降级原地 + metadata 记 `wt_degraded=true`，见「目录管理·worktree 决策与创建」④） |
 | **L4·参考** | 软性建议 | **柔性提示**，不影响流程 | limit 不存在 / cheap-research 未装 / 可选视觉增强不可用（严格视觉目标按[专用合同](references/serial_evidence_stages.md)阻断验收）/ init 末轮理解核对清单用户不回复 |
+
+即使全部 MCP 不可用，仍按[步骤规则](references/mcp_integration.md)降级并保留证据债务。
 
 **各步骤 L1/L2/L3 声明**：包括 compact 路径，执行时实读对应 step 头部声明并按原级别执行。
 

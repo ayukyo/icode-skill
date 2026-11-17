@@ -2,7 +2,9 @@
 from pathlib import Path
 import json
 import os
+import shlex
 import subprocess
+import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -29,6 +31,8 @@ def test_directory_selection_uses_numeric_latest_and_detects_entry_ambiguity(tmp
     rules = read("references/dir_and_metadata.md")
     section = rules.split("### 复用 / 创建新目录决策", 1)[1].split("```bash", 1)[1].split("```", 1)[0]
     snippet = section[section.index("LAST=$("):section.index("# REUSE=2")]
+    snippet = snippet.replace('"{ICODE_SKILL_ROOT}"', shlex.quote(str(ROOT)))
+    snippet = snippet.replace("python3 -c", f"{shlex.quote(sys.executable)} -c")
     env = dict(os.environ, WORKSPACE_ROOT=str(root))
     result = subprocess.run(["bash", "-c", snippet + '\nprintf "%s:%s\\n" "$LAST" "$REUSE"'],
                             env=env, text=True, capture_output=True, check=True)
@@ -41,14 +45,28 @@ def test_directory_selection_uses_numeric_latest_and_detects_entry_ambiguity(tmp
     (candidate / ".ico_metadata.json").write_text("not-json")
     result = subprocess.run(["bash", "-c", snippet], env=env, text=True, capture_output=True)
     assert result.returncode != 0
-    assert "禁止猜测复用" in result.stdout
+    assert "禁止猜测复用" in result.stderr
 
 
 def test_effective_mode_controls_directory_review_guidance():
     text = read("references/dir_and_metadata.md")
-    part = text[text.index("### 2.5"): ] if "### 2.5" in text else text
-    assert "effective_mode" in part
-    assert "有效模式为 `full`" in part
+    mode_rule = text.split("**`mode` 字段**", 1)[1].split("\n\n", 1)[0]
+    assert "`effective_mode(metadata)`" in mode_rule
+    assert "有效 full 的 review 为默认多轮+对抗" in mode_rule
+    assert "有效 fast 为单轮无对抗与 Reverse" in mode_rule
+
+
+def test_entry_and_compact_rules_allow_evidenced_no_mcp_fallback():
+    for path in ("SKILL.md", "references/full_workflow.md"):
+        matrix = read(path).split("### 强制阻断边界矩阵", 1)[1].split("**各步骤", 1)[0]
+        l1 = next(line for line in matrix.splitlines() if line.startswith("| **L1"))
+        assert "必要能力缺失且无可执行替代" in l1
+        assert "MCP 完全不可用" not in l1
+        assert "即使全部 MCP 不可用" in matrix
+        assert "保留证据债务" in matrix
+    compact = read("steps/fast.md").split("## 思考与 MCP 边界", 1)[1]
+    assert "结构化思考" in compact
+    assert "`unavailable_before_call`" in compact
 
 
 def test_host_review_does_not_require_claude_only_discovery_or_wait():
@@ -130,8 +148,9 @@ def test_audit_completes_only_after_deviation_and_delivery_decision():
 
 def test_fast_single_review_does_not_claim_full_upgrade():
     fast = read("steps/fast.md")
-    assert "命中升级风险、未 override" in fast
-    assert "这是 fast→full 升级机制" not in fast
-    assert "不改变工单有效模式" in fast
+    assert "fast review 一轮无对抗；有效 full 恢复原多轮与对抗" in fast
+    assert '`route=full` 时经控制面记录 `risk_profile.effective_mode="full"`' in fast
+    assert "显式 `/icode review N` 升级时先登记 full" in fast
     assert "fast 模式不跑 E2E" not in fast
-    assert "audit 的前端验证" in fast
+    assert "前端验证" in fast
+    assert "mcp_per_step.md" in fast

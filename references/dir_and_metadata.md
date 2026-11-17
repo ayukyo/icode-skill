@@ -103,7 +103,10 @@ if [ -n "$LAST" ]; then
   # 判定最新目录是否为"入口态"：有 .ico_metadata.json + 00_init.md，且无 01_plan.md
   if [ -f "$CAND/.ico_metadata.json" ] && [ -f "$CAND/00_init.md" ] && [ ! -f "$CAND/01_plan.md" ]; then
     # {ICODE_SKILL_ROOT} 先解析为本次实际加载的技能根，不能使用业务工程根。
-    STATUS=$(python3 -c "import sys; sys.path.insert(0,'{ICODE_SKILL_ROOT}/tools'); import icode_control as ctl; print(ctl.read_metadata_readonly(sys.argv[1]).get('status',''))" "$CAND") || exit 1
+    STATUS=$(python3 -c 'import pathlib, sys; sys.path.insert(0, str(pathlib.Path(sys.argv[2]) / "tools")); import icode_control as ctl; print(ctl.read_metadata_readonly(sys.argv[1]).get("status", ""))' "$CAND" "{ICODE_SKILL_ROOT}") || {
+      echo "❌ 无法读取工单状态，禁止猜测复用：$CAND" >&2
+      exit 1
+    }
     # 入口态：init_in_progress 或 log_done
     case "$STATUS" in
       init_in_progress|log_done) REUSE=2 ;;  # 2 = 有歧义，需问用户
@@ -290,7 +293,7 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
 
 入口命令（init/log）和步骤1常规新建目录时创建。完整字段定义见 SKILL.md「元信息文件」段，此处仅列入口创建时的最小模板：
 
-> **`schema_version` 字段（vNext 控制面，schema v3）**：所有新建工单一律先确定非空唯一 `ticket_id`，再用 `tools/icode_control.py create` 原子产生 `schema_version:3` metadata + `ticket_created` 事件；`workflow_gate_schema_version` 和 `thinking_gate_schema_version` 为 `1`，`mcp_gate_schema_version` 为 `2`。旧工单无 schema_version = legacy（只读适配，不静默伪装 vNext）。
+> **`schema_version` 字段（vNext 控制面，schema v3）**：所有新建工单一律先确定非空唯一 `ticket_id`，再用 `tools/icode_control.py create` 原子产生 `schema_version:3` metadata + `ticket_created` 事件；`workflow_gate_schema_version` 和 `thinking_gate_schema_version` 为 `1`，`mcp_gate_schema_version` 为 `2`，`mcp_gate_contract_version` 为 `2`（cheap-research 资格合同版本，受保护字段：新工单 trace 行按合同 v2 解释——eligible 只由业务事实计算；存量工单无此字段，其历史行按合同 v1 旧语义解释，不追溯改判；续跑首次控制面写入由 `adopt_gate_contract` 补齐该字段并写受保护的 `mcp_gate_contract_adopted_at`（显式 UTC）与 `mcp_gate_contract_history_boundary`（采纳时存在升级前未终结 attempt 则回退为其最早 start），linter 以该边界区分历史行与续跑新行）。旧工单无 schema_version = legacy（只读适配，不静默伪装 vNext）。
 
 > **`template_version` 字段**（schema 版本，自 [v1.1 升级](../steps/01_plan.md) 起所有新建工单默认带）：
 >
@@ -409,7 +412,8 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
   "schema_version": 3,
   "workflow_gate_schema_version": 1,
   "thinking_gate_schema_version": 1,
-  "mcp_gate_schema_version": 2
+  "mcp_gate_schema_version": 2,
+  "mcp_gate_contract_version": 2
 }
 ```
 
@@ -436,7 +440,8 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
   "schema_version": 3,
   "workflow_gate_schema_version": 1,
   "thinking_gate_schema_version": 1,
-  "mcp_gate_schema_version": 2
+  "mcp_gate_schema_version": 2,
+  "mcp_gate_contract_version": 2
 }
 ```
 
@@ -461,7 +466,8 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
   "schema_version": 3,
   "workflow_gate_schema_version": 1,
   "thinking_gate_schema_version": 1,
-  "mcp_gate_schema_version": 2
+  "mcp_gate_schema_version": 2,
+  "mcp_gate_contract_version": 2
 }
 ```
 
@@ -489,7 +495,8 @@ test -d "{project_path}" || {  # 工程根目录已删除/移动
   "schema_version": 3,
   "workflow_gate_schema_version": 1,
   "thinking_gate_schema_version": 1,
-  "mcp_gate_schema_version": 2
+  "mcp_gate_schema_version": 2,
+  "mcp_gate_contract_version": 2
 }
 ```
 

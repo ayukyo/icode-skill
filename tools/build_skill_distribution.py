@@ -135,7 +135,7 @@ def component_for(path):
     # Publishing/website maintenance belongs with developer resources, so the
     # bounded core retains runtime tools without raising its import budget.
     # Public package entry files are copied separately at the package root.
-    if (name in {".gitignore", "README.md", "README.zh-CN.md", "LICENSE.txt",
+    if (name in {".gitignore", "README.md", "LICENSE.txt",
                   "tools/build_skill_distribution.py", "tools/check_skill_installation.py",
                   "scripts/check-docx-renderer-release.py", "scripts/icode_payload_profile.py",
                   "tools/build_public_site.py", "tools/notify_indexnow.py",

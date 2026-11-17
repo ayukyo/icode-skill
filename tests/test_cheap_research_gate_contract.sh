@@ -33,10 +33,12 @@ write_trace() {  # $1=dir  $2..=jsonl 行
   done
 }
 # 生成一条合法 trace 行（evidence 用普通双引号 JSON，外层传参用单引号）
-trace_line() {  # $1=gate_id $2=tool $3=step $4=eligible $5=decision $6=evidence_json
-  python3 - "$1" "$2" "$3" "$4" "$5" "$6" <<'PY'
+# 可选 $7=availability_json（unavailable_before_call 的工具发现与替代证据）
+# 可选 $8=contract_version（行级合同版本声明；缺省不写 = 存量/继承 metadata）
+trace_line() {  # $1=gate_id $2=tool $3=step $4=eligible $5=decision $6=evidence_json [$7=availability_json] [$8=contract_version]
+  python3 - "$1" "$2" "$3" "$4" "$5" "$6" "${7:-}" "${8:-}" <<'PY'
 import json, sys, datetime, hashlib
-gid, tool, step, elig, dec, ev = sys.argv[1:]
+gid, tool, step, elig, dec, ev, avail, contract = sys.argv[1:]
 evidence = json.loads(ev)
 # These are explicit synthetic fixture inputs, not production trace repair.
 if gid == "review.dedup":
@@ -45,15 +47,21 @@ if gid in ("deepcheck.fixed_scan", "deepcheck.dedup"):
     evidence.setdefault("mode", "full")
     evidence.setdefault("phase", "fixed" if gid.endswith("fixed_scan") else "dedup")
 identity = hashlib.sha256(json.dumps([tool, evidence], sort_keys=True).encode()).hexdigest()
-print(json.dumps({
+row = {
   "schema_version": 2, "workflow_version": "2.x", "ticket_id": "demo-ticket",
   "step": step, "gate_id": gid, "tool": tool,
   "eligible": elig == "true", "evidence": evidence,
   "decision": dec, "attempted": dec in ("called", "degraded_after_attempt"),
-  "result": "success", "cache_key": identity if dec == "cache_hit" else None,
+  "result": "unavailable" if dec == "unavailable_before_call" else "success",
+  "cache_key": identity if dec == "cache_hit" else None,
   "input_digest": identity if dec == "cache_hit" else None, "source_files": [],
   "error_class": None, "at": datetime.datetime.now(datetime.timezone.utc).isoformat()
-}, ensure_ascii=False))
+}
+if avail:
+    row["availability"] = json.loads(avail)
+if contract:
+    row["contract_version"] = int(contract)
+print(json.dumps(row, ensure_ascii=False))
 PY
 }
 
@@ -74,6 +82,10 @@ check_contains references/mcp_per_step.md "gates\.json" "mcp_per_step.md 引用 
 check_contains references/mcp_per_step.md "产物文件不记录 MCP 调用信息" "mcp_per_step.md 正式产物不写 MCP 调用信息"
 check_contains references/thinking_core.md "\.mcp_gate_trace" "thinking_core.md 引用 .mcp_gate_trace"
 check_not_contains tools/lint_mcp_coverage.py "MCP 调用记录" "lint 不再搜索「MCP 调用记录」章节"
+check_contains mcp/cheap-research/gates.json "contract_version" "gates.json 声明资格合同版本真源"
+check_contains tools/lint_mcp_coverage.py "row_contract" "lint 按合同版本解释资格语义"
+check_contains tools/lint_mcp_coverage.py "enumeration_verified" "lint 校验替代枚举核验字段"
+check_contains tools/lint_mcp_coverage.py "mcp_gate_contract_version" "lint 读取 metadata 合同版本"
 # fast 文档矛盾：fast 只跑 Reverse，deepcheck Fixed/dedup 记为 skipped_stage_not_reached
 if grep -q "deepcheck（Fixed 预扫 scan_patterns + dedup extract）" steps/fast.md 2>/dev/null; then
   bad "fast.md 仍宣传 fast deepcheck 会执行 Fixed/dedup（与 Reverse 后终止矛盾）"
@@ -94,13 +106,24 @@ done
 echo ""
 echo "=== 12.2 运行时 fixture ==="
 
+# 无 MCP 场景的 availability 证据（工具未暴露 + 真实替代履行引用）
+AVAIL_DEDUP='{"tool_visible":false,"reason":"not_exposed","discovery_ref":"session:tools","fallback":"manual_dedup per inspection_evidence.md","evidence_ref":"dedup/manual_report.json"}'
+AVAIL_LOG='{"tool_visible":false,"reason":"not_exposed","discovery_ref":"session:tools","fallback":"main_agent_direct_read","evidence_ref":"log_analysis.md"}'
+
 # 1. TB 评论 3 条：log.comments_extract 合法 skip
-META_LOG='{"mcp_gate_schema_version":1,"completed_steps":["log"],"mode":"full","ticket_id":"demo-ticket"}'
+META_LOG='{"mcp_gate_schema_version":1,"mcp_gate_contract_version":2,"completed_steps":["log"],"mode":"full","ticket_id":"demo-ticket"}'
 make_ticket "$TMP/t1" "$META_LOG"
 write_trace "$TMP/t1" \
   "$(trace_line log.comments_extract extract log false skipped_not_eligible '{"tb_comments_count":3,"threshold":8,"cheap_available":true}')" \
   "$(trace_line log.long_log_summary summarize log false skipped_not_eligible '{"candidate_text_bytes":2048,"threshold":8192,"cheap_available":true}')"
 if $LINT "$TMP/t1" >/dev/null 2>&1; then ok "T1 评论3条→合法skip exit0"; else bad "T1 评论3条应 exit0"; fi
+
+# 1b. 评论 3 条 + 无 MCP：业务不达标仍是合法 skip（cheap_available 不改变 eligibility）
+make_ticket "$TMP/t1b" "$META_LOG"
+write_trace "$TMP/t1b" \
+  "$(trace_line log.comments_extract extract log false skipped_not_eligible '{"tb_comments_count":3,"threshold":8,"cheap_available":false}')" \
+  "$(trace_line log.long_log_summary summarize log false skipped_not_eligible '{"candidate_text_bytes":2048,"threshold":8192,"cheap_available":false}')"
+if $LINT "$TMP/t1b" >/dev/null 2>&1; then ok "T1b 评论3条+无MCP→合法skip"; else bad "T1b 评论3条+无MCP 应 exit0"; fi
 
 # 2. TB 评论 8 条：缺 extract 记录时 strict lint 失败
 make_ticket "$TMP/t2" "$META_LOG"
@@ -126,8 +149,15 @@ write_trace "$TMP/t4b" \
   "$(trace_line log.long_log_summary summarize log true called '{"candidate_text_bytes":8192,"threshold":8192,"cheap_available":true}')"
 if $LINT "$TMP/t4b" >/dev/null 2>&1; then ok "T4b 8192B有called→pass"; else bad "T4b 8192B 有 called 应 pass"; fi
 
+# 4c. 8192B + 无 MCP：eligible 保持 true，unavailable_before_call + 主代理直读兜底 → pass
+make_ticket "$TMP/t4c" "$META_LOG"
+write_trace "$TMP/t4c" \
+  "$(trace_line log.comments_extract extract log false skipped_not_eligible '{"tb_comments_count":3,"threshold":8,"cheap_available":false}')" \
+  "$(trace_line log.long_log_summary summarize log true unavailable_before_call '{"candidate_text_bytes":8192,"threshold":8192,"cheap_available":false}' "$AVAIL_LOG")"
+if $LINT "$TMP/t4c" >/dev/null 2>&1; then ok "T4c 8192B+无MCP unavailable_before_call→pass"; else bad "T4c 8192B+无MCP 应 pass"; fi
+
 # 5. 函数 49：review.dedup 合法 skip
-META_REV='{"mcp_gate_schema_version":1,"completed_steps":["2"],"mode":"full","ticket_id":"demo-ticket"}'
+META_REV='{"mcp_gate_schema_version":1,"mcp_gate_contract_version":2,"completed_steps":["2"],"mode":"full","ticket_id":"demo-ticket"}'
 make_ticket "$TMP/t5" "$META_REV"
 write_trace "$TMP/t5" \
   "$(trace_line review.dedup extract review false skipped_not_eligible '{"function_count":49,"threshold":50,"rg_available":true,"cheap_available":true}')" \
@@ -145,8 +175,29 @@ write_trace "$TMP/t6b" \
   "$(trace_line review.result_summary summarize review true called '{"result_source":"review_round_1.json","review_rounds":1}')"
 if $LINT "$TMP/t6b" >/dev/null 2>&1; then ok "T6b 函数50有 called→pass"; else bad "T6b 函数50 有 called 应 pass"; fi
 
+# 6c. 函数 50 + 无 MCP：eligible 保持 true，unavailable_before_call + 人工去重合同兜底 → pass
+make_ticket "$TMP/t6c" "$META_REV"
+write_trace "$TMP/t6c" \
+  "$(trace_line review.dedup extract review true unavailable_before_call '{"function_count":50,"threshold":50,"rg_available":true,"cheap_available":false}' "$AVAIL_DEDUP")" \
+  "$(trace_line review.result_summary summarize review true called '{"result_source":"review_round_1.json","review_rounds":1}')"
+if $LINT "$TMP/t6c" >/dev/null 2>&1; then ok "T6c 函数50+无MCP unavailable_before_call→pass"; else bad "T6c 函数50+无MCP 应 pass"; fi
+
+# 6d. 函数 50 + 无 MCP 却记 skipped_not_eligible：业务义务不得伪装成不适用 → fail
+make_ticket "$TMP/t6d" "$META_REV"
+write_trace "$TMP/t6d" \
+  "$(trace_line review.dedup extract review false skipped_not_eligible '{"function_count":50,"threshold":50,"rg_available":true,"cheap_available":false}')" \
+  "$(trace_line review.result_summary summarize review true called '{"result_source":"review_round_1.json","review_rounds":1}')"
+if $LINT "$TMP/t6d" >/dev/null 2>&1; then bad "T6d 函数50+无MCP 伪装 not_eligible 应 fail"; else ok "T6d 函数50+无MCP 伪装 not_eligible→fail"; fi
+
+# 6e. 函数 49 + 无 MCP：业务不达标仍是合法 skip
+make_ticket "$TMP/t6e" "$META_REV"
+write_trace "$TMP/t6e" \
+  "$(trace_line review.dedup extract review false skipped_not_eligible '{"function_count":49,"threshold":50,"rg_available":true,"cheap_available":false}')" \
+  "$(trace_line review.result_summary summarize review true called '{"result_source":"review_round_1.json","review_rounds":1}')"
+if $LINT "$TMP/t6e" >/dev/null 2>&1; then ok "T6e 函数49+无MCP→合法skip"; else bad "T6e 函数49+无MCP 应 pass"; fi
+
 # 7. fast Reverse-only：deepcheck Fixed/dedup 必须 skipped_stage_not_reached
-META_FAST_DC='{"mcp_gate_schema_version":1,"completed_steps":["5"],"mode":"fast","ticket_id":"demo-ticket"}'
+META_FAST_DC='{"mcp_gate_schema_version":1,"mcp_gate_contract_version":2,"completed_steps":["5"],"mode":"fast","ticket_id":"demo-ticket"}'
 make_ticket "$TMP/t7a" "$META_FAST_DC"
 write_trace "$TMP/t7a" \
   "$(trace_line deepcheck.fixed_scan scan_patterns deepcheck false skipped_stage_not_reached '{"mode":"fast","phase":"reverse","function_points_count":0}')"
@@ -158,7 +209,7 @@ write_trace "$TMP/t7b" \
 if $LINT "$TMP/t7b" >/dev/null 2>&1; then ok "T7b fast 双 gate 跳过记录→pass"; else bad "T7b fast 双 gate 跳过记录应 pass"; fi
 
 # 8. audit 两个 gate 任缺一个均失败
-META_AUDIT='{"mcp_gate_schema_version":1,"completed_steps":["6"],"mode":"full","ticket_id":"demo-ticket"}'
+META_AUDIT='{"mcp_gate_schema_version":1,"mcp_gate_contract_version":2,"completed_steps":["6"],"mode":"full","ticket_id":"demo-ticket"}'
 make_ticket "$TMP/t8a" "$META_AUDIT"
 write_trace "$TMP/t8a" \
   "$(trace_line audit.repo_facts propose_repo_facts audit true called '{"affected_repo_roots":["/repo"]}')"
@@ -170,7 +221,7 @@ write_trace "$TMP/t8b" \
 if $LINT "$TMP/t8b" >/dev/null 2>&1; then ok "T8b audit 双 gate→pass"; else bad "T8b audit 双 gate 应 pass"; fi
 
 # 9. patch listen 增量日志超过阈值：必须 summarize
-META_PATCH='{"mcp_gate_schema_version":1,"completed_steps":[],"mode":"full","patch_scoped":true,"ticket_id":"demo-ticket"}'
+META_PATCH='{"mcp_gate_schema_version":1,"mcp_gate_contract_version":2,"completed_steps":[],"mode":"full","patch_scoped":true,"ticket_id":"demo-ticket"}'
 make_ticket "$TMP/t9a" "$META_PATCH"
 if $LINT "$TMP/t9a" >/dev/null 2>&1; then bad "T9a patch 全缺应 fail"; else ok "T9a patch 无记录→fail"; fi
 make_ticket "$TMP/t9b" "$META_PATCH"
@@ -322,10 +373,117 @@ write_trace "$TMP/t19" \
   "$(trace_line review.dedup extract review true called '{"function_count":120,"threshold":50,"rg_available":true,"cheap_available":true}')"
 if $LINT "$TMP/t19" --step review --strict >/dev/null 2>&1; then bad "T19b --step review 缺 result_summary 应 fail"; else ok "T19b --step review 缺 result_summary→fail"; fi
 
+# 20. 资格合同版本：无 contract_version 的存量行按合同 v1 旧语义解释（历史记录不追溯改判）
+META_LEGACY_REV='{"mcp_gate_schema_version":1,"completed_steps":["2"],"mode":"full","ticket_id":"demo-ticket"}'
+make_ticket "$TMP/t20" "$META_LEGACY_REV"
+write_trace "$TMP/t20" \
+  "$(trace_line review.dedup extract review false skipped_not_eligible '{"function_count":266,"threshold":50,"rg_available":true,"cheap_available":false}')" \
+  "$(trace_line review.result_summary summarize review true unavailable_before_call '{"result_source":"02_review.md","review_rounds":1}' "$AVAIL_DEDUP")"
+if $LINT "$TMP/t20" --step review --strict >/dev/null 2>&1; then ok "T20 存量v1语义历史行→pass（不追溯改判）"; else bad "T20 存量v1语义历史行应 pass"; fi
+
+# 20b. 同一历史形状 + metadata 合同升到 v2：未重做的历史 skip 行必须判非法
+make_ticket "$TMP/t20b" '{"mcp_gate_schema_version":1,"mcp_gate_contract_version":2,"completed_steps":["2"],"mode":"full","ticket_id":"demo-ticket"}'
+write_trace "$TMP/t20b" \
+  "$(trace_line review.dedup extract review false skipped_not_eligible '{"function_count":266,"threshold":50,"rg_available":true,"cheap_available":false}')" \
+  "$(trace_line review.result_summary summarize review true unavailable_before_call '{"result_source":"02_review.md","review_rounds":1}' "$AVAIL_DEDUP")"
+if $LINT "$TMP/t20b" --step review --strict >/dev/null 2>&1; then bad "T20b 合同v2 reinterpret 历史 skip 应 fail"; else ok "T20b 合同v2 重解释历史 skip→fail"; fi
+
+# 20c. 行级声明 contract_version=2：历史 skip 形状立即按新合同判非法
+make_ticket "$TMP/t20c" "$META_LEGACY_REV"
+write_trace "$TMP/t20c" \
+  "$(trace_line review.dedup extract review false skipped_not_eligible '{"function_count":266,"threshold":50,"rg_available":true,"cheap_available":false}' "" 2)" \
+  "$(trace_line review.result_summary summarize review true unavailable_before_call '{"result_source":"02_review.md","review_rounds":1}' "$AVAIL_DEDUP")"
+if $LINT "$TMP/t20c" --step review --strict >/dev/null 2>&1; then bad "T20c 行级 contract_version=2 应 fail"; else ok "T20c 行级 contract_version=2→fail"; fi
+
+# 20d. 合同 v2 工单禁止把行降级为 contract_version=1
+make_ticket "$TMP/t20d" "$META_REV"
+write_trace "$TMP/t20d" \
+  "$(trace_line review.dedup extract review true unavailable_before_call '{"function_count":50,"threshold":50,"rg_available":true,"cheap_available":false}' "$AVAIL_DEDUP" 1)" \
+  "$(trace_line review.result_summary summarize review true called '{"result_source":"review_round_1.json","review_rounds":1}')"
+if $LINT "$TMP/t20d" --step review --strict >/dev/null 2>&1; then bad "T20d 合同v2工单行降级应 fail"; else ok "T20d 合同v2工单行降级→fail"; fi
+
+# 21. rg_available=false 时达到阈值的去重不得记为业务不适用（枚举绕过形态）
+make_ticket "$TMP/t21" "$META_REV"
+write_trace "$TMP/t21" \
+  "$(trace_line review.dedup extract review false skipped_not_eligible '{"function_count":50,"threshold":50,"rg_available":false,"cheap_available":false}')" \
+  "$(trace_line review.result_summary summarize review true called '{"result_source":"review_round_1.json","review_rounds":1}')"
+if $LINT "$TMP/t21" --step review --strict >/dev/null 2>&1; then bad "T21 rg=false 达阈值伪装 skip 应 fail"; else ok "T21 rg=false 达阈值伪装 skip→fail"; fi
+
+# 21b. rg_available=false 且声称低于阈值：枚举不可信不得证明业务不适用
+make_ticket "$TMP/t21b" "$META_REV"
+write_trace "$TMP/t21b" \
+  "$(trace_line review.dedup extract review false skipped_not_eligible '{"function_count":49,"threshold":50,"rg_available":false,"cheap_available":false}')" \
+  "$(trace_line review.result_summary summarize review true called '{"result_source":"review_round_1.json","review_rounds":1}')"
+if $LINT "$TMP/t21b" --step review --strict >/dev/null 2>&1; then bad "T21b 无枚举核验声称低于阈值应 fail"; else ok "T21b 无枚举核验声称低于阈值→fail"; fi
+
+# 21c. 受支持的替代枚举已核验（enumeration_verified=true）：低于阈值是合法业务 skip
+make_ticket "$TMP/t21c" "$META_REV"
+write_trace "$TMP/t21c" \
+  "$(trace_line review.dedup extract review false skipped_not_eligible '{"function_count":49,"threshold":50,"rg_available":false,"cheap_available":false,"enumeration_verified":true}')" \
+  "$(trace_line review.result_summary summarize review true called '{"result_source":"review_round_1.json","review_rounds":1}')"
+if $LINT "$TMP/t21c" --step review --strict >/dev/null 2>&1; then ok "T21c 替代枚举已核验→合法skip"; else bad "T21c 替代枚举已核验应 pass"; fi
+
+# 21d. enumeration_verified 类型非法：schema error
+make_ticket "$TMP/t21d" "$META_REV"
+write_trace "$TMP/t21d" \
+  "$(trace_line review.dedup extract review false skipped_not_eligible '{"function_count":49,"threshold":50,"rg_available":false,"cheap_available":false,"enumeration_verified":"yes"}')" \
+  "$(trace_line review.result_summary summarize review true called '{"result_source":"review_round_1.json","review_rounds":1}')"
+if $LINT "$TMP/t21d" --step review --strict >/dev/null 2>&1; then bad "T21d enumeration_verified 类型非法应 fail"; else ok "T21d enumeration_verified 类型非法→fail"; fi
+
+# 22. 枚举未知债务状态（ripgrep 与替代枚举都不可用时的唯一合法记录）
+make_ticket "$TMP/t22a" "$META_REV"
+write_trace "$TMP/t22a" \
+  "$(trace_line review.dedup extract review true unavailable_before_call '{"function_count":0,"threshold":50,"rg_available":false,"cheap_available":false,"enumeration_unverified":true}' "$AVAIL_DEDUP")" \
+  "$(trace_line review.result_summary summarize review true called '{"result_source":"review_round_1.json","review_rounds":1}')"
+if $LINT "$TMP/t22a" --step review --strict >/dev/null 2>&1; then ok "T22a 枚举未知+eligible=true+unavailable→pass"; else bad "T22a 枚举未知债务记录应 pass"; fi
+make_ticket "$TMP/t22b" "$META_REV"
+write_trace "$TMP/t22b" \
+  "$(trace_line review.dedup extract review false skipped_not_eligible '{"function_count":0,"threshold":50,"rg_available":false,"cheap_available":false,"enumeration_unverified":true}')" \
+  "$(trace_line review.result_summary summarize review true called '{"result_source":"review_round_1.json","review_rounds":1}')"
+if $LINT "$TMP/t22b" --step review --strict >/dev/null 2>&1; then bad "T22b 带声明仍 skip 应 fail"; else ok "T22b 带声明仍 skip→fail"; fi
+make_ticket "$TMP/t22c" "$META_REV"
+write_trace "$TMP/t22c" \
+  "$(trace_line review.dedup extract review true unavailable_before_call '{"function_count":49,"threshold":50,"rg_available":false,"cheap_available":false}' "$AVAIL_DEDUP")" \
+  "$(trace_line review.result_summary summarize review true called '{"result_source":"review_round_1.json","review_rounds":1}')"
+if $LINT "$TMP/t22c" --step review --strict >/dev/null 2>&1; then bad "T22c 未声明枚举未知状态应 fail"; else ok "T22c 未声明枚举未知状态→fail"; fi
+
+# 22d. 枚举未知状态不得记 cache_hit 计入 fulfilled（债务未解决不得伪装成功）
+make_ticket "$TMP/t22d" "$META_REV"
+write_trace "$TMP/t22d" \
+  "$(trace_line review.dedup extract review true cache_hit '{"function_count":0,"threshold":50,"rg_available":false,"cheap_available":false,"enumeration_unverified":true}')" \
+  "$(trace_line review.result_summary summarize review true called '{"result_source":"review_round_1.json","review_rounds":1}')"
+if $LINT "$TMP/t22d" --step review --strict >/dev/null 2>&1; then bad "T22d 枚举未知记 cache_hit 应 fail"; else ok "T22d 枚举未知记 cache_hit→fail"; fi
+$LINT "$TMP/t22d" --step review --strict --json | python3 -c '
+import json, sys
+r = json.load(sys.stdin)
+assert r["enumeration_debt"] == 1 and r["fulfilled"] == 1 and r["invalid_skip"] == 0, (r["enumeration_debt"], r["fulfilled"])
+' && ok "T22d 报告 enumeration_debt=1 暴露未解决债务" || bad "T22d 报告债务计数不符"
+
+# 22e. 债务状态与尝试值无关：达到阈值同样不得记 cache_hit
+make_ticket "$TMP/t22e" "$META_REV"
+write_trace "$TMP/t22e" \
+  "$(trace_line review.dedup extract review true cache_hit '{"function_count":266,"threshold":50,"rg_available":false,"cheap_available":false,"enumeration_unverified":true}')" \
+  "$(trace_line review.result_summary summarize review true called '{"result_source":"review_round_1.json","review_rounds":1}')"
+if $LINT "$TMP/t22e" --step review --strict >/dev/null 2>&1; then bad "T22e 达阈值枚举未知记 cache_hit 应 fail"; else ok "T22e 达阈值枚举未知记 cache_hit→fail"; fi
+
+# 23. 采纳边界：存量工单续跑由 mcp_gate_contract_adopted_at 区分历史行与新行
+META_ADOPT_FUTURE='{"mcp_gate_schema_version":1,"mcp_gate_contract_version":2,"mcp_gate_contract_adopted_at":"2099-01-01T00:00:00+00:00","completed_steps":["2"],"mode":"full","ticket_id":"demo-ticket"}'
+META_ADOPT_PAST='{"mcp_gate_schema_version":1,"mcp_gate_contract_version":2,"mcp_gate_contract_adopted_at":"2020-01-01T00:00:00+00:00","completed_steps":["2"],"mode":"full","ticket_id":"demo-ticket"}'
+make_ticket "$TMP/t23a" "$META_ADOPT_FUTURE"
+write_trace "$TMP/t23a" \
+  "$(trace_line review.dedup extract review false skipped_not_eligible '{"function_count":266,"threshold":50,"rg_available":true,"cheap_available":false}')" \
+  "$(trace_line review.result_summary summarize review true called '{"result_source":"review_round_1.json","review_rounds":1}')"
+if $LINT "$TMP/t23a" --step review --strict >/dev/null 2>&1; then ok "T23a 采纳前的历史 skip 行保持 v1 解释→pass"; else bad "T23a 采纳前历史行应 pass"; fi
+make_ticket "$TMP/t23b" "$META_ADOPT_PAST"
+write_trace "$TMP/t23b" \
+  "$(trace_line review.dedup extract review false skipped_not_eligible '{"function_count":266,"threshold":50,"rg_available":true,"cheap_available":false}')" \
+  "$(trace_line review.result_summary summarize review true called '{"result_source":"review_round_1.json","review_rounds":1}')"
+if $LINT "$TMP/t23b" --step review --strict >/dev/null 2>&1; then bad "T23b 采纳后的新行（无行级标注）强制当前合同应 fail"; else ok "T23b 采纳后新行强制当前合同→fail"; fi
+
 echo ""
 echo "=== 12.3 样本工单形状回归（eligible coverage = 100%） ==="
 SAMPLE="$TMP/sample"
-make_ticket "$SAMPLE" '{"mcp_gate_schema_version":1,"completed_steps":["log","1","2","3","4","5","6"],"mode":"fast","patch_scoped":true,"ticket_id":"demo-ticket"}'
+make_ticket "$SAMPLE" '{"mcp_gate_schema_version":1,"mcp_gate_contract_version":2,"completed_steps":["log","1","2","3","4","5","6"],"mode":"fast","patch_scoped":true,"ticket_id":"demo-ticket"}'
 write_trace "$SAMPLE" \
   "$(trace_line log.comments_extract extract log false skipped_not_eligible '{"tb_comments_count":3,"threshold":8,"cheap_available":true}')" \
   "$(trace_line log.long_log_summary summarize log false skipped_not_eligible '{"candidate_text_bytes":2048,"threshold":8192,"cheap_available":true}')" \

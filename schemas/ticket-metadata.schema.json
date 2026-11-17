@@ -605,6 +605,9 @@
     "workflow_gate_schema_version": { "description": "workflow 契约门禁 schema 版本（vNext 出生即带，--strict 门禁的前置）", "type": "integer", "minimum": 1 },
     "thinking_gate_schema_version": { "description": "reasoning 分级门禁 schema 版本（vNext 出生即带，--strict 门禁的前置）", "type": "integer", "minimum": 1 },
     "mcp_gate_schema_version": { "description": "cheap-research 覆盖门禁 schema 版本（vNext 出生即带，--strict 门禁的前置）", "type": "integer", "minimum": 1 },
+    "mcp_gate_contract_version": { "description": "cheap-research 资格合同版本（gates.json contract_version，vNext 出生即带且受保护）：2 = eligible 只由业务事实计算；存量工单无此字段时历史 trace 行按合同 v1 旧语义解释，不追溯改判", "type": "integer", "minimum": 1 },
+    "mcp_gate_contract_adopted_at": { "description": "存量工单续跑首次绑定资格合同的控制面写入时刻（显式 UTC ISO-8601，由 adopt_gate_contract 在 metadata_updated 提交时写入）：linter 以历史边界区分历史 trace 行（合同 v1 解释）与续跑新行（当前合同解释）", "type": "string" },
+    "mcp_gate_contract_history_boundary": { "description": "资格合同历史边界（显式 UTC ISO-8601，采纳时由控制面写入）：默认等于采纳时刻；若采纳时存在升级前未终结的 attempt 则回退为其最早 start 时刻，该时刻之后的 trace 行一律按当前合同解释，防止升级后、采纳前写入的记录伪装成历史行", "type": "string" },
 
     "requirement": { "type": "string" },
     "requirement_summary": { "type": "string" },

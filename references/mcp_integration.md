@@ -114,7 +114,7 @@
   - 函数数 < 50 → 整个 §2.5.7/§9.4 跳过（避免 LLM 成本浪费）
   - 函数数 > 500 → 分批（每批 100），合并结果
   - ripgrep 抽不到 / 不可用 → 用受支持的其他方式枚举并核验；仍无法完整枚举时保留未观察债务，不能声明去重已完成或低于阈值
-  - cheap-research 不可用 → 可按 [审查证据合同](inspection_evidence.md) 执行真实的人工等价去重；目录、分类、逐家族审查与源码回指均完成且契约可验证才可声明范围内完成。未完成、不可枚举、预算耗尽或不支持的证据路径保留未观察债务，不能伪装成已完成。MCP trace 按机器 catalog 的真实资格区分 `skipped_not_eligible`、`unavailable_before_call` 或 `degraded_after_attempt`，不把人工审查写成工具成功；工具恢复后可重跑。
+  - cheap-research 不可用 → 可按 [审查证据合同](inspection_evidence.md) 执行真实的人工等价去重；目录、分类、逐家族审查与源码回指均完成且契约可验证才可声明范围内完成。未完成、不可枚举、预算耗尽或不支持的证据路径保留未观察债务，不能伪装成已完成。MCP trace 按机器 catalog 记录：仅业务不达标（低于阈值）才 `skipped_not_eligible`；达到阈值而工具不可用保持 eligible=true，记 `unavailable_before_call` 或 `degraded_after_attempt`，不把人工审查写成工具成功；工具恢复后可重跑。资格按合同版本解释（gates.json `contract_version`）：新行带 `contract_version: 2`；存量工单由控制面在下一次 metadata 写入时采纳当前合同并记录 `mcp_gate_contract_adopted_at`，linter 以该时刻区分历史行（v1 解释，不追溯改判）与续跑新行（强制当前合同）；声称低于阈值须基于可信枚举（`rg_available=true` 或 `enumeration_verified=true`），两者皆不可用时写 `enumeration_unverified=true` 保留债务（eligible=true + unavailable/degraded），不得记为业务不适用。
   - 高质量模型某类返回空数组 → 该类跳过（无重复），不报错
 
 - **已知限制**：

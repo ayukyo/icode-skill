@@ -1,6 +1,7 @@
 {
   "schema_version": 1,
-  "doc": "cheap-research gate 机器真源。文档只解释语义，阈值一律从本文件读取，禁止在 step 文档/脚本中各自写一套常量。condition 字段供人审与测试锚点；第一版验证器用显式分支计算 eligibility，不引入通用表达式解释器。",
+  "contract_version": 2,
+  "doc": "cheap-research gate 机器真源。文档只解释语义，阈值一律从本文件读取，禁止在 step 文档/脚本中各自写一套常量。condition 字段供人审与测试锚点；第一版验证器用显式分支计算 eligibility，不引入通用表达式解释器。资格语义按 contract_version 解释：v2（当前）下 eligible 只由业务事实（阈值/范围/轮次/模式）计算，cheap_available 是必须记录的可用性事实，只决定 decision（called/cache_hit/degraded_after_attempt/unavailable_before_call），不参与 eligibility；达到业务阈值而工具不可用时禁止 skipped_not_eligible，须按 unavailable_before_call/degraded_after_attempt 留痕并真实完成人工等价履行。v1 为旧语义（cheap_available/rg_available 参与 eligibility），仅用于解释存量历史 trace 行，不追溯改判。v2 下 review.dedup 声称低于阈值必须基于可信枚举：rg_available=true（ripgrep 本身可用）或可选证据 enumeration_verified=true（受支持的替代枚举已核验）；ripgrep 与替代枚举都不可用时写可选证据 enumeration_unverified=true 显式声明「枚举未知、保留债务」——该状态下 function_count 不可核验（如实记录尝试值或 0），资格无法从函数数推导，业务义务推定成立，合法记录是 eligible=true + unavailable_before_call/degraded_after_attempt（called/cache_hit 宣称成功需可信枚举、skip 类 decision 均非法）；该 decision 约束与尝试值是否达到阈值无关，适用于所有 enumeration_unverified=true 记录；报告以 enumeration_debt 计数显式暴露未解决的枚举/去重债务。工单级余额按每 gate 的时间顺序逐行推演：债务只有在随后出现通过资格与证据校验的有效最终记录时才清偿——流程要求调用前先写 pending，中断/未完成/非法的重做行不改写债务状态；unavailable/degraded 清偿记录还须机器可验证的人工等价证据（availability.evidence_ref 指向工单目录内的人工去重报告，trace 须携带 attempt，报告须绑定当前工单、attempt、受影响仓库范围和源码，并通过 manual_dedup_evidence 校验；可信枚举低于阈值的业务不适用记录可直接清偿；清偿记录须覆盖产生债务的全部受影响仓库），且清偿记录必须属于当前工单（ticket_id 一致）；trace 含其他工单记录、不可读或丢失（而事件链曾记录未清偿债务）时余额报告为未知（null），不得当作清偿。",
   "constants": {
     "long_text_threshold_bytes": 8192,
     "max_input_bytes_per_call": 8000,
@@ -14,7 +15,7 @@
       "step": "log",
       "tool": "extract",
       "required_when_eligible": true,
-      "condition": "tb_comments_count >= tb_comment_extract_min && cheap_available",
+      "condition": "tb_comments_count >= tb_comment_extract_min",
       "evidence_fields": [
         "tb_comments_count",
         "threshold",
@@ -31,7 +32,7 @@
       "step": "log",
       "tool": "summarize",
       "required_when_eligible": true,
-      "condition": "candidate_text_bytes >= long_text_threshold_bytes && cheap_available",
+      "condition": "candidate_text_bytes >= long_text_threshold_bytes",
       "evidence_fields": [
         "candidate_text_bytes",
         "threshold",
@@ -48,7 +49,7 @@
       "step": "review",
       "tool": "extract",
       "required_when_eligible": true,
-      "condition": "affected_repo_function_count >= dedup_min_functions && rg_available && cheap_available",
+      "condition": "affected_repo_function_count >= dedup_min_functions（合同v2）；合同v1 旧语义另含 rg_available && cheap_available",
       "evidence_fields": [
         "affected_repo_roots",
         "function_count",
@@ -56,12 +57,20 @@
         "rg_available",
         "cheap_available"
       ],
+      "optional_evidence_fields": [
+        "enumeration_verified",
+        "enumeration_unverified",
+        "repo_review_scopes"
+      ],
       "evidence_types": {
         "affected_repo_roots": "paths",
         "function_count": "integer",
         "threshold": "integer",
         "rg_available": "boolean",
-        "cheap_available": "boolean"
+        "cheap_available": "boolean",
+        "enumeration_verified": "boolean",
+        "enumeration_unverified": "boolean",
+        "repo_review_scopes": "object"
       }
     },
     {

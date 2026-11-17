@@ -282,7 +282,7 @@ Free 阶段一次性完整覆盖全部 15 个角度。**A3 异常处理完备性
 
 ### 阶段 4 — Dedup（语义重复函数检测完整版）
 
-新 deepcheck attempt 的 `deepcheck.dedup` 最终 trace 行附 `attempt` = 当前 step attempt。声明完整时必须为 `called` 或合法 `cache_hit` 成功；旧 attempt 的调用不得冒充本轮。无该记录时按人工合同逐项完成并在本轮 coverage 登记 `manual_dedup`，否则保留债务。有效 full 声称 `not_eligible` 须有当前 attempt 的 `skipped_not_eligible` trace，函数数与当前范围独立核验一致；Python 用 AST 枚举，其他语言需附可信人工目录。未能确定函数数不得冒充低于阈值。旧 attempt 不追溯补写；audit 沿用既有可信复用合同。
+新 deepcheck attempt 的 `deepcheck.dedup` 最终 trace 行附 `attempt` = 当前 step attempt。声明完整时必须为 `called` 或合法 `cache_hit` 成功；旧 attempt 的调用不得冒充本轮。无该记录时按人工合同逐项完成并在本轮 coverage 登记 `manual_dedup`，否则保留债务。人工复检还要清偿 review 枚举债务时，须把同一报告单独登记为 `artifact --step deepcheck --attempt <deepcheck attempt> --path deepcheck_dedup_evidence.json`（登记时完整校验并写入受控回执），且该 attempt 真实成功结束（`success`/`degraded`）；清偿范围须按仓库逐项覆盖原债务的 `repo_review_scopes`，范围未知不构成覆盖。有效 full 声称 `not_eligible` 须有当前 attempt 的 `skipped_not_eligible` trace，函数数与当前范围独立核验一致；Python 用 AST 枚举，其他语言需附可信人工目录。未能确定函数数不得冒充低于阈值。旧 attempt 不追溯补写；audit 沿用既有可信复用合同。
 
 > **强证据场景判定**（详见 [references/mcp_per_step.md §5 deepcheck](../references/mcp_per_step.md)）：
 >
