@@ -134,18 +134,20 @@ def component_for(path):
         return "mcp"
     # Publishing/website maintenance belongs with developer resources, so the
     # bounded core retains runtime tools without raising its import budget.
-    # Packaging and installation verification are build-time helpers: nothing the
-    # installed workflow executes imports them, so they follow the release payload
-    # instead of consuming the bounded core's file budget.
-    if name in {"tools/build_skill_distribution.py", "tools/check_skill_installation.py",
-                "scripts/check-docx-renderer-release.py", "scripts/icode_payload_profile.py",
-                "tools/selfcheck_crosscheck.sh", "tools/selfcheck_inspection_worklist.sh",
-                "tools/selfcheck_workflow_contract.sh", "tools/selfcheck_workflow_evidence.sh"}:
-        return "support"
-    if (name in {".gitignore", "tools/build_public_site.py", "tools/notify_indexnow.py",
+    # Public package entry files are copied separately at the package root.
+    if (name in {".gitignore", "README.md", "README.zh-CN.md", "LICENSE.txt",
+                  "tools/build_skill_distribution.py", "tools/check_skill_installation.py",
+                  "scripts/check-docx-renderer-release.py", "scripts/icode_payload_profile.py",
+                  "tools/build_public_site.py", "tools/notify_indexnow.py",
                  "tools/render_brand_assets.py", "tools/prepare_skill_listing.py",
                  "tools/release_promotion.py", "tools/check_skill_evaluation.py",
-                 "tools/check_skill_discovery.py"} or name.startswith("docs/")
+                 "tools/check_skill_discovery.py", "mcp/_lib/README.md",
+                 "tools/selfcheck_crosscheck.sh", "tools/selfcheck_inspection_worklist.sh",
+                 "tools/selfcheck_reasoning_gate.sh", "tools/selfcheck_workflow_contract.sh",
+                 "tools/selfcheck_workflow_evidence.sh",
+                 "integrations/codebuddy/commands/legacy/icode-v0.md",
+                 "integrations/codebuddy/commands/legacy/icode-v1.md"}
+            or name.startswith("docs/")
             or (name.startswith("skill-packs/") and name != "skill-packs/manifest.json")):
         return "support"
     if name.startswith("mcp/") and not (
@@ -309,7 +311,7 @@ def build(source, output, profile="full", components_output=None, download_base=
             target.parent.mkdir()
             target.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         shutil.copyfile(templates / "README.md", package / "README.md")
-        shutil.copyfile(workflow / "LICENSE.txt", package / "LICENSE.txt")
+        shutil.copyfile(source / "LICENSE.txt", package / "LICENSE.txt")
         sums = [f"{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.relative_to(package).as_posix()}"
                 for p in sorted(package.rglob("*")) if p.is_file()]
         (package / "SHA256SUMS").write_text("\n".join(sums) + "\n", encoding="utf-8")
