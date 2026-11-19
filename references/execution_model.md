@@ -58,6 +58,16 @@ python3 tools/icode_control.py step --dir <out_dir> --step <step> --phase finish
 
 若该步骤随后推进 metadata 状态，顺序必须是：`before_transition check → step finish → transition`。新出生事件 `execution_contract_version=1` 的工单即使未 start 也会阻断完成态；成功回执的输出必须仍匹配登记 hash。无版本的历史工单只有已 start 后才要求回执。新工单的 patch/verify/readme 不走主流程 transition，故在 finish success/degraded 时执行三类步骤门禁。
 
+### 产物写入粒度
+
+同一 attempt 内写工单产物（`00_init.md` / `01_plan.md` / `log_analysis.md` / 各阶段报告）按章节整段落盘：
+
+- **先定稿再写**：完成分析后一次 `Write` 写出全文；必须分段时按章节分组，同一章节一轮内只写一次。
+- **禁止逐小节点编辑**：不把一个章节拆成几十次几百字符的 `Edit`；需要修正就整段替换该章节。
+- **同一锚点重写不超过 2 次**：超过说明结论尚未收敛，先定结论再写，并在 `.decision_anchors.json` 记下未收敛原因。
+- **跨轮/跨天迭代不受限**：用户追加需求、review 回流、按轮次重写产物属正常迭代；本条约束的是"单轮内把一份产物拼成几十次小改"。
+- **稳定后再登记**：产物内容稳定后用 `artifact --paths-json` 或 `closeout` 一次收尾，不边改边登记。
+
 ## 3. 长动作与执行回执
 
 ### 已完成语义工作的机械收尾合并调用

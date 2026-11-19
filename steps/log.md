@@ -244,7 +244,7 @@
    - **循环收敛**：分析师出假设 → 质疑者攻击 → 有实质反驳就修正/补证据/降级 → 重复直到收敛（默认最多4轮，可调）。收敛判据、诚实底线均在 [references/adversarial.md](../references/adversarial.md)（上方已 Read）
    - 对抗记录写入 `log_analysis.md` 的「对抗分析记录」章节，**每条记录必须注明该质疑者的 spawn Agent ID**（作为独立调用证据）
 8. **阶段4 报告生成 + 衔接步骤1**：
-   - 用 Write 写 `{ICODE_OUT_DIR}/log_analysis.md`，骨架：
+   - 用 Write 写 `{ICODE_OUT_DIR}/log_analysis.md`（**按 [产物写入粒度](../references/execution_model.md#产物写入粒度) 按章节整段落盘，禁止逐小节点编辑**），骨架：
 
      ```markdown
      # 日志根因分析报告：<问题描述>
