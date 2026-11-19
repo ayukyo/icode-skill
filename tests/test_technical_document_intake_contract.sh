@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Windows: python3 可能是 WindowsApps 假 stub（无输出、exit 49）；加载共享 shim
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/python3-shim.sh" 2>/dev/null || true
 set -u
 cd "$(dirname "$0")/.." || exit 1
 
@@ -67,7 +69,13 @@ printf 'plain UTF-8 requirement\n' >"$CORPUS/notes.txt"
 printf '\x00\x01\x02\xffopaque' >"$CORPUS/blob.bin"
 : >"$CORPUS/empty.dat"
 printf 'outside-secret' >"$OUTSIDE/secret.txt"
-ln -s "$OUTSIDE/secret.txt" "$CORPUS/sub dir/escape-link.txt"
+SYMLINK_FIXTURE=0
+if icode_symlink_ok; then
+  ln -s "$OUTSIDE/secret.txt" "$CORPUS/sub dir/escape-link.txt"
+  SYMLINK_FIXTURE=1
+else
+  printf '  SKIP %s（当前文件系统不支持真实符号链接）\n' "越界符号链接夹具"
+fi
 python3 - "$CORPUS/slides with spaces.pptx" "$CORPUS/valid.7z" "$CORPUS/truncated.7z" <<'PY'
 import struct, sys, zipfile, zlib
 with zipfile.ZipFile(sys.argv[1], "w") as zf:
@@ -103,20 +111,22 @@ SH
 chmod +x "$BAD_BIN/pdfinfo" "$GOOD_BIN/pdfinfo" "$GOOD_BIN/pdftotext" "$GOOD_BIN/pdftoppm"
 
 SOURCE_BEFORE="$(find "$CORPUS" -type f -print0 | sort -z | xargs -0 sha256sum)"
+# 工具有意使用 os.pathsep；Windows 上是 ';' 而不是 ':'
+ADAPTER_PATHSEP="$(python3 -c 'import os; print(os.pathsep)')"
 
 if [[ -f "$TOOL" ]] \
-  && DOCUMENT_INTAKE_ADAPTER_PATHS="$BAD_BIN:$GOOD_BIN" \
+  && DOCUMENT_INTAKE_ADAPTER_PATHS="$BAD_BIN${ADAPTER_PATHSEP}$GOOD_BIN" \
      DOCUMENT_INTAKE_SKIP_DEFAULT_PATHS=1 \
      python3 "$TOOL" scan --root "$CORPUS" --output-root "$OUT" \
        --output "$OUT/document_manifest.json" \
        --markdown "$OUT/document_manifest.md" --probe-content >/dev/null \
   && [[ "$SOURCE_BEFORE" == "$(find "$CORPUS" -type f -print0 | sort -z | xargs -0 sha256sum)" ]] \
-  && python3 - "$OUT/document_manifest.json" "$CORPUS" <<'PY'
+  && python3 - "$OUT/document_manifest.json" "$CORPUS" "$SYMLINK_FIXTURE" <<'PY'
 import hashlib, json, pathlib, sys
 manifest = json.load(open(sys.argv[1], encoding="utf-8"))
 root = pathlib.Path(sys.argv[2]).resolve()
 assert manifest["schema_version"] == 2
-assert manifest["source_root"] == str(root)
+assert pathlib.Path(manifest["source_root"]).resolve() == root
 assert manifest["security"] == {
     "document_content_trusted": False,
     "embedded_content_executed": False,
@@ -148,7 +158,8 @@ assert rows["valid.7z"]["status"] in {"readable_container", "parser_required"}
 assert rows["truncated.7z"]["detected_kind"] == "truncated_container"
 assert rows["truncated.7z"]["status"] == "corrupt"
 assert rows["blob.bin"]["status"] == "unsupported"
-assert rows["sub dir/escape-link.txt"]["status"] == "skipped"
+if sys.argv[3] == "1":
+    assert rows["sub dir/escape-link.txt"]["status"] == "skipped"
 for relative, row in rows.items():
     if row["detected_kind"] != "symlink":
         data = (root / relative).read_bytes()
@@ -181,13 +192,17 @@ else
   bad "输出路径保护不完整"
 fi
 
-ln -s "$OUTSIDE/symlink.json" "$OUT/symlink.json"
-if [[ -f "$TOOL" ]] \
-  && ! python3 "$TOOL" scan --root "$CORPUS" --output-root "$OUT" \
-       --output "$OUT/symlink.json" --markdown "$OUT/result.md" >/dev/null 2>&1; then
-  ok "输出拒绝符号链接"
+if icode_symlink_ok; then
+  ln -s "$OUTSIDE/symlink.json" "$OUT/symlink.json"
+  if [[ -f "$TOOL" ]] \
+    && ! python3 "$TOOL" scan --root "$CORPUS" --output-root "$OUT" \
+         --output "$OUT/symlink.json" --markdown "$OUT/result.md" >/dev/null 2>&1; then
+    ok "输出拒绝符号链接"
+  else
+    bad "输出接受符号链接"
+  fi
 else
-  bad "输出接受符号链接"
+  printf '  SKIP %s（当前文件系统不支持真实符号链接）\n' "输出拒绝符号链接"
 fi
 
 printf '\nResult: %d passed, %d failed\n' "$PASS" "$FAIL"

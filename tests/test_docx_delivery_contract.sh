@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Windows: python3 可能是 WindowsApps 假 stub（无输出、exit 49）；加载共享 shim
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/python3-shim.sh" 2>/dev/null || true
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -22,7 +24,10 @@ else
   bad "DOCX runtime package-index fallback is bounded and respects user configuration"
 fi
 
-RUNTIME_JSON="$(ICODE_DOCX_RUNTIME_ROOT="$TMP/runtime" ICODE_DOCX_RUNTIME_SYSTEM_SITE_PACKAGES=1 "$TEST_PYTHON" "$TOOLS/bootstrap_runtime.py" --python "$(command -v "$TEST_PYTHON")")"
+# 传真实解释器路径而不是 `command -v python3`：Windows 上后者可能是 shell 包装脚本，
+# 原生 subprocess 无法直接执行（WinError 193）。
+TEST_PYTHON_EXE="$("$TEST_PYTHON" -c 'import sys; print(sys.executable)')"
+RUNTIME_JSON="$(ICODE_DOCX_RUNTIME_ROOT="$TMP/runtime" ICODE_DOCX_RUNTIME_SYSTEM_SITE_PACKAGES=1 "$TEST_PYTHON" "$TOOLS/bootstrap_runtime.py" --python "$TEST_PYTHON_EXE")"
 DOCX_PYTHON="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["python"])' "$RUNTIME_JSON")"
 if [[ -x "$DOCX_PYTHON" ]] && "$DOCX_PYTHON" -c 'import docx, PIL'; then
   ok "self-managed DOCX runtime installs pinned dependencies"

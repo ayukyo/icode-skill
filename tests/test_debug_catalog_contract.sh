@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Windows: python3 可能是 WindowsApps 假 stub（无输出、exit 49）；加载共享 shim
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/python3-shim.sh" 2>/dev/null || true
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -129,27 +131,31 @@ test ! -e "$PROJECT/.icode_output/index.json"
 test -f "$DEBUG_ROOT/twin-42/.ico_metadata.json"
 test -f "$DEBUG_ROOT/twin-43/.ico_metadata.json"
 
-ESCAPE_PROJECT="$TMP/escape-project"
-ESCAPE_TARGET="$TMP/escape-target"
-mkdir -p "$ESCAPE_PROJECT/.icode_output" "$ESCAPE_TARGET"
-ln -s "$ESCAPE_TARGET" "$ESCAPE_PROJECT/.icode_output/.debug"
-set +e
-python3 "$TOOL" rebuild --project "$ESCAPE_PROJECT" \
-  >"$TMP/escape-rebuild.log" 2>&1
-ESCAPE_RC=$?
-set -e
-test "$ESCAPE_RC" -ne 0
-test ! -e "$ESCAPE_TARGET/debug_catalog.json"
+if icode_symlink_ok; then
+  ESCAPE_PROJECT="$TMP/escape-project"
+  ESCAPE_TARGET="$TMP/escape-target"
+  mkdir -p "$ESCAPE_PROJECT/.icode_output" "$ESCAPE_TARGET"
+  ln -s "$ESCAPE_TARGET" "$ESCAPE_PROJECT/.icode_output/.debug"
+  set +e
+  python3 "$TOOL" rebuild --project "$ESCAPE_PROJECT" \
+    >"$TMP/escape-rebuild.log" 2>&1
+  ESCAPE_RC=$?
+  set -e
+  test "$ESCAPE_RC" -ne 0
+  test ! -e "$ESCAPE_TARGET/debug_catalog.json"
 
-OUTSIDE_META="$TMP/outside-metadata.json"
-printf '%s\n' '{"debug":true,"tb_source":{"pid":"private","lib":"BUG","num":"1"}}' \
-  > "$OUTSIDE_META"
-mkdir -p "$DEBUG_ROOT/twin-symlink"
-ln -s "$OUTSIDE_META" "$DEBUG_ROOT/twin-symlink/.ico_metadata.json"
-python3 "$TOOL" rebuild --project "$PROJECT" > "$TMP/rebuild-symlink.json"
-if rg -q 'private' "$CATALOG"; then
-  printf 'outside metadata symlink leaked into catalog\n' >&2
-  exit 1
+  OUTSIDE_META="$TMP/outside-metadata.json"
+  printf '%s\n' '{"debug":true,"tb_source":{"pid":"private","lib":"BUG","num":"1"}}' \
+    > "$OUTSIDE_META"
+  mkdir -p "$DEBUG_ROOT/twin-symlink"
+  ln -s "$OUTSIDE_META" "$DEBUG_ROOT/twin-symlink/.ico_metadata.json"
+  python3 "$TOOL" rebuild --project "$PROJECT" > "$TMP/rebuild-symlink.json"
+  if rg -q 'private' "$CATALOG"; then
+    printf 'outside metadata symlink leaked into catalog\n' >&2
+    exit 1
+  fi
+else
+  printf 'SKIP: 符号链接越界两条断言（当前文件系统不支持真实符号链接）\n'
 fi
 
 printf 'PASS: debug catalog contract\n'

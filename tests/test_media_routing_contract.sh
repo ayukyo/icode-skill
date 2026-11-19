@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Windows: python3 可能是 WindowsApps 假 stub（无输出、exit 49）；加载共享 shim
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/python3-shim.sh" 2>/dev/null || true
 set -u
 cd "$(dirname "$0")/.." || exit 1
 
@@ -6,6 +8,10 @@ PASS=0
 FAIL=0
 ok() { PASS=$((PASS + 1)); printf '  PASS %s\n' "$1"; }
 bad() { FAIL=$((FAIL + 1)); printf '  FAIL %s\n' "$1" >&2; }
+
+# MCP SDK 未安装时 vision-bridge 运行时合同无法在本机验证（显式 SKIP，不伪装通过）
+MCP_SDK_OK=0
+python3 -c 'import mcp.server' >/dev/null 2>&1 && MCP_SDK_OK=1
 
 TOOL="tools/media_router.py"
 POLICY="references/media_routing.md"
@@ -100,14 +106,20 @@ PY
 then ok "未知宿主拒绝试传式 native 探测"; else bad "blocked 路由输出不可审计"; fi
 
 printf 'image-bytes' >"$TMP/page.png"
-ln -s "$TMP/page.png" "$TMP/link.png"
+if icode_symlink_ok; then
+  ln -s "$TMP/page.png" "$TMP/link.png"
+  SYMLINK_REJECT="-f $TMP/link.png"
+else
+  printf '  SKIP %s（当前文件系统不支持真实符号链接）\n' "视觉证据拒绝符号链接"
+  SYMLINK_REJECT=""
+fi
 if python3 "$TOOL" evidence --path "$TMP/page.png" --media-kind pdf_page \
      --channel native --provider host --model gpt --prompt-profile schematic-v1 \
      --profile-version 1 --page 9 --crop 10,20,300,400 --dpi 300 --tile-index 2 \
      >"$TMP/evidence.json" \
-  && ! python3 "$TOOL" evidence --path "$TMP/link.png" --media-kind image \
+  && { [[ -z "$SYMLINK_REJECT" ]] || ! python3 "$TOOL" evidence --path "$TMP/link.png" --media-kind image \
      --channel native --provider host --model gpt --prompt-profile general-v1 \
-     --profile-version 1 >/dev/null 2>&1 \
+     --profile-version 1 >/dev/null 2>&1; } \
   && python3 - "$TMP/evidence.json" <<'PY'
 import hashlib, json, pathlib, sys
 d=json.load(open(sys.argv[1], encoding="utf-8"))
@@ -214,7 +226,9 @@ for media_type, max_tokens in (("audio", 10), ("image", 0)):
     else:
         raise AssertionError("invalid media request accepted")
 PY
-then ok "vision-bridge 配置与媒体边界 fail-closed"; else bad "vision-bridge 配置与媒体边界校验失败"; fi
+then ok "vision-bridge 配置与媒体边界 fail-closed"
+elif [[ "$MCP_SDK_OK" -eq 0 ]]; then printf '  SKIP %s（本机未安装 mcp SDK）\n' "vision-bridge 配置与媒体边界"
+else bad "vision-bridge 配置与媒体边界校验失败"; fi
 
 if PYTHONPATH=mcp/vision-bridge python3 - <<'PY'
 import asyncio
@@ -262,7 +276,9 @@ asyncio.run(custom._video("unused.mp4", "", 128))
 assert [sum(item.get("type") == "image_url" for item in call)
         for call in custom.calls] == [2, 2, 2, 0]
 PY
-then ok "vision-bridge 视频帧按单消息上限分批并以纯文本聚合"; else bad "vision-bridge 图片分批合同失败"; fi
+then ok "vision-bridge 视频帧按单消息上限分批并以纯文本聚合"
+elif [[ "$MCP_SDK_OK" -eq 0 ]]; then printf '  SKIP %s（本机未安装 mcp SDK）\n' "vision-bridge 视频帧分批"
+else bad "vision-bridge 图片分批合同失败"; fi
 
 if python3 - "$TEMPLATE" "$BRIDGE_CONFIG" <<'PY'
 import json, sys

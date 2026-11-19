@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Windows: python3 可能是 WindowsApps 假 stub（无输出、exit 49）；加载共享 shim
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/python3-shim.sh" 2>/dev/null || true
 # SKILL.md 提示预算 + 机器真源等价契约（§10: test_prompt_budget_contract）
 # 目标：SKILL.md 瘦身为路由器 ≤50KB；被引用的「SKILL.md「XX」段」锚点全部保留（防断链）；
 #       gates.json 状态机与 schema 为合法机器真源。

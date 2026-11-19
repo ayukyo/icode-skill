@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Windows: python3 可能是 WindowsApps 假 stub（无输出、exit 49）；加载共享 shim
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/python3-shim.sh" 2>/dev/null || true
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -51,7 +53,13 @@ else
   bad "validator accepts the template entrypoint contract"
 fi
 
-EXPECTED_LIST=$'fixture-skill\t'"$(cd "$PACKS/fixture-skill" && pwd -P)"$'\tSKILL.md.template'
+# 用 Python 求绝对路径：Windows 上 `cd + pwd -P` 给 MSYS 形式，和校验器输出对不上
+EXPECTED_SOURCE="$(python3 - "$PACKS/fixture-skill" <<'PY'
+import pathlib, sys
+print(pathlib.Path(sys.argv[1]).resolve())
+PY
+)"
+EXPECTED_LIST=$'fixture-skill\t'"$EXPECTED_SOURCE"$'\tSKILL.md.template'
 if ACTUAL_LIST="$($VALIDATE --manifest "$PACKS/manifest.json" --list 2>/dev/null)" \
   && [[ "$ACTUAL_LIST" == "$EXPECTED_LIST" ]]; then
   ok "list exposes name, absolute source, and entrypoint"

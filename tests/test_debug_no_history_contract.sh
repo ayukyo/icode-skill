@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Windows: python3 可能是 WindowsApps 假 stub（无输出、exit 49）；加载共享 shim
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/python3-shim.sh" 2>/dev/null || true
 # 契约测试：debug 工单不参考历史工单（独立孪生对照）
 #
 # 背景：debug 工单是"独立孪生对照"——它应被参考（产物供正常工单并列对照研读），

@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
+# Windows: python3 可能是 WindowsApps 假 stub（无输出、exit 49）；加载共享 shim
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/python3-shim.sh" 2>/dev/null || true
 set -u
 cd "$(dirname "$0")/.." || exit 1
 
 PASS=0
 FAIL=0
+SKIP=0
 ok() { PASS=$((PASS + 1)); printf '  PASS %s\n' "$1"; }
 bad() { FAIL=$((FAIL + 1)); printf '  FAIL %s\n' "$1" >&2; }
+skip() { SKIP=$((SKIP + 1)); printf '  SKIP %s（%s）\n' "$1" "$2"; }
 
 CTL="python3 tools/icode_control.py"
 LINT="python3 tools/lint_workflow_contract.py"
@@ -192,9 +196,11 @@ PY
 )"
 if $CTL metadata-update --dir "$D6" --set-json "$SET_CONTRACT" \
     --request-id register-embedded-contract >/dev/null 2>&1 \
-  && python3 - "$D6/.ico_metadata.json" "$BASELINE_REF" <<'PY'
-import json, sys
-c=json.load(open(sys.argv[1], encoding="utf-8"))["verification_contract"]
+  && python3 - "$D6" "$BASELINE_REF" <<'PY'
+import sys
+sys.path.insert(0, "tests/lib")
+import ticket_metadata
+c = ticket_metadata.load(sys.argv[1])["verification_contract"]
 assert c["profile"] == "camera"
 assert c["baseline_ref"] == sys.argv[2]
 assert len(c["required_cells"]) == 1
@@ -221,13 +227,15 @@ fi
 
 D4="$TMP/.icode_output/.icode_output_4"
 cp -a "$D3" "$D4"
-python3 - "$D4/.ico_metadata.json" <<'PY'
-import json, sys
-p=sys.argv[1]
-d=json.load(open(p, encoding="utf-8"))
-d["ticket_id"]="embedded-verify-malformed"
-d["verification_contract"]["required_metrics"][0]["name"]=[]
-json.dump(d, open(p, "w", encoding="utf-8"))
+python3 - "$D4" <<'PY'
+import sys
+sys.path.insert(0, "tests/lib")
+import ticket_metadata
+d = ticket_metadata.load(sys.argv[1])
+# 不能改 ticket_id：storage v2 下 metadata 与事件账本按 ticket_id 绑定，改了会在
+# 进入合同校验前就以 ticket mismatch 被拦，测不到畸形 metric 这条路径。
+d["verification_contract"]["required_metrics"][0]["name"] = []
+ticket_metadata.store(sys.argv[1], d)
 PY
 if $LINT "$D4" --step audit-verified --strict --json 2>&1 \
     | rg -q 'required_metrics.*name' \
@@ -245,9 +253,11 @@ else
   bad "畸形 metric 合同触发异常或被误接受"
 fi
 
-RUNS_BEFORE="$(python3 - "$D/.ico_metadata.json" <<'PY'
-import json,sys
-print(len(json.load(open(sys.argv[1], encoding="utf-8"))["verification_runs"]))
+RUNS_BEFORE="$(python3 - "$D" <<'PY'
+import sys
+sys.path.insert(0, "tests/lib")
+import ticket_metadata
+print(len(ticket_metadata.load(sys.argv[1])["verification_runs"]))
 PY
 )"
 INVALID_OK=1
@@ -257,9 +267,11 @@ for metrics in '[]' '{"fps":true}' '{"fps":NaN}' '{"fps":Infinity}'; do
       --profile camera --baseline-ref embedded_baseline.json --metrics-json "$metrics" \
       --baseline b --evidence e >/dev/null 2>&1 && INVALID_OK=0
 done
-RUNS_AFTER="$(python3 - "$D/.ico_metadata.json" <<'PY'
-import json,sys
-print(len(json.load(open(sys.argv[1], encoding="utf-8"))["verification_runs"]))
+RUNS_AFTER="$(python3 - "$D" <<'PY'
+import sys
+sys.path.insert(0, "tests/lib")
+import ticket_metadata
+print(len(ticket_metadata.load(sys.argv[1])["verification_runs"]))
 PY
 )"
 if [[ "$INVALID_OK" -eq 1 && "$RUNS_BEFORE" == "$RUNS_AFTER" ]]; then
@@ -283,7 +295,10 @@ fi
 
 if python3 - schemas/ticket-metadata.schema.json <<'PY'
 import json,sys
-from jsonschema import ValidationError, validate
+try:
+    from jsonschema import ValidationError, validate
+except ModuleNotFoundError:
+    sys.exit(77)  # 本机未装 jsonschema：显式 SKIP，不伪装通过
 s=json.load(open(sys.argv[1], encoding="utf-8"))
 c=s["properties"]["verification_contract"]["properties"]
 r=s["properties"]["verification_runs"]["items"]["properties"]
@@ -304,7 +319,11 @@ except ValidationError:
 else:
     raise AssertionError("embedded profile without baseline_ref must be rejected")
 PY
-then ok "schema 暴露字段并拒绝无摘要 embedded 合同"; else bad "schema 字段或摘要条件缺失"; fi
+then
+  ok "schema 暴露字段并拒绝无摘要 embedded 合同"
+else
+  if [[ $? -eq 77 ]]; then skip "schema 字段与摘要条件" "本机缺少 jsonschema 模块"; else bad "schema 字段或摘要条件缺失"; fi
+fi
 
-printf '\nResult: %d passed, %d failed\n' "$PASS" "$FAIL"
+printf '\nResult: %d passed, %d failed, %d skipped\n' "$PASS" "$FAIL" "$SKIP"
 [[ "$FAIL" -eq 0 ]]

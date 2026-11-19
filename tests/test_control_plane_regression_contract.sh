@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Windows: python3 可能是 WindowsApps 假 stub（无输出、exit 49）；加载共享 shim
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/python3-shim.sh" 2>/dev/null || true
 # 控制面故障注入回归：出生/事件/事务/幂等/并发索引/verify 语义。
 set -u
 cd "$(dirname "$0")/.." || exit 1
@@ -8,7 +10,7 @@ bad() { FAIL=$((FAIL+1)); echo "  ❌ $1"; }
 
 CTL="python3 tools/icode_control.py"
 export ICODE_CONTROL_TEST_MODE=1
-T=$(mktemp -d /tmp/icoreg.XXXXXX); trap 'rm -rf "$T"' EXIT
+T=$(mktemp -d "${TMPDIR:-/tmp}/icoreg.XXXXXX"); trap 'rm -rf "$T"' EXIT
 WS="$T/ws"; mkdir -p "$WS/.icode_output"
 
 # 1) create 原子产生 metadata + 出生事件。

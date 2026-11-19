@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Windows: python3 可能是 WindowsApps 假 stub（无输出、exit 49）；加载共享 shim
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/python3-shim.sh" 2>/dev/null || true
 # 契约测试：语义决策门禁（semantic decision gate）
 #
 # 覆盖 WORKFLOW_OPTIMIZATION_PROPOSAL.md §7.1-1 / §7.2-1：
@@ -84,7 +86,10 @@ make_ticket "$TMP/e2_diagnosis" '{
 }'
 OUT="$(python3 - "$TMP/e2_diagnosis" <<'PY' 2>/dev/null
 import json,sys,subprocess
-r=json.loads(subprocess.run(["python3","tools/lint_workflow_contract.py",sys.argv[1],"--json"],capture_output=True,text=True).stdout)
+# 用 sys.executable：Windows 原生 Python 不认 PATH 里的 MSYS 路径（python3 shim 不可用）
+r=json.loads(subprocess.run([sys.executable,"-X","utf8","tools/lint_workflow_contract.py",sys.argv[1],"--json"],
+                            capture_output=True, text=True,
+                            encoding="utf-8", errors="replace").stdout)
 print(r["blocked"], "|".join(g["warnings"][0] if g["warnings"] else "" for g in r["gates"]))
 PY
 )"

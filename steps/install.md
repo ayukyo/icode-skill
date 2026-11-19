@@ -13,7 +13,7 @@
 
 根安装器在源码同步前规划 MCP 变更，保留旧入口直到新版安装成功；失败不注销旧注册。`--preview` 零写入，`--basic` 不修改 MCP 注册/回执；内部安装器的 `--no-delete` 保留退役项。单 MCP 维护只处理该项及清单明确声明的替代成员：安装 `icode-local` 可迁移其五个旧模块，不能清理其他服务。被统一服务复用的业务代码和原配置保留，旧虚拟环境/缓存与恢复快照归档到扫描根外。未选择宿主、自建服务和用户修改不会被作为受管退役自动清理。普通 `sync-to-global.sh` 只同步技能并保留旧 MCP 代码，不代替 MCP 安装收敛。真实配置冲突、注册验证或归档失败必须明确报告；不得把配置已写入当作宿主已重载，也不得自动杀死其他会话进程。
 
-**内置能力与独立 Skill 的安装边界**：`tools/evidence_intake.py`、`tools/email_intake.py`、`tools/document_intake.py`、`tools/media_router.py`、`tools/icode_crosscheck.py`、`debug_catalog.py`、`runtime_baseline.py`、`verification_debt.py`、`learn.py`、`scripts/submission_guard.py handoff` 及 `steps/learn.md` / `steps/crosscheck.md` 都属于 ICODE 本体，随 ICODE 目录一次复制到所选宿主，**不**写入 `skill-packs/manifest.json`。manifest 声明当前 16 个需要在技能根顶层独立发现的跨项目共享 Skill（含邮件证据与 MCU 软硬件契约审计）；`--client all` 会同时安装到 Claude Code、Codex，并检测到对应目录时追加 CodeBuddy（共享 Claude 技能根）与 WorkBuddy（独立 `~/.workbuddy/skills` 根），各自只增加独立命令桥和 MCP 配置。
+**内置能力与独立 Skill 的安装边界**：`tools/evidence_intake.py`、`tools/email_intake.py`、`tools/document_intake.py`、`tools/media_router.py`、`tools/icode_crosscheck.py`、`debug_catalog.py`、`runtime_baseline.py`、`verification_debt.py`、`learn.py`、`scripts/submission_guard.py handoff` 及 `steps/learn.md` / `steps/crosscheck.md` 都属于 ICODE 本体，随 ICODE 目录一次复制到所选宿主，**不**写入 `skill-packs/manifest.json`。manifest 声明当前 17 个需要在技能根顶层独立发现的跨项目共享 Skill（含邮件证据与 MCU 软硬件契约审计）；`--client all` 会同时安装到 Claude Code、Codex，并检测到对应目录时追加 CodeBuddy（共享 Claude 技能根）与 WorkBuddy（独立 `~/.workbuddy/skills` 根），各自只增加独立命令桥和 MCP 配置。
 
 **当前 9 个默认 MCP**（以 `mcp/servers.json` 为准）：
 

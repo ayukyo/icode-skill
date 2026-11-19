@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Windows: python3 可能是 WindowsApps 假 stub（无输出、exit 49）；加载共享 shim
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/python3-shim.sh" 2>/dev/null || true
 # handoff matrix contract: multi-repo delivery facts must be read-only and evidence-bounded.
 
 set -euo pipefail
@@ -97,9 +99,15 @@ with open(report_path, encoding="utf-8") as stream:
 assert report["schema_version"] == "1.0"
 assert report["read_only"] is True
 assert len(report["repositories"]) == 2
-rows = {row["repo_path"]: row for row in report["repositories"]}
+import os
 
-known = rows[super_repo]
+def _norm(path):
+    """Windows 上分隔符/大小写/短路径形式都可能不同，按规范化路径比较。"""
+    return os.path.normcase(os.path.normpath(str(path)))
+
+rows = {_norm(row["repo_path"]): row for row in report["repositories"]}
+
+known = rows[_norm(super_repo)]
 for key in (
     "modified", "build_participant", "deployed", "submit_required",
     "submit_reason", "docs_required", "docs_ready", "excluded_paths",
@@ -117,7 +125,7 @@ assert known["artifact_identity"] == "sha256:abc123"
 assert known["dirty"] is True
 assert known["excluded_paths"][0]["path"] == "build/"
 
-unknown = rows[sub_repo]
+unknown = rows[_norm(sub_repo)]
 assert unknown["dirty"] is False
 assert unknown["modified"] is None
 assert unknown["build_participant"] is None

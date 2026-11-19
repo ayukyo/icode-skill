@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Windows: python3 可能是 WindowsApps 假 stub（无输出、exit 49）；加载共享 shim
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/python3-shim.sh" 2>/dev/null || true
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -8,7 +10,7 @@ COMMAND_SOURCE="$ROOT/integrations/codebuddy/commands/icode.md"
 # Pin the scratch root to /tmp: on MSYS hosts mktemp -d follows TEMP (a
 # "C:\..." path) and cleaning such paths up can be rejected by hardened rm
 # wrappers, leaving the suite exit non-zero even when every assertion passed.
-TMP="$(mktemp -d /tmp/icode_wb_sync.XXXXXX)"
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/icode_wb_sync.XXXXXX")"
 # Clean up in the background: the apply cases materialise ~2k skill files and
 # deleting them synchronously in an EXIT trap can outlive sandboxed runners.
 trap 'rm -rf "$TMP" >/dev/null 2>&1 &' EXIT

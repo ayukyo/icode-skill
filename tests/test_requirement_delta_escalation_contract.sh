@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Windows: python3 可能是 WindowsApps 假 stub（无输出、exit 49）；加载共享 shim
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/python3-shim.sh" 2>/dev/null || true
 # 契约测试：需求增量强制升级（requirement delta escalation）
 #
 # 覆盖 WORKFLOW_OPTIMIZATION_PROPOSAL.md §7.1-3 / §7.2-4：

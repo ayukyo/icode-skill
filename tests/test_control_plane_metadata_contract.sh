@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Windows: python3 可能是 WindowsApps 假 stub（无输出、exit 49）；加载共享 shim
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/python3-shim.sh" 2>/dev/null || true
 # 控制面 metadata 契约（§10: test_ticket_metadata_schema_contract / test_completed_requires_all_gates_contract
 #                       / test_debug_isolation_vnext / test_delivery_evidence_layers）
 #
@@ -11,7 +13,7 @@ bad() { FAIL=$((FAIL+1)); echo "  ❌ $1"; }
 
 CTL="python3 tools/icode_control.py"
 export ICODE_CONTROL_TEST_MODE=1
-T=$(mktemp -d /tmp/icometa.XXXXXX); trap 'rm -rf "$T"' EXIT
+T=$(mktemp -d "${TMPDIR:-/tmp}/icometa.XXXXXX"); trap 'rm -rf "$T"' EXIT
 D="$T/.icode_output/.icode_output_1"; mkdir -p "$D"
 
 write_meta() { rm -f "$D/.ico_events.jsonl" "$D/.icontrol_txn.json"; cat > "$D/.ico_metadata.json"; }
@@ -81,12 +83,20 @@ then ok "门禁失败后 status 保持原值"; else bad "门禁失败后 status 
 
 # 7) schema 文件本身可被外部 jsonschema 消费（draft-07 合法）
 if python3 - <<'PY' 2>/dev/null
-import json, jsonschema
+import json, sys
+try:
+    import jsonschema
+except ModuleNotFoundError:
+    sys.exit(77)  # 本机未装 jsonschema：显式 SKIP，不伪装通过
 for f in ["ticket-metadata.schema.json","ticket-event.schema.json","ticket-index.schema.json"]:
     jsonschema.Draft7Validator.check_schema(json.load(open("schemas/"+f)))
 print("ok")
 PY
-then ok "三 schema 均为合法 draft-07（可被 jsonschema 消费）"; else bad "schema 非合法 draft-07"; fi
+then
+  ok "三 schema 均为合法 draft-07（可被 jsonschema 消费）"
+else
+  if [[ $? -eq 77 ]]; then echo "  SKIP 三 schema draft-07 校验（本机缺少 jsonschema 模块）"; else bad "schema 非合法 draft-07"; fi
+fi
 
 echo "PASS=$PASS FAIL=$FAIL"
 [ "$FAIL" -eq 0 ]

@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Windows: python3 可能是 WindowsApps 假 stub（无输出、exit 49）；加载共享 shim
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/python3-shim.sh" 2>/dev/null || true
 # tests/test_schema_migration.sh — 验证 schema v0→v1.1 自动迁移兼容性
 #
 # 用法：bash tests/test_schema_migration.sh
@@ -247,7 +249,12 @@ META_SIZE_BEFORE=$(stat -c%s "$META")
 PLAN_SIZE_BEFORE=$(stat -c%s "$PLAN")
 PFINAL_SIZE_BEFORE=$(stat -c%s "$PFINAL")
 DEEPCHECK_SIZE_BEFORE=$(stat -c%s "$DEEPCHECK")
-LOG_LEN_BEFORE=$(python3 -c "import json; print(len(json.load(open('$META'))['migration_log']))")
+# 路径必须走 argv：Windows 原生 Python 不认内嵌在 -c 字符串里的 MSYS 路径（/tmp/...）
+LOG_LEN_BEFORE=$(python3 - "$META" <<'PY'
+import json, sys
+print(len(json.load(open(sys.argv[1]))["migration_log"]))
+PY
+)
 
 # 模拟三步的"完整迁移流程"：检查 template_version → 不进迁移 → 跳过 metadata 写回
 # （与生产步骤 1/4/5 的设计完全一致：template_version==v1.1 → 跳过；只有 marker 检测决定实际是否追加）
@@ -263,7 +270,11 @@ if [ "$META_SIZE_BEFORE" = "$(stat -c%s "$META")" ] && \
    [ "$PLAN_SIZE_BEFORE" = "$(stat -c%s "$PLAN")" ] && \
    [ "$PFINAL_SIZE_BEFORE" = "$(stat -c%s "$PFINAL")" ] && \
    [ "$DEEPCHECK_SIZE_BEFORE" = "$(stat -c%s "$DEEPCHECK")" ] && \
-   [ "$LOG_LEN_BEFORE" = "$(python3 -c "import json; print(len(json.load(open('$META'))['migration_log']))")" ]; then
+   [ "$LOG_LEN_BEFORE" = "$(python3 - "$META" <<'PY'
+import json, sys
+print(len(json.load(open(sys.argv[1]))["migration_log"]))
+PY
+)" ]; then
   echo "  ✅ 二次进入 metadata/三个产物全部零增量，migration_log 长度=$LOG_LEN_BEFORE（正确未追加）"
 else
   echo "  ❌ 二次进入任一文件大小变化或 migration_log 被追加"
@@ -331,7 +342,11 @@ Path(p).write_text(json.dumps(d, ensure_ascii=False, indent=2))
 PY
 
 # 断言：migration_log 长度恰好 3，每个产物都已包含目标 marker
-SECOND_LOG_LEN=$(python3 -c "import json; print(len(json.load(open('$OUT2/.ico_metadata.json'))['migration_log']))")
+SECOND_LOG_LEN=$(python3 - "$OUT2/.ico_metadata.json" <<'PY'
+import json, sys
+print(len(json.load(open(sys.argv[1]))["migration_log"]))
+PY
+)
 if [ "$SECOND_LOG_LEN" -eq 3 ]; then
   echo "  ✅ 独立三步迁移后 migration_log 长度=3（步骤 1/4/5 各一条）"
 else

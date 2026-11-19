@@ -120,18 +120,25 @@ class DistributionTests(unittest.TestCase):
                 self.skipTest("Windows account cannot create symbolic links; verify on Linux")
             raise
 
+    # 子进程必须显式使用 UTF-8 stdio：pytest 若以 -X utf8 运行，父进程会按 UTF-8
+    # 解码，而 Windows 上子进程默认用系统代码页（cp936）输出，两边不一致就抛
+    # UnicodeDecodeError。显式约定编码，两端都不再依赖 locale。
+    CHILD_ENV = {**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"}
+
     def build(self, output=None, source=None):
         return subprocess.run([
             sys.executable, "-B", str(BUILDER), "--source", str(source or self.source),
             "--output", str(output or self.output),
-        ], capture_output=True, text=True)
+        ], capture_output=True, text=True, encoding="utf-8", errors="replace",
+            env=self.CHILD_ENV)
 
     def build_core(self):
         return subprocess.run([
             sys.executable, "-B", str(BUILDER), "--source", str(self.source),
             "--output", str(self.output), "--profile", "core",
             "--components-output", str(self.base / "components"),
-        ], capture_output=True, text=True, encoding="utf-8")
+        ], capture_output=True, text=True, encoding="utf-8", errors="replace",
+            env=self.CHILD_ENV)
 
     def component_install(self, component="docx", dry_run=False):
         skill = self.output / "skills/icode"
@@ -142,7 +149,8 @@ class DistributionTests(unittest.TestCase):
                 "--component-archive", str(archive), "--component-cache", str(self.base / "cache")]
         if dry_run:
             args.append("--dry-run")
-        return subprocess.run(args, capture_output=True, text=True, encoding="utf-8")
+        return subprocess.run(args, capture_output=True, text=True, encoding="utf-8",
+                              errors="replace", env=self.CHILD_ENV)
 
     def file_snapshot(self, root):
         return {p.relative_to(root).as_posix(): p.read_bytes()

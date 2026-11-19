@@ -155,7 +155,7 @@
 >
 > - cheap-research 🟢（`mcp__cheap-research__extract` 可用）
 > - **函数数 ≥ 50**（阈值取自 `mcp/cheap-research/gates.json` 常量 `dedup_min_functions`，禁止在正文写死）
-> - **gate 绑定**：本子阶段 = gate `review.dedup`（tool=extract）。**函数数按受影响 Git 仓库计算**（见下），任一受影响仓库 ≥ 阈值 → eligible=true 必须 called/cache_hit/degraded_after_attempt/unavailable_before_call；**全部 < 阈值** → eligible=false `skipped_not_eligible`（evidence 含 function_count/threshold/rg_available/cheap_available）
+> - **gate 绑定**：本子阶段 = gate `review.dedup`（tool=extract）。**函数数按受影响 Git 仓库计算**（见下），任一受影响仓库 ≥ 阈值 → eligible=true 必须 called/cache_hit/degraded_after_attempt/unavailable_before_call；**全部 < 阈值** → eligible=false `skipped_not_eligible`（**evidence 字段以 `mcp/cheap-research/gates.json` 的 `gates[].evidence_fields` 为唯一真源，本段不维护清单副本**；`review.dedup` 当前为 `affected_repo_roots` / `function_count` / `threshold` / `rg_available` / `cheap_available` 五项，schema v2 下**缺任一字段判 invalid**）
 >
 > **任一不满足 → 整个 §2.5.7 跳过**，在思考块 `MCP 调用` 段写明降级原因 + 写 trace `decision=skipped_not_eligible`（不写产物文件）。
 

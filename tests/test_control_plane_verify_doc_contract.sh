@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Windows: python3 可能是 WindowsApps 假 stub（无输出、exit 49）；加载共享 shim
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/python3-shim.sh" 2>/dev/null || true
 # verify/patch 语义分离 + doc 工作清单契约（§10: test_patch_verify_separation / test_doc_worklist_resume）
 set -u
 cd "$(dirname "$0")/.." || exit 1
@@ -6,7 +8,7 @@ PASS=0; FAIL=0
 ok()  { PASS=$((PASS+1)); echo "  ✅ $1"; }
 bad() { FAIL=$((FAIL+1)); echo "  ❌ $1"; }
 
-T=$(mktemp -d /tmp/icoverify.XXXXXX); trap 'rm -rf "$T"' EXIT
+T=$(mktemp -d "${TMPDIR:-/tmp}/icoverify.XXXXXX"); trap 'rm -rf "$T"' EXIT
 
 # 1) verify 步骤存在且为纯验证（不写 patch_history）
 if [ -f steps/verify.md ]; then ok "steps/verify.md 存在"; else bad "steps/verify.md 缺失"; fi

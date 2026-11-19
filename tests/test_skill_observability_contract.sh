@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Windows: python3 可能是 WindowsApps 假 stub（无输出、exit 49）；加载共享 shim
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/python3-shim.sh" 2>/dev/null || true
 set -u
 cd "$(dirname "$0")/.." || exit 1
 
@@ -10,7 +12,7 @@ bad() { FAIL=$((FAIL + 1)); printf '  FAIL %s\n' "$1" >&2; }
 CTL="python3 tools/icode_control.py"
 PROPOSE="tools/propose_skill_candidates.py"
 export ICODE_CONTROL_TEST_MODE=1
-TMP="$(mktemp -d /tmp/icode-skill-observe.XXXXXX)"
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/icode-skill-observe.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
 make_ticket() {
@@ -32,9 +34,11 @@ record_gap() {
 D1="$(make_ticket 1)"
 if record_gap "$D1" run-1 'clock jump segment' >/dev/null \
   && record_gap "$D1" run-1 'clock jump segment' | grep -q already_applied \
-  && python3 - "$D1/.ico_metadata.json" <<'PY'
-import json, sys
-run = json.load(open(sys.argv[1], encoding="utf-8"))["extensions"]["skills"]["runs"][0]
+  && python3 - "$D1" <<'PY'
+import sys
+sys.path.insert(0, "tests/lib")
+import ticket_metadata
+run = ticket_metadata.load(sys.argv[1])["extensions"]["skills"]["runs"][0]
 for key in ("trigger", "result", "adopted", "evidence_refs", "elapsed_ms", "estimated_tokens", "unique_findings"):
     assert key in run
 assert run["adopted"] is False and run["elapsed_ms"] == 1200

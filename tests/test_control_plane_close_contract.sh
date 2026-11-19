@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Windows: python3 可能是 WindowsApps 假 stub（无输出、exit 49）；加载共享 shim
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/python3-shim.sh" 2>/dev/null || true
 # 关闭分阶段幂等 + 身份解析 + 归档 hash roundtrip 契约。
 set -u
 cd "$(dirname "$0")/.." || exit 1
@@ -8,7 +10,7 @@ bad() { FAIL=$((FAIL+1)); echo "  ❌ $1"; }
 
 CTL="python3 tools/icode_control.py"
 export ICODE_CONTROL_TEST_MODE=1
-T=$(mktemp -d /tmp/icoclose.XXXXXX); trap 'rm -rf "$T"' EXIT
+T=$(mktemp -d "${TMPDIR:-/tmp}/icoclose.XXXXXX"); trap 'rm -rf "$T"' EXIT
 WS="$T/ws"; D="$WS/.icode_output/.icode_output_1"; mkdir -p "$D"
 ARCHIVE="$T/archive/close-1"; mkdir -p "$ARCHIVE"
 $CTL create --dir "$D" --ticket-id close-1 --requirement r --birth plan \
@@ -78,7 +80,7 @@ fi
 $CTL archive-manifest --dir "$D" --archive-dir "$ARCHIVE" --write --skip-linters >/dev/null 2>&1
 # 3) archived 是控制根交接点；原 checkout 消失后仍能在归档根推进到 closed。
 if $CTL close-phase --dir "$D" --phase archived 2>/dev/null \
-    | grep -q '"control_root":.*archive/close-1'; then
+    | grep -qE '"control_root":.*archive[\\/]close-1'; then
   ok "archived 完成后交接到归档控制根"
 else bad "archived 未交接控制根"; fi
 if $CTL close-phase --dir "$D" --phase roots_verified 2>/dev/null \
@@ -123,12 +125,15 @@ done
 [ "$okseq" -eq 1 ] && ok "源目录消失后归档根有序推进到 closed" \
   || bad "归档控制根续跑失败"
 if $CTL index-write --ticket-dir "$ARCHIVE" --index "$CLOSE_IDX" >/dev/null 2>&1 \
-   && python3 - "$ARCHIVE/.ico_metadata.json" "$CLOSE_IDX" <<'PY'
-import json,sys
-meta=json.load(open(sys.argv[1])); index=json.load(open(sys.argv[2]))
+   && python3 - "$ARCHIVE" "$CLOSE_IDX" <<'PY'
+import json,pathlib,sys
+sys.path.insert(0, "tests/lib")
+import ticket_metadata
+meta=ticket_metadata.load(sys.argv[1]); index=json.load(open(sys.argv[2], encoding="utf-8"))
 row=next(item for item in index["tickets"] if item["ticket_id"]=="close-1")
 assert meta["close_state"]=="closed"
-assert row["project_path"].endswith("/ws")
+# 分隔符无关：Windows 上 project_path 用反斜杠
+assert pathlib.PurePath(row["project_path"]).name == "ws"
 assert row["out_dir"]==".icode_output/.icode_output_1"
 PY
 then ok "归档根可刷新索引且保留原身份三元组"
@@ -156,9 +161,11 @@ if $CTL reopen --dir "$ARCHIVE" --metadata-json "$ACTIVE_JSON" \
     --reason follow-up --request-id reopen-1 >/dev/null 2>&1 \
    && $CTL reopen --dir "$ARCHIVE" --metadata-json "$ACTIVE_JSON" \
     --reason follow-up --request-id reopen-1 2>/dev/null | grep -q already_applied \
-   && python3 - "$ARCHIVE/.ico_metadata.json" "$NEW_WT/.icode_output/.active_ticket.json" <<'PY'
+   && python3 - "$ARCHIVE" "$NEW_WT/.icode_output/.active_ticket.json" <<'PY'
 import json,sys
-m=json.load(open(sys.argv[1]))
+sys.path.insert(0, "tests/lib")
+import ticket_metadata
+m=ticket_metadata.load(sys.argv[1])
 assert m["close_state"] is None
 assert m["delivery_verdict"]=="verification_pending"
 assert m["active_checkout"]["state"]=="active"

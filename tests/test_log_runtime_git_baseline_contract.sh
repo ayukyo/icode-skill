@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Windows: python3 可能是 WindowsApps 假 stub（无输出、exit 49）；加载共享 shim
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/python3-shim.sh" 2>/dev/null || true
 # tests/test_log_runtime_git_baseline_contract.sh — 验证「现场运行版本基线门」落地
 #
 # 用法：bash tests/test_log_runtime_git_baseline_contract.sh
@@ -22,6 +24,8 @@ SKILL_DOC="$REPO_ROOT/SKILL.md"
 ANTI_DOC="$REPO_ROOT/references/anti_laziness.md"
 THINKING_DOC="$REPO_ROOT/references/thinking_core.md"
 DIR_META="$REPO_ROOT/references/dir_and_metadata.md"
+# git 只读白名单随「检索与过时校验」一起迁到 project_docs_retrieval.md
+RETRIEVAL_DOC="$REPO_ROOT/references/project_docs_retrieval.md"
 
 FAIL=0
 
@@ -81,9 +85,9 @@ assert_contains "$LOG_DOC" "现场运行版本基线门" "log.md /icode log 概�
 assert_contains "$DIR_META" "runtime_code_baselines" "dir_and_metadata.md 三基线字段表含 runtime_code_baselines"
 assert_contains "$DIR_META" "relation_to_analysis_head" "dir_and_metadata.md 三基线字段表含 relation_to_analysis_head"
 assert_contains "$DIR_META" "metadata 三基线字段" "dir_and_metadata.md 含三基线字段定义"
-assert_contains "$DIR_META" "git show <hash>:<path>" "dir_and_metadata.md 白名单含 git show（现场读码）"
-assert_contains "$DIR_META" "git diff <commit>..HEAD -- <path>" "dir_and_metadata.md 白名单含 git diff（演进对照）"
-assert_contains "$DIR_META" "git blame <commit> -- <path>" "dir_and_metadata.md 白名单含 git blame（行归因）"
+assert_contains "$RETRIEVAL_DOC" "git show <hash>:<path>" "project_docs_retrieval.md 白名单含 git show（现场读码）"
+assert_contains "$RETRIEVAL_DOC" "git diff <commit>..HEAD -- <path>" "project_docs_retrieval.md 白名单含 git diff（演进对照）"
+assert_contains "$RETRIEVAL_DOC" "git blame <commit> -- <path>" "project_docs_retrieval.md 白名单含 git blame（行归因）"
 # 动态读取 anti_laziness 实际条数，断言计数声明与之一致
 ANTI_COUNT=$(grep -oE '^[0-9]+\.' "$ANTI_DOC" | tr -d '.' | sort -n | tail -1)
 VERSION_NO=$(grep -oE '^[0-9]+\. \*\*日志有版本证据仍直接用当前 HEAD 解释现场' "$ANTI_DOC" | grep -oE '^[0-9]+' | head -1)
@@ -208,8 +212,8 @@ rm -rf "$FIX"
 echo ""
 echo "=== REFACTOR：防回归（白名单禁改工作区 + 测试自身存在） ==="
 assert_file "$REPO_ROOT/tests/test_log_runtime_git_baseline_contract.sh" "测试脚本自身存在"
-# 白名单语境下禁止改变工作区/索引/网络操作（dir_and_metadata.md 只读约束段）
-if grep -qF -- '**禁止** `checkout`' "$DIR_META"; then
+# 白名单语境下禁止改变工作区/索引/网络操作（project_docs_retrieval.md 只读约束段）
+if grep -qF -- '**禁止** `checkout`' "$RETRIEVAL_DOC"; then
   echo "  ✅ 白名单显式禁止 checkout/switch/reset/stash/clean 等写操作"
 else
   echo "  ❌ 白名单缺少禁止写操作声明"

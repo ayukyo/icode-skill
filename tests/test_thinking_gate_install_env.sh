@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Windows: python3 可能是 WindowsApps 假 stub（无输出、exit 49）；加载共享 shim
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/python3-shim.sh" 2>/dev/null || true
 # P3 安装配置：sequential-thinking 默认注入 DISABLE_THOUGHT_LOGGING=true（隐私基线）
 # + 用户显式开启日志（false）时不被 install 反复覆盖 + 回读校验 + Codex 导出 env 同步
 # + 不影响其他 npx 系 MCP（context7/memory/playwright 无 env）。

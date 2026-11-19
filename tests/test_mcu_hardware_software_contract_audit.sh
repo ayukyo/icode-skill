@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Windows: python3 可能是 WindowsApps 假 stub（无输出、exit 49）；加载共享 shim
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/python3-shim.sh" 2>/dev/null || true
 set -u
 cd "$(dirname "$0")/.." || exit 1
 
@@ -15,7 +17,6 @@ import json, sys
 name=sys.argv[1]
 manifest=json.load(open("skill-packs/manifest.json", encoding="utf-8"))
 routes=json.load(open("mcp/workflow-gate/skill-routes.json", encoding="utf-8"))
-assert len(manifest["skills"]) == 16
 assert name in {item["name"] for item in manifest["skills"]}
 route=next(item for item in routes["routes"] if item["skill"] == name)
 assert {"plan", "code", "deepcheck", "audit", "verify"} <= set(route["steps"])

@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Windows: python3 可能是 WindowsApps 假 stub（无输出、exit 49）；加载共享 shim
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/python3-shim.sh" 2>/dev/null || true
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -108,8 +110,13 @@ Path(sys.argv[1]).write_text(json.dumps({
     "extensions": {"skills": {"runs": runs}},
 }), encoding="utf-8")
 PY
-ln -s "$TMP/outside/.ico_metadata.json" \
-  "$PROJECT/.icode_output/.icode_output_symlink/.ico_metadata.json"
+# Windows 上 ln -s 会退化成复制，等于把"工程外"工单塞进工程内，反而制造假失败
+if icode_symlink_ok; then
+  ln -s "$TMP/outside/.ico_metadata.json" \
+    "$PROJECT/.icode_output/.icode_output_symlink/.ico_metadata.json"
+else
+  printf 'SKIP: 工程外工单符号链接夹具（当前文件系统不支持真实符号链接）\n'
+fi
 
 MANIFEST_BEFORE="$(sha256sum "$MANIFEST" | cut -d' ' -f1)"
 ROUTES_BEFORE="$(sha256sum "$ROUTES" | cut -d' ' -f1)"

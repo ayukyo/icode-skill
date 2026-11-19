@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Windows: python3 可能是 WindowsApps 假 stub（无输出、exit 49）；加载共享 shim
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/python3-shim.sh" 2>/dev/null || true
 set -u
 cd "$(dirname "$0")/.." || exit 1
 
@@ -10,7 +12,7 @@ bad() { FAIL=$((FAIL + 1)); printf '  FAIL %s\n' "$1" >&2; }
 CTL="python3 tools/icode_control.py"
 LINT="python3 tools/lint_workflow_contract.py"
 export ICODE_CONTROL_TEST_MODE=1
-TMP="$(mktemp -d /tmp/icode-layered-verify.XXXXXX)"
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/icode-layered-verify.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 D="$TMP/.icode_output/.icode_output_1"
 mkdir -p "$(dirname "$D")"
@@ -58,9 +60,11 @@ else
   bad "完整分层验证仍被阻断"
 fi
 
-if python3 - "$D/.ico_metadata.json" <<'PY'
-import json, sys
-meta = json.load(open(sys.argv[1], encoding="utf-8"))
+if python3 - "$D" <<'PY'
+import sys
+sys.path.insert(0, "tests/lib")
+import ticket_metadata
+meta = ticket_metadata.load(sys.argv[1])
 runs = meta["verification_runs"]
 assert runs[-1]["layer"] == "consumption"
 assert runs[-1]["consumer"] == "algorithm"

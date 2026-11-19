@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Windows: python3 可能是 WindowsApps 假 stub（无输出、exit 49）；加载共享 shim
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/python3-shim.sh" 2>/dev/null || true
 # workflow gate（工作流硬门禁）demo 模拟验收
 #
 # 用 demo 工程（C 计算器）构造 6 个模拟工单 fixture 到 demo/.icode_output/.workflow_sim/，

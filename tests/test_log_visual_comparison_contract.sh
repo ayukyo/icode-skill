@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Windows: python3 可能是 WindowsApps 假 stub（无输出、exit 49）；加载共享 shim
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/python3-shim.sh" 2>/dev/null || true
 # tests/test_log_visual_comparison_contract.sh — 验证 log 工单「修复前后可读对照」契约
 #
 # 用法：bash tests/test_log_visual_comparison_contract.sh

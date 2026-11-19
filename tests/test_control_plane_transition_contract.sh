@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Windows: python3 可能是 WindowsApps 假 stub（无输出、exit 49）；加载共享 shim
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/python3-shim.sh" 2>/dev/null || true
 # 控制面状态机/迁移/索引单一 writer 契约（§10: test_transition_fail_closed_contract /
 #                       test_legacy_migration_idempotent / test_index_single_writer_contract /
 #                       test_ticket_snapshot_resume）
@@ -10,7 +12,7 @@ bad() { FAIL=$((FAIL+1)); echo "  ❌ $1"; }
 
 CTL="python3 tools/icode_control.py"
 export ICODE_CONTROL_TEST_MODE=1
-T=$(mktemp -d /tmp/icotrans.XXXXXX); trap 'rm -rf "$T"' EXIT
+T=$(mktemp -d "${TMPDIR:-/tmp}/icotrans.XXXXXX"); trap 'rm -rf "$T"' EXIT
 D="$T/.icode_output/.icode_output_1"; mkdir -p "$D"
 $CTL create --dir "$D" --ticket-id trans-1 --requirement r --birth plan >/dev/null
 

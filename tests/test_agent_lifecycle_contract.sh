@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Windows: python3 可能是 WindowsApps 假 stub（无输出、exit 49）；加载共享 shim
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/python3-shim.sh" 2>/dev/null || true
 set -u
 cd "$(dirname "$0")/.." || exit 1
 
@@ -8,7 +10,7 @@ ok() { PASS=$((PASS + 1)); printf '  PASS %s\n' "$1"; }
 bad() { FAIL=$((FAIL + 1)); printf '  FAIL %s\n' "$1" >&2; }
 
 CTL="python3 tools/icode_control.py"
-TMP="$(mktemp -d /tmp/icode-agent-life.XXXXXX)"
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/icode-agent-life.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 DIR="$TMP/.icode_output/.icode_output_1"
 mkdir -p "$(dirname "$DIR")"

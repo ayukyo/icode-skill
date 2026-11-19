@@ -70,7 +70,7 @@ Claude插件命名空间发现及10个安装目标的完整包复制。下文“
 
 | 宿主 | 当前官方清单与发现依据 | 根 `skills: "./"` 与本次处理 |
 | --- | --- | --- |
-| Claude Code | `.claude-plugin/plugin.json`；`skills` 接受字符串或数组；常规布局是 `skills/<name>/SKILL.md` | **官方明确允许** `.`/`./` 指向直接含 `SKILL.md` 的目录；无 `skills/` 且无该字段时，根入口可作单技能插件自动加载。当前源码还含 16 个 `.template`，薄根清单不会将它们转换为共享技能，故生成标准多技能布局。[参考](https://code.claude.com/docs/en/plugins-reference#path-behavior-rules) |
+| Claude Code | `.claude-plugin/plugin.json`；`skills` 接受字符串或数组；常规布局是 `skills/<name>/SKILL.md` | **官方明确允许** `.`/`./` 指向直接含 `SKILL.md` 的目录；无 `skills/` 且无该字段时，根入口可作单技能插件自动加载。当前源码还含 17 个 `.template`，薄根清单不会将它们转换为共享技能，故生成标准多技能布局。[参考](https://code.claude.com/docs/en/plugins-reference#path-behavior-rules) |
 | Codex | plugin-creator 生成兼容清单 `.codex-plugin/plugin.json`；当前官方也提供 Agent Plugins 1.0 根 `plugin.json` 格式 | 本次选 plugin-creator 格式。本机该技能的 `validate_plugin.py::validate_optional_contract_path` 要求 `skills` 归一化为 `skills`，拒绝 `./`。这是该校验合同的实际结论，不扩推为所有 Codex loader 永远拒绝根目录。[官方构建说明](https://learn.chatgpt.com/docs/build-plugins) |
 | CodeBuddy CLI | `.codebuddy-plugin/plugin.json`；`skills` 字符串或数组覆盖默认目录，技能布局为 `<name>/SKILL.md` | 已确认标准 `skills/` 目录；**未确认根直接技能的 loader 分支**，不以相对路径语法合法推断能发现根入口。生成 `./skills/`。[参考](https://www.codebuddy.ai/docs/cli/plugins-reference) |
 | Cursor | 当前接受 Agent Plugins 1.0 根 `plugin.json`，也有 `.cursor-plugin/plugin.json` | 已调查，暂不生成清单；目录读取不证明 ICODE 宿主/MCP 适配。[官方说明](https://cursor.com/docs/plugins) |
@@ -102,7 +102,7 @@ Claude插件命名空间发现及10个安装目标的完整包复制。下文“
 ```
 
 生成器复用 `validate_skill_pack.py` 的 manifest/路由校验和 `iter_source_publish_files` 转换规则。
-完整性范围是根工作流公开资源及 `skill-packs/manifest.json` 声明的全部共享技能，当前 1+16 个。根技能的 `agents/openai.yaml` 一并携带，包与普通安装使用同一份发现元数据。
+完整性范围是根工作流公开资源及 `skill-packs/manifest.json` 声明的全部共享技能，当前 1+17 个。根技能的 `agents/openai.yaml` 一并携带，包与普通安装使用同一份发现元数据。
 某些共享技能会引用用户另装的窄技能，这些不在声明集合内；不可用时按原路由降级并记录缺口。
 
 安全规则：仅选 Git 跟踪文件，结合显式顶层资源白名单；排除网站、tests、demo、Git、宿主配置与未跟踪文件。

@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Windows: python3 可能是 WindowsApps 假 stub（无输出、exit 49）；加载共享 shim
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/python3-shim.sh" 2>/dev/null || true
 # Offline integration only: mocks, synthetic media and Linux PTYs; no devices
 # or Git commit fixtures. Optional FFmpeg cases report explicit skips if absent.
 set -euo pipefail

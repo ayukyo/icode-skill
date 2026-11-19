@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
+# Windows: python3 可能是 WindowsApps 假 stub（无输出、exit 49）；加载共享 shim
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/python3-shim.sh" 2>/dev/null || true
 set -euo pipefail
 cd "$(dirname "$0")/.."
 export ICODE_CONTROL_TEST_MODE=1
-TMP="$(mktemp -d /tmp/icode-build-verify.XXXXXX)"
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/icode-build-verify.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 D="$TMP/.icode_output/.icode_output_1"
 CTL=(python3 tools/icode_control.py)
@@ -33,9 +35,18 @@ reject --build-source reused --artifact-identity sha256:a --baseline HEAD:a
   --consumer module_a --scenario incremental --evidence 'compiler exit=0; build log' \
   --request-id passed >"$TMP/replay.json"
 python3 - "$D/.ico_metadata.json" "$TMP/before.json" "$TMP/replay.json" <<'PY'
-import json, sys
-from tools.icode_control import check_schema
-meta, before, replay = [json.load(open(path)) for path in sys.argv[1:]]
+import json, pathlib, shutil, sys, tempfile
+from tools.icode_control import check_schema, read_metadata_readonly
+
+def load_logical(path):
+    """metadata 可能是 storage v2 envelope；用控制面只读适配器还原逻辑对象。"""
+    with tempfile.TemporaryDirectory() as tmp:
+        shutil.copy(path, pathlib.Path(tmp) / ".ico_metadata.json")
+        return read_metadata_readonly(tmp)
+
+meta = load_logical(sys.argv[1])
+before = load_logical(sys.argv[2])
+replay = json.load(open(sys.argv[3]))
 assert len(meta["verification_runs"]) == 2
 assert all(run["kind"] == "build" and run["layer"] == "build" for run in meta["verification_runs"])
 assert meta["verification_runs"][-1]["outcome"] == "pass"

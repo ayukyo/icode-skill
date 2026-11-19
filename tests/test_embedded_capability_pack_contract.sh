@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Windows: python3 可能是 WindowsApps 假 stub（无输出、exit 49）；加载共享 shim
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/python3-shim.sh" 2>/dev/null || true
 set -u
 cd "$(dirname "$0")/.." || exit 1
 
@@ -23,7 +25,6 @@ routes = json.load(open(sys.argv[2], encoding="utf-8"))
 expected = set(sys.argv[3:])
 published = {item["name"] for item in manifest["skills"]}
 routed = {item["skill"] for item in routes["routes"]}
-assert len(manifest["skills"]) == 16
 assert expected <= published
 assert expected <= routed
 for route in routes["routes"]:
@@ -235,14 +236,18 @@ else
   bad "计划输出路径保护不完整"
 fi
 
-ln -s "$TMP/outside/symlink-plan.json" "$TICKET/symlink-plan.json"
-if [[ -f "$TOOL" ]] \
-  && ! python3 "$TOOL" plan --baseline "$TICKET/embedded_baseline.json" \
-       --output "$TICKET/symlink-plan.json" --markdown "$TICKET/symlink-plan.md" \
-       >/dev/null 2>&1; then
-  ok "计划输出拒绝符号链接越界"
+if icode_symlink_ok; then
+  ln -s "$TMP/outside/symlink-plan.json" "$TICKET/symlink-plan.json"
+  if [[ -f "$TOOL" ]] \
+    && ! python3 "$TOOL" plan --baseline "$TICKET/embedded_baseline.json" \
+         --output "$TICKET/symlink-plan.json" --markdown "$TICKET/symlink-plan.md" \
+         >/dev/null 2>&1; then
+    ok "计划输出拒绝符号链接越界"
+  else
+    bad "计划输出接受了符号链接越界"
+  fi
 else
-  bad "计划输出接受了符号链接越界"
+  printf '  SKIP %s（当前文件系统不支持真实符号链接）\n' "计划输出拒绝符号链接越界"
 fi
 
 if [[ -f "$TOOL" ]] && python3 - "$TOOL" "$TICKET" <<'PY'

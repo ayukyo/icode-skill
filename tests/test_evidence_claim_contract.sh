@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Windows: python3 可能是 WindowsApps 假 stub（无输出、exit 49）；加载共享 shim
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/python3-shim.sh" 2>/dev/null || true
 set -u
 cd "$(dirname "$0")/.." || exit 1
 
@@ -9,7 +11,7 @@ bad() { FAIL=$((FAIL + 1)); printf '  FAIL %s\n' "$1" >&2; }
 
 CTL="python3 tools/icode_control.py"
 export ICODE_CONTROL_TEST_MODE=1
-TMP="$(mktemp -d /tmp/icode-claims.XXXXXX)"
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/icode-claims.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 D="$TMP/.icode_output/.icode_output_1"
 mkdir -p "$(dirname "$D")"
@@ -63,10 +65,12 @@ else
 fi
 
 if $CTL validate --dir "$D" --skip-linters | grep -q '"ok": true' \
-  && python3 - "$D/.ico_metadata.json" "$D/.ico_events.jsonl" <<'PY'
-import json, sys
-meta = json.load(open(sys.argv[1], encoding="utf-8"))
-events = [json.loads(line) for line in open(sys.argv[2], encoding="utf-8") if line.strip()]
+  && python3 - "$D" <<'PY'
+import sys
+sys.path.insert(0, "tests/lib")
+import ticket_metadata
+meta = ticket_metadata.load(sys.argv[1])
+events = ticket_metadata.load_events(sys.argv[1])
 claims = meta["claims"]
 event_claims = [
     {k: v for k, v in event["payload"].items() if k != "metadata_hash_after"}

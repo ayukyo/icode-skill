@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Windows: python3 可能是 WindowsApps 假 stub（无输出、exit 49）；加载共享 shim
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/python3-shim.sh" 2>/dev/null || true
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -327,18 +329,26 @@ test ! -e "$TMP/root-scope.json"
 # 根内 symlink 保留链接路径与目标；越界 symlink 只记失败，不读取目标。
 mkdir -p "$TMP/links"
 printf 'inside target\n' > "$TMP/links/target.log"
-ln -s target.log "$TMP/links/inside.log"
-ln -s /etc/passwd "$TMP/links/outside.log"
+printf 'outside target\n' > "$TMP/outside-secret.log"
+SYMLINK_FIXTURE=0
+if icode_symlink_ok; then
+  ln -s target.log "$TMP/links/inside.log"
+  ln -s "$TMP/outside-secret.log" "$TMP/links/outside.log"
+  SYMLINK_FIXTURE=1
+else
+  printf 'SKIP: 符号链接证据断言（当前文件系统不支持真实符号链接）\n'
+fi
 python3 "$ROOT/tools/evidence_intake.py" --root "$TMP" \
   --path "$TMP/links" --output "$TMP/links.json"
-python3 - "$TMP/links.json" <<'PY'
+python3 - "$TMP/links.json" "$SYMLINK_FIXTURE" <<'PY'
 import json, sys
 d = json.load(open(sys.argv[1], encoding="utf-8"))
-link = next(a for a in d["artifacts"] if a.get("local_path") == "links/inside.log")
-assert link["is_symlink"] is True
-assert link["symlink_target"] == "links/target.log"
-assert not any(a.get("local_path") == "links/outside.log" for a in d["artifacts"])
-assert any(x.get("input", "").endswith("outside.log") for x in d["coverage_hints"]["parse_failures"])
+if sys.argv[2] == "1":
+    link = next(a for a in d["artifacts"] if a.get("local_path") == "links/inside.log")
+    assert link["is_symlink"] is True
+    assert link["symlink_target"] == "links/target.log"
+    assert not any(a.get("local_path") == "links/outside.log" for a in d["artifacts"])
+    assert any(x.get("input", "").endswith("outside.log") for x in d["coverage_hints"]["parse_failures"])
 PY
 
 # watch 必须识别证据撤回及跨轮新增表示；manifest symlink 不能逃出 debug 工单。
@@ -388,8 +398,13 @@ workticket = tmp / "debug-ticket"
 workticket.mkdir()
 outside = tmp / "outside-manifest.json"
 outside.write_text('{}', encoding="utf-8")
-(workticket / "evidence_manifest.json").symlink_to(outside)
-assert watch.locate_evidence_manifest(str(workticket), None) is None
+try:
+    (workticket / "evidence_manifest.json").symlink_to(outside)
+except OSError:
+    # Windows 无符号链接特权：显式跳过该断言，不伪装通过
+    print("SKIP: manifest symlink 越界断言（当前环境不能创建符号链接）")
+else:
+    assert watch.locate_evidence_manifest(str(workticket), None) is None
 PY
 
 # TB 集成扫描整个 ticket 证据树，并用 remote_id 可靠绑定两个同名附件。
