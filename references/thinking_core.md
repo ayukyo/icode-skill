@@ -23,7 +23,7 @@ fast 使用各主步骤的「fast 必要执行」小节及命中的条件规则�
 |---|---------|------|--------|
 | 1 | **跨层枚举对齐修复模式**（防"同值不同义"型根因遗漏） | cross-layer-enum-normalization-pattern（外部参考案例，不随仓库分发） | log.md §2.1 对照表生成 + §0 §2.2 占位 + §3.1 扫描字段 + 阶段3「上游语义追问」；01_plan.md §4 ADR 场景 + §4.5 维度 2 子项；02_review.md 维度 4 风险遗漏子项；04_code.md 优雅度6条第 7 条 + 维度 4 复检双值日志 |
 | 2 | **段零文档/姐妹工程/关联工程检索强证据化**（防"只看自己工程代码"） | [references/project_docs_retrieval.md](project_docs_retrieval.md)「段零·工程文档检索」段（含 3.5 反查父项目 + **3.6 关联工程源码路径定位三级兜底**）+ [references/anti_laziness.md](anti_laziness.md) 第 24 条 | log.md §2.0 自动发现姐妹工程 + 段零 3.6 关联工程源码路径（project_path + manifest + 兜底三级）+ §2.1 段零文档盘点 + 阶段3 对抗质疑者 prompt 喂入 |
-| 3 | **TB 附件视频/图片研读强制化**（防"分析错时间点"） | [references/anti_laziness.md](anti_laziness.md) 第 23 条 | log.md「附件分析（含本地路径 + TB 源）与 ffmpeg 抽帧」段 |
+| 3 | **TB 附件视频/图片研读强制化**（防"分析错时间点"） | [references/anti_laziness.md](anti_laziness.md) 第 23 条 | references/log_tb_and_media.md「附件分析（含本地路径 + TB 源）、能力路由与 ffmpeg 抽帧」段 |
 | 4 | **可恢复执行模型**（端口/Reactive 边界/统一轨迹/副作用策略/回执） | [execution_model.md](execution_model.md) + `gates.json.execution_model` | ticket-scoped step 开始、写入/等待/副作用/转换边界与长动作终结 |
 
 ## 强制思考前置·统一契约（step 文件如何引用本文件）
@@ -166,37 +166,7 @@ N. **强制思考前置**（不可跳过，缺证据视为不合规；按 [refer
 
 ## cheap-research 执行门（gate）流程
 
-> 把 cheap-research 的「双保险」从两套自然语言提示词升级为**幂等可机检**状态机。
-> gate 机器真源 = `mcp/cheap-research/gates.json`（阈值**只从这里读**，禁止在 step 文档/脚本各自写常量）；
-> 运行痕迹 = `{ICODE_OUT_DIR}/.mcp_gate_trace.jsonl`（每 gate 一条最终判定，JSON Lines）；
-> 校验器 = `python3 tools/lint_mcp_coverage.py <out_dir> [--step <step>] [--strict] [--json] [--require-trace]`。
-> 新建工单 metadata 必须含 `"mcp_gate_schema_version": 2`；旧工单缺失时校验器输出 legacy-untracked 兼容警告，不阻断。
-
-**gate 全流程（每步到对应执行点时执行）**：
-
-1. **加载 gate catalog**：Read `mcp/cheap-research/gates.json`，取本 step 相关 gate 与阈值（`tb_comment_extract_min` / `long_text_threshold_bytes` / `dedup_min_functions` / `merge_min_rounds` / `max_input_bytes_per_call`）。
-2. **确定性计算 eligibility 并立刻写 trace**：按 gates.json 的 condition + 事实文件（TB 评论数 / 候选日志字节 / 函数 catalog / review round 数 / mode）算出 `eligible`，先追加一行 trace（`decision` 暂填 `pending`，`at` 为当前 ISO-8601）；**不得用"我觉得没必要"当 skip 理由**。
-3. **eligible 时先查缓存**：Read `{ICODE_OUT_DIR}/.cheap_research_cache.json` 查 `tool + args_hash`（语义见 SKILL.md「cheap-research 15 工具会话内缓存」段）。
-4. **有效缓存命中**：把 trace 行更新为 `decision=cache_hit`、`attempted=false`、`result=success`、`cache_key=<args_hash>`、`input_digest=<包含tool/args及源码hash的64位sha256>`——**gate 直接 fulfilled，不再重复调用**。
-5. **未命中才实际调用**：调 `mcp__cheap-research__<tool>`（先可见性自检；不可见才 ToolSearch 取 schema）。调用成功/返回空/失败后**更新最终 trace**：
-   - 成功 → `decision=called`、`attempted=true`、`result=success`、`source_files=[...]`
-   - 空/错误/超时 → `decision=degraded_after_attempt`、`attempted=true`、`result=empty|error|timeout`、`error_class=<类名>`
-   - 并把结果写回缓存（atomic 写 `.tmp` + `mv`）
-   - 工具未暴露且发现流程仍无法取得 schema → `decision=unavailable_before_call`、`attempted=false`、`result=unavailable`，并带 `availability={tool_visible:false,discovery_ref:<会话工具发现证据引用>,reason:not_exposed|discovery_failed,fallback:<替代方法>,evidence_ref:<替代结果引用>}`。工具直接可见不得用此分支，不伪造实际尝试；业务 eligibility 仍由事实计算。
-6. **step 正文到达同一 gate 时读取最终 trace**：已 fulfilled（called/cache_hit/degraded_after_attempt/unavailable_before_call 已记录）则复用，**避免 A/B 两层重复调用**；未 fulfilled 才执行上述流程。
-7. **step 转换前运行 validator**：`python3 tools/lint_mcp_coverage.py {ICODE_OUT_DIR} --step <step> --strict`——有 eligible 未履行 gate 时不得标记该步流程合规，先回补再转换。
-
-**trace 行约束**（校验器强制）：
-
-- `decision` 词表：`called` / `cache_hit` / `skipped_not_eligible` / `skipped_stage_not_reached` / `degraded_after_attempt` / `unavailable_before_call`
-- `eligible=true` 只允许 `called` / `cache_hit` / `degraded_after_attempt` / `unavailable_before_call`；`degraded_after_attempt` 必须 `attempted=true` 且 `result=error|empty|timeout`
-- `eligible=false` 只允许 `skipped_not_eligible` / `skipped_stage_not_reached`，且必须有结构化 `evidence`（不能只写自然语言）
-- catalog的 `evidence_fields/evidence_types`是必需字段/类型合同；called必须attempted=true，cache_hit必须有效cache_key和input_digest；fast未进入阶段只需mode/phase且不得伪装为full跳过。真实调用结果的来源引用应保留，不能仅自报字符串证明调用。
-- 工具coverage只检查调用声明与形状，不能证明实际执行、输入覆盖、Read理解或Dedup语义裁决；阶段覆盖证据另按[审查证据合同](inspection_evidence.md)检查。历史不足不自动补造trace。
-- **trace 禁止保存**：工具完整结果、日志正文、API key、Cookie、远程 URL 查询参数、设备凭据
-- 同一 `step + gate_id` 重跑允许追加新行，校验器以最后一条为当前状态并保留历史
-
-**候选导航不等于裁决**：cheap-research 输出始终是候选/摘要，主代理负责实证与最终结论；根因、架构、对抗、修复、终审裁决一律不回落到 cheap-research。
+> **按需加载**：本步骤命中 cheap-research 执行点（见 [mcp_per_step.md](mcp_per_step.md) 与 [tools_manifest.json](../mcp/cheap-research/tools_manifest.json)）时，先 Read [thinking_detail.md](thinking_detail.md)「cheap-research 执行门（gate）流程」段。**轨迹恒定写入 `{ICODE_OUT_DIR}/.mcp_gate_trace.jsonl`，步骤转换前由 `python3 tools/lint_mcp_coverage.py` 校验；轨迹与校验器不因本节按需加载而豁免。**
 
 ## 层级关系（API 层 / Hook 层 / Prompt 层 概览）
 

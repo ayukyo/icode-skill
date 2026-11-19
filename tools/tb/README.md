@@ -258,7 +258,7 @@ debug 全量分析**建基线**（每轮一条，按单号倒序），全部建�
 1. 每个项目 `tb_pull.py probe --status-names 打开,未完成` 拉线上最新（零附件下载）
 2. 扫 `{工程}/.icode_output/.debug/` 下 debug 工单 metadata 的 `tb_source`，按 lib+num+pid 定位每单旧 debug 孪生；
    匹配不到再扫**中断半成品**（无 `.ico_metadata.json` 但有 `tb_source/<LIB>-<NUM>/` 附件，见 [references/debug_mode.md](../../references/debug_mode.md) §12）→ 命中判"中断续跑"复用续跑（附件复用、收尾补写 metadata）
-3. 按单号倒序逐单机械"有更新判定"（比对口径对齐 log.md「批量 TB 分析」步骤3：评论 `(created, 评论文本)` 键差集、
+3. 按单号倒序逐单机械"有更新判定"（比对口径对齐 references/log_tb_and_media.md「批量 TB 分析」步骤3：评论 `(created, 评论文本)` 键差集、
    附件 `(name, ext)` 键差集、状态仅当旧 meta 含 `status` 字段才比）
 4. 从所有工程候选里**公平轮转取一条** -> 拉起 `claude -p` 触发 debug 分析（优先 `/icode log --debug <单>`，
    不可用则按 debug 语义手动建/复用 debug 工单；每轮一条）。轮转规则：优先选"非上次触发工程"里单号

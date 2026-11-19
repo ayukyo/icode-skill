@@ -43,7 +43,7 @@
 
 > 若本工单是 worktree 隔离工单（`metadata.active_checkout` 非 null，缺失按 [references/worktree_isolation.md §3.7](../references/worktree_isolation.md) 用 `worktree_path` 推导）且工程为 repo 多仓库（super-repo + 业务子仓，子仓各自独立 git 仓库），**super-repo worktree 不覆盖业务子仓**——子仓有自己的 `.git` 在原工程路径，worktree 内对应相对路径为空。本步骤进入编码前须确定实际修改的业务子仓，并为每个受影响子仓建立隔离 checkout，**禁止直接改原工程路径子仓**（会污染原工程、多需求并行冲突）。规范见 [references/worktree_isolation.md](../references/worktree_isolation.md)「⑤ 业务子仓隔离」。
 
-1. 读 `{ICODE_OUT_DIR}/03_plan_final.md` 的 code_files/§5 符号清单，确定本需求实际修改的业务子仓集（子仓相对 super-repo 路径经 `.repo/manifest.xml` `<project path>` 推导，见 [references/dir_and_metadata.md](../references/dir_and_metadata.md)「repo 嵌套子项目路径推导」）
+1. 读 `{ICODE_OUT_DIR}/03_plan_final.md` 的 code_files/§5 符号清单，确定本需求实际修改的业务子仓集（子仓相对 super-repo 路径经 `.repo/manifest.xml` `<project path>` 推导，见 [ticket_storage_details.md](../references/ticket_storage_details.md)「repo 嵌套子项目路径推导」）
 2. 不涉及子仓修改（只改 super-repo）→ **跳过本段**，无需隔离
 3. 对每个受影响原子仓，若 `metadata.sub_worktrees` 未含该子仓 → 建子仓隔离 checkout（把 checkout 放进 super-worktree 同名相对路径，保持路径结构与原工程一致；**子仓分支基于子仓当前分支的远程跟踪 `@{u}` 创建 + 自动 upstream**）：
    ```bash

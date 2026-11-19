@@ -162,7 +162,7 @@ cheap-research 的强证据执行点由三层机器机制承载，文档只解�
 | **cache 去重** | `{ICODE_OUT_DIR}/.cheap_research_cache.json` | 有效命中（`tool + args_hash`，source mtime 校验）→ gate 记 `decision=cache_hit`，**不重复调用**，等价履行 |
 | **运行时校验器** | `python3 tools/lint_mcp_coverage.py <out_dir> [--step <step>] [--strict] [--json]` | step 转换前跑：eligible 未履行 / missing gate / degraded-without-attempt / trace schema error / 敏感数据 → 退出码 1 阻断 |
 
-流程：**加载 gates.json → 确定性算 eligibility 并写 trace → eligible 先查 cache → 命中写 cache_hit / 未命中实际调用；未暴露则按结构化可用性证据降级 → 更新 trace → step 转换前跑校验器**。详见 [references/thinking_core.md](../../references/thinking_core.md)「cheap-research 执行门（gate）流程」段与契约测试 [tests/test_cheap_research_gate_contract.sh](../../tests/test_cheap_research_gate_contract.sh)。
+流程：**加载 gates.json → 确定性算 eligibility 并写 trace → eligible 先查 cache → 命中写 cache_hit / 未命中实际调用；未暴露则按结构化可用性证据降级 → 更新 trace → step 转换前跑校验器**。详见 [references/thinking_core.md](../references/thinking_detail.md)「cheap-research 执行门（gate）流程」段与契约测试 [tests/test_cheap_research_gate_contract.sh](../../tests/test_cheap_research_gate_contract.sh)。
 
 详见 [mcp/cheap-research/server.py](server.py)、工具类型真源 [tools_manifest.json](tools_manifest.json)
 与核心契约测试 [tests/](tests/)。

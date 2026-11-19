@@ -45,7 +45,7 @@
 
 检查 `{ICODE_OUT_DIR}/03_plan_final.md` 和步骤4创建的代码文件是否存在，缺失则报错。
 
-> **模块文档检索（新增）**：在思考分级之前，Read `~/.claude/icode_data/project_docs/<project_id>/<branch_safe>/_meta.json` 取 `module_deps` 列表，对每个 dep 检 `~/.claude/icode_data/module_docs/<key>/_meta.json` 的 `current_commit` 是否与 `_meta.json.module_deps[].commit` 一致（不一致标 `⚠️ commit 漂移`，仍读但附警告）。命中模块的章节作为上下文**只进思考块，不写入产物文件**（audit 是消费方，模块文档已在 plan 阶段固化）。**降级**：路径不存在或 Read 失败 → 静默跳过本段，主流程继续。**复用缓存**：本 ticket 内已通过 01_plan / 02_review / 05_deepcheck 段零检索注入过的模块文档不重复 Read（`_inject_cache.json` 按 `(source, ref_id, slice)` 去重，slice=`section:<file>`，路径 `{ICODE_OUT_DIR}/_inject_cache.json`，与上游步骤共用同一缓存文件——参见 [references/dir_and_metadata.md](../references/dir_and_metadata.md)「注入缓存机制」段）。**前提契约**：同 02_review.md「模块文档检索」段——依赖上游段零检索已执行；`_inject_cache.json` 不存在时退化为全量 Read + 写 `▶ 步骤 6 模块文档检索退化：无 _inject_cache.json 可复用`。
+> **模块文档检索（新增）**：在思考分级之前，Read `~/.claude/icode_data/project_docs/<project_id>/<branch_safe>/_meta.json` 取 `module_deps` 列表，对每个 dep 检 `~/.claude/icode_data/module_docs/<key>/_meta.json` 的 `current_commit` 是否与 `_meta.json.module_deps[].commit` 一致（不一致标 `⚠️ commit 漂移`，仍读但附警告）。命中模块的章节作为上下文**只进思考块，不写入产物文件**（audit 是消费方，模块文档已在 plan 阶段固化）。**降级**：路径不存在或 Read 失败 → 静默跳过本段，主流程继续。**复用缓存**：本 ticket 内已通过 01_plan / 02_review / 05_deepcheck 段零检索注入过的模块文档不重复 Read（`_inject_cache.json` 按 `(source, ref_id, slice)` 去重，slice=`section:<file>`，路径 `{ICODE_OUT_DIR}/_inject_cache.json`，与上游步骤共用同一缓存文件——参见 [references/dir_and_metadata.md](../references/ticket_storage_details.md)「注入缓存机制」段）。**前提契约**：同 02_review.md「模块文档检索」段——依赖上游段零检索已执行；`_inject_cache.json` 不存在时退化为全量 Read + 写 `▶ 步骤 6 模块文档检索退化：无 _inject_cache.json 可复用`。
 
 ### 前置：统一拓扑门禁（共享检查器）
 
@@ -91,12 +91,12 @@ git rev-list --count <worktree_branch>..<目标基分支>     # 目标基分支 
 > - 主代理把候选逐条与代码实证比对，`match=false` 项作为终审重点复核（防止 patch / 实施改了入口忘改 README、声明与代码漂移）
 > - **gate trace**：audit 存在受影响仓库（`affected_repo_roots` 非空）→ `audit.repo_facts: eligible=true` 必须 called/cache_hit/degraded_after_attempt/unavailable_before_call（evidence 含 affected_repo_roots）
 > - **前提契约（关键文件全缺降级）**：README / CLAUDE.md / 入口文件**全部不存在** → propose_repo_facts 无对象可审 → 跳过本段；写 `▶ propose_repo_facts 跳过：工程无 README/CLAUDE.md/入口文件可审计` + trace `eligible=false, skipped_not_eligible, evidence={affected_repo_roots:[]}`
-> - **降级**：cheap-research 不可用 → 走原流程（主代理自审）；写 `[降级-propose_repo_facts 不可用]`。trace 按 [thinking_core.md](../references/thinking_core.md)「cheap-research 执行门（gate）流程」区分实际失败与未暴露；未暴露记 `unavailable_before_call/attempted=false/result=unavailable` 及完整 `availability`，不伪造调用。
+> - **降级**：cheap-research 不可用 → 走原流程（主代理自审）；写 `[降级-propose_repo_facts 不可用]`。trace 按 [thinking_detail.md](../references/thinking_detail.md)「cheap-research 执行门（gate）流程」区分实际失败与未暴露；未暴露记 `unavailable_before_call/attempted=false/result=unavailable` 及完整 `availability`，不伪造调用。
 
 4. **思考分级（L2：sequential-thinking）**（按 [references/mcp_per_step.md](../references/mcp_per_step.md)「通用前置·分级思考」段执行）：本步骤为 L2，调用 sequential-thinking（3~5 步）。思考职责 = 构建追溯矩阵（计划功能点→代码位置）→ 汇步骤历史 → 规划 6 维度审计策略
 5. 输出：`▶ 步骤6 终审开始`
 6. **重新读取所有代码文件**
-7. **计划vs代码差异摘要**（gate `audit.plan_diff`）：用已读取的 `03_plan_final.md` 内容（步骤2）和代码文件内容（步骤6），调 `mcp__cheap-research__diff_summary(text_a=计划文本, text_b=实现文本, focus="计划vs代码偏离")`，输出差异摘要（偏离项 + 未实现功能点 + 新增功能点，≤500 token）。**gate trace**：audit 存在计划文本与实现 diff → `audit.plan_diff: eligible=true` 必须 called/cache_hit/degraded_after_attempt/unavailable_before_call（evidence 含 plan_source/code_sources）。**降级**（cheap-research 不可用）：主代理手动对比；trace 按 [thinking_core.md](../references/thinking_core.md)「cheap-research 执行门（gate）流程」区分实际失败与未暴露，未暴露记 `unavailable_before_call/attempted=false/result=unavailable` 及完整 `availability`，不伪造调用。**结果供 6.1 维度 2「执行精准度」+ 维度 3「方案偏离度」直接引用**。
+7. **计划vs代码差异摘要**（gate `audit.plan_diff`）：用已读取的 `03_plan_final.md` 内容（步骤2）和代码文件内容（步骤6），调 `mcp__cheap-research__diff_summary(text_a=计划文本, text_b=实现文本, focus="计划vs代码偏离")`，输出差异摘要（偏离项 + 未实现功能点 + 新增功能点，≤500 token）。**gate trace**：audit 存在计划文本与实现 diff → `audit.plan_diff: eligible=true` 必须 called/cache_hit/degraded_after_attempt/unavailable_before_call（evidence 含 plan_source/code_sources）。**降级**（cheap-research 不可用）：主代理手动对比；trace 按 [thinking_detail.md](../references/thinking_detail.md)「cheap-research 执行门（gate）流程」区分实际失败与未暴露，未暴露记 `unavailable_before_call/attempted=false/result=unavailable` 及完整 `availability`，不伪造调用。**结果供 6.1 维度 2「执行精准度」+ 维度 3「方案偏离度」直接引用**。
 8. **执行终审**
 
 > **全工单 gate 完整性校验（audit 收尾，不把 MCP 明细塞入 06_audit.md）**：终审前运行

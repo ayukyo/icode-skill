@@ -370,7 +370,7 @@
 - **部署验证型 patch（无代码修改）**：可跳过 trace_refs / diff_summary / compile scan / repo facts，但必须**分别用 eligibility 证据说明为何不成立**（如 `evidence={change_type:"deploy_only", no_code_diff:true}` 记 `skipped_not_eligible`），不能静默跳过。
 - **patch finalized 前校验**：运行 `python3 tools/lint_mcp_coverage.py {ICODE_OUT_DIR} --step patch --strict`——本 patch 的 in-scope gate 必须各有最终 trace 行。
 
-工具不可用时按 [thinking_core.md](../references/thinking_core.md)「cheap-research 执行门（gate）流程」记录真实分支并由主代理完成必要原文分析；未暴露工具用 `unavailable_before_call/attempted=false/result=unavailable` 和完整 `availability`，不伪造调用失败。
+工具不可用时按 [thinking_detail.md](../references/thinking_detail.md)「cheap-research 执行门（gate）流程」记录真实分支并由主代理完成必要原文分析；未暴露工具用 `unavailable_before_call/attempted=false/result=unavailable` 和完整 `availability`，不伪造调用失败。
 
 **patch 阶段 1 重审的 cheap-research 约束（修复场景防降质）**：
 

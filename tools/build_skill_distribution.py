@@ -134,6 +134,14 @@ def component_for(path):
         return "mcp"
     # Publishing/website maintenance belongs with developer resources, so the
     # bounded core retains runtime tools without raising its import budget.
+    # Packaging and installation verification are build-time helpers: nothing the
+    # installed workflow executes imports them, so they follow the release payload
+    # instead of consuming the bounded core's file budget.
+    if name in {"tools/build_skill_distribution.py", "tools/check_skill_installation.py",
+                "scripts/check-docx-renderer-release.py", "scripts/icode_payload_profile.py",
+                "tools/selfcheck_crosscheck.sh", "tools/selfcheck_inspection_worklist.sh",
+                "tools/selfcheck_workflow_contract.sh", "tools/selfcheck_workflow_evidence.sh"}:
+        return "support"
     if (name in {".gitignore", "tools/build_public_site.py", "tools/notify_indexnow.py",
                  "tools/render_brand_assets.py", "tools/prepare_skill_listing.py",
                  "tools/release_promotion.py", "tools/check_skill_evaluation.py",

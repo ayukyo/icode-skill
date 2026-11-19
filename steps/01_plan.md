@@ -109,7 +109,7 @@
      - 作为本次计划的启发——参考其决策理由与踩坑。**只进会话上下文，不得在 `01_plan.md` 堆砌历史引用**（唯一例外：实质借鉴的 ADR 可在"理由"末尾加一句 `(参考相似工单 {ticket_id} 的同类决策)`）
    - 命中工单的 `01_plan.md` 读不到（工程被删/移动）→ 跳过该条不报错
    - **段零·工程文档检索**（与历史检索并行，候选合并排序；本入口检索时机：目录管理+需求来源确定后）：完整流程以 [references/project_docs_retrieval.md](../references/project_docs_retrieval.md)「段零·工程文档检索」+「module_docs 工程模块库」段为准（含步骤 1-5 + 3.5 反查父项目 + 3.6 关联工程检索 + 3.6 源码路径定位 [project_path+manifest+兜底]），**执行前必须 Read 该段全文（含顶部「段零步骤速查」导航），不得凭本行摘要执行**；stale 降级 / commit 校验 / 注入防重复等细节同该段
-   - **注入防重复**（两源共用 `_inject_cache.json`）：无缓存则创建空 `{"ticket_id":"<本工单>","injections":[]}`；注入前按 `(source, ref_id, slice)` 查缓存去重，已注入的跳过。历史源 slice=`adr_risks`；段零 slice=`section:<file>`。详见 [references/project_docs_retrieval.md](../references/project_docs_retrieval.md)「注入缓存机制」段
+   - **注入防重复**（两源共用 `_inject_cache.json`）：无缓存则创建空 `{"ticket_id":"<本工单>","injections":[]}`；注入前按 `(source, ref_id, slice)` 查缓存去重，已注入的跳过。历史源 slice=`adr_risks`；段零 slice=`section:<file>`。详见 [references/project_docs_retrieval.md](../references/ticket_storage_details.md)「注入缓存机制」段
    - **段零只读当前分支子目录是反交叉污染设计，不要误读为"被覆盖"**：详见 [steps/doc.md](doc.md) 顶部「⚠️ 多分支设计·反偷懒强约束」段（`project_docs_retrieval.md`「段零·工程文档检索」段），跨分支不交叉读是为防止跨分支借鉴失真；用户反馈"看不到其他分支文档"时**默认不是 bug**，应先 `ls project_docs/<id>/` 看是否有多分支子目录再判
    - 零命中不注入，不强凑参考
 
@@ -258,7 +258,7 @@
 **`tdd.mode` 判定**（落盘 `metadata.tdd.mode`）：只要修改改变可观察行为，默认 `required`；配置/接线/日志路由/协议字段/脚本接线优先 `contract`（静态/契约测试）；遗留行为不明 `characterization`（先锁现状再加目标断言）；硬件/闭源 SDK/实时性 `device_split`（主机/静态可测先测、设备验证单列）；纯文档/纯注释/生成物同步且无生产行为变化 `exempt`（须显式记理由）；测试环境/必要硬件不可用且无可信替代 `blocked`（不改写为 pass，交付验证保持 pending）。**不能因为"改动少""fast""patch"自动豁免**。判定结论与测试契约表写入 `metadata.tdd`（结构见 [SKILL.md](../SKILL.md) metadata 段）
 
 
-**修复方案三档分级（反偷懒第 26 条）**：本节修复方案分 A 档（根因修复，主方案，必做）/ B 档（兜底防御，单独小节，标注"A 修复后触发概率"，用户显式确认才实施）/ C 档（后续工单，进范围外）。§3 架构设计只含 A 档改动，B 档不混入。ADR：A 档多候选走 A1/A2 对比，B 档不进 ADR。A 档跨工程（修复点不在当前工程）时 plan 明示"本工程无可实施 A 档，转交 <X> 工单"，不把 B 档提为 A 档。最小修复=只做 A 档。详见 反偷懒第 26 条。**完成后落盘 metadata**：把本节 A/B/C 三档各 1-2 条一句话摘要写入 `fix_tiers = {"A": [...], "B": [...], "C": [...]}`（字段缺失视为 null，供步骤2/4/6 核对实施范围）；**同处写 `scope_contract`**（范围契约，O-4 语义冻结，见 [references/dir_and_metadata.md](../references/dir_and_metadata.md)「scope_contract 字段族」）：`{"summary": "根因方向 + A/B/C 分档 + 验收边界 一句话指纹", "at": "运行时取系统时间", "source_step": "01_plan"}`——冻结本计划语义基线，供后续步骤检测用户输入/审查是否改变契约（字段缺失视为 null，向后兼容）
+**修复方案三档分级（反偷懒第 26 条）**：本节修复方案分 A 档（根因修复，主方案，必做）/ B 档（兜底防御，单独小节，标注"A 修复后触发概率"，用户显式确认才实施）/ C 档（后续工单，进范围外）。§3 架构设计只含 A 档改动，B 档不混入。ADR：A 档多候选走 A1/A2 对比，B 档不进 ADR。A 档跨工程（修复点不在当前工程）时 plan 明示"本工程无可实施 A 档，转交 <X> 工单"，不把 B 档提为 A 档。最小修复=只做 A 档。详见 反偷懒第 26 条。**完成后落盘 metadata**：把本节 A/B/C 三档各 1-2 条一句话摘要写入 `fix_tiers = {"A": [...], "B": [...], "C": [...]}`（字段缺失视为 null，供步骤2/4/6 核对实施范围）；**同处写 `scope_contract`**（范围契约，O-4 语义冻结，见 [dir_and_metadata.md](../references/dir_and_metadata.md)「scope_contract 字段族」）：`{"summary": "根因方向 + A/B/C 分档 + 验收边界 一句话指纹", "at": "运行时取系统时间", "source_step": "01_plan"}`——冻结本计划语义基线，供后续步骤检测用户输入/审查是否改变契约（字段缺失视为 null，向后兼容）
 
 > **已受影响数据处置二选一（条件触发：根因链涉持久化坏状态）**：若根因链已证实现场存在**分叉/损坏的持久化状态**（主记录与派生工件不一致、历史数据已污染、错误状态已落盘等），本节必须明确选择二者之一：**A** 本次实现包含已受影响数据的安全修复/迁移与验证（并入 A 档）；**B** 本次只阻止复发，现有数据修复由**独立受控步骤**完成——必须写明**交接内容**（交给谁 / 哪些数据需修）、**触发条件**（何时做）与**部署后验证项**（修完怎么验证），并提示用户确认。**只防复发 ≠ 已恢复现场数据**——选 B 时交付措辞必须用"仅防复发"而非"已恢复"。本检查项与 C 档（后续工单进范围外）相容，但 C 档**不豁免**"必须写明交接"的强制要求。
 

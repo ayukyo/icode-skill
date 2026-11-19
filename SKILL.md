@@ -124,7 +124,7 @@ Windows/WSL 构建按需加载 [WSL 构建合同](references/wsl_build.md)；本
 - 全流程精简：`/icode fast 需求`；工程知识库：`/icode doc`；Word 交付：`/icode docx`；约束红线：`/icode limit`
 - **中断/跨会话恢复**：按 `completed_steps` 中 1~6 范围内最大已完成步骤续跑（见「全流程串联规则」）；重新执行某步骤可覆盖该步骤输出
 
-> **锚点保留：方式 D2 / D3 / H**——`/icode log` 的 TB 缺陷单拉取（方式 D2：单 `LIB-NUM` 复用+增量对抗；方式 D3：批量"打开/未完成"分析）——锚点兼容写法「方式H」/「方式 H」等价；钉钉文档拉取（方式 H）详见 [steps/log.md](steps/log.md)「TB 缺陷源拉取」+「批量 TB 分析」 / `tools/dingtalk/README.md`。
+> **锚点保留：方式 D2 / D3 / H**——`/icode log` 的 TB 缺陷单拉取（方式 D2：单 `LIB-NUM` 复用+增量对抗；方式 D3：批量"打开/未完成"分析）——锚点兼容写法「方式H」/「方式 H」等价；钉钉文档拉取（方式 H）详见 [log_tb_and_media.md](references/log_tb_and_media.md)（TB 拉取/批量） / `tools/dingtalk/README.md`。
 
 ## 通用规则
 
@@ -198,7 +198,7 @@ python3 -c "import sys; sys.path.insert(0,'{ICODE_SKILL_ROOT}/tools'); import ic
 | 主题 | 真源 | 核心要点 |
 |------|------|---------|
 | 强制思考前置（分级 reasoning gate） | [references/thinking_core.md](references/thinking_core.md)（首次完整读、失效重载）+ [references/thinking_detail.md](references/thinking_detail.md)（按需读） | 每步开始前先按 **reasoning gate 分级 L0～L3**：L0（help/status/list/install/bak/learn）只执行机器门禁；L1（readme/ppt/study/close/reopen/worktree/init/doc/limit/merge）写决策记录（study 写库外私有来源，其余按步骤合同写 `.decision_anchors.json`）；**L2/L3（plan/review/code/patch/log/deepcheck/audit）才首选 `sequential-thinking` MCP 3～5 步**，MCP 不可用降级 `### 结构化思考` 文字块；思考子项见各 step 文件。分级判定机器真源 = `mcp/reasoning-gate/gates.json`，工单运行痕迹 = `{ICODE_OUT_DIR}/.thinking_gate_trace.jsonl`（study 无工单 trace），校验器 = `python3 tools/lint_thinking_gate.py` |
-| 反偷懒约束 | [references/anti_laziness.md](references/anti_laziness.md) | 39 条典型偷懒行为 + 正面合规要求；引用 references 必须每步重新 Read 输出 `📖 已 Read` 确认行；思考块每子项 ≥2 句实质内容 |
+| 反偷懒约束 | [references/anti_laziness.md](references/anti_laziness.md) | 39 条典型偷懒行为 + 正面合规要求；首次实读/失效重载，复用须有原文+hash；输出 `📖 已 Read` 确认行；思考块每子项 ≥2 句实质内容 |
 
 ### 根因优先决策准则（修复缺陷逻辑本身，优先于规避/绕过/补丁/开关）
 

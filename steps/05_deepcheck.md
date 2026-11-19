@@ -50,7 +50,7 @@
 
 检查 `{ICODE_OUT_DIR}/03_plan_final.md` 和步骤4创建的代码文件是否存在，缺失则报错并提示先执行 `/icode code`。
 
-> **模块文档检索（新增）**：在思考分级之前，Read `~/.claude/icode_data/project_docs/<project_id>/<branch_safe>/_meta.json` 取 `module_deps` 列表，对每个 dep 检 `~/.claude/icode_data/module_docs/<key>/_meta.json` 的 `current_commit` 是否与 `_meta.json.module_deps[].commit` 一致（不一致标 `⚠️ commit 漂移`，仍读但附警告）。命中模块的章节作为上下文**只进思考块，不写入产物文件**（deepcheck 是消费方，模块文档已在 plan 阶段固化）。**降级**：路径不存在或 Read 失败 → 静默跳过本段，主流程继续。**复用缓存**：本 ticket 内已通过 01_plan / 02_review 段零检索注入过的模块文档不重复 Read（`_inject_cache.json` 按 `(source, ref_id, slice)` 去重，slice=`section:<file>`，路径 `{ICODE_OUT_DIR}/_inject_cache.json`，与上游步骤共用同一缓存文件——参见 [references/dir_and_metadata.md](../references/dir_and_metadata.md)「注入缓存机制」段）。**前提契约**：同 02_review.md「模块文档检索」段——依赖上游段零检索已执行；`_inject_cache.json` 不存在时退化为全量 Read + 写 `▶ 步骤 5 模块文档检索退化：无 _inject_cache.json 可复用`。
+> **模块文档检索（新增）**：在思考分级之前，Read `~/.claude/icode_data/project_docs/<project_id>/<branch_safe>/_meta.json` 取 `module_deps` 列表，对每个 dep 检 `~/.claude/icode_data/module_docs/<key>/_meta.json` 的 `current_commit` 是否与 `_meta.json.module_deps[].commit` 一致（不一致标 `⚠️ commit 漂移`，仍读但附警告）。命中模块的章节作为上下文**只进思考块，不写入产物文件**（deepcheck 是消费方，模块文档已在 plan 阶段固化）。**降级**：路径不存在或 Read 失败 → 静默跳过本段，主流程继续。**复用缓存**：本 ticket 内已通过 01_plan / 02_review 段零检索注入过的模块文档不重复 Read（`_inject_cache.json` 按 `(source, ref_id, slice)` 去重，slice=`section:<file>`，路径 `{ICODE_OUT_DIR}/_inject_cache.json`，与上游步骤共用同一缓存文件——参见 [references/dir_and_metadata.md](../references/ticket_storage_details.md)「注入缓存机制」段）。**前提契约**：同 02_review.md「模块文档检索」段——依赖上游段零检索已执行；`_inject_cache.json` 不存在时退化为全量 Read + 写 `▶ 步骤 5 模块文档检索退化：无 _inject_cache.json 可复用`。
 
 ## 前置：统一拓扑门禁（共享检查器）
 
@@ -251,7 +251,7 @@ Free 阶段一次性完整覆盖全部 15 个角度。**A3 异常处理完备性
 > - **gate 绑定**：本预扫 = gate `deepcheck.fixed_scan`（tool=scan_patterns）。**full 模式进入 Fixed 且功能点非空** → eligible=true 必须 called/cache_hit/degraded_after_attempt/unavailable_before_call；**功能点为空** → eligible=false `skipped_not_eligible`；**fast 模式不进入 Fixed** → eligible=false `skipped_stage_not_reached`（见顶部「fast 模式降级」段）
 > - **前提契约（§2 空降级）**：`03_plan_final.md` §2 功能需求为空或不存在 → `patterns=[]` → scan_patterns 退化为无操作（不报错）；写 `▶ scan_patterns 跳过：03_plan_final.md §2 无功能需求`
 > - **fast 模式行为**：`effective_mode(metadata) == "fast"` 时**不跑 Fixed 阶段**（[steps/05_deepcheck.md](05_deepcheck.md) §「fast 模式降级」段）→ scan_patterns 预扫不触发，但**必须**在 `.mcp_gate_trace.jsonl` 记 `skipped_stage_not_reached`（缺记录 = 转换校验失败）
-> - **降级**：cheap-research 不可用 → 走原流程（主代理自扫）；写 `[降级-scan_patterns 不可用]`。trace 按 [thinking_core.md](../references/thinking_core.md)「cheap-research 执行门（gate）流程」区分实际失败与未暴露；未暴露记 `unavailable_before_call/attempted=false/result=unavailable` 及完整 `availability`，不伪造调用。
+> - **降级**：cheap-research 不可用 → 走原流程（主代理自扫）；写 `[降级-scan_patterns 不可用]`。trace 按 [thinking_detail.md](../references/thinking_detail.md)「cheap-research 执行门（gate）流程」区分实际失败与未暴露；未暴露记 `unavailable_before_call/attempted=false/result=unavailable` 及完整 `availability`，不伪造调用。
 
 7 维度逐项检查（**每维度必须列 file:line 证据 + 评分理由 ≥2 句实质，不得只概括**）：
 1. 计划实施一致性 — 逐条对照每个功能点/接口/约束

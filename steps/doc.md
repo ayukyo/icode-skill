@@ -5,7 +5,7 @@
 **会话**: 主会话
 **定位**: **工程级知识库生成与维护，独立步骤**。不创建 `.icode_output_N/`、不写 `.ico_metadata.json`、不更新工单 `completed_steps`/`status`。知识库供 `/icode init`/`log`/`plan`/`start`/`fast` 启动时**段零检索**自动注入。
 
-> **核心设计哲学**（必须先 Read [references/dir_and_metadata.md](../references/dir_and_metadata.md)「project_docs 工程文档库」段 + [references/doc_template.md](../references/doc_template.md)）：不要求用户维护工程专属配置；章节前50行承载检索信息，源码身份、正文SHA和发布状态由元信息/工作清单核对。
+> **核心设计哲学**（必须先 Read [references/dir_and_metadata.md](../references/ticket_storage_details.md)「project_docs 工程文档库」段 + [references/doc_template.md](../references/doc_template.md)）：不要求用户维护工程专属配置；章节前50行承载检索信息，源码身份、正文SHA和发布状态由元信息/工作清单核对。
 
 > **共享技能路由**：语料接入前读取 [references/skill_routing.md](../references/skill_routing.md)，只加载命中当前资料类型的技能；邮件正文、线程、表格、图片或附件先走 `email-evidence-intake`，再复用文档/媒体/表格/证据/原理图能力。
 > **工程接入门**：读取 [references/project_intake.md](../references/project_intake.md)。唯一嵌套仓的知识库绑定实际 Git 根；large/huge 仓先按 tracked paths、活动构建配置和目标模块建立 worklist，代码语义画像禁止默认全树内容扫描。版本捕获另按实际输入流式计算内容SHA，开销随未忽略输入总量增长，不把哈希扫描宣称为全树语义分析。
@@ -116,7 +116,7 @@ AI 解析自然语言的「目标工程」+「动作」：
 
 ### 2. 模块检测 + 代码特征扫描（先扫描后生成）
 
-**模块检测**（按 6 级优先级识别工程依赖的独立模块）：详见 [dir_and_metadata.md](../references/dir_and_metadata.md)「module_docs 工程模块库」段「6 级模块检测」表（git submodule / `repo` 管理 / CMake FetchContent / monorepo 启发式 / vendor 扫描 / 用户配置 + `.icode_doc_modules` JSON 格式）。**"独立模块"判定 = 该模块本身是独立 git 仓库，与"是否工程核心"无关**——工程核心模块同时是独立仓库时两者都生成，互补不重复（职责划分见 [doc_template.md](../references/doc_template.md)「九 · 职责划分」）。
+**模块检测**（按 6 级优先级识别工程依赖的独立模块）：详见 [ticket_storage_details.md](../references/ticket_storage_details.md)「module_docs 工程模块库」段「6 级模块检测」表（git submodule / `repo` 管理 / CMake FetchContent / monorepo 启发式 / vendor 扫描 / 用户配置 + `.icode_doc_modules` JSON 格式）。**"独立模块"判定 = 该模块本身是独立 git 仓库，与"是否工程核心"无关**——工程核心模块同时是独立仓库时两者都生成，互补不重复（职责划分见 [doc_template.md](../references/doc_template.md)「九 · 职责划分」）。
 
 **monorepo 启发式补充判别条件**（dir_and_metadata 表未含，doc.md 步骤 2 独有）：子目录**不在工程根 `.gitignore` 中**（避免误把工程内辅助目录当独立模块）+ **子目录有自己的 README**（含 `## ` 等 markdown 标题）。
 
@@ -319,7 +319,7 @@ PY
 
 ### 8. 主动 stale 扫描（project_docs 章节锚点校验，防过时堆积）
 
-对比 index.json 的主动 stale 扫描（见 [project_docs_retrieval.md](../references/project_docs_retrieval.md)「索引淘汰规则·主动 stale 扫描」），project_docs 章节此前只有段零命中前被动检测，长期不跑 /icode doc 的工程过时章节无机制标记。本步骤补第二道清理（详见 [project_docs_retrieval.md](../references/project_docs_retrieval.md)「project_docs 主动 stale 扫描」段）：
+对比 index.json 的主动 stale 扫描（见 [project_docs_retrieval.md](../references/ticket_storage_details.md)「索引淘汰规则·主动 stale 扫描」），project_docs 章节此前只有段零命中前被动检测，长期不跑 /icode doc 的工程过时章节无机制标记。本步骤补第二道清理（详见 [project_docs_retrieval.md](../references/project_docs_retrieval.md)「project_docs 主动 stale 扫描」段）：
 
 - **时机**：步骤7 进度输出后（章节已生成 + 99 章审计完成）
 - **范围**：当前工程分支目录的章节，以每章记录的实际源码根/依赖身份核查；扫描其他工程时先切换其真实源码上下文，不用当前cwd判全局其他版本的锚点

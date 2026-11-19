@@ -14,6 +14,7 @@ BRIDGE_CONFIG="mcp/vision-bridge/config.example.json"
 BRIDGE_README="mcp/vision-bridge/README.md"
 HOST_ADAPTERS="references/host_adapters.md"
 LOG_STEP="steps/log.md"
+LOG_MEDIA_REF="references/log_tb_and_media.md"
 TMP="$(mktemp -d -t icode-media-routing.XXXXXX)"
 trap 'rm -rf "$TMP"' EXIT
 
@@ -273,7 +274,7 @@ PY
 then ok "媒体策略和 bridge 配置声明保守单消息图片上限"; else bad "媒体策略或 bridge 配置缺单消息图片上限"; fi
 
 if rg -q 'max_images_per_message' "$POLICY" \
-  && rg -q 'selected_max_images_per_message' "$LOG_STEP" \
+  && rg -q 'selected_max_images_per_message' "$LOG_MEDIA_REF" \
   && rg -q 'max_images_per_message' "$BRIDGE_README" \
   && rg -q '串行' "$HOST_ADAPTERS"
 then ok "native/bridge/dual 文档都声明单消息限额与串行分批"; else bad "媒体分批文档合同不完整"; fi

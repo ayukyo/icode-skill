@@ -40,7 +40,7 @@
 > - **gate 绑定**：本段 = gate `merge.cross_round_summary`（tool=summarize）。阈值 `merge_min_rounds`（gates.json 常量 =2，即 >1 轮才 eligible）
 > - **多轮（review_rounds ≥ 阈值）**：调 `mcp__cheap-research__summarize(text=<合并后 issue JSON 字符串>, max_tokens=1000, focus="按维度归属 + 严重度分组")` 压到 ≤1K token，写入 `{ICODE_OUT_DIR}/_review_merged_summary.md`（**与单轮 `_review_summary.md` 共存**：单轮摘要作每轮历史快照，merged_summary 作多轮合并视图）→ trace `eligible=true, decision=called/cache_hit/degraded_after_attempt/unavailable_before_call, evidence={review_rounds, threshold}`
 > - 主代理看 merged_summary 决定采纳/驳回/分流，**不替代逐 JSON 细读**（细节仍以 JSON 为准）
-> - **降级**：cheap-research 不可用 → 主代理直接读各轮 JSON 原文合并；写 `[降级-merge 跨轮 summarize 不可用]`。trace 按 [thinking_core.md](../references/thinking_core.md)「cheap-research 执行门（gate）流程」区分实际调用失败与未暴露工具；未暴露记 `unavailable_before_call/attempted=false/result=unavailable` 及完整 `availability`，不伪造调用。
+> - **降级**：cheap-research 不可用 → 主代理直接读各轮 JSON 原文合并；写 `[降级-merge 跨轮 summarize 不可用]`。trace 按 [thinking_detail.md](../references/thinking_detail.md)「cheap-research 执行门（gate）流程」区分实际调用失败与未暴露工具；未暴露记 `unavailable_before_call/attempted=false/result=unavailable` 及完整 `availability`，不伪造调用。
 > - **N=1 场景**（未触达自动延长）：`_review_summary.md` 已足够，跳过本段；写 `▶ merge 跨轮汇总跳过：仅 1 轮 review，合并无意义` + trace `merge.cross_round_summary: eligible=false, skipped_not_eligible, evidence={review_rounds:1, threshold:2}`——**必须写 trace**（让"合理没调用"与"漏调"可区分）
 
 解析审查意见——如果 `{ICODE_OUT_DIR}/_review_summary.md` 存在，先读其**审查轮次 + 总问题数 + 关键 HIGH 问题 + 未解决标记**获取概览；再读 `review_round_*.json` 文件（按 `total_rounds` 顺序读取所有轮 JSON；**clean 轮无 JSON 文件**——步骤2 约定无 issue 的轮跳过写文件，遇到缺失的轮号直接跳过）提取结构化审查数据，重点关注：
