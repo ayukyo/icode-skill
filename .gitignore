@@ -25,6 +25,8 @@
 /docs/ppt-package-size-*.md
 /docs/private/
 /docs/local/
+# 本地 AI 工作流规划/设计草稿（superpowers），仅本地保留，不入库不分发。
+/docs/superpowers/
 /.pytest_cache/
 /_site/
 
