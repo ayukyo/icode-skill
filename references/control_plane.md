@@ -238,4 +238,4 @@ UI 优先工单概览，其后是最终计划、patch 和阶段证据；按已�
 
 ## lite 原生 profile
 
-mode=lite/workflow_version=1 通过 workflow_contract(meta) 选择三步合同。出生 --birth lite 固定模式、版本及原始需求；metadata-update 不能改写。G1/G2/G3、合法回退及同版重验见 [lite](../steps/lite.md)。lite-review 执行实际 CLI 并记录专属调用事件，通用 event 不可伪造。record-verification 的新必需失败在同一事务中撤销已验证投影并记录 lite_invalidation；不自动把新增 pass 升为 verified。
+mode=lite/workflow_version=1 通过 workflow_contract(meta) 选择三步合同。出生 --birth lite 固定模式、版本及原始需求；metadata-update 不能改写。G1/G2/G3、合法回退及同版重验见 [lite](../steps/lite.md)。lite-review 为当前 attempt 登记宿主子代理并返回只读输入引用（含 host_receipt_challenge）；实际调用由当前宿主执行，随后用 record-agent-result 签收宿主身份、绑定 challenge 的宿主回执和报告，并由宿主配置（固定路径 `<宿主真实主目录>/.icode/host_adapter.json`，主目录取自系统账户数据库而非 HOME，不接受环境变量重定向，命令摘要锁定；进入 Code 时把该摘要冻结进 extensions.lite.host_adapter 且受 metadata-update 专用写入保护，签收在启动适配器前比对该摘要、只执行已校验字节）指定的可信适配器确证本次启动与返回后才落盘；仅 joined 且 adopted=yes 且经适配器确认的报告可作为审核依据。未采纳报告中的阻断问题仍进入复审队列，但不能关闭既有问题。历史 CLI 事件仍可读取。record-verification 的新必需失败在同一事务中撤销已验证投影并记录 lite_invalidation；不自动把新增 pass 升为 verified。

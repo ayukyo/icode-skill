@@ -8,7 +8,7 @@
 
 读取 references/core.md，按 project_intake.md 固定工程根。保留用户范围、停止点和已有修改；不强制 worktree。恢复时明确绑定工单，读取 metadata 与 trace；缺参数且不能唯一绑定才询问，不按最大序号替换当前绑定。
 
-实施前确认能使用本机 codex/claude CLI 创建全新只读审核上下文并读取目标仓库；实际审核通过 lite-review 受控调用。缺能力时明确阻塞，不能先改完再自审。能力咨询和只读预检不触发登录、安装或模型调用。受保护 provider 未实现的路径明确拒绝，不能退回原始 Git 绕过。
+实施前按 [宿主适配](../references/host_adapters.md) 和 [子代理等待契约](../references/subagent_spawn_wait.md) 核对当前会话能启动全新独立子代理、有界等待并让审核者只读目标仓库，同时运行 `python3 tools/icode_control.py lite-preflight --dir <out>` 确认宿主已安装可信适配器配置（`<宿主真实主目录>/.icode/host_adapter.json`，主目录取自系统账户数据库而非 `HOME`，命令与摘要已锁定）。Lite 沿用宿主已有的独立审查能力和模型选择。缺工具、授权或访问能力时在实施前明确阻塞；缺适配器配置不阻塞实施，但按降级语义记入 `extensions.lite.host_adapter`，交付结论只能是 `verification_pending`，拿不到 `verified`。能力咨询和只读预检不触发登录、安装或模型调用。受保护 provider 未实现的路径明确拒绝。
 
 首版不支持已启用阶段计划的工程：出生、步骤动作及事件写入均明确拒绝，继续使用既有阶段流程。不能将 lite 实施映射成中性 review 来绕过阶段授权。
 
@@ -42,14 +42,14 @@ transition --to lite_code_in_progress，再 start lite_code。复用已明确合
 
 ## Review：独立审核与验收
 
-本阶段加载 references/lite_review.md。transition --to lite_review_in_progress；start lite_review 冻结候选和合同。before_write 检查后实际执行：
+本阶段加载 [独立审核规则](../references/lite_review.md)。transition --to lite_review_in_progress；start lite_review 冻结候选和合同。before_write 检查后登记本次审核：
 
 ```bash
 python3 tools/icode_control.py lite-review --dir <out> --attempt <review-attempt> \
-  --backend codex --request-id <unique-request>
+  --request-id <unique-request>
 ```
 
-Claude 使用 --backend claude；--model 仅传用户已选择的模型。等待返回后 check after_wait；逐条处理实际报告。pass 且无阻断 finding 才满足 G2。否则按 lite_review.md 回退修复并新上下文复审，不能冒充审核结束。
+本命令返回 `spawn.spawn_id` 和精简的 `review_input`（含 `host_receipt_challenge`）。主代理用当前宿主的工具启动一个全新审核子代理，传入 `review_input`，让它按需读取工单和仓库。仅登记成功不代表宿主已启动；收到 `already_applied` 时应核对原调用和宿主句柄，禁止重放。记录实际工具返回的子代理身份和有界等待，按独立审核规则用 `record-agent-result` 签收结构化 JSON，回传绑定本次 challenge 的 `--host-receipt`，并由宿主配置指定的可信适配器确证本次启动与返回——缺配置、摘要不符或未确认即拒绝；只有 `joined` 且 `adopted=yes` 的报告才可作为审核依据，未采纳报告中的阻断问题仍须复审。等待返回后 check after_wait，再逐条处理实际报告。pass 且无阻断 finding 才满足 G2。审核失败应核实原因并终结本轮；发现缺陷按审核规则回退修复后新起独立审核。
 
 最终候选审核有效且全部本地必需证据通过：before_transition check → finish success；控制面按 G3 只允许两种结论：
 

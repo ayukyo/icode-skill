@@ -1956,7 +1956,75 @@
                     "items": { "type": "string", "minLength": 1 }
                   },
                   "summary_digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
-                  "error_class": { "type": "string", "minLength": 1 }
+                  "error_class": { "type": "string", "minLength": 1 },
+                  "lite_review_attempt": {"type": "string", "minLength": 1},
+                  "lite_review_binding": {
+                    "type": "object",
+                    "required": ["candidate_id", "contract_digest"],
+                    "properties": {
+                      "candidate_id": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                      "contract_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+                    },
+                    "additionalProperties": false
+                  },
+                  "host_receipt_challenge": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                  "host_receipt": {
+                    "type": "object",
+                    "required": ["spawn_id", "host_session_id", "challenge", "receipt_sha256"],
+                    "properties": {
+                      "spawn_id": {"type": "string", "minLength": 1},
+                      "host_session_id": {"type": "string", "minLength": 1, "maxLength": 256},
+                      "challenge": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                      "returned_at": {"type": "string", "minLength": 1},
+                      "receipt_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+                    },
+                    "additionalProperties": false
+                  },
+                  "host_attestation": {
+                    "type": "object",
+                    "required": [
+                      "adapter_sha256",
+                      "launched",
+                      "spawn_id",
+                      "host_session_id",
+                      "challenge",
+                      "report_sha256",
+                      "stored_report_sha256",
+                      "attested_at"
+                    ],
+                    "properties": {
+                      "adapter_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                      "launched": {"const": true},
+                      "spawn_id": {"type": "string", "minLength": 1},
+                      "host_session_id": {"type": "string", "minLength": 1, "maxLength": 256},
+                      "challenge": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                      "report_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                      "stored_report_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                      "attested_at": {"type": "string", "minLength": 1}
+                    },
+                    "additionalProperties": false
+                  },
+                  "host_session_id": {"type": "string", "minLength": 1, "maxLength": 256},
+                  "lite_review_report": {
+                    "type": "object",
+                    "required": ["report_path", "report_sha256"],
+                    "properties": {
+                      "report_path": {"type": "string", "minLength": 1},
+                      "report_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+                    },
+                    "additionalProperties": false
+                  },
+                  "host_attestation_degraded": {
+                    "type": "object",
+                    "description": "宿主适配器不可用的降级事实；与 host_attestation 互斥，绝不表示已获可信确认。",
+                    "required": ["status", "reason", "observed_at"],
+                    "properties": {
+                      "status": {"const": "unavailable"},
+                      "reason": {"type": "string", "minLength": 1},
+                      "observed_at": {"type": "string", "minLength": 1}
+                    },
+                    "additionalProperties": false
+                  }
                 },
                 "additionalProperties": false
               }
