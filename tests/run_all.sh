@@ -56,7 +56,7 @@ usage() {
 用法: bash tests/run_all.sh [-j N] [-t SECONDS] [过滤词 ...]
 
   -j N        并发测试数（默认取 nproc，缺失时回退 4，自动默认上限 8）
-  -t SECONDS  单个测试超时秒数（默认 300；超时标记 TIMEOUT 并计为失败）
+  -t SECONDS  单个测试超时秒数（默认 600；超时标记 TIMEOUT，随后串行重试一次）
   -h          显示本帮助
 
 过滤词为子串匹配，多个过滤词之间是“或”关系；不传则运行 tests/test_*.sh 全部。
@@ -64,7 +64,9 @@ usage() {
 USAGE
 }
 
-# 自动并发数：nproc -> getconf -> 4；默认值不超过 8，避免 Windows 过载。
+# 自动并发数：nproc -> getconf -> 4；默认值不超过 6。
+# 实测（Windows，16 核）：-j 6 全量 16m47s，-j 8 反而 27m23s —— 并发过高会互相
+# 争抢进程创建与杀软扫描，超时判定也会抖动，所以把上限压到 6。
 detect_default_jobs() {
   local n=""
   if command -v nproc >/dev/null 2>&1; then
@@ -76,7 +78,7 @@ detect_default_jobs() {
     ''|*[!0-9]*) n=4 ;;
   esac
   [ "$n" -lt 1 ] && n=4
-  [ "$n" -gt 8 ] && n=8
+  [ "$n" -gt 6 ] && n=6
   printf '%s\n' "$n"
 }
 
@@ -88,7 +90,7 @@ is_positive_int() {
 }
 
 JOBS=""
-TIMEOUT_SECONDS=300
+TIMEOUT_SECONDS=600
 FILTERS=()
 
 # -------- 参数解析 --------
