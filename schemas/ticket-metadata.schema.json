@@ -2010,7 +2010,8 @@
                     "required": ["report_path", "report_sha256"],
                     "properties": {
                       "report_path": {"type": "string", "minLength": 1},
-                      "report_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+                      "report_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                      "input_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
                     },
                     "additionalProperties": false
                   },

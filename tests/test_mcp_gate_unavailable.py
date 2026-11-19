@@ -69,6 +69,13 @@ def test_unavailable_gate_keeps_evidenced_fallback(tmp_path, gate):
     assert coverage.report_is_pass(result, False, True), result
     assert result["unavailable_before_call"] == 1
     assert result["called"] == 0
+    if gate["id"] == "review.dedup":
+        # 真正达到阈值时，只登记工具不可用不能证明人工审查已完成。
+        row = result["gates"][0]["trace_row"]
+        assert result["enumeration_debt"] == 1
+        assert coverage.ticket_enumeration_debt(
+            [row], {"ticket_id": row["ticket_id"], "mode": "full",
+                    "mcp_gate_contract_version": 2}, CATALOG, tmp_path) == 1
 
 
 @pytest.mark.parametrize("gate", CATALOG["gates"], ids=lambda gate: gate["id"])

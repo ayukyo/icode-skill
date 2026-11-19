@@ -19,6 +19,22 @@
 
 工具未暴露、策略禁止或实际调用失败时分别记录真实原因并按步骤降级；必要证据未完成时保留债务。
 
+<a id="no-mcp-workflows"></a>
+
+## 无 MCP 执行 start、fast、lite
+
+`/icode install --basic` 可提供技能和控制面。保留安装目录中的 `mcp/` 规则文件，Python 校验器直接读取这些文件。以当前会话的工具与授权为准，已有完整可用工具时仍按步骤合同调用。
+
+| 入口 | 无 MCP 的执行方式 |
+|---|---|
+| `start` | 执行六阶段。L2/L3 用结构化思考，语义结论回读源文件，检索、差异和去重使用本地工具及可核验的人工证据。需要独立对抗时使用宿主原生子代理，缺失的独立裁决如实留待核验。 |
+| `fast` | 复用同一替代路径及证据门。有效 Fast 仍是一轮计划审查及 Reverse；Fixed/Dedup 记 `skipped_stage_not_reached`。实际升级 Full 时按六阶段完整规则执行。 |
+| `lite` | 使用本地三阶段门禁与宿主原生独立审核。没有可信适配器时，可在全部本地证据通过且审核问题已处理后以 `verification_pending` 交付。宿主缺少启动独立子代理或有界等待能力时，实施前报告阻塞。 |
+
+Start/Fast 工具未暴露时，两类 trace 均为 `decision=unavailable_before_call`、`attempted=false`，并记录发现、替代方法与真实证据。思考 trace 的 `result=degraded`，MCP 覆盖 trace 的 `result=unavailable`。工具已发起但失败时，按对应合同记录真实结果。业务资格由任务事实决定。
+
+本地替代证据满足验收门时可交付 `verified`。Review 已达去重阈值、工具不可用且缺少可核验的人工证据时，仍有去重债务。Start/Fast 的枚举或去重债务未清偿时，终审可用 `verification_pending`，其余硬门继续按各步骤合同执行。实际有失败时按真实结果处理。
+
 ---
 
 ## 9 个默认 MCP 的强证据 + 降级路径

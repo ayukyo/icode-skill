@@ -988,6 +988,19 @@ def _manual_report_snapshot_consistent(helper, reports, row, metadata, roots, sc
         return False
 
 
+def review_dedup_debt(row, gate, constants, metadata, out_dir):
+    """枚举未知或满足去重资格却未完成机器可核验的替代审查。"""
+    if has_enumeration_debt_state(row, metadata):
+        return True
+    return (gate is not None
+            and row.get("gate_id") == "review.dedup"
+            and row_contract(row, metadata) >= 2
+            and row.get("eligible") is True
+            and row.get("decision") in ENUMERATION_DEBT_DECISIONS
+            and gate_row_is_valid_final(row, gate, constants, metadata)
+            and not manual_dedup_evidence_verifiable(row, metadata, out_dir))
+
+
 def ticket_enumeration_debt(trace_rows: List[Dict], metadata: Dict,
                             catalog: Optional[Dict] = None,
                             out_dir: Optional[Path] = None) -> int:
@@ -1066,7 +1079,8 @@ def ticket_enumeration_debt(trace_rows: List[Dict], metadata: Dict,
         gid = str(row.get("gate_id", ""))
         if not gid:
             continue
-        if has_enumeration_debt_state(row, metadata):
+        gate = gates_by_id.get(gid)
+        if review_dedup_debt(row, gate, constants, metadata, out_dir):
             debt_open = True  # 债务产生（即便该行组合非法，债务也未清偿）
             roots = row["evidence"].get("affected_repo_roots")
             if not isinstance(roots, list) or not roots or any(not isinstance(root, str) or not root.strip() for root in roots):
@@ -1084,7 +1098,6 @@ def ticket_enumeration_debt(trace_rows: List[Dict], metadata: Dict,
                 covered_roots = set()  # 新一轮债务：既有复检覆盖不作数
                 covered_scopes = {}
             continue
-        gate = gates_by_id.get(gid)
         if gate is None:
             continue
         if not gate_row_is_valid_final(row, gate, constants, metadata):
@@ -1248,7 +1261,7 @@ def build_report(out_dir: Path, step_filter: Optional[str], legacy: bool,
         row = last_by_gate[gid]
         gs["trace_row"] = row
         issues = validate_row(row, gate, 0)
-        if has_enumeration_debt_state(row, metadata):
+        if review_dedup_debt(row, gate, catalog.get("constants", {}), metadata, out_dir):
             # 报告显式暴露未解决的枚举/去重债务（不改变通过判定：按合同留痕的
             # unavailable/degraded 记录是合法履行，但债务必须在报告中可见）。
             report["enumeration_debt"] += 1

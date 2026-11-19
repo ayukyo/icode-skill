@@ -8,7 +8,9 @@
 
 读取 references/core.md，按 project_intake.md 固定工程根。保留用户范围、停止点和已有修改；不强制 worktree。恢复时明确绑定工单，读取 metadata 与 trace；缺参数且不能唯一绑定才询问，不按最大序号替换当前绑定。
 
-实施前按 [宿主适配](../references/host_adapters.md) 和 [子代理等待契约](../references/subagent_spawn_wait.md) 核对当前会话能启动全新独立子代理、有界等待并让审核者只读目标仓库，同时运行 `python3 tools/icode_control.py lite-preflight --dir <out>` 确认宿主已安装可信适配器配置（`<宿主真实主目录>/.icode/host_adapter.json`，主目录取自系统账户数据库而非 `HOME`，命令与摘要已锁定）。Lite 沿用宿主已有的独立审查能力和模型选择。缺工具、授权或访问能力时在实施前明确阻塞；缺适配器配置不阻塞实施，但按降级语义记入 `extensions.lite.host_adapter`，交付结论只能是 `verification_pending`，拿不到 `verified`。能力咨询和只读预检不触发登录、安装或模型调用。受保护 provider 未实现的路径明确拒绝。
+实施前按[宿主适配](../references/host_adapters.md)和[子代理等待合同](../references/subagent_spawn_wait.md)核对会话能启动全新只读审核子代理并有界等待。Lite 的控制面不需要 MCP 服务；所有阶段使用本地规则和真实源码/测试证据。缺宿主工具、授权或访问能力时，在实施前明确阻塞。
+
+工单出生后运行 `python3 tools/icode_control.py lite-preflight --dir <out>`。该命令只检测可信适配器，`host_attestation=unavailable` 时报告原因并返回 `delivery_ceiling=verification_pending`，规划和实施可以继续。宿主子代理的实际启动能力单独核对。
 
 首版不支持已启用阶段计划的工程：出生、步骤动作及事件写入均明确拒绝，继续使用既有阶段流程。不能将 lite 实施映射成中性 review 来绕过阶段授权。
 
@@ -49,12 +51,12 @@ python3 tools/icode_control.py lite-review --dir <out> --attempt <review-attempt
   --request-id <unique-request>
 ```
 
-本命令返回 `spawn.spawn_id` 和精简的 `review_input`（含 `host_receipt_challenge`）。主代理用当前宿主的工具启动一个全新审核子代理，传入 `review_input`，让它按需读取工单和仓库。仅登记成功不代表宿主已启动；收到 `already_applied` 时应核对原调用和宿主句柄，禁止重放。记录实际工具返回的子代理身份和有界等待，按独立审核规则用 `record-agent-result` 签收结构化 JSON，回传绑定本次 challenge 的 `--host-receipt`，并由宿主配置指定的可信适配器确证本次启动与返回——缺配置、摘要不符或未确认即拒绝；只有 `joined` 且 `adopted=yes` 的报告才可作为审核依据，未采纳报告中的阻断问题仍须复审。等待返回后 check after_wait，再逐条处理实际报告。pass 且无阻断 finding 才满足 G2。审核失败应核实原因并终结本轮；发现缺陷按审核规则回退修复后新起独立审核。
+本命令返回 `spawn.spawn_id` 和精简的 `review_input`（含 `host_receipt_challenge`）。主代理用当前宿主工具启动全新只读审核子代理。遇到 `already_applied` 先核对原调用和宿主句柄。用实际子代理身份和结果，按[独立审核规则](../references/lite_review.md)调用 `record-agent-result`，提供绑定本次 challenge 的 `--host-receipt`。只有 `joined` 且 `adopted=yes` 的合规报告可以用于完成 Review。适配器不可用时按 Code 已冻结的降级状态签收，阻断问题仍须进入后续复审。等待后执行 `check after_wait`。pass 且所有阻断项已按相应证据等级复核关闭，才满足 G2。
 
 最终候选审核有效且全部本地必需证据通过：before_transition check → finish success；控制面按 G3 只允许两种结论：
 
-- 全部必需 AC 当前有效证据通过：transition --to completed --delivery-verdict verified。
-- 仅缺声明的外部执行条件：transition --to completed --delivery-verdict verification_pending，展示“代码已审核，外部验证待完成”，列环境、动作、预期信号。
+- 全部必需 AC 当前有效证据通过且审核具有可信宿主确认：transition --to completed --delivery-verdict verified。
+- 仅缺声明的外部执行条件或可信宿主确认：transition --to completed --delivery-verdict verification_pending。列出仍待完成的核验；缺可信宿主确认时生成的 `lite.md` 会展示原因及实际审核结论。
 
 审核缺失/失败、有已知缺陷、必需检查失败均不能 completed。不得用 blocked/not_applicable/pending 包装这些情形。
 

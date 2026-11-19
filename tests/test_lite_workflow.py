@@ -83,6 +83,7 @@ class LiteWorkflowTests(unittest.TestCase):
             "mod = importlib.util.module_from_spec(spec)\n"
             "spec.loader.exec_module(mod)\n"
             f"mod._HOST_CONFIG_ROOT_OVERRIDE = Path({str(self.host_root)!r})\n"
+            f"mod.INDEX_PATH = Path({str(self.host_home / 'index.json')!r})\n"
             "sys.argv = ['icode_control.py', *sys.argv[1:]]\n"
             "sys.exit(mod.main())\n", encoding="utf-8")
         self._harness_path = script
@@ -226,13 +227,13 @@ class LiteWorkflowTests(unittest.TestCase):
 
     def host_result(self, spawn, *, result="joined", verdict="pass", findings=None,
                     identity=None, adopted=None, challenge=None, ok=True,
-                    with_receipt=True, with_session=True):
+                    with_receipt=True, with_session=True, request_id=None):
         adopt = adopted if adopted is not None else ("yes" if result == "joined" else "no")
         args = ["record-agent-result", "--dir", self.ticket, "--spawn-id", spawn,
                 "--result", result, "--adopted", adopt,
                 "--adoption-reason", "核对宿主返回",
                 "--evidence-ref", "宿主工具调用夹具", "--summary", "结构化审核结果",
-                "--request-id", str(uuid.uuid4())]
+                "--request-id", request_id or str(uuid.uuid4())]
         if result == "joined":
             raw = self.ticket / "fixture-review-result.json"
             raw.write_text(json.dumps({"verdict": verdict, "findings": findings or [], "criteria": [
@@ -332,6 +333,56 @@ class LiteWorkflowTests(unittest.TestCase):
         self.assertEqual(meta["delivery_verdict"], "verification_pending")
         self.assertEqual(meta["status"], "completed")
         self.assertEqual(meta["extensions"]["lite"]["host_adapter"]["status"], "unavailable")
+        self.call("lite-report", "--dir", self.ticket)
+        report = (self.ticket / "lite.md").read_text(encoding="utf-8")
+        self.assertIn("审核结论：pass", report)
+        self.assertIn("宿主确认待完成", report)
+
+    def test_preflight_reports_pending_ceiling_without_an_adapter(self):
+        self.create_lite()
+        self.assertEqual(self.call("lite-preflight", "--dir", self.ticket)["delivery_ceiling"],
+                         "verified")
+        self.drop_host_config()
+        before = self.bytes()
+        result = self.call("lite-preflight", "--dir", self.ticket)
+        self.assertEqual(result["delivery_ceiling"], "verification_pending")
+        self.assertEqual(result["reason"], "lite_host_adapter_unavailable")
+        self.assertEqual(self.bytes(), before)
+
+    def test_pending_delivery_requires_explicit_recheck_of_degraded_findings(self):
+        self.drop_host_config()
+        review = self.code()
+        finding = {"id": "F-1", "blocking": True, "status": "open",
+                   "description": "单独复核值更新边界", "evidence": "source.py:1"}
+        self.fake_host_review(review, "changes_required", [finding])
+        self.finish("lite_review", review, outcome="blocked")
+        for findings in ([], [dict(finding, status="resolved")]):
+            self.transition("lite_code_in_progress")
+            code = self.start("lite_code")
+            self.finish("lite_code", code)
+            self.transition("lite_code_done")
+            self.transition("lite_review_in_progress")
+            review = self.start("lite_review")
+            self.fake_host_review(review, findings=findings)
+            self.finish("lite_review", review, ok=bool(findings))
+            if not findings:
+                self.finish("lite_review", review, outcome="blocked")
+        self.transition("completed", "verification_pending")
+        events = ctl.read_events(self.ticket)[0]
+        self.assertIn("F-1", ctl.lite_open_findings(self.ticket, events))
+        self.assertEqual(ctl.lite_open_findings(self.ticket, events, pending_delivery=True), {})
+
+    def test_host_result_replay_requires_same_report(self):
+        self.drop_host_config()
+        review = self.code()
+        spawn = self.prepare_host_review(review)["spawn"]["spawn_id"]
+        identity = {"request_id": "stable-result", "identity": "session-one"}
+        self.host_result(spawn, **identity)
+        before = self.bytes()
+        self.assertTrue(self.host_result(spawn, **identity)["already_applied"])
+        replay = self.host_result(spawn, verdict="changes_required", ok=False, **identity)
+        self.assertEqual(replay["gate_id"], "idempotency_conflict")
+        self.assertEqual(self.bytes(), before)
 
     def test_degraded_review_is_marked_unattested(self):
         # 降级审核只作留痕：不得写入表示"已获可信确认"的 host_attestation，
@@ -616,7 +667,7 @@ class LiteWorkflowTests(unittest.TestCase):
         # P1/P2：暂存文件必须带扩展名（Windows CreateProcess 要求），
         # 并且清理时不能因为只读位而遗留文件。
         python_payload = b"#!" + sys.executable.encode() + b"\nprint('{}')\n"
-        staged = ctl._stage_adapter_payload(python_payload, Path("/x/adapter"))
+        staged = ctl._stage_adapter_payload(python_payload)
         workspace = staged.parent
         try:
             self.assertTrue(staged.exists())
@@ -625,26 +676,36 @@ class LiteWorkflowTests(unittest.TestCase):
             ctl._remove_staged_adapter(staged)
         self.assertFalse(workspace.exists(), "暂存工作目录未被清理")
 
-    def test_staged_adapter_can_import_sibling_resources(self):
-        # P2：暂存副本改写了 __file__/目录，适配器仍须能解析同目录资源。
-        origin = Path(tempfile.mkdtemp(prefix="icode-adapter-origin-"))
-        self.addCleanup(shutil.rmtree, origin, True)
-        (origin / "helper.py").write_text("VALUE = 'sibling-ok'\n", encoding="utf-8")
-        real = origin / "adapter.py"
-        real.write_text(
-            "#!" + sys.executable + "\n"
-            "import json,sys,helper\nreq=json.load(sys.stdin)\n"
-            "print(json.dumps({'launched':True,'sibling':helper.VALUE}))\n",
-            encoding="utf-8")
-        real.chmod(0o700)
-
-        staged = ctl._stage_adapter_payload(real.read_bytes(), real)
+    def test_staged_adapter_runs_self_contained_bytes(self):
+        payload = b"#!/usr/bin/env python3\nimport json,sys\nprint(json.dumps(json.load(sys.stdin)))\n"
+        staged = ctl._stage_adapter_payload(payload)
         try:
+            self.assertEqual(list(staged.parent.iterdir()), [staged])
+            self.assertEqual(staged.read_bytes(), payload)
             proc = ctl._run_staged_adapter(staged, {"spawn_id": "s-1"})
             self.assertEqual(proc.returncode, 0, proc.stderr)
-            self.assertEqual(json.loads(proc.stdout)["sibling"], "sibling-ok")
+            self.assertEqual(json.loads(proc.stdout)["spawn_id"], "s-1")
         finally:
             ctl._remove_staged_adapter(staged)
+
+    @unittest.skipUnless(os.name == "nt", "requires Windows NTFS ACLs")
+    def test_windows_adapter_read_execute_is_not_write(self):
+        target = self.host_root / "acl-probe.py"
+        target.write_text("pass\n", encoding="utf-8")
+        sid = ctl._windows_current_sid_string_cached()
+        self.assertTrue(sid)
+        users = "*S-1-5-32-545"
+        for rights, writable in (("RX", False), ("(WA)", True)):
+            subprocess.run(["icacls", str(target), "/inheritance:r", "/grant:r",
+                            f"*{sid}:F", f"{users}:{rights}"],
+                           check=True, capture_output=True, timeout=15)
+            self.assertEqual(ctl._path_is_others_writable(target), writable)
+        directory = self.host_root / "acl-ancestor"
+        directory.mkdir()
+        subprocess.run(["icacls", str(directory), "/inheritance:r", "/grant:r",
+                        f"*{sid}:F", f"{users}:(AD)"], check=True, capture_output=True, timeout=15)
+        self.assertTrue(ctl._path_is_others_writable(directory))
+        self.assertFalse(ctl._path_is_others_writable(directory, ancestor=True))
 
     def test_others_writable_check_flags_group_and_world(self):
         # P1：权限判定必须真正拦截组/其他人可写，而不是恒真或恒假。

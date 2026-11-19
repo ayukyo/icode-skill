@@ -11,9 +11,10 @@ Lite 复用 [宿主适配](host_adapters.md) 和 [子代理等待契约](subagen
 拿到宿主返回的真实子代理 ID 和结果后，原样签收报告。以下 `response.json` 是工具实际返回的 JSON，也可用 `--lite-review-report -` 通过 stdin 提交。签收分两层核验：
 
 - **绑定层**：`--host-receipt` 必须回传与本次登记绑定、含 `host_receipt_challenge`（`lite-review` 返回在 `review_input.host_receipt_challenge`）的宿主启动/返回回执，控制面校验 `challenge`/`spawn_id`/`host_session_id` 一致且 challenge 未复用。
-- **来源层（必需）**：调用方自拼的回执不构成可信证据，也不能自选核验程序。适配器只能由**宿主侧配置**决定，路径固定为 `<宿主真实主目录>/.icode/host_adapter.json`，内容为 `{"command": "<绝对路径>", "sha256": "<适配器摘要>"}`。控制面**不接受任何环境变量重定向**（如 `ICODE_HOST_CONFIG`）：能设置环境变量的调用方同样能指向自建配置和自建程序，"摘要与配置一致"会退化为"摘要与调用方给的配置一致"，从而绕过来源信任。**主目录同样不能取自 `HOME`**：`HOME` 是进程环境值，调用方设置它就能换掉整个信任根。控制面按平台取真实主目录——macOS/Linux 用 `pwd.getpwuid`；Windows 用 `SHGetKnownFolderPath(FOLDERID_Profile)`，由 Shell 按当前登录令牌的 SID 解析，不读 `USERPROFILE`/`HOME`，也天然处理 `%SystemDrive%` 之类可展开形式；取不到即 fail-closed，绝不回退到环境变量。**`ICODE_CONTROL_TEST_MODE`/`ICODE_TEST_HOST_ROOT` 之类的测试开关也不是信任根入口**：测试只能在同进程内给 `_HOST_CONFIG_ROOT_OVERRIDE` 赋值（例如 `mock.patch.object`），生产 CLI 子进程拿不到该入口。控制面还要求主目录、信任根、配置文件、适配器及其父目录链均非符号链接且不可被其他用户写入——POSIX 读 `st_mode` 的组/其他可写位，Windows 读实际 NTFS DACL 并逐 ACE 判断写类权限（`st_mode` 在 Windows 只反映只读属性，不能作为 ACL 证据）；适配器不得位于调用方工作区或临时目录；任一不满足即 `lite_host_adapter_unavailable`。`lite_code_in_progress` 时把已确认的适配器摘要冻结进工单 `extensions.lite.host_adapter`（该字段受 `metadata-update` 专用写入保护，只能由受控阶段转换改写）。**签收在启动适配器之前先比对冻结摘要，并且只执行刚刚校验过的那份字节**（先落私有临时副本再执行，执行后再次核对磁盘；暂存副本保留脚本后缀以便 Windows `CreateProcess` 启动，并在暂存目录中把适配器原目录的兄弟条目链接进来，使依赖同目录模块/配置的适配器仍按原相对位置解析，不要求适配器自包含；Windows 下先清除只读位再整目录删除，避免遗留文件）：身份不符时未受信任的程序根本不会运行——事后拒绝签收无法撤销它已造成的副作用。随后把 `challenge`/`spawn_id`/`host_session_id`/`report_sha256`（提交原文摘要）/`stored_report_sha256`（落盘报告摘要）交给适配器，适配器须查询实际宿主（如会话注册表）后回传 `{"launched": true}` 及完全一致的四元组回显。**未配置、摘要不符、身份被替换或适配器未确认时，joined 结果一律拒绝，不能进入交付。**
+- **来源层（可信交付）**：宿主部署 `<账户真实主目录>/.icode/host_adapter.json`，内容为 `{"command":"<绝对路径>","sha256":"<适配器摘要>"}`。macOS/Linux 从账户数据库查主目录，Windows 用 Known Folder API。控制面核验配置、适配器和所在目录的权限，拒绝环境变量或调用参数指定的配置。进入 Code 时冻结适配器摘要，签收时比对两次；仅执行校验过的私有暂存副本。适配器入口须自包含，使用宿主 API 或明确的资源路径；暂存目录只含该入口。Python 入口使用控制面的已验证解释器，原生 Windows 也支持 EXE。
+- **宿主确认**：适配器从 stdin 接收 `challenge`、`spawn_id`、`host_session_id`、`report_sha256`（提交原文）和 `stored_report_sha256`（存档报告）。它须查询真实宿主后返回 `launched: true` 并回显以上五项。适配器已在 Code 冻结却后来被替换、超时或拒绝确认时，拒绝签收；需要降级继续时先受控返回 Code，重新记录适配器状态。
+- **适配器不可用**：`lite-preflight` 返回 `delivery_ceiling=verification_pending` 与原因。进入 Code 后把事实记入工单，实际原生子代理的报告仍须完成绑定校验和签收。采用的报告以 `outcome=degraded` 登记，交付上限为 `verification_pending`。恢复可信适配器后，受控重新进入 Code、复核本地证据并取得新审核。
 
-> 适配器是宿主中立边界：ICODE 不规定适配器如何查询宿主，只要求它能在本地确证“这次 spawn/返回确实存在且对应本次登记与报告摘要”。适配器选择与授权归宿主。**降级语义与其他模式一致**：宿主未安装配置时，lite 的规划与实施照常推进，但会把 `extensions.lite.host_adapter.status="unavailable"` 与原因记入工单，交付结论固定为 `verification_pending`；`verified` 交付仍必须通过可信适配器签收，不予降级。即"能干活但拿不到 verified"，而不是整条流程停摆。降级下的审核回执记为独立态 `outcome=degraded`（不是 `success`）：报告照常留档追溯，但**不具备关闭历史阻断问题的资格**，也不能作为任何 `verified` 依据；工单仍须如实记录 `host_attestation_degraded`，与表示"已获可信确认"的 `host_attestation` 互斥。实施前用 `lite-preflight` 预检可在开工前就知道当前是否具备 verified 交付能力。安装配置后重新进入 Code 会重新确认并冻结适配器身份，即可正常签收。
 
 ```bash
 python3 tools/icode_control.py record-agent-result --dir <out> --spawn-id <spawn-id> \
@@ -23,7 +24,11 @@ python3 tools/icode_control.py record-agent-result --dir <out> --spawn-id <spawn
   --host-receipt host-receipt.json --request-id <result-request>
 ```
 
-回执复用 `agent_spawned` / `agent_result`，绑定当前 attempt、候选、语义合同及不可变审核报告摘要。**采纳门（P2）**：只有 `result=joined` 且 `adopted=yes` + 可信宿主确认的报告才计为可采信成功回执；`adopted=no|partial` 的 joined 报告只保留追溯，`lite_review_records` 将其标为 `failure`，不能作为通过依据。**复审门（P2）**：阻断问题的“登记”与“关闭”分开判定——任何实际返回且通过校验的报告（**包括 `adopted=no/partial`**）中的阻断问题都进入复审队列；但**只有可采信报告**（joined + adopted=yes + 经宿主确认）才能以同一 ID + `status=resolved` + 证据关闭历史问题，未采纳报告不能关闭任何既有阻断项。旧版先写报告后记 schema 失败的脏回执（如 `findings: null`）不纳入复审。子代理身份和返回值取自宿主工具，主代理负责如实登记，控制面校验绑定、重复身份和报告完整性。通用 event、metadata-update、普通 Agent 结果或未登记的报告都不能替代 Lite 审核回执。历史 CLI 回执依原规则读取。
+回执复用 `agent_spawned` / `agent_result`，绑定当前 attempt、候选、语义合同及报告摘要。同一 `request_id` 仅可重试原报告。
+
+**复审**：通过校验的实际报告中的阻断问题一律登记，包括降级和未采纳的报告。可信复审可用同一 ID、`status=resolved` 与证据关闭问题。降级复审只能为 `verification_pending` 关闭来源同为降级的阻断项，可信交付前还须复核这些问题。未采纳报告没有关闭资格。历史 CLI 的成功回执仍按原合同读取，其失败事件不参与复审。
+
+通用事件、`metadata-update`、普通 Agent 结果或未登记的报告均不能替代 Lite 复审回执。
 
 宿主启动失败、超时或停止时，核对实际状态后用已有 `record-agent-result` 记录 `failed|timed_out|stopped`、`adopted=no` 和简短证据引用，无须传报告。候选漂移或无效报告被拒收后，如实终结 Agent 及 step attempt，保留原因；审核设施失败且代码与合同未变时可直接新建审核 attempt。宿主工具调用结果未知时先查原句柄，不能重复启动。
 

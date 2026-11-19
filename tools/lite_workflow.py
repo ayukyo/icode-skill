@@ -165,6 +165,12 @@ def render_report(meta, review=None):
     if review:
         lines += ["审核结论：" + review["verdict"], review["requirement_assessment"],
                   review["implementation_assessment"]]
+        for finding in review["findings"]:
+            lines.append(f"- {finding['id']} [{finding['status']}] "
+                         f"{finding['description']}（{finding['evidence']}）")
+    adapter = (((meta.get("extensions") or {}).get("lite") or {}).get("host_adapter") or {})
+    if adapter.get("status") == "unavailable":
+        lines.append("宿主确认待完成：" + adapter.get("detail", "宿主适配器不可用"))
     for criterion in (meta.get("acceptance_contract") or {}).get("criteria", []):
         lines.append("- " + criterion["id"] + "：" + criterion["expected"])
     latest = {}

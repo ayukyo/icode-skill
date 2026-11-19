@@ -65,7 +65,8 @@ class CandidateTests(unittest.TestCase):
     def bytes(self):
         return tuple((self.ticket / name).read_bytes() for name in (ctl.METADATA_NAME, ctl.EVENTS_NAME))
 
-    def finish_review(self, step, attempt=None, *, scope=".", after_reads=None, ok=True):
+    def finish_review(self, step, attempt=None, *, scope=".", after_reads=None, ok=True,
+                      write_dedup_trace=True):
         """Real start/check/inspection/artifact/finish ports, no gate mocking."""
         attempt = attempt or step + "-1"
         (self.ticket / "03_plan_final.md").write_text("fixture plan\n", encoding="utf-8", newline="\n")
@@ -90,15 +91,16 @@ class CandidateTests(unittest.TestCase):
             self.call("artifact", "--dir", self.ticket, "--step", step, "--attempt", attempt,
                       "--path", "source.py", "--scope", "workspace")
         else:
-            if step == "deepcheck":
-                trace = {"schema_version": 2, "ticket_id": "candidate-1", "step": step,
+            ticket_id = ctl.load_metadata(self.ticket)["ticket_id"]
+            if step == "deepcheck" and write_dedup_trace:
+                trace = {"schema_version": 2, "ticket_id": ticket_id, "step": step,
                          "gate_id": "deepcheck.dedup", "tool": "extract", "eligible": False,
                          "attempt": attempt, "decision": "skipped_not_eligible", "attempted": False,
                          "result": "not_applicable", "at": "2026-11-15T00:00:00Z",
                          "evidence": {"mode": "full", "phase": "dedup", "function_count": 0, "threshold": 50}}
                 (self.ticket / ".mcp_gate_trace.jsonl").write_text(json.dumps(trace) + "\n", encoding="utf-8")
-            phases = ["audit"] if step == "audit" else ["reverse", "fixed", "free"]
-            coverage = {"schema_version": 1, "ticket_id": "candidate-1", "attempt": attempt,
+            phases = report["required_phases"]
+            coverage = {"schema_version": 1, "ticket_id": ticket_id, "attempt": attempt,
                         "review_scope": ["."], "coverage_status": "complete_within_scope",
                         "unobserved": [], "dedup_unobserved": [], "dedup_status": "not_eligible",
                         "dedup_reason": "single fixture", "read_phases": {
@@ -116,7 +118,7 @@ class CandidateTests(unittest.TestCase):
                 self.assertFalse(any(isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
                                      for node in ast.walk(tree)))
                 coverage["manual_dedup"] = {
-                    "schema_version": 1, "ticket_id": "candidate-1", "attempt": attempt,
+                    "schema_version": 1, "ticket_id": ticket_id, "attempt": attempt,
                     "review_scope": ["."], "unobserved": [], "sources": [{
                         "path": "source.py", "sha256": ctl.file_sha256(source),
                         "catalog_method": "python_ast", "functions": []}], "families": []}

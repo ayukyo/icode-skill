@@ -3907,9 +3907,7 @@ def lite_review_records(events):
                         and attestation.get("challenge") == native[payload["spawn_id"]].get("host_receipt_challenge")
                         and attestation.get("spawn_id") == payload["spawn_id"]
                         and attestation.get("host_session_id") == payload.get("host_session_id"))
-            # 降级：适配器不可用时审核只留痕。单独记 "degraded"，既不等于
-            # success（不能关闭历史阻断问题、不能作为 verified 依据），
-            # 也不等于 failure（否则整条流程在 Review 处停摆）。
+            # 降级审核只能用于待验证交付，仍须追踪本轮发现的问题。
             degraded = (payload.get("host_attestation_degraded") or {}).get("status") == "unavailable"
             trusted = (payload.get("result") == "joined" and bool(report)
                        and adopted == "yes" and attested)
@@ -3927,38 +3925,39 @@ def lite_review_records(events):
     return invocations, returns
 
 
-def lite_open_findings(out_dir, events, exclude_invocation=None):
-    """登记阻断问题与接受关闭结论分开判定。
-
-    - 登记：任何实际返回且通过校验的报告（含 adopted=no/partial 的未采纳报告）
-      中的阻断问题都进入复审队列，不能因报告未被采纳就丢弃。
-    - 关闭：只有可作为通过依据的报告（`outcome=success`，即 joined + adopted=yes
-      + 经可信宿主确认）才能以同一 ID + resolved + 证据关闭历史问题；未采纳报告
-      不能关闭任何既有阻断项。
-    - 兼容：旧版可能先写报告再记录 schema 失败，此类失败回执（`outcome` 非 success
-      且非宿主子代理）不纳入复审，避免读取历史脏报告。
-    """
+def lite_open_findings(out_dir, events, *, pending_delivery=False, current_report=None):
+    """待验证交付允许降级复审解决降级问题，可信交付仍需逐项可信确认。"""
     findings = {}
+    needs_attestation = set()
     for fact in lite_review_records(events)[1]:
-        if fact.get("invocation_id") == exclude_invocation:
-            continue
         if not fact.get("report_path") or not fact.get("report_sha256"):
             continue
-        source = fact.get("source")
         trusted = fact.get("outcome") == "success"
-        # 旧版失败回执不纳入复审；宿主子代理的未采纳报告是已校验产物，需纳入登记。
-        if not trusted and not (source == "host-subagent" and fact.get("adopted") in ("no", "partial")):
+        if not trusted and fact.get("source") != "host-subagent":
+            # 旧 CLI 失败事件可能指向未通过 schema 校验的报告。
             continue
-        items = _load_lite_review_report(out_dir, fact).get("findings")
+        provisional = bool(fact.get("host_attestation_degraded"))
+        if current_report is not None and fact["invocation_id"] == current_report[0]:
+            report = current_report[1]
+        else:
+            report = _load_lite_review_report(out_dir, fact)
+        items = report.get("findings")
         if not isinstance(items, list):
             continue
         for finding in items:
             if not isinstance(finding, dict) or not finding.get("id"):
                 continue
-            if trusted and finding.get("status") == "resolved" and finding.get("evidence"):
-                findings.pop(finding["id"], None)
+            key = finding["id"]
+            can_resolve = trusted or (pending_delivery and fact["outcome"] == "degraded"
+                                      and key not in needs_attestation)
+            if finding.get("status") == "resolved":
+                if can_resolve and finding.get("evidence"):
+                    findings.pop(key, None)
+                    needs_attestation.discard(key)
             elif finding.get("blocking", True):
-                findings[finding["id"]] = finding
+                if not provisional:
+                    needs_attestation.add(key)
+                findings[key] = finding
     return findings
 
 
@@ -3998,11 +3997,6 @@ def lite_review_fact(out_dir, meta, events, attempt=None, *, candidate=None, all
             if degradation is None:
                 raise ControlError("审核结果未获宿主确认，不能作为依据",
                                    gate_id="lite_review_host_unattested")
-        elif not attestation and degradation is not None:
-            # 降级路径：进入 Code 时已记录适配器不可用，此处缺确认属预期；
-            # 审核只是留痕，交付结论由 _host_adapter_degradation 强制为
-            # verification_pending，永远不会被当成 verified 依据。
-            pass
         elif attestation.get("launched") is not True \
                 or attestation.get("challenge") != challenge \
                 or attestation.get("spawn_id") != fact.get("invocation_id") \
@@ -4037,13 +4031,10 @@ def lite_review_fact(out_dir, meta, events, attempt=None, *, candidate=None, all
         if issues:
             raise ControlError("审核报告身份不匹配", gate_id="lite_review_report", violations=issues)
         return report if return_report else candidate
-    previous = lite_open_findings(out_dir, events, fact["invocation_id"])
-    # 未经可信确认的降级审核没有关闭历史阻断问题的资格：它可以留痕，
-    # 但不能让调用方用"自己写的 resolved"把 P1 问题从账上抹掉。
-    closed = set() if fact.get("outcome") == "degraded" else {
-        finding["id"] for finding in report["findings"]
-        if finding.get("status") == "resolved" and finding.get("evidence")}
-    issues += ["unresolved_previous_finding:" + key for key in previous if key not in closed]
+    outstanding = lite_open_findings(
+        out_dir, events, pending_delivery=fact["outcome"] == "degraded",
+        current_report=(fact["invocation_id"], report))
+    issues += ["unresolved_previous_finding:" + key for key in outstanding]
     if issues:
         raise ControlError("独立审核未通过", gate_id="lite_review_report", violations=issues)
     return report if return_report else candidate
@@ -4054,9 +4045,14 @@ def cmd_lite_preflight(args):
     out_dir = Path(args.dir).resolve()
     if not out_dir.is_dir():
         raise ControlError(f"工单目录不存在: {out_dir}", exit_code=2, gate_id="lite_preflight_dir")
-    trusted = _host_adapter_config()
-    print(json.dumps({"ok": True, "adapter_sha256": trusted["sha256"],
-                      "config_path": str(trusted["config_path"])}, ensure_ascii=False))
+    observation = _observe_host_adapter()
+    if observation["status"] == "pinned":
+        response = {"host_attestation": "available", "adapter_sha256": observation["sha256"],
+                    "config_path": observation["config_path"], "delivery_ceiling": "verified"}
+    else:
+        response = {"host_attestation": "unavailable", "reason": observation["reason"],
+                    "detail": observation["detail"], "delivery_ceiling": "verification_pending"}
+    print(json.dumps({"ok": True, **response}, ensure_ascii=False))
     return 0
 
 
@@ -4073,7 +4069,7 @@ def cmd_lite_report(args):
         if issues:
             raise ControlError("事件链不完整", gate_id="event_chain", violations=issues)
         # 主报告不属于审核签名输入，不生成虚假的执行/完成事件。
-        returns = [r for r in lite_review_records(events)[1] if r.get("outcome") == "success"]
+        returns = [r for r in lite_review_records(events)[1] if r.get("outcome") in {"success", "degraded"}]
         review = (lite_review_fact(out_dir, meta, events, allow_rejected=True, return_report=True)
                   if returns else None)
         atomic_write_bytes(out_dir / "lite.md", lite_module().render_report(meta, review).encode("utf-8"))
@@ -4164,11 +4160,7 @@ def lite_step_gate(out_dir, meta, events, step, attempt=None):
         issues += lint.validate_identity_change(meta, catalog)
     if step == "lite_prepare":
         # 用户停止点允许记录规划完成，但不能进入实施。
-        stop = "user_stop_after_prepare" in issues
         issues = [x for x in issues if x != "user_stop_after_prepare"]
-        # 宿主适配器缺失/不可信不再阻断规划完成：与其他模式一致，缺口记入
-        # degradation，交付结论随之降级为 verification_pending（见 lite_delivery_gate）。
-        # 真正需要审核可信性的是签收环节，那里仍 fail-closed。
     elif step == "lite_review":
         lite_review_fact(out_dir, meta, events, attempt)
     if step in {"lite_code", "lite_review"}:
@@ -4202,7 +4194,7 @@ def lite_transition_guard(out_dir, meta, events, target, verdict):
         if issues:
             raise ControlError("G1 规划准入未通过", gate_id="lite_prepare_gate", violations=issues)
     if target == "completed":
-        candidate = lite_review_fact(out_dir, meta, events)
+        lite_review_fact(out_dir, meta, events)
         issues, pending = lite_evidence_issues(out_dir, meta, events)
         # 无适配器降级：只能以 verification_pending 交付，永远不能声称 verified。
         if _host_adapter_degradation(meta) is not None:
@@ -5107,6 +5099,11 @@ def cmd_transition(args):
     # 工单级未解决债务余额：跨步骤按当前有效 trace 汇总，不随被推进步骤变化；
     # 对债务 gate 真实重做（最后一条不再携带债务状态）即清偿归零。
     enumeration_debt_balance = ticket_enumeration_debt(out_dir, meta)
+    if to_status == "completed" and args.delivery_verdict == "verified" \
+            and meta.get("mode") != "lite" and enumeration_debt_balance != 0:
+        raise ControlError("枚举或去重证据仍待核验，交付结论不能为 verified",
+                           gate_id="gate_enumeration_debt",
+                           enumeration_debt=enumeration_debt_balance)
     if to_status in sm["gate_policy"]["gated_targets"] and not meta.get("debug") and not gates_skipped:
         gate_reports = run_gate_linters(out_dir, to_status, args.delivery_verdict, metadata=meta)
         failed = [g for g in gate_reports if not g["ok"]]
@@ -5183,25 +5180,10 @@ def cmd_transition(args):
             if to_status == "lite_code_in_progress":
                 extensions = dict(meta2.get("extensions") or {})
                 lite_ns = dict(extensions.get("lite") or {})
-                try:
-                    trusted = _host_adapter_config()
-                except ControlError as exc:
-                    # 适配器不可用时不再阻断进入 Code：照其他模式记降级事实，
-                    # 交付结论保持 verification_pending；签收仍要求可信确认。
-                    lite_ns["host_adapter"] = {
-                        "status": "unavailable",
-                        "reason": exc.extra.get("gate_id") or "lite_host_adapter_unavailable",
-                        "detail": str(exc),
-                        "observed_at": now_iso(),
-                    }
-                else:
-                    previous = lite_ns.get("host_adapter") or {}
-                    lite_ns["host_adapter"] = {
-                        "status": "pinned",
-                        "sha256": trusted["sha256"],
-                        "path": str(trusted["path"]),
-                        "pinned_at": previous.get("pinned_at") or now_iso(),
-                    }
+                observation = _observe_host_adapter()
+                observation.pop("config_path", None)
+                timestamp = "pinned_at" if observation["status"] == "pinned" else "observed_at"
+                lite_ns["host_adapter"] = {**observation, timestamp: now_iso()}
                 extensions["lite"] = lite_ns
                 meta2["extensions"] = extensions
         meta2["status"] = to_status
@@ -7740,6 +7722,15 @@ def _read_host_receipt(args):
 _HOST_CONFIG_ROOT_OVERRIDE = None
 
 
+def _host_path_is_link(path):
+    try:
+        info = path.lstat()
+    except FileNotFoundError:
+        return False
+    return (stat.S_ISLNK(info.st_mode) or
+            bool(getattr(info, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT))
+
+
 def _host_home():
     """返回宿主真实主目录，不信任 HOME 等调用方可设置的环境变量。
 
@@ -7763,7 +7754,7 @@ def _host_home():
         raise ControlError("系统账户数据库返回的宿主主目录不可信",
                            gate_id="lite_host_adapter_unavailable")
     resolved = Path(home)
-    if resolved.is_symlink():
+    if _host_path_is_link(resolved):
         raise ControlError("宿主主目录是符号链接，拒绝信任",
                            gate_id="lite_host_adapter_unavailable")
     if not resolved.is_dir():
@@ -7824,7 +7815,7 @@ def _windows_host_home():
         raise ControlError("Windows 账户 API 返回的宿主主目录不可信",
                            gate_id="lite_host_adapter_unavailable")
     resolved = Path(home)
-    if resolved.is_symlink():
+    if _host_path_is_link(resolved):
         raise ControlError("宿主主目录是符号链接，拒绝信任",
                            gate_id="lite_host_adapter_unavailable")
     if not resolved.is_dir():
@@ -7844,7 +7835,7 @@ def _host_config_root():
     # 子进程拿不到这个入口，生产调用永远走 _host_home()。
     root = _host_home() / ".icode"
     # 信任根本身也必须不可被旁人改写（对伪造主目录的纵深防御）。
-    if root.is_symlink() or (root.exists() and _path_is_others_writable(root)):
+    if _host_path_is_link(root) or (root.exists() and _path_is_others_writable(root)):
         raise ControlError("宿主信任根可被其他用户改写，拒绝信任",
                            gate_id="lite_host_adapter_unavailable")
     return root
@@ -7857,7 +7848,7 @@ def _default_host_config():
 def _host_adapter_config():
     """读取并验证宿主适配器配置：固定命令、固定摘要、不可被旁人改写。"""
     config_path = _default_host_config()
-    if config_path.is_symlink() or not config_path.is_file():
+    if _host_path_is_link(config_path) or not config_path.is_file():
         raise ControlError("未配置可信宿主适配器（缺少宿主配置 %s）" % config_path,
                            gate_id="lite_host_adapter_unavailable")
     if _path_is_others_writable(config_path):
@@ -7873,7 +7864,7 @@ def _host_adapter_config():
     if not isinstance(command, str) or not os.path.isabs(command) or not Path(command).is_file():
         raise ControlError("宿主适配器命令必须是已存在的绝对路径", gate_id="lite_host_adapter_unavailable")
     adapter = Path(command)
-    if adapter.is_symlink() or _path_is_others_writable(adapter):
+    if _host_path_is_link(adapter) or _path_is_others_writable(adapter):
         raise ControlError("宿主适配器可被其他用户改写，拒绝信任", gate_id="lite_host_adapter_unavailable")
     if not os.access(adapter, os.X_OK):
         raise ControlError("宿主适配器不可执行", gate_id="lite_host_adapter_unavailable")
@@ -7884,12 +7875,26 @@ def _host_adapter_config():
     return {"path": adapter, "sha256": actual, "config_path": config_path}
 
 
+def _observe_host_adapter():
+    """预检和进入 Code 使用同一套宿主适配器可用性规则。"""
+    try:
+        trusted = _host_adapter_config()
+    except ControlError as exc:
+        return {"status": "unavailable", "reason": exc.extra.get("gate_id", "lite_host_adapter_unavailable"),
+                "detail": exc.message}
+    except (OSError, RuntimeError, ValueError) as exc:
+        return {"status": "unavailable", "reason": "lite_host_adapter_unavailable",
+                "detail": f"无法核验宿主适配器路径：{exc}"}
+    return {"status": "pinned", "sha256": trusted["sha256"], "path": str(trusted["path"]),
+            "config_path": str(trusted["config_path"])}
+
+
 # 其他用户/组可写位。POSIX 上 st_mode 能证明这一点；Windows 的 st_mode 只
 # 反映只读属性，无法说明 NTFS ACL 是否向他人授予写权限，必须另读 ACL。
 _OTHERS_WRITE_BITS = 0o022
 
 
-def _path_is_others_writable(path):
+def _path_is_others_writable(path, *, ancestor=False):
     """目标是否允许当前用户之外的主体写入；无法判定时抛错（fail-closed）。
 
     POSIX 读 st_mode；Windows 读实际 DACL，逐个 ACE 判断是否对
@@ -7901,7 +7906,7 @@ def _path_is_others_writable(path):
     if os.name != "nt":
         return bool(resolved.stat().st_mode & _OTHERS_WRITE_BITS)
     try:
-        return _windows_path_has_foreign_write_ace(resolved)
+        return _windows_path_has_foreign_write_ace(resolved, ancestor=ancestor)
     except ControlError:
         raise
     except (AttributeError, OSError, ValueError) as exc:
@@ -7931,7 +7936,7 @@ def _ace_sid_offset(base, ace_type, object_ace_types, flat_offset):
     return offset
 
 
-def _windows_path_has_foreign_write_ace(path):
+def _windows_path_has_foreign_write_ace(path, *, ancestor=False):
     r"""读 Windows DACL，判断是否存在授予"他人可写"的 ACE。
 
     只用 GetNamedSecurityInfo + 逐 ACE 解析。真实 ACE 形态多变（OBJECT_INHERIT、
@@ -7948,9 +7953,10 @@ def _windows_path_has_foreign_write_ace(path):
     DACL_SECURITY_INFORMATION = 0x00000004
     OWNER_SECURITY_INFORMATION = 0x00000001
     ERROR_SUCCESS = 0
-    # 写类访问位：写数据/追加/写属性/写扩展属性/删除子项/删除/修改 DACL/修改属主
-    WRITE_MASK = 0x00000002 | 0x00000004 | 0x00000010 | 0x00000020 | 0x00000040 \
-        | 0x00010000 | 0x00040000 | 0x00080000
+    # 祖先目录仅允许创建新目录的 ACE（例如盘符根目录）不允许替换现有组件。
+    write_mask = 0x00000100 | 0x00000040 | 0x00010000 | 0x00040000 | 0x00080000 | 0x50000000
+    if not ancestor:
+        write_mask |= 0x00000002 | 0x00000004 | 0x00000010
 
     advapi32 = ctypes.WinDLL("advapi32", use_last_error=True)
     kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
@@ -7979,9 +7985,6 @@ def _windows_path_has_foreign_write_ace(path):
     class ACE_HEADER(ctypes.Structure):
         _fields_ = [("AceType", ctypes.c_ubyte), ("AceFlags", ctypes.c_ubyte),
                     ("AceSize", wintypes.WORD)]
-
-    class ACCESS_ALLOWED_ACE(ctypes.Structure):
-        _fields_ = [("Header", ACE_HEADER), ("Mask", wintypes.DWORD), ("SidStart", wintypes.DWORD)]
 
     class ACL_SIZE_INFORMATION(ctypes.Structure):
         _fields_ = [("AceCount", wintypes.DWORD),
@@ -8029,11 +8032,11 @@ def _windows_path_has_foreign_write_ace(path):
             base = ace_ptr.value
             header = ctypes.cast(ace_ptr, ctypes.POINTER(ACE_HEADER)).contents
             ace_type = header.AceType & 0xFF
-            if ace_type not in ALLOWED_ACE_TYPES:
+            if header.AceFlags & 0x08 or ace_type not in ALLOWED_ACE_TYPES:  # INHERIT_ONLY_ACE
                 continue
             mask = ctypes.cast(base + ACE_MASK_OFFSET,
                                ctypes.POINTER(wintypes.DWORD)).contents.value
-            if not (mask & WRITE_MASK):
+            if not (mask & write_mask):
                 continue
             sid_any = ctypes.c_void_p(base + _ace_sid_offset(base, ace_type,
                                                              OBJECT_ACE_TYPES,
@@ -8041,7 +8044,10 @@ def _windows_path_has_foreign_write_ace(path):
             sid_str_ptr = ctypes.c_wchar_p()
             if not advapi32.ConvertSidToStringSidW(sid_any, ctypes.byref(sid_str_ptr)):
                 return True
-            sid_str = sid_str_ptr.value or ""
+            try:
+                sid_str = sid_str_ptr.value or ""
+            finally:
+                kernel32.LocalFree(sid_str_ptr)
             if sid_str and sid_str != current_sid and sid_str not in allowed_sids:
                 return True
         return False
@@ -8070,10 +8076,25 @@ def _windows_current_sid_string_cached():
         from ctypes import wintypes
         advapi32 = ctypes.WinDLL("advapi32", use_last_error=True)
         kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.GetCurrentProcess.restype = wintypes.HANDLE
+        kernel32.GetCurrentProcess.argtypes = []
+        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        kernel32.LocalFree.argtypes = [ctypes.c_void_p]
+        kernel32.LocalFree.restype = ctypes.c_void_p
+        advapi32.OpenProcessToken.argtypes = [wintypes.HANDLE, wintypes.DWORD,
+                                             ctypes.POINTER(wintypes.HANDLE)]
+        advapi32.OpenProcessToken.restype = wintypes.BOOL
+        advapi32.GetTokenInformation.argtypes = [wintypes.HANDLE, ctypes.c_int,
+                                                 ctypes.c_void_p, wintypes.DWORD,
+                                                 ctypes.POINTER(wintypes.DWORD)]
+        advapi32.GetTokenInformation.restype = wintypes.BOOL
+        advapi32.ConvertSidToStringSidW.argtypes = [ctypes.c_void_p,
+                                                    ctypes.POINTER(ctypes.c_wchar_p)]
+        advapi32.ConvertSidToStringSidW.restype = wintypes.BOOL
         TOKEN_QUERY = 0x0008
         TokenUser = 1
-        token = ctypes.c_void_p()
-        if kernel32.OpenProcessToken(kernel32.GetCurrentProcess(), TOKEN_QUERY,
+        token = wintypes.HANDLE()
+        if advapi32.OpenProcessToken(kernel32.GetCurrentProcess(), TOKEN_QUERY,
                                      ctypes.byref(token)):
             try:
                 size = wintypes.DWORD(0)
@@ -8084,7 +8105,10 @@ def _windows_current_sid_string_cached():
                     sid_ptr = ctypes.cast(buf, ctypes.POINTER(ctypes.c_void_p)).contents
                     str_sid = ctypes.c_wchar_p()
                     if advapi32.ConvertSidToStringSidW(sid_ptr, ctypes.byref(str_sid)):
-                        result = str_sid.value
+                        try:
+                            result = str_sid.value
+                        finally:
+                            kernel32.LocalFree(str_sid)
             finally:
                 kernel32.CloseHandle(token)
     except Exception:
@@ -8102,16 +8126,16 @@ def _require_host_owned_location(adapter):
     调用方创建的可写目录都会被拒绝。
     """
     resolved = adapter.resolve()
-    for parent in resolved.parents:
+    for parent in adapter.parents:
         try:
-            st = parent.lstat()
+            linked = _host_path_is_link(parent)
         except OSError as exc:
             raise ControlError("宿主适配器所在目录不可核验，拒绝信任",
                                gate_id="lite_host_adapter_unavailable") from exc
-        if stat.S_ISLNK(st.st_mode):
+        if linked:
             raise ControlError("宿主适配器所在目录是符号链接，拒绝信任",
                                gate_id="lite_host_adapter_unavailable")
-        if _path_is_others_writable(parent):
+        if _path_is_others_writable(parent, ancestor=True):
             raise ControlError("宿主适配器所在目录可被其他用户改写，拒绝信任",
                                gate_id="lite_host_adapter_unavailable")
     # 调用方的工作区与临时目录即使权限收紧也属调用方，不能作为信任来源。
@@ -8134,89 +8158,44 @@ def _require_host_owned_location(adapter):
                 gate_id="lite_host_adapter_unavailable")
 
 
-def _adapter_script_kind(payload):
-    """判断适配器脚本类型：返回 (suffix, interpreter_args)。
-
-    Windows 的 CreateProcess 要求 AppName/命令行首项带可执行扩展名，
-    mkstemp 的无扩展名路径无法直接启动，因此按内容选解释器并给出后缀。
-    """
+def _adapter_suffix(payload):
+    """按入口文件类型选择暂存后缀。"""
     if payload.startswith(b"#!"):
         first = payload.split(b"\n", 1)[0].decode("utf-8", "replace")
         if "python" in first:
-            return ".py", None
+            return ".py"
         if "/sh" in first or "/bash" in first:
-            return ".sh", None
-        return "", None
-    if payload[:2] in (b"MZ", b"\x7fE"):
-        return (".exe" if os.name == "nt" else ""), None
-    if payload.lstrip()[:5] == b"<?xml":
-        return ".wsf", None
-    return ".py", None
+            return ".sh"
+        return ".bin"
+    if payload.startswith(b"MZ"):
+        return ".exe"
+    if payload.startswith(b"\x7fELF"):
+        return ".bin"
+    return ".py" if os.name == "nt" else ".bin"
 
 
-def _stage_adapter_payload(payload, adapter):
-    """把已校验字节写成私有暂存文件，并镜像适配器原目录的资源。
-
-    只执行"已校验的那份字节"能消除校验后替换窗口，但代价是脚本的
-    __file__ 与同目录资源位置变了。宿主适配器常依赖同目录的配置或模块，
-    因此这里在暂存目录里为原目录的每个兄弟条目建符号链接（POSIX）或
-    目录联接（Windows），让 `import` 与相对路径读取仍能解析到宿主原件，
-    而不必要求适配器自包含。符号链接本身不改动校验过的字节。
-    """
-    suffix, _ = _adapter_script_kind(payload)
+def _stage_adapter_payload(payload):
+    """适配器为自包含入口，私有目录只写入已校验字节。"""
     workspace = Path(tempfile.mkdtemp(prefix="icode-host-adapter-"))
-    staged = workspace / ("adapter" + (suffix or ".bin"))
-    with staged.open("wb") as sink:
-        sink.write(payload)
-    if os.name == "posix":
-        staged.chmod(0o500)
-    else:
-        staged.chmod(staged.stat().st_mode | stat.S_IREAD)
-    _mirror_adapter_resources(adapter, staged.name, workspace)
-    return staged
-
-
-def _mirror_adapter_resources(adapter, staged_name, workspace):
-    """把适配器原目录的兄弟条目链接进暂存目录，保留相对资源定位。"""
+    staged = workspace / ("adapter" + _adapter_suffix(payload))
     try:
-        origin = Path(adapter).resolve().parent
-        entries = list(origin.iterdir())
+        staged.write_bytes(payload)
+        staged.chmod(0o500 if os.name == "posix" else stat.S_IREAD)
     except OSError:
-        # 原目录不可枚举时不做镜像；适配器若依赖同目录资源会自行报错。
-        return
-    for entry in entries:
-        name = entry.name
-        # 只接受单段常规名：防止反常条目把链接写到暂存目录之外。
-        if not name or name in (".", "..") or name in (staged_name, "adapter"):
-            continue
-        if os.sep in name or (os.altsep and os.altsep in name):
-            continue
-        link = workspace / name
-        if link.parent != workspace or link.exists() or link.is_symlink():
-            continue
-        try:
-            link.symlink_to(entry)
-        except (OSError, NotImplementedError):
-            # Windows 无符号链接权限时退化为目录联接/复制对目录与文件均不可行，
-            # 直接跳过：宁可让适配器暴露真实失败，也不伪造出半可用环境。
-            continue
+        _remove_staged_adapter(staged)
+        raise
+    return staged
 
 
 def _run_staged_adapter(staged, request):
     """按平台正确方式启动暂存适配器，始终把请求 JSON 送到 stdin。"""
     payload_in = json.dumps(request, ensure_ascii=False)
-    if os.name == "nt":
-        suffix = staged.suffix.lower()
-        if suffix == ".py":
-            command = [sys.executable, str(staged)]
-        elif suffix == ".sh":
-            raise ControlError("Windows 无法执行 shell 脚本形式的宿主适配器",
-                               gate_id="lite_host_adapter_unattested")
-        else:
-            command = [str(staged)]
-        return subprocess.run(command, input=payload_in, capture_output=True,
-                              text=True, timeout=60, encoding="utf-8")
-    return subprocess.run([str(staged)], input=payload_in, capture_output=True,
+    suffix = staged.suffix.lower()
+    if os.name == "nt" and suffix not in {".py", ".exe"}:
+        raise ControlError("Windows 宿主适配器须使用 Python 或 EXE",
+                           gate_id="lite_review_host_unattested")
+    command = [sys.executable, "-I", "-X", "utf8", str(staged)] if suffix == ".py" else [str(staged)]
+    return subprocess.run(command, input=payload_in, capture_output=True,
                           text=True, timeout=60, encoding="utf-8")
 
 
@@ -8280,9 +8259,9 @@ def _host_attest(spawn, host_session_id, report_sha256, stored_report_sha256,
     # 先落一份私有临时副本再执行：路径与内容都来自刚刚校验过的同一份字节。
     staged = None
     try:
-        staged = _stage_adapter_payload(payload, adapter)
+        staged = _stage_adapter_payload(payload)
         proc = _run_staged_adapter(staged, request)
-    except (OSError, subprocess.TimeoutExpired) as exc:
+    except (OSError, UnicodeError, subprocess.TimeoutExpired) as exc:
         raise ControlError("宿主适配器调用失败", gate_id="lite_review_host_unattested",
                            detail=type(exc).__name__) from exc
     finally:
@@ -8515,6 +8494,21 @@ def cmd_record_agent_result(args):
             events, args.request_id, "agent_result", input_payload,
             actor=args.actor, payload_keys=(*input_payload, "host_session_id"))
         if prior:
+            if report is not None:
+                receipt = prior["payload"]["lite_review_report"]
+                digest = receipt.get("input_sha256") or (
+                    prior["payload"].get("host_attestation") or {}).get("report_sha256")
+                if digest:
+                    same_report = digest == report_digest
+                else:
+                    # 旧降级回执只保存了规范化正文。比较可恢复的内容，兼容原请求重试。
+                    stored = _load_lite_review_report(out_dir, receipt)
+                    binding = {key: stored[key] for key in (
+                        "schema_version", "attempt", "candidate_id", "contract_digest")}
+                    same_report = canonical_digest({**report, **binding}) == canonical_digest(stored)
+                if not same_report:
+                    raise ControlError("同一 request_id 提交了不同的 Lite 审核报告",
+                                       gate_id="idempotency_conflict")
             print(json.dumps({"ok": True, "already_applied": True,
                               "request_id": args.request_id, "spawn_id": spawn_id,
                               "event_id": prior["event_id"]},
@@ -8532,7 +8526,6 @@ def cmd_record_agent_result(args):
                 exit_code=1, gate_id="agent_spawn_already_terminal",
                 existing_result=target.get("result"))
         result_at = now_iso()
-        degraded_marker = None
         result_record = {key: value for key, value in input_payload.items()
                          if key != "spawn_id"}
         if target.get("lite_review_attempt"):
@@ -8555,12 +8548,10 @@ def cmd_record_agent_result(args):
                     result_record["lite_review_report"] = _commit_lite_agent_report(
                         out_dir, name, data, None, target, host_session_id,
                         degraded=True)
-                    degraded_marker = {"status": "unavailable",
-                                       "reason": degradation.get("reason")
-                                       or "lite_host_adapter_unavailable",
-                                       "observed_at": now_iso()}
-                    # 同时写入 metadata 与事件：事件链校验要求两者一致。
-                    result_record["host_attestation_degraded"] = degraded_marker
+                    result_record["host_attestation_degraded"] = {
+                        "status": "unavailable",
+                        "reason": degradation.get("reason") or "lite_host_adapter_unavailable",
+                        "observed_at": result_at}
                 else:
                     attestation = _host_attest(target, host_session_id, report_digest,
                                                hashlib.sha256(data).hexdigest(),
@@ -8569,6 +8560,7 @@ def cmd_record_agent_result(args):
                     result_record["host_attestation"] = attestation
                     result_record["lite_review_report"] = _commit_lite_agent_report(
                         out_dir, name, data, attestation, target, host_session_id)
+                result_record["lite_review_report"]["input_sha256"] = report_digest
         elif report is not None:
             raise ControlError("普通 Agent 结果不能签收 Lite 审核报告", gate_id="lite_review_entry")
         del events

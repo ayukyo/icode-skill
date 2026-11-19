@@ -137,7 +137,7 @@ L3 保留 `mechanism=sequential-thinking+adversarial` 和升级触发器，替�
    - 成功 → `decision=called`、`attempted=true`、`result=success`、`source_files=[...]`
    - 空/错误/超时 → `decision=degraded_after_attempt`、`attempted=true`、`result=empty|error|timeout`、`error_class=<类名>`
    - 并把结果写回缓存（atomic 写 `.tmp` + `mv`）
-   - 工具未暴露且发现流程仍无法取得 schema → `decision=unavailable_before_call`、`attempted=false`、`result=unavailable`，并带 `availability={tool_visible:false,discovery_ref:<会话工具发现证据引用>,reason:not_exposed|discovery_failed,fallback:<替代方法>,evidence_ref:<替代结果引用>}`。工具直接可见不得用此分支，不伪造实际尝试；业务 eligibility 仍由事实计算。
+   - 工具未暴露且发现流程仍无法取得 schema → `decision=unavailable_before_call`、`attempted=false`、`result=unavailable`，并带 `availability={tool_visible:false,discovery_ref:<会话工具发现证据引用>,reason:not_exposed|discovery_failed,fallback:<替代方法>,evidence_ref:<替代结果引用>}`。工具可见但被上层策略禁止时同样使用此分支，记录 `tool_visible=true`、`reason=policy_denied` 和真实的 `policy_ref`。业务 eligibility 仍由事实计算。
 6. **step 正文到达同一 gate 时读取最终 trace**：已 fulfilled（called/cache_hit/degraded_after_attempt/unavailable_before_call 已记录）则复用，**避免 A/B 两层重复调用**；未 fulfilled 才执行上述流程。
 7. **step 转换前运行 validator**：`python3 tools/lint_mcp_coverage.py {ICODE_OUT_DIR} --step <step> --strict`——有 eligible 未履行 gate 时不得标记该步流程合规，先回补再转换。
 

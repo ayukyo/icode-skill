@@ -133,6 +133,8 @@ classification 结构及 canonical scope 摘要、引用根与校验边界见 [r
 
 ## 思考与 MCP 边界
 
+无 MCP 的共用路径见 [MCP 集成合同](../references/mcp_integration.md#no-mcp-workflows)。
+
 等级由 [reasoning catalog](../mcp/reasoning-gate/gates.json) 决定，不能因 fast 全部降 L1。新语义、复杂修改、根因分析和重构在 sequential-thinking 可调用时执行至少 3 步。工具未暴露时按 [思考前置合同](../references/thinking_core.md)写结构化思考，记录 `unavailable_before_call` 与发现依据、替代方法及实际证据。review/Reverse/Audit 各自保留独立判断。当前只复用 merge 既有 L1；尚无足够机器事实证明其他步骤可降级，维持 L2。
 
 机械复制和派生矩阵可由脚本完成，但不等于语义审查完成。cheap-research 的条件与 trace 沿用 [MCP 每步规则](../references/mcp_per_step.md)，不重复调用已经履行且输入未变的 gate。未进入 Fixed/Dedup 时仍写 `skipped_stage_not_reached`，证据为有效 `mode=fast/phase=reverse`；升级 full 不得借用户请求 fast 跳阶段。
