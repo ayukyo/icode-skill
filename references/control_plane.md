@@ -116,6 +116,7 @@ UI/host在登记自己的agent之前执行同一受控事务，再重新读取�
 - `step`：开始时校验 inputs 并冻结 protected 摘要；边界 `check` 发现漂移即返回 route；成功 `finish` 强制 required checks + outputs。
 - `artifact`：只允许记录命中该 step outputs 合同的真实文件及 sha256；`--paths-json` 批量逐成员仍各自校验端口与 hash，任一成员不合规整批拒绝且不写事件。
 - `closeout`：同一 attempt 的机械收尾组合入口（可选产物登记 → before_transition 复检 → finish → 可选 transition）。各阶段仍逐条调用原命令、各自持锁与写事务，不合并也不跳过任何门禁；`transition` 仅在显式给出 `--transition-to` 时执行。
+- `compact`：存量 legacy 工单的物理减重（内联 metadata → 物理外壳 v2），默认 dry-run，`--apply` 才写。写入前后逻辑对象与 `metadata_hash` 必须完全相同（写前往返校验 + 写后重读校验），首次写入前备份为 `.ico_metadata.json.pre-compact.bak`；已有待恢复事务时拒绝。它只改物理表示，不是业务事件，也不推进任何状态。**取舍**：v2 工单每次读取都要解码完整事件账本，因此只有 metadata 明显大于 `event_bytes` 时才净收益；报告里两者都给；账本不小于 metadata 时 `--apply` 直接拒绝（`compact_ledger_dominates`），实测确认收益后才带 `--force`。
 - `operation`：记录长动作 start/finish；有副作用动作缺终结回执时禁止再次 start 和推进完成态。
 - `policy`：只读计算 retry/fallback/block 决策；只有 read-only + retryable transport 可能 `auto_retry=true`。
 - `trace`：只读合成 step/gate/artifact/operation/state 时间线和开放 attempt。

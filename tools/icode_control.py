@@ -101,6 +101,7 @@ import re
 import io
 import importlib.util
 import subprocess
+import shutil
 import stat
 import sys
 import tempfile
@@ -7642,6 +7643,85 @@ def cmd_closeout(args, *, git_provider=None, require_git_provider=False, inspect
     return 0
 
 
+def cmd_compact(args):
+    """Physical storage maintenance: encode one legacy ticket as storage v2.
+
+    Dry-run by default. Only the physical envelope changes; the logical object
+    and its metadata hash are identical before and after, which the pre-write
+    round trip and the post-write reload both assert before the command
+    reports success.
+    """
+    out_dir = Path(args.dir).resolve()
+    meta_path = out_dir / METADATA_NAME
+    if meta_path.is_symlink():
+        raise ControlError("metadata 不得是符号链接", exit_code=1, gate_id="compact_target")
+    if not meta_path.is_file():
+        raise ControlError(f"{METADATA_NAME} 不存在", exit_code=1, gate_id="compact_target",
+                           path=str(meta_path))
+    with DirLock(out_dir):
+        raw = _load_raw_json(meta_path, "metadata")
+        if storage_module().is_envelope(raw):
+            print(json.dumps({"ok": True, "dir": str(out_dir), "already_compact": True,
+                              "applied": False}, ensure_ascii=False, indent=2))
+            return 0
+        if (out_dir / TXN_NAME).exists():
+            raise ControlError("存在未完成事务，先恢复再压缩", exit_code=1,
+                               gate_id="compact_pending_transaction")
+        meta = load_metadata(out_dir)
+        require_vnext(meta, out_dir)
+        require_valid_metadata(meta)
+        before_hash = metadata_hash(meta)
+        before_bytes = meta_path.stat().st_size
+        ledger = _committed_ledger(out_dir)
+        encoded = storage_module().encode_document(meta, kind="metadata",
+                                                   committed_registry=ledger.registry)
+        del meta
+        restored = storage_module().decode_document(encoded, kind="metadata",
+                                                    registry=ledger.registry)
+        same = metadata_hash(restored) == before_hash
+        del restored
+        if not same:
+            raise ControlError("压缩后逻辑内容与原文不一致，拒绝写入", exit_code=1,
+                               gate_id="compact_roundtrip")
+        after_bytes = len(json.dumps(encoded, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+        events_path = out_dir / EVENTS_NAME
+        # v2 reads decode the whole ledger, so report it: a ledger that dominates
+        # the metadata can make the compacted form slower per command.
+        event_bytes = events_path.stat().st_size if events_path.is_file() else 0
+        report = {"ok": True, "dir": str(out_dir), "applied": False,
+                  "before_bytes": before_bytes, "after_bytes": after_bytes,
+                  "event_bytes": event_bytes,
+                  "saved_ratio": round(1 - after_bytes / before_bytes, 4) if before_bytes else 0.0,
+                  "metadata_hash": before_hash}
+        if event_bytes >= before_bytes:
+            report["note"] = "事件账本不小于 metadata：减重后每次读取需解码完整账本，可能反而更慢"
+        if not args.apply:
+            print(json.dumps(report, ensure_ascii=False, indent=2))
+            return 0
+        # Measured regression guard: when the ledger dominates, v2 reads get
+        # slower, so refuse instead of trusting the operator to read the note.
+        if event_bytes >= before_bytes and not getattr(args, "force", False):
+            raise ControlError(
+                "事件账本不小于 metadata，减重后读取会变慢；先实测再带 --force 执行",
+                exit_code=1, gate_id="compact_ledger_dominates",
+                before_bytes=before_bytes, event_bytes=event_bytes)
+        backup = out_dir / (METADATA_NAME + ".pre-compact.bak")
+        if not backup.exists():
+            shutil.copy2(meta_path, backup)
+        atomic_write_json(meta_path, encoded)
+        try:
+            reread = load_metadata(out_dir)
+            if metadata_hash(reread) != before_hash:
+                raise ControlError("重读逻辑内容与压缩前不一致", exit_code=1, gate_id="compact_verify")
+            require_valid_metadata(reread)
+        except Exception:
+            shutil.copy2(backup, meta_path)
+            raise
+        report.update(applied=True, backup=str(backup))
+        print(json.dumps(report, ensure_ascii=False, indent=2))
+        return 0
+
+
 def evaluate_execution_policy(model, op_class, failure, attempts):
     if op_class not in model["operation_classes"]:
         raise ControlError(f"未知 operation class: {op_class!r}", exit_code=2,
@@ -8411,6 +8491,13 @@ def build_parser():
                    help="仅 --transition-to completed 时使用")
     p.add_argument("--request", help="幂等键前缀；各阶段派生 <prefix>.artifact/.check/.finish/.transition")
     p.set_defaults(func=cmd_closeout)
+
+    p = sub.add_parser("compact", help="存量工单物理减重：legacy 内联 metadata → storage v2（默认 dry-run）")
+    p.add_argument("--dir", required=True)
+    p.add_argument("--apply", action="store_true", help="真实写入；缺省只报告压缩后大小")
+    p.add_argument("--force", action="store_true",
+                   help="事件账本不小于 metadata 时仍写入（已实测确认收益后再用）")
+    p.set_defaults(func=cmd_compact)
 
     p = sub.add_parser("inspection", help="原生自查清单：范围/关联单元/专项规则/源码定位（不调用模型）")
     p.add_argument("--dir", required=True)

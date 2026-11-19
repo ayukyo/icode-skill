@@ -479,7 +479,7 @@
     "source_sha256": {
       "references/adversarial.md": "a0d9dce94860e9c1d9009073501173dcc9b7b8c39341e8faee8dbce173149274",
       "references/anti_laziness.md": "50526be9c81272fbd9ab3756dfcc1cd9f51fe34da564791cb62cb8bb18c44e07",
-      "references/control_plane.md": "41f28600bf3b98156e15e519a9cf4b2a9d66937d6609bd62cf10187a0d6c1659",
+      "references/control_plane.md": "78d637c737dd12ad80366b872848e59b7ca9b479d69204104454d883617bc448",
       "references/dir_and_metadata.md": "7cc5404bd710fbfcdc2377971cdc9c9768a413255d6126a8ccba71bfb07373ab",
       "references/evidence_and_verification.md": "76f4cd9c5a6594fd90bdae7f86b551bb5dc6b5ac16ac3e70198faa66872b8b63",
       "references/execution_model.md": "654eca21e747df850ba2eb3790df37855370a63dede7368f402e58e323ca3f0e",
