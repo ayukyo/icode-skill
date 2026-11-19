@@ -219,7 +219,7 @@
       "plan": {
         "inputs": [
           {"id": "requirement", "kind": "metadata_pointer", "value": "/requirement", "required": true, "protected": true},
-          {"id": "scope", "kind": "metadata_pointer", "value": "/scope_contract", "required": false, "protected": true},
+          {"id": "scope", "kind": "metadata_pointer", "value": "/scope_contract", "required": false, "protected": false},
           {"id": "initial_requirement", "kind": "ticket_file", "value": "00_init.md", "required": false, "protected": true},
           {"id": "log_analysis", "kind": "ticket_file", "value": "log_analysis.md", "required": false, "protected": true}
         ],
