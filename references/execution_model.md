@@ -36,12 +36,17 @@ python3 tools/icode_control.py step --dir <out_dir> --step <step> --phase check 
 - `result=blocked`：按 `route` 回流；先把旧 attempt 以 `blocked` 终结，再重新 `start` 形成新基线。
 - 计划内修改了受保护输入（例如 deepcheck/patch 主动改代码）也必须终结旧 attempt 并重新开始复检；禁止提供“强制接受新摘要”的旁路。
 
-每个落盘输出都记录实际文件摘要；路径必须命中该步骤的 outputs 端口：
+每个落盘输出都记录实际文件摘要；路径必须命中该步骤的 outputs 端口。同一 attempt 的多个产物优先用批量形式一次登记——每个成员仍各自生成一条 `artifact_written` 事件、各自计算 hash：
 
 ```bash
 python3 tools/icode_control.py artifact --dir <out_dir> --step <step> \
   --attempt <attempt> --scope <ticket|workspace|external> --path <path> --request <request>
+
+python3 tools/icode_control.py artifact --dir <out_dir> --step <step> \
+  --attempt <attempt> --scope <ticket|workspace> --paths-json '["a.json","b.json"]' --request <request>
 ```
+
+批量约束：1 至 256 个规范的项目相对 POSIX 路径、最多 64KiB、不得重复；按输入顺序逐条登记。全批先完成端口校验、链构造与幂等检查，**任一成员不存在、越界、不在端口合同内或幂等键冲突，整批拒绝且不写任何事件**。`--request` 按成员派生 `request#序号`，同批重放幂等返回 `already_applied=true`；`--scope external` 不支持批量。
 
 步骤全部结束后写终结回执。`success` 会强制检查 required checks 与 required outputs；不完整时拒绝伪成功：
 

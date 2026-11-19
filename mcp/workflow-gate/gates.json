@@ -479,10 +479,10 @@
     "source_sha256": {
       "references/adversarial.md": "a0d9dce94860e9c1d9009073501173dcc9b7b8c39341e8faee8dbce173149274",
       "references/anti_laziness.md": "50526be9c81272fbd9ab3756dfcc1cd9f51fe34da564791cb62cb8bb18c44e07",
-      "references/control_plane.md": "902c510031acdef45b77039c7a9cc8c6ddb10c13f6ce3149db984fed2dffddc0",
+      "references/control_plane.md": "93f3bce13b41efae3031c25cde558ffcae7ed625423598ed4ac2dce0afc96fb2",
       "references/dir_and_metadata.md": "7cc5404bd710fbfcdc2377971cdc9c9768a413255d6126a8ccba71bfb07373ab",
       "references/evidence_and_verification.md": "76f4cd9c5a6594fd90bdae7f86b551bb5dc6b5ac16ac3e70198faa66872b8b63",
-      "references/execution_model.md": "634eef9f97fd2e23df79b5be24e0dab3aca655a28917b80712a217750519d4f7",
+      "references/execution_model.md": "81bc7b0bb12278b4cfd6068c0a45a6ea5fcc5ed841d91acc1a5ced20e12c1d27",
       "references/first_activation_path.md": "e1cdbda0109044af19ef5bf9e4edff677c112d28f550aebe4dd73c8fbde0ac80",
       "references/inspection_evidence.md": "ecf393049f3060b6ee4615b972d62cf61d65eeec63c2f058499ed36b870085dc",
       "references/inspection_worklist.md": "c5d216c24d0124e963ecdbe6aeddad7a98adf1d15f6895258f69fa6313f5f5d8",

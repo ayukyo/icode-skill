@@ -114,7 +114,7 @@ UI/host在登记自己的agent之前执行同一受控事务，再重新读取�
 `gates.json.execution_model` 是步骤端口、Reactive 边界、动作类别和失败策略的机器真源；完整顺序、命令和降级边界见 [execution_model.md](execution_model.md)。受控入口：
 
 - `step`：开始时校验 inputs 并冻结 protected 摘要；边界 `check` 发现漂移即返回 route；成功 `finish` 强制 required checks + outputs。
-- `artifact`：只允许记录命中该 step outputs 合同的真实文件及 sha256。
+- `artifact`：只允许记录命中该 step outputs 合同的真实文件及 sha256；`--paths-json` 批量逐成员仍各自校验端口与 hash，任一成员不合规整批拒绝且不写事件。
 - `operation`：记录长动作 start/finish；有副作用动作缺终结回执时禁止再次 start 和推进完成态。
 - `policy`：只读计算 retry/fallback/block 决策；只有 read-only + retryable transport 可能 `auto_retry=true`。
 - `trace`：只读合成 step/gate/artifact/operation/state 时间线和开放 attempt。

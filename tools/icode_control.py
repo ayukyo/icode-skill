@@ -1335,17 +1335,24 @@ def read_events(out_dir, *, _observation=None):
     return events, path
 
 
-def prepare_event(out_dir, meta, event_type, payload, request_id=None, actor="icode"):
-    """锁定内校验现有链并构造下一事件；不落盘。"""
-    # event schema 真源校验 event_type 枚举
+def _event_schema_for(event_type):
+    """Load the event schema and reject an unknown event type before any read."""
     event_schema = load_json(SCHEMA_EVENT, "ticket-event.schema.json")
     allowed_types = event_schema["properties"]["event_type"]["enum"]
     if event_type not in allowed_types:
         raise ControlError(f"未知事件类型 {event_type!r}，允许: {allowed_types}", exit_code=2)
-    events, problems = verify_event_chain(out_dir, meta, semantic=False)
-    if problems:
-        raise ControlError("现有事件链不完整，拒绝追加事件", exit_code=1,
-                           gate_id="event_chain", violations=problems)
+    return event_schema
+
+
+def build_prepared_event(events, meta, event_type, payload, request_id=None, actor="icode",
+                         *, event_schema=None):
+    """Construct the next chained event from an already verified ledger.
+
+    The caller owns chain verification. Batched writes use this to chain several
+    events against one verified baseline instead of re-reading the ledger per
+    member; a single write keeps using ``prepare_event``.
+    """
+    event_schema = event_schema if event_schema is not None else _event_schema_for(event_type)
     prev_hash = events[-1]["event_hash"] if events else GENESIS_HASH
     event = {
         "schema_version": 1,
@@ -1366,34 +1373,71 @@ def prepare_event(out_dir, meta, event_type, payload, request_id=None, actor="ic
     return event
 
 
-def append_prepared_event(out_dir, event):
+def prepare_event(out_dir, meta, event_type, payload, request_id=None, actor="icode"):
+    """锁定内校验现有链并构造下一事件；不落盘。"""
+    # event schema 真源校验 event_type 枚举（先于链读取，保持既有错误优先级）
+    event_schema = _event_schema_for(event_type)
+    events, problems = verify_event_chain(out_dir, meta, semantic=False)
+    if problems:
+        raise ControlError("现有事件链不完整，拒绝追加事件", exit_code=1,
+                           gate_id="event_chain", violations=problems)
+    return build_prepared_event(events, meta, event_type, payload, request_id, actor,
+                                event_schema=event_schema)
+
+
+def append_prepared_event(out_dir, event, *, ledger=None):
+    """Append one prepared event.
+
+    ``ledger`` lets a batch reuse one decoded ledger instead of re-reading the
+    file per member; the caller then owns keeping it current.
+    """
     path = Path(out_dir) / EVENTS_NAME
+    updated_registry = None
     try:
         physical = event
-        if _storage_enabled(out_dir):
-            ledger = _committed_ledger(out_dir)
+        if ledger is not None:
             _logical_ledger_validator(event, ledger.events)
-            physical, _ = storage_module().encode_event(event, committed_registry=ledger.registry)
+            physical, updated_registry = storage_module().encode_event(
+                event, committed_registry=ledger.registry)
+        elif _storage_enabled(out_dir):
+            current = _committed_ledger(out_dir)
+            _logical_ledger_validator(event, current.events)
+            physical, _ = storage_module().encode_event(event, committed_registry=current.registry)
         atomic_append_line(path, json.dumps(physical, ensure_ascii=False, sort_keys=True) + "\n")
     except OSError as exc:
         raise ControlError(f"事件日志追加失败: {path}: {exc}", exit_code=1,
                            gate_id="event_log_io")
+    if ledger is not None:
+        ledger.events.append(event)
+        ledger.registry = updated_registry
 
 
 def append_event(out_dir, meta, event_type, payload, request_id=None, actor="icode",
-                 *, git_provider=None, require_git_provider=False, inspection_provider_factory=None, inspection_deadline=None):
-    """兼容事件-only 写入；调用方必须已持有 DirLock。"""
+                 *, git_provider=None, require_git_provider=False, inspection_provider_factory=None,
+                 inspection_deadline=None, prepared=None, storage_ledger=None):
+    """兼容事件-only 写入；调用方必须已持有 DirLock。
+
+    ``prepared`` publishes an event the caller already chained against a
+    verified ledger; every guard below still runs. ``storage_ledger`` is the
+    optional decoded ledger reused by a batch.
+    """
     access = _code_access("code", git_provider, require_git_provider, inspection_provider_factory, inspection_deadline)
     if access:
         _code_guard(out_dir, meta, **access)
     stage_token = _stage_write_guard(out_dir, event_type, payload, git_provider=git_provider, require_git_provider=require_git_provider)
-    if stage_token is not None and event_type in {"step_started", "operation_started"}:
-        payload = dict(payload, stage_generation=stage_token["generation"], stage_id=stage_token["stage_id"])
-    event = prepare_event(out_dir, meta, event_type, payload, request_id=request_id, actor=actor)
+    if prepared is not None:
+        if prepared.get("event_type") != event_type or prepared.get("ticket_id") != meta.get("ticket_id"):
+            raise ControlError("预构造事件与发布参数不一致", exit_code=1,
+                               gate_id="event_preparation")
+        event = prepared
+    else:
+        if stage_token is not None and event_type in {"step_started", "operation_started"}:
+            payload = dict(payload, stage_generation=stage_token["generation"], stage_id=stage_token["stage_id"])
+        event = prepare_event(out_dir, meta, event_type, payload, request_id=request_id, actor=actor)
     if access:
         _code_guard(out_dir, meta, **access)
     _stage_publication_check(stage_token, git_provider=git_provider, require_git_provider=require_git_provider)
-    append_prepared_event(out_dir, event)
+    append_prepared_event(out_dir, event, ledger=storage_ledger)
     if access:
         # A late refusal does not erase an event already appended.
         _code_guard(out_dir, meta, **access)
@@ -7380,10 +7424,75 @@ def declared_output_path(out_dir, meta, contract, target):
     return None
 
 
+def _artifact_batch_members(args):
+    """Parse ``--paths-json`` into ordered canonical members, or None for single-path.
+
+    Order is preserved (unlike the inspection read set) because the batch must
+    emit receipts in the same order as the equivalent single calls.
+    """
+    raw = getattr(args, "paths_json", None)
+    if raw is None:
+        return None
+    try:
+        if getattr(args, "path", None) is not None:
+            raise ValueError("--paths-json 与 --path 互斥")
+        if getattr(args, "scope", "ticket") == "external":
+            raise ValueError("批量产物仅允许 ticket/workspace scope")
+        if type(raw) is not str or len(raw.encode("utf-8")) > 64 * 1024:
+            raise ValueError("批量路径 JSON 必须是至多64KiB的字符串")
+        members = strict_json_loads(raw)
+        if type(members) is not list or not 1 <= len(members) <= 256:
+            raise ValueError("批量路径必须包含1至256个唯一成员")
+        for member in members:
+            if type(member) is not str or not member or "\0" in member or "\\" in member \
+                    or member.startswith("/") or PureWindowsPath(member).drive \
+                    or any(part in {"", ".", "..", ".git"} for part in member.split("/")):
+                raise ValueError("批量路径必须是规范的项目相对POSIX文件")
+        if len(set(members)) != len(members):
+            raise ValueError("批量路径不得重复")
+        return list(members)
+    except (ValueError, TypeError, RecursionError) as exc:
+        raise ControlError(f"批量产物参数无效: {exc}", gate_id="artifact_batch") from exc
+
+
+def _publish_artifact_batch(out_dir, meta, events, prepared, base_request, access):
+    """Publish one artifact event per member against one verified ledger.
+
+    Chain construction and idempotency checks run for every member before the
+    first append, so a conflict or a refused replay never leaves a partial
+    batch behind.
+    """
+    event_schema = _event_schema_for("artifact_written")
+    chain = list(events)
+    planned, results = [], []
+    for index, (target, output_id, payload) in enumerate(prepared):
+        request = None if base_request is None else f"{base_request}#{index}"
+        prior = find_idempotent_event(chain, request, "artifact_written", payload)
+        if prior is None:
+            prepared_event = build_prepared_event(chain, meta, "artifact_written", payload,
+                                                  request, "icode", event_schema=event_schema)
+            chain.append(prepared_event)
+            planned.append((prepared_event, payload, request))
+            event_id, already_applied = prepared_event["event_id"], False
+        else:
+            event_id, already_applied = prior["event_id"], True
+        results.append({"output": output_id, "path": str(target), "sha256": payload["sha256"],
+                        "event_id": event_id, "already_applied": already_applied})
+    ledger = _committed_ledger(out_dir) if _storage_enabled(out_dir) else None
+    for prepared_event, payload, request in planned:
+        append_event(out_dir, meta, "artifact_written", payload, request_id=request,
+                     prepared=prepared_event, storage_ledger=ledger, **access)
+    return results
+
+
 def cmd_artifact(args, *, git_provider=None, require_git_provider=False, inspection_provider_factory=None):
     out_dir = Path(args.dir).resolve()
     access = _code_access(args.step, git_provider, require_git_provider, inspection_provider_factory)
     candidate_access = _code_candidate_access(access)
+    # Provider admission stays ahead of argument validation, as before.
+    batch_members = _artifact_batch_members(args)
+    if batch_members is None and getattr(args, "path", None) is None:
+        raise ControlError("必须提供 --path 或 --paths-json", exit_code=2, gate_id="artifact_batch")
     model = load_execution_model()
     contract = step_contract(model, args.step)
     with DirLock(out_dir):
@@ -7405,43 +7514,54 @@ def cmd_artifact(args, *, git_provider=None, require_git_provider=False, inspect
             raise ControlError("产物必须关联同一步骤的未终结 attempt", exit_code=1,
                                gate_id="artifact_attempt")
         base = Path(out_dir) if args.scope == "ticket" else execution_workspace(out_dir, meta)
-        target = port_path(base, args.path)
-        if args.scope != "external" and not target.is_relative_to(base.resolve()):
-            raise ControlError("产物路径逃逸出声明 scope", exit_code=1,
-                               gate_id="artifact_scope", path=str(target))
-        if not target.is_file():
-            raise ControlError(f"产物不存在或不是普通文件: {target}", exit_code=1,
-                               gate_id="artifact_exists")
-        output_id = declared_output_path(out_dir, meta, contract, target)
-        if output_id is None:
-            raise ControlError("产物不在该步骤 outputs 端口合同内", exit_code=1,
-                               gate_id="step_ports", step=args.step, path=str(target))
-        payload = {
-            "execution_model_version": model["schema_version"],
-            "step": args.step,
-            "attempt": args.attempt,
-            "output": output_id,
-            "scope": args.scope,
-            "path": str(target),
-            "sha256": file_sha256(target),
-            "size": target.stat().st_size,
-        }
-        if output_id == "review_manifest":
-            issues = review_evidence_issues(out_dir, meta)
-            if issues:
-                raise ControlError("审查manifest不满足结构/计数合同", exit_code=1,
-                                   gate_id="review_manifest", violations=issues)
-            data = load_json(target, "review manifest")
-            # Preserve each completed round's identity in the original event,
-            # including clean rounds that have no separate detail file.
-            payload["round_digests"] = {str(row["round"]): canonical_digest(row) for row in data["rounds"]}
-        prior = find_idempotent_event(events, args.request, "artifact_written", payload)
-        event = prior or append_event(out_dir, meta, "artifact_written", payload,
-                                      request_id=args.request, **access)
-    _code_output(json.dumps({"ok": True, "step": args.step, "attempt": args.attempt,
-                      "output": output_id, "path": str(target),
-                      "sha256": payload["sha256"], "event_id": event["event_id"],
-                      "already_applied": bool(prior)}, ensure_ascii=False, indent=2), out_dir, meta, access)
+        prepared = []
+        for member in (batch_members if batch_members is not None else [args.path]):
+            target = port_path(base, member)
+            if args.scope != "external" and not target.is_relative_to(base.resolve()):
+                raise ControlError("产物路径逃逸出声明 scope", exit_code=1,
+                                   gate_id="artifact_scope", path=str(target))
+            if not target.is_file():
+                raise ControlError(f"产物不存在或不是普通文件: {target}", exit_code=1,
+                                   gate_id="artifact_exists")
+            output_id = declared_output_path(out_dir, meta, contract, target)
+            if output_id is None:
+                raise ControlError("产物不在该步骤 outputs 端口合同内", exit_code=1,
+                                   gate_id="step_ports", step=args.step, path=str(target))
+            payload = {
+                "execution_model_version": model["schema_version"],
+                "step": args.step,
+                "attempt": args.attempt,
+                "output": output_id,
+                "scope": args.scope,
+                "path": str(target),
+                "sha256": file_sha256(target),
+                "size": target.stat().st_size,
+            }
+            if output_id == "review_manifest":
+                issues = review_evidence_issues(out_dir, meta)
+                if issues:
+                    raise ControlError("审查manifest不满足结构/计数合同", exit_code=1,
+                                       gate_id="review_manifest", violations=issues)
+                data = load_json(target, "review manifest")
+                # Preserve each completed round's identity in the original event,
+                # including clean rounds that have no separate detail file.
+                payload["round_digests"] = {str(row["round"]): canonical_digest(row) for row in data["rounds"]}
+            prepared.append((target, output_id, payload))
+        if batch_members is None:
+            target, output_id, payload = prepared[0]
+            prior = find_idempotent_event(events, args.request, "artifact_written", payload)
+            event = prior or append_event(out_dir, meta, "artifact_written", payload,
+                                          request_id=args.request, **access)
+            results = [{"output": output_id, "path": str(target), "sha256": payload["sha256"],
+                        "event_id": event["event_id"], "already_applied": bool(prior)}]
+        else:
+            results = _publish_artifact_batch(out_dir, meta, events, prepared, args.request, access)
+    response = {"ok": True, "step": args.step, "attempt": args.attempt}
+    if batch_members is None:
+        response.update(results[0])
+    else:
+        response.update(count=len(results), artifacts=results)
+    _code_output(json.dumps(response, ensure_ascii=False, indent=2), out_dir, meta, access)
     return 0
 
 
@@ -8189,13 +8309,15 @@ def build_parser():
     p.add_argument("--request", help="本条执行事件的幂等键")
     p.set_defaults(func=cmd_step)
 
-    p = sub.add_parser("artifact", help="记录与 step outputs 合同匹配的产物 hash")
+    p = sub.add_parser("artifact", help="记录与 step outputs 合同匹配的产物 hash（单条或批量）")
     p.add_argument("--dir", required=True)
     p.add_argument("--step", required=True)
     p.add_argument("--attempt", required=True)
-    p.add_argument("--path", required=True)
+    p.add_argument("--path", help="单个产物路径；与 --paths-json 互斥")
+    p.add_argument("--paths-json",
+                   help="仅批量：1至256个规范相对POSIX路径的JSON数组，最多64KiB；按输入顺序逐条登记")
     p.add_argument("--scope", default="ticket", choices=["ticket", "workspace", "external"])
-    p.add_argument("--request", help="幂等键")
+    p.add_argument("--request", help="幂等键；批量时每个成员使用 request#序号")
     p.set_defaults(func=cmd_artifact)
 
     p = sub.add_parser("inspection", help="原生自查清单：范围/关联单元/专项规则/源码定位（不调用模型）")
