@@ -357,7 +357,10 @@ if $LINT "$SAMPLE" >/dev/null 2>&1; then ok "S2 样本工单 exit0"; else bad "S
 
 echo ""
 echo "=== 14. stdio 冒烟回归（R-2：Output validation error 再犯防护）==="
-if timeout 120 python3 "$(dirname "$0")/test_cheap_research_stdio_smoke.py" >/dev/null 2>&1; then
+# 真实 stdio 冒烟需要 mcp Python SDK；缺 SDK 时 client 会一直等，表现为超时而非明确报错
+if [ "$(python3 -c 'import mcp.server; print(1)' 2>/dev/null)" != "1" ]; then
+  echo "  SKIP T14 stdio 冒烟（本机未安装 mcp Python SDK）"
+elif timeout 120 python3 "$(dirname "$0")/test_cheap_research_stdio_smoke.py" >/dev/null 2>&1; then
   ok "T14 stdio 冒烟：真实 spawn server describe_capabilities 无 Output validation error"
 else
   bad "T14 stdio 冒烟失败（R-2 复发？）——直接运行 test_cheap_research_stdio_smoke.py 查看细节"

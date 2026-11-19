@@ -161,7 +161,13 @@ JSON
 cat > "$ESCAPE_TARGET/.ico_metadata.json" <<'JSON'
 {"schema_version":3,"ticket_id":"VERIFY-ESCAPE","status":"completed","verification_contract":{"required":false,"required_layers":[],"required_consumers":[],"required_scenarios":[]}}
 JSON
-ln -s "$ESCAPE_TARGET/.ico_metadata.json" "$ESCAPE_POINTER/.ico_metadata.json"
+# 不支持符号链接时不要退化成复制：复制会让"越界"工单变成合法工单，
+# 反而制造假失败。缺文件时工具会走"不可解析"分支，语义仍被覆盖。
+if icode_symlink_ok; then
+  ln -s "$ESCAPE_TARGET/.ico_metadata.json" "$ESCAPE_POINTER/.ico_metadata.json"
+else
+  printf '  SKIP %s（当前文件系统不支持真实符号链接）\n' "越界工单符号链接夹具"
+fi
 
 cat > "$NOT_REQUIRED/.ico_metadata.json" <<'JSON'
 {
@@ -283,7 +289,8 @@ JSON
 BEFORE_PENDING="$(sha256sum "$TICKET/.ico_metadata.json" "$NOT_REQUIRED/.ico_metadata.json" "$LEGACY/.ico_metadata.json")"
 printf 'stale' > "$REPORT_ROOT/debt.json"
 printf 'stale' > "$REPORT_ROOT/debt.md"
-if HOME="$HOME_DIR" python3 tools/verification_debt.py pending \
+# Windows 上 Path.home()/expanduser 读 USERPROFILE，只设 HOME 不会真正隔离
+if HOME="$HOME_DIR" USERPROFILE="$HOME_DIR" python3 tools/verification_debt.py pending \
     --project "$PROJECT" --output "$REPORT_ROOT/debt.json" --markdown "$REPORT_ROOT/debt.md" \
     > "$TMP/pending.stdout" 2> "$TMP/pending.stderr"; then
   ok "pending 命令生成验证债务报告"
@@ -336,11 +343,11 @@ assert tickets["V3-INVALID-LAYER"]["tracking_status"] == "invalid_contract"
 assert tickets["VERIFY-BLOCKED"]["tracking_status"] == "blocked"
 assert tickets["VERIFY-BLOCKED"]["ticket_blocked"] is True
 assert tickets["VERIFY-ARCH"]["tracking_status"] == "verification_pending"
-assert tickets["VERIFY-ARCH"]["ticket_dir"].endswith("archive/VERIFY-ARCH")
+assert pathlib.PurePath(tickets["VERIFY-ARCH"]["ticket_dir"]).as_posix().endswith("archive/VERIFY-ARCH")
 assert tickets["VERIFY-ARTIFACT"]["tracking_status"] == "satisfied"
-assert tickets["VERIFY-ARTIFACT"]["ticket_dir"].endswith("artifacts/VERIFY-ARTIFACT")
+assert pathlib.PurePath(tickets["VERIFY-ARTIFACT"]["ticket_dir"]).as_posix().endswith("artifacts/VERIFY-ARTIFACT")
 assert tickets["VERIFY-BACKUP"]["tracking_status"] == "verification_pending"
-assert tickets["VERIFY-BACKUP"]["ticket_dir"].endswith("backup-snapshot/.icode_output/.icode_output_406")
+assert pathlib.PurePath(tickets["VERIFY-BACKUP"]["ticket_dir"]).as_posix().endswith("backup-snapshot/.icode_output/.icode_output_406")
 assert "VERIFY-MISMATCH" not in tickets
 assert "VERIFY-ESCAPE" not in tickets
 assert "VERIFY-PATH-ESCAPE" not in tickets
@@ -494,7 +501,7 @@ ticket = pathlib.Path(sys.argv[3])
 report_root = pathlib.Path(sys.argv[4])
 home = pathlib.Path(sys.argv[5])
 tool = repo / "tools/verification_debt.py"
-env = dict(os.environ, HOME=str(home))
+env = dict(os.environ, HOME=str(home), USERPROFILE=str(home))
 
 def run(*args):
     return subprocess.run(
@@ -548,9 +555,13 @@ assert run("plan", "--ticket-dir", ticket, "--output", metadata_hardlink,
 assert __import__("hashlib").sha256(metadata.read_bytes()).hexdigest() == metadata_hash
 
 metadata_symlink = ticket / "metadata-symlink.json"
-metadata_symlink.symlink_to(metadata)
-assert run("plan", "--ticket-dir", ticket, "--output", metadata_symlink,
-           "--markdown", ticket / "metadata-symlink.md").returncode != 0
+try:
+    metadata_symlink.symlink_to(metadata)
+except OSError:
+    print("SKIP: metadata 符号链接别名断言（当前环境不能创建符号链接）")
+else:
+    assert run("plan", "--ticket-dir", ticket, "--output", metadata_symlink,
+               "--markdown", ticket / "metadata-symlink.md").returncode != 0
 
 index = home / ".claude/icode_data/index.json"
 index_hardlink = report_root / "index-hardlink.json"

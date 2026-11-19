@@ -48,8 +48,17 @@ AGENTS_ROOT="$FAKE_HOME/.agents/skills"
 ALL_INSTALLED=false
 if [[ -x "$INSTALL" ]] \
   && run_install "$FAKE_HOME" "$CLAUDE_ROOT" "$AGENTS_ROOT" \
-       --client all --skip-mcp >/dev/null 2>&1; then
+       --client all --skip-mcp >"$TMP/install.log" 2>&1; then
   ALL_INSTALLED=true
+fi
+# 安装器会引导 DOCX runtime（pip 装 python-docx/python-pptx）。离线环境里这必然失败，
+# 后面 12 条断言全部依赖安装成功——只在 pip 明确报"找不到包"时整体 SKIP，
+# 其它失败（权限、路径、脚本缺陷）仍然照常判红。
+if [[ "$ALL_INSTALLED" != true ]] \
+   && grep -qE "No matching distribution|Could not find a version that satisfies|Temporary failure in name resolution" "$TMP/install.log" 2>/dev/null; then
+  echo "  SKIP 开源安装合同（本机无法访问包索引，DOCX runtime 引导失败）"
+  echo "安装器结构检查已通过；安装后的断言未执行。"
+  exit 0
 fi
 if "$ALL_INSTALLED" \
   && [[ -f "$CLAUDE_ROOT/icode/SKILL.md" ]] \
@@ -259,7 +268,9 @@ fi
 SELF_HOME="$TMP/home-self"
 SELF_SOURCE="$SELF_HOME/.claude/skills/icode"
 mkdir -p "$SELF_SOURCE"
-(cd "$ROOT" && tar --exclude=.git --exclude=.worktrees -cf - .) \
+# 只复制 Git 跟踪文件：工作树里的 .icode_output / venv 等本地产物体积大且含
+# 平台专属符号链接，整树打包既慢又会在解包时报错
+(cd "$ROOT" && git ls-files -z | tar --null -T - -cf -) \
   | tar -xf - -C "$SELF_SOURCE"
 if [[ -x "$SELF_SOURCE/install.sh" ]] \
   && HOME="$SELF_HOME" USERPROFILE="$SELF_HOME" \
@@ -289,7 +300,9 @@ fi
 
 REAL_MCP_SOURCE="$TMP/real-mcp-source"
 mkdir -p "$REAL_MCP_SOURCE"
-(cd "$ROOT" && tar --exclude=.git --exclude=.worktrees -cf - .) \
+# 只复制 Git 跟踪文件：工作树里的 .icode_output / venv 等本地产物体积大且含
+# 平台专属符号链接，整树打包既慢又会在解包时报错
+(cd "$ROOT" && git ls-files -z | tar --null -T - -cf -) \
   | tar -xf - -C "$REAL_MCP_SOURCE"
 find "$REAL_MCP_SOURCE/mcp" -mindepth 2 -type f -name install.sh -delete
 mkdir -p "$REAL_MCP_SOURCE/mcp/fixture-mcp"
@@ -328,7 +341,9 @@ fi
 
 MCP_SOURCE="$TMP/mcp-source"
 mkdir -p "$MCP_SOURCE"
-(cd "$ROOT" && tar --exclude=.git --exclude=.worktrees -cf - .) \
+# 只复制 Git 跟踪文件：工作树里的 .icode_output / venv 等本地产物体积大且含
+# 平台专属符号链接，整树打包既慢又会在解包时报错
+(cd "$ROOT" && git ls-files -z | tar --null -T - -cf -) \
   | tar -xf - -C "$MCP_SOURCE"
 cat >"$MCP_SOURCE/mcp/install.sh" <<'SH'
 #!/usr/bin/env bash

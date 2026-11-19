@@ -12,8 +12,15 @@ ok()  { PASS=$((PASS+1)); echo "  ✅ $1"; }
 bad() { FAIL=$((FAIL+1)); echo "  ❌ $1"; }
 
 REG="mcp/sequential-thinking/scripts/register_mcp.py"
-NODE="$(command -v node)"
-NPX="$(command -v npx)"
+NODE="$(command -v node || true)"
+NPX="$(command -v npx || true)"
+
+# sequential-thinking 是 npx 启动的 MCP server；没有 Node.js 时注册必然失败，
+# 显式 SKIP 而不是给出与环境无关的假红。
+if [ -z "$NODE" ] || [ -z "$NPX" ]; then
+  echo "  SKIP sequential-thinking 注册合同（本机未安装 Node.js：node/npx 不在 PATH）"
+  exit 0
+fi
 
 # 1) 默认注入：空 HOME 下注册 → env.DISABLE_THOUGHT_LOGGING == "true"，且回读一致
 HOME1="$(mktemp -d)"

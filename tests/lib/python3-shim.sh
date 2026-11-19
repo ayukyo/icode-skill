@@ -124,23 +124,67 @@ fi
 #   - python3 可用（Linux/macOS/CI）→ 立即返回，零开销
 #   - python3 不可用且没有 `py` 启动器 → 什么都不做，行为与今天一致
 # ---------------------------------------------------------------------------
-# 用真实执行判定，不信任 --version（假 stub 的 --version 也可能 exit 0 而无输出）。
-if python3 -c 'print(1)' >/dev/null 2>&1; then
-  return 0 2>/dev/null || exit 0
-fi
+# 用**真实输出**判定，不信任退出码或 --version：WindowsApps 假 stub 对 `python -c`
+# 会返回 rc=0 但没有任何输出，只看退出码会把 stub 当成可用解释器。
+#
+# 快路径：已知解析到 WindowsApps 别名时不要真去执行它——该 stub 单次调用约 1.9s
+# （失败路径的冷启动），70 个测试累计就是 2 分钟以上。
+_icode_python3_path="$(command -v python3 2>/dev/null || true)"
+case "$_icode_python3_path" in
+  *[Ww]indows[Aa]pps*) : ;;
+  *)
+    if [ "$(python3 -c 'print(1)' 2>/dev/null)" = "1" ]; then
+      return 0 2>/dev/null || exit 0
+    fi
+    ;;
+esac
 
 command -v py >/dev/null 2>&1 || { return 0 2>/dev/null || exit 0; }
-py -3 -c 'print(1)' >/dev/null 2>&1 || { return 0 2>/dev/null || exit 0; }
 
 # 共享一个 shim 目录（不按 PID 分裂，避免每次测试残留一个新目录）。
 _icode_shim_dir="${_icode_tmpdir_posix}/icode-python3-shim"
-if [ ! -x "$_icode_shim_dir/python3" ]; then
-  mkdir -p "$_icode_shim_dir" 2>/dev/null || true
-  # -X utf8：Windows 的 Python 默认编码是 cp936，而测试里大量 open()/read_text 没有
-  # 显式指定 encoding，会抛 UnicodeDecodeError。强制 UTF-8 模式，与仓库其余入口
-  # （控制面调用用 `-B -X utf8`）保持一致。
-  printf '#!/bin/sh\nexec py -3 -X utf8 "$@"\n' > "$_icode_shim_dir/python3" 2>/dev/null || true
-  chmod +x "$_icode_shim_dir/python3" 2>/dev/null || true
+mkdir -p "$_icode_shim_dir" 2>/dev/null || true
+
+# 优先缓存真实解释器路径：Windows 的 `py` 启动器在 USERPROFILE 被重定向时会直接
+# 退出（rc=109、无任何输出），而测试隔离 HOME 恰恰要改 USERPROFILE。
+# 缓存同时省掉每个测试 1~2 次 `py` 启动（约 0.5s/次）。
+_icode_exe_cache="$_icode_shim_dir/.python-exe"
+_icode_py_exe=""
+if [ -s "$_icode_exe_cache" ]; then
+  _icode_py_exe="$(cat "$_icode_exe_cache" 2>/dev/null)"
+  if [ -n "$_icode_py_exe" ] && [ ! -x "$_icode_py_exe" ]; then
+    _icode_py_exe=""   # 缓存失效（解释器被卸载/换机）
+  fi
+fi
+if [ -z "$_icode_py_exe" ]; then
+  [ "$(py -3 -c 'print(1)' 2>/dev/null)" = "1" ] || { return 0 2>/dev/null || exit 0; }
+  _icode_py_exe="$(py -3 -c 'import sys; print(sys.executable)' 2>/dev/null)"
+  if [ -n "$_icode_py_exe" ]; then
+    printf '%s' "$_icode_py_exe" > "$_icode_exe_cache.$$" 2>/dev/null \
+      && mv -f "$_icode_exe_cache.$$" "$_icode_exe_cache" 2>/dev/null || true
+    # 不删旧包装器：下面的 stamp 比对会触发原子重写。并发跑测试时删除会造成
+    # 瞬时缺文件窗口（期间启动的测试 rc=127）。
+  fi
+fi
+if [ -z "$_icode_py_exe" ]; then
+  _icode_py_launch='py -3'
+else
+  _icode_py_launch="\"$_icode_py_exe\""
+fi
+# 只有解释器启动命令变了才重写包装器（用 .launch 里的字符串比对，read 是内建，
+# 不产生进程）。稳态下省掉每次测试 3 次进程创建（printf/chmod/mv 各约 0.5s），
+# 同时保证升级后旧的 `py -3` 包装器会被替换成本机真实解释器路径。
+# -X utf8：Windows 的 Python 默认编码是 cp936，而测试里大量 open()/read_text 没有
+# 显式指定 encoding，会抛 UnicodeDecodeError。强制 UTF-8 模式，与仓库其余入口
+# （控制面调用用 `-B -X utf8`）保持一致。
+_icode_stamp=""
+[ -f "$_icode_shim_dir/.launch" ] && IFS= read -r _icode_stamp < "$_icode_shim_dir/.launch"
+if [ "$_icode_stamp" != "$_icode_py_launch" ] || [ ! -f "$_icode_shim_dir/python3" ]; then
+  printf '#!/bin/sh\nexec %s -X utf8 "$@"\n' "$_icode_py_launch" > "$_icode_shim_dir/python3.$$" 2>/dev/null \
+    && chmod +x "$_icode_shim_dir/python3.$$" 2>/dev/null \
+    && mv -f "$_icode_shim_dir/python3.$$" "$_icode_shim_dir/python3" 2>/dev/null || true
+  printf '%s' "$_icode_py_launch" > "$_icode_shim_dir/.launch.$$" 2>/dev/null \
+    && mv -f "$_icode_shim_dir/.launch.$$" "$_icode_shim_dir/.launch" 2>/dev/null || true
 fi
 
 if [ -x "$_icode_shim_dir/python3" ]; then
@@ -150,5 +194,15 @@ if [ -x "$_icode_shim_dir/python3" ]; then
   esac
 fi
 
-unset _icode_shim_dir _icode_tmpdir_posix
+# `python` 同样可能是 WindowsApps 假 stub（rc=0、无输出），补齐同名包装器。
+# 只在包装器**还不存在**时探测：执行一次 python 约 0.5s，70 个测试都付一次不划算。
+# 代价是若之后原生 python 恢复可用，仍会被这里的包装器覆盖——对测试环境可接受。
+if [ ! -f "$_icode_shim_dir/python" ] && [ -x "$_icode_shim_dir/python3" ]; then
+  if [ "$(python -c 'print(1)' 2>/dev/null)" != "1" ]; then
+    cp -f "$_icode_shim_dir/python3" "$_icode_shim_dir/python" 2>/dev/null || true
+    chmod +x "$_icode_shim_dir/python" 2>/dev/null || true
+  fi
+fi
+
+unset _icode_shim_dir _icode_tmpdir_posix _icode_py_exe _icode_py_launch _icode_stamp
 return 0 2>/dev/null || exit 0

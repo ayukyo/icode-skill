@@ -80,7 +80,7 @@ fi
 $CTL archive-manifest --dir "$D" --archive-dir "$ARCHIVE" --write --skip-linters >/dev/null 2>&1
 # 3) archived 是控制根交接点；原 checkout 消失后仍能在归档根推进到 closed。
 if $CTL close-phase --dir "$D" --phase archived 2>/dev/null \
-    | grep -qE '"control_root":.*archive[\\/]close-1'; then
+    | grep -qE '"control_root":.*archive[\\/]+close-1'; then
   ok "archived 完成后交接到归档控制根"
 else bad "archived 未交接控制根"; fi
 if $CTL close-phase --dir "$D" --phase roots_verified 2>/dev/null \

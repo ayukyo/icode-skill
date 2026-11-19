@@ -13,6 +13,7 @@
 /demo/.ui_runtime_sim*/
 /demo/.all_tests_*/
 /demo/calc_demo
+/demo/calc_demo.exe
 /demo/*.o
 /demo/log/
 /demo/.serena/

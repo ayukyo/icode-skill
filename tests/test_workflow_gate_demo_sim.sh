@@ -24,9 +24,22 @@ SIM="demo/.icode_output/.workflow_sim"
 LINT="python3 tools/lint_workflow_contract.py"
 
 # 0) demo 工程真实基线：可构建、可运行（make clean && make && 基本运算）
-if (cd demo && make clean >/dev/null 2>&1 && make >/dev/null 2>&1 && \
-    echo "calc 1 2 +" | ./calc_demo >/dev/null 2>&1); then
+#    没有 make 时按 Makefile 同参数直接调用 gcc，保持"基线可构建可运行"这条断言有效
+demo_build() {
+  if command -v make >/dev/null 2>&1; then
+    (cd demo && make clean >/dev/null 2>&1 && make >/dev/null 2>&1)
+    return $?
+  fi
+  command -v gcc >/dev/null 2>&1 || return 127
+  (cd demo && rm -f main.o calc.o calc_demo &&
+   gcc -Wall -Wextra -std=c99 -O2 -c main.c -o main.o &&
+   gcc -Wall -Wextra -std=c99 -O2 -c calc.c -o calc.o &&
+   gcc -Wall -Wextra -std=c99 -O2 -o calc_demo main.o calc.o -lm)
+}
+if demo_build && echo "calc 1 2 +" | ./demo/calc_demo >/dev/null 2>&1; then
   ok "demo 工程可构建可运行（C 计算器基线）"
+elif ! command -v make >/dev/null 2>&1 && ! command -v gcc >/dev/null 2>&1; then
+  echo "  SKIP demo 工程基线（本机无 make 也无 gcc）"
 else
   bad "demo 工程构建/运行失败（基线不可用）"
 fi

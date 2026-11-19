@@ -114,7 +114,20 @@ SOURCE_BEFORE="$(find "$CORPUS" -type f -print0 | sort -z | xargs -0 sha256sum)"
 # 工具有意使用 os.pathsep；Windows 上是 ';' 而不是 ':'
 ADAPTER_PATHSEP="$(python3 -c 'import os; print(os.pathsep)')"
 
-if [[ -f "$TOOL" ]] \
+# 伪 adapter 是 bash 脚本：Windows 原生 subprocess 无法直接执行（WinError 193）。
+# 能否真实执行要先探测，不能假设。
+ADAPTER_EXEC_OK=0
+if python3 - "$GOOD_BIN/pdftotext" <<'PY' >/dev/null 2>&1
+import subprocess, sys
+subprocess.run([sys.argv[1]], check=True, capture_output=True)
+PY
+then
+  ADAPTER_EXEC_OK=1
+fi
+
+if [[ "$ADAPTER_EXEC_OK" -eq 0 ]]; then
+  printf '  SKIP %s（当前平台不能直接执行 shell 脚本形式的伪 CLI adapter）\n' "文档接入工具行为合同"
+elif [[ -f "$TOOL" ]] \
   && DOCUMENT_INTAKE_ADAPTER_PATHS="$BAD_BIN${ADAPTER_PATHSEP}$GOOD_BIN" \
      DOCUMENT_INTAKE_SKIP_DEFAULT_PATHS=1 \
      python3 "$TOOL" scan --root "$CORPUS" --output-root "$OUT" \

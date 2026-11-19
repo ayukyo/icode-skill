@@ -178,7 +178,9 @@ fi
 SELF_ROOT="$TMP/self-skills"
 SELF_SOURCE="$SELF_ROOT/icode"
 mkdir -p "$SELF_SOURCE"
-(cd "$ROOT" && tar --exclude=.git --exclude=.worktrees -cf - .) \
+# 只复制 Git 跟踪文件：工作树里的 .icode_output / venv 等本地产物体积大且含
+# 平台专属符号链接，整树打包既慢又会在解包时报错
+(cd "$ROOT" && git ls-files -z | tar --null -T - -cf -) \
   | tar -xf - -C "$SELF_SOURCE"
 if CLAUDE_SKILLS_ROOT="$SELF_ROOT" \
      AGENTS_SKILLS_ROOT="$TMP/self-unused" \
@@ -322,8 +324,10 @@ chmod +x "$FAKE_MV_BIN/sleep"
 COMMIT_ROLLBACK_OK=true
 export MV_FAIL_SOURCE_PATTERN
 export MV_FAIL_TARGET_PATTERN
-MV_FAIL_SOURCE_PATTERN="$ROLLBACK_AGENTS/.icode-stage-icode.*"
-MV_FAIL_TARGET_PATTERN="$ROLLBACK_AGENTS/icode"
+# 用形态无关的 glob：同步引擎内部会把路径规范化（`pwd -P` 在 MSYS 下给 /c/...），
+# 直接拼 $ROLLBACK_AGENTS 的字符串在 Windows 上永远匹配不上，失败注入形同虚设。
+MV_FAIL_SOURCE_PATTERN="*/.icode-stage-icode.*"
+MV_FAIL_TARGET_PATTERN="*/rollback-agents/icode"
 if PATH="$FAKE_MV_BIN:$PATH" \
      ICODE_SYNC_ENGINE=cp run_sync "$ROLLBACK_CLAUDE" "$ROLLBACK_AGENTS" \
        --apply --client all >/dev/null 2>&1; then
@@ -332,8 +336,8 @@ elif [[ "$ROLLBACK_CLAUDE_HASH" != "$(find "$ROLLBACK_CLAUDE/icode" -type f -pri
   || [[ "$ROLLBACK_AGENTS_HASH" != "$(find "$ROLLBACK_AGENTS/icode" -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum)" ]]; then
   COMMIT_ROLLBACK_OK=false
 fi
-MV_FAIL_SOURCE_PATTERN="$ROLLBACK_AGENTS/icode"
-MV_FAIL_TARGET_PATTERN="$ROLLBACK_AGENTS/.icode-backup-icode.*"
+MV_FAIL_SOURCE_PATTERN="*/rollback-agents/icode"
+MV_FAIL_TARGET_PATTERN="*/.icode-backup-icode.*"
 if PATH="$FAKE_MV_BIN:$PATH" \
      ICODE_SYNC_ENGINE=cp run_sync "$ROLLBACK_CLAUDE" "$ROLLBACK_AGENTS" \
        --apply --client all >/dev/null 2>&1; then

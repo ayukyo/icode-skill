@@ -29,6 +29,11 @@ else
   bad "PPT 视觉路由合同不完整"
 fi
 
+
+# python-pptx 未安装时，夹具与检查器都无法运行；显式 SKIP 而不是给假红
+PPTX_OK=0
+[ "$(python3 -c 'import pptx; print(1)' 2>/dev/null)" = "1" ] && PPTX_OK=1
+if [ "$PPTX_OK" -eq 1 ]; then
 if python3 - "$TMP" <<'PY'
 import base64
 import sys
@@ -108,6 +113,11 @@ then
   ok "损坏 PPTX 返回可审计 JSON 而非堆栈中断"
 else
   bad "损坏 PPTX 未返回可审计失败结果"
+fi
+
+else
+  printf '  SKIP %s
+' "PPT 渲染结构夹具与检查器场景（本机未安装 python-pptx）"
 fi
 
 printf '\nResult: %d passed, %d failed\n' "$PASS" "$FAIL"

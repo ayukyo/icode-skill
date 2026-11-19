@@ -15,8 +15,15 @@ for name in "${SERVERS[@]}"; do
   bash -n "$dir/uninstall.sh"
 done
 
-PYTHONDONTWRITEBYTECODE=1 python3 -m unittest "$ROOT/tests/test_local_mcp_suite.py"
-PYTHONDONTWRITEBYTECODE=1 python3 -m unittest "$ROOT/tests/test_local_mcp_paths.py"
+# MCP Python SDK 未安装时，server 模块无法导入；显式 SKIP 而不是给假红
+MCP_SDK_OK=0
+[ "$(python3 -c 'import mcp.types; print(1)' 2>/dev/null)" = "1" ] && MCP_SDK_OK=1
+if [ "$MCP_SDK_OK" -eq 1 ]; then
+  PYTHONDONTWRITEBYTECODE=1 python3 -m unittest "$ROOT/tests/test_local_mcp_suite.py"
+  PYTHONDONTWRITEBYTECODE=1 python3 -m unittest "$ROOT/tests/test_local_mcp_paths.py"
+else
+  echo "  SKIP unittest 套件（本机未安装 mcp Python SDK）"
+fi
 python3 - "$ROOT" <<'PY'
 import json
 import sys
