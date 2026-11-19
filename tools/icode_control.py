@@ -7892,18 +7892,62 @@ def _observe_host_adapter():
 # 其他用户/组可写位。POSIX 上 st_mode 能证明这一点；Windows 的 st_mode 只
 # 反映只读属性，无法说明 NTFS ACL 是否向他人授予写权限，必须另读 ACL。
 _OTHERS_WRITE_BITS = 0o022
+_MACOS_EVERYONE_ACL_UUID = "ABCDEFAB-CDEF-ABCD-EFAB-CDEF0000000C"
+
+
+def _macos_path_has_foreign_write_acl(path, *, ancestor=False):
+    """保守检查 macOS 扩展 ACL 中授予其他主体的写权限。"""
+    try:
+        result = subprocess.run(
+            ["/bin/ls", "-lde", str(path)], capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=5,
+            env={**os.environ, "LC_ALL": "C"})
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise ControlError("无法读取 macOS ACL：%s" % type(exc).__name__,
+                           gate_id="lite_host_adapter_unavailable") from exc
+    if result.returncode:
+        raise ControlError("无法读取 macOS ACL（退出码 %d）" % result.returncode,
+                           gate_id="lite_host_adapter_unavailable")
+
+    import pwd
+    current_user = pwd.getpwuid(os.getuid()).pw_name
+    write_permissions = {"write", "append", "add_file", "add_subdirectory",
+                         "delete_child", "delete", "writeattr", "writeextattr",
+                         "writesecurity"}
+    for line in result.stdout.splitlines()[1:]:
+        entry = re.match(r"^\s*\d+:\s+(.+?)\s+(allow|deny)\s+(.+)$", line)
+        if not entry or entry.group(2) != "allow":
+            continue
+        principal, permissions = entry.groups()[0], entry.group(3)
+        granted = {permission.strip() for permission in permissions.split(",")}
+        if not granted.intersection(write_permissions):
+            continue
+        if principal == current_user or principal == "user:" + current_user:
+            continue
+        # macOS ls may render the Everyone principal as its UUID instead of a name.
+        if principal.casefold() == _MACOS_EVERYONE_ACL_UUID.casefold():
+            return True
+        # Group and unresolved principals may include another account. Reject
+        # their write grants instead of assuming the ACL is private.
+        if principal.startswith("group:") or principal.startswith("user:"):
+            return True
+        return True
+    return False
 
 
 def _path_is_others_writable(path, *, ancestor=False):
     """目标是否允许当前用户之外的主体写入；无法判定时抛错（fail-closed）。
 
-    POSIX 读 st_mode；Windows 读实际 DACL，逐个 ACE 判断是否对
-    非当前用户的主体授予写类权限。
+    macOS 同时读取扩展 ACL；其它 POSIX 读 st_mode。Windows 读实际 DACL，
+    逐个 ACE 判断是否对非当前用户的主体授予写类权限。
     """
     # 检查解析后的目标本身：lstat 只看符号链接自身的权限位，
     # 会让一个指向 0777 目录的 0755 链接被误判为安全。
     resolved = Path(path).resolve()
-    if os.name != "nt":
+    if os.name == "posix":
+        if os.uname().sysname == "Darwin" and _macos_path_has_foreign_write_acl(
+                resolved, ancestor=ancestor):
+            return True
         return bool(resolved.stat().st_mode & _OTHERS_WRITE_BITS)
     try:
         return _windows_path_has_foreign_write_ace(resolved, ancestor=ancestor)

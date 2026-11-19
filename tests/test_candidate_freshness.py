@@ -364,6 +364,28 @@ class CandidateTests(unittest.TestCase):
         mode = self.capture()
         self.assertNotEqual(mode["candidate_id"], unstaged["candidate_id"])
 
+    @unittest.skipUnless(sys.platform == "darwin", "requires a macOS filesystem")
+    def test_unicode_and_case_aliases_are_bound_to_real_git_candidate(self):
+        composed = "café source.py"
+        decomposed = "cafe\u0301 source.py"
+        (self.repo / composed).write_text("value = 1\n", encoding="utf-8", newline="\n")
+        unicode_before = self.capture()
+        self.assertTrue((self.repo / decomposed).exists())
+        self.assertTrue((self.repo / composed).samefile(self.repo / decomposed))
+        (self.repo / decomposed).write_text("value = 2\n", encoding="utf-8", newline="\n")
+        unicode_after = self.capture()
+        self.assertNotEqual(unicode_before["candidate_id"], unicode_after["candidate_id"])
+
+        upper = self.repo / "CaseProbe.py"
+        lower = self.repo / "caseprobe.py"
+        upper.write_text("value = 1\n", encoding="utf-8", newline="\n")
+        case_before = self.capture()
+        self.assertTrue(lower.exists())
+        self.assertTrue(upper.samefile(lower))
+        lower.write_text("value = 2\n", encoding="utf-8", newline="\n")
+        case_after = self.capture()
+        self.assertNotEqual(case_before["candidate_id"], case_after["candidate_id"])
+
     def test_untracked_scope_exclusions_checkout_and_base_drift(self):
         old = self.capture()
         (self.repo / "new.txt").write_text("new", encoding="utf-8", newline="\n")

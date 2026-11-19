@@ -707,6 +707,22 @@ class LiteWorkflowTests(unittest.TestCase):
         self.assertTrue(ctl._path_is_others_writable(directory))
         self.assertFalse(ctl._path_is_others_writable(directory, ancestor=True))
 
+    @unittest.skipUnless(sys.platform == "darwin", "requires macOS extended ACLs")
+    def test_macos_adapter_acl_write_is_not_trusted(self):
+        target = self.host_root / "macos-acl-probe.py"
+        target.write_text("pass\n", encoding="utf-8")
+        target.chmod(0o600)
+
+        subprocess.run(["/bin/chmod", "+a", "everyone allow read", str(target)],
+                       check=True, capture_output=True, timeout=10)
+        self.assertFalse(ctl._path_is_others_writable(target))
+        subprocess.run(["/bin/chmod", "+a", "everyone allow write", str(target)],
+                       check=True, capture_output=True, timeout=10)
+        acl = subprocess.run(["/bin/ls", "-lde", str(target)], check=True,
+                             capture_output=True, text=True, timeout=10).stdout
+        self.assertRegex(acl, r"allow [^\n]*\bwrite\b")
+        self.assertTrue(ctl._path_is_others_writable(target))
+
     def test_others_writable_check_flags_group_and_world(self):
         # P1：权限判定必须真正拦截组/其他人可写，而不是恒真或恒假。
         base = Path(tempfile.mkdtemp(prefix="icode-acl-"))

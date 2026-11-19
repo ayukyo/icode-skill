@@ -122,18 +122,27 @@ esac
 # WindowsApps 的 python3/python 可能是假 stub（--version 无输出但 exit 0）。
 # 探测顺序与其余入口（tools/selfcheck_reasoning_gate.sh、mcp/install.sh）一致：
 # 真实 python3/python 优先；Windows(Git Bash/MSYS) 回退 py 启动器。
-_py_ok() { [ "$("$@" -c 'print(1)' 2>/dev/null)" = "1" ]; }
+_python_usable() { [ "$("$@" -c 'import sys; print(int(sys.version_info >= (3, 10)))' 2>/dev/null)" = "1" ]; }
 PYTHON_BIN=""
-for candidate in python3 python; do
+if [[ -n "${ICODE_PYTHON_BIN:-}" ]]; then
+  if _python_usable "$ICODE_PYTHON_BIN"; then
+    PYTHON_BIN="$ICODE_PYTHON_BIN"
+  else
+    echo "❌ ICODE_PYTHON_BIN 必须指向 Python 3.10 或更新版本" >&2
+    exit 1
+  fi
+fi
+for candidate in python3.12 python3.11 python3 python; do
+  [[ -n "$PYTHON_BIN" ]] && break
   if command -v "$candidate" >/dev/null 2>&1; then
     _bin="$(command -v "$candidate")"
-    if [ -n "$("$_bin" --version 2>&1 | grep -i 'python')" ]; then
+    if _python_usable "$_bin"; then
       PYTHON_BIN="$_bin"
       break
     fi
   fi
 done
-if [ -z "$PYTHON_BIN" ] && _py_ok py -3; then
+if [ -z "$PYTHON_BIN" ] && _python_usable py -3; then
   # 以包装函数保持 "$PYTHON_BIN" 的单词引用形式（bash 解析函数先于 PATH）
   py3() { py -3 "$@"; }
   PYTHON_BIN=py3
@@ -691,11 +700,15 @@ reap_transaction_leftovers() {
   for d in "${ICODE_DIRS[@]}"; do
     roots+=("$(dirname "$d")")
   done
+  # Bash 3.2 expands an empty array under set -u as an unset variable.
+  [[ ${#roots[@]} -gt 0 ]] || return 0
   for d in "${roots[@]}"; do
     dup=false
-    for s in "${seen[@]}"; do
-      [[ "$s" == "$d" ]] && dup=true && break
-    done
+    if [[ ${#seen[@]} -gt 0 ]]; then
+      for s in "${seen[@]}"; do
+        [[ "$s" == "$d" ]] && dup=true && break
+      done
+    fi
     [[ "$dup" == true ]] && continue
     seen+=("$d")
     for t in "$d"/.icode-backup-* "$d"/.icode-stage-*; do
