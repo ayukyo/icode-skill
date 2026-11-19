@@ -301,6 +301,11 @@ printf 'claude rollback original\n' >"$ROLLBACK_CLAUDE/icode/original.txt"
 printf 'agents rollback original\n' >"$ROLLBACK_AGENTS/icode/original.txt"
 ROLLBACK_CLAUDE_HASH="$(find "$ROLLBACK_CLAUDE/icode" -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum)"
 ROLLBACK_AGENTS_HASH="$(find "$ROLLBACK_AGENTS/icode" -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum)"
+# Windows 上同步的提交路径不经过 retry_move_dir（探针实测：假 mv 从未被调用），
+# 无法注入 mv 失败，该回滚场景在 Windows 不可验证。显式 SKIP 并写明原因。
+if [[ -n "${MSYSTEM:-}" ]] || [[ "$(uname -s 2>/dev/null)" == MINGW* ]] || [[ "$(uname -s 2>/dev/null)" == MSYS* ]]; then
+  printf '  SKIP %s（Windows 提交路径不经过 retry_move_dir，mv 失败无法注入）\n' "ICODE commit failure rolls back earlier selected targets"
+else
 REAL_MV="$(command -v mv)"
 FAKE_MV_BIN="$TMP/fake-mv-bin"
 mkdir -p "$FAKE_MV_BIN"
@@ -352,6 +357,7 @@ else
   bad "ICODE commit failure rolls back earlier selected targets"
 fi
 unset MV_FAIL_SOURCE_PATTERN MV_FAIL_TARGET_PATTERN
+fi
 
 cat >"$PACKS/bad.json" <<'JSON'
 {"schema_version":1,"skills":[
