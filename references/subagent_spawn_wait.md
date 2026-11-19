@@ -8,7 +8,7 @@
 
 ## 机械等待契约（强制）
 
-1. **一律后台 spawn + 阻塞等**：`Agent` **后台 spawn（`run_in_background: true`）拿 task_id** → 紧跟 `TaskOutput(task_id, block=true, timeout=...)` **阻塞等结果**——唯一可机械执行超时的等待方式，超时把控制权交回主代理
+1. **一律后台 spawn + 阻塞等**：`Agent` **后台 spawn（`run_in_background: true`）拿 task_id** → 紧跟 `TaskOutput(task_id, block=true, timeout=...)` **阻塞等结果**——**首选**等待原语，超时把控制权交回主代理。宿主未提供 `TaskOutput` 时不得裸同步 spawn 或被动等通知，按下方「等待原语探测与降级」执行
 2. **禁止裸同步 spawn**：`run_in_background: false` 同步 spawn 当唯一等待手段——`Agent` 工具**无 timeout 参数**，同步 spawn 挂死 = 主代理被整个工具调用卡死、无超时边界、**墙钟截止也救不了**（主循环被工具调用阻塞，代理自己无法执行任何超时；一旦误踩只能人工中断）。**⚠️ `Agent` 工具自身说明会诱导裸同步 spawn**（"只有下一步依赖结果时才用 `run_in_background: false`"）——对所有子代理**一律无效**，只认后台 spawn + `TaskOutput` 机械超时，不被工具提示带偏（实测踩坑：按工具提示同步 spawn 等子代理返回，挂死数小时无逃生门）
 3. **禁止被动等任务通知**：断连/挂死的子代理**永远不发通知**，主代理回合制空闲时无定时器，任何墙钟阈值都触发不了
 4. **并行 spawn 禁止串行**：相互独立的子代理必须一次性**并行后台 spawn 全部**（全拿 task_id 再逐个 `TaskOutput` 阻塞等）；禁止等一个返回再 spawn 下一个——串行总等待放大 N 倍、耗尽墙钟 deadline 预算
@@ -16,6 +16,29 @@
    - **首次 spawn**：`timeout = 600000`（10 分钟看门狗档，`BACKGROUND_WATCHDOG_SECONDS=600`）。超时 → 判「疑似断连/挂死」→ `TaskStop` → 前台重来
    - **前台重来 / 重试**：`timeout = 120000`（`TIMEOUT_SECONDS=120`，可由 `.ico_metadata.json.task_timeout_seconds` 覆盖，见 [dir_and_metadata.md](dir_and_metadata.md)「`task_timeout_seconds` 字段」段）。超时 → 先 `TaskStop` 停句柄 → 重试 1 次（换措辞 + 可换 subagent_type 兜底）→ 二次仍超时 → 诚实降级
 6. **子代理失败处理**：失败（返回空 / 截断 / schema 不符 / 超时）→ 按对应步骤的降级标签（如 `[未验证-子代理失败]` / `[未验证-子代理对抗失败]`）**诚实降级**，**禁止主代理自演代替**——判断性结论自演 = 自己提的结论自己确认自己（既当运动员又当裁判）；主代理 Read/Grep 实证铁证不算自演（属事实核查），见 [adversarial.md](adversarial.md)「主代理实证 ≠ 自演」
+
+## 等待原语探测与降级（宿主差异，强制）
+
+> **为什么需要**：本契约的机械等待建立在 `TaskOutput` 上，但**并非所有宿主都暴露它**（实测：某宿主 `ToolSearch select:TaskOutput` 无命中，`Agent` 可用而等待原语不可用）。此时若仍按「`TaskOutput` 是唯一方式」字面执行，合规路径直接不存在——执行代理要么被动等通知（被本条契约禁止）、要么裸同步 spawn（被禁止），两条都是坑。
+
+**spawn 前必须先探测并记录 `wait_primitive`**（按优先级）：
+
+| 取值 | 判定 | 等待方式 |
+|---|---|---|
+| `task_output` | 工具列表直接可见，或 `ToolSearch select:TaskOutput` 命中 | 原契约：`TaskOutput(task_id, block=true, timeout)` 阻塞等 |
+| `monitor_until` | `TaskOutput` 不可用，但宿主提供 `Monitor`/等价「until 条件 + 超时」工具 | 一次条件阻塞调用表达「直到 N 个子代理终止或 deadline」，到点未满足 → `TaskStop` 未返回者 + 按 deadline 规则降级 |
+| `none` | 上述均不可用 | 见下方降级路径 |
+
+**`wait_primitive = none` 时的强制规则**：
+
+1. **仍并行后台 spawn**——保住并行收益与观测记录，不因缺原语退回串行。
+2. **禁止空闲等待**：spawn 后**在同一回合继续执行与该结果无关的工作**，不得以「等通知」占位空转，也不得只发一句「等待中」就结束回合。
+3. **整合点只认已到达的通知**：未到达者标 `[未验证-无等待原语-未收口]`，与被判失败的 `[未验证-子代理失败]` **区分开**——前者是能力缺失，后者是子代理真的坏了。
+4. **禁止声称「已等满 20 分钟」**：没有阻塞原语就无法证明等待发生过，该说法等同伪造 deadline 降级。
+5. **必须留痕**：把 `wait_primitive` 写进 trace（`.thinking_gate_trace.jsonl` / `.mcp_gate_trace.jsonl` 的 `availability`）与 `adversarial_verification`（或 `extensions.agent.spawns[].join_condition`，见下方观测记录契约），让审计能区分「没等」和「没法等」。
+6. **判断性结论不得因此升级**：依赖质疑者裁决的 issue，在 `none` 下仍只能停在原有降级标签，不得因「反正等不到」改标 `confirmed`。
+
+**探测本身要留证据**：记录实际做过的发现动作（工具列表快照 / `ToolSearch` 查询串与结果 / 宿主能力声明），不写「未暴露」四个字了事；空结果不等于未安装，但可作为本会话不可用的证据。
 
 ## 墙钟硬截止（总闸，防"等子代理返回"拖成几小时）
 

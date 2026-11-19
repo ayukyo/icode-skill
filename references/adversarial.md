@@ -56,7 +56,7 @@
 
 若分析对象为 0 条需对抗项（全无问题，或全部已实证无需对抗），跳过本步骤，直接置 `adversarial_verification = null`，进入产出写入。不得为空清单 spawn 质疑者浪费资源。
 
-## 显式等待 + 超时机制（防"主代理未等子代理跑降级"；统一走 `TaskOutput` 机械阻塞等待）
+## 显式等待 + 超时机制（防"主代理未等子代理跑降级"；首选 `TaskOutput` 机械阻塞等待，宿主无此原语时按 [subagent_spawn_wait.md](subagent_spawn_wait.md)「等待原语探测与降级」执行）
 
 > **通用契约**：本段 + 「整合墙钟硬截止」段是「子代理 spawn 等待通用契约」（见 [subagent_spawn_wait.md](subagent_spawn_wait.md)）的**质疑者实例**——机械等待与墙钟规则逐条对齐（同一组常量/档位），冲突以通用契约为准；质疑者特有内容（3 质疑者分工 / verdict schema / 裁决优先级 / `no_spawn_env` 代行门控）保留本文件。非对抗 spawn 点（doc 审计 / §6.7 facts 收集 / haiku 兜底 / 摘要消化 / 并行子任务）直接按通用契约执行。
 

@@ -17,6 +17,9 @@ lint_mcp_coverage.py —— cheap-research gate 运行时校验器（v2 重构�
   用了 skip 类 decision = invalid_skip（独立计数，进入 coverage 分母，违规）。
   degraded_after_attempt 必须 attempted=true 且 result ∈ {error, empty, timeout}。
   unavailable_before_call 必须 attempted=false、result=unavailable，并提供工具发现与降级证据。
+  注意：本文件的 result 词表与 .thinking_gate_trace.jsonl 不同（后者对同一 decision 要求
+  result=degraded，见 references/thinking_core.md「思考工具未暴露的 trace 合同」），
+  两套 trace 不要互相套用取值。
 - eligible=false 的 gate 只允许 decision ∈ {skipped_not_eligible, skipped_stage_not_reached}，
   且必须带结构化 evidence（不能只写自然语言"没必要"）。
 - invalid_skip / missing / schema 错误 / sensitive 均为失败条件；coverage = fulfilled / eligible，

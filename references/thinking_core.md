@@ -114,6 +114,15 @@ N. **强制思考前置**（不可跳过，缺证据视为不合规；按 [refer
 
 `tier/default_tier/triggers/mechanism` 保留原等级合同，不因工具缺失降到 L0/L1；`mechanism` 表示该等级要求的机制，实际替代载体由 `availability.fallback` 表达。沿用 `schema_version=1`，新增字段为条件必填；旧真实调用 trace 继续有效。`result=degraded` 只表示降级履行，不代表工具调用成功。完整示例见 [thinking_detail.md](thinking_detail.md)「thinking gate trace」。字段校验只检查声明一致性，不能独立证明工具不可见或思考完成，引用必须指向真实证据。
 
+> **⚠️ 与 MCP gate trace 的 `result` 词表不同（易错点，两套不能互套）**：同为 `decision=unavailable_before_call`，两种 trace 要求的值**不一样**——
+>
+> | trace 文件 | 校验器 | `unavailable_before_call` 的 `result` | 其余取值 |
+> |---|---|---|---|
+> | `.thinking_gate_trace.jsonl` | `tools/lint_thinking_gate.py` | **`degraded`**（历史工单沿用此值） | `success` / `blocked` |
+> | `.mcp_gate_trace.jsonl` | `tools/lint_mcp_coverage.py` | **`unavailable`** | `degraded_after_attempt` 用 `error` / `empty` / `timeout` |
+>
+> 写 trace 前先确认目标文件属于哪一套词表。实测踩坑：照本文件的 `degraded` 写 MCP trace，被 `lint_mcp_coverage.py` 判 `invalid` 并阻断 `transition`。两侧同时要求 `attempted=false`，只有 `result` 相反。
+
 ## 通用流程（每步执行）
 
 1. **分级**：按 [mcp_per_step.md](mcp_per_step.md)「默认等级表」+ `mcp/reasoning-gate/gates.json` 升级触发器确定本步等级（L0～L3），把等级与触发原因写入 `{ICODE_OUT_DIR}/.thinking_gate_trace.jsonl`（每 step 最终一行；schema/词表见 [thinking_detail.md](thinking_detail.md)「thinking gate trace」段）。
