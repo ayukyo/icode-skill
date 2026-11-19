@@ -64,6 +64,17 @@ python3 tools/icode_control.py step --dir <out_dir> --step <step> --phase finish
 
 fast 与 start 都可把已确定的连续机械动作放进同一次宿主 Bash/工具调用，**内部仍顺序执行原生命令，首个非零退出即停止**。实际审查、适用测试、必要 after_wait 和 before_write 已完成、产物已真实落盘后才可使用；不能把多个阶段的语义判断或实际 Read 合并。宿主不支持串行编排时继续原单步调用。
 
+同一 attempt 的收尾（产物登记 → before_transition 复检 → finish → 可选 transition）优先用原生子命令，它逐阶段调用同一条命令、同一套门禁，只去掉重复的进程启动：
+
+```bash
+python3 tools/icode_control.py closeout --dir <out_dir> --step <step> --attempt <attempt> \
+  --paths-json '["a.json","b.json"]' --scope ticket \
+  --outcome <success|failure|degraded|blocked|skipped> --evidence <short-ref> \
+  [--transition-to <status>] [--request <prefix>]
+```
+
+`--request` 为幂等键前缀，各阶段派生 `<prefix>.artifact/.check/.finish/.transition`；状态目标因步骤而异，故 `transition` 只在显式给出 `--transition-to` 时执行，完成态仍需 `--delivery-verdict`。
+
 下面是 plan 的可运行示例。一次 Bash 调用依次传入实际技能根、工单目录、真实 attempt、该次请求前缀四个参数；Python 解释器按平台解析，Windows 把 `PY=(python3)` 换为 `PY=(py -3)`，或单独放入已验证的 `ICODE_PYTHON_BIN` 绝对路径。其它步骤按现有目录的真实端口、检查和合法目标状态逐项组成序列，不发明缩略状态或少跑审查阶段。
 
 ```bash

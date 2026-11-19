@@ -12,12 +12,11 @@ Guard for the planned consolidations (``artifact --paths-json`` and a
 Nothing here relaxes a gate: the comparison runs on the real event ledger, so a
 batch that skips a hash, an output port, or a boundary check fails.
 
-``artifact --paths-json`` is implemented, so its cases run; ``closeout`` is not,
-and its case stays gated behind an option probe so it activates by itself when
-the command lands. The fixture terminates the step as ``blocked`` on purpose -
-that keeps the receipt set deterministic without having to synthesise a complete
-inspection report, and the comparison target is the ledger sequence, not the
-outcome.
+Both capabilities are implemented, so every case runs; a withdrawn option fails
+the capability check instead of silently skipping the equivalence proof. The
+fixture terminates the step as ``blocked`` on purpose - that keeps the receipt
+set deterministic without having to synthesise a complete inspection report, and
+the comparison target is the ledger sequence, not the outcome.
 """
 import argparse
 import importlib.util
@@ -187,6 +186,12 @@ def artifact_args(*extra):
     return ("artifact", "--step", STEP, "--attempt", ATTEMPT, "--scope", "workspace", *extra)
 
 
+def test_batch_and_closeout_capabilities_are_present():
+    """Withdrawing either option must fail here, not silently skip the proofs."""
+    assert BATCH_ARTIFACT, "artifact --paths-json is missing; batched registration is required"
+    assert CLOSEOUT_AVAILABLE, "closeout is missing; mechanical step closeout is required"
+
+
 def test_compare_detects_a_changed_receipt():
     """The comparator must be able to fail, otherwise the guard is decorative."""
     left = [{"output": "code_files", "sha256": "a" * 64, "size": 1}]
@@ -208,8 +213,6 @@ def test_single_path_registration_is_deterministic(tmp_path):
     assert event_sequence(first) == event_sequence(second)
 
 
-@pytest.mark.skipif(not BATCH_ARTIFACT,
-                    reason="artifact --paths-json not implemented yet; activates with the option")
 def test_artifact_batch_matches_single_path_calls(tmp_path):
     single, single_workspace = build_ticket(tmp_path / "single", acting=manual_sequence)
     batched, batched_workspace = build_ticket(tmp_path / "batch", acting=batched_sequence)
@@ -217,8 +220,6 @@ def test_artifact_batch_matches_single_path_calls(tmp_path):
     assert event_sequence(single) == event_sequence(batched)
 
 
-@pytest.mark.skipif(not BATCH_ARTIFACT,
-                    reason="artifact --paths-json not implemented yet; activates with the option")
 def test_batch_refuses_mixed_path_and_paths_json(tmp_path):
     out_dir, _ = build_ticket(tmp_path / "mixed")
     result = run_expect_failure(out_dir, *artifact_args(
@@ -226,8 +227,6 @@ def test_batch_refuses_mixed_path_and_paths_json(tmp_path):
     assert result["gate_id"] == "artifact_batch"
 
 
-@pytest.mark.skipif(not BATCH_ARTIFACT,
-                    reason="artifact --paths-json not implemented yet; activates with the option")
 @pytest.mark.parametrize("members", [
     ["src/a.py", "src/a.py"],
     ["src/../src/a.py"],
@@ -244,8 +243,6 @@ def test_batch_refuses_non_canonical_members(tmp_path, members):
     assert receipts(out_dir, workspace) == []
 
 
-@pytest.mark.skipif(not BATCH_ARTIFACT,
-                    reason="artifact --paths-json not implemented yet; activates with the option")
 def test_batch_is_all_or_nothing_on_a_missing_member(tmp_path):
     out_dir, workspace = build_ticket(tmp_path / "atomic")
     result = run_expect_failure(out_dir, *artifact_args(
@@ -254,8 +251,6 @@ def test_batch_is_all_or_nothing_on_a_missing_member(tmp_path):
     assert receipts(out_dir, workspace) == []
 
 
-@pytest.mark.skipif(not BATCH_ARTIFACT,
-                    reason="artifact --paths-json not implemented yet; activates with the option")
 def test_batch_conflict_aborts_before_any_append(tmp_path):
     out_dir, workspace = build_ticket(tmp_path / "conflict")
     run(out_dir, *artifact_args("--path", FILES[1], "--request", "batch#1"))
@@ -266,8 +261,6 @@ def test_batch_conflict_aborts_before_any_append(tmp_path):
     assert [row["path"] for row in receipts(out_dir, workspace)] == [FILES[1]]
 
 
-@pytest.mark.skipif(not BATCH_ARTIFACT,
-                    reason="artifact --paths-json not implemented yet; activates with the option")
 def test_batch_replay_is_idempotent(tmp_path):
     out_dir, workspace = build_ticket(tmp_path / "replay")
     payload = json.dumps(list(FILES))
@@ -280,6 +273,35 @@ def test_batch_replay_is_idempotent(tmp_path):
     assert len(receipts(out_dir, workspace)) == before == len(FILES)
 
 
+def test_closeout_without_artifacts_matches_manual_finish(tmp_path):
+    def closeout_only(out_dir, workspace):
+        run(out_dir, "closeout", "--step", STEP, "--attempt", ATTEMPT,
+            "--outcome", "blocked", "--evidence", "fixture termination", "--request", "closeout")
+
+    reference, _ = build_ticket(tmp_path / "manual", acting=finish_step)
+    candidate, _ = build_ticket(tmp_path / "closeout", acting=closeout_only)
+    assert event_sequence(reference) == event_sequence(candidate)
+
+
+def test_closeout_forwards_the_transition_target(tmp_path):
+    """An illegal target must fail exactly as the manual transition does."""
+    reference, workspace = build_ticket(tmp_path / "manual")
+    register_single(reference, workspace)
+    finish_step(reference, workspace)
+    manual = run_expect_failure(reference, "transition", "--to", "plan_done", "--request-id", "tr")
+
+    candidate, _ = build_ticket(tmp_path / "closeout")
+    consolidated = run_expect_failure(
+        candidate, "closeout", "--step", STEP, "--attempt", ATTEMPT,
+        "--paths-json", json.dumps(list(FILES)), "--scope", "workspace",
+        "--outcome", "blocked", "--evidence", "fixture termination",
+        "--request", "closeout", "--transition-to", "plan_done")
+
+    assert manual["gate_id"] == "step_receipt"
+    assert consolidated["gate_id"] == manual["gate_id"]
+    assert consolidated["violations"] == manual["violations"]
+
+
 def test_manual_closeout_sequence_is_repeatable(tmp_path):
     """Documents the sequence ``closeout`` has to reproduce, with no closeout present."""
     first, _ = build_ticket(tmp_path / "manual-one", acting=manual_sequence)
@@ -287,8 +309,6 @@ def test_manual_closeout_sequence_is_repeatable(tmp_path):
     assert event_sequence(first) == event_sequence(second)
 
 
-@pytest.mark.skipif(not CLOSEOUT_AVAILABLE,
-                    reason="closeout subcommand not implemented yet; activates with the command")
 def test_closeout_matches_the_manual_sequence(tmp_path):
     def consolidated(out_dir, workspace):
         run(out_dir, "closeout", "--step", STEP, "--attempt", ATTEMPT,

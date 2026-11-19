@@ -7565,6 +7565,83 @@ def cmd_artifact(args, *, git_provider=None, require_git_provider=False, inspect
     return 0
 
 
+def _closeout_run(argv, access):
+    """Run one existing subcommand in-process and return its parsed payload.
+
+    Composition keeps every gate, port check, receipt and lock at its single
+    source; closeout only removes repeated process starts.
+    """
+    parsed = build_parser().parse_args(argv)
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        code = parsed.func(parsed, **access) if access else parsed.func(parsed)
+    payload = None
+    text = buffer.getvalue().strip()
+    if text.startswith("{"):
+        try:
+            payload = json.loads(text)
+        except ValueError:
+            payload = None
+    if code not in (0, None):
+        raise ControlError(f"closeout 子阶段退出码 {code}", exit_code=code)
+    if isinstance(payload, dict) and payload.get("ok") is False:
+        extra = {key: payload[key] for key in ("gate_id", "hint", "violations") if key in payload}
+        raise ControlError(str(payload.get("error") or "closeout 子阶段失败"), **extra)
+    return payload if payload is not None else {"ok": True}
+
+
+def cmd_closeout(args, *, git_provider=None, require_git_provider=False, inspection_provider_factory=None):
+    """机械收尾：可选产物登记 + before_transition 复检 + finish + 可选 transition。
+
+    每个子阶段仍走各自的命令、锁与事务；closeout 只去掉重复的进程启动，不合并、
+    不跳过任何门禁。状态目标因步骤而异，故 transition 只在显式给出时执行。
+    """
+    access = {}
+    if _candidate_access_requested(git_provider, require_git_provider) or inspection_provider_factory is not None:
+        access = dict(git_provider=git_provider, require_git_provider=require_git_provider,
+                      inspection_provider_factory=inspection_provider_factory)
+    out_dir = str(Path(args.dir).resolve())
+
+    def phase_request(name):
+        return None if args.request is None else f"{args.request}.{name}"
+
+    results = {}
+    if args.paths_json is not None or args.path is not None:
+        argv = ["artifact", "--dir", out_dir, "--step", args.step, "--attempt", args.attempt,
+                "--scope", args.scope]
+        argv += (["--paths-json", args.paths_json] if args.paths_json is not None
+                 else ["--path", args.path])
+        if phase_request("artifact"):
+            argv += ["--request", phase_request("artifact")]
+        results["artifacts"] = _closeout_run(argv, access)
+
+    argv = ["step", "--dir", out_dir, "--step", args.step, "--attempt", args.attempt,
+            "--phase", "check", "--boundary", "before_transition"]
+    if phase_request("check"):
+        argv += ["--request", phase_request("check")]
+    results["check"] = _closeout_run(argv, access)
+
+    argv = ["step", "--dir", out_dir, "--step", args.step, "--attempt", args.attempt,
+            "--phase", "finish", "--outcome", args.outcome]
+    for evidence in args.evidence:
+        argv += ["--evidence", evidence]
+    if phase_request("finish"):
+        argv += ["--request", phase_request("finish")]
+    results["finish"] = _closeout_run(argv, access)
+
+    if args.transition_to:
+        argv = ["transition", "--dir", out_dir, "--to", args.transition_to]
+        if args.delivery_verdict:
+            argv += ["--delivery-verdict", args.delivery_verdict]
+        if phase_request("transition"):
+            argv += ["--request-id", phase_request("transition")]
+        results["transition"] = _closeout_run(argv, {})
+
+    print(json.dumps({"ok": True, "step": args.step, "attempt": args.attempt, **results},
+                     ensure_ascii=False, indent=2))
+    return 0
+
+
 def evaluate_execution_policy(model, op_class, failure, attempts):
     if op_class not in model["operation_classes"]:
         raise ControlError(f"未知 operation class: {op_class!r}", exit_code=2,
@@ -8320,6 +8397,21 @@ def build_parser():
     p.add_argument("--request", help="幂等键；批量时每个成员使用 request#序号")
     p.set_defaults(func=cmd_artifact)
 
+    p = sub.add_parser("closeout", help="步骤机械收尾：产物登记 + before_transition 复检 + finish（可选 transition）")
+    p.add_argument("--dir", required=True)
+    p.add_argument("--step", required=True)
+    p.add_argument("--attempt", required=True)
+    p.add_argument("--path", help="单个产物路径；与 --paths-json 互斥")
+    p.add_argument("--paths-json", help="批量产物：1至256个规范相对POSIX路径的JSON数组，最多64KiB")
+    p.add_argument("--scope", default="ticket", choices=["ticket", "workspace", "external"])
+    p.add_argument("--outcome", required=True, help="finish 结果")
+    p.add_argument("--evidence", action="append", required=True, help="finish 的简短证据引用，可重复")
+    p.add_argument("--transition-to", help="可选：finish 成功后继续流转到该状态")
+    p.add_argument("--delivery-verdict", choices=DELIVERY_VERDICTS,
+                   help="仅 --transition-to completed 时使用")
+    p.add_argument("--request", help="幂等键前缀；各阶段派生 <prefix>.artifact/.check/.finish/.transition")
+    p.set_defaults(func=cmd_closeout)
+
     p = sub.add_parser("inspection", help="原生自查清单：范围/关联单元/专项规则/源码定位（不调用模型）")
     p.add_argument("--dir", required=True)
     p.add_argument("--step", required=True, choices=["code", "deepcheck", "audit"])
@@ -8609,6 +8701,7 @@ def main(*, git_provider=None, require_git_provider=False, inspection_provider_f
             (args.cmd == "step" and args.func is cmd_step and getattr(args, "phase", None) in {"start", "check", "finish"}) or
             (args.cmd == "inspection" and args.func is cmd_inspection and getattr(args, "phase", None) in {"prepare", "read", "assess", "check"}) or
             (args.cmd == "artifact" and args.func is cmd_artifact) or
+            (args.cmd == "closeout" and args.func is cmd_closeout) or
             (args.cmd == "check-outputs" and args.func is cmd_check_outputs))
         if access and not (ordinary or code_entry):
             raise ControlError("B1 command dispatch is not enabled", gate_id="candidate_business_propagation_pending")
@@ -8634,7 +8727,12 @@ def main(*, git_provider=None, require_git_provider=False, inspection_provider_f
             payload = json.loads(out)
         except (ValueError, TypeError):
             payload = None
-        checkpoint = ((args.cmd == "transition" and getattr(args, "to", None) == "completed") or
+        closeout_completed = (args.cmd == "closeout"
+                              and getattr(args, "transition_to", None) == "completed")
+        closeout_patch = (args.cmd == "closeout" and getattr(args, "step", None) == "patch"
+                          and getattr(args, "outcome", None) in {"success", "degraded"})
+        checkpoint = (closeout_completed or closeout_patch or
+                      (args.cmd == "transition" and getattr(args, "to", None) == "completed") or
                       (args.cmd == "step" and getattr(args, "step", None) == "patch" and
                        getattr(args, "phase", None) == "finish" and
                        getattr(args, "outcome", None) in {"success", "degraded"}))
