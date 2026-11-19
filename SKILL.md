@@ -359,7 +359,7 @@ test -f "{ICODE_OUT_DIR}/03_plan_final.md" && python3 -c "import sys; sys.path.i
 | [references/media_routing.md](references/media_routing.md) | **媒体能力路由真源**：文本优先、宿主能力证明、native/bridge/dual/text_only、分块与视觉证据来源 | init / log / plan / deepcheck / audit / verify（存在图片/视频/PDF 视觉区域时） |
 | [references/host_adapters.md](references/host_adapters.md) | Claude Code / Codex / CodeBuddy 宿主工具适配；共享技能正文禁止绑定具体工具语法 | 共享 SKILL 被路由时 |
 | [references/control_plane.md](references/control_plane.md) + [references/execution_model.md](references/execution_model.md) | **工单控制面 + 可恢复执行**：状态机/事件链/端口/边界回检/轨迹/副作用策略/回执/关闭 | 所有 ticket-scoped step |
-| [references/dir_and_metadata.md](references/dir_and_metadata.md) | 目录硬熔断、ticket_id、索引/metadata、归档/备份过时校验、注入缓存、project_docs 段零检索 | init / log / plan / start / fast / doc / bak |
+| [references/dir_and_metadata.md](references/dir_and_metadata.md) + [references/project_docs_retrieval.md](references/project_docs_retrieval.md) | 目录/索引/metadata + 段零检索与过时校验（按需加载） | init / log / plan / start / fast / doc / bak |
 | [references/doc_template.md](references/doc_template.md) | icode doc 章节模板：前 50 行四块结构（项目元信息/KEYS/简要说明/目录）+ 十位桶编号 + 自适应 grep 关键词表 + 99 章审计策略 + **v2.0.0 双视角必含元素清单（14 项）+ 业务流独立成章 + 英文首次中文备注 + 链路中文说明 + 质量审视检查清单 + 模板版本自举迁移** | doc |
 | [references/necessity_check.md](references/necessity_check.md) | **现有功能覆盖度检查（防重复实现机制）**：触发时机 + 执行命令（全工程检索 + Read 命中处行为链）+ 三类判定（已覆盖/部分/未覆盖）+ 各步骤落点（init §2.X/预筛列、plan 前置/断言/ADR/对抗、review 维度7、deepcheck Reverse 对比、audit 视角 C） | init / plan / review / deepcheck / audit |
 | [references/first_activation_path.md](references/first_activation_path.md) | **首次激活路径一致性检查**：静态分析盲区（"写了从没实机执行过"的死路径既有 bug）+ 触发条件 + 检测法（软信号、不阻断）+ 双侧校验一致性核对清单 + 部署后验证建议下游输出 | plan（断言⑤）/ deepcheck（Reverse）/ audit（部署后建议）/ patch（部署后验证发现） |

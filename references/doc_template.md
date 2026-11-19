@@ -2,7 +2,7 @@
 
 <!-- SCHEMA_VERSION: v2.0.0 -->
 <!-- 模板版本号：steps/doc.md 步骤 5「模板版本迁移」子步骤读此版本号，与章节 _meta.json.template_version 比对 -->
-<!-- 旧 v1 章节（无 template_version 字段）一律视为待升级；v2 章节享有段零注入优先级（见 dir_and_metadata.md「段零·工程文档检索·质量信号」段） -->
+<!-- 旧 v1 章节（无 template_version 字段）一律视为待升级；v2 章节享有段零注入优先级（见 project_docs_retrieval.md「段零·工程文档检索·质量信号」段） -->
 <!-- v2.0.0 相对 v1 的破坏性变化：双视角必含元素清单（14 项）/ 业务流独立成章 / 英文首次中文备注 / 链路中文说明 / 质量审视机械可验证 -->
 
 > `/icode doc` 生成章节的模板规范，被 [steps/doc.md](../steps/doc.md) 引用。核心哲学见 [references/dir_and_metadata.md](dir_and_metadata.md)「project_docs 工程文档库」段：无需用户维护工程专属配置；前50行用于粗筛，源码身份、正文SHA和审计状态见元信息，版本契约见[doc_snapshot_contract.md](doc_snapshot_contract.md)。
@@ -18,7 +18,7 @@
 5. **链路中文说明**：所有数字链路（如 topic 数量、线程数）必含一句因果中文，让读者理解"数字背后的故事"
 6. **模板版本自举迁移**：旧 v1 章节被识别后自动重生成，无需用户手动触发（详见 [steps/doc.md](../steps/doc.md) 步骤 5「模板版本迁移」子步骤）
 
-**质量信号机制**：章节 `_meta.json.template_version` 字段记录生成所用模板版本。段零检索时 v2 章节注入优先级 > v1（v1 降级注入摘要+升级提示），详见 [references/dir_and_metadata.md](dir_and_metadata.md)「段零·工程文档检索·质量信号」段。
+**质量信号机制**：章节 `_meta.json.template_version` 字段记录生成所用模板版本。段零检索时 v2 章节注入优先级 > v1（v1 降级注入摘要+升级提示），详见 [references/project_docs_retrieval.md](project_docs_retrieval.md)「段零·工程文档检索·质量信号」段。
 
 ## 一、章节前 50 行四块结构（强制）
 
@@ -93,7 +93,7 @@
 | 5 | **角色化阅读路径表**（≥ 5 种角色：新人/改 bug/做新功能/查 API/优化性能 等） | 双 | 表格行数 |
 | 6 | **故障现象索引表**（≥ 5 行 "现象 → 排查点" 映射） | 双 | 表格行数 |
 
-> **overview 元信息块「关联工程」字段必填**（工程级，其他章节元信息块填同值）：从「工程定位与产品族」章节提炼姊妹/同族工程标识，优先填 project_id（即 `project_docs/` 目录名），不知目录名填工程名/产品代号（段零模糊匹配兜底），无关联填"无"。段零据此跨工程检索（见 [dir_and_metadata.md](dir_and_metadata.md)「段零·工程文档检索」步骤 3.6）
+> **overview 元信息块「关联工程」字段必填**（工程级，其他章节元信息块填同值）：从「工程定位与产品族」章节提炼姊妹/同族工程标识，优先填 project_id（即 `project_docs/` 目录名），不知目录名填工程名/产品代号（段零模糊匹配兜底），无关联填"无"。段零据此跨工程检索（见 [project_docs_retrieval.md](project_docs_retrieval.md)「段零·工程文档检索」步骤 3.6）
 
 #### workflow 业务流章节（4 项必含）
 
@@ -215,7 +215,7 @@
 - **等待契约**：并行子代理等待按 [subagent_spawn_wait.md](subagent_spawn_wait.md)「子代理 spawn 等待通用契约」执行——后台 spawn + `TaskOutput` 阻塞等 + `INTEGRATION_WALL_CLOCK_DEADLINE_SECONDS=1200` 墙钟硬截止，超时按已返回批整合、未返回批标 `[未验证-子代理失败]`（**禁止裸同步 spawn / 被动等通知 / 无限等待**）
 - **增量**：读 `00_overview.md` 的 generation_commit，`git diff <commit>..HEAD --name-only` 拿变更文件，只重验引用了变更文件的 file:line
   - **语义联动盲区（已知局限）**：增量只重验"引用了变更文件"的 file:line；未变更文件因他处变更而语义变化时不被重验（如 a.c 没变但 b.c 改了导致 a.c 中函数 A 的行为变，a.c:100 相关引用不重验 → 章节描述可能已过时但 99 章不发现）
-  - **一跳联动缓解**：为缩小盲区，对变更文件直接调用/引用的未变更文件也纳入重验范围--grep 变更文件调用的函数符号 / 引用的类型，把被引用的未变更文件加入重验集（仅扩一跳，控 token）；仍无法覆盖"间接语义联动"（二跳及以上），残余过时由段零 stale 检测 + 不盲信约束兜底（见 [dir_and_metadata.md](dir_and_metadata.md)「stale 检测」「不盲信约束」）
+  - **一跳联动缓解**：为缩小盲区，对变更文件直接调用/引用的未变更文件也纳入重验范围--grep 变更文件调用的函数符号 / 引用的类型，把被引用的未变更文件加入重验集（仅扩一跳，控 token）；仍无法覆盖"间接语义联动"（二跳及以上），残余过时由段零 stale 检测 + 不盲信约束兜底（见 [project_docs_retrieval.md](project_docs_retrieval.md)「stale 检测」「不盲信约束」）
 - **局部失败**：单个子代理失败 → 该批标 `[未验证-子代理失败]`，不拖垮全局，末尾标红可针对性重跑
 
 ## 七、KEYS 与简要说明生成
@@ -224,14 +224,14 @@
 
 - **核心类**：grep `class\s+\w+`/`struct\s+\w+` 取前 10，锚点 = 所在 H2 小节
 - **关键技术**：代码客观词（从 fenced code 块和 API 名提取）+ 叙事主观词（H2 标题/加粗术语）
-- **文件位置**：正文出现的所有 .cpp/.h/.py/.c 等源码路径完整聚合去重（不得遗漏--遗漏会导致段零 stale 检测漏判假阴性，见 [dir_and_metadata.md](dir_and_metadata.md)「stale 检测」以 KEYS 文件位置为锚点）；含模块内相对路径
+- **文件位置**：正文出现的所有 .cpp/.h/.py/.c 等源码路径完整聚合去重（不得遗漏--遗漏会导致段零 stale 检测漏判假阴性，见 [project_docs_retrieval.md](project_docs_retrieval.md)「stale 检测」以 KEYS 文件位置为锚点）；含模块内相对路径
 - **关联模块**：正文 `[xx章](xx.md)` 链接 + 提及的其他模块
 - **关键 IPC topic**：grep 工程既有 IPC 发布/订阅/服务端 API 的模板参数
 - **简要说明**：首段+尾段提炼，50~100 字，讲清"解决什么+关键设计+模块关系"，不复述标题
 
 ## 八、与段零检索的契约
 
-段零检索流程见 [references/dir_and_metadata.md](dir_and_metadata.md)「段零·工程文档检索」段：`ls` 枚举章节 → 读前 50 行 KEYS 匹配 → 命中按 `[小节锚点]` 定点读小节 → 查 `_inject_cache.json` 防重复注入。
+段零检索流程见 [references/project_docs_retrieval.md](project_docs_retrieval.md)「段零·工程文档检索」段：`ls` 枚举章节 → 读前 50 行 KEYS 匹配 → 命中按 `[小节锚点]` 定点读小节 → 查 `_inject_cache.json` 防重复注入。
 
 **章节作者责任**：保证前 50 行 KEYS 准确反映正文、锚点指向真实 H2 小节。AI 生成时自动保证；用户手动改正文后应同步更新 KEYS（不更新则段零匹配精度下降，不报错）。
 
@@ -249,7 +249,7 @@
 | **工程内子目录模块**（非独立仓库） | 不生成 | 生成 project_docs 该模块章节 |
 | **第三方预编译库**（thirdparty 无 git 仓库） | 不生成 | 只在 project_docs 依赖列表记录，不单开章节 |
 
-**互补不重复原则**：独立仓库模块的"内部实现"写进 module_docs，"在本工程中的角色/拓扑位置"写进 project_docs。段零检索时两源合并排序（见 [dir_and_metadata.md](dir_and_metadata.md)「段零·工程文档检索」），读者从工程章节看角色定位、从模块章节看内部实现，不交叉。
+**互补不重复原则**：独立仓库模块的"内部实现"写进 module_docs，"在本工程中的角色/拓扑位置"写进 project_docs。段零检索时两源合并排序（见 [project_docs_retrieval.md](project_docs_retrieval.md)「段零·工程文档检索」），读者从工程章节看角色定位、从模块章节看内部实现，不交叉。
 
 ### 模块章节与工程章节的差异
 

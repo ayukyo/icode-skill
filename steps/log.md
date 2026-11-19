@@ -71,15 +71,15 @@
    - **两段式检索**：段一从本次症状/关键词提炼关键词集，与各 ticket `keywords` 做 Jaccard 粗筛取 ≤10 候选（零 token，可复活预扫后排除剩余 stale）；段二只把候选 `keywords + requirement_points` 喂主代理精读打分选 top-N 命中（N 由梯度决定，明确无关则 0 条）。`/icode log` 每次强制新建目录，本次工单尚未入索引，故无需排除当前 ticket_id
    - **`/icode log` 注入分支**：命中工单经段二精读+过时校验后，**按 `verdict` 分流注入**（字段缺失视为 `unknown`，详见 SKILL.md「注入形式·按 verdict 分流」）：
      - `verified`/`unknown`（含旧工单）：定点读其 `log_analysis.md` 的「根因结论 + 决定性证据」章节（**不读全文**，≤800 token/条）；**`unknown` 额外扩读 `00_init.md` 末轮对话摘要**（≤0.3K）+ 思考块「历史参考」走对抗质疑三问 + ⚠️未验证警告（[../references/thinking_detail.md](../references/thinking_detail.md)「历史参考小节」）——旧工单防误导主防线
-     - **结论级时效校验（防"锚点在但结论已被后续 commit 有意推翻"）**：注入前若发现"当前代码行为与某条历史工单结论冲突"，对该工单执行 [references/dir_and_metadata.md](../references/dir_and_metadata.md)「过时校验」第 5 步（git 演进史判定缺陷回归 vs 有意设计演进）；判定"有意设计演进"→ 该条结论降级为"历史快照"，注入附 ⚠️ 警告「该结论已被 `<hash>` 有意演进，当前行为以最新代码为准」，**不作根因判定基准**。与"证据权威优先级"硬规则（阶段1 基线检查顶部）联动
+     - **结论级时效校验（防"锚点在但结论已被后续 commit 有意推翻"）**：注入前若发现"当前代码行为与某条历史工单结论冲突"，对该工单执行 [references/project_docs_retrieval.md](../references/project_docs_retrieval.md)「过时校验」第 5 步（git 演进史判定缺陷回归 vs 有意设计演进）；判定"有意设计演进"→ 该条结论降级为"历史快照"，注入附 ⚠️ 警告「该结论已被 `<hash>` 有意演进，当前行为以最新代码为准」，**不作根因判定基准**。与"证据权威优先级"硬规则（阶段1 基线检查顶部）联动
      - `disproved`（`verdict_review_needed=false`）：**不读根因结论**（避免错误根因方向被借鉴），改读 `verdict_reason`（作可验证断言）+ `correct_direction` 作避坑参考（≤0.7K/条）；**强制 Grep/Read 验证证伪前提是否仍成立**（详见 [../references/thinking_detail.md](../references/thinking_detail.md)「历史参考小节」）；`correct_direction` 缺失则降级读根因 + ⛔ 警告，提示 `/icode status --verdict` 补标
      - `disproved`/`superseded`（`verdict_review_needed=true`，证伪前提依赖已变化）：**降级对抗质疑**--不硬反转，走 unknown 强化层（扩读末轮+三问）+ 证伪前提+依赖变化提示（详见 SKILL.md「注入形式·按 verdict 分流」），让新需求重新评估前提是否仍成立
      - `superseded`：读 `superseded_by` 指针 + `correct_direction` + 替代工单根因摘要（≤0.8K/条）
      - 作为本次分析的启发——参考其根因方向与踩坑。**只进会话上下文，绝不写进 `log_analysis.md`**（唯一例外：实质借鉴可在该根因条目末尾加一句 `(参考相似工单 {ticket_id} 的同类根因)`）
    - **重复模式检测**（命中簇重复信号时，段二命中分流后执行）：段二命中簇 ≥2 或任一条 `hit_count ≥ 3` → 思考块「历史参考」加一行轻提示「⚠️ 该模块/症状已出现 N 次，疑似重复模式」（软信号，不判结论、不自动重构）；命中簇 ≥2 时按 [references/thinking_detail.md](../references/thinking_detail.md)「重复模式检测」段执行实事求是评估（查 `~/.claude/icode_data/patterns.json` 状态 → Read/Grep 核对当前代码 → 三态结论：已解决不重构 / 复发建议再重构（附粗略影响面）/ 新根因重估 → 回写 patterns.json；三态结论均提炼 `workaround` 上次方案、命中带出，`project_path` 为 git 仓库时加 git 修复频次确定性佐证）。**全程软提示不打断分析**（与既有 L2 警告分级一致，非硬门禁，不阻塞流程推进）
-   - **段零·工程文档检索**（与历史检索并行，候选合并排序；本入口检索时机：建目录后）：完整流程以 [references/dir_and_metadata.md](../references/dir_and_metadata.md)「段零·工程文档检索」+「module_docs 工程模块库」段为准（含步骤 1-5 + 3.5 反查父项目 + 3.6 关联工程检索 + 3.6 源码路径定位 [project_path+manifest+兜底]），**执行前必须 Read 该段全文（含顶部「段零步骤速查」导航），不得凭本行摘要执行**；stale 降级 / commit 校验 / 注入防重复等细节同该段
-   - **注入防重复**（两源共用 `_inject_cache.json`）：无缓存则创建空 `{"ticket_id":"<本工单>","injections":[]}`；注入前按 `(source, ref_id, slice)` 查缓存去重，已注入的跳过。历史源 slice=`root_cause_evidence`；段零 slice=`section:<file>`。详见 [references/dir_and_metadata.md](../references/dir_and_metadata.md)「注入缓存机制」段
-   - **段零只读当前分支子目录是反交叉污染设计，不要误读为"被覆盖"**：详见 [steps/doc.md](doc.md) 顶部「⚠️ 多分支设计·反偷懒强约束」段（`dir_and_metadata.md`「段零·工程文档检索」段），跨分支不交叉读是为防止跨分支借鉴失真；用户反馈"看不到其他分支文档"时**默认不是 bug**，应先 `ls project_docs/<id>/` 看是否有多分支子目录再判
+   - **段零·工程文档检索**（与历史检索并行，候选合并排序；本入口检索时机：建目录后）：完整流程以 [references/project_docs_retrieval.md](../references/project_docs_retrieval.md)「段零·工程文档检索」+「module_docs 工程模块库」段为准（含步骤 1-5 + 3.5 反查父项目 + 3.6 关联工程检索 + 3.6 源码路径定位 [project_path+manifest+兜底]），**执行前必须 Read 该段全文（含顶部「段零步骤速查」导航），不得凭本行摘要执行**；stale 降级 / commit 校验 / 注入防重复等细节同该段
+   - **注入防重复**（两源共用 `_inject_cache.json`）：无缓存则创建空 `{"ticket_id":"<本工单>","injections":[]}`；注入前按 `(source, ref_id, slice)` 查缓存去重，已注入的跳过。历史源 slice=`root_cause_evidence`；段零 slice=`section:<file>`。详见 [references/project_docs_retrieval.md](../references/project_docs_retrieval.md)「注入缓存机制」段
+   - **段零只读当前分支子目录是反交叉污染设计，不要误读为"被覆盖"**：详见 [steps/doc.md](doc.md) 顶部「⚠️ 多分支设计·反偷懒强约束」段（`project_docs_retrieval.md`「段零·工程文档检索」段），跨分支不交叉读是为防止跨分支借鉴失真；用户反馈"看不到其他分支文档"时**默认不是 bug**，应先 `ls project_docs/<id>/` 看是否有多分支子目录再判
    - 零命中不注入，不强凑参考
 3. **阶段0 输入要素收敛**（最多1-2轮，不拖成长讨论）：
    - 解析用户零散输入，提取已有信息
@@ -106,7 +106,7 @@
      - **核心警告**：设备型号只是 SKU，不能当代码库假设。设备型号 A 固件代码库实际可能是 B（姊妹产品命名差一个字母/前缀的高频坑）（某实战工单真实踩坑——姊妹产品复用的高频陷阱）
      - **必做三步**（写入 `log_analysis.md §2.0`）：
        1. **提取独特字符串**：从设备日志里抓取 ≥3 个独特标识符（如 `NodeStartupA` / `sensor_loc` / `SensorDriverB` / `prepare_mode_switch` 等节点名 / 模块名 / 驱动名 / 关键函数名）
-       2. **姊妹工程 git grep**：**候选代码库路径来源优先级**--① 阶段0 用户收集的姊妹工程清单（如有） -> ② **用户未给清单时，优先用段零 3.6 命中的关联工程源码路径**（`project_path` / manifest path，见 [references/dir_and_metadata.md](../references/dir_and_metadata.md) 步骤 3.6 源码路径定位；DOC 关联工程字段经 3.6 自动定位，无需用户手动给清单） -> 对每个候选路径逐个 `git grep -rn <独特字符串>`，找出真正代码库
+       2. **姊妹工程 git grep**：**候选代码库路径来源优先级**--① 阶段0 用户收集的姊妹工程清单（如有） -> ② **用户未给清单时，优先用段零 3.6 命中的关联工程源码路径**（`project_path` / manifest path，见 [references/project_docs_retrieval.md](../references/project_docs_retrieval.md) 步骤 3.6 源码路径定位；DOC 关联工程字段经 3.6 自动定位，无需用户手动给清单） -> 对每个候选路径逐个 `git grep -rn <独特字符串>`，找出真正代码库
        2.5. **自动发现姐妹工程（步骤② 段零 3.6 无关联工程 且 用户无清单时，**`**P0 不可跳过**`**）**：步骤② 的段零 3.6 返回空（关联工程字段缺失/未配置，静默跳过）且用户未提供姐妹工程清单时，**不得直接退到步骤③"只看当前工程"**。必须先执行以下自动发现（任一步有命中即停止，不必全跑）：
          - **a. 同级目录扫描**：`ls -d ../*/ 2>/dev/null` 枚举父目录下同级目录，对每个目录 `test -d <d>/.git && echo <d>` 判定是否为 git 仓库，收集候选工程路径列表。**worktree 兄弟天然排除（实测 2026-08-15，无需额外过滤）**：git worktree 成员目录的 `.git` 是**普通文件**（gitdir 指针）而非目录，`test -d` 判据对它们返回 false → 不会误收为本工程其他 checkout（独立克隆的 `.git` 是目录，照常收集为姐妹工程候选，两者天然区分）
          - **b. manifest 扫描**（当前工程为 repo-root 模式且有 `.repo/manifest.xml` 时）：`grep '<project' .repo/manifest.xml` 提取其他 `<project>` 的 `path` 属性，拼绝对路径作为候选
