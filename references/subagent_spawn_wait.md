@@ -10,6 +10,19 @@
 
 质疑者角色、裁决优先级、独立性与真实性仍以 [adversarial.md](adversarial.md) 为准；结构性无能力、未暴露、策略禁止、容量不足及真实调用失败须分别留痕。
 
+## 等待原语探测与降级
+
+启动前记录实际发现依据及 `wait_primitive`。宿主原生等待、`TaskOutput` 与 `Monitor` 的调用均须能按指定超时交还控制权。
+
+| 值 | 当前宿主能力 |
+|---|---|
+| `native_wait` | 原生子代理有界等待接口 |
+| `task_output` | 实际可用的 `TaskOutput` |
+| `monitor_until` | 实际可用的 `Monitor` 或等价条件等待 |
+| `none` | 未发现有界等待能力 |
+
+`none` 时，仅在步骤允许且还有不依赖结果的工作时，才并行后台启动。整合时只使用已实际返回的结果，未返回者标 `[未验证-无等待原语-未收口]`。无有界等待时不声称达到墙钟期限，也不把该标签当作调用失败。将 `wait_primitive` 与发现依据记入适用的 trace，以及 `adversarial_verification` 或 `extensions.agent.spawns[].join_condition`。依赖独立结果的动作保持阻塞。
+
 ## 观测记录契约（spawn 留痕，防"子代理干了什么"不可审计）
 
 每次 spawn 子代理（含质疑者对抗、doc 审计、facts 提取、haiku 兜底、摘要消化、并行子任务等全部 5 类非对抗 spawn 点）在**发起前**把观测字段写进 metadata `extensions.agent.spawns`（vNext 工单；legacy 缺失视为不强制，向后兼容）：
