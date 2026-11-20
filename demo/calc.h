@@ -110,6 +110,17 @@ int calc_max(int a, int b, int *result);
 int calc_min(int a, int b, int *result);
 
 /*
+ * 区间裁剪 clamp(x, lo, hi)
+ * result == NULL：返回 CALC_ERR_INVALID，不写 *result
+ * lo > hi：返回 CALC_ERR_INVALID（空区间无定义，不静默交换上下界）
+ * 正常：*result = min(max(x, lo), hi)，保证落在闭区间 [lo, hi] 内
+ * lo == hi 是合法退化区间，*result = lo
+ * 纯比较无算术，不可能溢出（对齐 calc_min）
+ * 成功返回 CALC_OK，失败不写 *result
+ */
+int calc_clamp(int x, int lo, int hi, int *result);
+
+/*
  * 斐波那契数列第 n 项（数学定义 fib(0)=0, fib(1)=1）
  * n 为负数：返回 CALC_ERR_INVALID，不写 *result（对齐 calc_sqrt 的负数处理）
  * result == NULL：返回 CALC_ERR_INVALID，不写 *result

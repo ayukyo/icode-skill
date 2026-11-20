@@ -276,6 +276,19 @@ int main(void)
     rc = calc_min(INT_MIN, INT_MAX, &result);  printf("min(INT_MIN,INT_MAX)=%d rc=%d (expect INT_MIN,0)\n", result, rc);
     rc = calc_min(1, 2, NULL);  printf("min(1,2,NULL)=rc=%d (expect %d INVALID)\n", rc, CALC_ERR_INVALID);
 
+    /* ---- 新增：calc_clamp 区间裁剪 ---- */
+    rc = calc_clamp(5, 0, 10, &result);   printf("clamp(5,0,10) = %d rc=%d (expect 5,0)\n", result, rc);
+    rc = calc_clamp(-5, 0, 10, &result);  printf("clamp(-5,0,10) = %d rc=%d (expect 0,0)\n", result, rc);
+    rc = calc_clamp(15, 0, 10, &result);  printf("clamp(15,0,10) = %d rc=%d (expect 10,0)\n", result, rc);
+    rc = calc_clamp(0, 0, 10, &result);   printf("clamp(0,0,10) = %d rc=%d (expect 0,0)\n", result, rc);
+    rc = calc_clamp(10, 0, 10, &result);  printf("clamp(10,0,10) = %d rc=%d (expect 10,0)\n", result, rc);
+    rc = calc_clamp(7, 7, 7, &result);    printf("clamp(7,7,7) = %d rc=%d (expect 7,0)\n", result, rc);
+    result = 0x5A5A;                      /* 哨兵：失败分支不得改写 *result */
+    rc = calc_clamp(5, 10, 0, &result);   printf("clamp(5,10,0) rc=%d sentinel=%d (expect %d,23130)\n", rc, result, CALC_ERR_INVALID);
+    rc = calc_clamp(5, 0, 10, NULL);      printf("clamp(5,0,10,NULL) rc=%d (expect %d)\n", rc, CALC_ERR_INVALID);
+    rc = calc_clamp(INT_MIN, INT_MIN, INT_MAX, &result);  printf("clamp(INT_MIN,INT_MIN,INT_MAX) = %d rc=%d (expect INT_MIN,0)\n", result, rc);
+    rc = calc_clamp(INT_MAX, INT_MIN, INT_MAX, &result);  printf("clamp(INT_MAX,INT_MIN,INT_MAX) = %d rc=%d (expect INT_MAX,0)\n", result, rc);
+
     /* ---- 新增：calc_fib 斐波那契数列（数学定义 fib(0)=0, fib(1)=1） ---- */
     rc = calc_fib(0, &result);
     printf("fib(0) = %d (rc=%d)\n", result, rc);  /* 0 */

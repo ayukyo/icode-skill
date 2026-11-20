@@ -550,6 +550,24 @@ int calc_min(int a, int b, int *result) {
     return CALC_OK;
 }
 
+/* 区间裁剪 clamp(x, lo, hi) - 纯比较，无算术故不可能溢出 */
+int calc_clamp(int x, int lo, int hi, int *result) {
+    if (result == NULL)
+        return CALC_ERR_INVALID;  /* 入口 NULL 防御，不写 *result */
+    if (lo > hi)
+        return CALC_ERR_INVALID;  /* 空区间：调用方参数错误，不静默交换上下界 */
+    if (x < lo) {
+        *result = lo;             /* 低于下界 → 取下界 */
+        return CALC_OK;
+    }
+    if (x > hi) {
+        *result = hi;             /* 高于上界 → 取上界 */
+        return CALC_OK;
+    }
+    *result = x;                  /* 已在区间内 → 原值返回 */
+    return CALC_OK;
+}
+
 /*
  * 斐波那契数列第 n 项（数学定义 fib(0)=0, fib(1)=1）
  * n<0 / result==NULL：CALC_ERR_INVALID，不写 *result
