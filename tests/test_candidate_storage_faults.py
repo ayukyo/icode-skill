@@ -56,7 +56,9 @@ class StorageFaultTests(control_fixtures.StorageControlTests):
 
     def test_actual_process_exit_at_each_durable_window(self):
         # Each subtest restores the original committed state via a new setUp.
-        for index, mode in enumerate(("journal", "premetadata", "append", "compact", "unlink")):
+        # Metadata is compacted before the append, so there is no second
+        # metadata write ("compact") window in the ordinary transaction.
+        for index, mode in enumerate(("journal", "premetadata", "append", "unlink")):
             if index: self.setUp()
             with self.subTest(mode=mode):
                 before = self.api.load_metadata(self.directory)

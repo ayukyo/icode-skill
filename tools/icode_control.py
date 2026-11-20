@@ -355,15 +355,21 @@ def _logical_ledger_validator(event, prior, *, event_schema=None, seen_ids=None)
         seen_ids.add(event["event_id"])
 
 
-def decode_control_ledger(records, *, limits=None):
-    """Pure adapter also used by stage's independently bounded raw reader."""
+def decode_control_ledger(records, *, limits=None, out_dir=None):
+    """Pure adapter also used by stage's independently bounded raw reader.
+
+    ``out_dir`` enables the content-addressed definition side store; without
+    it only definitions inlined in the ledger itself can be resolved, which
+    keeps legacy inline ledgers readable.
+    """
+    store = FileDefinitionStore(out_dir) if out_dir is not None else None
     try:
         schema = load_json(SCHEMA_EVENT, "ticket-event.schema.json")
         seen = set()
         def validator(event, prior):
             _logical_ledger_validator(event, prior, event_schema=schema, seen_ids=seen)
         return storage_module().decode_events(records, limits=limits,
-                       logical_event_validator=validator)
+                       logical_event_validator=validator, definition_store=store)
     except storage_module().StorageError as exc:
         raise ControlError("candidate storage ledger: " + str(exc), gate_id="candidate_storage") from exc
 
@@ -372,7 +378,7 @@ def _committed_ledger(out_dir, *, _observation=None):
     path = Path(out_dir) / EVENTS_NAME
     try:
         records, _ = _read_raw_events(out_dir, _observation=_observation)
-        return decode_control_ledger(records)
+        return decode_control_ledger(records, out_dir=out_dir)
     except ControlError as exc:
         exc.extra.setdefault("path", str(path))
         exc.extra.setdefault("control_path", exc.extra["path"])
@@ -397,7 +403,8 @@ def load_json(path, what, *, _observation=None):
             exc.extra.setdefault("ticket_id", raw["value"].get("ticket_id"))
         raise
     try:
-        value = storage_module().decode_document(raw, kind=kinds[path.name], registry=ledger.registry)
+        value = storage_module().decode_document(raw, kind=kinds[path.name], registry=ledger.registry,
+                                                 definition_store=FileDefinitionStore(path.parent))
     except storage_module().StorageError as exc:
         raise ControlError("candidate storage document: " + str(exc), gate_id="candidate_storage",
                            path=str(path), control_path=str(path), control_root=str(path.parent),
@@ -435,22 +442,29 @@ def _storage_enabled(out_dir, *, new_metadata=None):
     return isinstance(new_metadata, dict) and new_metadata.get("schema_version") == 3
 
 
-def _encode_control_document(value, kind, registry, enabled):
+def _encode_control_document(value, kind, registry, enabled, *, require_definitions=False):
     if not enabled:
         return value
     try:
-        return storage_module().encode_document(value, kind=kind, committed_registry=registry)
+        return storage_module().encode_document(value, kind=kind, committed_registry=registry,
+                                                require_definitions=require_definitions)
     except storage_module().StorageError as exc:
         raise ControlError("candidate storage encode: " + str(exc), gate_id="candidate_storage") from exc
 
 
-def write_metadata(out_dir, value, *, registry=None, enabled=None):
-    """Typed physical writer; callers retain the original lock/transaction guard."""
+def write_metadata(out_dir, value, *, registry=None, enabled=None, require_definitions=False):
+    """Typed physical writer; callers retain the original lock/transaction guard.
+
+    ``require_definitions`` keeps manifest slots as references and fails when a
+    definition is neither committed nor supplied by the caller's registry. The
+    side store must already contain those definitions, or decoding fails.
+    """
     if enabled is None:
         enabled = _storage_enabled(out_dir, new_metadata=value)
     if registry is None and enabled:
         registry = _committed_ledger(out_dir).registry
-    physical = _encode_control_document(value, "metadata", registry, enabled)
+    physical = _encode_control_document(value, "metadata", registry, enabled,
+                                        require_definitions=require_definitions)
     atomic_write_json(Path(out_dir) / METADATA_NAME, physical)
     return physical
 
@@ -507,6 +521,69 @@ def atomic_write_bytes(path, data):
         if os.path.exists(tmp):
             os.unlink(tmp)
         raise
+
+
+DEFINITION_STORE_DIR = ".ico_storage"
+
+
+class FileDefinitionStore:
+    """Content-addressed side store for candidate manifest definitions.
+
+    Ledger events and metadata keep only ``$icode_manifest_ref`` references;
+    the first definition is persisted here. Files are immutable, named by the
+    manifest digest, and verified on every read. A rolled-back transaction may
+    leave unreferenced orphan files; they are harmless and can be pruned
+    offline without touching the authenticated ledger.
+    """
+    MAX_BYTES = 64 * 1024 * 1024
+
+    def __init__(self, out_dir):
+        self.root = Path(out_dir) / DEFINITION_STORE_DIR / "definitions"
+
+    @staticmethod
+    def _validate(kind, sha):
+        if kind not in ("file_manifest", "index_manifest"):
+            raise storage_module().StorageError("unknown manifest definition kind: " + str(kind))
+        if not isinstance(sha, str) or re.fullmatch("[0-9a-f]{64}", sha) is None:
+            raise storage_module().StorageError("invalid manifest definition digest")
+
+    def _path(self, kind, sha):
+        self._validate(kind, sha)
+        return self.root / kind / (sha + ".json")
+
+    def load(self, kind, sha):
+        self._validate(kind, sha)
+        path = self._path(kind, sha)
+        try:
+            data = path.read_bytes()
+        except FileNotFoundError:
+            return None
+        except OSError as exc:
+            raise storage_module().StorageError("manifest definition read failed: " + str(exc)) from exc
+        if len(data) > self.MAX_BYTES:
+            raise storage_module().StorageError("manifest definition exceeds side-store limit")
+        if storage_module()._manifest_digest_bytes(kind, data) != sha:
+            raise storage_module().StorageError("corrupt manifest definition side file")
+        return data
+
+    def save(self, kind, sha, rows_json):
+        self._validate(kind, sha)
+        path = self._path(kind, sha)
+        try:
+            existing = path.read_bytes()
+        except FileNotFoundError:
+            existing = None
+        except OSError as exc:
+            raise storage_module().StorageError("manifest definition read failed: " + str(exc)) from exc
+        if existing is not None:
+            if storage_module()._manifest_digest_bytes(kind, existing) != sha:
+                raise storage_module().StorageError("refusing to overwrite a corrupt manifest definition")
+            return
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            atomic_write_bytes(path, rows_json)
+        except OSError as exc:
+            raise storage_module().StorageError("manifest definition write failed: " + str(exc)) from exc
 
 
 def atomic_append_line(path, line):
@@ -1332,7 +1409,7 @@ def _read_raw_events(out_dir, *, _observation=None):
 def read_events(out_dir, *, _observation=None):
     events, path = _read_raw_events(out_dir, _observation=_observation)
     if any(storage_module().is_envelope(event) for event in events):
-        events = decode_control_ledger(events).events
+        events = decode_control_ledger(events, out_dir=out_dir).events
     return events, path
 
 
@@ -1394,16 +1471,18 @@ def append_prepared_event(out_dir, event, *, ledger=None):
     """
     path = Path(out_dir) / EVENTS_NAME
     updated_registry = None
+    store = FileDefinitionStore(out_dir)
     try:
         physical = event
         if ledger is not None:
             _logical_ledger_validator(event, ledger.events)
             physical, updated_registry = storage_module().encode_event(
-                event, committed_registry=ledger.registry)
+                event, committed_registry=ledger.registry, definition_store=store)
         elif _storage_enabled(out_dir):
             current = _committed_ledger(out_dir)
             _logical_ledger_validator(event, current.events)
-            physical, _ = storage_module().encode_event(event, committed_registry=current.registry)
+            physical, _ = storage_module().encode_event(event, committed_registry=current.registry,
+                                                        definition_store=store)
         atomic_append_line(path, json.dumps(physical, ensure_ascii=False, sort_keys=True) + "\n")
     except OSError as exc:
         raise ControlError(f"事件日志追加失败: {path}: {exc}", exit_code=1,
@@ -3160,9 +3239,14 @@ def commit_metadata_and_event(out_dir, before, after, event_type, payload,
     txn_path = out_dir / TXN_NAME
     enabled = _storage_enabled(out_dir, new_metadata=after)
     registry = _committed_ledger(out_dir).registry if enabled else None
+    prospective = None
     if enabled:
         try:
-            _, prospective = storage_module().encode_event(event, committed_registry=registry)
+            # First manifest definitions are persisted to the content-addressed
+            # side store here, so the event, journal and metadata below keep
+            # references only instead of repeating the full manifest.
+            _, prospective = storage_module().encode_event(
+                event, committed_registry=registry, definition_store=FileDefinitionStore(out_dir))
             # Before publishing anything, prove that final metadata can resolve
             # exclusively from prior definitions plus this natural event.
             storage_module().encode_document(after, kind="metadata", committed_registry=prospective,
@@ -3176,11 +3260,13 @@ def commit_metadata_and_event(out_dir, before, after, event_type, payload,
         "after_metadata": after,
         "event": event,
     }
-    atomic_write_json(txn_path, _encode_control_document(journal, "transaction", registry, enabled))
+    atomic_write_json(txn_path, _encode_control_document(
+        journal, "transaction", prospective if enabled else None, enabled, require_definitions=True))
     try:
         if access:
             _candidate_context_guard(out_dir, before, git_provider, require_git_provider)
-        write_metadata(out_dir, after, registry=registry, enabled=enabled)
+        write_metadata(out_dir, after, registry=prospective if enabled else None, enabled=enabled,
+                       require_definitions=True)
         if access:
             before_publish()
             _candidate_context_guard(out_dir, before, git_provider, require_git_provider)
@@ -3317,7 +3403,54 @@ def cmd_resolve_ticket(args):
     return 0
 
 
+def _read_utf8_text(path, label, *, max_bytes=1024 * 1024):
+    """Read a user-supplied UTF-8 text file without shell argv decoding.
+
+    Windows shells may pass non-ASCII argv through the ANSI code page; a file
+    argument is the reliable path for Chinese requirements and JSON payloads.
+    """
+    try:
+        data = Path(path).read_bytes()
+    except OSError as exc:
+        raise ControlError(f"{label} 读取失败: {exc}", exit_code=2) from exc
+    if len(data) > max_bytes:
+        raise ControlError(f"{label} 超过 {max_bytes} 字节上限", exit_code=2)
+    try:
+        text = data.decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise ControlError(f"{label} 必须是 UTF-8: {exc}", exit_code=2) from exc
+    return text
+
+
+def _resolve_requirement_arg(args):
+    """Resolve --requirement / --requirement-file once, before digests."""
+    inline = getattr(args, "requirement", None)
+    file_path = getattr(args, "requirement_file", None)
+    if inline is not None and file_path is not None:
+        raise ControlError("--requirement 与 --requirement-file 只能二选一", exit_code=2)
+    if file_path is not None:
+        text = _read_utf8_text(file_path, "--requirement-file")
+        if not text.strip():
+            raise ControlError("--requirement-file 内容为空", exit_code=2)
+        args.requirement = text
+        args.requirement_file = None
+        return text
+    if not isinstance(inline, str) or not inline.strip():
+        raise ControlError("create 需要 --requirement 或 --requirement-file", exit_code=2)
+    return inline
+
+
+def _read_json_argument(inline, file_path, label):
+    """Resolve an inline JSON argument or its UTF-8 file variant."""
+    if inline is not None and file_path is not None:
+        raise ControlError(f"{label} 与 {label}-file 只能二选一", exit_code=2)
+    if file_path is not None:
+        return strict_json_loads(_read_utf8_text(file_path, f"{label}-file"))
+    return strict_json_loads(inline) if inline else {}
+
+
 def _cmd_create_plain(args):
+    _resolve_requirement_arg(args)
     out_dir = Path(args.dir).resolve()
     workspace, path_is_debug = classify_ticket_dir(out_dir)
     birth_is_debug = args.birth.startswith("debug-")
@@ -3385,16 +3518,32 @@ def _cmd_create_plain(args):
     # references/dir_and_metadata.md 声明「可选，缺失视为 []」。新工单在出生处补空数组，
     # 让两处口径一致；用户显式传入时保留（setdefault 不覆盖）。
     meta.setdefault("requirement_deltas", [])
+    # 同理 semantic_decisions：init/debug 出生尚未产生语义决策，但 --strict 要求
+    # 字段显式存在。空数组表示「尚未决策」，由 plan 按需填充；不改变语义门禁
+    # （非空且 status != resolved 时仍按原规则阻断）。
+    meta.setdefault("semantic_decisions", [])
     if debug:
         meta["debug"] = True
     elif meta.get("debug"):
         raise ControlError("非 debug 出生类型禁止 metadata.debug=true", exit_code=2,
                            gate_id="birth_kind_mismatch")
-    try:
-        repo_head = candidate_module().repository_head(workspace)
-    except (candidate_module().CandidateError, OSError, UnicodeError) as exc:
-        raise ControlError(f"Git工程候选绑定失败: {exc}", gate_id="candidate_capture") from exc
-    if repo_head:
+    repo_head = None
+    if not debug:
+        try:
+            repo_head = candidate_module().repository_head(workspace)
+        except (candidate_module().CandidateError, OSError, UnicodeError) as exc:
+            raise ControlError(f"Git工程候选绑定失败: {exc}", gate_id="candidate_capture") from exc
+    scan_start = time.monotonic()
+    if debug:
+        # debug 工单不进入 code/patch，候选快照没有消费点。跳过全仓候选扫描，
+        # 避免把完整 manifest 内联进 ticket_created 事件（大仓可达数十 MB）。
+        # 候选相关参数对 debug 没有语义，显式拒绝而不是静默丢弃。
+        if getattr(args, "exclude", None) or getattr(args, "candidate_limits_json", None):
+            raise ControlError(
+                "debug 出生不建立候选合同，--exclude/--candidate-limits-json 不适用",
+                exit_code=2, gate_id="birth_candidate_contract")
+        print("candidate scan: skipped (debug birth)", file=sys.stderr)
+    elif repo_head:
         limits = candidate_limits(getattr(args, "candidate_limits_json", None))
         meta["excluded_side_effects"] = getattr(args, "exclude", None) or []
         meta["review_receipts"] = []
@@ -3404,8 +3553,16 @@ def _cmd_create_plain(args):
         meta["excluded_side_effects"] = candidate["excluded_side_effects"]
         meta["candidate_tracking"] = {"version": 1, "mode": "enabled",
                                       "base": repo_head, "current": candidate, "limits": limits}
+        # Birth observability: a large repository can spend a long time hashing
+        # every tracked/untracked file before the first event is written.
+        elapsed_ms = int((time.monotonic() - scan_start) * 1000)
+        print(f"candidate scan: {len(candidate.get('manifest') or [])} files, "
+              f"{len(candidate.get('index_manifest') or [])} index rows, {elapsed_ms} ms",
+              file=sys.stderr)
     elif getattr(args, "exclude", None):
         raise ControlError("非 Git 出生无法绑定候选排除项", gate_id="candidate_capture")
+    else:
+        print("candidate scan: skipped (non-git birth)", file=sys.stderr)
     require_valid_metadata(meta)
     payload = {"birth_kind": args.birth,
                "execution_contract_version": 1,
@@ -3466,6 +3623,7 @@ def _stage_birth_digest(args):
 
 def cmd_create(args):
     """A staged project's new ordinary ticket must name its planned binding."""
+    _resolve_requirement_arg(args)
     out_dir = Path(args.dir).resolve()
     workspace, _debug = classify_ticket_dir(out_dir)
     locator = stage_module().locator_path(workspace)
@@ -4554,6 +4712,34 @@ def required_archive_files(meta, events=()):
     return required
 
 
+def definition_store_entries(root):
+    """Relative POSIX paths of every content-addressed definition side file."""
+    store = Path(root) / DEFINITION_STORE_DIR
+    if not store.is_dir():
+        return set()
+    return {item.relative_to(root).as_posix() for item in store.rglob("*.json")
+            if item.is_file() and not item.is_symlink()}
+
+
+def mirror_definition_store(source_dir, archive_dir):
+    """Copy definitions the archive root is missing; files are immutable.
+
+    Content addressing makes the copy idempotent: an existing file is never
+    rewritten, so a torn or tampered copy cannot be silently replaced here.
+    """
+    source_root = Path(source_dir) / DEFINITION_STORE_DIR / "definitions"
+    if not source_root.is_dir():
+        return
+    for item in sorted(source_root.rglob("*.json")):
+        if not item.is_file() or item.is_symlink():
+            continue
+        target = Path(archive_dir) / DEFINITION_STORE_DIR / "definitions" / item.relative_to(source_root)
+        if target.is_file():
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        atomic_write_bytes(target, item.read_bytes())
+
+
 def verify_archive_manifest(archive_dir, ticket_id, source_dir=None):
     archive_dir = Path(archive_dir).resolve()
     manifest_path = archive_dir / ARCHIVE_MANIFEST_NAME
@@ -4675,6 +4861,7 @@ def verify_archive_manifest(archive_dir, ticket_id, source_dir=None):
                 ".icontrol.lock", TXN_NAME, ARCHIVE_MANIFEST_NAME
             } and not item.name.endswith(".tmp") and item.stat().st_size <= 2 * 1024 * 1024
         )
+        expected.update(definition_store_entries(root))
     missing_entries = sorted(expected - set(manifest_paths))
     if missing_entries:
         problems.append(f"manifest 漏列必需文件: {missing_entries}")
@@ -4705,6 +4892,14 @@ def refresh_archive_manifest_control_files(archive_dir, ticket_id):
             raise ControlError(f"manifest 缺受控文件条目: {name}",
                                exit_code=1, gate_id="archive_manifest")
         row.update({"size": path.stat().st_size, "sha256": file_sha256(path)})
+    # A close-time event may define a new content-addressed manifest. Existing
+    # rows are immutable; only definitions the handoff copied need new rows.
+    for rel in sorted(definition_store_entries(archive_dir)):
+        if rel in by_path:
+            continue
+        path = archive_dir / rel
+        rows.append({"path": rel, "role": "control",
+                     "size": path.stat().st_size, "sha256": file_sha256(path)})
     manifest["control_state_refreshed_at"] = now_iso()
     atomic_write_json(manifest_path, manifest)
     _, problems = verify_archive_manifest(archive_dir, ticket_id, source_dir=None)
@@ -4732,6 +4927,10 @@ def handoff_close_control_root(source_dir, meta):
         if not events_path.is_file():
             raise ControlError("源工单事件链不存在，无法交接",
                                exit_code=1, gate_id="event_chain")
+        # Close-time events may reference definitions created after the first
+        # archive copy; mirror them before the ledger/metadata become readable
+        # only through the archive root.
+        mirror_definition_store(source_dir, archive_dir)
         atomic_write_bytes(archive_dir / EVENTS_NAME, events_path.read_bytes())
         write_metadata(archive_dir, meta, enabled=_storage_enabled(source_dir))
         refresh_archive_manifest_control_files(archive_dir, meta.get("ticket_id"))
@@ -4790,6 +4989,10 @@ def _cmd_archive_manifest(args):
         } and not item.name.endswith(".tmp") and item.stat().st_size <= 2 * 1024 * 1024
     }
     required.update(small_files)
+    # Content-addressed definitions are referenced by the compacted ledger and
+    # metadata, so an archive without them cannot be decoded. They are copied
+    # unconditionally (they are control files, not bulky attachments).
+    required.update(definition_store_entries(source_dir))
     file_rows = []
     for rel in sorted(required):
         source = source_dir / rel
@@ -5819,8 +6022,10 @@ def cmd_metadata_update(args):
     """原子更新已登记业务字段；生命周期控制字段只允许专用命令维护。"""
     out_dir = Path(args.dir).resolve()
     try:
-        updates = strict_json_loads(args.set_json) if args.set_json else {}
-        appends = strict_json_loads(args.append_json) if args.append_json else {}
+        updates = _read_json_argument(getattr(args, "set_json", None),
+                                       getattr(args, "set_json_file", None), "--set-json")
+        appends = _read_json_argument(getattr(args, "append_json", None),
+                                      getattr(args, "append_json_file", None), "--append-json")
     except (json.JSONDecodeError, ValueError) as exc:
         raise ControlError(f"metadata-update 参数不是合法 JSON: {exc}", exit_code=2)
     if not isinstance(updates, dict) or not isinstance(appends, dict):
@@ -8455,7 +8660,8 @@ def build_parser():
     p = sub.add_parser("create", help="原子创建 vNext metadata + ticket_created 出生事件")
     p.add_argument("--dir", required=True)
     p.add_argument("--ticket-id", required=True)
-    p.add_argument("--requirement", required=True)
+    p.add_argument("--requirement", help="原始需求文本；与 --requirement-file 二选一")
+    p.add_argument("--requirement-file", help="UTF-8 需求文件；Windows 非 ASCII argv 的可靠入口")
     p.add_argument("--birth", required=True,
                    choices=["init", "plan", "log", "debug-init", "debug-log"])
     p.add_argument("--metadata-json", help="额外 metadata 字段 JSON 对象；受保护出生字段由工具覆盖")
@@ -8624,7 +8830,9 @@ def build_parser():
     p = sub.add_parser("metadata-update", help="原子更新已登记业务字段并追加 metadata_updated 事件")
     p.add_argument("--dir", required=True)
     p.add_argument("--set-json", help="覆盖字段的 JSON 对象")
+    p.add_argument("--set-json-file", help="UTF-8 JSON 文件；Windows 非 ASCII argv 的可靠入口")
     p.add_argument("--append-json", help="追加数组字段的 JSON 对象；每个值必须是元素数组")
+    p.add_argument("--append-json-file", help="UTF-8 JSON 文件；与 --append-json 二选一")
     p.add_argument("--request-id", help="幂等键")
     p.add_argument("--actor", default="icode", choices=["icode", "user", "watch", "system"])
     p.set_defaults(func=cmd_metadata_update)

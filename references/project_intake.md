@@ -32,6 +32,8 @@
 
 MCP 不可用时可用只读 `git -C <path> rev-parse --show-toplevel` 与有界 `find <path> -maxdepth 3 -name .git` 复核，但仍执行同一“唯一才选、多根/截断即阻断”语义，并记录 `degraded_after_attempt`；禁止退化成 `pwd` 后静默把容器目录当项目。
 
+**降级记录（MCP 不可用时）**：`icode-local.workspace_resolve_project` 不可用时，按上述只读 git 兜底执行，并在本步骤思考块（L2/L3）或 `.decision_anchors.json.reasoning_gate`（L1）记录 `server=icode-local, operation=workspace_resolve_project, result=unavailable, fallback=git rev-parse --show-toplevel` 与核实证据。不要伪造 cheap-research 事件，也不要把 MCP 不可用写成“工程不存在”。
+
 ## 3. 静态工程画像
 
 嵌入式或大仓命中时调用 `icode-local.workspace_inspect_project_profile(path, max_depth=2)`；旧入口 `icode-workspace.inspect_project_profile` 继续兼容。它只允许读取：
@@ -53,6 +55,15 @@ MCP 不可用时可用只读 `git -C <path> rev-parse --show-toplevel` 与有界
 | huge（≥150k） | tracked path 枚举 → README/构建根/活动配置 → 目标模块 | 200 | 否 |
 
 软预算不是“读够数量就宣布完成”。达到预算时输出 `truncated/unobserved`，再按当前问题缩小目录、文件类型、符号或提交范围；不得自动扩大到整个 vendor SDK。二进制、生成目录和历史文档只在有明确证据用途时读取，且采用 hash/manifest/抽样，不把字符串命中当实现支持。
+
+### 网络盘/慢文件系统
+
+SMB/NFS/网络挂载的参考仓可能比本地慢一个数量级，且 `find`/全树 `rg` 容易超时。优先：
+
+- `git -C <root> ls-tree -r --name-only <ref>` 枚举受控路径，再 `git show <ref>:<path>` 读单个文件（只读，不 checkout/fetch）；
+- 精确 `git grep -n <pattern> <ref> -- <path>` 或按目录限定的 `rg`，不用无界 `find`/全树扫描；
+- 所有扫描设置超时；超时按 `degraded` 记录（写明未观察范围与下一步），**不得**判为“文件/符号不存在”；
+- 网络盘上的 `git status`/`git diff` 也应收窄路径；不要把网络延迟误报为工程缺失。
 
 ### 审查范围与完成语义
 

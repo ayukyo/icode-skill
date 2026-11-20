@@ -31,6 +31,8 @@
    - source_mismatch/modified/partial/template_mismatch/missing/ambiguous：不注正文，只给不含file:line的概览、原因和更新提示；不存在的正文不编造概览。
    - 旧dep无快照绑定或旧平铺库无内容指纹：按legacy_summary_only处理，不凭相同commit自动认作工作区匹配。
    - generated=false区分按需未生成/partial/失败；保留依赖事实，汇总待办，不能只看族目录存在就认为generated=true。
+   - **reference-only（debug/只读跨工程分析）**：当入口是 `--debug` 或只读跨工程分析、且不把模块正文作为代码事实时，可只读 `_meta.json` 的 branch/commit 与 `00_overview` 简要说明，记录 `resolution=reference_only` 与原因；**不注入模块正文、不声称已 match**。使用该模式时，凡涉及代码行为/接口/调用链的断言必须用 Read/Grep 实证当前代码（不盲信约束），文档只作设计意图参考。
+   - **跨工程 stale 轻量表（reference-only 时）**：对每个被参考工程记录 `doc_commit / current_HEAD / git merge-base --is-ancestor <doc_commit> <HEAD> / 相关章节 git diff --name-only`。祖先关系为 0 且无相关差异 → 可作概览参考；为 1/128 或有差异 → 标 stale，只读简要说明，不把文档描述当代码事实；表写入 §2「分析范围」或「文档来源与新鲜度」。
    快照路径和校验细则见doc_snapshot_contract.md；旧库和不同工程的版本继续保留，不由当前工程覆盖。
 3.5 **反查父项目**（子仓库内工作时）：如果 cwd 在 git-root 模式 → 计算 `cwd_relative = realpath(cwd) 相对 realpath(.repo 所在目录)`（**注意：是相对 .repo 根，不是相对 git_root**——例如 cwd 在 `myproject/module_a/`、.repo 在 `myproject/.repo/` 时，cwd_relative = `module_a/`）→ 若 `.repo/manifest.xml` 存在且 `cwd_relative` 精确匹配或为某 `<project path>` 的子路径 → 该 manifest project 的"父 repo 根"=`.repo/` 所在目录；把父 project（repo-root）也纳入检索（读 `project_docs/<父 project_id>/<父 branch>/_meta.json` + 章节，**按父 repo 自身分支子目录读**，勿读错的分支），候选合并排序时一并参与打分（来源标签标「来源：project:父 project_id」）
 3.6 **关联工程检索（跨工程参考，只读 overview）**：读当前00_overview「关联工程」字段；优先按声明的project_id与其明确来源分支定位overview。关联工程分支不要求与当前工程同名；没有明确分支时仅枚举其元信息作概览候选，不混入当前工程正文，来源标其真实project/branch/source_id。多个关联版本只给不含file:line的说明及版本标签，不擅选一个当当前代码；始终不注关联工程正文。以该关联工程自己的实际源码根/分支核stale，无法定位则明示未经当前源码验证。无命中提示未生成，不因当前分支名不同抹去关联工程线索。

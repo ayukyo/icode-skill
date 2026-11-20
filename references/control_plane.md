@@ -16,11 +16,11 @@
 
 新建工单使用闭集物理外壳 `{"storage_version":2,"kind":"metadata","value":完整逻辑对象}`；事件行及事务文件对应 `kind="event" / "transaction"`。逻辑 metadata schema=3、candidate=1、event=1、事务=1 及全部既有 ID / hash 算法保持不变，hash 依据还原后的完整对象计算，不能针对外壳或 ref 计算。下方与共享模板列出的字段均指逻辑对象，不能直接对磁盘顶层做字段判断。
 
-codec 仅替换完整候选 snapshot 的 `manifest/index_manifest/untracked_manifest` 数组槽。引用是内容摘要；定义首次自然出现在同票已提交事件链的 inline 数组中，后续可用引用。定义不从别票、索引、外部路径、pending journal 或 metadata 自报内容获取；坏引用、未知外壳版本和损坏事件链必须失败，不能当 legacy 空值继续。没有 blob 库、额外权威索引或后台服务。历史 inline 文件保持可读，不批量迁移或重写旧事件前缀。
+codec 仅替换完整候选 snapshot 的 `manifest/index_manifest/untracked_manifest` 数组槽。引用是内容摘要；首次定义写入工单目录内的内容寻址侧库 `.ico_storage/definitions/<kind>/<sha256>.json`，事件行、journal 与 metadata 只保留引用，因此大仓的首个 `ticket_created` 事件不再内联整份 manifest。侧库是工单控制文件的一部分，随工单目录复制/归档/备份，不能单独剥离；每次读取都按内容摘要复验，损坏或缺失必须失败。定义不从别票、索引、外部路径、pending journal 或 metadata 自报内容获取；坏引用、未知外壳版本和损坏事件链必须失败，不能当 legacy 空值继续。没有 blob 库、额外权威索引或后台服务。历史 inline 文件保持可读（解码优先用已提交定义，缺失时才查侧库），不批量迁移或重写旧事件前缀。旧版 ICODE（不认识侧库）读取新工单会因引用无法解析而 fail-closed，禁止用旧版对新工单写回。
 
 可执行字段检查统一按 [SKILL.md「票据逻辑读取约定」](../SKILL.md) 从**实际加载技能根**的 `tools` 导入 `icode_control`，调用 `read_metadata_readonly(out_dir)`。该 adapter 在读前 / 读后拒绝 pending，不写、不建锁、不恢复；中央 writer 内部 `load_metadata` 不能作为只读资格判定的替代。现有专用 CLI 继续使用，不另建 metadata dump CLI。index、active pointer、crosscheck 容器等独立 JSON 不套用票据外壳；原始 `Read` 仍可独立读取物理证据，不能把展开再序列化的内容冒充原始字节。
 
-受控 writer 保留原事务顺序：journal → 仅引用已提交定义的 metadata（新数组暂 inline）→ append 事件 → 同事务内 compact metadata → 删除 journal。恢复只由既有持锁 writer 入口执行；归档必须包含本地完整 ledger 以便自给还原，原事件字节与归档 manifest 的原字节校验继续保留。物理减重不改变业务门禁，也不构成 LLM 加速或实机验收的证据。
+受控 writer 保留原事务顺序：先把新定义原子写入侧库 → journal（只引用）→ metadata（只引用）→ append 事件 → 同事务内 compact metadata（正常路径写入时已是引用形态，此步通常无实际写入）→ 删除 journal。事务回滚可能留下未被引用的侧文件，它们是内容寻址的孤儿、不影响校验，可离线清理。恢复只由既有持锁 writer 入口执行；归档必须包含本地完整 ledger 与 `.ico_storage/` 侧库以便自给还原（侧文件逐文件列入归档 manifest，不受顶层 2 MiB 小文件限制），原事件字节与归档 manifest 的原字节校验继续保留。物理减重不改变业务门禁，也不构成 LLM 加速或实机验收的证据。
 
 ## 2. 工单身份解析
 

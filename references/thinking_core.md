@@ -112,7 +112,15 @@ N. **强制思考前置**（不可跳过，缺证据视为不合规；按 [refer
 - `fallback`：实际采用的结构化文字思考方法；L3 仍须独立对抗证据。
 - `evidence_ref`：已完成的结构化思考与 L3 对抗结果的引用。
 
+**可复制模板（仅 `.thinking_gate_trace.jsonl`；MCP trace 用 `unavailable`，勿混）**：
+
+```json
+{"schema_version":1,"ticket_id":"<工单 ID>","step":"<step>","tier":"L2","default_tier":"<catalog 默认等级>","triggers":["<gates.json 枚举>"],"mechanism":"sequential-thinking","decision":"unavailable_before_call","attempted":false,"result":"degraded","degraded_reason":"<真实失败/未暴露类别>","availability":{"tool_visible":false,"discovery_ref":"<ToolSearch/配置核实引用>","reason":"not_exposed","fallback":"structured_text","evidence_ref":"<产物中的结构化思考锚点>"},"over_invoked":false,"at":"<运行时 ISO-8601>"}
+```
+
 `tier/default_tier/triggers/mechanism` 保留原等级合同，不因工具缺失降到 L0/L1；`mechanism` 表示该等级要求的机制，实际替代载体由 `availability.fallback` 表达。沿用 `schema_version=1`，新增字段为条件必填；旧真实调用 trace 继续有效。`result=degraded` 只表示降级履行，不代表工具调用成功。完整示例见 [thinking_detail.md](thinking_detail.md)「thinking gate trace」。字段校验只检查声明一致性，不能独立证明工具不可见或思考完成，引用必须指向真实证据。
+
+**降级思考块的落点**：L2/L3 降级文字块可留在会话上下文，或写入 `{ICODE_OUT_DIR}/.thinking_notes.md`；trace 的 `evidence_ref` 指向该文件/锚点。不要把流程性思考块追加进 `00_init.md`、`01_plan.md` 等产品产物（产品产物只保留需求/计划结论；若已写入，保留一行引用即可）。
 
 > **⚠️ 与 MCP gate trace 的 `result` 词表不同（易错点，两套不能互套）**：同为 `decision=unavailable_before_call`，两种 trace 要求的值**不一样**——
 >

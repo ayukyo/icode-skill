@@ -112,6 +112,8 @@ class StorageStageTests(fixtures.StorageControlTests):
         rows[0] = rows[0]["value"]
         ledger.write_text("\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8")
         self.assertIsNone(stage.discover_stage_history(project))
+        side_files = {path: path.read_bytes() for path in
+                      (self.directory / ".ico_storage" / "definitions").rglob("*.json")}
         for mode in ("missing", "unknown", "reserved", "corrupt", "pending"):
             metadata = (self.directory / self.api.METADATA_NAME).read_bytes()
             ledger_bytes = ledger.read_bytes()
@@ -119,9 +121,9 @@ class StorageStageTests(fixtures.StorageControlTests):
                 if mode == "pending":
                     (self.directory / self.api.TXN_NAME).write_text("{}", encoding="utf-8")
                 elif mode == "corrupt":
-                    damaged = copy.deepcopy(rows)
-                    damaged[1]["value"]["payload"]["snapshot"]["manifest"][0]["size"] = 77
-                    ledger.write_text("\n".join(json.dumps(row) for row in damaged) + "\n", encoding="utf-8")
+                    # Definitions live in the content-addressed side store.
+                    damaged = sorted(side_files)[0]
+                    damaged.write_bytes(damaged.read_bytes() + b" ")
                 else:
                     damaged = json.loads(metadata)
                     if mode == "unknown": damaged["storage_version"] = 99
@@ -135,6 +137,8 @@ class StorageStageTests(fixtures.StorageControlTests):
                 self.assertEqual(before, {p.name: (p.read_bytes(), p.stat().st_mtime_ns) for p in self.directory.iterdir() if p.is_file()})
             (self.directory / self.api.METADATA_NAME).write_bytes(metadata)
             ledger.write_bytes(ledger_bytes)
+            for path, data in side_files.items():
+                path.write_bytes(data)
             (self.directory / self.api.TXN_NAME).unlink(missing_ok=True)
 
     def test_archive_is_self_contained_and_handoff_uses_physical_bytes(self):

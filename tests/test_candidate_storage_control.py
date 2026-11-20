@@ -64,15 +64,16 @@ class StorageControlTests(unittest.TestCase):
         self.assertEqual(self.api.read_events(self.directory)[0][-1], event)
 
     def test_postappend_compact_failure_never_rolls_back_committed_metadata(self):
-        original = self.api.atomic_write_json
-        count = 0
-        def write(path, value):
-            nonlocal count
-            if Path(path).name == self.api.METADATA_NAME:
-                count += 1
-                if count >= 2: raise OSError("postcompact failure")
-            return original(path, value)
-        with mock.patch.object(self.api, "atomic_write_json", side_effect=write):
+        # Metadata is already written in its compact reference form before the
+        # append, so the remaining post-append step is finalization itself.
+        original = self.api._finalize_committed_metadata
+        calls = 0
+        def finalize(out_dir, after):
+            nonlocal calls
+            calls += 1
+            if calls <= 2: raise OSError("postcompact failure")
+            return original(out_dir, after)
+        with mock.patch.object(self.api, "_finalize_committed_metadata", side_effect=finalize):
             with self.assertRaises(OSError): self.update()
         self.assertTrue((self.directory / self.api.TXN_NAME).exists())
         current = self.api.load_metadata(self.directory)

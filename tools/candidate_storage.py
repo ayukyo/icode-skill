@@ -78,6 +78,31 @@ class _Definition:
     row_depth: int
 
 
+def _manifest_row_depth(kind, value):
+    required = {"path", "mode", "oid"} if kind == "index_manifest" else \
+               {"path", "kind", "mode", "sha256", "size", "git_oid"}
+    if any(type(row) is not dict or set(row) != required or
+           any(type(cell) not in (str, int, float, bool, type(None)) for cell in row.values()) for row in value):
+        raise StorageError("invalid closed candidate manifest row")
+    return 2 if value else 0
+
+
+def _definition_from_rows(kind, rows_json, budget, depth):
+    """Validate a definition loaded from a content-addressed side store."""
+    try:
+        value = json.loads(rows_json)
+    except (ValueError, TypeError, UnicodeError, RecursionError) as exc:
+        raise StorageError("invalid side manifest definition JSON: " + str(exc)) from exc
+    if not isinstance(value, list):
+        raise StorageError("candidate manifest definition must be an array")
+    row_depth = _manifest_row_depth(kind, value)
+    budget.check("max_manifest_rows", len(value))
+    budget.check("max_depth", depth + row_depth)
+    canonical = _canonical(value)
+    budget.charge(len(canonical))
+    return _Definition(canonical, len(value), row_depth)
+
+
 class Registry:
     """An invocation-local ledger registry; never deserialized from JSON."""
     def __init__(self):
@@ -238,13 +263,18 @@ def _registry(value):
 
 
 class _Transform:
-    def __init__(self, registry, budget, *, encode=False, define=False, typed=True, require_definitions=False):
+    def __init__(self, registry, budget, *, encode=False, define=False, typed=True, require_definitions=False,
+                 definition_store=None):
         self.registry = _registry(registry)
         self.budget = budget
         self.encode = encode
         self.define = define
         self.typed = typed
         self.require_definitions = require_definitions
+        # Optional content-addressed side store. When present, first definitions
+        # are persisted there and events keep only references; decoding resolves
+        # references that are not yet in the ledger registry from the same store.
+        self.definition_store = definition_store
 
     def slot(self, value, name, depth):
         kind = "index_manifest" if name == "index_manifest" else "file_manifest"
@@ -261,7 +291,12 @@ class _Transform:
             self.budget.check("max_refs", self.budget.refs)
             key = (kind, ref["sha256"])
             if key not in self.registry._definitions:
-                raise StorageError("missing or forward manifest reference: " + ref["sha256"])
+                if self.definition_store is None:
+                    raise StorageError("missing or forward manifest reference: " + ref["sha256"])
+                rows_json = self.definition_store.load(kind, ref["sha256"])
+                if rows_json is None:
+                    raise StorageError("missing or forward manifest reference: " + ref["sha256"])
+                self.registry._definitions[key] = _definition_from_rows(kind, rows_json, self.budget, depth)
             definition = self.registry._definitions[key]
             self.budget.check("max_manifest_rows", definition.row_count)
             self.budget.check("max_depth", depth + definition.row_depth)
@@ -274,17 +309,21 @@ class _Transform:
         if not isinstance(value, list):
             raise StorageError("candidate manifest must be an array or typed reference")
         self.budget.check("max_manifest_rows", len(value))
-        required = {"path", "mode", "oid"} if kind == "index_manifest" else \
-                   {"path", "kind", "mode", "sha256", "size", "git_oid"}
-        if any(type(row) is not dict or set(row) != required or
-               any(type(cell) not in (str, int, float, bool, type(None)) for cell in row.values()) for row in value):
-            raise StorageError("invalid closed candidate manifest row")
-        row_depth = 2 if value else 0
+        row_depth = _manifest_row_depth(kind, value)
         self.budget.check("max_depth", depth + row_depth)
         rows_json = _canonical(value)
         self.budget.charge(len(rows_json))
         key = (kind, _manifest_digest_bytes(kind, rows_json))
         if self.encode and key in self.registry._definitions:
+            self.budget.refs += 1
+            self.budget.check("max_refs", self.budget.refs)
+            return {_MARKER: {"storage_version": 2, "kind": kind, "sha256": key[1]}}
+        if self.encode and self.define and self.definition_store is not None:
+            # First definition: persist the canonical rows in the content-
+            # addressed side store, then keep only the reference in the event.
+            self.budget.check("max_definitions", len(self.registry) + 1)
+            self.definition_store.save(kind, key[1], rows_json)
+            self.registry._definitions[key] = _Definition(rows_json, len(value), row_depth)
             self.budget.refs += 1
             self.budget.check("max_refs", self.budget.refs)
             return {_MARKER: {"storage_version": 2, "kind": kind, "sha256": key[1]}}
@@ -323,11 +362,13 @@ class _Transform:
         return value
 
 
-def decode_events(raw_records, *, limits=None, logical_event_validator):
+def decode_events(raw_records, *, limits=None, logical_event_validator, definition_store=None):
     """Validate each complete logical event before committing its definitions.
 
     The required validator receives (event, prior_events), and must check the
     existing event schema, hash, ID, previous hash and ticket identity contract.
+    ``definition_store`` resolves references whose first definition lives in a
+    content-addressed side file instead of an inline event array.
     """
     if not callable(logical_event_validator):
         raise StorageError("logical event validator is required")
@@ -337,7 +378,8 @@ def decode_events(raw_records, *, limits=None, logical_event_validator):
         budget.raw_object(raw)
         value, typed = _unwrap(raw, StorageKind.EVENT)
         temporary = registry._fork()
-        logical = _Transform(temporary, budget, define=True, typed=typed).walk(value)
+        logical = _Transform(temporary, budget, define=True, typed=typed,
+                             definition_store=definition_store).walk(value)
         try:
             outcome = logical_event_validator(logical, _ReadOnlySequence(events))
             if outcome is False:
@@ -350,11 +392,12 @@ def decode_events(raw_records, *, limits=None, logical_event_validator):
     return DecodedLedger(events, registry)
 
 
-def decode_document(raw_object, *, kind, registry, limits=None):
+def decode_document(raw_object, *, kind, registry, limits=None, definition_store=None):
     budget = _Budget(limits)
     budget.raw_object(raw_object)
     value, typed = _unwrap(raw_object, kind)
-    logical = _Transform(_registry(registry), budget, typed=typed).walk(value)
+    logical = _Transform(_registry(registry), budget, typed=typed,
+                         definition_store=definition_store).walk(value)
     budget.check("max_expanded_bytes", budget.expanded)
     return logical
 
@@ -376,12 +419,13 @@ def encode_document(logical_object, *, kind, committed_registry, limits=None, re
     return result
 
 
-def encode_event(logical_event, *, committed_registry, limits=None):
+def encode_event(logical_event, *, committed_registry, limits=None, definition_store=None):
     if not isinstance(logical_event, dict) or is_envelope(logical_event):
         raise StorageError("logical event must be an unwrapped object")
     temporary = _registry(committed_registry)._fork()
     budget = _Budget(limits)
-    value = _Transform(temporary, budget, encode=True, define=True).walk(logical_event)
+    value = _Transform(temporary, budget, encode=True, define=True,
+                       definition_store=definition_store).walk(logical_event)
     result = {"storage_version": 2, "kind": "event", "value": value}
     budget.raw_object(result)
     return result, temporary

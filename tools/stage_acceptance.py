@@ -215,9 +215,11 @@ def discover_stage_history(project, *, limits=None, tolerate=None):
                             max_events=bounds["max_events"],
                             timeout_seconds=max(0, bounds["timeout_seconds"] - (time.monotonic() - started)))
                         try:
-                            ledger = api.decode_control_ledger(raw_events, limits=codec_limits)
+                            ledger = api.decode_control_ledger(raw_events, limits=codec_limits,
+                                                               out_dir=directory)
                             meta = storage.decode_document(raw_meta, kind="metadata", registry=ledger.registry,
-                                                           limits=codec_limits)
+                                                           limits=codec_limits,
+                                                           definition_store=api.FileDefinitionStore(directory))
                         except (storage.StorageError, api.ControlError) as exc:
                             reject("stage discovery control ledger hash/schema/identity is damaged; candidate storage: " + str(exc), "invalid_candidate_storage")
                         raw_events = ledger.events

@@ -32,6 +32,15 @@ skill 内所有 `python3 tools/...` 形式的命令，执行前必须按平台�
 
 Windows 上裸 `python` / `python3` 常解析到 `%LOCALAPPDATA%\Microsoft\WindowsApps` 的应用执行别名（假 stub），表现为**退出码 0、无任何输出**。出现这种"静默成功"一律视为失败：改用 `py -3` 重跑同一命令，不得据此判定步骤完成，也不得把空输出当作通过证据。可用性判定：`py -3 -c "import sys; print(sys.executable)"` 有真实路径输出即可用。
 
+### 非 ASCII 文本入参（跨平台硬规则）
+
+Windows shell（PowerShell / Git Bash）把中文、emoji 或长文本作为 argv 传给 `py -3` 时，可能按 ANSI 代码页（cp936/cp1252）解码而乱码；`--requirement`、`--set-json` 等内联参数不可靠。规则：
+
+- **优先文件入参**：`create --requirement-file <utf8>`、`metadata-update --set-json-file <utf8>` / `--append-json-file <utf8>`。文件统一按 UTF-8（可带 BOM）读取，写入前校验非空与 JSON 合法性。
+- 旧命令没有文件入参时，把文本写入 UTF-8 文件后由 Python 脚本读取；或使用 `PYTHONUTF8=1` + PowerShell 单引号 here-string。**禁止**用 shell 变量拼接长中文后直接传 argv。
+- **落盘后回读比对**：`create` 后核对 metadata `requirement` 与原文；`metadata-update` 后核对摘要/字段。发现替换字符用 `metadata-update` 修复，**禁止手改 `.ico_metadata.json`**。
+- `--requirement` 与 `--requirement-file`、`--set-json` 与 `--set-json-file` 均只能二选一；同时给出按参数错误退出。
+
 ## 自然语言入口
 
 用户可直接说“使用 ICODE 给这个模块增加重试，先出方案，不改代码”或“用 ICODE 测设备现有版本，不编译、不部署”。由**当前宿主 Agent**理解意图，不新增模型调用或 Runtime 依赖；`/icode <自然语言>` 与原有 `/icode <子命令>` 并存。
@@ -177,7 +186,7 @@ Windows/WSL 构建按需加载 [WSL 构建合同](references/wsl_build.md)；本
 
 > 锚点保留小节：`元信息文件` / `可选字段` / `verdict 字段族` / `workload_estimate 字段族` / `status 字段枚举` / `status 写回校验` / `全局索引` / `模板`
 
-**票据逻辑读取约定**：下列可执行片段中的 `{ICODE_SKILL_ROOT}` 必须先替换为**本次实际加载的 ICODE 技能目录绝对路径**（即本 `SKILL.md` 所在目录，按 Codex / Claude 等当前宿主实际安装位置解析，不能使用业务工程根代替）。从该目录的 `tools` 导入 `icode_control` 后调用 `read_metadata_readonly(工单目录)`；它兼容旧 inline 与新 storage v2 envelope，并只从同票已提交事件链还原候选数组。读取前后发现 pending 或遇到坏引用必须停止，不能用默认空对象、跳过或成功提示继续；不加锁、不恢复、不写回。原始 `Read` 可独立查看物理文件，但字段判断必须使用还原后的逻辑对象。全局 index、active pointer、crosscheck 容器等独立 JSON 保留原读取协议；逻辑 schema / ID / hash 均不变，历史 inline 不主动重写。
+**票据逻辑读取约定**：下列可执行片段中的 `{ICODE_SKILL_ROOT}` 必须先替换为**本次实际加载的 ICODE 技能目录绝对路径**（即本 `SKILL.md` 所在目录，按 Codex / Claude 等当前宿主实际安装位置解析，不能使用业务工程根代替）。从该目录的 `tools` 导入 `icode_control` 后调用 `read_metadata_readonly(工单目录)`；它兼容旧 inline 与新 storage v2 envelope，并只从同票已提交事件链 + 工单内 `.ico_storage/` 内容寻址侧库还原候选数组（侧文件按摘要复验，缺失/损坏即停）。读取前后发现 pending 或遇到坏引用必须停止，不能用默认空对象、跳过或成功提示继续；不加锁、不恢复、不写回。原始 `Read` 可独立查看物理文件，但字段判断必须使用还原后的逻辑对象。全局 index、active pointer、crosscheck 容器等独立 JSON 保留原读取协议；逻辑 schema / ID / hash 均不变，历史 inline 不主动重写。
 
 **status 写回校验（强制，防词表外值落盘）**：每步写 `.ico_metadata.json` 前，必须先对照上方词表校验 `status` 在枚举内（`completed_steps` 中的步骤号须是 `steps/*.md` 清单里存在的合法值），词表外值直接判不合规、拒绝写回并修正。按上面的技能根约定替换占位符后执行：
 

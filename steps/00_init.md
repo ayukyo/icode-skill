@@ -60,6 +60,8 @@
    - **违规阻止例外**：limit 「worktree 强制禁止」红线命中时（[steps/limit.md](../steps/limit.md) §7），AI 提示一次"本工程 limit 禁止 worktree，本工单回退原地建" + 回退原地（不创建 worktree）
    - AI **不得自创理由另行弹问** worktree（是否用 worktree = 用户消息意图决定，不由 AI 判断）
    - **目录仍为空时立即建立控制面出生记录**：生成非空 `ticket_id`，在写 `00_init.md`、trace、checkpoint 等任何产物前调用 `python3 tools/icode_control.py create --dir {ICODE_OUT_DIR} --ticket-id <id> --requirement '<原始需求>' --birth init|debug-init`。`create` 会拒绝非空目录和 normal/debug 域错配；不得拖到步骤 7 才创建，否则中断目录没有可验证身份。
+   - **非 ASCII 需求（Windows 必读）**：`--requirement` 经 shell argv 传递时，Windows 可能按 ANSI 代码页解码，中文/emoji/长文本会乱码。需求含非 ASCII 时先把原文写入 UTF-8 文件，改用 `--requirement-file <path>`；`create` 成功后在步骤 7 回读 metadata `requirement` 与原文比对。发现乱码用 `metadata-update --set-json-file` 修复，**禁止手改 `.ico_metadata.json`**。`--requirement` 与 `--requirement-file` 只能二选一。
+   - **debug 出生不建立候选合同**：`--birth debug-init|debug-log` 会跳过全仓候选快照（debug 不进入 code/patch），`--exclude` / `--candidate-limits-json` 对 debug 不适用并会被显式拒绝；这是控制面行为，不是错误。
 2. **历史检索复用**（强制思考之前，全局索引存在时必须执行，详见 SKILL.md「历史检索复用」段）：
    - **`--debug` 分支（独立孪生对照 → 跳过源1·历史工单检索）**：debug 工单是**独立孪生**——它应**被参考**（产物供正常工单并列对照研读），**不去参考历史工单**。历史检索读 `index.json` 注入的是**历史正式工单**结论（debug 工单不入索引），参考它们会被既有结论带偏、无法独立形成自己的思考——正常工单与 debug 孪生两份对照收敛到同一历史结论，对照价值尽失。因此 debug 模式**整段跳过**下方源1·历史工单检索（两段式检索 / verdict 分流注入 / 重复模式检测），**保留**源2·段零工程文档检索 + limit 红线检查点。**跳过后在思考块「历史参考」标注**"debug 模式跳过历史工单检索（独立孪生对照），无历史工单参考，仅注入段零工程文档"（与 log.md 步骤4 debug 分支一致）
    - **源1·历史工单检索**（**debug 模式整段跳过，见上方 debug 分支**）：Read `~/.claude/icode_data/index.json`（不存在则跳过检索）
@@ -73,7 +75,8 @@
 3. 处理输入参数（**两种都支持**，本步骤只**构思内容框架**，实际 Write 在步骤6；深度读代码在步骤4）：
    - **有参数**（`/icode init <粗略需求>`）：将参数作为初始需求，结合步骤2历史参考（若有），**构思**第一版 `00_init.md` 各章节内容框架（此时不深入读代码，代码细节留给步骤4）
    - **无参数**（`/icode init`）：**构思**空模板版 `00_init.md`（各章节内容写"待补"），然后主动询问用户"这次想做什么？"开启对话
-4. **了解现有工程**：阅读项目中相关代码，识别现状、可复用模块、相关接口（**先于思考**，为步骤5的"现状盘点/影响面分析"提供代码依据）。**进入工程第一步先做 git 状态快照（O-2）**：执行 `git -C <project_path> status --short` + `ls -ld <project_path>/.git` 做 **`.git` 三形态判别**：**目录**=普通 git 仓库 / **symlink**=repo 独立仓（`.git` 指向 repo 管理目录，父仓 `.gitignore` 忽略子仓、父仓根目录 `git diff` 恒为空）/ **普通文件**（内容以 `gitdir:` 开头）= **git worktree 成员**（`git status` 正常，勿误判为异常；project_id 归主仓见 [references/dir_and_metadata.md](../references/dir_and_metadata.md)「project_id 与 branch 语义」F1）；记录三态（staged / unstaged / untracked）；repo 多仓工程**禁止**在父仓根目录用 `git diff` 判定子仓改动归属。**必须同步执行「现有功能覆盖度检查」**（防重复实现机制，完整规则见 [references/necessity_check.md](../references/necessity_check.md)）：对 §3 每个新增需求点，全工程检索关键词 → Read 命中处上下文（≥20 行，消费点必须追行为链）→ 三类判定（已覆盖/部分/未覆盖）——**结论写入 §2 的「2.X 现有功能覆盖度检查」子段 + §5 预筛表「是否已覆盖」列**。本检查在 §2 现状盘点之后、§3 新增需求点之前执行
+4. **了解现有工程**：阅读项目中相关代码，识别现状、可复用模块、相关接口（**先于思考**，为步骤5的"现状盘点/影响面分析"提供代码依据）。**进入工程第一步先做 git 状态快照（O-2）**：执行 `git -C <project_path> status --short` + `ls -ld <project_path>/.git` 做 **`.git` 三形态判别**：**目录**=普通 git 仓库 / **symlink**=repo 独立仓（`.git` 指向 repo 管理目录，父仓 `.gitignore` 忽略子仓、父仓根目录 `git diff` 恒为空）/ **普通文件**（内容以 `gitdir:` 开头）= **git worktree 成员**（`git status` 正常，勿误判为异常；project_id 归主仓见 [references/dir_and_metadata.md](../references/dir_and_metadata.md)「project_id 与 branch 语义」F1）；记录三态（staged / unstaged / untracked）；repo 多仓工程**禁止**在父仓根目录用 `git diff` 判定子仓改动归属。**必须同步执行「现有功能覆盖度检查」**（防重复实现机制，完整规则见 [references/necessity_check.md](../references/necessity_check.md)）：对 §3 每个新增需求点，全工程检索关键词 → Read 命中处上下文（≥20 行，消费点必须追行为链）→ 三类判定（已覆盖/部分/未覆盖）——**结论写入 §2 的「2.X 现有功能覆盖度检查」子段 + §5 预筛表「是否已覆盖」列**。本检查在 §2 现状盘点之后、§3 新增需求点之前执行。跨工程/多需求场景按**最小判定**读取（建议 20–40 行/命中点），不追完整实现，实现细节留步骤 4。
+   - **多仓需求（用户点名 ≥2 个工程）**：当前工作区根仍按 `project_intake` 解析；被点名的其它工程作为**只读参考**记录 `{project_path, branch, HEAD, 文档来源}`，只读 `00_overview` + 相关章节前 50 行做有界 KEYS 匹配，不触发 `project_intake` 的多根 L1 阻断。产物 §2 增加「分析范围」表（工程/根路径/分支/HEAD/文档来源/是否 Read 实证），§2.X 覆盖度表增加可选「工程」列；参考仓（如驱动仓）只作证据，不写入工程产物。
 5. **思考分级（L1：决策记录）**（按 [references/mcp_per_step.md](../references/mcp_per_step.md)「通用前置·分级思考」段执行）：本步骤为 L1，不调用 sequential-thinking；结构化决策字段记入 `.decision_anchors.json`（见 [references/decision_anchors.md](../references/decision_anchors.md)「L1 决策记录契约」） = 需求分解 → 现状盘点（基于步骤4读码结果） → 影响面分析（基于步骤4读码结果） → 待决策项识别 → 待决策倾向自审（逐条回溯现状盘点/影响面证据，主动找反证；无反证保留、有反证修正并记反证依据）。**若步骤2有历史参考，在此处「历史参考」小节记录命中工单 id 与要点，作为思考输入**
 6. 使用 Write 工具写入 `{ICODE_OUT_DIR}/00_init.md`（模板见下文；**按 [产物写入粒度](../references/execution_model.md#产物写入粒度) 整段落盘，禁止把同一章节拆成几十次小改**）。**第 6 节链路图初稿**（一图流总览）：before 画步骤 4 读码所得现状链路（关键节点标 file:line），after 画构思的改动后链路并标 `[+]`/`[~]`/`[-]`，改动点清单对齐第 3 节新增需求点；无参数/信息不足时画已知部分 + `?` 待补，**不得整节留空或仅写"待补"**
 7. 完善步骤 1 已创建的 `{ICODE_OUT_DIR}/.ico_metadata.json`：
@@ -100,6 +103,10 @@
    ```
 
    > **控制面接线**：原子出生已在步骤 1 的空目录阶段完成。本步骤只原子合并 `requirement_summary/requirement_points/keywords/workload_*` 等业务字段；不得再次调用 `create`，也不得改写 `ticket_id/created_at/status/completed_steps/indexed/project_path` 等受保护字段。
+   >
+   > **出生默认值**：`create` 已为 init/debug-init 出生 seed `semantic_decisions: []` 与 `requirement_deltas: []`。空数组表示「尚未决策/尚无增量」，由步骤 1 plan 按需填充；步骤 0 不需要提前拍板，`--strict` 的 workflow gate 因此对新建工单直接通过存在性检查。
+   >
+   > **`requirement_points` 上限**：它是**索引检索摘要**，schema 上限 8 条；§3 的完整需求点可以更多，二者不是一一对应。超过 8 条时按模块/能力合并，完整细节留在 `00_init.md`。
 
    **`--debug` 模式差异**（详 [references/debug_mode.md](../references/debug_mode.md)）：
    - `status` 改为 `"debug_in_progress"`（不是 `"init_in_progress"`——下游易识别）
@@ -172,6 +179,8 @@
 
    - **持续更新**：每轮对话结束前重评（需求点/文件数/大改词可能变化），刷新 metadata + 索引（仅刷 `workload_estimate`+`workload_reason`，不刷 `requirement_points` 防索引膨胀）。**debug 工单豁免本子段**（debug 不评估工作量、不写索引，见上方 debug 模式差异）
    - **保持向后兼容**：旧 metadata 无 `workload_estimate` 视为 `"medium"`（中性默认），不阻塞后续步骤
+
+10. **理解核对清单（首轮同样适用）**：Write `00_init.md` 后，按「后续每轮对话」第 6 条的格式输出 5~10 条理解点（✅/🔴/🟢/❌）。该要求不限于后续轮次；首轮 `/icode init` 也必须输出，确保用户在进入 plan 前修正歧义。
 
 ### 后续每轮对话（同一会话内，由 AI 自主识别，无需用户敲命令）
 
@@ -248,6 +257,8 @@
 ### 2.X 现有功能覆盖度检查（防重复实现机制，必填）
 
 > 对 §3 每个新增需求点，**全工程检索**（不限本模块）确认现有代码无等价实现；有命中必须 Read 上下文（≥20 行）、消费点追行为链、再判定。完整执行规则见 [references/necessity_check.md](../references/necessity_check.md)。**"现有实现路径存在" ≠ "现有实现已覆盖需求"**——本检查是 §3 需求点定稿的前置，结论同时落 §5 预筛表「是否已覆盖」列。
+>
+> **跨工程时**：表格增加可选「工程」列（SDK/CLI/Viewer/参考仓），同一需求点可有多行；检索范围与只读参考仓按步骤 4「多仓需求」记录。
 
 | 需求点（第3节编号） | 检索关键词（≥2 个同义变体） | 命中位置（file:line） | 行为链结论 | 判定（已覆盖 / 部分 / 未覆盖） |
 |---------------------|----------------------------|----------------------|-----------|------------------------------|
@@ -361,6 +372,8 @@
 ```
 
 ### 改动点清单（图上每个 `[+]`/`[~]`/`[-]` 标注 = 本清单一行；每行「关联需求点」回指第 3 节需求点，一个需求点可对应多个改动点）
+
+> **跨工程时**：增加可选「工程」列，标明改动落在哪个工程；同一改动点跨多工程时分行走。
 
 | 类型 | 位置 (file:line / 模块) | 改动说明 | 关联需求点 |
 |------|------------------------|---------|-----------|
