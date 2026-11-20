@@ -285,7 +285,7 @@
       },
       "audit": {
         "inputs": [
-          {"id": "final_plan", "kind": "ticket_file", "value": "03_plan_final.md", "required": true, "protected": true},
+          {"id": "final_plan", "kind": "ticket_file", "value": "03_plan_final.md", "required": true, "protected": true, "ignore_sections": ["## 实现偏差备忘"]},
           {"id": "code_files", "kind": "metadata_files", "value": "/code_files", "base": "workspace", "required": true, "protected": true},
           {"id": "deepcheck", "kind": "ticket_file", "value": "05_deepcheck.md", "required": false, "protected": true},
           {"id": "active_checkout", "kind": "metadata_pointer", "value": "/active_checkout", "required": false, "protected": true},
@@ -480,9 +480,9 @@
       "references/adversarial.md": "944203babed04e58a5ccccdd7bc256a7199daa2d36e3ae4ac9d661a5f105b3cf",
       "references/anti_laziness.md": "8b15b9d2c578f5e84e019939a13dec9c5a334a6e75ca7fb380941ab5ee79d665",
       "references/control_plane.md": "78d637c737dd12ad80366b872848e59b7ca9b479d69204104454d883617bc448",
-      "references/dir_and_metadata.md": "bf42dc90877cac6485e736a5b0faf970dbd5147030e7297627af8d49b0e207a0",
+      "references/dir_and_metadata.md": "d8cbda67669de7d9df4290efb106958c5612e5a4bd97ee56fae54032dde27189",
       "references/evidence_and_verification.md": "76f4cd9c5a6594fd90bdae7f86b551bb5dc6b5ac16ac3e70198faa66872b8b63",
-      "references/execution_model.md": "654eca21e747df850ba2eb3790df37855370a63dede7368f402e58e323ca3f0e",
+      "references/execution_model.md": "cfcbeb56def22273c2d719f13b6afe65727b119ba7332e4e466468e70bd4ab69",
       "references/first_activation_path.md": "e1cdbda0109044af19ef5bf9e4edff677c112d28f550aebe4dd73c8fbde0ac80",
       "references/inspection_evidence.md": "ecf393049f3060b6ee4615b972d62cf61d65eeec63c2f058499ed36b870085dc",
       "references/inspection_worklist.md": "c5d216c24d0124e963ecdbe6aeddad7a98adf1d15f6895258f69fa6313f5f5d8",

@@ -2045,6 +2045,29 @@ def file_fact(path, label=None):
     return fact
 
 
+def section_ignoring_file_fact(path, label, sections):
+    """按「忽略指定章节」计算文件事实，供受保护计划端口使用。
+
+    终审合同要求把「实现偏差备忘」回写到 03_plan_final.md，而该文件同时是 audit 的
+    受保护输入。整文件取哈希会让合规回写被判成漂移，因此这里只对**第一个被忽略章节
+    之前**的正文取哈希：保护范围收敛为「计划正文」，被显式允许改写的章节（定稿时预留、
+    终审回填）不参与比对。尾部空行一并归一化，使「定稿时还没有备忘段、终审才追加」与
+    「定稿时就带空备忘段」得到相同摘要。`ignore_sections` 必须在端口上显式声明，未声明的
+    端口保持整文件保护。
+    """
+    data = Path(path).read_bytes()
+    text = data.decode("utf-8")
+    cut = len(text)
+    for heading in sections:
+        index = text.find(heading)
+        if index != -1:
+            cut = min(cut, index)
+    body = text[:cut].rstrip("\r\n").encode("utf-8")
+    return {"path": label or str(path), "exists": True,
+            "sha256": hashlib.sha256(body).hexdigest(), "size": len(body),
+            "ignored_sections": list(sections)}
+
+
 def port_value(out_dir, meta, port):
     """Resolve an explicit delivery path, retaining historical fixed names."""
     value = port.get("value")
@@ -2150,6 +2173,11 @@ def _resolve_port_legacy(out_dir, meta, port):
         return result
     if kind == "ticket_file":
         path = port_path(Path(out_dir), value)
+        sections = [item for item in (port.get("ignore_sections") or [])
+                    if isinstance(item, str) and item.strip()]
+        if sections and path.is_file():
+            return {"id": port.get("id"), "kind": kind,
+                    **section_ignoring_file_fact(path, str(Path(value)), sections)}
         return {"id": port.get("id"), "kind": kind,
                 **file_fact(path, str(Path(value)))}
     if kind == "ticket_glob":
@@ -2192,18 +2220,34 @@ def _resolve_port_legacy(out_dir, meta, port):
                 if isinstance(raw, str) and raw.strip():
                     candidates.append(Path(raw).expanduser().resolve())
         roots = {}
+        failures = []
         for target in candidates:
             try:
                 root_proc = subprocess.run(
                     ["git", "-C", str(target), "rev-parse", "--show-toplevel"],
                     capture_output=True, text=True, timeout=10)
+                if root_proc.returncode != 0:
+                    continue  # 明确不是 Git 仓库：稳定的“无事实”结论，不当作故障
                 head_proc = subprocess.run(
                     ["git", "-C", str(target), "rev-parse", "HEAD"],
                     capture_output=True, text=True, timeout=10)
-            except (OSError, subprocess.TimeoutExpired):
+            except FileNotFoundError:
+                continue  # 本机没有 git 可执行文件：同样是稳定结论
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                # 瞬时读取失败若被 continue 掉，roots 会变小、digest 随之变化，
+                # 进而被误判成“工作区漂移”。这里必须 fail-closed 到明确错误。
+                failures.append(f"{target}: {type(exc).__name__}")
+                continue
+            if head_proc.returncode != 0:
+                failures.append(f"{target}: HEAD 读取失败")
                 continue
             if root_proc.returncode == 0 and head_proc.returncode == 0:
                 roots[root_proc.stdout.strip()] = head_proc.stdout.strip()
+        if failures:
+            raise ControlError(
+                "workspace_git_head 端口解析失败（瞬时环境故障，不能当作工作区漂移）: "
+                + "; ".join(failures),
+                exit_code=1, gate_id="step_ports_transient")
         facts = [{"root": root, "head": roots[root]} for root in sorted(roots)]
         if facts:
             result.update({"exists": True, "roots": facts,
@@ -3337,6 +3381,10 @@ def _cmd_create_plain(args):
         "thinking_gate_schema_version": 1,
         "mcp_gate_schema_version": load_json(SKILL_ROOT / "mcp/cheap-research/gates.json", "cheap gate catalog")["trace_schema_version"],
     })
+    # 完成态 transition 走 --strict，linter 要求 requirement_deltas 显式存在；而
+    # references/dir_and_metadata.md 声明「可选，缺失视为 []」。新工单在出生处补空数组，
+    # 让两处口径一致；用户显式传入时保留（setdefault 不覆盖）。
+    meta.setdefault("requirement_deltas", [])
     if debug:
         meta["debug"] = True
     elif meta.get("debug"):

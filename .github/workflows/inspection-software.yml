@@ -104,7 +104,7 @@ jobs:
       - name: Fast admission and derived ticket overview contracts
         run: python -m pytest -p no:anyio tests/test_fast_policy.py tests/test_fast_admission.py tests/test_overview_checkpoint.py tests/test_delivery_report.py tests/test_delivery_pending_path.py tests/test_ticket_context.py tests/test_ticket_material_ui.py tests/test_fast_patch_crosscheck.py -q
       - name: Source-bound execution profiles, rule coverage and batched-write equivalence
-        run: python -m pytest -p no:anyio tests/test_execution_profile.py tests/test_execution_profile_integration.py tests/test_execution_profile_rule_coverage.py tests/test_fast_execution_contract.py tests/test_execution_closeout_recipe.py tests/test_control_batching_equivalence.py -q
+        run: python -m pytest -p no:anyio tests/test_execution_profile.py tests/test_execution_profile_integration.py tests/test_execution_profile_rule_coverage.py tests/test_fast_execution_contract.py tests/test_execution_closeout_recipe.py tests/test_control_batching_equivalence.py tests/test_step_port_protection_unit.py -q
       - name: Candidate storage roundtrip, recovery and legacy compaction contracts
         run: python -m pytest -p no:anyio tests/test_candidate_storage.py tests/test_candidate_storage_control.py tests/test_candidate_storage_stage.py tests/test_candidate_storage_faults.py tests/test_candidate_storage_readers.py tests/test_candidate_storage_doc_contract.py tests/test_storage_compaction.py -q
       - name: Offline distribution resource contract

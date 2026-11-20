@@ -8,7 +8,7 @@
 
 ## 1. 五项能力及边界
 
-1. **Step Ports**：每个已登记步骤声明 `inputs / outputs`。开始时验证必填输入；成功终结前验证必填输出。端口只保存存在性、路径、大小和摘要，不把正文复制进事件链。
+1. **Step Ports**：每个已登记步骤声明 `inputs / outputs`。开始时验证必填输入；成功终结前验证必填输出。端口只保存存在性、路径、大小和摘要，不把正文复制进事件链。`ticket_file` 端口可声明 `ignore_sections`，把保护范围收敛到指定章节之前的正文——audit 的 `final_plan` 端口据此忽略「实现偏差备忘」段，使终审按合同回写该段不再被判成漂移，而正文改动仍然触发漂移。端口解析遇到瞬时环境故障（如 `git rev-parse` 超时）必须 fail-closed 报 `step_ports_transient`，不得退化成「解析结果少一项」，否则摘要变化会被误报为工作区漂移。
 2. **Reactive 边界复检**：开始时冻结 `protected=true` 的输入摘要；在写入、等待返回、外部副作用、状态转换前重新计算。漂移即返回路由并 fail-closed，不在同一 attempt 静默刷新基线。
 3. **统一轨迹**：步骤、边界 gate、产物、长动作和状态转换共用哈希事件链；`trace` 从同一来源生成时间线，不维护第二份运行状态。
 4. **副作用感知 Retry/Fallback**：失败分类与动作类别共同决定 `retry / fallback / repair_then_retry / verify_receipt / block / human_decision`。只有只读瞬时失败可自动重试；写、外部动作和硬件动作禁止盲重放。
