@@ -177,10 +177,15 @@ def test_manual_dedup_coverage_checks_scope_and_current_candidate(tmp_path):
 
 def test_new_deepcheck_cannot_claim_not_eligible_for_51_functions(tmp_path):
     subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    subprocess.run(["git", "-C", str(tmp_path), "config", "user.email", "icode-test@example.invalid"], check=True)
+    subprocess.run(["git", "-C", str(tmp_path), "config", "user.name", "ICODE test"], check=True)
     src = tmp_path / "src"
     src.mkdir()
     source = src / "app.py"
     source.write_text("\n".join(f"def function_{n}(): pass" for n in range(51)), encoding="utf-8")
+    subprocess.run(["git", "-C", str(tmp_path), "add", "src/app.py"], check=True)
+    subprocess.run(["git", "-C", str(tmp_path), "commit", "-m", "fixture baseline"], check=True,
+                   capture_output=True, text=True)
     out = tmp_path / ".icode_output/.icode_output_1"
     code, created = call(out, "create", "--ticket-id", "threshold-1", "--requirement", "fixture",
                          "--birth", "plan", "--metadata-json", json.dumps({"mode": "full", "code_files": ["src/app.py"]}))

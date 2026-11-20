@@ -109,6 +109,26 @@ def _workspace_head_port():
     return next(item for item in contract['inputs'] if item['id'] == 'workspace_head')
 
 
+def test_audit_protects_plan_around_the_real_memo_section(ticket):
+    out, meta = ticket
+    plan = out / '03_plan_final.md'
+    port = _audit_final_plan_port()
+    template = ('# 定稿\n\n````markdown\n```\n## 实现偏差备忘\n````\n\n'
+                '## 计划正文\n{plan_body}\n\n'
+                '## 实现偏差备忘（步骤6 终审回写）\n{memo}\n### 备忘子节\n{memo}\n\n'
+                '## 交付边界\n{boundary}\n')
+
+    def fact(plan_body='计划内容', memo='待回写', boundary='交付范围'):
+        plan.write_text(template.format(plan_body=plan_body, memo=memo, boundary=boundary),
+                        encoding='utf-8', newline='\n')
+        return ctl._resolve_port_legacy(out, meta, port)
+
+    before = fact()
+    assert fact(memo='已补充备忘') == before
+    assert fact(plan_body='修改计划内容') != before
+    assert fact(boundary='修改交付范围') != before
+
+
 def test_transient_git_failure_is_fail_closed_not_a_fake_drift(ticket, monkeypatch):
     out, meta = ticket
 
@@ -144,6 +164,66 @@ def test_non_git_target_stays_a_stable_absence(ticket, monkeypatch):
     fact = ctl._resolve_port_legacy(out, meta, _workspace_head_port())
     assert fact['exists'] is False
     assert 'digest' not in fact
+
+
+def test_unavailable_declared_git_root_does_not_shrink_the_snapshot(ticket):
+    out, meta = ticket
+    meta['sub_worktrees'] = [{'path': str(out / 'missing-checkout')}]
+    with pytest.raises(ctl.ControlError) as excinfo:
+        ctl._resolve_port_legacy(out, meta, _workspace_head_port())
+    assert excinfo.value.extra.get('gate_id') == 'step_ports_transient'
+
+
+def test_transient_check_failure_invalidates_an_earlier_pass(ticket, monkeypatch, capsys):
+    out, _ = ticket
+
+    def run(*argv):
+        args = ctl.build_parser().parse_args(list(argv))
+        try:
+            return args.func(args)
+        except ctl.ControlError as exc:
+            print(json.dumps(exc.report(), ensure_ascii=False))
+            return exc.exit_code
+
+    assert run('create', '--dir', str(out), '--ticket-id', 'TRANSIENT-CHECK',
+               '--birth', 'plan', '--requirement', 'fixture', '--request-id', 'create') == 0
+    capsys.readouterr()
+    assert run('step', '--dir', str(out), '--step', 'plan', '--phase', 'start',
+               '--attempt', 'plan-a', '--request', 'start') == 0
+    capsys.readouterr()
+    check = ('step', '--dir', str(out), '--step', 'plan', '--phase', 'check',
+             '--attempt', 'plan-a', '--boundary', 'before_write')
+    assert run(*check, '--request', 'check-pass') == 0
+    capsys.readouterr()
+
+    original = ctl.capture_step_inputs
+    def transient(*args, **kwargs):
+        raise ctl.ControlError('transient git failure', gate_id='step_ports_transient')
+    monkeypatch.setattr(ctl, 'capture_step_inputs', transient)
+    assert run(*check, '--request', 'check-transient') == 1
+    failure = json.loads(capsys.readouterr().out)
+    assert failure['capture_error']['gate_id'] == 'step_ports_transient'
+
+    assert run('step', '--dir', str(out), '--step', 'plan', '--phase', 'finish',
+               '--attempt', 'plan-a', '--outcome', 'success', '--evidence', 'fixture',
+               '--request', 'finish') == 1
+    finish_error = json.loads(capsys.readouterr().out)
+    assert finish_error['gate_id'] == 'step_receipt'
+    assert finish_error['missing_checks'] == ['before_write', 'before_transition']
+    events, problems = ctl.verify_event_chain(out, ctl.load_metadata(out))
+    assert problems == []
+    failed_check = [event for event in events if event['event_type'] == 'gate_checked'][-1]
+    assert failed_check['payload']['result'] == 'blocked'
+    assert failed_check['payload']['current_digest'] is None
+
+    monkeypatch.setattr(ctl, 'capture_step_inputs', original)
+    assert run(*check, '--request', 'check-retry') == 0
+    capsys.readouterr()
+    assert run('step', '--dir', str(out), '--step', 'plan', '--phase', 'finish',
+               '--attempt', 'plan-a', '--outcome', 'success', '--evidence', 'fixture',
+               '--request', 'finish-after-retry') == 1
+    retry_finish = json.loads(capsys.readouterr().out)
+    assert retry_finish['missing_checks'] == ['before_transition']
 
 
 def test_new_birth_seeds_requirement_deltas(tmp_path, capsys):

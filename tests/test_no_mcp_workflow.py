@@ -145,7 +145,12 @@ def test_six_phase_workflow_without_mcp(mode, monkeypatch, tmp_path):
         trace("audit", "repo_facts", "propose_repo_facts", "06_audit.md", affected_repo_roots=[str(repo)])
         trace("audit", "plan_diff", "diff_summary", "06_audit.md",
               plan_source=final.name, code_sources=["source.py"])
-        fixture.finish_review("audit")
+
+        def write_audit_memo():
+            with final.open("a", encoding="utf-8", newline="\n") as f:
+                f.write("\n## 实现偏差备忘（步骤6 终审回写）\n\n无实质偏差。\n")
+
+        fixture.finish_review("audit", after_reads=write_audit_memo)
         if mode == "full":
             trace("review", "dedup", "extract", review.name, affected_repo_roots=[str(repo)],
                   function_count=0, threshold=cheap["dedup_min_functions"],

@@ -124,7 +124,8 @@ def test_documented_ticket_reader(case, name, marker, mode, tmp_path):
     dump(pointer, {"ticket_id": "doc-1", "control_root": str(ticket)})
     code = python_fragment(name, marker).replace("{ICODE_OUT_DIR}", ticket.as_posix())
     code = code.replace("{ICODE_SKILL_ROOT}", ROOT.as_posix())
-    args = [str(ticket.parent)] if case == "backup" else [str(pointer)] if case == "active" else [str(ticket)] if case == "reuse" else ["1"]
+    args = ([str(ticket.parent)] if case == "backup" else [str(pointer)] if case == "active"
+            else [str(ticket), str(ROOT)] if case == "reuse" else ["1"])
     before = hashes(ticket)
     index_before = index.read_bytes()
     # A business project's tools module must never shadow the installed skill's reader.
@@ -188,6 +189,21 @@ def test_no_raw_ticket_readers_in_executable_docs():
                         or re.search(r"json\.load\(f\)\.get\([\"']ticket_id", line)):
                     violations.append(f"{path.relative_to(ROOT)}: {line}")
     assert not violations, "Raw ticket readers bypass storage/pending checks:\n" + "\n".join(violations)
+
+
+def test_full_workflow_status_examples_read_storage_v2_metadata(tmp_path):
+    ticket = tmp_path / "project/.icode_output/.icode_output_1"
+    make_ticket(ticket, "v2")
+    commands = [body for body in blocks("references/full_workflow.md")
+                if "read_metadata_readonly" in body and "python3 -c" in body]
+    assert len(commands) == 2
+    for command in commands:
+        command = command.replace("{ICODE_OUT_DIR}", ticket.as_posix())
+        command = command.replace("{ICODE_SKILL_ROOT}", ROOT.as_posix())
+        result = subprocess.run(["bash", "-c", "set -e\n" + command], cwd=ticket.parents[1],
+                                capture_output=True, text=True, encoding="utf-8")
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "❌ 前一步产物缺失/状态异常" not in result.stdout
 
 
 def test_debug_example_uses_the_same_readonly_protocol():

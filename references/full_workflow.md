@@ -185,7 +185,7 @@ Windows/WSL 构建按需加载 [WSL 构建合同](wsl_build.md)；本地 MCP 采
 **status 写回校验（强制，防词表外值落盘）**：每步写 `.ico_metadata.json` 前，必须先对照上方词表校验 `status` 在枚举内（`completed_steps` 中的步骤号须是 `steps/*.md` 清单里存在的合法值），词表外值直接判不合规、拒绝写回并修正。校验用一行命令：
 
 ```bash
-python3 -c "import json,sys; d=json.load(open('{ICODE_OUT_DIR}/.ico_metadata.json')); valid={'init_in_progress','plan_done','review_in_progress','review_done','plan_finalized','code_in_progress','code_done','deepcheck_in_progress','deepcheck_done','completed','log_in_progress','log_done','debug_in_progress','debug_done'}; s=d.get('status'); print('status:', s); sys.exit(0 if s in valid else 1)"
+python3 -c 'import pathlib,sys; sys.path.insert(0,str(pathlib.Path(sys.argv[2]) / "tools")); import icode_control as ctl; d=ctl.read_metadata_readonly(sys.argv[1]); valid={"init_in_progress","plan_done","review_in_progress","review_done","plan_finalized","code_in_progress","code_done","deepcheck_in_progress","deepcheck_done","completed","log_in_progress","log_done","debug_in_progress","debug_done"}; s=d.get("status"); print("status:",s); sys.exit(0 if s in valid else 1)' "{ICODE_OUT_DIR}" "{ICODE_SKILL_ROOT}"
 ```
 
 
@@ -209,7 +209,7 @@ python3 -c "import json,sys; d=json.load(open('{ICODE_OUT_DIR}/.ico_metadata.jso
 
 ### 全流程串联规则
 
-`/icode start` 执行步骤1后，如果会话断开，恢复时必须读取 `.ico_metadata.json` 的 `completed_steps`，从最后一个完成步骤的下一步继续。不可跳过未完成的步骤。
+`/icode start` 执行步骤1后，如果会话断开，恢复时必须通过 `icode_control.read_metadata_readonly(ICODE_OUT_DIR)` 读取逻辑 metadata 的 `completed_steps`，从最后一个完成步骤的下一步继续。不可跳过未完成的步骤；禁止直接解析物理 `.ico_metadata.json`。
 
 **续跑判定规则**：以 `completed_steps` 中**编号 1~6 范围内最大的已完成步骤**为基准推进下一步。`"0"` 和 `"log"` 仅作为"已走过步骤0/log入口"的标记，**不影响**推进逻辑。例：`["0"]`/`["log"]` → 下一步是步骤1；`["0","1"]`/`["log","1"]` → 下一步是步骤2。
 
@@ -227,7 +227,7 @@ python3 -c "import json,sys; d=json.load(open('{ICODE_OUT_DIR}/.ico_metadata.jso
 校验命令示例（推进到步骤4 前）：
 
 ```bash
-test -f "{ICODE_OUT_DIR}/03_plan_final.md" && python3 -c "import json,sys; d=json.load(open('{ICODE_OUT_DIR}/.ico_metadata.json')); sys.exit(0 if d.get('status')=='plan_finalized' else 1)" || echo "❌ 前一步产物缺失/状态异常，停止串联"
+test -f "{ICODE_OUT_DIR}/03_plan_final.md" && python3 -c 'import pathlib,sys; sys.path.insert(0,str(pathlib.Path(sys.argv[2]) / "tools")); import icode_control as ctl; sys.exit(0 if ctl.read_metadata_readonly(sys.argv[1]).get("status")=="plan_finalized" else 1)' "{ICODE_OUT_DIR}" "{ICODE_SKILL_ROOT}" || echo "❌ 前一步产物缺失/状态异常，停止串联"
 ```
 
 > 与「前置文件校验」表（本段下方）的关系：前置校验表是**单步命令**入口的 L1 检查，本门禁是 **start/fast 自动串联**时每步转换点的强制复查——两者共用同一产物判据，自动串联下不因"上一步刚跑完"而跳过复查（本轮实测教训：自动串联下 `03_plan_final.md` 缺失仍推进到步骤6）。

@@ -1962,8 +1962,16 @@ def validate_execution_event_semantics(events, meta=None):
                 state["checks"].add(boundary)
             if payload.get("result") not in {"pass", "blocked"}:
                 problems.append(f"第 {line} 行 gate_checked.result 非法")
+            capture_error = payload.get("capture_error")
             for key in ("captured_digest", "current_digest"):
-                if re.fullmatch(r"[0-9a-f]{64}", payload.get(key, "")) is None:
+                value = payload.get(key)
+                unavailable_current = (key == "current_digest" and value is None
+                                       and payload.get("result") == "blocked"
+                                       and isinstance(capture_error, dict)
+                                       and capture_error.get("gate_id") == "step_ports_transient"
+                                       and isinstance(capture_error.get("message"), str)
+                                       and bool(capture_error.get("message")))
+                if not unavailable_current and re.fullmatch(r"[0-9a-f]{64}", value or "") is None:
                     problems.append(f"第 {line} 行 gate_checked.{key} 非法")
         elif event_type == "artifact_written":
             state = steps.get(attempt)
@@ -2173,23 +2181,36 @@ def file_fact(path, label=None):
 
 
 def section_ignoring_file_fact(path, label, sections):
-    """按「忽略指定章节」计算文件事实，供受保护计划端口使用。
-
-    终审合同要求把「实现偏差备忘」回写到 03_plan_final.md，而该文件同时是 audit 的
-    受保护输入。整文件取哈希会让合规回写被判成漂移，因此这里只对**第一个被忽略章节
-    之前**的正文取哈希：保护范围收敛为「计划正文」，被显式允许改写的章节（定稿时预留、
-    终审回填）不参与比对。尾部空行一并归一化，使「定稿时还没有备忘段、终审才追加」与
-    「定稿时就带空备忘段」得到相同摘要。`ignore_sections` 必须在端口上显式声明，未声明的
-    端口保持整文件保护。
-    """
-    data = Path(path).read_bytes()
-    text = data.decode("utf-8")
-    cut = len(text)
-    for heading in sections:
-        index = text.find(heading)
-        if index != -1:
-            cut = min(cut, index)
-    body = text[:cut].rstrip("\r\n").encode("utf-8")
+    """只排除指定 Markdown 章节及其子节，保留其余计划正文。"""
+    text = Path(path).read_bytes().decode("utf-8")
+    fence = None
+    ignored_level = None
+    protected = []
+    for line in io.StringIO(text, newline=""):
+        content = line.rstrip("\r\n")
+        marker = re.fullmatch(r" {0,3}(`{3,}|~{3,})(.*)", content)
+        if fence is not None:
+            if marker and marker[1][0] == fence[0] and len(marker[1]) >= len(fence) and not marker[2].strip(" \t"):
+                fence = None
+        elif marker and (marker[1].startswith("~") or "`" not in marker[2]):
+            fence = marker[1]
+        else:
+            heading = re.fullmatch(r" {0,3}(#{1,6})(?:[ \t]+(.*))?", content)
+            if heading:
+                level = len(heading[1])
+                if ignored_level is not None and level <= ignored_level:
+                    ignored_level = None
+                if ignored_level is None:
+                    title = re.sub(r"[ \t]+#+[ \t]*$", "", heading[2] or "").strip()
+                    # 定稿模板允许在备忘标题后附带步骤说明。
+                    key = f"{heading[1]} {title}"
+                    base = re.sub(r"(?:（[^（）]+）| \([^()]+\))$", "", key).rstrip()
+                    if key in sections or base in sections:
+                        ignored_level = level
+        if ignored_level is None:
+            protected.append(line)
+    # 备忘单独追加到末尾时，章节前新增的空行不应导致漂移。
+    body = "".join(protected).rstrip("\r\n").encode("utf-8")
     return {"path": label or str(path), "exists": True,
             "sha256": hashlib.sha256(body).hexdigest(), "size": len(body),
             "ignored_sections": list(sections)}
@@ -2354,13 +2375,19 @@ def _resolve_port_legacy(out_dir, meta, port):
                     candidates.append(Path(raw).expanduser().resolve())
         roots = {}
         failures = []
+        git_env = dict(os.environ, LC_ALL="C")
         for target in candidates:
             try:
                 root_proc = subprocess.run(
                     ["git", "-C", str(target), "rev-parse", "--show-toplevel"],
-                    capture_output=True, text=True, timeout=10)
+                    capture_output=True, text=True, timeout=10, env=git_env)
                 if root_proc.returncode != 0:
-                    continue  # 明确不是 Git 仓库：稳定的“无事实”结论，不当作故障
+                    message = root_proc.stderr.strip()
+                    if (message == "fatal: not a git repository"
+                            or message.startswith("fatal: not a git repository (or ")):
+                        continue
+                    failures.append(f"{target}: Git 仓库根读取失败（退出码 {root_proc.returncode}）")
+                    continue
                 head_proc = subprocess.run(
                     ["git", "-C", str(target), "rev-parse", "HEAD"],
                     capture_output=True, text=True, timeout=10)
@@ -2374,8 +2401,7 @@ def _resolve_port_legacy(out_dir, meta, port):
             if head_proc.returncode != 0:
                 failures.append(f"{target}: HEAD 读取失败")
                 continue
-            if root_proc.returncode == 0 and head_proc.returncode == 0:
-                roots[root_proc.stdout.strip()] = head_proc.stdout.strip()
+            roots[root_proc.stdout.strip()] = head_proc.stdout.strip()
         if failures:
             raise ControlError(
                 "workspace_git_head 端口解析失败（瞬时环境故障，不能当作工作区漂移）: "
@@ -9219,7 +9245,41 @@ def cmd_step(args, *, git_provider=None, require_git_provider=False, inspection_
             if args.boundary not in model["boundaries"]:
                 raise ControlError(f"--boundary 非法: {args.boundary!r}", exit_code=2,
                                    allowed=model["boundaries"])
-            current, missing = capture_step_inputs(out_dir, meta, model, args.step, **candidate_access)
+            try:
+                current, missing = capture_step_inputs(out_dir, meta, model, args.step, **candidate_access)
+            except ControlError as exc:
+                if exc.extra.get("gate_id") != "step_ports_transient":
+                    raise
+                payload = {
+                    "execution_model_version": model["schema_version"],
+                    "step": args.step,
+                    "attempt": args.attempt,
+                    "boundary": args.boundary,
+                    "result": "blocked",
+                    "changed_inputs": ["$capture"],
+                    "missing_inputs": [],
+                    "captured_digest": start_payload.get("input_digest"),
+                    "current_digest": None,
+                    "capture_error": {"gate_id": "step_ports_transient", "message": exc.message},
+                    "route": "retry",
+                    "elapsed_ms": elapsed_ms(start.get("timestamp")),
+                }
+                prior = find_idempotent_event(
+                    events, args.request, "gate_checked", payload,
+                    payload_keys=["step", "attempt", "boundary", "result", "changed_inputs",
+                                  "missing_inputs", "captured_digest", "current_digest",
+                                  "capture_error", "route"])
+                del events
+                event = prior or append_event(out_dir, meta, "gate_checked", payload,
+                                              request_id=args.request, **access)
+                result = {"ok": False, "step": args.step, "phase": "check",
+                          "attempt": args.attempt, "boundary": args.boundary,
+                          "result": "blocked", "changed_inputs": ["$capture"],
+                          "missing_inputs": [], "route": "retry",
+                          "capture_error": payload["capture_error"],
+                          "event_id": event["event_id"], "already_applied": bool(prior)}
+                _code_output(json.dumps(result, ensure_ascii=False, indent=2), out_dir, meta, access)
+                return 1
             old_protected = start_payload.get("protected") or {}
             # 工具升级只新增端口时，旧 attempt 记录的 contract_digest 与受保护输入
             # 集合都会变化；这是升级而非真实漂移，兼容时按启动时合同继续本

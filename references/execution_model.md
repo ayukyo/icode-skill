@@ -8,7 +8,7 @@
 
 ## 1. 五项能力及边界
 
-1. **Step Ports**：每个已登记步骤声明 `inputs / outputs`。开始时验证必填输入；成功终结前验证必填输出。端口只保存存在性、路径、大小和摘要，不把正文复制进事件链。`ticket_file` 端口可声明 `ignore_sections`，把保护范围收敛到指定章节之前的正文——audit 的 `final_plan` 端口据此忽略「实现偏差备忘」段，使终审按合同回写该段不再被判成漂移，而正文改动仍然触发漂移。端口解析遇到瞬时环境故障（如 `git rev-parse` 超时）必须 fail-closed 报 `step_ports_transient`，不得退化成「解析结果少一项」，否则摘要变化会被误报为工作区漂移。
+1. **Step Ports**：每个已登记步骤声明 `inputs / outputs`。开始时验证必填输入；成功终结前验证必填输出。端口只保存存在性、路径、大小和摘要，不把正文复制进事件链。audit 的 `final_plan` 端口通过 `ignore_sections` 排除「实现偏差备忘」章节及其子节。代码块内的同名示例和备忘前后的计划正文仍参与计算。Git 仓库根或 HEAD 读取失败时返回 `step_ports_transient`；边界检查会记录 `blocked` 回执并将 `current_digest` 标为不可用，修复路径或 Git 环境后重新执行同一边界检查。Git 未安装或明确报告目标不是仓库时保留无 Git 事实的结果。
 2. **Reactive 边界复检**：开始时冻结 `protected=true` 的输入摘要；在写入、等待返回、外部副作用、状态转换前重新计算。漂移即返回路由并 fail-closed，不在同一 attempt 静默刷新基线。
 3. **统一轨迹**：步骤、边界 gate、产物、长动作和状态转换共用哈希事件链；`trace` 从同一来源生成时间线，不维护第二份运行状态。
 4. **副作用感知 Retry/Fallback**：失败分类与动作类别共同决定 `retry / fallback / repair_then_retry / verify_receipt / block / human_decision`。只有只读瞬时失败可自动重试；写、外部动作和硬件动作禁止盲重放。
@@ -35,6 +35,8 @@ python3 tools/icode_control.py step --dir <out_dir> --step <step> --phase check 
 - `result=pass`：继续。
 - `result=blocked`：按 `route` 回流；先把旧 attempt 以 `blocked` 终结，再重新 `start` 形成新基线。
 - 计划内修改了受保护输入（例如 deepcheck/patch 主动改代码）也必须终结旧 attempt 并重新开始复检；禁止提供“强制接受新摘要”的旁路。
+
+升级后续接仍开放的 audit attempt 时，如果边界检查报告 `$contract` 或 `final_plan` 漂移，先核对计划正文与原审查证据。只有升级引起的摘要变化时，带上原 `--attempt` 和真实 `--evidence`，用 `step --step audit --phase finish --outcome blocked` 终结原 attempt，在当前状态重新 `start` audit 并重新登记回执。发现计划正文确实变化时，按返回的路由回到审查。已终结的历史回执保留原记录。
 
 每个落盘输出都记录实际文件摘要；路径必须命中该步骤的 outputs 端口。同一 attempt 的多个产物优先用批量形式一次登记——每个成员仍各自生成一条 `artifact_written` 事件、各自计算 hash：
 

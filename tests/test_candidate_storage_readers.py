@@ -357,7 +357,9 @@ def raw_io_inventory(relative):
 
 
 def test_owned_raw_io_matches_reviewed_allowlist():
-    """All raw IO expressions are explicit; metadata dispatch is tested above."""
+    """Raw reads of reports/source bytes are explicit; metadata dispatch is tested above."""
+    # The MCP linter hashes report, candidate, and source evidence bytes directly;
+    # these are evidence artifacts, not storage-v2 control documents.
     approved = json.loads((ROOT / "tests/data/candidate_reader_raw_io_allowlist.json").read_text())
     actual = {relative: raw_io_inventory(relative) for relative in RAW_IO_FILES}
     assert actual == approved
