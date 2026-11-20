@@ -37,7 +37,20 @@ def call(*argv):
 def legacy_ticket(tmp_path):
     out_dir = tmp_path / "ws" / ".icode_output/.icode_output_1"
     out_dir.mkdir(parents=True)
-    seed = {"mode": "full", "code_files": [], "semantic_decisions": [], "requirement_deltas": []}
+    # 夹具必须落在「metadata 大于事件账本」的区间：这正是 compact 设计针对的场景
+    # （见 control_plane 的 compact_ledger_dominates 护栏）。之前只带一个最小 seed，
+    # 序列化后 metadata 反而比账本小，护栏在 LF 换行的平台上会把 apply 正确拒绝掉。
+    seed = {"mode": "full", "code_files": [], "semantic_decisions": [], "requirement_deltas": [],
+            "requirement_points": [
+                "保留既有四则运算的错误码语义不变",
+                "区间裁剪的上下界由调用方保证 lo <= hi",
+                "失败路径不得改写 *result 的既有内容",
+                "退化区间 lo == hi 视为合法输入",
+                "INT_MIN / INT_MAX 输入不得触发未定义行为",
+                "实现只做比较，不引入算术溢出通道",
+                "命名与注释沿用 calc_* 既有风格",
+                "回归用例覆盖裁剪、边界与非法区间三类",
+            ]}
     code, payload = call("create", "--dir", str(out_dir), "--birth", "plan",
                          "--ticket-id", "legacy-compact", "--requirement", "fixture",
                          "--metadata-json", json.dumps(seed))
@@ -98,8 +111,17 @@ def test_second_apply_is_a_no_op(legacy_ticket):
 def test_ledger_dominated_ticket_requires_force(legacy_ticket):
     """A ledger at least as large as the metadata makes v2 reads slower."""
     path = legacy_ticket / CTL.METADATA_NAME
-    path.write_text(json.dumps(json.loads(path.read_text(encoding="utf-8")),
-                               ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+    events_path = legacy_ticket / CTL.EVENTS_NAME
+    meta_bytes = path.stat().st_size
+    # 用真实 writer 追加审计事件把账本撑大，而不是把 metadata 重新序列化成紧凑格式——
+    # 后者依赖两种 JSON 写法的字节差，属于平台相关的巧合。
+    appended = 0
+    while events_path.stat().st_size < meta_bytes and appended < 50:
+        code, payload = call("event", "--dir", str(legacy_ticket), "--type", "external_note",
+                             "--payload", json.dumps({"note": "ledger-padding-%d" % appended}))
+        assert code == 0, payload
+        appended += 1
+    assert events_path.stat().st_size >= meta_bytes, "无法把账本撑到不小于 metadata"
     before = path.read_bytes()
     with pytest.raises(CTL.ControlError) as error:
         call("compact", "--dir", str(legacy_ticket), "--apply")
