@@ -2,6 +2,19 @@
 
 > 本文件汇集 icode "创建工单目录 / 生成 ticket_id / 写全局索引 / metadata 模板" 的共享规则。入口命令（init/log）和步骤1在创建工单时引用本文件，不重复定义。进入本文件前必须先按 [project_intake.md](project_intake.md) 解析实际工程根；下文所有 `cwd`/`WORKSPACE_ROOT`/`GIT_ROOT` 示例均假定已在该根执行，禁止在只包裹一个子仓的容器目录落工单。
 
+## 跨平台 CLI 规则（Python 解释器与非 ASCII 入参）
+
+skill 内所有 `python3 tools/...` 形式的命令，执行前必须按平台解析解释器：**Linux/macOS 用 `python3`；Windows 用 `py -3`**（已设 `ICODE_PYTHON_BIN` 时以它为准）。`SKILL.md` 与 `steps/*.md` 中保留 `python3` 写法是跨平台通用形式，不逐处改写，执行时按本规则解析。
+
+**Windows 假 stub 判定**：裸 `python` / `python3` 常解析到 `%LOCALAPPDATA%\Microsoft\WindowsApps` 的应用执行别名，表现为**退出码 0、无任何输出**。出现这种"静默成功"一律视为失败：改用 `py -3` 重跑同一命令，不得据此判定步骤完成，也不得把空输出当作通过证据。可用性判定：`py -3 -c "import sys; print(sys.executable)"` 有真实路径输出即可用。
+
+**非 ASCII 文本入参**：Windows shell（PowerShell / Git Bash）把中文、emoji 或长文本作为 argv 传给 `py -3` 时，可能按 ANSI 代码页（cp936/cp1252）解码而乱码；`--requirement`、`--set-json` 等内联参数不可靠。规则：
+
+- **优先文件入参**：`create --requirement-file <utf8>`、`metadata-update --set-json-file <utf8>` / `--append-json-file <utf8>`。文件统一按 UTF-8（可带 BOM）读取，写入前校验非空与 JSON 合法性。
+- 旧命令没有文件入参时，把文本写入 UTF-8 文件后由 Python 脚本读取；或使用 `PYTHONUTF8=1` + PowerShell 单引号 here-string。**禁止**用 shell 变量拼接长中文后直接传 argv。
+- **落盘后回读比对**：`create` 后核对 metadata `requirement` 与原文；`metadata-update` 后核对摘要/字段。发现替换字符用 `metadata-update` 修复，**禁止手改 `.ico_metadata.json`**。
+- `--requirement` 与 `--requirement-file`、`--set-json` 与 `--set-json-file` 均只能二选一；同时给出按参数错误退出。
+
 ## 目录管理
 
 ### 创建新目录（用于常规 init / log，以及 start / plan 在不满足复用条件时）
