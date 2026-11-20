@@ -120,8 +120,8 @@ case "$CLIENT" in
 esac
 
 # WindowsApps 的 python3/python 可能是假 stub（--version 无输出但 exit 0）。
-# 探测顺序与其余入口（tools/selfcheck_reasoning_gate.sh、mcp/install.sh）一致：
-# 真实 python3/python 优先；Windows(Git Bash/MSYS) 回退 py 启动器。
+# 优先选择满足 Python 3.10+ 的解释器；Windows(Git Bash/MSYS) 优先 py 启动器，
+# 避免裸 python3 命中 WindowsApps stub 或与根安装器选择不同版本。
 _python_usable() { [ "$("$@" -c 'import sys; print(int(sys.version_info >= (3, 10)))' 2>/dev/null)" = "1" ]; }
 PYTHON_BIN=""
 if [[ -n "${ICODE_PYTHON_BIN:-}" ]]; then
@@ -132,7 +132,14 @@ if [[ -n "${ICODE_PYTHON_BIN:-}" ]]; then
     exit 1
   fi
 fi
-for candidate in python3.12 python3.11 python3 python; do
+if [[ -z "$PYTHON_BIN" ]] && { [[ -n "${MSYSTEM:-}" ]] \
+     || [[ "$(uname -s 2>/dev/null)" == MINGW* ]] \
+     || [[ "$(uname -s 2>/dev/null)" == MSYS* ]]; } && _python_usable py -3; then
+  # 以包装函数保持 "$PYTHON_BIN" 的单词引用形式（bash 解析函数先于 PATH）
+  py3() { py -3 "$@"; }
+  PYTHON_BIN=py3
+fi
+for candidate in python3.12 python3.11 python3.10 python3 python; do
   [[ -n "$PYTHON_BIN" ]] && break
   if command -v "$candidate" >/dev/null 2>&1; then
     _bin="$(command -v "$candidate")"

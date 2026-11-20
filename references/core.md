@@ -9,6 +9,6 @@
 - 先读当前阶段所需规则和实际代码。记录事实、决策、风险和证据摘要，不输出或保存完整内部推理。
 - 编译、静态检查、行为测试、设备加载及业务效果分别陈述。缺失证据不冒充通过；零测试、全跳过和失败必须如实记录。
 - 中断恢复先查 trace 和未终结副作用，不盲重放。关闭工单先 reopen；原有串口、严格证据、阶段计划与受保护 provider 边界继续适用。
-- Linux/macOS 使用 python3；如果本机解释器版本不足，使用已核实的 ICODE_PYTHON_BIN。Windows 使用 py -3，不把无输出 stub 当成功。
+- 控制面要求 Python 3.10+。执行 `python3 tools/...` 前按 [跨平台解释器规则](full_workflow.md) 解析并验证解释器；Linux/macOS 默认探测 `python3.12`、`python3.11`、`python3.10`、`python3`、`python`，Windows 优先 `py -3`。显式设置 `ICODE_PYTHON_BIN` 时必须使用并验证该解释器，过低或不可用就停止，不静默切换；不把 Windows 无输出 stub 当成功。
 
 full/fast 的完整规则在 full_workflow.md，lite 的真实步骤、质量门和恢复在 ../steps/lite.md。不得将旧六步轮次、产物或工具配额无条件套入 lite。

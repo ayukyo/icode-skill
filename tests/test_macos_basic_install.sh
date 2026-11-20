@@ -5,10 +5,27 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SANDBOX="$(mktemp -d "/private/tmp/icode macOS 验收.XXXXXX")"
 trap 'rm -rf "$SANDBOX"' EXIT
 
-PYTHON_BIN="${ICODE_PYTHON_BIN:-$(command -v python3 || command -v python)}"
-if [[ -z "$PYTHON_BIN" ]]; then
-  echo "python3 or python is required" >&2
-  exit 1
+_python_310_or_newer() {
+  [[ "$("$1" -c 'import sys; print(int(sys.version_info >= (3, 10)))' 2>/dev/null)" == "1" ]]
+}
+if [[ -n "${ICODE_PYTHON_BIN:-}" ]]; then
+  PYTHON_BIN="$ICODE_PYTHON_BIN"
+  if ! _python_310_or_newer "$PYTHON_BIN"; then
+    echo "ICODE_PYTHON_BIN must point to Python 3.10 or newer" >&2
+    exit 1
+  fi
+else
+  PYTHON_BIN=""
+  for candidate in python3.12 python3.11 python3.10 python3 python; do
+    if command -v "$candidate" >/dev/null 2>&1 && _python_310_or_newer "$(command -v "$candidate")"; then
+      PYTHON_BIN="$(command -v "$candidate")"
+      break
+    fi
+  done
+  if [[ -z "$PYTHON_BIN" ]]; then
+    echo "Python 3.10 or newer is required (set ICODE_PYTHON_BIN to select it)" >&2
+    exit 1
+  fi
 fi
 SKILLS_ROOT="$SANDBOX/测试 skills"
 RUNTIME_ROOT="${ICODE_DOCX_RUNTIME_ROOT:-$SANDBOX/docx-runtime}"

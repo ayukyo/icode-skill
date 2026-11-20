@@ -79,24 +79,43 @@ case "$CLIENT" in
     ;;
 esac
 
-# Resolve this once for pre-sync reconciliation and installed DOCX bootstraps.
-_docx_py_ok() { [ "$("$@" -c 'print(1)' 2>/dev/null)" = "1" ]; }
+# Resolve one Python 3.10+ interpreter for pre-sync reconciliation and DOCX bootstraps.
+_docx_py_ok() { [ "$("$@" -c 'import sys; print(int(sys.version_info >= (3, 10)))' 2>/dev/null)" = "1" ]; }
 DOCX_PYTHON=()
 if [[ -n "${ICODE_PYTHON_BIN:-}" ]]; then
-  DOCX_PYTHON=("$ICODE_PYTHON_BIN")
+  if _docx_py_ok "$ICODE_PYTHON_BIN"; then
+    DOCX_PYTHON=("$ICODE_PYTHON_BIN")
+  else
+    echo "❌ ICODE_PYTHON_BIN 必须指向可运行的 Python 3.10 或更新版本" >&2
+    exit 1
+  fi
 elif { [[ -n "${MSYSTEM:-}" ]] || [[ "$(uname -s 2>/dev/null)" == MINGW* ]] \
        || [[ "$(uname -s 2>/dev/null)" == MSYS* ]]; } && _docx_py_ok py -3; then
   DOCX_PYTHON=(py -3)
-elif _docx_py_ok python3; then
-  DOCX_PYTHON=(python3)
-elif _docx_py_ok py -3; then
-  DOCX_PYTHON=(py -3)
-elif _docx_py_ok python; then
-  DOCX_PYTHON=(python)
+else
+  for candidate in python3.12 python3.11 python3.10 python3 python py; do
+    if [[ "$candidate" == py ]]; then
+      _docx_py_ok py -3 && DOCX_PYTHON=(py -3) && break
+    elif command -v "$candidate" >/dev/null 2>&1 && _docx_py_ok "$candidate"; then
+      DOCX_PYTHON=("$candidate")
+      break
+    fi
+  done
 fi
 if [[ ${#DOCX_PYTHON[@]} -eq 0 ]]; then
-  echo "❌ 未找到可用的安装 Python（可设 ICODE_PYTHON_BIN 显式指定）" >&2
+  echo "❌ 未找到 Python 3.10 或更新版本（可设 ICODE_PYTHON_BIN 显式指定）" >&2
   exit 1
+fi
+# Pass a shell-resolvable path to sync and nested installers. Keep the Windows
+# py launcher as a launcher; child scripts apply the same py -3 priority.
+if [[ -z "${ICODE_PYTHON_BIN:-}" && "${DOCX_PYTHON[0]}" != "py" ]]; then
+  ICODE_PYTHON_BIN="$(command -v "${DOCX_PYTHON[0]}")"
+  if [[ -z "$ICODE_PYTHON_BIN" ]]; then
+    echo "❌ 无法解析所选 Python 解释器的命令路径" >&2
+    exit 1
+  fi
+  export ICODE_PYTHON_BIN
+  DOCX_PYTHON=("$ICODE_PYTHON_BIN")
 fi
 
 CLAUDE_ROOT="${CLAUDE_SKILLS_ROOT:-$HOME/.claude/skills}"

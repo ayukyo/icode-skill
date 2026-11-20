@@ -22,7 +22,7 @@ DOCX/PPT 技术图可复用 SVG 图源；按对应步骤读取受限校验、PNG
 
 ## Python 解释器解析（跨平台硬规则）
 
-skill 内所有 `python3 tools/...` 形式的命令执行前先选择并核实解释器：控制面最低 **Python 3.10**；显式设置 `ICODE_PYTHON_BIN` 时以该可执行文件为准，版本不足或不可执行须报告并停止，不静默换解释器。未设置时 Linux/macOS 从可用 `python3` 选择满足版本的解释器；Windows 以 `py -3` 解析并验证。验证 `import sys; print(sys.executable); print(sys.version_info[:2])` 有真实路径且版本满足要求；控制面及其子进程保持同一已验证解释器。文中的 `python3` 为平台通用形式，执行时替换为该解释器，不需修改 PATH。
+skill 内所有 `python3 tools/...` 形式的命令执行前先选择并核实解释器：控制面最低 **Python 3.10**；显式设置 `ICODE_PYTHON_BIN` 时以该可执行文件为准，版本不足或不可执行须报告并停止，不静默换解释器。未设置时 Linux/macOS 依次探测 `python3.12`、`python3.11`、`python3.10`、`python3`、`python` 并选择首个满足版本的解释器；Windows 优先验证 `py -3`，失败后按相同顺序探测 PATH 中的解释器。验证 `import sys; print(sys.executable); print(sys.version_info[:2])` 有真实路径且版本满足要求；控制面及其子进程保持同一已验证解释器。文中的 `python3` 为平台通用形式，执行时替换为该解释器，不需修改 PATH。macOS/Linux 若默认 `python3` 低于 3.10，可设置 `ICODE_PYTHON_BIN` 指向已安装的较新版本。
 
 Windows 上裸 `python` / `python3` 常解析到 `%LOCALAPPDATA%\Microsoft\WindowsApps` 的应用执行别名（假 stub），表现为**退出码 0、无任何输出**。出现这种"静默成功"一律视为失败：改用 `py -3` 重跑同一命令，不得据此判定步骤完成，也不得把空输出当作通过证据。可用性判定：`py -3 -c "import sys; print(sys.executable)"` 有真实路径输出即可用。
 

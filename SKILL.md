@@ -32,7 +32,7 @@ DOCX/PPT 技术图可复用 SVG 图源；按对应步骤读取受限校验、PNG
 
 ## Python 解释器解析（跨平台硬规则）
 
-skill 内所有 `python3 tools/...` 命令执行前按平台解析：**Linux/macOS 用 `python3`；Windows 用 `py -3`**（`ICODE_PYTHON_BIN` 优先）。Windows 裸 `python`/`python3` 可能是 WindowsApps 假 stub（退出码 0、无输出），**静默成功一律改用 `py -3` 重跑**；非 ASCII 文本优先文件入参（`--requirement-file` / `--set-json-file` / `--append-json-file`），与内联参数二选一。完整规则见 [dir_and_metadata.md](references/dir_and_metadata.md)「跨平台 CLI 规则」。
+控制面最低要求 **Python 3.10**。显式设置 `ICODE_PYTHON_BIN` 时必须核实该解释器，不可用或版本不足就停止；未设置时 Linux/macOS 按 `python3.12`、`python3.11`、`python3.10`、`python3`、`python` 顺序选择首个合格版本，Windows 先试 `py -3`，失败后按序探测 PATH。文档中的 `python3` 是占位写法，控制面和子进程使用同一已验证解释器；验证须输出真实路径与版本，WindowsApps 假 stub 的空输出视为失败。非 ASCII 文本优先使用文件入参，完整规则见 [dir_and_metadata.md](references/dir_and_metadata.md)「跨平台 CLI 规则」。
 
 ## 自然语言入口
 

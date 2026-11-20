@@ -64,6 +64,8 @@ cd ~/icode-skill
 ./install.sh --client all
 ```
 
+**Python 要求：ICODE 控制面需要 Python 3.10 或更新版本。** 安装器会自动探测兼容解释器；若机器上的默认 `python3` 低于 3.10，请显式指定已安装的新版本，例如 `export ICODE_PYTHON_BIN="$(command -v python3.12)"` 后再运行安装命令。显式指定的版本不满足要求时安装会报错，不会悄悄切回旧解释器。安装后的命令与子进程也应使用同一已验证解释器。
+
 `./install.sh --dry-run --client all` 可做零写入预检；`--skip-mcp` 只安装 ICODE 和共享技能。ICODE 本体发布到 `<skills-root>/icode/`，每个共享技能从不可发现的源模板生成到顶层 `<skills-root>/<skill-name>/SKILL.md`，不会再出现嵌套同名技能。
 
 重装会按最新发行收敛受管 Skill/MCP：未被用户改写的旧共享技能归档到技能扫描目录外；所选新版 MCP 全部安装并通过注册校验后，才注销已证明归属的退役 MCP。用户改写、归属不明、旧共享技能缺历史摘要的项保留并报告冲突，不冒充全部同步成功。当前共享技能成功更新后会记录发布摘要，供后续退役判断。MCP 摘要回执与配置/运行时私有归档位于 `~/.local/state/icode/mcp-install/`，共享技能归档位于 `<skills-root-parent>/.icode-skill-archive/`；回执不保存凭据正文。

@@ -185,6 +185,8 @@ cd ~/icode-skill
 ./install.sh --client all
 ```
 
+**Python requirement: ICODE's control plane requires Python 3.10 or newer.** The installer probes for a compatible interpreter. If the default `python3` is older, set `ICODE_PYTHON_BIN` to an installed newer interpreter before running it, for example `export ICODE_PYTHON_BIN="$(command -v python3.12)"`. An explicitly selected interpreter below 3.10 is rejected; the installer will not silently fall back to an older interpreter. Commands and child processes should use the same verified interpreter.
+
 Use `./install.sh --dry-run --client all` for a zero-write preflight, or `--skip-mcp` when only ICODE and the shared skills are required. ICODE is installed as `<skills-root>/icode/`; each shared skill is generated from its source template at `<skills-root>/<skill-name>/SKILL.md`. Source templates cannot be discovered as nested skills.
 
 Reinstallation also reconciles retired managed skills and MCPs. Unchanged owned skills are archived outside the discovery roots; obsolete owned MCP registrations are removed only after the selected replacement set has installed and passed registration checks. User changes, unknown ownership and missing legacy skill digests are retained and reported as conflicts. MCP receipts and private configuration/runtime archives live under `~/.local/state/icode/mcp-install/`; shared skill archives live under `<skills-root-parent>/.icode-skill-archive/`. Receipts contain registration hashes, not credential values.
