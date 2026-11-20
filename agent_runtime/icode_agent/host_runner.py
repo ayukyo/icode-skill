@@ -37,6 +37,8 @@ def parse_verify_note(note, ticket_id=None):
 
 
 def _stage_host_action(step, verify_actions):
+    if step == "lite":
+        return "code"
     if step == "verify" and verify_actions in (["intent"], ["plan"]):
         return "plan"
     if step in {"init", "log", "plan", "status", "code", "patch", "fast", "verify"}:
@@ -45,7 +47,7 @@ def _stage_host_action(step, verify_actions):
 
 
 ALLOWED_STEPS = frozenset({
-    "init", "start", "fast", "log", "plan", "review", "merge", "code",
+    "lite", "init", "start", "fast", "log", "plan", "review", "merge", "code",
     "deepcheck", "audit", "readme", "patch", "verify", "status", "doc",
     "docx", "ppt", "limit", "learn", "study", "bak",
 })

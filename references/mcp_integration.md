@@ -12,12 +12,28 @@
 
 ## 判定 MCP 是否可用
 
-按 [thinking_core.md](thinking_core.md) 的"强证据"逻辑（**注册 且 可调用 双条件同时满足才视为可用**；证据 A=注册为必要条件，证据 B=可调用为充分条件——B 成立必然 A 成立，但仅 A 成立（已注册未连接/未暴露）不算可用）：
+按 [thinking_core.md](thinking_core.md) 区分宿主注册、会话暴露、授权及实际调用结果。当前会话已有完整工具 schema 且上层允许时直接调用；**配置不可读不能否定**宿主已暴露的工具，也不据此推断注册状态或调用成功。
 
 - **证据 A（强证据）**：MCP 在**当前宿主**注册——Claude Code = `~/.claude.json` 的 `mcpServers.<name>` 段存在；Codex = `codex mcp list` 含 `<name>`；CodeBuddy = `~/.codebuddy/mcp.json` 的 `mcpServers.<name>` 段存在。跨宿主注册已支持（显式 `--client codebuddy`，或 `/icode install --client all` 在已检测到 CodeBuddy 时追加），**宿主不同注册证据互不替代**（当前宿主没注册 = 证据 A 不成立，即使另一宿主已注册）。CodeBuddy 无 ToolSearch 时仅以当前会话直接可见工具作为证据 B
-- **证据 B（强证据）**：工具可在当前会话**直接调用**——工具列表直接可见（完整 schema，按语义识别：标准 `mcp__<name>__<tool>` 或代理前缀 `__<proxy>_<tool>` 形态）或 ToolSearch 可取 schema（不可见时按 [thinking_core.md](thinking_core.md) 第 0 判据）
+- **证据 B（会话可见）**：工具列表中直接可见完整 schema（标准 `mcp__<name>__<tool>` 或宿主代理前缀），或宿主支持的发现接口返回 schema；是否允许及实际调用结果另行核验。
 
-**强证据不存在 → 走降级路径**。**本文档路径：可装可降级，不阻塞流程。**
+工具未暴露、策略禁止或实际调用失败时分别记录真实原因并按步骤降级；必要证据未完成时保留债务。
+
+<a id="no-mcp-workflows"></a>
+
+## 无 MCP 执行 start、fast、lite
+
+`/icode install --basic` 可提供技能和控制面。保留安装目录中的 `mcp/` 规则文件，Python 校验器直接读取这些文件。以当前会话的工具与授权为准，已有完整可用工具时仍按步骤合同调用。
+
+| 入口 | 无 MCP 的执行方式 |
+|---|---|
+| `start` | 执行六阶段。L2/L3 用结构化思考，语义结论回读源文件，检索、差异和去重使用本地工具及可核验的人工证据。需要独立对抗时使用宿主原生子代理，缺失的独立裁决如实留待核验。 |
+| `fast` | 复用同一替代路径及证据门。有效 Fast 仍是一轮计划审查及 Reverse；Fixed/Dedup 记 `skipped_stage_not_reached`。实际升级 Full 时按六阶段完整规则执行。 |
+| `lite` | 使用本地三阶段门禁与宿主原生独立审核。没有可信适配器时，可在全部本地证据通过且审核问题已处理后以 `verification_pending` 交付。宿主缺少启动独立子代理或有界等待能力时，实施前报告阻塞。 |
+
+Start/Fast 工具未暴露时，两类 trace 均为 `decision=unavailable_before_call`、`attempted=false`，并记录发现、替代方法与真实证据。思考 trace 的 `result=degraded`，MCP 覆盖 trace 的 `result=unavailable`。工具已发起但失败时，按对应合同记录真实结果。业务资格由任务事实决定。
+
+本地替代证据满足验收门时可交付 `verified`。Review 已达去重阈值、工具不可用且缺少可核验的人工证据时，仍有去重债务。Start/Fast 的枚举或去重债务未清偿时，终审可用 `verification_pending`，其余硬门继续按各步骤合同执行。实际有失败时按真实结果处理。
 
 ---
 
@@ -33,7 +49,7 @@
 
 ### ② vision-bridge（**推荐装，需配三件套**）
 
-- **强证据**：`~/.claude.json` 的 `mcpServers.vision-bridge` 段存在 + `config.json` 三件套（base_url/api_key/model）已填
+- **强证据**：本会话实际暴露且允许调用 vision-bridge；注册配置或能力画像不能代替可调用性和健康检查。
 - **路由真源**：[media_routing.md](media_routing.md)。先调用 `tools/media_router.py route` 或按同一合同判定 session 原生能力、bridge 健康度/能力画像、任务类型和风险，不能仅凭 bridge 已安装就优先使用。
 - **宿主明确证明原生多模态**：普通视觉任务走 native，保留当前强模型能力；bridge 仅作失败兜底或显式/高风险双通道复核。
 - **纯文本或能力未知**：禁止试探性图片注入；bridge 健康则调 `analyze_media_evidence`（兼容旧调用可用 `analyze_media`），不可用则 `text_only` + 明确视觉缺口。
@@ -65,14 +81,14 @@
 
 ### ⑥ cheap-research（**可选 · 降本场景**）
 
-- **强证据**：`~/.claude.json` 的 `mcpServers.cheap-research` 段存在，且 `mcp__cheap-research__describe_capabilities()` 实际可调用；LLM capability 另要求画像为 `configured_unverified` 并以首次真实 LLM 调用确认，不能把“配置已填”当健康探测
+- **强证据**：本会话实际可调用 `mcp__cheap-research__describe_capabilities()`；LLM capability 另要求画像为 `configured_unverified` 并以首次真实 LLM 调用确认，不能把“配置已填”当健康探测
 - **强证据满足**：先用 `mcp__cheap-research__describe_capabilities()` 获取不含密钥的会话级能力画像，再按 `summarize` / `retrieve_similar` / `fill_template` / `extract` / `propose_repo_facts` 等 15 工具的 capability 选择；工具均返回结构化 dict
 - **⚠️ 分能力闸门（v1.1）**：15 工具分三类 capability，**不能整体按三件套判定**——
   - `local`（6 个，不依赖 LLM provider）：`describe_capabilities` / `scan_patterns` / `trace_refs` / `validate_migration_ops` / `parse_project_id` / `scan_modules`（`fetch_remote` 归 fetch）——**provider 未配置也照常可用**
   - `fetch`（1 个，不依赖 LLM provider）：`fetch_remote`；只拉公网材料，结果始终是 `untrusted_remote/source_material_only`
   - `llm`（8 个，必须 provider 可用）：`summarize` / `retrieve_similar` / `fill_template` / `extract` / `propose_repo_facts` / `diff_summary` / `generate_filename` / `select_template`
   - 真源：[mcp/cheap-research/tools_manifest.json](../mcp/cheap-research/tools_manifest.json)
-- **降级**（没装 / 装了没填三件套）：主会话按原始证据兜底，或使用当前宿主确实支持的低成本子代理（方案 A），不阻塞主流程。**子代理兜底时按 [subagent_spawn_wait.md](subagent_spawn_wait.md) 通用契约等待**（后台 spawn + `TaskOutput` 阻塞等 + 20 分钟墙钟硬截止，禁止裸同步 spawn / 被动等通知 / 无限等待）
+- **降级**（没装 / 装了没填三件套）：主会话按原始证据兜底，或使用当前宿主确实支持的低成本子代理（方案 A）。子代理按 [subagent_spawn_wait.md](subagent_spawn_wait.md) 使用宿主可执行的有界等待；未完成的必要证据保留债务。
 - **触发场景**：以各步骤**正文执行点**为真源（推荐表仅声明、正文无调用的不算入选）——log 阶段2 TB 评论预提取（`extract`，评论 ≥ 8 条）、doc 远程模块 README 拉取（`fetch_remote`）、review dedup 分类/找重复（`extract`）+ 审查输出压缩（`summarize`）、merge 跨轮 review 汇总（`summarize`，>1 轮）、deepcheck Fixed 预扫（`scan_patterns`）+ dedup（`extract`）、audit 仓库事实候选预审（`propose_repo_facts`）+ 计划vs代码差异摘要（`diff_summary`）、patch 阶段工具映射（见 [steps/08_patch.md](../steps/08_patch.md) 338 行）。**init/plan/code/status/readme 无正文执行点**（历史检索/ADR 检索/现状盘点/文件名/模板选择均走确定性机制 Read/rg/规则，`--scan` 零 LLM），标 ⚪。完整清单见 [tools_manifest.json](../mcp/cheap-research/tools_manifest.json)
 - **不接管决策**：所有高风险子任务（3 质疑者对抗 / 架构决策 / 终审裁决 / 修复方案 / 用户对话）一律不交给 cheap-research
 - **新增能力分工边界**：技术文档/压缩包先走 `tools/document_intake.py`，视觉页/原理图先走 `tools/media_router.py` 选择 native/bridge/dual；cheap-research 只可消费其**带 source hash + 页/区域回指的文本化候选**做压缩或结构化提取。它不得自己解析图片/视频/7z，不得裁决管脚复用、电气兼容、时序、MCU/SDK 适配或原理图正确性；这些结论留给对应 SKILL + 主模型复检
@@ -113,8 +129,8 @@
 - **降级路径**：
   - 函数数 < 50 → 整个 §2.5.7/§9.4 跳过（避免 LLM 成本浪费）
   - 函数数 > 500 → 分批（每批 100），合并结果
-  - ripgrep 抽不到 / 不可用 → 整个 dedup 跳过
-  - cheap-research 不可用 → 停止整轮 dedup，保留未消除的重复风险；符合门槛的 gate 仍按真实情况记录 `unavailable_before_call` 或 `degraded_after_attempt`，不得伪装成未触发或已完成。可在工具恢复后重跑。
+  - ripgrep 抽不到 / 不可用 → 用受支持的其他方式枚举并核验；仍无法完整枚举时保留未观察债务，不能声明去重已完成或低于阈值
+  - cheap-research 不可用 → 可按 [审查证据合同](inspection_evidence.md) 执行真实的人工等价去重；目录、分类、逐家族审查与源码回指均完成且契约可验证才可声明范围内完成。未完成、不可枚举、预算耗尽或不支持的证据路径保留未观察债务，不能伪装成已完成。MCP trace 按机器 catalog 记录：仅业务不达标（低于阈值）才 `skipped_not_eligible`；达到阈值而工具不可用保持 eligible=true，记 `unavailable_before_call` 或 `degraded_after_attempt`，不把人工审查写成工具成功；工具恢复后可重跑。资格按合同版本解释（gates.json `contract_version`）：新行带 `contract_version: 2`；存量工单由控制面在下一次 metadata 写入时采纳当前合同并记录 `mcp_gate_contract_adopted_at`，linter 以该时刻区分历史行（v1 解释，不追溯改判）与续跑新行（强制当前合同）；声称低于阈值须基于可信枚举（`rg_available=true` 或 `enumeration_verified=true`），两者皆不可用时写 `enumeration_unverified=true` 保留债务（eligible=true + unavailable/degraded），不得记为业务不适用。
   - 高质量模型某类返回空数组 → 该类跳过（无重复），不报错
 
 - **已知限制**：
@@ -143,8 +159,8 @@
 ## AI 执行时的工作流
 
 1. **本步骤开始前**：判定本步骤推荐的 MCP（见 [mcp_per_step.md](mcp_per_step.md)）是否可用
-   - 查 `~/.claude.json` 的 `mcpServers`：用 `Read` 工具
-   - 查当前会话工具列表：工具**直接可见**（按语义识别，含代理前缀形态）即视为可用；不可见再 ToolSearch 取 schema（见 [thinking_core.md](thinking_core.md) 第 0 判据）
+   - 按当前宿主读取对应注册配置；配置不可读时如实记录未知，不能套用其他宿主的配置路径。
+   - 核对当前会话直接可见工具及授权；仅在宿主提供发现接口时使用该接口，不能假定存在 ToolSearch（见 [thinking_core.md](thinking_core.md) 第 0 判据）。注册、可见和可调用是不同事实。
 2. **如有强证据**：除视觉任务须先按 media routing 选 native/bridge/dual 外，其余 MCP 优先用工具（省事且返回更结构化）
 3. **无强证据**：走降级路径（Bash / Read / Write / WebFetch 等原生工具）
 4. **不阻塞**：MCP 不可用不是错误，**降级操作完全是合规的**

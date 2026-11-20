@@ -7,6 +7,10 @@
     "l3_min_steps": 4
   },
   "steps": {
+    "lite_prepare": {"default_tier":"L1","requires_trace":false,"desc":"lite 语义决策与证据摘要，不要求固定外部思考调用"},
+    "lite_code": {"default_tier":"L1","requires_trace":false,"desc":"lite 语义决策与证据摘要，不要求固定外部思考调用"},
+    "lite_review": {"default_tier":"L1","requires_trace":false,"desc":"lite 语义决策与证据摘要，不要求固定外部思考调用"},
+
     "verify": {"default_tier": "L1", "requires_trace": true, "desc": "工单验证决策；无工单模式在运行报告记录，不伪造工单"},
     "docx": {"default_tier": "L1", "requires_trace": true, "desc": "工单模式记录交付决策；独立转换以 source_map 决策记录为准"},
     "status":  {"default_tier": "L0", "requires_trace": false, "desc": "纯查询和格式化，依赖 schema/索引校验即可"},

@@ -46,6 +46,9 @@
     }
   },
   "steps": {
+    "lite_prepare": [],
+    "lite_code": [],
+    "lite_review": [],
     "init": [
       {"server": "icode-local-index", "condition": "已有索引或仓库超过 500 个文本文件", "required": false},
       {"server": "icode-workspace", "condition": "多 Git 根或来源不明", "required": false},

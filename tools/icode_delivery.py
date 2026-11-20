@@ -63,7 +63,9 @@ def build_delivery_report(out_dir, meta=None, *, include_crosscheck=True):
     elif meta.get("schema_version") == 3:
         _events, problems = ctl.verify_event_chain(out_dir, meta)
         issues.extend(problems)
-    review = ctl.candidate_module().delivery_freshness(meta, context["current"], context["events"])
+    review = (ctl.delivery_freshness(out_dir, meta) if meta.get("mode") == "lite" else
+              ctl.candidate_module().delivery_freshness(meta, context["current"], context["events"],
+                  required_steps=ctl.workflow_contract(meta)["required_review_steps"]))
     if enabled and context["reasons"]:
         review = dict(review, ok=False, state="blocked", reasons=context["reasons"])
     verification = ctl.verification_evidence_module().assess(meta, context)

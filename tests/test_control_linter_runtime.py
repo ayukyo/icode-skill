@@ -36,6 +36,13 @@ def completed(*, stdout=None, stderr=b"", code=0):
 
 
 class ControlLinterRuntimeTests(unittest.TestCase):
+    def setUp(self):
+        # Runtime-mock cases exercise subprocess handling; give the control plane
+        # the same minimal ticket context that production callers provide.
+        self.metadata = patch.object(CONTROL, "load_metadata", return_value={"mode": "full"})
+        self.metadata.start()
+        self.addCleanup(self.metadata.stop)
+
     def _real(self, *, empty_path=False, c_locale=False, legacy=True):
         # The child gets only runtime necessities, never model credentials.
         environment = {key: os.environ[key] for key in (

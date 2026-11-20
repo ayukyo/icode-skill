@@ -80,7 +80,7 @@ N. **强制思考前置**（不可跳过，缺证据视为不合规；按 [refer
 
 > **判定 MCP 是否可用**（仅 L2/L3；L0/L1 不做发现探测）：先区分当前会话工具、宿主注册、独立服务握手三个事实，不能互相替代。
 >
-> **第 0 判据·直接可见即可用**：先检查当前宿主提供的工具目录。目标工具已有完整 schema（标准 `mcp__<server>__<tool>` 或代理前缀）时直接调用，禁止再以 ToolSearch 空结果否定它；没有暴露也不能直接断言未安装。可见性检查不替代实际调用。
+> **第 0 判据·可见性与授权分开**：先检查当前宿主提供的工具目录。目标工具已有完整 schema（标准 `mcp__<server>__<tool>` 或代理前缀）且上层允许调用时直接调用，禁止再以 ToolSearch 空结果否定它；没有暴露也不能直接断言未安装。可见性检查不替代实际调用。
 >
 > **第一步·直接 ToolSearch 验证**：仅在工具不可见且宿主实际提供 ToolSearch 时，先用 `select:mcp__sequential-thinking__sequentialthinking` 精确发现，无命中后再用 `sequential-thinking` 补充发现。无 ToolSearch 的宿主不虚构调用，直接进入下方配置读取判定。每个宿主工具目录版本只需发现一次；会话重载、目录变化、配置修复或原调用失败后必须重新检查，不能用旧发现结果跳过本步实际思考。
 >
@@ -98,17 +98,19 @@ N. **强制思考前置**（不可跳过，缺证据视为不合规；按 [refer
 > |---|---|---|
 > | 配置缺失组 | 工具不可见，宿主与适用项目配置实际可读且均无该服务；有 ToolSearch 时完成精确及模糊发现 | `强制思考: 降级文字块（未配置 server：<实际宿主配置路径>；按该宿主安装入口补注册）` |
 > | 注册但未暴露组 | 工具不可见、发现无命中或宿主无发现工具，实际宿主配置有该服务 | `强制思考: 降级文字块（配置有 server，本会话工具未暴露：<已核实原因或尚未确定>；<修复及重载后验证动作>）` |
-> | 调用失败组 | 当前工具可见/发现成功，实际调用返回错误或超时 | `强制思考: 降级文字块（工具实际调用失败：<具体错误类别>）` |
+> | 策略禁止组 | 工具可见，但上层用户或宿主策略明确禁止本次调用；引用真实策略 | `强制思考: 降级文字块（工具可见，策略禁止调用；保留策略依据）` |
+> | 配置未知组 | 工具不可见，但适用配置不可读 | `强制思考: 降级文字块（会话工具未暴露，配置状态未知）` |
+> | 调用失败组 | 当前工具可见/发现成功且允许调用，实际调用返回错误或超时 | `强制思考: 降级文字块（工具实际调用失败：<具体错误类别>）` |
 >
 > 不能满足分组事实时保留未知并继续取证；不得虚构 ToolSearch、调用尝试或成功。按原 trace 合同记录真实边界，不把独立协议客户端结果冒充当前会话调用。无论采用何种载体，思考本身与证据要求均不可省略。
 
 ### 思考工具未暴露的 trace 合同
 
-配置缺失组、注册但未暴露组完成上述核实与结构化文字思考后，在 `.thinking_gate_trace.jsonl` 记 `decision=unavailable_before_call`、`attempted=false`、`result=degraded`，并填写非空 `degraded_reason` 和 `availability`：
+配置缺失、注册但未暴露、配置未知或策略禁止组完成实际发现与结构化文字思考后，在 `.thinking_gate_trace.jsonl` 记 `decision=unavailable_before_call`、`attempted=false`、`result=degraded`，并填写非空 `degraded_reason` 和 `availability`：
 
-- `tool_visible=false`；直接可见工具禁止使用此分支。
+- 工具未暴露时 `tool_visible=false`；工具可见但策略禁止时 `tool_visible=true`，并记 `reason=policy_denied` 和非空 `policy_ref` 指向真实上层策略，不能伪造授权或调用。
 - `discovery_ref`：本会话工具目录/发现结果及实际宿主配置核实记录的引用；无 ToolSearch 不虚构调用。
-- `reason=not_exposed|discovery_failed`：按真实发现结果选择。
+- `reason=not_exposed|discovery_failed|policy_denied`：按真实事实选择；配置不可读时保留未知，不伪称未注册。
 - `fallback`：实际采用的结构化文字思考方法；L3 仍须独立对抗证据。
 - `evidence_ref`：已完成的结构化思考与 L3 对抗结果的引用。
 
@@ -136,10 +138,10 @@ N. **强制思考前置**（不可跳过，缺证据视为不合规；按 [refer
 1. **分级**：按 [mcp_per_step.md](mcp_per_step.md)「默认等级表」+ `mcp/reasoning-gate/gates.json` 升级触发器确定本步等级（L0～L3），把等级与触发原因写入 `{ICODE_OUT_DIR}/.thinking_gate_trace.jsonl`（每 step 最终一行；schema/词表见 [thinking_detail.md](thinking_detail.md)「thinking gate trace」段）。
 2. 输出 `ultrathink` 触发词（触发更长的内部推理 budget）——**L0/L1 可省略**（纯机器门禁/决策记录不依赖推理预算）。
 3. **加载本步骤适用的 references**：按「共享规则加载」首次实读或失效重载，实际 Read 后输出 `📖 已 Read references/xxx.md`；满足复用条件时引用已有来源，不伪造本步新 Read。
-4. **ICODE 本地 MCP 路由门（所有等级）**：读取 `mcp/icode-mcp-policy/policy.json` 当前 step 的 routes；优先用当前可见的 `icode-local.policy_evaluate_call` 复核目标 server/tool/operation，旧宿主兼容 `icode-mcp-policy.evaluate_call`；二者均未暴露时直接按同一 JSON 及 transport 映射判定。统一服务的模块前缀仅改变调用名，不改变逻辑模块权限。只有 condition 被当前事实满足才调用目标服务；`required=true` 的命中项在工具可见时必须先实际调用；工具未暴露时记录发现依据，随后按 [mcp_integration.md](mcp_integration.md) 的底层确定性工具降级。policy 缺失/损坏时默认拒绝新增 MCP 调用，不影响原有 Read/rg/git/ssh/adb 路径。不得为探测 MCP 而读取无关工程文件。
+4. **ICODE 本地 MCP 路由门（所有等级）**：读取 `mcp/icode-mcp-policy/policy.json` 当前 step 的 routes；优先用当前可见的 `icode-local.policy_evaluate_call` 复核目标 server/tool/operation，旧宿主兼容 `icode-mcp-policy.evaluate_call`；二者均未暴露时直接按同一 JSON 及 transport 映射判定。统一服务的模块前缀仅改变调用名，不改变逻辑模块权限。只有 condition 被当前事实满足才调用目标服务；`required=true` 的命中项在工具可见且上层允许时必须先实际调用；可见但策略禁止时保留真实策略依据并按可用替代手段处理；工具未暴露时记录发现依据，随后按 [mcp_integration.md](mcp_integration.md) 的底层确定性工具降级。policy 缺失/损坏时默认拒绝新增 MCP 调用，不影响原有 Read/rg/git/ssh/adb 路径。不得为探测 MCP 而读取无关工程文件。
 5. **MCP 调用 gate**（L2/L3 不可跳过）：在结构化思考开始前，先处理本步 🟢 MCP（按 [mcp_per_step.md](mcp_per_step.md)「强证据场景判定」）：
    - 列出本步满足强证据场景的 🟢 MCP（**不含 sequential-thinking**，它由第 5 步承载；其余 🟢 MCP 由本 gate + 各 step 执行步骤内嵌点承载）
-   - 对每个 🟢 MCP：**若该工具已在工具列表直接可见（完整 schema）则直接调用**，不可见才 ToolSearch 取 `mcp__<name>__<tool>` schema -> **实际调用一次** -> 把调用结果（成功/空/失败）写进思考块「MCP 调用」段
+   - 对每个 🟢 MCP：**若该工具已在工具列表直接可见（完整 schema）且上层允许则直接调用**；不可见时仅在宿主提供发现接口时取得 schema。可调用则**实际调用一次**并记录结果；未暴露或策略禁止按真实事实降级。
    - 调用失败/返回空 -> 思考块写明降级原因（MCP 不可用 / 无相关结果 / 不适用场景）才能跳过；**工具可调用但未经实际调用就标降级 = 反偷懒第 21 条违规**；工具未暴露按下文 unavailable_before_call 合同记录，不伪造尝试
    - ⚪ MCP（强证据场景不满足）无需评估无需声明
    - **本步若无 🟢 MCP**（全 ⚪）：gate 直接通过，思考块记"本步无 🟢 MCP（强证据场景均不满足）"
@@ -164,8 +166,8 @@ N. **强制思考前置**（不可跳过，缺证据视为不合规；按 [refer
 3. **按等级执行**：
    - L0 → 执行既有机器门禁后更新 trace：`mechanism=deterministic_checks`、`attempted=true`、`result=success`。
    - L1 → 写 `.decision_anchors.json` 决策摘要后更新 trace：`mechanism=decision_record`、`attempted=true`、`result=success`。
-   - L2/L3 → 实际调用 sequential-thinking（先可见性自检；不可见才 ToolSearch 取 schema）。调用成功后更新 trace：`attempted=true`、`result=success`、`mechanism=sequential-thinking`（L3 为 `sequential-thinking+adversarial`）；失败/超时 → `attempted=true`、`result=degraded`、`degraded_reason=<真实失败类别>`。
-   - L2/L3 工具未暴露 → 完成发现核实与结构化文字思考后，按「思考工具未暴露的 trace 合同」记 `decision=unavailable_before_call`、`attempted=false`、`result=degraded` 与完整证据；不伪造实际调用失败。
+   - L2/L3 → 允许调用且可用时实际调用 sequential-thinking（先可见性和授权自检；不可见且宿主支持时才 ToolSearch 取 schema）。调用成功后更新 trace：`attempted=true`、`result=success`、`mechanism=sequential-thinking`（L3 为 `sequential-thinking+adversarial`）；失败/超时 → `attempted=true`、`result=degraded`、`degraded_reason=<真实失败类别>`。
+   - L2/L3 工具未暴露或被真实上层策略禁止 → 完成发现核实与结构化文字思考后，按「思考工具未暴露的 trace 合同」记 `decision=unavailable_before_call`、`attempted=false`、`result=degraded` 与完整证据；不伪造实际调用失败。
 4. **step 转换前运行 validator**：`python3 tools/lint_thinking_gate.py {ICODE_OUT_DIR} --step <step> --strict`——有 in-scope requires_trace step 未履行（missing / L2/L3 未调用且无合法降级 / tier 降级 / 触发词非法）时不得标记该步流程合规，先回补再转换。
 
 **trace 行约束**（校验器强制）：

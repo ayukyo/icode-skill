@@ -130,14 +130,14 @@ L3 保留 `mechanism=sequential-thinking+adversarial` 和升级触发器，替�
 **gate 全流程（每步到对应执行点时执行）**：
 
 1. **加载 gate catalog**：Read `mcp/cheap-research/gates.json`，取本 step 相关 gate 与阈值（`tb_comment_extract_min` / `long_text_threshold_bytes` / `dedup_min_functions` / `merge_min_rounds` / `max_input_bytes_per_call`）。
-2. **确定性计算 eligibility 并立刻写 trace**：按 gates.json 的 condition + 事实文件（TB 评论数 / 候选日志字节 / 函数 catalog / review round 数 / mode）算出 `eligible`，先追加一行 trace（`decision` 暂填 `pending`，`at` 为当前 ISO-8601）；**不得用"我觉得没必要"当 skip 理由**。
+2. **确定性计算 eligibility 并立刻写 trace**：按 gates.json 的 condition + 事实文件（TB 评论数 / 候选日志字节 / 函数 catalog / review round 数 / mode）算出 `eligible`（**eligible 只由业务事实计算**：`cheap_available` 与工具暴露状态只决定 decision，不改变 eligibility；达到业务阈值而工具不可用 → eligible=true + unavailable_before_call/degraded_after_attempt，禁止 skipped_not_eligible），先追加一行 trace（`decision` 暂填 `pending`，`at` 为当前 ISO-8601——建议显式带时区；无时区值按本地时间解释，与控制面事件时间（now_iso）同约定；新行带 `contract_version: 2`，机器真源 = gates.json `contract_version`）；**不得用"我觉得没必要"当 skip 理由**。**合同版本边界**：无 `contract_version` 的存量行按合同 v1 旧语义解释（`cheap_available`/`rg_available` 参与 eligibility），不追溯改判历史记录；vNext 出生 metadata 带 `mcp_gate_contract_version=2`（受保护字段），其全部行按 v2 解释且禁止行降级为 1；旧工单续跑需满足新合同时，真实重做相应审查并追加带 `contract_version: 2` 的新行（同一 gate 以最后一条为准），不得改写历史行。
 3. **eligible 时先查缓存**：Read `{ICODE_OUT_DIR}/.cheap_research_cache.json` 查 `tool + args_hash`（语义见 SKILL.md「cheap-research 15 工具会话内缓存」段）。
 4. **有效缓存命中**：把 trace 行更新为 `decision=cache_hit`、`attempted=false`、`result=success`、`cache_key=<args_hash>`、`input_digest=<包含tool/args及源码hash的64位sha256>`——**gate 直接 fulfilled，不再重复调用**。
 5. **未命中才实际调用**：调 `mcp__cheap-research__<tool>`（先可见性自检；不可见才 ToolSearch 取 schema）。调用成功/返回空/失败后**更新最终 trace**：
    - 成功 → `decision=called`、`attempted=true`、`result=success`、`source_files=[...]`
    - 空/错误/超时 → `decision=degraded_after_attempt`、`attempted=true`、`result=empty|error|timeout`、`error_class=<类名>`
    - 并把结果写回缓存（atomic 写 `.tmp` + `mv`）
-   - 工具未暴露且发现流程仍无法取得 schema → `decision=unavailable_before_call`、`attempted=false`、`result=unavailable`，并带 `availability={tool_visible:false,discovery_ref:<会话工具发现证据引用>,reason:not_exposed|discovery_failed,fallback:<替代方法>,evidence_ref:<替代结果引用>}`。工具直接可见不得用此分支，不伪造实际尝试；业务 eligibility 仍由事实计算。
+   - 工具未暴露且发现流程仍无法取得 schema → `decision=unavailable_before_call`、`attempted=false`、`result=unavailable`，并带 `availability={tool_visible:false,discovery_ref:<会话工具发现证据引用>,reason:not_exposed|discovery_failed,fallback:<替代方法>,evidence_ref:<替代结果引用>}`。工具可见但被上层策略禁止时同样使用此分支，记录 `tool_visible=true`、`reason=policy_denied` 和真实的 `policy_ref`。业务 eligibility 仍由事实计算。
 6. **step 正文到达同一 gate 时读取最终 trace**：已 fulfilled（called/cache_hit/degraded_after_attempt/unavailable_before_call 已记录）则复用，**避免 A/B 两层重复调用**；未 fulfilled 才执行上述流程。
 7. **step 转换前运行 validator**：`python3 tools/lint_mcp_coverage.py {ICODE_OUT_DIR} --step <step> --strict`——有 eligible 未履行 gate 时不得标记该步流程合规，先回补再转换。
 

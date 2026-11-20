@@ -4,6 +4,18 @@
 **产出**: `{ICODE_OUT_DIR}/01_plan.md`
 **会话**: 主会话
 
+**人工去重债务可追溯清偿的计划输入**：在 plan attempt 内，把全部拟新增、修改或删除的源码路径写入 `{ICODE_OUT_DIR}/plan_candidates.json`：`{"schema_version":1,"ticket_id":"<本工单>","attempt":"<plan attempt>","files":["<相对项目根或绝对路径>"]}`。同时在 `01_plan.md` 中写且只写一次以下章节，JSON 内容须与清单文件一致：
+
+````text
+<!-- icode:plan-candidates -->
+```json
+{"schema_version":1,"ticket_id":"<本工单>","attempt":"<plan attempt>","files":["<相对项目根或绝对路径>"]}
+```
+<!-- /icode:plan-candidates -->
+````
+
+文件清单须与计划一致，不能只列审查范围的一部分；无可核实清单时后续人工去重保留债务。计划完成前通过控制面分别为 `01_plan.md` 和 `plan_candidates.json` 执行 `artifact --step plan --attempt <plan attempt> --path <文件名>` 登记，成功结束 plan 后才进入 review。旧计划缺少这些回执时先真实重做并登记计划，不能补造历史回执。
+
 > **共享技能路由**：现状调研前读取 [references/skill_routing.md](../references/skill_routing.md)，按风险事实加载命中技能；技能结论须由主代理复核后进入 ADR。
 > **证据习惯真源**：证据缺口、完整链路、状态生命周期和验收分层统一执行 [references/evidence_and_verification.md](../references/evidence_and_verification.md)。
 > **工程接入门**：读取 [references/project_intake.md](../references/project_intake.md)，先解析实际工程根；大型/超大型 SDK 仓先做静态画像并限定扫描范围，多根或发现预算截断时 L1 阻断。
@@ -98,7 +110,7 @@
    d. **仅常规新建分支，目录仍为空时立即创建控制面工单**：生成非空 `ticket_id`，调用 `python3 tools/icode_control.py create --dir {ICODE_OUT_DIR} --ticket-id <id> --requirement '<原始需求>' --birth plan`。必须早于历史检索留痕、trace 和 `01_plan.md` 落盘；复用 init/log 工单时不得再次 create。
 
 2. **历史检索复用**（目录管理之后、强制思考之前，全局索引存在时必须执行，详见 SKILL.md「历史检索复用」段）。**置于目录管理之后**：此时需求来源已确定（复用情况已读 `00_init.md`，常规新建情况用命令行参数），可用完整需求做相关性判断：
-   - Read `~/.claude/icode_data/index.json`（不存在则跳过检索）
+   - Read `~/.claude/icode_data/index.json`（不存在或因权限等只读失败则如实记录原因并跳过历史检索，不得声称检索无命中；工单局部拓扑按 [worktree_isolation.md](../references/worktree_isolation.md) 核验）
    - **两段式检索**：段一从本次需求提炼关键词集，与各 ticket `keywords` 做 Jaccard 粗筛取 ≤10 候选（零 token，可复活预扫后排除剩余 stale/当前 `ticket_id`）；段二只把候选 `keywords + requirement_points` 喂主代理精读打分选 top-N 命中（N 由梯度决定，明确无关则 0 条）。**排除当前 `ticket_id`**，不自我参考——当前 ticket_id 读「最新 `.icode_output_N` 目录的 `.ico_metadata.json`」的 `ticket_id` 字段；**常规新建目录首跑时目录刚创建、尚未入索引，无需排除**；复用步骤0目录时 metadata 已有 ticket_id，按值排除
    - **`/icode plan`/`/icode start` 注入分支**：命中工单经段二精读+过时校验后，**按 `verdict` 分流注入**（字段缺失视为 `unknown`，详见 SKILL.md「注入形式·按 verdict 分流」）：
      - `verified`/`unknown`（含旧工单）：定点读其 `01_plan.md` 的 ADR 章节 + 风险评估章节（**不读全文**，≤1K token/条）；**`unknown` 额外扩读 `00_init.md` 末轮对话摘要**（≤0.3K，捞最终结论/证伪信号）+ 思考块「历史参考」走对抗质疑三问 + ⚠️未验证警告（[../references/thinking_detail.md](../references/thinking_detail.md)「历史参考小节」）--旧工单防误导主防线，不依赖标注
@@ -176,7 +188,7 @@
    > **与 `00_init.md` 第5节待决策项的关系**：若 `00_init.md` 第5节列了某待决策项的初步倾向（步骤0「待决策倾向自审」产出），步骤1 ADR **必须独立评估**该决策，不得直接照搬 init 倾向作为 ADR 决策；若 ADR 决策与 init 倾向一致，「理由」字段须附独立 Read/Grep 调研证据（呼应上方「工程既有模式调研」），不得仅引用"init 已倾向 X"作为 ADR 理由。（注：init 第5节标"无代码证据-留步骤1 ADR"的纯设计/产品偏好项除外，其 ADR 理由记设计依据即可，不要求 grep 证据）
 
    > **历史溯源（可选）**：若本 ADR 的决策实质借鉴了历史检索命中的相似工单，在「理由」末尾追加一句 `(参考相似工单 {ticket_id} 的同类决策)`。这是决策溯源而非工程污染，仅限实质借鉴时使用，不得堆砌。
-   > **证据权威优先级（硬规则，ADR 决策前必查）**：当"当前代码行为 / 历史工单 ADR / 段零文档快照 / 用户需求描述"冲突时，按 **当前 HEAD 代码 + git 提交演进史（commit message / 回归日志 / 测试注释） > 历史工单 ADR > 段零工程文档快照 > 用户需求描述** 裁定；以最高权威为准，低级权威只作参考；**决策依据冲突必须在 ADR「理由」中显式标注**（格式："历史工单 `<id>` ADR 已被 commit `<hash>` 演进，本 ADR 以 `<hash>` 为准"）。历史工单 ADR 是**某个时间点的快照**、代码是**持续演进的事实**——禁止照搬旧 ADR 决策而不核对当前代码演进史（会产出回归既有修复的方案）
+   > **现状证据与目标授权**：当前代码、测试和实测用于核实现状，git 历史用于解释演进；历史 ADR 与文档快照可能过时，不能替代当前事实。用户的当前明确要求决定本次目标和授权范围，不能因现有代码行为不同而自动否定；遇到目标冲突、不可安全实施或确有语义歧义时在 ADR 说明依据并按适用的上层指令处理。
 5. **模块详细设计** — 每个模块的职责、关键函数、数据结构，引用现有接口命名风格。**代码示例使用伪代码+关键行号引用**，禁止粘贴完整函数实现（完整实现留给步骤4编码阶段）。格式：`参考 src/foo.cpp:42-68 的 HandleXxx 模式`。**必须说明新增代码如何融入既有链路习惯**（命名模式/错误处理模式/调用链模式/日志模式），不得写出"功能对但风格突兀"的设计
 
 ### 端到端路径推演表（plan 阶段反推核心机制，治「链路完整性漏洞」盲区）
@@ -345,7 +357,7 @@
 
    c.5 **方案对抗验证**（plan 阶段反推核心机制，治「自验自证」盲区）：
       - **目的**：断言验证是「我设计时核对证据」，**对抗验证是「第三方攻击方案可行性」**——独立质疑者从可行性/兼容性/调用链完整性三视角攻击方案，撑不住就降级/修正，不让漏洞流到 04_code 才暴露。**复用 log 阶段对抗模式**（独立质疑者 / 诚实降级 / 证据回指），但 plan 阶段不需 log 那么重——max **2 轮**收敛（log 默认 4 轮，plan 方案范围更聚焦，2 轮足够）
-      - **三视角质疑者**（任一独立 spawn，禁用 Explore，用 general-purpose + schema 强制结构化）：
+      - **三视角质疑者**（各自独立上下文；按当前宿主能力及授权选择代理和结构化结果，见 [宿主适配](../references/host_adapters.md)）：
         - **可行性质疑者**：方案是否真能在现有架构下实现？是否有未识别的依赖/前置条件？修改范围是否被低估？
         - **兼容性质疑者**：方案是否破坏既有功能？是否引入回归？上下游依赖是否被忽略？API 变更是否兼容？**方案必要性**：方案是否在解决一个已被现有代码解决的问题？输入文件中是否有与方案功能重叠的现有实现？——若发现重叠，必须质疑方案必要性并回指 file:line
         - **调用链完整性质疑者**：方案涉及的所有跨模块/跨端点调用，调用链是否完整？返回路径是否闭环？异常分支是否都有出口？
@@ -353,8 +365,8 @@
       - **收敛与降级**：
         - 有实质反驳 → 修正方案 / 补证据 / 降级标 `[未验证-对抗不通过]`
         - 2 轮后仍有质疑 → 标 `[部分通过]`，剩余质疑点写入「方案对抗验证记录」末尾「残余风险」段
-        - 环境无 spawn 工具（`no_spawn_env = true`）→ 主代理代行三视角独立判断，但不得自演一致假共识；产物文件强制明示「主代理代行（环境无 spawn 工具）」
-        - 子代理超时/失败 → 按 [references/adversarial.md](../references/adversarial.md)「子代理失败处理」重试 2 次（含 1 次换 subagent_type） → 仍失败标 `[未验证-子代理对抗失败]`，**禁止主代理补齐为代理代行**；**质疑者统一后台 spawn（`run_in_background: true`）+ `TaskOutput(task_id, block=true, timeout=...)` 阻塞等 verdict**（**首选**等待原语；宿主未提供 `TaskOutput` 时按 [subagent_spawn_wait.md](../references/subagent_spawn_wait.md)「等待原语探测与降级」执行，不得裸同步 spawn 或被动等通知；**禁止被动等任务通知**——挂死永无通知看门狗失守；`Agent` 工具无 timeout 参数，裸同步 spawn 无法机械执行超时）；**首次 spawn 走 10 分钟看门狗档（`TaskOutput(block=true, timeout=600000)`，`BACKGROUND_WATCHDOG_SECONDS=600`，超时判疑似断连 → `TaskStop` → 前台重来）**；前台重来/重试走 120s 档（超时先 `TaskStop` 停句柄再重试 1 次，二次仍超时走 `[未验证-子代理对抗失败]`，见 adversarial.md「显式等待 + 超时机制」段看门狗）；**质疑者 spawn 须含输出预算硬约束防 `max_output_tokens` 截断**（verdict 第一动作/禁回显/总输出≤2000 token 宽松上限勿压紧，见 adversarial.md「spawn 规格要求」第 4 条）；**整合墙钟硬截止**——对抗等待+整合阶段墙钟上限 20 分钟（`INTEGRATION_WALL_CLOCK_DEADLINE_SECONDS=1200`），3 质疑者一次性并行后台 spawn，到 deadline 未返回者先 `TaskStop` 再按已返回 verdict 整合、未返回者标 `[未验证-子代理对抗失败]`，**禁止无限等待**（见 adversarial.md「整合墙钟硬截止」段）
+        - 当前宿主确无独立能力或上层策略禁止时，主代理可做标明原因的事实复核，但不冒充独立审查；判断性结论保留 `needs_more_evidence`。
+        - 调用失败按 [对抗规则](../references/adversarial.md) 和 [有界等待](../references/subagent_spawn_wait.md) 处理；真实有能力且获授权时最多重试两次，容量不足可分批启动独立上下文。未返回不得提前标成功或失败。
       - **产物**：将对抗记录追加到 `01_plan.md` 末尾「方案对抗验证记录」章节（与「断言验证记录」并列），每条记录注质疑者 spawn Agent ID 或「主代理代行」标注
       - **与现有「c. 断言验证」的关系**：断言验证是「静态核对」（接口存在吗？模式对吗？），对抗验证是「动态攻击」（方案撑得住第三方攻击吗？）——两者互补，前者治「细节错」，后者治「方向错」，缺一不可
 
@@ -400,6 +412,7 @@
    常规新建工单已在步骤 1d 原子出生；此处原子合并上述非受保护业务字段。不得重跑 `create`，也不得修改其受保护出生字段。计划产物和合同落盘完成后再调 `transition --to plan_done`，工具自动追加 `"1"` 到 `completed_steps`。
 
    - **两种情况都要刷新全局索引**（步骤5之后）：vNext 调 `python3 tools/icode_control.py index-write --ticket-dir {ICODE_OUT_DIR}`；禁止手工直改 index.json。legacy 工单只读，需先运行 migration 显式升级。
+   - 若索引读写因权限失败，保留真实状态和错误，记录索引同步债务；不能把已有 `indexed=true` 当成此次同步成功。只有本地 `indexed=false` 且索引无对应条目或只读失败时，按拓扑规范核对本地可信根和全部其他门禁后才可继续；已读到冲突记录仍 fail-closed。权限恢复后调用上述原生 `index-write` 受控重试并重新核对，不能自行改索引；UI `create-next` 在工单出生前索引锁失败则报告创建阻断。
    - **常规新建目录情况**（此前未入索引）：`ticket_id` 已在 `create` 前按 `{工程名}-{N}` 规则生成（工程名冲突时加 `project_path` 短 hash 后缀）；直接用 `index-write` 写入条目，禁止先留空 ID 再回填。
    - **复用步骤0目录情况**：metadata 已有 `ticket_id`，按该 id 更新对应条目（`has_plan` 置 true，刷新 `requirement_summary`），不新建条目。
 

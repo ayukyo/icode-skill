@@ -223,7 +223,10 @@
           {"id": "initial_requirement", "kind": "ticket_file", "value": "00_init.md", "required": false, "protected": true},
           {"id": "log_analysis", "kind": "ticket_file", "value": "log_analysis.md", "required": false, "protected": true}
         ],
-        "outputs": [{"id": "plan", "kind": "ticket_file", "value": "01_plan.md"}],
+        "outputs": [
+          {"id": "plan", "kind": "ticket_file", "value": "01_plan.md"},
+          {"id": "plan_candidates", "kind": "ticket_file", "value": "plan_candidates.json", "required": false}
+        ],
         "required_checks": ["before_write", "before_transition"],
         "drift_routes": {"requirement": "plan", "scope": "plan", "initial_requirement": "plan", "log_analysis": "plan", "default": "plan"}
       },
@@ -231,15 +234,17 @@
         "inputs": [
           {"id": "plan", "kind": "ticket_file", "value": "01_plan.md", "required": true, "protected": true},
           {"id": "requirement", "kind": "metadata_pointer", "value": "/requirement", "required": true, "protected": true},
-          {"id": "scope", "kind": "metadata_pointer", "value": "/scope_contract", "required": false, "protected": true}
+          {"id": "scope", "kind": "metadata_pointer", "value": "/scope_contract", "required": false, "protected": true},
+          {"id": "plan_candidates", "kind": "ticket_file", "value": "plan_candidates.json", "required": false, "protected": true}
         ],
         "outputs": [
           {"id": "review", "kind": "ticket_file", "value": "02_review.md"},
           {"id": "review_manifest", "kind": "ticket_file", "value": "review_manifest.json"},
-          {"id": "review_rounds", "kind": "ticket_glob", "value": "review_round_*.json", "required": false}
+          {"id": "review_rounds", "kind": "ticket_glob", "value": "review_round_*.json", "required": false},
+          {"id": "review_dedup_evidence", "kind": "ticket_file", "value": "review_dedup_evidence.json", "required": false}
         ],
         "required_checks": ["before_write", "after_wait", "before_transition"],
-        "drift_routes": {"plan": "review", "requirement": "plan", "scope": "plan", "default": "review"}
+        "drift_routes": {"plan": "review", "requirement": "plan", "scope": "plan", "plan_candidates": "plan", "default": "review"}
       },
       "merge": {
         "inputs": [
@@ -279,7 +284,8 @@
         ],
         "outputs": [{"id": "deepcheck", "kind": "ticket_file", "value": "05_deepcheck.md"},
           {"id": "inspection_coverage", "kind": "ticket_file", "value": "deepcheck_coverage.json"},
-          {"id": "inspection_worklist", "kind": "ticket_file", "value": "deepcheck_worklist.json"}],
+          {"id": "inspection_worklist", "kind": "ticket_file", "value": "deepcheck_worklist.json"},
+          {"id": "deepcheck_dedup_evidence", "kind": "ticket_file", "value": "deepcheck_dedup_evidence.json", "required": false}],
         "required_checks": ["before_write", "after_wait", "before_transition"],
         "drift_routes": {"final_plan": "review", "code_files": "deepcheck", "active_checkout": "worktree", "workspace_head": "merge", "default": "deepcheck"}
       },
@@ -366,6 +372,522 @@
       "external_side_effect": "即使错误看似 retryable，也必须先核对远端/设备回执，禁止自动重放。",
       "destructive_hardware": "任何失败均不自动重试，必须由人确认下一动作。",
       "managed_write": "仅在幂等键和写后校验均存在时允许人工或上层编排重试。"
+    }
+  },
+  "workflow_profiles": {
+    "lite": {
+      "1": {
+        "step_order": [
+          "lite_prepare",
+          "lite_code",
+          "lite_review"
+        ],
+        "required_review_steps": [
+          "lite_review"
+        ],
+        "completion_step": "lite_review",
+        "human_artifacts": [
+          "lite.md"
+        ],
+        "state_machine": {
+          "doc": "vNext 工单（metadata.schema_version=3）状态机真源。tools/icode_control.py transition 按此判定合法性；steps/*.md 的状态写回必须经 `python3 tools/icode_control.py transition --dir <out_dir> --to <status>`，禁止绕过直写（validate 会校验 metadata.status 与最后一条 state_changed 事件一致性）。legacy 工单（metadata 无 schema_version）为只读适配对象，不走 transition（validate 报 legacy-untracked 不阻断只读审计）。",
+          "states": [
+            "lite_prepare_in_progress",
+            "lite_prepare_done",
+            "lite_code_in_progress",
+            "lite_code_done",
+            "lite_review_in_progress",
+            "completed"
+          ],
+          "terminal_states_of_ticket": [
+            "completed",
+            "debug_done"
+          ],
+          "transitions": [
+            {
+              "from": "lite_prepare_in_progress",
+              "to": "lite_prepare_done"
+            },
+            {
+              "from": "lite_prepare_done",
+              "to": "lite_code_in_progress"
+            },
+            {
+              "from": "lite_code_in_progress",
+              "to": "lite_code_done"
+            },
+            {
+              "from": "lite_code_done",
+              "to": "lite_review_in_progress"
+            },
+            {
+              "from": "lite_review_in_progress",
+              "to": "completed"
+            },
+            {
+              "from": "lite_code_in_progress",
+              "to": "lite_prepare_in_progress",
+              "lite_return": true
+            },
+            {
+              "from": "lite_code_done",
+              "to": "lite_prepare_in_progress",
+              "lite_return": true
+            },
+            {
+              "from": "lite_code_done",
+              "to": "lite_code_in_progress",
+              "lite_return": true
+            },
+            {
+              "from": "lite_review_in_progress",
+              "to": "lite_prepare_in_progress",
+              "lite_return": true
+            },
+            {
+              "from": "lite_review_in_progress",
+              "to": "lite_code_in_progress",
+              "lite_return": true
+            },
+            {
+              "from": "completed",
+              "to": "lite_prepare_in_progress",
+              "lite_return": true
+            },
+            {
+              "from": "completed",
+              "to": "lite_code_in_progress",
+              "lite_return": true
+            },
+            {
+              "from": "completed",
+              "to": "completed"
+            },
+            {
+              "from": "lite_prepare_done",
+              "to": "lite_prepare_in_progress",
+              "lite_return": true
+            }
+          ],
+          "gate_policy": {
+            "doc": "状态前移门禁分级：to 完成态（gated_targets）→ 依次运行三个 gate linter（vNext 工单一律 --strict），任一失败即 fail-closed 状态不前移；to 进行态（*_in_progress）→ 仅做状态机合法性判定，不跑 linter。completed 额外强制 delivery_verdict 显式回填。debug 孪生工单（metadata.debug=true）走 .debug 隔离域，不跑通用门禁。",
+            "gated_targets": [
+              "lite_prepare_done",
+              "lite_code_done",
+              "completed"
+            ],
+            "step_by_target": {
+              "lite_prepare_done": "lite_prepare",
+              "lite_code_done": "lite_code",
+              "completed": "lite_review"
+            },
+            "completed_step_by_target": {
+              "lite_prepare_done": "lite_prepare",
+              "lite_code_done": "lite_code",
+              "completed": "lite_review"
+            },
+            "gate_linters": {
+              "thinking_gate": [
+                "python3",
+                "tools/lint_thinking_gate.py",
+                "--strict",
+                "--json"
+              ],
+              "mcp_coverage": [
+                "python3",
+                "tools/lint_mcp_coverage.py",
+                "--strict",
+                "--json"
+              ],
+              "workflow_contract": [
+                "python3",
+                "tools/lint_workflow_contract.py",
+                "--strict",
+                "--json"
+              ]
+            },
+            "completed_requires": "transition --to completed 必须携带 --delivery-verdict ∈ {verified,verification_pending,blocked,not_applicable}（交付分层契约：宿主验证通过不得自动映射为 verified）"
+          },
+          "action_policy": {
+            "schema_version": 1,
+            "doc": "UI/Agent 宿主执行前的机器动作真源。action-policy 从本段、metadata 与事件链生成允许动作和 revision；前端推荐按钮不得自行维护第二套状态映射。project-scoped 的 init/start/fast 由可信 project catalog 单独路由，不伪装成既有 ticket action。",
+            "read_only_actions": [
+              "status"
+            ],
+            "actions": {
+              "verify": {
+                "statuses": [
+                  "lite_prepare_in_progress",
+                  "lite_prepare_done",
+                  "lite_code_in_progress",
+                  "lite_code_done",
+                  "lite_review_in_progress",
+                  "completed"
+                ],
+                "debug": "main",
+                "side_effect": "external_side_effect",
+                "variants": {
+                  "build": {
+                    "statuses": [
+                      "lite_prepare_in_progress",
+                      "lite_prepare_done",
+                      "lite_code_in_progress",
+                      "lite_code_done",
+                      "lite_review_in_progress",
+                      "completed"
+                    ],
+                    "side_effect": "managed_write"
+                  },
+                  "plan": {
+                    "statuses": [
+                      "lite_prepare_in_progress",
+                      "lite_prepare_done",
+                      "lite_code_in_progress",
+                      "lite_code_done",
+                      "lite_review_in_progress",
+                      "completed"
+                    ],
+                    "side_effect": "managed_write"
+                  },
+                  "intent": {
+                    "statuses": [
+                      "lite_prepare_in_progress",
+                      "lite_prepare_done",
+                      "lite_code_in_progress",
+                      "lite_code_done",
+                      "lite_review_in_progress",
+                      "completed"
+                    ],
+                    "side_effect": "managed_write"
+                  }
+                }
+              },
+              "bak": {
+                "statuses": [
+                  "lite_prepare_in_progress",
+                  "lite_prepare_done",
+                  "lite_code_in_progress",
+                  "lite_code_done",
+                  "lite_review_in_progress",
+                  "completed"
+                ],
+                "debug": "main",
+                "side_effect": "managed_write"
+              },
+              "status": {
+                "statuses": [
+                  "lite_prepare_in_progress",
+                  "lite_prepare_done",
+                  "lite_code_in_progress",
+                  "lite_code_done",
+                  "lite_review_in_progress",
+                  "completed"
+                ],
+                "debug": "both",
+                "side_effect": "read_only"
+              },
+              "lite": {
+                "statuses": [
+                  "lite_prepare_in_progress",
+                  "lite_prepare_done",
+                  "lite_code_in_progress",
+                  "lite_code_done",
+                  "lite_review_in_progress",
+                  "completed"
+                ],
+                "debug": "main",
+                "side_effect": "managed_write"
+              }
+            },
+            "recommended_by_status": {
+              "lite_prepare_in_progress": "lite",
+              "lite_prepare_done": "lite",
+              "lite_code_in_progress": "lite",
+              "lite_code_done": "lite",
+              "lite_review_in_progress": "lite",
+              "completed": null
+            }
+          },
+          "close_phases": [
+            "close_planned",
+            "archived",
+            "roots_verified",
+            "checkouts_removed",
+            "branches_removed",
+            "closed"
+          ],
+          "close_phase_doc": "关闭分阶段状态（metadata.close_state）。每阶段幂等（重放同阶段=已应用），禁止跨阶段跳转；用 tools/icode_control.py close-phase 记录。archived 成功后控制根从源 out_dir 交接到 archive_path，roots_verified 起必须在归档根续跑，保证源 checkout 删除后仍可留痕。closed 为终态，重复 close 对已 closed 工单只回放摘要不重复清理。"
+        },
+        "execution_model": {
+          "schema_version": 1,
+          "finish_gate_steps": [],
+          "doc": "借鉴行为树的端口、Reactive 边界检查、节点轨迹、Retry/Fallback 与长动作回执，但不引入行为树运行时、XML、全局黑板或常驻 tick。工单事件链是唯一执行账本；新出生事件 execution_contract_version=1 强制完成回执；无版本的历史工单仅在已 start 后强制，保持历史兼容。",
+          "boundaries": [
+            "before_write",
+            "after_wait",
+            "before_side_effect",
+            "before_transition"
+          ],
+          "input_kinds": [
+            "metadata_pointer",
+            "ticket_file",
+            "ticket_glob",
+            "metadata_files",
+            "workspace_git_head"
+          ],
+          "output_kinds": [
+            "metadata_pointer",
+            "ticket_file",
+            "ticket_glob",
+            "metadata_files",
+            "external_artifact"
+          ],
+          "step_outcomes": [
+            "success",
+            "failure",
+            "degraded",
+            "blocked",
+            "skipped"
+          ],
+          "step_contracts": {
+            "lite_prepare": {
+              "inputs": [
+                {
+                  "id": "requirement",
+                  "kind": "metadata_pointer",
+                  "value": "/requirement",
+                  "required": true,
+                  "protected": true
+                }
+              ],
+              "outputs": [],
+              "required_checks": [
+                "before_write",
+                "before_transition"
+              ],
+              "drift_routes": {
+                "default": "lite_prepare"
+              }
+            },
+            "lite_code": {
+              "inputs": [
+                {
+                  "id": "requirement",
+                  "kind": "metadata_pointer",
+                  "value": "/requirement",
+                  "required": true,
+                  "protected": true
+                },
+                {
+                  "id": "scope_contract",
+                  "kind": "metadata_pointer",
+                  "value": "/scope_contract",
+                  "required": true,
+                  "protected": true
+                },
+                {
+                  "id": "acceptance_contract",
+                  "kind": "metadata_pointer",
+                  "value": "/acceptance_contract",
+                  "required": true,
+                  "protected": true
+                },
+                {
+                  "id": "verification_contract",
+                  "kind": "metadata_pointer",
+                  "value": "/verification_contract",
+                  "required": true,
+                  "protected": true
+                },
+                {
+                  "id": "requirement_deltas",
+                  "kind": "metadata_pointer",
+                  "value": "/requirement_deltas",
+                  "required": false,
+                  "protected": true
+                },
+                {
+                  "id": "semantic_decisions",
+                  "kind": "metadata_pointer",
+                  "value": "/semantic_decisions",
+                  "required": false,
+                  "protected": true
+                },
+                {
+                  "id": "impact_contract",
+                  "kind": "metadata_pointer",
+                  "value": "/impact_contract",
+                  "required": false,
+                  "protected": true
+                }
+              ],
+              "outputs": [],
+              "required_checks": [
+                "before_write",
+                "before_transition"
+              ],
+              "drift_routes": {
+                "default": "lite_prepare"
+              }
+            },
+            "lite_review": {
+              "inputs": [
+                {
+                  "id": "requirement",
+                  "kind": "metadata_pointer",
+                  "value": "/requirement",
+                  "required": true,
+                  "protected": true
+                },
+                {
+                  "id": "scope_contract",
+                  "kind": "metadata_pointer",
+                  "value": "/scope_contract",
+                  "required": true,
+                  "protected": true
+                },
+                {
+                  "id": "acceptance_contract",
+                  "kind": "metadata_pointer",
+                  "value": "/acceptance_contract",
+                  "required": true,
+                  "protected": true
+                },
+                {
+                  "id": "verification_contract",
+                  "kind": "metadata_pointer",
+                  "value": "/verification_contract",
+                  "required": true,
+                  "protected": true
+                },
+                {
+                  "id": "requirement_deltas",
+                  "kind": "metadata_pointer",
+                  "value": "/requirement_deltas",
+                  "required": false,
+                  "protected": true
+                },
+                {
+                  "id": "semantic_decisions",
+                  "kind": "metadata_pointer",
+                  "value": "/semantic_decisions",
+                  "required": false,
+                  "protected": true
+                },
+                {
+                  "id": "impact_contract",
+                  "kind": "metadata_pointer",
+                  "value": "/impact_contract",
+                  "required": false,
+                  "protected": true
+                }
+              ],
+              "outputs": [],
+              "required_checks": [
+                "before_write",
+                "before_transition",
+                "after_wait"
+              ],
+              "drift_routes": {
+                "default": "lite_prepare"
+              }
+            },
+            "verify": {
+              "inputs": [
+                {
+                  "id": "requirement",
+                  "kind": "metadata_pointer",
+                  "value": "/requirement",
+                  "required": true,
+                  "protected": true
+                }
+              ],
+              "outputs": [],
+              "required_checks": [
+                "before_write",
+                "after_wait",
+                "before_transition"
+              ],
+              "drift_routes": {
+                "default": "lite_prepare"
+              }
+            }
+          },
+          "operation_classes": {
+            "read_only": {
+              "auto_retry": true,
+              "requires_idempotency": false,
+              "ambiguous_start_action": "retry"
+            },
+            "managed_write": {
+              "auto_retry": false,
+              "requires_idempotency": true,
+              "ambiguous_start_action": "verify_receipt"
+            },
+            "external_side_effect": {
+              "auto_retry": false,
+              "requires_idempotency": true,
+              "ambiguous_start_action": "verify_receipt"
+            },
+            "destructive_hardware": {
+              "auto_retry": false,
+              "requires_idempotency": true,
+              "ambiguous_start_action": "human_decision"
+            }
+          },
+          "failure_policies": {
+            "retryable_transport": {
+              "action": "retry",
+              "max_attempts": 3,
+              "backoff_seconds": [
+                0,
+                1,
+                3
+              ],
+              "conclusion_ceiling": "degraded"
+            },
+            "capability_unavailable": {
+              "action": "fallback",
+              "max_attempts": 1,
+              "backoff_seconds": [
+                0
+              ],
+              "conclusion_ceiling": "degraded"
+            },
+            "deterministic_failure": {
+              "action": "repair_then_retry",
+              "max_attempts": 1,
+              "backoff_seconds": [
+                0
+              ],
+              "conclusion_ceiling": "blocked"
+            },
+            "policy_schema_security": {
+              "action": "block",
+              "max_attempts": 0,
+              "backoff_seconds": [],
+              "conclusion_ceiling": "blocked"
+            },
+            "ambiguous_side_effect": {
+              "action": "verify_receipt",
+              "max_attempts": 0,
+              "backoff_seconds": [],
+              "conclusion_ceiling": "blocked"
+            },
+            "destructive_risk": {
+              "action": "human_decision",
+              "max_attempts": 0,
+              "backoff_seconds": [],
+              "conclusion_ceiling": "blocked"
+            }
+          },
+          "safety_overrides": {
+            "external_side_effect": "即使错误看似 retryable，也必须先核对远端/设备回执，禁止自动重放。",
+            "destructive_hardware": "任何失败均不自动重试，必须由人确认下一动作。",
+            "managed_write": "仅在幂等键和写后校验均存在时允许人工或上层编排重试。"
+          }
+        }
+      }
     }
   },
   "state_machine": {
@@ -477,30 +999,31 @@
     "schema_version": 1,
     "hash_algorithm": "sha256_utf8_lf",
     "source_sha256": {
-      "references/adversarial.md": "944203babed04e58a5ccccdd7bc256a7199daa2d36e3ae4ac9d661a5f105b3cf",
-      "references/anti_laziness.md": "8b15b9d2c578f5e84e019939a13dec9c5a334a6e75ca7fb380941ab5ee79d665",
-      "references/control_plane.md": "b463553e2fc030a8d8f29ea0e66bdc353c57633e96c9212b9d09809e2d2c2cba",
-      "references/dir_and_metadata.md": "43fba229c62f168728ec21112f32ba285d2196d6ec8d9db5715799462123f595",
+      "references/adversarial.md": "166ebe194686f97ad0e02a925ffb5dfa7b39473ca1872f4aa5c700dc90a00e32",
+      "references/anti_laziness.md": "80d9c7a1d7516458016aa4f4f0f412ce3ffc00713d69a82447677f3820da049f",
+      "references/control_plane.md": "d2d10a90a90b1ad143d1a706631614ccd801cbb89a75c3179f3b00679d24b915",
+      "references/dir_and_metadata.md": "50495c09066f7d83aed266648f636e1e3931d8dc72af7307e65b8ae1852304ff",
       "references/evidence_and_verification.md": "76f4cd9c5a6594fd90bdae7f86b551bb5dc6b5ac16ac3e70198faa66872b8b63",
-      "references/execution_model.md": "cfcbeb56def22273c2d719f13b6afe65727b119ba7332e4e466468e70bd4ab69",
+      "references/execution_model.md": "ff226826e262f9deecbe7ae4d9a31511ba330703b5a6c404f1ef0b6a8715758b",
       "references/first_activation_path.md": "e1cdbda0109044af19ef5bf9e4edff677c112d28f550aebe4dd73c8fbde0ac80",
-      "references/inspection_evidence.md": "ecf393049f3060b6ee4615b972d62cf61d65eeec63c2f058499ed36b870085dc",
+      "references/inspection_evidence.md": "6334a9ace4917c079afa09e977777a16e8173362e5fa95d804fef4819f60b098",
       "references/inspection_worklist.md": "c5d216c24d0124e963ecdbe6aeddad7a98adf1d15f6895258f69fa6313f5f5d8",
-      "references/mcp_per_step.md": "42f3d655cfe2873920253bfecbb2cb35a8dc59e8a2f020532402ddcdfdc5ddf6",
+      "references/mcp_integration.md": "6f78a839d8f17d5426afff3e64ff9c5a74321c91afc83ac18faff2875cbb78f0",
+      "references/mcp_per_step.md": "ae744697bce73f67e1677f2528169bb69949248ad82884b7a92e34c6371e5d29",
       "references/media_routing.md": "1551c4148fec8eb22dc3362e25db5fa3c8fd43b924baf479b116b9b636368a4a",
       "references/project_intake.md": "ea69fd3ff91ec47fd5a097a490031967e180358bab699a355001fa1ee00a5ec9",
       "references/serial_evidence_stages.md": "4bd51a7801cc41bf64347cc05f91d53c959e5625105a20780b792248caa9c395",
       "references/skill_routing.md": "bcc1a99ee1326d828ec6ffc3a96755edac76c88525a351f9e759e41efc612fb7",
-      "references/thinking_core.md": "84e208182004881479e2b6750b3a3fa2c9569c451064795c4a71d7fb51d66a55",
-      "references/thinking_detail.md": "f800e5458df5cc7efa2a4a59c29b743bf2b3031a8986938b5611baf52390d31d",
-      "references/worktree_isolation.md": "2bc1efc67c9c0009a7998fed74bb0e501b70cb2420a5d668bab970a8507336a8",
-      "steps/01_plan.md": "cbade7a0483db1141aa5d9d265d0fa69319dd2adfe59960ff261b9cde5aebd41",
-      "steps/02_review.md": "4d54bb71f832a4dc206adab114eadb9b2a890317986924656d5ca639ea280f72",
+      "references/thinking_core.md": "bd3a51ecc57ff7d52379324f0747c216387d408ab969ec24956a4be8f8bf5f09",
+      "references/thinking_detail.md": "c827c2c9b13272b62ae5a1c7cf2d3df45b9ca2c065c669d4b9c61f24bdc8c6cb",
+      "references/worktree_isolation.md": "9afd46b341406af4dc48b0c78fcdd1ed2434a437b8f02b8e2c1697212fa4a6e4",
+      "steps/01_plan.md": "3ce77ac4542460d5f72d0ace03da0ea32f781ced8d91b9bb19b00909a5b5db1a",
+      "steps/02_review.md": "57ce5d0e03d1915cc7ea410cca92d34e626a254b5c70e148c1c0a3adf7c91b28",
       "steps/03_merge.md": "4bec4cd49ca287b0b906c04e0f9974f816f36a174c32e1ab50ea3333993e97a4",
       "steps/04_code.md": "7174013a0d2417f8ee149d4a4497fe82a23f3df3a95e63c2f44a7c470a729553",
-      "steps/05_deepcheck.md": "6a34f98ff1ef16fb086dd1b8a62703a224304d61e187d85f0d0bf9e835d2dce5",
-      "steps/06_audit.md": "470ff31813eec795de556489c52b128b6c85cad7d3078b0b1444cac1037157f2",
-      "steps/fast.md": "3fae1afec84257511be21eaf8153d4285740670827b796ed71066529b894d9a9"
+      "steps/05_deepcheck.md": "57b67310307d5e17b2e4b685c26ea24bedf73c7623c7bb5f7c395769e903efa0",
+      "steps/06_audit.md": "8b4869ed0646f9161dc5d12f0472838c5540cb82738b4f4f8d0f600f26e26a58",
+      "steps/fast.md": "a81c7a42b670bfb3e472bf0447373934649497625827174000e27744daad277b"
     },
     "phases": {
       "plan": {

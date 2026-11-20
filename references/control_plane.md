@@ -235,3 +235,7 @@ Git checkout 和逐仓提交契约由 `steps/reopen.md` 先创建/校验；然�
 机器上下文入口 `tools/ticket_context.py` 提供 `build_ticket_context(out_dir, *, purpose='general')->dict` 和 CLI `--dir`；只保留身份、状态、计数、有限改动路径与材料导航，不输出 manifest/index_manifest 或全部 run 正文。`overview_freshness(out_dir,snapshot)` 可比较保存的绑定与当前权威。独立复评 fresh 必须显式用 `purpose='crosscheck_fresh'` / `--purpose crosscheck_fresh`：在读取前分支排除旧 crosscheck 和工单概览内容，连会 hash 旧 finding 的提交库存扫描也不执行；库存为 `inventory_withheld_for_fresh`，不声称主门禁通过。原工单需求/计划/audit 仍按原合同可读。普通视图可显示旧 crosscheck 时效，fresh 不提供旧裁决或 finding，不把“读后过滤”冒充独立。
 
 UI 优先工单概览，其后是最终计划、patch 和阶段证据；按已解析 ticket 身份及白名单材料名称读取，复用现有文档安全 reader、会话鉴权和大小限制，拒绝任意路径、JSON 控制面、链接/重解析点和 hardlink。Markdown 以文本显示，不执行 HTML；不新增后台服务。完整报告的直接执行结果仍由 binary_exit_code 独立派生，runner/CI 不能代替 binary result；文档复用保留 origin 的实际源码/制品来源。crosscheck 为可选事实，not_run 中性、stale 不自动重跑，不加入主门禁。人工经验记录使用 [escape_taxonomy.md](escape_taxonomy.md)，不会自动创建 rule/skill 或同步。
+
+## lite 原生 profile
+
+mode=lite/workflow_version=1 通过 workflow_contract(meta) 选择三步合同。出生 --birth lite 固定模式、版本及原始需求；metadata-update 不能改写。G1/G2/G3、回退和同版重验见 [Lite](../steps/lite.md)。lite-review 登记当前 attempt 并返回只读输入引用。宿主原生子代理返回后，record-agent-result 签收绑定 challenge 的回执和报告。同一 request_id 须匹配原报告摘要。可信适配器的身份或不可用事实在进入 Code 时冻结；降级审核只能支持 verification_pending。阻断项按 [Lite 审核合同](lite_review.md) 登记和复审。历史 CLI 事件可读取。record-verification 的新必需失败在同一事务中撤销已验证投影并记录 lite_invalidation；新增 pass 仍需受控重验。

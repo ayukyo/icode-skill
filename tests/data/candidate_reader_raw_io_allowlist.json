@@ -93,6 +93,10 @@
   ],
   "tools/lint_mcp_coverage.py": [
     [
+      "_manual_report_snapshot_consistent",
+      "Call(func=Attribute(value=Name(id='target', ctx=Load()), attr='read_bytes', ctx=Load()), args=[], keywords=[])"
+    ],
+    [
       "load_json",
       "Call(func=Attribute(value=Name(id='json', ctx=Load()), attr='loads', ctx=Load()), args=[Call(func=Attribute(value=Name(id='path', ctx=Load()), attr='read_text', ctx=Load()), args=[], keywords=[keyword(arg='encoding', value=Constant(value='utf-8'))])], keywords=[])"
     ],
@@ -101,12 +105,36 @@
       "Call(func=Attribute(value=Name(id='path', ctx=Load()), attr='read_text', ctx=Load()), args=[], keywords=[keyword(arg='encoding', value=Constant(value='utf-8'))])"
     ],
     [
+      "manual_dedup_evidence_verifiable",
+      "Call(func=Attribute(value=Name(id='json', ctx=Load()), attr='loads', ctx=Load()), args=[Name(id='report_bytes', ctx=Load())], keywords=[])"
+    ],
+    [
+      "manual_dedup_evidence_verifiable",
+      "Call(func=Attribute(value=Name(id='target', ctx=Load()), attr='read_bytes', ctx=Load()), args=[], keywords=[])"
+    ],
+    [
       "read_trace_lines",
       "Call(func=Attribute(value=Name(id='json', ctx=Load()), attr='loads', ctx=Load()), args=[Name(id='raw', ctx=Load())], keywords=[])"
     ],
     [
       "read_trace_lines",
       "Call(func=Attribute(value=Name(id='trace_path', ctx=Load()), attr='read_text', ctx=Load()), args=[], keywords=[keyword(arg='encoding', value=Constant(value='utf-8'))])"
+    ],
+    [
+      "review_manual_provenance",
+      "Call(func=Attribute(value=Name(id='candidates_file', ctx=Load()), attr='read_bytes', ctx=Load()), args=[], keywords=[])"
+    ],
+    [
+      "review_manual_provenance",
+      "Call(func=Attribute(value=Name(id='json', ctx=Load()), attr='loads', ctx=Load()), args=[Name(id='candidate_bytes', ctx=Load())], keywords=[])"
+    ],
+    [
+      "review_manual_provenance",
+      "Call(func=Attribute(value=Name(id='json', ctx=Load()), attr='loads', ctx=Load()), args=[Subscript(value=Name(id='sections', ctx=Load()), slice=Constant(value=0), ctx=Load())], keywords=[])"
+    ],
+    [
+      "review_manual_provenance",
+      "Call(func=Attribute(value=Name(id='plan_file', ctx=Load()), attr='read_bytes', ctx=Load()), args=[], keywords=[])"
     ]
   ],
   "tools/lint_workflow_contract.py": [

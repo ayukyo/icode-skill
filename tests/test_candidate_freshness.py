@@ -1,5 +1,6 @@
 """Final-source candidates: real Git fixtures and control-plane receipts."""
 import importlib.util
+import ast
 import json
 import os
 from pathlib import Path
@@ -64,7 +65,8 @@ class CandidateTests(unittest.TestCase):
     def bytes(self):
         return tuple((self.ticket / name).read_bytes() for name in (ctl.METADATA_NAME, ctl.EVENTS_NAME))
 
-    def finish_review(self, step, attempt=None, *, scope=".", after_reads=None, ok=True):
+    def finish_review(self, step, attempt=None, *, scope=".", after_reads=None, ok=True,
+                      write_dedup_trace=True):
         """Real start/check/inspection/artifact/finish ports, no gate mocking."""
         attempt = attempt or step + "-1"
         (self.ticket / "03_plan_final.md").write_text("fixture plan\n", encoding="utf-8", newline="\n")
@@ -89,12 +91,37 @@ class CandidateTests(unittest.TestCase):
             self.call("artifact", "--dir", self.ticket, "--step", step, "--attempt", attempt,
                       "--path", "source.py", "--scope", "workspace")
         else:
-            phases = ["audit"] if step == "audit" else ["reverse", "fixed", "free"]
-            coverage = {"schema_version": 1, "ticket_id": "candidate-1", "attempt": attempt,
+            ticket_id = ctl.load_metadata(self.ticket)["ticket_id"]
+            if step == "deepcheck" and write_dedup_trace:
+                trace = {"schema_version": 2, "ticket_id": ticket_id, "step": step,
+                         "gate_id": "deepcheck.dedup", "tool": "extract", "eligible": False,
+                         "attempt": attempt, "decision": "skipped_not_eligible", "attempted": False,
+                         "result": "not_applicable", "at": "2026-11-15T00:00:00Z",
+                         "evidence": {"mode": "full", "phase": "dedup", "function_count": 0, "threshold": 50}}
+                (self.ticket / ".mcp_gate_trace.jsonl").write_text(json.dumps(trace) + "\n", encoding="utf-8")
+            phases = report["required_phases"]
+            coverage = {"schema_version": 1, "ticket_id": ticket_id, "attempt": attempt,
                         "review_scope": ["."], "coverage_status": "complete_within_scope",
                         "unobserved": [], "dedup_unobserved": [], "dedup_status": "not_eligible",
                         "dedup_reason": "single fixture", "read_phases": {
                             phase: {"source.py": ctl.file_sha256(self.repo / "source.py")} for phase in phases}}
+            events, _ = ctl.read_events(self.ticket)
+            has_deepcheck = any(event.get("event_type") == "step_finished"
+                                and (event.get("payload") or {}).get("step") == "deepcheck"
+                                and (event.get("payload") or {}).get("outcome") == "success"
+                                for event in events)
+            if step == "audit" and not has_deepcheck:
+                # Standalone audit has no earlier receipt to reuse. Inspect the
+                # actual fixture source and declare its real empty catalog.
+                source = self.repo / "source.py"
+                tree = ast.parse(source.read_text(encoding="utf-8"))
+                self.assertFalse(any(isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                                     for node in ast.walk(tree)))
+                coverage["manual_dedup"] = {
+                    "schema_version": 1, "ticket_id": ticket_id, "attempt": attempt,
+                    "review_scope": ["."], "unobserved": [], "sources": [{
+                        "path": "source.py", "sha256": ctl.file_sha256(source),
+                        "catalog_method": "python_ast", "functions": []}], "families": []}
             name = step + "_coverage.json"
             (self.ticket / name).write_text(json.dumps(coverage), encoding="utf-8", newline="\n")
             self.call("artifact", "--dir", self.ticket, "--step", step, "--attempt", attempt, "--path", name)
@@ -336,6 +363,28 @@ class CandidateTests(unittest.TestCase):
         os.chmod(self.repo / "source.py", 0o755)
         mode = self.capture()
         self.assertNotEqual(mode["candidate_id"], unstaged["candidate_id"])
+
+    @unittest.skipUnless(sys.platform == "darwin", "requires a macOS filesystem")
+    def test_unicode_and_case_aliases_are_bound_to_real_git_candidate(self):
+        composed = "café source.py"
+        decomposed = "cafe\u0301 source.py"
+        (self.repo / composed).write_text("value = 1\n", encoding="utf-8", newline="\n")
+        unicode_before = self.capture()
+        self.assertTrue((self.repo / decomposed).exists())
+        self.assertTrue((self.repo / composed).samefile(self.repo / decomposed))
+        (self.repo / decomposed).write_text("value = 2\n", encoding="utf-8", newline="\n")
+        unicode_after = self.capture()
+        self.assertNotEqual(unicode_before["candidate_id"], unicode_after["candidate_id"])
+
+        upper = self.repo / "CaseProbe.py"
+        lower = self.repo / "caseprobe.py"
+        upper.write_text("value = 1\n", encoding="utf-8", newline="\n")
+        case_before = self.capture()
+        self.assertTrue(lower.exists())
+        self.assertTrue(upper.samefile(lower))
+        lower.write_text("value = 2\n", encoding="utf-8", newline="\n")
+        case_after = self.capture()
+        self.assertNotEqual(case_before["candidate_id"], case_after["candidate_id"])
 
     def test_untracked_scope_exclusions_checkout_and_base_drift(self):
         old = self.capture()

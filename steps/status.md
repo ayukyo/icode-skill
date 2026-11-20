@@ -42,7 +42,7 @@
 范围契约: {scope_contract 字段读取方式：直接读 metadata.scope_contract，缺失视为 "未冻结"；显示 summary 摘要（截断 ≤60 字）+ 冻结时间。requirement_deltas 读取：缺失视为 []；存在未分流条目（classification 未定 / needs_user_confirm 未确认 / needs_replan 未重审）时显示「⚠️ 有 N 条未分流语义变更」——提示先分流再继续} 
 schema: {template_version 字段读取方式：直接读 metadata.template_version 字段，缺失视为 "未知"；显示 schema 版本 + migration_log 长度，如 "v1.1 (3 migrations, 最近 2026-07-25 12:34)" 或 "v0（待迁移）" 或 "未知（field 缺失）"}
 worktree: {worktree_path 字段读取方式：读 metadata.active_checkout（缺失按 [references/worktree_isolation.md](../references/worktree_isolation.md) §3.7 用 worktree_path 内存推导，不写回），null 显示「主仓」；非 null 显示路径 + branch（如 "…/<repo>-wt-<ticket-slug>（分支 icode/<ticket-slug>）"，另注意续跑须 cd 进该 worktree，见 [references/worktree_isolation.md](../references/worktree_isolation.md) §2）；wt_degraded=true 时附注「（降级原地，未用 worktree）」}
-拓扑: {active_checkout 字段读取方式：读 metadata.active_checkout，缺失则按 [references/worktree_isolation.md](../references/worktree_isolation.md) §3.7 用 worktree_path 内存推导（不写回）。vNext 仅 `close_state=closed` 显示「已关闭，基线 {submitted_baseline 前 12 位}」；只有 legacy 工单才以“有 submitted 基线且 active_checkout=null”兜底判关闭。active_checkout 非 null 则显示「{path}（分支 {branch}，{state}）」，即使保留历史 submitted_baseline 也不误判为仍关闭。state 为 `preparing` 时附注「迁移中，未获活动权」。迁移状态：migration 非 null 时附注「迁移: {migration.state}」。历史 checkout：{checkout_history 长度与 state 分布}。**双活动根检测**：checkout_history 中 state=active 与 active_checkout 同时存在 → 拓扑判定 BLOCKED，输出各冲突路径 + dirty/commit，禁止自行选择"较新的那个"（§3.8）。reopen 工单另显示 `artifact_root`，明确代码根与产物根分离}
+拓扑: {active_checkout 字段读取方式：读 metadata.active_checkout，缺失则按 [references/worktree_isolation.md](../references/worktree_isolation.md) §3.7 用 worktree_path 内存推导（不写回）。vNext 仅 `close_state=closed` 显示「已关闭，基线 {submitted_baseline 前 12 位}」；只有 legacy 工单才以“有 submitted 基线且 active_checkout=null”兜底判关闭。active_checkout 非 null 则显示「{path}（分支 {branch}，{state}）」，即使保留历史 submitted_baseline 也不误判为仍关闭。state 为 `preparing` 时附注「迁移中，未获活动权」。迁移状态：migration 非 null 时附注「迁移: {migration.state}」。历史 checkout：{checkout_history 长度与 state 分布}。**双活动根检测**：按统一拓扑门禁核对规范化真实路径；同一真实根只计一次，不同活动根或路径无法核验时 BLOCKED，输出冲突路径 + dirty/commit，禁止自行选择"较新的那个"（§3.8）。reopen 工单另显示 `artifact_root`，明确代码根与产物根分离}
 已完成: {completed_steps 链路，如 log -> 1 -> 2 -> 3 -> 4}
 下一步: {根据续跑判定规则推断，如 "/icode deepcheck (步骤5复检)"}
 代码文件: {code_files 列表，无则"未编码"}
@@ -224,3 +224,7 @@ python3 tools/verification_debt.py pending \
 **强制约束**：🟢/🟢*/⚪ 语义 + 双保险机制（执行步骤内嵌 + thinking_core gate）详见 [SKILL.md「MCP 调用覆盖强制化」](../SKILL.md) + [references/mcp_per_step.md「双保险机制」](../references/mcp_per_step.md)；本步骤表内的 🟢/🟢* 标注按上方真源判定。
 
 **派生报告按需生成**：`verification_debt.py` 默认只写 `--output` 指定的 JSON；需阅读或导出 Markdown 时再提供 `--markdown <路径>`。旧双文件调用仍兼容，不删除历史报告。
+
+## lite 状态
+
+mode=lite 时按 workflow_contract(meta) 展示三阶段与真实 completed_steps，completed 不映射旧 audit/六步。状态、candidate inspect、validate/snapshot 和派生 lite.md 共用真实控制面事实；不能把“代码已审核，外部验证待完成”显示成 verified。

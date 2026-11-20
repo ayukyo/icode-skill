@@ -318,7 +318,8 @@
             "enum": [
               "code",
               "deepcheck",
-              "audit"
+              "audit",
+              "lite_review"
             ]
           },
           "attempt": {
@@ -604,6 +605,9 @@
     "workflow_gate_schema_version": { "description": "workflow 契约门禁 schema 版本（vNext 出生即带，--strict 门禁的前置）", "type": "integer", "minimum": 1 },
     "thinking_gate_schema_version": { "description": "reasoning 分级门禁 schema 版本（vNext 出生即带，--strict 门禁的前置）", "type": "integer", "minimum": 1 },
     "mcp_gate_schema_version": { "description": "cheap-research 覆盖门禁 schema 版本（vNext 出生即带，--strict 门禁的前置）", "type": "integer", "minimum": 1 },
+    "mcp_gate_contract_version": { "description": "cheap-research 资格合同版本（gates.json contract_version，vNext 出生即带且受保护）：2 = eligible 只由业务事实计算；存量工单无此字段时历史 trace 行按合同 v1 旧语义解释，不追溯改判", "type": "integer", "minimum": 1 },
+    "mcp_gate_contract_adopted_at": { "description": "存量工单续跑首次绑定资格合同的控制面写入时刻（显式 UTC ISO-8601，由 adopt_gate_contract 在 metadata_updated 提交时写入）：linter 以历史边界区分历史 trace 行（合同 v1 解释）与续跑新行（当前合同解释）", "type": "string" },
+    "mcp_gate_contract_history_boundary": { "description": "资格合同历史边界（显式 UTC ISO-8601，采纳时由控制面写入）：默认等于采纳时刻；若采纳时存在升级前未终结的 attempt 则回退为其最早 start 时刻，该时刻之后的 trace 行一律按当前合同解释，防止升级后、采纳前写入的记录伪装成历史行", "type": "string" },
 
     "requirement": { "type": "string" },
     "requirement_summary": { "type": "string" },
@@ -612,7 +616,7 @@
     "created_at": { "type": "string" },
     "status": {
       "description": "status 词表（与 SKILL.md 词表和 mcp/workflow-gate/gates.json state_machine.states 一致）",
-      "enum": ["log_in_progress", "log_done", "init_in_progress", "plan_done", "review_in_progress", "review_done", "plan_finalized", "code_in_progress", "code_done", "deepcheck_in_progress", "deepcheck_done", "completed", "debug_in_progress", "debug_done"]
+      "enum": ["lite_prepare_in_progress", "lite_prepare_done", "lite_code_in_progress", "lite_code_done", "lite_review_in_progress", "log_in_progress", "log_done", "init_in_progress", "plan_done", "review_in_progress", "review_done", "plan_finalized", "code_in_progress", "code_done", "deepcheck_in_progress", "deepcheck_done", "completed", "debug_in_progress", "debug_done"]
     },
     "completed_steps": { "type": "array", "items": { "type": "string" } },
     "indexed": { "type": "boolean" },
@@ -645,7 +649,8 @@
 
     "workload_estimate": { "enum": ["small", "medium", "large", null] },
     "workload_reason": { "type": ["string", "null"] },
-    "mode": { "enum": ["full", "fast", null] },
+    "workflow_version": { "type": "integer" },
+    "mode": { "enum": ["full", "fast", "lite", null] },
     "limit_refs": { "type": ["array", "null"] },
     "fix_tiers": {
       "type": ["object", "null"],
@@ -835,7 +840,10 @@
             "properties": {
               "layer": { "enum": ["static", "unit", "build", "host", "deploy", "delivery", "consumption", "settings_preview", "operation_view", "closed_client", "physical"] },
               "consumer": { "type": "string", "minLength": 1 },
-              "scenario": { "type": "string", "minLength": 1 }
+              "scenario": { "type": "string", "minLength": 1 },
+              "criterion_ids": { "type": "array", "items": { "type": "string" } },
+              "external": { "type": "boolean" },
+              "pending_reason": { "type": "string" }
             },
             "additionalProperties": false
           }
@@ -1948,7 +1956,76 @@
                     "items": { "type": "string", "minLength": 1 }
                   },
                   "summary_digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
-                  "error_class": { "type": "string", "minLength": 1 }
+                  "error_class": { "type": "string", "minLength": 1 },
+                  "lite_review_attempt": {"type": "string", "minLength": 1},
+                  "lite_review_binding": {
+                    "type": "object",
+                    "required": ["candidate_id", "contract_digest"],
+                    "properties": {
+                      "candidate_id": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                      "contract_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+                    },
+                    "additionalProperties": false
+                  },
+                  "host_receipt_challenge": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                  "host_receipt": {
+                    "type": "object",
+                    "required": ["spawn_id", "host_session_id", "challenge", "receipt_sha256"],
+                    "properties": {
+                      "spawn_id": {"type": "string", "minLength": 1},
+                      "host_session_id": {"type": "string", "minLength": 1, "maxLength": 256},
+                      "challenge": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                      "returned_at": {"type": "string", "minLength": 1},
+                      "receipt_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+                    },
+                    "additionalProperties": false
+                  },
+                  "host_attestation": {
+                    "type": "object",
+                    "required": [
+                      "adapter_sha256",
+                      "launched",
+                      "spawn_id",
+                      "host_session_id",
+                      "challenge",
+                      "report_sha256",
+                      "stored_report_sha256",
+                      "attested_at"
+                    ],
+                    "properties": {
+                      "adapter_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                      "launched": {"const": true},
+                      "spawn_id": {"type": "string", "minLength": 1},
+                      "host_session_id": {"type": "string", "minLength": 1, "maxLength": 256},
+                      "challenge": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                      "report_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                      "stored_report_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                      "attested_at": {"type": "string", "minLength": 1}
+                    },
+                    "additionalProperties": false
+                  },
+                  "host_session_id": {"type": "string", "minLength": 1, "maxLength": 256},
+                  "lite_review_report": {
+                    "type": "object",
+                    "required": ["report_path", "report_sha256"],
+                    "properties": {
+                      "report_path": {"type": "string", "minLength": 1},
+                      "report_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                      "input_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+                    },
+                    "additionalProperties": false
+                  },
+                  "host_attestation_degraded": {
+                    "type": "object",
+                    "description": "宿主适配器不可用的降级事实；与 host_attestation 互斥，绝不表示已获可信确认。",
+                    "required": ["status", "reason", "observed_at"],
+                    "properties": {
+                      "status": {"const": "unavailable"},
+                      "reason": {"type": "string", "minLength": 1},
+                      "observed_at": {"type": "string", "minLength": 1}
+                    },
+                    "additionalProperties": false
+                  }
                 },
                 "additionalProperties": false
               }

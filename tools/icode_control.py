@@ -109,7 +109,7 @@ import time
 import uuid
 import copy
 import types
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
 SKILL_ROOT = Path(__file__).resolve().parent.parent
@@ -136,6 +136,7 @@ INIT_GUIDE_REQUIRED_HEADINGS = (
 )
 DELIVERY_VERDICTS = ["verified", "verification_pending", "blocked", "not_applicable"]
 CONTROL_EVENT_TYPES = {
+    "lite_review_invoked", "lite_review_returned",
     "ticket_created", "step_started", "step_finished", "artifact_written", "gate_checked",
     "operation_started", "operation_finished", "state_changed", "claim_recorded",
     "verification_recorded", "skill_run_recorded", "snapshot_written",
@@ -154,7 +155,11 @@ CONTROLLED_BIRTH_FIELDS = {
     "completed_steps", "indexed", "debug", "project_path", "close_state",
     "delivery_verdict", "claims", "verification_runs", "control_plane_degraded",
     "workflow_gate_schema_version", "thinking_gate_schema_version",
-    "mcp_gate_schema_version",
+    "mcp_gate_schema_version", "mcp_gate_contract_version",
+    # 采纳边界只能由控制面为存量工单写入（adopt_gate_contract）；出生时禁止调用方
+    # 注入——未来时刻会把新工单的全部 trace 行伪装成历史行按 v1 解释；过去的历史
+    # 边界同理（把新工单全部行按当前合同过度约束之外，还可配合伪造采纳时刻）。
+    "mcp_gate_contract_adopted_at", "mcp_gate_contract_history_boundary",
 }
 
 # ---------------------------------------------------------------- 基础设施
@@ -866,28 +871,49 @@ def require_valid_metadata(meta):
             violations=violations,
             hint="先运行 validate --dir <out_dir> 并修复字段类型/枚举；实验字段移入 extensions.<namespace>",
         )
+    profile = workflow_contract(meta)
+    if meta.get("mode") != "lite" and str(meta.get("status", "")).startswith("lite_"):
+        raise ControlError("旧模式不能使用 lite 状态", gate_id="workflow_profile")
+    if meta.get("mode") == "lite" and (meta.get("status") not in profile["state_machine"]["states"]
+            or any(step not in profile["step_order"] for step in meta.get("completed_steps", []))):
+        raise ControlError("lite 模式与状态/步骤不匹配", gate_id="workflow_profile")
     if not execution_binding_topology_ok(meta):
-        raise ControlError("执行根绑定与 checkout 拓扑冲突",
-                           gate_id="execution_binding_topology")
+        raise ControlError("执行根绑定与 checkout 拓扑冲突", gate_id="execution_binding_topology")
 
 
 # ---------------------------------------------------------------- gates.json 状态机
 
-def load_state_machine():
-    gates = load_json(GATES_JSON, "gates.json")
-    sm = gates.get("state_machine")
-    if not sm:
-        raise ControlError(f"gates.json 缺少 state_machine 段: {GATES_JSON}")
-    return sm
+def lite_module():
+    name = "icode_lite_workflow"
+    if name not in sys.modules:
+        path = SKILL_ROOT / "tools/lite_workflow.py"
+        try:
+            spec = importlib.util.spec_from_file_location(name, path)
+            if spec is None or spec.loader is None:
+                raise ImportError("无法创建 Lite 工作流加载器")
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[name] = module
+            spec.loader.exec_module(module)
+        except (OSError, ImportError, SyntaxError, TypeError, ValueError) as exc:
+            sys.modules.pop(name, None)
+            raise ControlError(f"Lite 工作流模块不可用：{exc}",
+                               gate_id="workflow_profile") from exc
+    return sys.modules[name]
 
 
-def load_execution_model():
-    gates = load_json(GATES_JSON, "gates.json")
-    model = gates.get("execution_model")
-    if not isinstance(model, dict):
-        raise ControlError(f"gates.json 缺少 execution_model 段: {GATES_JSON}",
-                           gate_id="execution_model_catalog")
-    return model
+def workflow_contract(meta=None):
+    try:
+        return lite_module().workflow_contract(meta or {}, load_json(GATES_JSON, "gates.json"))
+    except (KeyError, ValueError, TypeError) as exc:
+        raise ControlError(str(exc), gate_id="workflow_profile") from exc
+
+
+def load_state_machine(meta=None):
+    return workflow_contract(meta)["state_machine"]
+
+
+def load_execution_model(meta=None):
+    return workflow_contract(meta)["execution_model"]
 
 
 def legal_transition(sm, from_status, to_status):
@@ -1658,10 +1684,18 @@ class ExecutionBindingMirror:
         return sorted(self.issues)
 
 
+def state_change_payload(event):
+    if event.get("event_type") == "state_changed":
+        return event.get("payload") or {}
+    if event.get("event_type") == "verification_recorded":
+        return (event.get("payload") or {}).get("lite_invalidation")
+    return None
+
+
 def validate_event_semantics(events, meta, *, candidate_api=None, git_provider=None, require_git_provider=False):
     """校验控制事件的顺序和 payload 语义，防止自洽 hash 掩盖伪造生命周期。"""
     problems = []
-    sm = load_state_machine()
+    sm = load_state_machine(meta)
     births = [(idx, event) for idx, event in enumerate(events)
               if event.get("event_type") == "ticket_created"]
     migrations = [(idx, event) for idx, event in enumerate(events)
@@ -1684,9 +1718,14 @@ def validate_event_semantics(events, meta, *, candidate_api=None, git_provider=N
         initial_by_kind = {
             "init": "init_in_progress", "plan": "init_in_progress",
             "log": "log_in_progress", "debug-init": "debug_in_progress",
-            "debug-log": "debug_in_progress",
+            "debug-log": "debug_in_progress", "lite": "lite_prepare_in_progress",
         }
         current_state = initial_by_kind.get(birth_kind)
+        if meta.get("mode") == "lite":
+            expected_identity = {"mode": "lite", "workflow_version": 1,
+                                 "requirement_digest": canonical_digest(meta["requirement"])}
+            if birth["payload"].get("workflow_identity") != expected_identity:
+                problems.append("lite 出生身份或原始需求被改写")
         if current_state is None:
             problems.append(f"ticket_created.birth_kind 非法或缺失: {birth_kind!r}")
         expected_debug = isinstance(birth_kind, str) and birth_kind.startswith("debug-")
@@ -1696,9 +1735,9 @@ def validate_event_semantics(events, meta, *, candidate_api=None, git_provider=N
     review_return_mirror = ExecutionBindingMirror(meta)
     for idx, event in enumerate(events, 1):
         review_return_mirror.consume(event)
-        if event.get("event_type") != "state_changed":
+        payload = state_change_payload(event)
+        if payload is None:
             continue
-        payload = event.get("payload") or {}
         source = payload.get("from")
         target = payload.get("to")
         if source not in sm["states"] or target not in sm["states"]:
@@ -1711,7 +1750,9 @@ def validate_event_semantics(events, meta, *, candidate_api=None, git_provider=N
         transition = legal_transition(sm, source, target)
         if transition is None:
             problems.append(f"第 {idx} 行记录非法状态流转 {source!r} → {target!r}")
-        if transition and transition.get("review_return"):
+        if transition and (transition.get("review_return") or
+                           (source == "completed" and target == "review_in_progress"
+                            and "review_return" in payload)):
             if not review_return_payload_ok(payload) or not event.get("request_id"):
                 problems.append(f"第 {idx} 行审查恢复缺少修订、原因或请求身份")
             if (review_return_mirror.open_steps or review_return_mirror.open_operations
@@ -1756,10 +1797,10 @@ def validate_event_semantics(events, meta, *, candidate_api=None, git_provider=N
             f"事件序列最终 close_state={close_state!r} 与 metadata.close_state="
             f"{meta.get('close_state')!r} 不一致")
 
-    problems.extend(validate_execution_event_semantics(events))
+    problems.extend(validate_execution_event_semantics(events, meta))
 
     event_runs = [{key: value for key, value in (event.get("payload") or {}).items()
-                   if key != "metadata_hash_after"}
+                   if key not in {"metadata_hash_after", "lite_invalidation"}}
                   for event in events
                   if event.get("event_type") == "verification_recorded"]
     metadata_runs = meta.get("verification_runs") or []
@@ -1875,10 +1916,10 @@ def reconstruct_agent_spawns(events):
     return spawns, problems
 
 
-def validate_execution_event_semantics(events):
+def validate_execution_event_semantics(events, meta=None):
     """校验 v1 执行事件配对；未标版本的旧 step 事件保持可读兼容。"""
     problems = []
-    model = load_execution_model()
+    model = load_execution_model(meta)
     catalog_problems = validate_execution_catalog(model)
     if catalog_problems:
         return [f"execution_model catalog: {item}" for item in catalog_problems]
@@ -1921,8 +1962,16 @@ def validate_execution_event_semantics(events):
                 state["checks"].add(boundary)
             if payload.get("result") not in {"pass", "blocked"}:
                 problems.append(f"第 {line} 行 gate_checked.result 非法")
+            capture_error = payload.get("capture_error")
             for key in ("captured_digest", "current_digest"):
-                if re.fullmatch(r"[0-9a-f]{64}", payload.get(key, "")) is None:
+                value = payload.get(key)
+                unavailable_current = (key == "current_digest" and value is None
+                                       and payload.get("result") == "blocked"
+                                       and isinstance(capture_error, dict)
+                                       and capture_error.get("gate_id") == "step_ports_transient"
+                                       and isinstance(capture_error.get("message"), str)
+                                       and bool(capture_error.get("message")))
+                if not unavailable_current and re.fullmatch(r"[0-9a-f]{64}", value or "") is None:
                     problems.append(f"第 {line} 行 gate_checked.{key} 非法")
         elif event_type == "artifact_written":
             state = steps.get(attempt)
@@ -2060,9 +2109,16 @@ def trusted_execution_workspace(out_dir, meta):
     active_history = [item for item in (meta.get("checkout_history") or [])
                       if isinstance(item, dict) and item.get("state") == "active"]
     if active_history:
-        raise ControlError(
-            "checkout_history 与 active_checkout 出现双活动根",
-            exit_code=1, gate_id="execution_root_topology")
+        history_path = active_history[0].get("path") or active_history[0].get("worktree_path")
+        active_path = (active.get("path") or active.get("worktree_path")) if isinstance(active, dict) else None
+        if (len(active_history) != 1 or not isinstance(history_path, str) or not history_path.strip()
+                or not Path(history_path).is_absolute() or not Path(history_path).is_dir()
+                or not isinstance(active_path, str) or not active_path.strip()
+                or not Path(active_path).is_absolute() or not Path(active_path).is_dir()
+                or Path(history_path).resolve() != Path(active_path).resolve()):
+            raise ControlError(
+                "checkout_history 与 active_checkout 活动根不唯一或路径无效",
+                exit_code=1, gate_id="execution_root_topology")
 
     if isinstance(active, dict):
         if active.get("state") != "active":
@@ -2125,23 +2181,36 @@ def file_fact(path, label=None):
 
 
 def section_ignoring_file_fact(path, label, sections):
-    """按「忽略指定章节」计算文件事实，供受保护计划端口使用。
-
-    终审合同要求把「实现偏差备忘」回写到 03_plan_final.md，而该文件同时是 audit 的
-    受保护输入。整文件取哈希会让合规回写被判成漂移，因此这里只对**第一个被忽略章节
-    之前**的正文取哈希：保护范围收敛为「计划正文」，被显式允许改写的章节（定稿时预留、
-    终审回填）不参与比对。尾部空行一并归一化，使「定稿时还没有备忘段、终审才追加」与
-    「定稿时就带空备忘段」得到相同摘要。`ignore_sections` 必须在端口上显式声明，未声明的
-    端口保持整文件保护。
-    """
-    data = Path(path).read_bytes()
-    text = data.decode("utf-8")
-    cut = len(text)
-    for heading in sections:
-        index = text.find(heading)
-        if index != -1:
-            cut = min(cut, index)
-    body = text[:cut].rstrip("\r\n").encode("utf-8")
+    """只排除指定 Markdown 章节及其子节，保留其余计划正文。"""
+    text = Path(path).read_bytes().decode("utf-8")
+    fence = None
+    ignored_level = None
+    protected = []
+    for line in io.StringIO(text, newline=""):
+        content = line.rstrip("\r\n")
+        marker = re.fullmatch(r" {0,3}(`{3,}|~{3,})(.*)", content)
+        if fence is not None:
+            if marker and marker[1][0] == fence[0] and len(marker[1]) >= len(fence) and not marker[2].strip(" \t"):
+                fence = None
+        elif marker and (marker[1].startswith("~") or "`" not in marker[2]):
+            fence = marker[1]
+        else:
+            heading = re.fullmatch(r" {0,3}(#{1,6})(?:[ \t]+(.*))?", content)
+            if heading:
+                level = len(heading[1])
+                if ignored_level is not None and level <= ignored_level:
+                    ignored_level = None
+                if ignored_level is None:
+                    title = re.sub(r"[ \t]+#+[ \t]*$", "", heading[2] or "").strip()
+                    # 定稿模板允许在备忘标题后附带步骤说明。
+                    key = f"{heading[1]} {title}"
+                    base = re.sub(r"(?:（[^（）]+）| \([^()]+\))$", "", key).rstrip()
+                    if key in sections or base in sections:
+                        ignored_level = level
+        if ignored_level is None:
+            protected.append(line)
+    # 备忘单独追加到末尾时，章节前新增的空行不应导致漂移。
+    body = "".join(protected).rstrip("\r\n").encode("utf-8")
     return {"path": label or str(path), "exists": True,
             "sha256": hashlib.sha256(body).hexdigest(), "size": len(body),
             "ignored_sections": list(sections)}
@@ -2173,6 +2242,12 @@ def completion_receipt_issues(out_dir, meta, events, step):
     if not starts:
         return [f"{step}:missing_step_start"]
     start = starts[-1]
+    if meta.get("mode") == "lite":
+        order = workflow_contract(meta)["step_order"]
+        for event in events[events.index(start) + 1:]:
+            target = (state_change_payload(event) or {}).get("to")
+            if target in {"lite_prepare_in_progress", "lite_code_in_progress"} and step in order[(0 if target == "lite_prepare_in_progress" else 1):]:
+                return [step + ":before_lite_return"]
     # Returning to review invalidates workflow completion, not retained raw
     # executions. New steps may honestly reuse unchanged build/test artifacts.
     returns = [i for i, e in enumerate(events) if e.get("event_type") == "state_changed"
@@ -2182,11 +2257,11 @@ def completion_receipt_issues(out_dir, meta, events, step):
         return [f"{step}:before_review_return"]
     finish = step_attempt_finished(events, start["payload"]["attempt"])
     outcome = (finish.get("payload") or {}).get("outcome") if finish else None
-    if outcome not in {"success", "degraded"}:
+    if outcome not in ({"success"} if meta.get("mode") == "lite" else {"success", "degraded"}):
         return [f"{step}:missing_advancing_receipt"]
-    if outcome == "degraded":
+    if outcome == "degraded" and meta.get("mode") != "lite":
         return []  # Existing explicit debt contracts still govern degradation.
-    model = load_execution_model()
+    model = load_execution_model(meta)
     _, missing = validate_step_outputs(out_dir, meta, model, step)
     missing += missing_output_receipts(out_dir, meta, step_contract(model, step), events, start)
     return missing
@@ -2300,13 +2375,19 @@ def _resolve_port_legacy(out_dir, meta, port):
                     candidates.append(Path(raw).expanduser().resolve())
         roots = {}
         failures = []
+        git_env = dict(os.environ, LC_ALL="C")
         for target in candidates:
             try:
                 root_proc = subprocess.run(
                     ["git", "-C", str(target), "rev-parse", "--show-toplevel"],
-                    capture_output=True, text=True, timeout=10)
+                    capture_output=True, text=True, timeout=10, env=git_env)
                 if root_proc.returncode != 0:
-                    continue  # 明确不是 Git 仓库：稳定的“无事实”结论，不当作故障
+                    message = root_proc.stderr.strip()
+                    if (message == "fatal: not a git repository"
+                            or message.startswith("fatal: not a git repository (or ")):
+                        continue
+                    failures.append(f"{target}: Git 仓库根读取失败（退出码 {root_proc.returncode}）")
+                    continue
                 head_proc = subprocess.run(
                     ["git", "-C", str(target), "rev-parse", "HEAD"],
                     capture_output=True, text=True, timeout=10)
@@ -2320,8 +2401,7 @@ def _resolve_port_legacy(out_dir, meta, port):
             if head_proc.returncode != 0:
                 failures.append(f"{target}: HEAD 读取失败")
                 continue
-            if root_proc.returncode == 0 and head_proc.returncode == 0:
-                roots[root_proc.stdout.strip()] = head_proc.stdout.strip()
+            roots[root_proc.stdout.strip()] = head_proc.stdout.strip()
         if failures:
             raise ControlError(
                 "workspace_git_head 端口解析失败（瞬时环境故障，不能当作工作区漂移）: "
@@ -2464,6 +2544,53 @@ def capture_step_inputs(out_dir, meta, model, step, *, git_provider=None, requir
     return captured
 
 
+# 从 cda2936 的步骤合同升级到新增可选枚举证据端口的合同。
+# 绑定新旧完整摘要，后续的端口定义、检查项或路由变化需要重新验证。
+COMPATIBLE_STEP_CONTRACT_UPGRADES = {
+    "plan": (
+        "5e35e5eca8ad8ff36fc06846a3eaf979f24f33dccd0a9ad7646739e2d9d505e1",
+        "fd05b95f25fe18cbaf57a54359fa3846d25b22b54601e30f5aacc515d8c1257e",
+    ),
+    "review": (
+        "2e4a1e550e281626826dda608ef940edbd634f28944f86e48afc600f3c7a3368",
+        "b7a5142cab10494f11eef10f3ce2bde45448cd08f60817b12d6b1dcd490d989e",
+    ),
+    "deepcheck": (
+        "367a3c124c8954d6996d2710e81df9c14061ca539d727b58ba7bf0e89b38cf58",
+        "d92a42475ca6e19db39b5eafa3a6ff0ef634ec8011b0ab08c9f3fd467a71da4c",
+    ),
+}
+
+
+def attempt_upgrade_compatible(start_payload, contract, captured_protected=None):
+    """仅已核验的合同升级可沿用旧 attempt 的受保护输入。"""
+    upgrade = COMPATIBLE_STEP_CONTRACT_UPGRADES.get(start_payload.get("step"))
+    if upgrade is None or (start_payload.get("contract_digest"), canonical_digest(contract)) != upgrade:
+        return False
+    old_inputs = start_payload.get("inputs")
+    if not isinstance(old_inputs, list) or not old_inputs:
+        return False
+    old_ids = {fact.get("id") for fact in old_inputs if isinstance(fact, dict)}
+    if not old_ids:
+        return False
+    current_ids = {port.get("id") for port in contract.get("inputs") or []}
+    if not current_ids.issuperset(old_ids):
+        return False  # 旧输入端口被移除 → 真实合同变更，不兼容
+    protected = start_payload.get("protected")
+    if not isinstance(protected, dict) or not protected:
+        return False
+    recorded = start_payload.get("input_digest")
+    if not isinstance(recorded, str) or re.fullmatch(r"[0-9a-f]{64}", recorded) is None:
+        return False
+    if canonical_digest(protected) != recorded:
+        return False  # 记录与摘要不自洽：无法区分升级与篡改
+    if captured_protected is not None:
+        for port_id, fact in protected.items():
+            if captured_protected.get(port_id) != fact:
+                return False  # 旧端口内容漂移 → 真实输入漂移
+    return True
+
+
 def validate_step_outputs(out_dir, meta, model, step, allow_incomplete=False,
                           *, git_provider=None, require_git_provider=False, inspection_provider_factory=None, inspection_deadline=None,
                           check_inspections=True):
@@ -2478,7 +2605,7 @@ def validate_step_outputs(out_dir, meta, model, step, allow_incomplete=False,
     if step == "review" and by_id.get("review_manifest", {}).get("exists"):
         missing.extend(review_evidence_issues(out_dir, meta))
     if check_inspections and step in ("deepcheck", "audit") and by_id.get("inspection_coverage", {}).get("exists"):
-        missing.extend(inspection_coverage_issues(out_dir, meta, step, allow_incomplete=allow_incomplete))
+        missing.extend(inspection_coverage_issues(out_dir, meta, step, allow_incomplete=allow_incomplete, **access))
     if check_inspections and by_id.get("inspection_worklist", {}).get("exists"):
         missing.extend(inspection_worklist_issues(out_dir, meta, step, allow_incomplete=allow_incomplete, **access))
     if access:
@@ -2746,7 +2873,127 @@ def review_evidence_issues(out_dir, meta, events=None, start=None, allow_legacy=
     return issues
 
 
-def inspection_coverage_issues(out_dir, meta, step, attempt=None, allow_incomplete=False):
+def dedup_attempt_has_mcp_evidence(out_dir, step, attempt):
+    """只有本 attempt 的成功 trace 才能支持本轮 MCP 去重声明。"""
+    if step != "deepcheck" or not attempt:
+        return False
+    path = Path(out_dir) / ".mcp_gate_trace.jsonl"
+    if path.is_symlink() or not path.is_file():
+        return False
+    try:
+        rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+        relevant = [row for row in rows if isinstance(row, dict) and row.get("gate_id") == "deepcheck.dedup"]
+        if not relevant:
+            return False
+        row = relevant[-1]
+        if row.get("attempt") != attempt or row.get("ticket_id") != load_metadata(out_dir).get("ticket_id"):
+            return False
+        if row.get("eligible") is not True or row.get("decision") not in {"called", "cache_hit"} or row.get("result") != "success":
+            return False
+        spec = importlib.util.spec_from_file_location("icode_dedup_gate", SKILL_ROOT / "tools/lint_mcp_coverage.py")
+        helper = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(helper)
+        catalog = load_json(SKILL_ROOT / "mcp/cheap-research/gates.json", "cheap gate catalog")
+        gate = next(item for item in catalog["gates"] if item.get("id") == "deepcheck.dedup")
+        return not helper.validate_row(row, gate, 1)
+    except (OSError, ValueError, TypeError, KeyError, StopIteration, ImportError, ControlError):
+        return False
+
+
+def dedup_code_files_covered(workspace, code_files, sources, helper):
+    """Documents stay in review coverage, but do not enter the function catalog."""
+    for name in code_files:
+        if not isinstance(name, str) or not name.strip():
+            return False
+        path = port_path(workspace, name)
+        if not path.is_relative_to(workspace):
+            return False
+        suffix = path.suffix.lower()
+        if suffix in helper._SOURCE_SUFFIXES:
+            if path.relative_to(workspace).as_posix() not in sources:
+                return False
+        elif suffix not in helper._NON_SOURCE_SUFFIXES and path.name not in helper._NON_SOURCE_NAMES:
+            return False
+    return True
+
+
+def audit_reuses_deepcheck_dedup(out_dir, meta, report, events, audit_start, *,
+                                  git_provider=None, require_git_provider=False,
+                                  inspection_provider_factory=None, inspection_deadline=None):
+    """Reuse only a receipted full deepcheck whose original source still matches."""
+    # This path's enumerator and historical checks have no protected-provider
+    # implementation. Refuse before *any* native Git or candidate access.
+    if (git_provider is not None or require_git_provider is not False
+            or inspection_provider_factory is not None or inspection_deadline is not None):
+        return False
+    try:
+        checked_events, problems = verify_event_chain(out_dir, meta)
+        if problems or checked_events != events:
+            return False
+        prior = events[:events.index(audit_start)]
+        starts = [e for e in prior if e.get("event_type") == "step_started"
+                  and (e.get("payload") or {}).get("step") == "deepcheck"]
+        if not starts:
+            return False
+        start = starts[-1]
+        payload = start["payload"]
+        attempt = payload.get("attempt")
+        if payload.get("dedup_evidence_version") != 1 or payload.get("effective_mode") != "full":
+            return False
+        finishes = [e for e in prior if e.get("event_type") == "step_finished"
+                    and (e.get("payload") or {}).get("step") == "deepcheck"
+                    and (e.get("payload") or {}).get("attempt") == attempt]
+        if len(finishes) != 1 or finishes[0]["payload"].get("outcome") != "success":
+            return False
+        finish = finishes[0]
+        path = Path(out_dir) / "deepcheck_coverage.json"
+        if path.is_symlink() or not path.is_file():
+            return False
+        digest = file_sha256(path)
+        middle = prior[prior.index(start) + 1:prior.index(finish)]
+        if not any(e.get("event_type") == "artifact_written" and
+                   (e.get("payload") or {}).get("step") == "deepcheck" and
+                   (e.get("payload") or {}).get("attempt") == attempt and
+                   (e.get("payload") or {}).get("output") == "inspection_coverage" and
+                   (e.get("payload") or {}).get("path") == str(path.resolve()) and
+                   (e.get("payload") or {}).get("sha256") == digest for e in middle):
+            return False
+        deep = load_json(path, "deepcheck coverage")
+        if (not isinstance(deep, dict) or deep.get("attempt") != attempt
+                or deep.get("review_scope") != report.get("review_scope")
+                or deep.get("dedup_status") != report.get("dedup_status")
+                or inspection_coverage_issues(out_dir, meta, "deepcheck", attempt)):
+            return False
+        spec = importlib.util.spec_from_file_location("icode_audit_dedup", SKILL_ROOT / "tools/manual_dedup_evidence.py")
+        helper = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(helper)
+        workspace = execution_workspace(out_dir, meta)
+        sources = helper.collect_sources(workspace, deep["review_scope"])
+        # Ignored source files cannot silently disappear from the denominator.
+        if not dedup_code_files_covered(workspace, meta.get("code_files", []), sources, helper):
+            return False
+        if deep.get("dedup_status") == "complete_within_scope" and "manual_dedup" not in deep:
+            # MCP trace alone does not bind every source in the declared scope.
+            receipt = (finish.get("payload") or {}).get("candidate_receipt") or {}
+            old = receipt.get("candidate")
+            if (receipt.get("attempt") != attempt or receipt.get("step") != "deepcheck"
+                    or receipt.get("event_id") != finish.get("event_id")
+                    or not candidate_module().snapshot_identity_ok(old)):
+                return False
+            before = {row["path"]: row.get("sha256") for row in old["manifest"]}
+            current = candidate_snapshot(out_dir, meta, events=events)
+            now = {row["path"]: row.get("sha256") for row in current["manifest"]}
+            if (not candidate_module().review_source_equivalence(old, current)["equivalent"]
+                    or any(before.get(name) != digest or now.get(name) != digest for name, digest in sources.items())):
+                return False
+        return True
+    except (ControlError, OSError, ValueError, TypeError, KeyError, IndexError, ImportError):
+        return False
+
+
+def inspection_coverage_issues(out_dir, meta, step, attempt=None, allow_incomplete=False,
+                               *, git_provider=None, require_git_provider=False,
+                               inspection_provider_factory=None, inspection_deadline=None):
     """Validate declared reads against current source; never equate a hash with a Read."""
     path = Path(out_dir) / f"{step}_coverage.json"
     if path.is_symlink() or not path.is_file():
@@ -2790,6 +3037,78 @@ def inspection_coverage_issues(out_dir, meta, step, attempt=None, allow_incomple
     phases = ["audit"] if step == "audit" else ["reverse"] if effective_mode == "fast" else ["reverse", "fixed", "free"]
     reads = report.get("read_phases")
     workspace = execution_workspace(out_dir, meta)
+    current_attempt = attempt or report.get("attempt")
+    events, _ = read_events(out_dir)
+    starts = [event for event in events if event.get("event_type") == "step_started"
+              and (event.get("payload") or {}).get("attempt") == current_attempt
+              and (event.get("payload") or {}).get("step") == step]
+    new_dedup_contract = len(starts) == 1 and (starts[0].get("payload") or {}).get("dedup_evidence_version") == 1
+    if dedup == "complete_within_scope" and "manual_dedup" not in report:
+        if new_dedup_contract:
+            proven = (audit_reuses_deepcheck_dedup(out_dir, meta, report, events, starts[0],
+                        git_provider=git_provider, require_git_provider=require_git_provider,
+                        inspection_provider_factory=inspection_provider_factory, inspection_deadline=inspection_deadline)
+                      if step == "audit" else dedup_attempt_has_mcp_evidence(out_dir, step, current_attempt))
+            if not proven:
+                issues.append(f"{step}_coverage:manual_dedup_required")
+    if (new_dedup_contract and step == "audit" and effective_mode != "fast"
+            and dedup == "not_eligible" and "manual_dedup" not in report
+            and not audit_reuses_deepcheck_dedup(out_dir, meta, report, events, starts[0],
+                    git_provider=git_provider, require_git_provider=require_git_provider,
+                    inspection_provider_factory=inspection_provider_factory, inspection_deadline=inspection_deadline)):
+        issues.append(f"{step}_coverage:dedup_not_eligible_unverified")
+    if ("manual_dedup" in report and dedup in {"complete_within_scope", "not_eligible"}) or (
+            new_dedup_contract and step == "deepcheck" and effective_mode != "fast" and dedup == "not_eligible"):
+        try:
+            spec = importlib.util.spec_from_file_location("icode_manual_dedup", SKILL_ROOT / "tools/manual_dedup_evidence.py")
+            helper = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(helper)
+            sources = helper.collect_sources(workspace, scope,
+                require_git_provider=bool(require_git_provider or git_provider is not None or inspection_provider_factory is not None))
+            if new_dedup_contract and not dedup_code_files_covered(
+                    workspace, meta.get("code_files") or [], sources, helper):
+                raise ValueError("code file absent from dedup source enumeration")
+            manual_issues = None
+            if "manual_dedup" in report:
+                manual_issues = helper.validate_report(report["manual_dedup"], workspace, meta.get("ticket_id"),
+                                                       current_attempt, scope, sources)
+                issues.extend(f"{step}_coverage:manual_dedup:{item}" for item in manual_issues)
+                if new_dedup_contract and step == "audit" and dedup == "not_eligible" and not manual_issues:
+                    threshold = load_json(SKILL_ROOT / "mcp/cheap-research/gates.json", "cheap gate catalog")["constants"]["dedup_min_functions"]
+                    count = sum(len(source["functions"]) for source in report["manual_dedup"]["sources"])
+                    if count >= threshold:
+                        issues.append(f"{step}_coverage:dedup_not_eligible_threshold={count}/{threshold}")
+            if new_dedup_contract and step == "deepcheck" and effective_mode != "fast" and dedup == "not_eligible":
+                import ast
+                count = 0
+                if any(Path(relative).suffix.lower() not in {".py", ".pyi"} for relative in sources):
+                    if manual_issues is None or manual_issues:
+                        raise ValueError("non-Python not_eligible requires verified manual catalog")
+                    count = sum(len(source["functions"]) for source in report["manual_dedup"]["sources"])
+                else:
+                    for relative in sources:
+                        data = helper._read_source(workspace / relative, helper._DEFAULT_SOURCE_MAX_BYTES)
+                        if hashlib.sha256(data).hexdigest() != sources[relative]:
+                            raise ValueError(f"source changed after enumeration: {relative}")
+                        tree = ast.parse(data, filename=relative)
+                        count += sum(isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) for node in ast.walk(tree))
+                catalog = load_json(SKILL_ROOT / "mcp/cheap-research/gates.json", "cheap gate catalog")
+                threshold = catalog["constants"]["dedup_min_functions"]
+                if count >= threshold:
+                    issues.append(f"{step}_coverage:dedup_not_eligible_threshold={count}/{threshold}")
+                trace_path = Path(out_dir) / ".mcp_gate_trace.jsonl"
+                if trace_path.is_symlink() or not trace_path.is_file():
+                    raise ValueError("not_eligible requires current attempt trace")
+                rows = [json.loads(line) for line in trace_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+                rows = [row for row in rows if isinstance(row, dict) and row.get("gate_id") == "deepcheck.dedup"]
+                trace = rows[-1] if rows else {}
+                evidence = trace.get("evidence") or {}
+                if (trace.get("attempt") != current_attempt or trace.get("ticket_id") != meta.get("ticket_id")
+                        or trace.get("decision") != "skipped_not_eligible" or trace.get("eligible") is not False
+                        or evidence.get("function_count") != count or evidence.get("threshold") != threshold):
+                    issues.append(f"{step}_coverage:dedup_not_eligible_trace")
+        except (OSError, ValueError, ImportError, KeyError, TypeError, SyntaxError) as exc:
+            issues.append(f"{step}_coverage:manual_dedup:{exc}")
     code_files = meta.get("code_files") or []
     if not isinstance(code_files, list) or not code_files or any(not isinstance(p, str) or not p.strip() for p in code_files):
         issues.append(f"{step}_coverage:empty_code_files")
@@ -2823,7 +3142,8 @@ def _authenticated_inspection_review(out_dir, meta, model, events, start):
     step, attempt = payload.get("step"), payload.get("attempt")
     contract = step_contract(model, step)
     finish = step_attempt_finished(events, attempt)
-    if payload.get("contract_digest") != canonical_digest(contract) or not finish \
+    digest_matches = payload.get("contract_digest") == canonical_digest(contract)
+    if (not digest_matches and not attempt_upgrade_compatible(payload, contract)) or not finish \
             or finish["payload"].get("outcome") not in ("success", "degraded"):
         return None
     first, last = events.index(start), events.index(finish)
@@ -2962,23 +3282,32 @@ def cmd_check_outputs(args, *, git_provider=None, require_git_provider=False, in
     if access:
         _code_inspection_provider(out_dir, meta, **access)
     events, problems = verify_event_chain(out_dir, meta, **candidate_access)
-    model = load_execution_model()
-    steps = ["plan", "review", "merge", "code", "deepcheck", "audit"] if args.step == "audit" else [args.step]
+    model = load_execution_model(load_metadata(out_dir))
+    steps = workflow_contract(meta)["step_order"] if args.step in {"audit", "lite_review"} else [args.step]
     warnings = []
     for step in steps:
         contract = step_contract(model, step)
         starts = [e for e in events if e.get("event_type") == "step_started" and
                   (e.get("payload") or {}).get("step") == step]
-        policy = load_state_machine()["gate_policy"]
+        policy = load_state_machine(load_metadata(out_dir))["gate_policy"]
         completion = {policy["step_by_target"][target]: number for target, number in
                       policy["completed_step_by_target"].items() if target in policy["step_by_target"]}
         old_contract = bool(starts) and (starts[-1].get("payload") or {}).get("contract_digest") != canonical_digest(contract)
+        upgrade_only_drift = False
+        if old_contract and not access:
+            try:
+                captured, _capture_missing = capture_step_inputs(out_dir, meta, model, step)
+                upgrade_only_drift = attempt_upgrade_compatible(
+                    (starts[-1].get("payload") or {}), contract,
+                    captured_protected=captured.get("protected"))
+            except ControlError:
+                upgrade_only_drift = False
         latest_start = starts[-1] if starts else None
         attempt = (latest_start.get("payload") or {}).get("attempt") if latest_start else None
         finished = step_attempt_finished(events, attempt) if attempt is not None else None
         historical = bool(old_contract and finished and (finished.get("payload") or {}).get("outcome") in ("success", "degraded")) or (
                       not starts and completion.get(step) in (meta.get("completed_steps") or []))
-        if old_contract and not historical:
+        if old_contract and not historical and not upgrade_only_drift:
             problems.append(f"{step}:contract_drift_reenter")
         degraded = bool(finished and (finished.get("payload") or {}).get("outcome") == "degraded")
         superseded = inspection_superseded_by_current_review(out_dir, meta, model, events, step, latest_start) \
@@ -3189,11 +3518,108 @@ def _finalize_committed_metadata(out_dir, after):
         atomic_write_json(path, physical)
 
 
+GATE_CONTRACT_CATALOG = SKILL_ROOT / "mcp/cheap-research/gates.json"
+# 出生派生字段：由工具升级引入的出生字段。旧版本工具创建的工单缺这些字段，
+# 幂等重试比较时按当前出生值补齐（见 comparable_birth_metadata）。
+BIRTH_DERIVED_FIELDS = frozenset({"mcp_gate_contract_version"})
+
+
+def comparable_birth_metadata(current, expected_meta):
+    """幂等重试比较视图：对缺失的出生派生字段按当前出生值补齐。
+
+    request_id 幂等事件与事件链完整性由调用方先行校验；旧版本工具创建的
+    metadata 缺少升级后新增的出生字段（如 mcp_gate_contract_version），补齐后
+    比较使升级后的幂等重试返回 already_applied 而非 ticket_create_exists。
+    其余字段（含工单后续进展）仍要求精确一致。
+    """
+    comparable = dict(current)
+    for field in sorted(BIRTH_DERIVED_FIELDS):
+        if field not in comparable and field in expected_meta:
+            comparable[field] = expected_meta[field]
+    return comparable
+
+
+def gate_contract_open_attempt_start(events):
+    """升级采纳时未终结 attempt 的最早 start 时刻（aware datetime）；无则 None。
+
+    事件时间取 `timestamp`（now_iso 本地 naive），按本地时区解析后参与比较，
+    与采纳时刻（UTC aware）可比。
+    """
+    started = {}
+    for event in events:
+        payload = event.get("payload") or {}
+        if event.get("event_type") == "step_started":
+            attempt = payload.get("attempt")
+            if attempt is not None and attempt not in started:
+                started[attempt] = event.get("timestamp") or payload.get("at") or event.get("at")
+        elif event.get("event_type") == "step_finished":
+            started.pop(payload.get("attempt"), None)
+    times = [parse_control_timestamp(t) for t in started.values()]
+    times = [t for t in times if t is not None]
+    return min(times) if times else None
+
+
+def parse_control_timestamp(value):
+    """ISO-8601 → aware datetime；naive 按本地时区解释（now_iso 约定），无法解析返回 None。"""
+    if not isinstance(value, str) or not value.strip():
+        return None
+    text = value.strip()
+    if text.endswith(("Z", "z")):
+        text = text[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.astimezone()
+    return parsed
+
+
+def adopt_gate_contract(meta, events=None):
+    """存量工单续跑时绑定当前资格合同（就地修改并返回）。
+
+    旧版本工具创建的 metadata 缺少 `mcp_gate_contract_version`；其历史 trace 行
+    由 linter 按合同 v1 原始解释保留。为使续跑产生的新记录与历史记录可靠区分并被
+    强制采用当前合同，控制面在下一次 metadata 写入时补齐出生字段并记录采纳时刻
+    `mcp_gate_contract_adopted_at`（显式 UTC）。若采纳时存在升级前未终结的 attempt
+    （升级后、采纳前可能已写入新 trace），历史边界回退为 `mcp_gate_contract_history_boundary`
+    = 其最早 start 时刻：该时刻之后的行一律按当前合同解释（宁可过度约束也不让
+    旧式 skip 伪装成历史记录），该 attempt 须受控终结并重启后按当前合同重新留痕。
+    """
+    if meta.get("mcp_gate_contract_version") is None:
+        catalog = load_json(GATE_CONTRACT_CATALOG, "cheap gate catalog")
+        meta["mcp_gate_contract_version"] = catalog["contract_version"]
+        adopted_at = datetime.now(timezone.utc).isoformat()
+        meta["mcp_gate_contract_adopted_at"] = adopted_at
+        boundary = adopted_at
+        if events:
+            earliest_open = gate_contract_open_attempt_start(events)
+            if earliest_open:
+                boundary = earliest_open.isoformat()
+        meta["mcp_gate_contract_history_boundary"] = boundary
+    return meta
+
+
 def commit_metadata_and_event(out_dir, before, after, event_type, payload,
                               request_id=None, actor="icode", event_id=None, *,
                               git_provider=None, require_git_provider=False, before_publish=None,
                               before_append=None):
     """调用方持锁。事务日志 + metadata 原子替换 + event 追加；普通 I/O 失败回滚旧 metadata。"""
+    if event_type != "ticket_created" and isinstance(after, dict):
+        # 存量工单的每次控制面写入都是一次续跑：先绑定当前资格合同（幂等）。
+        # 采纳时检查未终结 attempt，历史边界回退到其最早 start（覆盖升级后、
+        # 采纳前写入的 trace）。
+        if after.get("mcp_gate_contract_version") is None:
+            try:
+                pending_events, chain_problems = verify_event_chain(out_dir, after, semantic=False)
+            except (OSError, ValueError, ControlError) as exc:
+                raise ControlError("无法验证事件链，拒绝采纳资格合同",
+                                   gate_id="event_chain_invalid") from exc
+            if chain_problems:
+                raise ControlError("事件链无效，拒绝采纳资格合同",
+                                   gate_id="event_chain_invalid",
+                                   violations=chain_problems)
+            adopt_gate_contract(after, events=pending_events)
     out_dir = Path(out_dir)
     access = ({"git_provider": git_provider, "require_git_provider": require_git_provider}
               if _candidate_access_requested(git_provider, require_git_provider) else {})
@@ -3310,7 +3736,10 @@ def commit_metadata_and_event(out_dir, before, after, event_type, payload,
 # ---------------------------------------------------------------- 门禁 linter（复用三现有 linter）
 
 def run_gate_linters(out_dir, to_status=None, delivery_verdict=None, legacy=False, step=None, *, metadata=None):
-    sm = load_state_machine()
+    meta = metadata if metadata is not None else load_metadata(out_dir)
+    sm = load_state_machine(meta)
+    if meta.get("mode") == "lite":
+        return lite_gate_reports(out_dir, meta, step or sm["gate_policy"]["step_by_target"].get(to_status), delivery_verdict)
     lint_cfg = sm["gate_policy"]["gate_linters"]
     # step 真源 = gates.json state_machine.gate_policy.step_by_target（7 项全量：
     # log/plan/review/merge/code/deepcheck/audit）。thinking_gate/mcp_coverage/
@@ -3385,6 +3814,10 @@ def run_gate_linters(out_dir, to_status=None, delivery_verdict=None, legacy=Fals
                  "cmd": full_cmd}
         if isinstance(report, dict):
             entry["report"] = report
+            if isinstance(report.get("enumeration_debt"), int):
+                # 枚举/去重债务必须从校验报告透传到门禁结果与状态推进输出：
+                # 门禁通过不代表债务已解决，调用方需要从推进结果看到它。
+                entry["enumeration_debt"] = report["enumeration_debt"]
         else:
             raw = (stdout or stderr or "")[-500:]
             entry["detail"] = "linter 未返回合法 JSON 对象" + (f": {raw}" if raw else "")
@@ -3395,7 +3828,459 @@ def run_gate_linters(out_dir, to_status=None, delivery_verdict=None, legacy=Fals
     return results
 
 
+_GATE_COVERAGE_MODULE = None
+
+
+def gate_coverage_module():
+    """加载 cheap-research 覆盖校验器（跨步骤债务余额与其共享同一实现）。"""
+    global _GATE_COVERAGE_MODULE
+    if _GATE_COVERAGE_MODULE is None:
+        spec = importlib.util.spec_from_file_location(
+            "icode_gate_coverage", SKILL_ROOT / "tools/lint_mcp_coverage.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        _GATE_COVERAGE_MODULE = module
+    return _GATE_COVERAGE_MODULE
+
+
+def last_recorded_gate_enumeration_debt(out_dir):
+    """事件链中最近一次记录的债务余额；返回 (是否记录过, 值)。"""
+    try:
+        events, _problems = read_events(out_dir)
+    except Exception:
+        return False, None
+    for event in reversed(events):
+        if event.get("event_type") != "state_changed":
+            continue
+        payload = event.get("payload") or {}
+        if "gate_enumeration_debt" in payload:
+            return True, payload.get("gate_enumeration_debt")
+    return False, None
+
+
+def ticket_enumeration_debt(out_dir, meta):
+    """工单级未解决枚举/去重债务余额；返回 None 表示无法判定（不是清偿）。
+
+    与单次状态推进的门禁报告不同：报告只看被推进步骤的 in-scope gates，
+    review 产生的债务在后续 plan_finalized/completed 推进的报告中会归零；
+    余额跨步骤持续存在，交付结论反映的是工单尚未清偿的债务。清偿要求债务
+    gate 出现通过资格与证据校验的有效最终记录（pending/中断/非法行不清偿；
+    unavailable/degraded 还需 availability.evidence_ref 指向工单目录内真实
+    存在的人工等价证据文件）。trace 不存在时结合事件链判定：从未记录过债务
+    或最近记录为 0 → 确认无债务（0）；曾记录未清偿/未知债务且 trace 缺失 →
+    无法核实（None）——trace 丢失不得被报告为债务归零。trace 不可读/含
+    不完整 JSON 同样返回 None。
+    """
+    path = Path(out_dir) / ".mcp_gate_trace.jsonl"
+    if path.is_symlink():
+        return None  # 符号链接的 trace 不可作为证据读取，无法确认债务状态
+    if not path.is_file():
+        recorded, value = last_recorded_gate_enumeration_debt(out_dir)
+        if not recorded or value == 0:
+            return 0  # 从未记录过债务 / 最近已确认清偿：确认无债务
+        return None  # 曾记录未清偿（或未知）债务且 trace 缺失：无法核实
+    try:
+        rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()
+                if line.strip()]
+    except (OSError, ValueError):
+        return None  # 不可读/不完整 JSON：未知，不得当作清偿
+    if any(not isinstance(row, dict) or row.get("ticket_id") != meta.get("ticket_id") for row in rows):
+        return None  # 他单或非对象记录不能作为本工单的确定余额
+    try:
+        return gate_coverage_module().ticket_enumeration_debt(rows, meta, out_dir=Path(out_dir))
+    except (TypeError, AttributeError):
+        return None
+
+
 # ---------------------------------------------------------------- 子命令实现
+
+def _load_lite_review_report(out_dir, fact):
+    path = Path(out_dir) / fact["report_path"]
+    if path.parent != Path(out_dir) or path.is_symlink() or not path.is_file():
+        raise ControlError("不可变审核报告缺失或被改写", gate_id="lite_review_report")
+    try:
+        # 签名和解析必须使用同一份字节，不在校验后重新打开可变路径。
+        data = path.read_bytes()
+        if hashlib.sha256(data).hexdigest() != fact.get("report_sha256"):
+            raise ControlError("不可变审核报告缺失或被改写", gate_id="lite_review_report")
+        return strict_json_loads(data.decode("utf-8"))
+    except (OSError, UnicodeError, ValueError) as exc:
+        raise ControlError("审核报告读取或JSON解析失败", gate_id="lite_review_report") from exc
+
+
+def lite_review_records(events):
+    """将宿主子代理与历史 CLI 回执投影到同一套审核读取接口。"""
+    invocations, returns = [], []
+    native = {}
+    for event in events:
+        kind, payload = event.get("event_type"), event.get("payload") or {}
+        if kind == "lite_review_invoked":
+            invocations.append(payload)
+        elif kind == "lite_review_returned":
+            returns.append({**payload, "source": "legacy"})
+        elif kind == "agent_spawned" and payload.get("lite_review_attempt"):
+            invocation = {**payload["lite_review_binding"], "attempt": payload["lite_review_attempt"],
+                          "invocation_id": payload["spawn_id"],
+                          "host_receipt_challenge": payload.get("host_receipt_challenge")}
+            native[payload["spawn_id"]] = invocation
+            invocations.append(invocation)
+        elif kind == "agent_result" and payload.get("spawn_id") in native:
+            report = payload.get("lite_review_report") or {}
+            # adopted=no/partial 的返回仅供追溯：保留记录，但不得作为审核通过依据。
+            adopted = payload.get("adopted")
+            attestation = payload.get("host_attestation") or {}
+            attested = (attestation.get("launched") is True
+                        and attestation.get("challenge") == native[payload["spawn_id"]].get("host_receipt_challenge")
+                        and attestation.get("spawn_id") == payload["spawn_id"]
+                        and attestation.get("host_session_id") == payload.get("host_session_id"))
+            # 降级审核只能用于待验证交付，仍须追踪本轮发现的问题。
+            degraded = (payload.get("host_attestation_degraded") or {}).get("status") == "unavailable"
+            trusted = (payload.get("result") == "joined" and bool(report)
+                       and adopted == "yes" and attested)
+            degraded_only = (not trusted and degraded and payload.get("result") == "joined"
+                             and bool(report) and adopted == "yes")
+            returns.append({**native[payload["spawn_id"]], **report,
+                            "host_session_id": payload.get("host_session_id"),
+                            "adopted": adopted,
+                            "host_receipt": payload.get("host_receipt"),
+                            "host_attestation": payload.get("host_attestation"),
+                            "host_attestation_degraded": payload.get("host_attestation_degraded"),
+                            "source": "host-subagent",
+                            "outcome": ("success" if trusted
+                                        else "degraded" if degraded_only else "failure")})
+    return invocations, returns
+
+
+def lite_open_findings(out_dir, events, *, pending_delivery=False, current_report=None):
+    """待验证交付允许降级复审解决降级问题，可信交付仍需逐项可信确认。"""
+    findings = {}
+    needs_attestation = set()
+    for fact in lite_review_records(events)[1]:
+        if not fact.get("report_path") or not fact.get("report_sha256"):
+            continue
+        trusted = fact.get("outcome") == "success"
+        if not trusted and fact.get("source") != "host-subagent":
+            # 旧 CLI 失败事件可能指向未通过 schema 校验的报告。
+            continue
+        provisional = bool(fact.get("host_attestation_degraded"))
+        if current_report is not None and fact["invocation_id"] == current_report[0]:
+            report = current_report[1]
+        else:
+            report = _load_lite_review_report(out_dir, fact)
+        items = report.get("findings")
+        if not isinstance(items, list):
+            continue
+        for finding in items:
+            if not isinstance(finding, dict) or not finding.get("id"):
+                continue
+            key = finding["id"]
+            can_resolve = trusted or (pending_delivery and fact["outcome"] == "degraded"
+                                      and key not in needs_attestation)
+            if finding.get("status") == "resolved":
+                if can_resolve and finding.get("evidence"):
+                    findings.pop(key, None)
+                    needs_attestation.discard(key)
+            elif finding.get("blocking", True):
+                if not provisional:
+                    needs_attestation.add(key)
+                findings[key] = finding
+    return findings
+
+
+def lite_review_fact(out_dir, meta, events, attempt=None, *, candidate=None, allow_rejected=False,
+                     return_report=False):
+    starts = [e for e in events if e.get("event_type") == "step_started"
+              and e["payload"].get("step") == "lite_review"]
+    if not starts:
+        raise ControlError("缺少独立审核 attempt", gate_id="lite_review_required")
+    start = starts[-1]
+    attempt = attempt or start["payload"]["attempt"]
+    if attempt != start["payload"]["attempt"]:
+        raise ControlError("旧审核 attempt 不可签收", gate_id="lite_review_stale")
+    invocations, results = lite_review_records(events)
+    returns = [r for r in results if r.get("attempt") == attempt]
+    if not returns:
+        raise ControlError("独立审核尚未真实返回", gate_id="lite_review_required")
+    fact = returns[-1]
+    invokes = [r for r in invocations if r.get("invocation_id") == fact.get("invocation_id")]
+    candidate = candidate if candidate is not None else candidate_snapshot(out_dir, meta, events=events)
+    degradation = _host_adapter_degradation(meta)
+    acceptable = {"success"} | ({"degraded"} if degradation is not None else set())
+    if len(invokes) != 1 or fact.get("outcome") not in acceptable \
+            or not fact.get("host_session_id"):
+        raise ControlError("缺少可信宿主审核结果", gate_id="lite_review_required")
+    # 新宿主子代理回执必须携带绑定本次登记的 challenge 回执与可信适配器确认；历史 CLI 回执按原规则读取。
+    if fact.get("source") == "host-subagent":
+        challenge = (fact.get("host_receipt") or {}).get("challenge")
+        if not isinstance(challenge, str) or not challenge \
+                or (fact.get("host_receipt") or {}).get("spawn_id") != fact.get("invocation_id") \
+                or (fact.get("host_receipt") or {}).get("host_session_id") != fact.get("host_session_id"):
+            raise ControlError("宿主审核回执未绑定本次启动，不能作为审核依据",
+                               gate_id="lite_review_host_receipt")
+        attestation = fact.get("host_attestation") or {}
+        if fact.get("outcome") == "degraded":
+            # 已确认是本工单记录的降级审核：只作留痕，绝不当作可信依据。
+            if degradation is None:
+                raise ControlError("审核结果未获宿主确认，不能作为依据",
+                                   gate_id="lite_review_host_unattested")
+        elif attestation.get("launched") is not True \
+                or attestation.get("challenge") != challenge \
+                or attestation.get("spawn_id") != fact.get("invocation_id") \
+                or attestation.get("host_session_id") != fact.get("host_session_id") \
+                or attestation.get("stored_report_sha256") != fact.get("report_sha256") \
+                or not fact.get("host_attestation"):
+            raise ControlError("缺少可信宿主确认，审核结果不能作为通过依据",
+                               gate_id="lite_review_host_unattested")
+        else:
+            _require_pinned_adapter(meta, attestation)
+    invocation = invokes[0]
+    reviewed = start["payload"].get("candidate_input")
+    # 保留原报告身份；普通线性提交仅通过已有的严格源码等价证明复用。
+    proof = candidate_module().compare_candidates(reviewed, candidate)
+    if invocation.get("attempt") != attempt or not proof["equivalent"] \
+            or invocation.get("candidate_id") != (reviewed or {}).get("candidate_id") \
+            or invocation.get("contract_digest") != lite_module().contract_digest(meta):
+        raise ControlError("审核的代码或合同已过期", gate_id="lite_review_stale")
+    # 回退后的旧结果不能重新生效；所有绑定都来自受控执行器事件。
+    if any((state_change_payload(e) or {}).get("to") in {
+            "lite_prepare_in_progress", "lite_code_in_progress"}
+           for e in events[events.index(start) + 1:]):
+        raise ControlError("审核前已有回退失效边界", gate_id="lite_review_stale")
+    report = _load_lite_review_report(out_dir, fact)
+    schema_issues = validate_against(report, SCHEMA_DIR / "lite-review.schema.json", "lite_review_schema")
+    if schema_issues:
+        raise ControlError("审核报告不满足 schema", gate_id="lite_review_report", violations=schema_issues)
+    issues = lite_module().review_issues(report, meta,
+                                        invocation["candidate_id"], attempt, allow_rejected=allow_rejected)
+    # 合法拒绝结论可以展示；展示权限不产生通过或关闭历史问题的资格。
+    if allow_rejected and report["verdict"] in {"changes_required", "blocked"}:
+        if issues:
+            raise ControlError("审核报告身份不匹配", gate_id="lite_review_report", violations=issues)
+        return report if return_report else candidate
+    outstanding = lite_open_findings(
+        out_dir, events, pending_delivery=fact["outcome"] == "degraded",
+        current_report=(fact["invocation_id"], report))
+    issues += ["unresolved_previous_finding:" + key for key in outstanding]
+    if issues:
+        raise ControlError("独立审核未通过", gate_id="lite_review_report", violations=issues)
+    return report if return_report else candidate
+
+
+def cmd_lite_preflight(args):
+    """只读预检：确认宿主适配器来源可信，供实施前检查。"""
+    out_dir = Path(args.dir).resolve()
+    if not out_dir.is_dir():
+        raise ControlError(f"工单目录不存在: {out_dir}", exit_code=2, gate_id="lite_preflight_dir")
+    observation = _observe_host_adapter()
+    if observation["status"] == "pinned":
+        response = {"host_attestation": "available", "adapter_sha256": observation["sha256"],
+                    "config_path": observation["config_path"], "delivery_ceiling": "verified"}
+    else:
+        response = {"host_attestation": "unavailable", "reason": observation["reason"],
+                    "detail": observation["detail"], "delivery_ceiling": "verification_pending"}
+    print(json.dumps({"ok": True, **response}, ensure_ascii=False))
+    return 0
+
+
+def cmd_lite_report(args):
+    out_dir = Path(args.dir).resolve()
+    with DirLock(out_dir):
+        recover_pending_transaction(out_dir)
+        meta = load_metadata(out_dir)
+        require_valid_metadata(meta)
+        ensure_execution_writable(meta)
+        if meta.get("mode") != "lite":
+            raise ControlError("仅 lite 工单可派生主报告", gate_id="workflow_profile")
+        events, issues = verify_event_chain(out_dir, meta)
+        if issues:
+            raise ControlError("事件链不完整", gate_id="event_chain", violations=issues)
+        # 主报告不属于审核签名输入，不生成虚假的执行/完成事件。
+        returns = [r for r in lite_review_records(events)[1] if r.get("outcome") in {"success", "degraded"}]
+        review = (lite_review_fact(out_dir, meta, events, allow_rejected=True, return_report=True)
+                  if returns else None)
+        atomic_write_bytes(out_dir / "lite.md", lite_module().render_report(meta, review).encode("utf-8"))
+    print(json.dumps({"ok": True, "path": str(out_dir / "lite.md")}, ensure_ascii=False))
+    return 0
+
+
+def lite_evidence_issues(out_dir, meta, events):
+    candidate = candidate_snapshot(out_dir, meta, events=events)
+    runs = meta.get("verification_runs") or []
+    issues, pending = lite_module().delivery_issues(meta, runs)
+    api = verification_evidence_module()
+    contract = meta.get("verification_contract") or {}
+    cells = api.required_cells(contract)
+    settings = api.metric_settings(contract, cells or [])
+    if cells is None or settings is None:
+        return issues + ["verification_contract_invalid"], pending
+    context = {"enabled": True, "current": candidate, "events": events, "reasons": [],
+               "candidate_api": candidate_module(), "evidence_root": str(out_dir),
+               "review_validator": api.protected_review_validator(out_dir, meta, verify=verify_event_chain)}
+    selected = api.eligible_latest_runs(meta, context, source_runs=runs)
+    issues += selected["reasons"]
+    profile, baseline_ref, metrics = settings
+    for cell in cells:
+        raw = [r for r in runs if api.cell(r) == cell]
+        if not raw and cell in pending:
+            continue
+        latest = selected["latest"].get(cell)
+        if raw and (latest or {}).get("run_id") != raw[-1].get("run_id"):
+            issues.append("latest_verification_ineligible:" + "/".join(cell))
+        state = api.unit_state(latest, profile, [m for m in metrics if api.cell(m) == cell],
+                               baseline_ref, meta=meta, evidence_root=str(out_dir),
+                               review_validator=context["review_validator"])
+        if state != "satisfied":
+            issues.append(state + ":" + "/".join(cell))
+    return sorted(set(issues)), pending
+
+
+LITE_HOST_DEGRADED = "host_attestation_unavailable"
+
+
+def _host_adapter_degradation(meta):
+    """返回工单记录的宿主适配器不可用事实；可用时返回 None。"""
+    pinned = ((meta.get("extensions") or {}).get("lite") or {}).get("host_adapter") or {}
+    if pinned.get("status") == "unavailable":
+        return pinned
+    return None
+
+
+def _pinned_adapter_sha256(meta):
+    """返回进入 Code 时冻结的宿主适配器摘要；缺失即 fail-closed。
+
+    适配器已记不可用属于**降级**路径，由调用方先用 _host_adapter_degradation
+    判定；只有"未降级却没有身份"这种自相矛盾状态才在这里拒绝。
+    """
+    pinned = ((meta.get("extensions") or {}).get("lite") or {}).get("host_adapter") or {}
+    if pinned.get("status") == "unavailable":
+        raise ControlError(
+            "本工单记录宿主适配器不可用（%s），不能按可信审核签收；"
+            "只能以 verification_pending 交付"
+            % (pinned.get("detail") or "lite_host_adapter_unavailable"),
+            gate_id="lite_host_adapter_unavailable")
+    expected = pinned.get("sha256")
+    if not isinstance(expected, str) or not expected:
+        raise ControlError("缺少 Prepare 阶段确认的宿主适配器身份，不能作为审核依据",
+                           gate_id="lite_host_adapter_unavailable")
+    return expected
+
+
+def _require_pinned_adapter(meta, attestation):
+    """签收结果的适配器身份必须等于冻结值。
+
+    真正的执行前比对在 _host_attest 内完成；这里复核落盘记录的身份自洽，
+    避免把不一致的确认写进事件链。
+    """
+    expected = _pinned_adapter_sha256(meta)
+    if attestation.get("adapter_sha256") != expected:
+        raise ControlError("签收所用宿主适配器与 Prepare 阶段确认的身份不一致",
+                           gate_id="lite_host_adapter_unavailable")
+
+
+def lite_step_gate(out_dir, meta, events, step, attempt=None):
+    issues = lite_module().prepare_issues(meta)
+    lint = workflow_lint_module()
+    catalog = load_json(GATES_JSON, "gates")
+    issues += lint.validate_requirement_deltas(meta, catalog)
+    if step in {"lite_code", "lite_review"}:
+        issues += lint.validate_identity_change(meta, catalog)
+    if step == "lite_prepare":
+        # 用户停止点允许记录规划完成，但不能进入实施。
+        issues = [x for x in issues if x != "user_stop_after_prepare"]
+    elif step == "lite_review":
+        lite_review_fact(out_dir, meta, events, attempt)
+    if step in {"lite_code", "lite_review"}:
+        evidence_issues, _ = lite_evidence_issues(out_dir, meta, events)
+        issues += evidence_issues
+    if issues:
+        raise ControlError("lite 质量门未通过", gate_id="lite_quality_gate", violations=issues)
+
+
+def lite_gate_reports(out_dir, meta, step, delivery_verdict):
+    events, issues = verify_event_chain(out_dir, meta)
+    if issues:
+        raise ControlError("事件链不完整", gate_id="event_chain", violations=issues)
+    if step and step != "verify":
+        if step not in workflow_contract(meta)["step_order"]:
+            raise ControlError("未知 lite 步骤", gate_id="workflow_profile")
+        lite_step_gate(out_dir, meta, events, step)
+    elif meta.get("status") == "completed":
+        lite_step_gate(out_dir, meta, events, "lite_review")
+    return [{"gate_id": "lite_contract", "ok": True}]
+
+
+def lite_transition_guard(out_dir, meta, events, target, verdict):
+    current = meta["status"]
+    if target in {"lite_prepare_in_progress", "lite_code_in_progress"}:
+        execution = execution_trace(events)
+        if execution["open_steps"] or execution["open_operations"] or execution["open_agents"]:
+            raise ControlError("回退前须终结开放执行", gate_id="lite_return_open_execution")
+    if target == "lite_code_in_progress":
+        issues = lite_module().prepare_issues(meta)
+        if issues:
+            raise ControlError("G1 规划准入未通过", gate_id="lite_prepare_gate", violations=issues)
+    if target == "completed":
+        lite_review_fact(out_dir, meta, events)
+        issues, pending = lite_evidence_issues(out_dir, meta, events)
+        # 无适配器降级：只能以 verification_pending 交付，永远不能声称 verified。
+        if _host_adapter_degradation(meta) is not None:
+            pending = list(pending) + [LITE_HOST_DEGRADED]
+        allowed = "verification_pending" if pending else "verified"
+        if verdict == "verified":
+            applicability = verification_applicability(out_dir, meta)
+            if not applicability["ok"]:
+                issues += applicability["reasons"]
+            lint = workflow_lint_module()
+            issues += lint.validate_acceptance(meta, load_json(GATES_JSON, "gates"))
+        if issues or verdict != allowed:
+            raise ControlError("G3 当前证据不支持交付结论", gate_id="lite_delivery_gate",
+                               violations=issues, expected_verdict=allowed)
+    return current
+
+
+def _active_lite_review(meta, events, attempt):
+    if meta.get("mode") != "lite" or meta.get("status") != "lite_review_in_progress":
+        raise ControlError("仅当前 lite 审核阶段可登记审核", gate_id="lite_review_entry")
+    start = find_step_start(events, attempt)
+    if start["payload"].get("step") != "lite_review" or step_attempt_finished(events, attempt):
+        raise ControlError("review attempt 已结束或不匹配", gate_id="lite_review_entry")
+    return start["payload"].get("candidate_input")
+
+
+def _lite_review_input(meta, events, spawn, *, out_dir=None, candidate=None):
+    """构造只读审核输入；challenge 必须与登记一致。"""
+    challenge = spawn.get("host_receipt_challenge")
+    if not isinstance(challenge, str) or not challenge:
+        raise ControlError("审核登记缺少宿主挑战", gate_id="lite_review_entry")
+    out_dir = Path(out_dir) if out_dir is not None else None
+    if out_dir is None:
+        raise ControlError("缺少工单目录", gate_id="lite_review_entry")
+    if candidate is None:
+        candidate = candidate_snapshot(out_dir, meta, events=events)
+    return {
+        "workspace": str(execution_workspace(out_dir, meta)),
+        "metadata": str(out_dir / METADATA_NAME),
+        "events": str(out_dir / EVENTS_NAME),
+        "rules": str(SKILL_ROOT / "references/lite_review.md"),
+        "baseline": candidate["base"],
+        "candidate_id": candidate["candidate_id"],
+        "host_receipt_challenge": challenge,
+        "task": "新建独立只读上下文，按审核规则读取原始需求、合同、候选差异、"
+                "历史未关闭问题及当前验收证据。按字段读取材料，返回结构化审核 JSON。"
+                "宿主须在 record-agent-result 时通过 --host-receipt 回传含 host_receipt_challenge 的启动/返回回执。",
+    }
+
+
+def cmd_lite_review(args):
+    """登记将由当前宿主实际启动的独立子代理。"""
+    return cmd_record_agent_spawn(argparse.Namespace(
+        dir=args.dir, task_scope="Lite 独立审核", expected_artifact="结构化审核 JSON",
+        evidence_boundary="只读当前工单、实际差异与验收证据",
+        join_condition="宿主返回新子代理身份及结构化结论",
+        backend="host-subagent", model="inherit", capability=["text", "tools"],
+        exclusive_key="lite-review", request_id=args.request_id, actor="icode",
+        lite_review_attempt=args.attempt))
+
 
 def cmd_resolve_ticket(args):
     result = resolve_dir(args)
@@ -3477,30 +4362,41 @@ def _cmd_create_plain(args):
     birth = {
         "init": ("init_in_progress", ["0"], False),
         "plan": ("init_in_progress", [], False),
+        "lite": ("lite_prepare_in_progress", [], False),
         "log": ("log_in_progress", [], False),
         "debug-init": ("debug_in_progress", ["0"], True),
         "debug-log": ("debug_in_progress", [], True),
     }
     status, completed_steps, debug = birth[args.birth]
     meta = dict(seed)
-    if meta.get("risk_profile") is not None and not isinstance(meta["risk_profile"], dict):
-        raise ControlError("risk_profile 必须是 JSON 对象或 null", exit_code=2,
-                           gate_id="fast_risk_profile")
-    profile = dict(meta.get("risk_profile") or {})
-    if "policy_version" in profile and (type(profile["policy_version"]) is not int or profile["policy_version"] != 2):
-        raise ControlError("新工单必须使用风险策略版本2；历史兼容仅适用于已有工单", exit_code=2,
-                           gate_id="fast_risk_profile")
-    # Bind the policy at every new birth, including initially full tickets, so
-    # later updates cannot opt back into historical admission by omitting it.
-    initial_mode = "fast" if meta.get("mode") == "fast" else "full"
-    profile["policy_version"] = 2
-    profile.setdefault("requested_mode", initial_mode)
-    profile.setdefault("effective_mode", initial_mode)
-    meta["risk_profile"] = profile
+    if args.birth == "lite":
+        if meta.get("mode", "lite") != "lite" or meta.get("workflow_version", 1) != 1:
+            raise ControlError("lite 出生必须 mode=lite/workflow_version=1", gate_id="workflow_profile")
+        meta.update(mode="lite", workflow_version=1)
+        meta.setdefault("requirement_deltas", [])
+        meta.setdefault("semantic_decisions", [])
+    elif meta.get("mode") == "lite":
+        raise ControlError("lite 模式必须使用 lite 出生", gate_id="workflow_profile")
+    if args.birth != "lite":
+        if meta.get("risk_profile") is not None and not isinstance(meta["risk_profile"], dict):
+            raise ControlError("risk_profile 必须是 JSON 对象或 null", exit_code=2,
+                               gate_id="fast_risk_profile")
+        profile = dict(meta.get("risk_profile") or {})
+        if "policy_version" in profile and (type(profile["policy_version"]) is not int or profile["policy_version"] != 2):
+            raise ControlError("新工单必须使用风险策略版本2；历史兼容仅适用于已有工单", exit_code=2,
+                               gate_id="fast_risk_profile")
+        # Bind the policy at every new birth, including initially full tickets, so
+        # later updates cannot opt back into historical admission by omitting it.
+        initial_mode = "fast" if meta.get("mode") == "fast" else "full"
+        profile["policy_version"] = 2
+        profile.setdefault("requested_mode", initial_mode)
+        profile.setdefault("effective_mode", initial_mode)
+        meta["risk_profile"] = profile
     if verification_evidence_module().real_env_risk(meta) and meta.get("verification_contract") is None:
         meta["verification_contract"] = verification_evidence_module().pending_contract()
     if verification_evidence_module().build_starts(meta):
         raise ControlError("build-start receipts cannot be seeded at ticket creation", gate_id="build_start_writer")
+    _cheap_catalog = load_json(GATE_CONTRACT_CATALOG, "cheap gate catalog")
     meta.update({
         "schema_version": 3,
         "ticket_id": args.ticket_id,
@@ -3512,7 +4408,10 @@ def _cmd_create_plain(args):
         "project_path": str(workspace),
         "workflow_gate_schema_version": 1,
         "thinking_gate_schema_version": 1,
-        "mcp_gate_schema_version": load_json(SKILL_ROOT / "mcp/cheap-research/gates.json", "cheap gate catalog")["trace_schema_version"],
+        "mcp_gate_schema_version": _cheap_catalog["trace_schema_version"],
+        # 资格合同版本绑定于出生（受保护字段，事后不可改写）：新工单的 trace 行按合同 v2
+        # 解释；存量工单无此字段，其历史行按合同 v1 旧语义解释，不追溯改判。
+        "mcp_gate_contract_version": _cheap_catalog["contract_version"],
     })
     # 完成态 transition 走 --strict，linter 要求 requirement_deltas 显式存在；而
     # references/dir_and_metadata.md 声明「可选，缺失视为 []」。新工单在出生处补空数组，
@@ -3567,6 +4466,9 @@ def _cmd_create_plain(args):
     payload = {"birth_kind": args.birth,
                "execution_contract_version": 1,
                "requirement_summary": meta.get("requirement_summary") or args.requirement[:100]}
+    if meta.get("mode") == "lite":
+        payload["workflow_identity"] = {"mode": "lite", "workflow_version": 1,
+                                        "requirement_digest": canonical_digest(meta["requirement"])}
     if getattr(args, "stage_id", None):
         payload["stage_birth"] = {"stage_id": args.stage_id, "input_digest": _stage_birth_digest(args)}
     if "candidate_tracking" in meta:
@@ -3585,7 +4487,7 @@ def _cmd_create_plain(args):
                 events, args.request_id, "ticket_created", payload)
             comparable_meta = dict(meta)
             comparable_meta["created_at"] = current.get("created_at")
-            if prior and current == comparable_meta:
+            if prior and comparable_birth_metadata(current, comparable_meta) == comparable_meta:
                 print(json.dumps({"ok": True, "already_applied": True,
                                   "ticket_id": args.ticket_id,
                                   "event_id": prior["event_id"], "out_dir": str(out_dir)},
@@ -3627,6 +4529,8 @@ def cmd_create(args):
     out_dir = Path(args.dir).resolve()
     workspace, _debug = classify_ticket_dir(out_dir)
     locator = stage_module().locator_path(workspace)
+    if args.birth == "lite" and (locator.parent.exists() or stage_module().discover_stage_history(workspace) is not None):
+        raise ControlError("lite 首版不支持已启用阶段计划的工程，请使用既有阶段流程", gate_id="lite_stage_unsupported")
     if not locator.parent.exists():
         if stage_module().discover_stage_history(workspace) is not None:
             raise ControlError("stage: project locator directory missing; recover it with stage register on the authenticated coordinator",
@@ -3865,7 +4769,7 @@ def cmd_validate(args):
         events, chain_problems = verify_event_chain(out_dir, meta)
         violations.extend({"gate_id": "event_chain", "path": f"$.ico_events.jsonl#{i}",
                            "detail": p} for i, p in enumerate(chain_problems, 1))
-        state_events = [e for e in events if e["event_type"] == "state_changed"]
+        state_events = [dict(e, payload=state_change_payload(e)) for e in events if state_change_payload(e) is not None]
         if not legacy and state_events:
             last = state_events[-1]
             if meta.get("status") != last["payload"].get("to"):
@@ -3899,15 +4803,15 @@ def cmd_validate(args):
                 "gate_id": "ticket_birth_event", "path": f"$.{EVENTS_NAME}",
                 "detail": "vNext 工单缺 ticket_created（或 legacy 迁移产生的 migration_applied）事件。",
             })
-        state_events = [e for e in events if e.get("event_type") == "state_changed"]
-        birth_states = {"init_in_progress", "log_in_progress", "debug_in_progress"}
+        state_events = [dict(e, payload=state_change_payload(e)) for e in events if state_change_payload(e) is not None]
+        birth_states = {"init_in_progress", "log_in_progress", "debug_in_progress", "lite_prepare_in_progress"}
         if not state_events and not migration_events and meta.get("status") not in birth_states:
             violations.append({
                 "gate_id": "status_event_consistency", "path": "$.status",
                 "detail": f"metadata.status={meta.get('status')!r} 不是出生态但事件链无 state_changed；"
                           "状态疑似在创建时绕过 transition 直写。",
             })
-        completed_by_target = load_state_machine()["gate_policy"].get(
+        completed_by_target = load_state_machine(meta)["gate_policy"].get(
             "completed_step_by_target", {})
         completed_steps = set(meta.get("completed_steps") or [])
         event_backed_targets = {}
@@ -3915,6 +4819,11 @@ def cmd_validate(args):
             payload = state_event.get("payload") or {}
             if payload.get("review_return") == 1:
                 for invalidated in ("2", "3", "4", "5", "6"):
+                    event_backed_targets.pop(invalidated, None)
+            if meta.get("mode") == "lite" and payload.get("to") in {"lite_prepare_in_progress", "lite_code_in_progress"}:
+                order = workflow_contract(meta)["step_order"]
+                cutoff = 0 if payload["to"] == "lite_prepare_in_progress" else 1
+                for invalidated in order[cutoff:]:
                     event_backed_targets.pop(invalidated, None)
             target = payload.get("to")
             expected_step = completed_by_target.get(target)
@@ -3936,8 +4845,8 @@ def cmd_validate(args):
             })
 
     if not legacy and requires_execution_receipts(events):
-        step = load_state_machine()["gate_policy"]["step_by_target"].get(meta.get("status"))
-        state_events = [e for e in events if e.get("event_type") == "state_changed"]
+        step = load_state_machine(meta)["gate_policy"]["step_by_target"].get(meta.get("status"))
+        state_events = [dict(e, payload=state_change_payload(e)) for e in events if state_change_payload(e) is not None]
         test_fixture = (os.environ.get("ICODE_CONTROL_TEST_MODE") == "1" and state_events and
                         state_events[-1].get("payload", {}).get("gates_skipped_for_test") is True)
         if step and not test_fixture:
@@ -4083,7 +4992,7 @@ def review_return_problem(meta, events, stage):
 def cmd_transition(args):
     out_dir = Path(args.dir).resolve()
     stage_action = _stage_write_action("state_changed", {"to": args.to})
-    sm = load_state_machine()
+    sm = load_state_machine(load_metadata(out_dir))
     to_status = args.to
     expected_revision = getattr(args, "expected_revision", None)
     reason = getattr(args, "reason", None)
@@ -4141,7 +5050,8 @@ def cmd_transition(args):
                              ensure_ascii=False, indent=2))
             return 0
 
-        is_review_return = bool(trans and trans.get("review_return"))
+        is_review_return = bool(trans and (trans.get("review_return") or
+                                           (current == "completed" and to_status == "review_in_progress")))
         if is_review_return:
             if not review_return_payload_ok(return_request) or not args.request_id:
                 raise ControlError("返回审查需要当前 revision、明确原因和 request-id",
@@ -4160,6 +5070,9 @@ def cmd_transition(args):
 
         # Only historical births may be untracked. New births explicitly opt in
         # through the immutable event, so omitting start cannot bypass receipts.
+        if meta.get("mode") == "lite":
+            sm = load_state_machine(meta)
+            lite_transition_guard(out_dir, meta, events, to_status, args.delivery_verdict)
         tracked_step = sm["gate_policy"].get("step_by_target", {}).get(to_status)
         if tracked_step:
             starts = [event for event in events
@@ -4209,6 +5122,14 @@ def cmd_transition(args):
     # 门禁：完成态跑三 linter（debug 孪生跳过）；completed 强制显式 delivery_verdict
     gate_reports = []
     gates_skipped = bool(args.skip_gates)
+    # 工单级未解决债务余额：跨步骤按当前有效 trace 汇总，不随被推进步骤变化；
+    # 对债务 gate 真实重做（最后一条不再携带债务状态）即清偿归零。
+    enumeration_debt_balance = ticket_enumeration_debt(out_dir, meta)
+    if to_status == "completed" and args.delivery_verdict == "verified" \
+            and meta.get("mode") != "lite" and enumeration_debt_balance != 0:
+        raise ControlError("枚举或去重证据仍待核验，交付结论不能为 verified",
+                           gate_id="gate_enumeration_debt",
+                           enumeration_debt=enumeration_debt_balance)
     if to_status in sm["gate_policy"]["gated_targets"] and not meta.get("debug") and not gates_skipped:
         gate_reports = run_gate_linters(out_dir, to_status, args.delivery_verdict, metadata=meta)
         failed = [g for g in gate_reports if not g["ok"]]
@@ -4216,7 +5137,9 @@ def cmd_transition(args):
             print(json.dumps({
                 "ok": False, "fail_closed": True, "status": current,
                 "error": f"门禁未通过，状态不前移（{current!r} → {to_status!r} 被拒绝）",
-                "failed_gates": [{"gate_id": g["gate_id"], "detail": g.get("detail") or
+                "failed_gates": [{"gate_id": g["gate_id"],
+                                  "enumeration_debt": g.get("enumeration_debt"),
+                                  "detail": g.get("detail") or
                                   json.dumps(g.get("report", {}), ensure_ascii=False)[:600],
                                   "hint": g.get("hint")} for g in failed],
                 "gate_reports": gate_reports,
@@ -4243,6 +5166,8 @@ def cmd_transition(args):
         if problems:
             raise ControlError("现有事件链不完整，状态禁止前移", exit_code=1,
                                gate_id="event_chain", violations=problems)
+        if meta2.get("mode") == "lite":
+            lite_transition_guard(out_dir, meta2, events2, to_status, args.delivery_verdict)
         if tracked_step and requires_execution_receipts(events2) and not args.skip_gates:
             receipt_issues = completion_receipt_issues(out_dir, meta2, events2, tracked_step)
             if receipt_issues:
@@ -4270,6 +5195,23 @@ def cmd_transition(args):
                                         if s not in {"2", "3", "4", "5", "6"}]
             meta2.update(delivery_verdict="verification_pending", verdict="unknown",
                          total_rounds=1, clean_rounds=0, extended_rounds=0)
+        if meta2.get("mode") == "lite" and to_status in {"lite_prepare_in_progress", "lite_code_in_progress"}:
+            order = workflow_contract(meta2)["step_order"]
+            cutoff = 0 if to_status == "lite_prepare_in_progress" else 1
+            meta2["completed_steps"] = [x for x in meta2.get("completed_steps", []) if x in order[:cutoff]]
+            meta2["delivery_verdict"] = "verification_pending"
+            # 进入 Code 时把已核验的宿主适配器身份冻结进工单：签收阶段必须仍使用
+            # 同一适配器，防止实施期间信任根被换成"只回显"的程序。回退到 Prepare
+            # 不解除冻结，重新进入 Code 时按当前宿主信任根重新确认并再次冻结。
+            if to_status == "lite_code_in_progress":
+                extensions = dict(meta2.get("extensions") or {})
+                lite_ns = dict(extensions.get("lite") or {})
+                observation = _observe_host_adapter()
+                observation.pop("config_path", None)
+                timestamp = "pinned_at" if observation["status"] == "pinned" else "observed_at"
+                lite_ns["host_adapter"] = {**observation, timestamp: now_iso()}
+                extensions["lite"] = lite_ns
+                meta2["extensions"] = extensions
         meta2["status"] = to_status
         if current == "completed" and to_status.endswith("_in_progress"):
             # 终态被重开后，旧的现场交付结论不再能表示新一轮已完成。
@@ -4282,6 +5224,11 @@ def cmd_transition(args):
             meta2["completed_steps"] = completed_steps
         if args.delivery_verdict:
             meta2["delivery_verdict"] = args.delivery_verdict
+        # 债务余额无条件进入 state_changed 事件 payload（可持续追踪）与状态推进
+        # 输出：门禁通过不代表债务已解决，0 显式证明清偿，null 表示 trace 不可读
+        # 无法判定（不得当作清偿），交付结论必须可见。
+        transition_payload["gate_enumeration_debt"] = enumeration_debt_balance
+        transition_payload["gate_enumeration_debt_unknown"] = enumeration_debt_balance is None
         event = commit_metadata_and_event(
             out_dir, before_meta, meta2, "state_changed", transition_payload,
             request_id=args.request_id)
@@ -4296,6 +5243,8 @@ def cmd_transition(args):
     print(json.dumps({"ok": True, "from": current, "to": to_status,
                       "delivery_verdict": args.delivery_verdict,
                       "gates_skipped": gates_skipped,
+                      "enumeration_debt": enumeration_debt_balance,
+                      "enumeration_debt_unknown": enumeration_debt_balance is None,
                       "event_id": event["event_id"],
                       "index_refresh": index_refresh,
                       "gates": [{g["gate_id"]: g["ok"]} for g in gate_reports]},
@@ -4374,7 +5323,7 @@ def build_index_entry(out_dir, meta, identity=None):
         "updated_at": now_iso(),
         "created_at": meta.get("created_at"),
         "has_00_init": (out_dir / "00_init.md").is_file(),
-        "has_plan": (out_dir / "01_plan.md").is_file(),
+        "has_plan": (out_dir / "01_plan.md").is_file() or "lite_prepare" in (meta.get("completed_steps") or []),
         "requirement_summary": meta.get("requirement_summary") or (meta.get("requirement") or "")[:80],
         "requirement_points": meta.get("requirement_points"),
         "keywords": meta.get("keywords"),
@@ -4389,6 +5338,8 @@ def build_index_entry(out_dir, meta, identity=None):
                        if meta.get("tb_source", {}).get(key) is not None}
                       if isinstance(meta.get("tb_source"), dict) else None),
     }
+    if meta.get("mode") == "lite":
+        entry.update(mode="lite", workflow_version=meta["workflow_version"])
     return {k: v for k, v in entry.items() if v is not None or k in
             ("ticket_id", "project_path", "out_dir", "status")}
 
@@ -4686,6 +5637,12 @@ def cmd_index_update(args):
 
 def required_archive_files(meta, events=()):
     required = {METADATA_NAME, EVENTS_NAME}
+    if meta.get("mode") == "lite":
+        required.add("lite.md")
+        for review in lite_review_records(events)[1]:
+            if review.get("report_path"):
+                required.add(review["report_path"])
+        return required
     step_files = {
         "0": ["00_init.md"],
         "log": ["00_init.md", "log_analysis.md"],
@@ -4766,7 +5723,8 @@ def verify_archive_manifest(archive_dir, ticket_id, source_dir=None):
         if os.environ.get("ICODE_CONTROL_TEST_MODE") != "1":
             problems.append("manifest 标记跳过 linter，但当前不是测试夹具")
     else:
-        expected_gates = set(load_state_machine()["gate_policy"]["gate_linters"])
+        expected_gates = ({"lite_contract"} if load_metadata(archive_dir).get("mode") == "lite" else
+                          set(load_state_machine()["gate_policy"]["gate_linters"]))
         if not isinstance(linter_rows, list):
             problems.append("manifest.lint_roundtrip 类型错误")
         else:
@@ -5076,7 +6034,8 @@ METADATA_UPDATE_PROTECTED = {
     "indexed", "delivery_verdict", "claims", "verification_runs", "close_state",
     "control_plane_degraded", "debug", "project_path",
     "workflow_gate_schema_version", "thinking_gate_schema_version",
-    "mcp_gate_schema_version",
+    "mcp_gate_schema_version", "mcp_gate_contract_version",
+    "mcp_gate_contract_adopted_at", "mcp_gate_contract_history_boundary",
 }
 CLOSE_BOOKKEEPING_FIELDS = {
     "artifact_root", "archive_path", "backup_path", "worktree_path", "worktree_branch",
@@ -5105,8 +6064,12 @@ def stage_projection(out_dir, *, git_provider=None, require_git_provider=False):
 
 
 def require_stage_action(out_dir, action, *, expected_generation=None, git_provider=None, require_git_provider=False):
-    return stage_module().require_action(out_dir, action, expected_generation=expected_generation,
+    state = stage_module().require_action(out_dir, action, expected_generation=expected_generation,
                                          git_provider=git_provider, require_git_provider=require_git_provider)
+    if state.get("enabled") and action not in {"status", "trace", "check", "inspect"} \
+            and (Path(out_dir) / METADATA_NAME).is_file() and load_metadata(out_dir).get("mode") == "lite":
+        raise ControlError("lite 首版不支持阶段计划执行", gate_id="lite_stage_unsupported")
+    return state
 
 
 def register_stage_program(out_dir, plan, **kwargs):
@@ -5190,6 +6153,9 @@ def _stage_retirement_guard(out_dir, *, git_provider=None, require_git_provider=
 
 def _stage_write_guard(out_dir, event_type, payload, *, git_provider=None, require_git_provider=False):
     retirement = _stage_retirement_guard(out_dir, git_provider=git_provider, require_git_provider=require_git_provider)
+    if (Path(out_dir) / METADATA_NAME).is_file() and load_metadata(out_dir).get("mode") == "lite" \
+            and stage_projection(out_dir, git_provider=git_provider, require_git_provider=require_git_provider).get("enabled"):
+        raise ControlError("lite 首版不支持阶段计划写入", gate_id="lite_stage_unsupported")
     action = _stage_write_action(event_type, payload)
     if action is None:
         return retirement
@@ -5779,13 +6745,17 @@ def candidate_snapshot(out_dir, meta, *, base=None, excluded_side_effects=None, 
         raise ControlError(f"候选身份无法完整建立: {exc}", gate_id="candidate_capture") from exc
 
 
-def delivery_freshness(out_dir, meta=None, *, required_steps=("code", "deepcheck", "audit"),
+def delivery_freshness(out_dir, meta=None, *, required_steps=None,
                        git_provider=None, require_git_provider=False):
     """Read-only query; freshness acceptance remains distinct from query success."""
     meta = load_metadata(out_dir) if meta is None else meta
+    required_steps = tuple(required_steps or workflow_contract(meta)["required_review_steps"])
     module = candidate_module()
     access = ({"git_provider": git_provider, "require_git_provider": require_git_provider}
               if _candidate_access_requested(git_provider, require_git_provider) else {})
+    if access and meta.get("mode") == "lite":
+        return {"ok": False, "state": "blocked", "reasons": ["lite_provider_unsupported"],
+                "candidate_id": None, "applicable_receipts": [], "required_steps": list(required_steps)}
     if not access:
         if (meta.get("candidate_tracking") or {}).get("mode") != "enabled":
             return module.delivery_freshness(meta, None, required_steps=required_steps)
@@ -5800,7 +6770,15 @@ def delivery_freshness(out_dir, meta=None, *, required_steps=("code", "deepcheck
             return {"ok": False, "state": "blocked", "reasons": ["candidate_capture"],
                     "detail": exc.message, "candidate_id": None, "applicable_receipts": [],
                     "required_steps": list(required_steps)}
-        return module.delivery_freshness(meta, current, events, required_steps)
+        result = module.delivery_freshness(meta, current, events, required_steps)
+        if meta.get("mode") == "lite":
+            try:
+                lite_review_fact(out_dir, meta, events, candidate=current)
+            except ControlError as exc:
+                result = dict(result, ok=False, state="review_required", applicable_receipts=[],
+                              reasons=result["reasons"] + [exc.extra.get("gate_id", "lite_review_required")],
+                              detail=exc.message)
+        return result
     try:
         if access:
             _candidate_context_guard(out_dir, meta, git_provider, require_git_provider)
@@ -5874,7 +6852,7 @@ def candidate_event_issues(events, meta):
         receipt = payload.get("candidate_receipt")
         if kind == "step_finished" and "candidate_receipt" in payload:
             if payload.get("outcome") != "success" \
-                    or payload.get("step") not in candidate_module().REVIEW_STEPS \
+                    or payload.get("step") not in workflow_contract(meta)["required_review_steps"] \
                     or not isinstance(receipt, dict) or receipt.get("event_id") != event.get("event_id") \
                     or receipt.get("step") != payload.get("step") or receipt.get("attempt") != payload.get("attempt") \
                     or not isinstance(tracking, dict):
@@ -5902,7 +6880,7 @@ def cmd_candidate(args, *, git_provider=None, require_git_provider=False):
     if access and args.phase not in {"inspect", "capture"}:
         raise ControlError("candidate phase is not enabled", gate_id="candidate_business_propagation_pending")
     if args.phase == "inspect":
-        result = delivery_freshness(out_dir, required_steps=tuple(args.require_step or candidate_module().REVIEW_STEPS), **access)
+        result = delivery_freshness(out_dir, required_steps=tuple(args.require_step or workflow_contract(load_metadata(out_dir))["required_review_steps"]), **access)
         result["freshness_ok"] = result["ok"]
         if not args.require_step:
             result["ok"] = True
@@ -6064,6 +7042,10 @@ def cmd_metadata_update(args):
         meta = load_metadata(out_dir)
         require_vnext(meta, out_dir)
         require_valid_metadata(meta)
+        if meta.get("mode") == "lite":
+            protected_lite = {"mode", "workflow_version", "requirement"}
+            if touched & protected_lite or "requirement_deltas" in updates:
+                raise ControlError("lite 出生身份与原始需求不可覆盖；需求变更只允许追加", gate_id="lite_identity_frozen")
         close_state = meta.get("close_state")
         if close_state is not None:
             phases = load_state_machine()["close_phases"]
@@ -6101,6 +7083,11 @@ def cmd_metadata_update(args):
                 raise ControlError(
                     f"关闭流程中只允许更新拓扑/提交/归档账本字段，收到: {disallowed}",
                     exit_code=1, gate_id="close_metadata_frozen")
+        if meta.get("mode") == "lite" and touched & {
+                "requirement_deltas", "scope_contract", "semantic_decisions", "acceptance_contract",
+                "verification_contract", "impact_contract"} and meta["status"] != "lite_prepare_in_progress":
+            # 精确历史回放已在上方处理；新语义只能在撤销下游投影后写入。
+            raise ControlError("语义合同变化先受控回退 Prepare", gate_id="lite_prepare_required")
         updated = dict(meta)
         updated.update(updates)
         for key, values in appends.items():
@@ -6137,6 +7124,16 @@ def cmd_metadata_update(args):
             raise ControlError(
                 "extensions.agent.spawns 由 record-agent-spawn/record-agent-result "
                 "专用命令维护，metadata-update 禁止改写",
+                exit_code=2, gate_id="metadata_update_protected")
+        # 冻结的宿主适配器身份只能由受控阶段转换写入；否则调用方可在实施后
+        # 用普通 metadata 更新把冻结值改成自己回显适配器的摘要，再顺利签收。
+        current_pinned = ((((meta.get("extensions") or {}).get("lite") or {})
+                           .get("host_adapter")) or {})
+        updated_pinned = ((((updated.get("extensions") or {}).get("lite") or {})
+                           .get("host_adapter")) or {})
+        if updated_pinned != current_pinned:
+            raise ControlError(
+                "extensions.lite.host_adapter 由受控阶段转换维护，metadata-update 禁止改写",
                 exit_code=2, gate_id="metadata_update_protected")
         if updated == meta:
             print(json.dumps({"ok": True, "no_change": True,
@@ -6531,8 +7528,24 @@ def cmd_record_verification(args, *, git_provider=None, require_git_provider=Fal
         runs = list(meta.get("verification_runs") or [])
         runs.append(run)
         meta["verification_runs"] = runs
+        event_payload = run
+        if meta.get("mode") == "lite" and meta.get("status") == "completed":
+            cells = (meta.get("verification_contract") or {}).get("required_cells") or []
+            key = lambda row: tuple(row.get(k) for k in ("layer", "consumer", "scenario"))
+            if any(key(cell) == key(run) for cell in cells):
+                issues, _ = lite_evidence_issues(out_dir, meta, events)
+                if issues:
+                    execution = execution_trace(events)
+                    if execution["open_steps"] or execution["open_operations"] or execution["open_agents"]:
+                        # 显式 verify 可仍有自己的开放 attempt；先撤销 verified，终结后按标准回退。
+                        meta["delivery_verdict"] = "blocked"
+                    else:
+                        meta.update(status="lite_code_in_progress", delivery_verdict="verification_pending",
+                                    completed_steps=["lite_prepare"])
+                        event_payload = dict(run, lite_invalidation={"from": "completed", "to": "lite_code_in_progress",
+                                             "delivery_verdict": None, "reason": "latest_required_verification_invalid"})
         event = commit_metadata_and_event(
-            out_dir, before_meta, meta, "verification_recorded", run,
+            out_dir, before_meta, meta, "verification_recorded", event_payload,
             request_id=args.request_id,
             **(dict(access, before_publish=before_publish) if access else {}))
     print(json.dumps({"ok": True, "run": {key: value for key, value in run.items() if key != "candidate"}, "event_id": event["event_id"]},
@@ -6613,6 +7626,744 @@ def _agent_spawns(meta):
     return list((((meta.get("extensions") or {}).get("agent") or {}).get("spawns")) or [])
 
 
+def _lite_agent_receipt(out_dir, meta, events, spawn, host_session_id, report, *,
+                        host_receipt):
+    """校验回执绑定并生成待落盘报告；不写入磁盘，可信核验通过后再提交。"""
+    reviewed = _active_lite_review(meta, events, spawn["lite_review_attempt"])
+    binding = spawn["lite_review_binding"]
+    current = candidate_snapshot(out_dir, meta, events=events)
+    if (reviewed or {}).get("candidate_id") != binding["candidate_id"] \
+            or not candidate_module().compare_candidates(reviewed, current)["equivalent"] \
+            or lite_module().contract_digest(meta) != binding["contract_digest"]:
+        raise ControlError("审核返回已失效", gate_id="lite_review_stale")
+    if any(fact.get("host_session_id") == host_session_id for fact in lite_review_records(events)[1]):
+        raise ControlError("审核宿主复用了已有上下文", gate_id="lite_review_host")
+    # P1：回执须绑定本次登记——回传 spawn 下发的 challenge，且身份/spawn 一致。
+    challenge = spawn.get("host_receipt_challenge")
+    if not isinstance(challenge, str) or not challenge:
+        raise ControlError("该审核登记缺少宿主挑战，无法核验回执来源", gate_id="lite_review_host_receipt")
+    if not isinstance(host_receipt, dict):
+        raise ControlError("缺少宿主回执，无法核验结果来自本次启动", gate_id="lite_review_host_receipt")
+    if host_receipt.get("challenge") != challenge \
+            or host_receipt.get("spawn_id") != spawn.get("spawn_id") \
+            or host_receipt.get("host_session_id") != host_session_id:
+        raise ControlError("宿主回执与本次登记的 challenge/spawn/身份不一致",
+                           gate_id="lite_review_host_receipt")
+    if any(fact.get("host_receipt", {}).get("challenge") == challenge
+           for fact in lite_review_records(events)[1] if fact.get("host_receipt")):
+        raise ControlError("宿主回执 challenge 已被使用，禁止重放", gate_id="lite_review_host_receipt")
+    report = dict(report, schema_version=1, attempt=spawn["lite_review_attempt"], **binding)
+    violations = validate_against(report, SCHEMA_DIR / "lite-review.schema.json", "lite_review_schema")
+    if violations:
+        raise ControlError("审核报告不满足 schema", gate_id="lite_review_report", violations=violations)
+    name = "lite_review_" + spawn["spawn_id"] + ".json"
+    try:
+        data = (json.dumps(report, ensure_ascii=False, indent=2, allow_nan=False) + "\n").encode("utf-8")
+    except (ValueError, RecursionError) as exc:
+        raise ControlError("审核报告包含无效 JSON 值", gate_id="lite_review_report") from exc
+    return name, data
+
+
+def _commit_lite_agent_report(out_dir, name, data, attestation, spawn, host_session_id,
+                              degraded=False):
+    """仅在可信宿主确认后落盘；失败尝试不占用报告路径。
+
+    degraded=True 表示本工单已记录宿主适配器不可用：报告照常留痕供追溯，
+    但不构成可信确认，交付结论只能是 verification_pending。
+    """
+    if degraded:
+        # 降级路径：没有可信确认，报告只作留痕；调用方保证工单记录了不可用事实。
+        if attestation is not None:
+            raise ControlError("降级落盘不应携带可信确认",
+                               gate_id="lite_review_host_unattested")
+    else:
+        challenge = spawn.get("host_receipt_challenge")
+        if not isinstance(attestation, dict) or attestation.get("launched") is not True \
+                or attestation.get("challenge") != challenge \
+                or attestation.get("spawn_id") != spawn.get("spawn_id") \
+                or attestation.get("host_session_id") != host_session_id \
+                or attestation.get("stored_report_sha256") != hashlib.sha256(data).hexdigest():
+            raise ControlError("缺少可信宿主确认，结果不能作为审核依据",
+                               gate_id="lite_review_host_unattested")
+    path = out_dir / name
+    # 中断可能在事件提交前留下报告，只允许原字节的精确重试。
+    if path.is_symlink() or (path.exists() and (
+            not path.is_file() or path.stat().st_size != len(data) or path.read_bytes() != data)):
+        raise ControlError("审核报告路径已被占用", gate_id="lite_review_report")
+    if not path.exists():
+        atomic_write_bytes(path, data)
+    return {"report_path": name, "report_sha256": hashlib.sha256(data).hexdigest()}
+
+
+def _read_lite_agent_result(args):
+    limit = 256 * 1024
+    try:
+        if args.lite_review_report == "-":
+            data = sys.stdin.buffer.read(limit + 1)
+        else:
+            path = Path(args.lite_review_report)
+            if not path.is_file():
+                raise ValueError("报告输入须为常规文件或 stdin")
+            with path.open("rb") as stream:
+                data = stream.read(limit + 1)
+        if len(data) > limit:
+            raise ValueError("审核报告超过 256 KiB")
+        report = strict_json_loads(data.decode("utf-8"))
+        if not isinstance(report, dict):
+            raise ValueError("审核报告应为 JSON 对象")
+    except (OSError, ValueError, RecursionError) as exc:
+        raise ControlError("无法读取审核报告", gate_id="lite_review_report") from exc
+    return report, hashlib.sha256(data).hexdigest()
+
+
+def _read_host_receipt(args):
+    """读取宿主提供的启动/返回回执；宿主中立：仅校验与本次登记绑定的字段。"""
+    limit = 64 * 1024
+    path_arg = getattr(args, "host_receipt", None)
+    try:
+        if path_arg == "-":
+            data = sys.stdin.buffer.read(limit + 1)
+        else:
+            path = Path(path_arg)
+            if not path.is_file():
+                raise ValueError("宿主回执须为常规文件或 stdin")
+            with path.open("rb") as stream:
+                data = stream.read(limit + 1)
+        if len(data) > limit:
+            raise ValueError("宿主回执超过 64 KiB")
+        receipt = strict_json_loads(data.decode("utf-8"))
+        if not isinstance(receipt, dict):
+            raise ValueError("宿主回执应为 JSON 对象")
+    except (OSError, ValueError, RecursionError) as exc:
+        raise ControlError("无法读取宿主回执", gate_id="lite_review_host_receipt") from exc
+    return receipt, hashlib.sha256(data).hexdigest()
+
+
+# 宿主适配器只从宿主侧配置读取，调用方不能按次指定可执行文件。
+# 配置固定位于 <宿主真实主目录>/.icode/host_adapter.json，部署时由宿主写入并锁定权限。
+# 不接受任何环境变量重定向：调用方本就能设置环境变量，按次/按进程指向自建配置
+# 会让"摘要与配置一致"退化为"摘要与调用方给的配置一致"，从而绕过来源信任。
+# 主目录同样不能取自 HOME（见 _host_home）：设置 HOME 就能换掉整个信任根。
+# 测试只用显式进程内钩子 _HOST_CONFIG_ROOT_OVERRIDE 隔离信任根。
+_HOST_CONFIG_ROOT_OVERRIDE = None
+
+
+def _host_path_is_link(path):
+    try:
+        info = path.lstat()
+    except FileNotFoundError:
+        return False
+    return (stat.S_ISLNK(info.st_mode) or
+            bool(getattr(info, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT))
+
+
+def _host_home():
+    """返回宿主真实主目录，不信任 HOME 等调用方可设置的环境变量。
+
+    HOME 只是进程环境的约定值，调用方设置后 Path.home() 会跟随改变，等于
+    把信任根交给调用方。这里改从系统账户数据库取值；取不到一律 fail-closed，
+    绝不回退到环境变量。
+    """
+    if os.name == "nt":
+        return _windows_host_home()
+    if os.name != "posix":
+        raise ControlError("宿主信任根无法在该平台安全确定（缺少账户数据库）",
+                           gate_id="lite_host_adapter_unavailable")
+    import pwd
+    try:
+        entry = pwd.getpwuid(os.getuid())
+    except KeyError as exc:
+        raise ControlError("无法从系统账户数据库确定宿主主目录",
+                           gate_id="lite_host_adapter_unavailable") from exc
+    home = (getattr(entry, "pw_dir", "") or "").strip()
+    if not home or not os.path.isabs(home):
+        raise ControlError("系统账户数据库返回的宿主主目录不可信",
+                           gate_id="lite_host_adapter_unavailable")
+    resolved = Path(home)
+    if _host_path_is_link(resolved):
+        raise ControlError("宿主主目录是符号链接，拒绝信任",
+                           gate_id="lite_host_adapter_unavailable")
+    if not resolved.is_dir():
+        raise ControlError("宿主主目录不存在，拒绝信任",
+                           gate_id="lite_host_adapter_unavailable")
+    if _path_is_others_writable(resolved):
+        raise ControlError("宿主主目录可被其他用户改写，拒绝信任",
+                           gate_id="lite_host_adapter_unavailable")
+    return resolved
+
+
+def _windows_host_home():
+    r"""Windows：经 Known Folder API 取用户主目录，不使用 USERPROFILE/HOME。
+
+    USERPROFILE 与 HOME 一样是进程环境值，调用方能随手改掉。这里用
+    SHGetKnownFolderPath(FOLDERID_Profile)：它由 Shell 根据当前登录令牌的
+    SID 解析，不读可被伪造的环境变量，也天然处理了 ProfileImagePath 里
+    `%SystemDrive%` 之类的可展开形式。
+    """
+    try:
+        import ctypes
+        from ctypes import wintypes
+    except ImportError as exc:
+        raise ControlError("宿主信任根无法在 Windows 上安全确定",
+                           gate_id="lite_host_adapter_unavailable") from exc
+
+    class GUID(ctypes.Structure):
+        _fields_ = [("Data1", wintypes.DWORD), ("Data2", wintypes.WORD),
+                    ("Data3", wintypes.WORD), ("Data4", ctypes.c_ubyte * 8)]
+
+    # {5E6C858F-0E22-4760-9AFE-EA3317B67173} = FOLDERID_Profile
+    folder_id_profile = GUID(0x5E6C858F, 0x0E22, 0x4760,
+                             (ctypes.c_ubyte * 8)(0x9A, 0xFE, 0xEA, 0x33,
+                                                  0x17, 0xB6, 0x71, 0x73))
+    shell32 = ctypes.WinDLL("shell32", use_last_error=True)
+    ole32 = ctypes.WinDLL("ole32", use_last_error=True)
+    # HRESULT 是有符号 32 位。c_long 在 Windows(LLP64) 上正是 32 位，
+    # 而在 POSIX(LP64) 上是 64 位；本函数只在 Windows 运行，故用 c_long 安全。
+    shell32.SHGetKnownFolderPath.restype = ctypes.c_long
+    shell32.SHGetKnownFolderPath.argtypes = [
+        ctypes.POINTER(GUID), wintypes.DWORD, wintypes.HANDLE,
+        ctypes.POINTER(ctypes.c_wchar_p)]
+    # CoTaskMemFree 必须显式声明：默认返回值被当作 c_int，指针参数需 c_void_p。
+    ole32.CoTaskMemFree.restype = None
+    ole32.CoTaskMemFree.argtypes = [ctypes.c_void_p]
+    out = ctypes.c_wchar_p()
+    hr = shell32.SHGetKnownFolderPath(ctypes.byref(folder_id_profile), 0, None,
+                                      ctypes.byref(out))
+    if hr != 0:
+        raise ControlError("Known Folder API 无法解析用户主目录（HRESULT 0x%08X）" % (hr & 0xFFFFFFFF),
+                           gate_id="lite_host_adapter_unavailable")
+    try:
+        home = (out.value or "").strip()
+    finally:
+        if out:
+            ole32.CoTaskMemFree(out)
+    if not home or not os.path.isabs(home):
+        raise ControlError("Windows 账户 API 返回的宿主主目录不可信",
+                           gate_id="lite_host_adapter_unavailable")
+    resolved = Path(home)
+    if _host_path_is_link(resolved):
+        raise ControlError("宿主主目录是符号链接，拒绝信任",
+                           gate_id="lite_host_adapter_unavailable")
+    if not resolved.is_dir():
+        raise ControlError("宿主主目录不存在，拒绝信任",
+                           gate_id="lite_host_adapter_unavailable")
+    if _path_is_others_writable(resolved):
+        raise ControlError("宿主主目录可被其他用户改写，拒绝信任",
+                           gate_id="lite_host_adapter_unavailable")
+    return resolved
+
+
+def _host_config_root():
+    if _HOST_CONFIG_ROOT_OVERRIDE is not None:
+        return Path(_HOST_CONFIG_ROOT_OVERRIDE)
+    # 信任根不接受任何环境变量重定向。测试若需要隔离信任根，必须在本进程内
+    # 直接赋值 _HOST_CONFIG_ROOT_OVERRIDE（例如 mock.patch.object），而 CLI
+    # 子进程拿不到这个入口，生产调用永远走 _host_home()。
+    root = _host_home() / ".icode"
+    # 信任根本身也必须不可被旁人改写（对伪造主目录的纵深防御）。
+    if _host_path_is_link(root) or (root.exists() and _path_is_others_writable(root)):
+        raise ControlError("宿主信任根可被其他用户改写，拒绝信任",
+                           gate_id="lite_host_adapter_unavailable")
+    return root
+
+
+def _default_host_config():
+    return _host_config_root() / "host_adapter.json"
+
+
+def _host_adapter_config():
+    """读取并验证宿主适配器配置：固定命令、固定摘要、不可被旁人改写。"""
+    config_path = _default_host_config()
+    if _host_path_is_link(config_path) or not config_path.is_file():
+        raise ControlError("未配置可信宿主适配器（缺少宿主配置 %s）" % config_path,
+                           gate_id="lite_host_adapter_unavailable")
+    if _path_is_others_writable(config_path):
+        raise ControlError("宿主适配器配置可被其他用户改写，拒绝信任",
+                           gate_id="lite_host_adapter_unavailable")
+    try:
+        config = strict_json_loads(config_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, RecursionError) as exc:
+        raise ControlError("宿主适配器配置无法解析", gate_id="lite_host_adapter_unavailable") from exc
+    if not isinstance(config, dict):
+        raise ControlError("宿主适配器配置应为 JSON 对象", gate_id="lite_host_adapter_unavailable")
+    command, pin = config.get("command"), config.get("sha256")
+    if not isinstance(command, str) or not os.path.isabs(command) or not Path(command).is_file():
+        raise ControlError("宿主适配器命令必须是已存在的绝对路径", gate_id="lite_host_adapter_unavailable")
+    adapter = Path(command)
+    if _host_path_is_link(adapter) or _path_is_others_writable(adapter):
+        raise ControlError("宿主适配器可被其他用户改写，拒绝信任", gate_id="lite_host_adapter_unavailable")
+    if not os.access(adapter, os.X_OK):
+        raise ControlError("宿主适配器不可执行", gate_id="lite_host_adapter_unavailable")
+    _require_host_owned_location(adapter)
+    actual = file_sha256(adapter)
+    if not isinstance(pin, str) or pin != actual:
+        raise ControlError("宿主适配器摘要与可信配置不一致", gate_id="lite_host_adapter_unavailable")
+    return {"path": adapter, "sha256": actual, "config_path": config_path}
+
+
+def _observe_host_adapter():
+    """预检和进入 Code 使用同一套宿主适配器可用性规则。"""
+    try:
+        trusted = _host_adapter_config()
+    except ControlError as exc:
+        return {"status": "unavailable", "reason": exc.extra.get("gate_id", "lite_host_adapter_unavailable"),
+                "detail": exc.message}
+    except (OSError, RuntimeError, ValueError) as exc:
+        return {"status": "unavailable", "reason": "lite_host_adapter_unavailable",
+                "detail": f"无法核验宿主适配器路径：{exc}"}
+    return {"status": "pinned", "sha256": trusted["sha256"], "path": str(trusted["path"]),
+            "config_path": str(trusted["config_path"])}
+
+
+# 其他用户/组可写位。POSIX 上 st_mode 能证明这一点；Windows 的 st_mode 只
+# 反映只读属性，无法说明 NTFS ACL 是否向他人授予写权限，必须另读 ACL。
+_OTHERS_WRITE_BITS = 0o022
+_MACOS_EVERYONE_ACL_UUID = "ABCDEFAB-CDEF-ABCD-EFAB-CDEF0000000C"
+
+
+def _macos_path_has_foreign_write_acl(path, *, ancestor=False):
+    """保守检查 macOS 扩展 ACL 中授予其他主体的写权限。"""
+    try:
+        result = subprocess.run(
+            ["/bin/ls", "-lde", str(path)], capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=5,
+            env={**os.environ, "LC_ALL": "C"})
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise ControlError("无法读取 macOS ACL：%s" % type(exc).__name__,
+                           gate_id="lite_host_adapter_unavailable") from exc
+    if result.returncode:
+        raise ControlError("无法读取 macOS ACL（退出码 %d）" % result.returncode,
+                           gate_id="lite_host_adapter_unavailable")
+
+    import pwd
+    current_user = pwd.getpwuid(os.getuid()).pw_name
+    write_permissions = {"write", "append", "add_file", "add_subdirectory",
+                         "delete_child", "delete", "writeattr", "writeextattr",
+                         "writesecurity"}
+    for line in result.stdout.splitlines()[1:]:
+        entry = re.match(r"^\s*\d+:\s+(.+?)\s+(allow|deny)\s+(.+)$", line)
+        if not entry or entry.group(2) != "allow":
+            continue
+        principal, permissions = entry.groups()[0], entry.group(3)
+        granted = {permission.strip() for permission in permissions.split(",")}
+        if not granted.intersection(write_permissions):
+            continue
+        if principal == current_user or principal == "user:" + current_user:
+            continue
+        # macOS ls may render the Everyone principal as its UUID instead of a name.
+        if principal.casefold() == _MACOS_EVERYONE_ACL_UUID.casefold():
+            return True
+        # Group and unresolved principals may include another account. Reject
+        # their write grants instead of assuming the ACL is private.
+        if principal.startswith("group:") or principal.startswith("user:"):
+            return True
+        return True
+    return False
+
+
+def _path_is_others_writable(path, *, ancestor=False):
+    """目标是否允许当前用户之外的主体写入；无法判定时抛错（fail-closed）。
+
+    macOS 同时读取扩展 ACL；其它 POSIX 读 st_mode。Windows 读实际 DACL，
+    逐个 ACE 判断是否对非当前用户的主体授予写类权限。
+    """
+    # 检查解析后的目标本身：lstat 只看符号链接自身的权限位，
+    # 会让一个指向 0777 目录的 0755 链接被误判为安全。
+    resolved = Path(path).resolve()
+    if os.name == "posix":
+        if os.uname().sysname == "Darwin" and _macos_path_has_foreign_write_acl(
+                resolved, ancestor=ancestor):
+            return True
+        return bool(resolved.stat().st_mode & _OTHERS_WRITE_BITS)
+    try:
+        return _windows_path_has_foreign_write_ace(resolved, ancestor=ancestor)
+    except ControlError:
+        raise
+    except (AttributeError, OSError, ValueError) as exc:
+        # 缺失的 API、畸形 ACE 等原生失败必须转成受控的 ControlError，
+        # 否则调用方的降级处理接不住，Windows 上会直接崩而不是按预期降级。
+        raise ControlError("Windows ACL 校验失败：%s" % type(exc).__name__,
+                           gate_id="lite_host_adapter_unavailable") from exc
+
+
+def _ace_sid_offset(base, ace_type, object_ace_types, flat_offset):
+    """返回 ACE 内 SID 起始偏移。
+
+    普通允许型 ACE 固定为 Mask(4) 之后；对象型 ACE 在 Mask 后还有 Flags(4)
+    与按 Flags 位可选出现的两个 GUID，SID 不在固定位置。
+    """
+    if ace_type not in object_ace_types:
+        return flat_offset
+    import ctypes
+    from ctypes import wintypes
+    flags = ctypes.cast(base + flat_offset,
+                        ctypes.POINTER(wintypes.DWORD)).contents.value
+    offset = flat_offset + 4                     # 越过 Flags
+    if flags & 0x1:                              # ACE_OBJECT_TYPE_PRESENT
+        offset += 16
+    if flags & 0x2:                              # ACE_INHERITED_OBJECT_TYPE_PRESENT
+        offset += 16
+    return offset
+
+
+def _windows_path_has_foreign_write_ace(path, *, ancestor=False):
+    r"""读 Windows DACL，判断是否存在授予"他人可写"的 ACE。
+
+    只用 GetNamedSecurityInfo + 逐 ACE 解析。真实 ACE 形态多变（OBJECT_INHERIT、
+    INHERIT_ONLY、容器快速 ACL 等），逐位解析容易漏判；这里采取保守策略：
+    任何无法确定为"仅当前用户/系统/内置管理员可写"的写类 ACE 都视为风险。
+    """
+    try:
+        import ctypes
+        from ctypes import wintypes
+    except ImportError as exc:
+        raise ControlError("无法在 Windows 上校验 ACL", gate_id="lite_host_adapter_unavailable") from exc
+
+    SE_FILE_OBJECT = 1
+    DACL_SECURITY_INFORMATION = 0x00000004
+    OWNER_SECURITY_INFORMATION = 0x00000001
+    ERROR_SUCCESS = 0
+    # 祖先目录仅允许创建新目录的 ACE（例如盘符根目录）不允许替换现有组件。
+    write_mask = 0x00000100 | 0x00000040 | 0x00010000 | 0x00040000 | 0x00080000 | 0x50000000
+    if not ancestor:
+        write_mask |= 0x00000002 | 0x00000004 | 0x00000010
+
+    advapi32 = ctypes.WinDLL("advapi32", use_last_error=True)
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    # 64 位下指针必须显式声明为 c_void_p：ctypes 默认按 c_int 解释返回值，
+    # 会把指针高位截断，导致 GetAce/ConvertSidToStringSidW 解引用非法地址。
+    advapi32.GetNamedSecurityInfoW.restype = wintypes.DWORD
+    advapi32.GetNamedSecurityInfoW.argtypes = [
+        wintypes.LPWSTR, ctypes.c_int, wintypes.DWORD,
+        ctypes.POINTER(ctypes.c_void_p), ctypes.POINTER(ctypes.c_void_p),
+        ctypes.POINTER(ctypes.c_void_p), ctypes.POINTER(ctypes.c_void_p),
+        ctypes.POINTER(ctypes.c_void_p)]
+    # Win32 没有 GetAceCount：ACE 数量只能由
+    # GetAclInformation(AclSizeInformation) 取 ACL_SIZE_INFORMATION.AceCount。
+    advapi32.GetAclInformation.restype = wintypes.BOOL
+    advapi32.GetAclInformation.argtypes = [ctypes.c_void_p, ctypes.c_void_p,
+                                           wintypes.DWORD, wintypes.DWORD]
+    advapi32.GetAce.restype = wintypes.BOOL
+    advapi32.GetAce.argtypes = [ctypes.c_void_p, wintypes.DWORD,
+                                ctypes.POINTER(ctypes.c_void_p)]
+    advapi32.ConvertSidToStringSidW.restype = wintypes.BOOL
+    advapi32.ConvertSidToStringSidW.argtypes = [ctypes.c_void_p,
+                                                ctypes.POINTER(ctypes.c_wchar_p)]
+    kernel32.LocalFree.restype = ctypes.c_void_p
+    kernel32.LocalFree.argtypes = [ctypes.c_void_p]
+
+    class ACE_HEADER(ctypes.Structure):
+        _fields_ = [("AceType", ctypes.c_ubyte), ("AceFlags", ctypes.c_ubyte),
+                    ("AceSize", wintypes.WORD)]
+
+    class ACL_SIZE_INFORMATION(ctypes.Structure):
+        _fields_ = [("AceCount", wintypes.DWORD),
+                    ("AclBytesInUse", wintypes.DWORD),
+                    ("AclBytesFree", wintypes.DWORD)]
+
+    AclSizeInformation = 2
+    # 允许型 ACE：ACCESS_ALLOWED、_OBJECT、_CALLBACK、_CALLBACK_OBJECT。
+    # 0x2 是 SYSTEM_AUDIT、0xa 是 ACCESS_DENIED_CALLBACK，都不是允许型。
+    ALLOWED_ACE_TYPES = (0x0, 0x5, 0x9, 0xB)
+    OBJECT_ACE_TYPES = (0x5, 0xB)
+    ACE_MASK_OFFSET = 4
+    ACE_SID_OFFSET_FLAT = 8
+
+    target = str(path)
+    owner = ctypes.c_void_p()
+    dacl = ctypes.c_void_p()
+    sd = ctypes.c_void_p()
+    rc = advapi32.GetNamedSecurityInfoW(
+        target, SE_FILE_OBJECT, OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
+        ctypes.byref(owner), None, ctypes.byref(dacl), None, ctypes.byref(sd))
+    if rc != ERROR_SUCCESS:
+        raise ControlError("无法读取 Windows ACL（错误 %d）" % rc,
+                           gate_id="lite_host_adapter_unavailable")
+    try:
+        if not dacl:
+            # 无 DACL 表示所有人完全访问，等同于他人可写。
+            return True
+        current_sid = _windows_current_sid_string_cached()
+        allowed_sids = _windows_privileged_sid_strings()
+        if not current_sid:
+            # 无法确定"自己"是谁时，任何写类 ACE 都不能判定为安全。
+            raise ControlError("无法确定当前用户 SID，拒绝信任",
+                               gate_id="lite_host_adapter_unavailable")
+        size_info = ACL_SIZE_INFORMATION()
+        if not advapi32.GetAclInformation(dacl, ctypes.byref(size_info),
+                                          ctypes.sizeof(ACL_SIZE_INFORMATION),
+                                          AclSizeInformation):
+            raise ControlError("无法读取 ACL 的 ACE 数量（错误 %d）" % ctypes.get_last_error(),
+                               gate_id="lite_host_adapter_unavailable")
+        for index in range(size_info.AceCount):
+            ace_ptr = ctypes.c_void_p()
+            if not advapi32.GetAce(dacl, index, ctypes.byref(ace_ptr)) or not ace_ptr.value:
+                raise ControlError("读取 ACE 失败", gate_id="lite_host_adapter_unavailable")
+            base = ace_ptr.value
+            header = ctypes.cast(ace_ptr, ctypes.POINTER(ACE_HEADER)).contents
+            ace_type = header.AceType & 0xFF
+            if header.AceFlags & 0x08 or ace_type not in ALLOWED_ACE_TYPES:  # INHERIT_ONLY_ACE
+                continue
+            mask = ctypes.cast(base + ACE_MASK_OFFSET,
+                               ctypes.POINTER(wintypes.DWORD)).contents.value
+            if not (mask & write_mask):
+                continue
+            sid_any = ctypes.c_void_p(base + _ace_sid_offset(base, ace_type,
+                                                             OBJECT_ACE_TYPES,
+                                                             ACE_SID_OFFSET_FLAT))
+            sid_str_ptr = ctypes.c_wchar_p()
+            if not advapi32.ConvertSidToStringSidW(sid_any, ctypes.byref(sid_str_ptr)):
+                return True
+            try:
+                sid_str = sid_str_ptr.value or ""
+            finally:
+                kernel32.LocalFree(sid_str_ptr)
+            if sid_str and sid_str != current_sid and sid_str not in allowed_sids:
+                return True
+        return False
+    finally:
+        if sd:
+            kernel32.LocalFree(sd)
+
+
+def _windows_privileged_sid_strings():
+    """内置的、可安全授予写权限的 SID（本机系统本体）。"""
+    return {"S-1-5-18",   # LOCAL SYSTEM
+            "S-1-5-32-544"}  # BUILTIN\Administrators
+
+
+_WINDOWS_CURRENT_SID = None
+_WINDOWS_CURRENT_SID_RESOLVED = False
+
+
+def _windows_current_sid_string_cached():
+    global _WINDOWS_CURRENT_SID, _WINDOWS_CURRENT_SID_RESOLVED
+    if _WINDOWS_CURRENT_SID_RESOLVED:
+        return _WINDOWS_CURRENT_SID
+    result = None
+    try:
+        import ctypes
+        from ctypes import wintypes
+        advapi32 = ctypes.WinDLL("advapi32", use_last_error=True)
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.GetCurrentProcess.restype = wintypes.HANDLE
+        kernel32.GetCurrentProcess.argtypes = []
+        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        kernel32.LocalFree.argtypes = [ctypes.c_void_p]
+        kernel32.LocalFree.restype = ctypes.c_void_p
+        advapi32.OpenProcessToken.argtypes = [wintypes.HANDLE, wintypes.DWORD,
+                                             ctypes.POINTER(wintypes.HANDLE)]
+        advapi32.OpenProcessToken.restype = wintypes.BOOL
+        advapi32.GetTokenInformation.argtypes = [wintypes.HANDLE, ctypes.c_int,
+                                                 ctypes.c_void_p, wintypes.DWORD,
+                                                 ctypes.POINTER(wintypes.DWORD)]
+        advapi32.GetTokenInformation.restype = wintypes.BOOL
+        advapi32.ConvertSidToStringSidW.argtypes = [ctypes.c_void_p,
+                                                    ctypes.POINTER(ctypes.c_wchar_p)]
+        advapi32.ConvertSidToStringSidW.restype = wintypes.BOOL
+        TOKEN_QUERY = 0x0008
+        TokenUser = 1
+        token = wintypes.HANDLE()
+        if advapi32.OpenProcessToken(kernel32.GetCurrentProcess(), TOKEN_QUERY,
+                                     ctypes.byref(token)):
+            try:
+                size = wintypes.DWORD(0)
+                advapi32.GetTokenInformation(token, TokenUser, None, 0, ctypes.byref(size))
+                buf = ctypes.create_string_buffer(size.value)
+                if advapi32.GetTokenInformation(token, TokenUser, buf, size,
+                                                ctypes.byref(size)):
+                    sid_ptr = ctypes.cast(buf, ctypes.POINTER(ctypes.c_void_p)).contents
+                    str_sid = ctypes.c_wchar_p()
+                    if advapi32.ConvertSidToStringSidW(sid_ptr, ctypes.byref(str_sid)):
+                        try:
+                            result = str_sid.value
+                        finally:
+                            kernel32.LocalFree(str_sid)
+            finally:
+                kernel32.CloseHandle(token)
+    except Exception:
+        result = None
+    _WINDOWS_CURRENT_SID = result
+    _WINDOWS_CURRENT_SID_RESOLVED = True
+    return result
+
+
+def _require_host_owned_location(adapter):
+    """适配器必须位于不可被组/其他人改写、且不是符号链接的目录链中。
+
+    摘要只能证明文件未被替换，不能证明它来自宿主。这里要求从适配器到根的
+    每一级父目录都不可被旁人写入：调用方私有的可写目录、工程工作区中由
+    调用方创建的可写目录都会被拒绝。
+    """
+    resolved = adapter.resolve()
+    for parent in adapter.parents:
+        try:
+            linked = _host_path_is_link(parent)
+        except OSError as exc:
+            raise ControlError("宿主适配器所在目录不可核验，拒绝信任",
+                               gate_id="lite_host_adapter_unavailable") from exc
+        if linked:
+            raise ControlError("宿主适配器所在目录是符号链接，拒绝信任",
+                               gate_id="lite_host_adapter_unavailable")
+        if _path_is_others_writable(parent, ancestor=True):
+            raise ControlError("宿主适配器所在目录可被其他用户改写，拒绝信任",
+                               gate_id="lite_host_adapter_unavailable")
+    # 调用方的工作区与临时目录即使权限收紧也属调用方，不能作为信任来源。
+    # 只有"进程内注入了信任根"的测试才能落在临时目录：该信号不走环境变量，
+    # 生产 CLI 拿不到，因此这条豁免无法被调用方利用。
+    if _HOST_CONFIG_ROOT_OVERRIDE is not None:
+        return
+    denied = [Path.cwd(), Path("/tmp"), Path("/var/tmp")]
+    for raw in (os.environ.get("TMPDIR"), os.environ.get("TEMP")):
+        if raw:
+            denied.append(Path(raw))
+    for root in denied:
+        try:
+            root_resolved = root.resolve()
+        except OSError:
+            continue
+        if root_resolved == resolved or root_resolved in resolved.parents:
+            raise ControlError(
+                "宿主适配器不能位于调用方工作区或临时目录，拒绝信任",
+                gate_id="lite_host_adapter_unavailable")
+
+
+def _adapter_suffix(payload):
+    """按入口文件类型选择暂存后缀。"""
+    if payload.startswith(b"#!"):
+        first = payload.split(b"\n", 1)[0].decode("utf-8", "replace")
+        if "python" in first:
+            return ".py"
+        if "/sh" in first or "/bash" in first:
+            return ".sh"
+        return ".bin"
+    if payload.startswith(b"MZ"):
+        return ".exe"
+    if payload.startswith(b"\x7fELF"):
+        return ".bin"
+    return ".py" if os.name == "nt" else ".bin"
+
+
+def _stage_adapter_payload(payload):
+    """适配器为自包含入口，私有目录只写入已校验字节。"""
+    workspace = Path(tempfile.mkdtemp(prefix="icode-host-adapter-"))
+    staged = workspace / ("adapter" + _adapter_suffix(payload))
+    try:
+        staged.write_bytes(payload)
+        staged.chmod(0o500 if os.name == "posix" else stat.S_IREAD)
+    except OSError:
+        _remove_staged_adapter(staged)
+        raise
+    return staged
+
+
+def _run_staged_adapter(staged, request):
+    """按平台正确方式启动暂存适配器，始终把请求 JSON 送到 stdin。"""
+    payload_in = json.dumps(request, ensure_ascii=False)
+    suffix = staged.suffix.lower()
+    if os.name == "nt" and suffix not in {".py", ".exe"}:
+        raise ControlError("Windows 宿主适配器须使用 Python 或 EXE",
+                           gate_id="lite_review_host_unattested")
+    command = [sys.executable, "-I", "-X", "utf8", str(staged)] if suffix == ".py" else [str(staged)]
+    return subprocess.run(command, input=payload_in, capture_output=True,
+                          text=True, timeout=60, encoding="utf-8")
+
+
+def _remove_staged_adapter(staged):
+    """删除整个暂存工作目录；Windows 上只读位会阻止删除，先恢复可写。"""
+    if staged is None:
+        return
+    workspace = staged.parent
+    leftover = False
+    try:
+        if os.name == "nt":
+            try:
+                staged.chmod(stat.S_IWRITE)
+            except OSError:
+                pass
+        shutil.rmtree(workspace, ignore_errors=True)
+        leftover = workspace.exists()
+    except OSError:
+        leftover = True
+    if leftover:
+        # 清理失败不应掩盖真正的审核结论，但要留下可追踪的痕迹。
+        try:
+            sys.stderr.write(f"warning: 未能清理暂存适配器目录 {workspace}\n")
+        except Exception:
+            pass
+
+
+def _host_attest(spawn, host_session_id, report_sha256, stored_report_sha256,
+                 expected_sha256):
+    """执行宿主配置指定的适配器，核验本次启动/返回身份与报告摘要。
+
+    适配器由宿主配置选择并锁定摘要，调用方不能传入自己的程序；控制面只把
+    challenge/身份/摘要交给它，要求它查询实际宿主会话后回传 launched=true。
+
+    expected_sha256 是进入 Code 时冻结的身份。必须先比对再执行：未受信任的
+    程序一旦跑起来，它造成的副作用无法靠事后拒绝签收撤销。
+    """
+    if not isinstance(expected_sha256, str) or not expected_sha256:
+        raise ControlError("缺少 Prepare 阶段确认的宿主适配器身份，不能作为审核依据",
+                           gate_id="lite_host_adapter_unavailable")
+    trusted = _host_adapter_config()
+    adapter = trusted["path"]
+    # 执行前：配置摘要与冻结身份必须一致。
+    if trusted["sha256"] != expected_sha256:
+        raise ControlError("签收所用宿主适配器与 Prepare 阶段确认的身份不一致，拒绝执行",
+                           gate_id="lite_host_adapter_unavailable")
+    request = {"step": "lite_review", "spawn_id": spawn.get("spawn_id"),
+               "host_session_id": host_session_id,
+               "challenge": spawn.get("host_receipt_challenge"),
+               "report_sha256": report_sha256,
+               "stored_report_sha256": stored_report_sha256}
+    # 把已核验的字节固定下来再执行，消除"校验之后、执行之前"被替换的窗口：
+    # 交给子进程的执行体就是刚刚算过摘要的那份内容。
+    try:
+        payload = adapter.read_bytes()
+    except OSError as exc:
+        raise ControlError("宿主适配器不可读", gate_id="lite_host_adapter_unavailable") from exc
+    if hashlib.sha256(payload).hexdigest() != expected_sha256:
+        raise ControlError("宿主适配器内容与确认身份不一致，拒绝执行",
+                           gate_id="lite_host_adapter_unavailable")
+    # 先落一份私有临时副本再执行：路径与内容都来自刚刚校验过的同一份字节。
+    staged = None
+    try:
+        staged = _stage_adapter_payload(payload)
+        proc = _run_staged_adapter(staged, request)
+    except (OSError, UnicodeError, subprocess.TimeoutExpired) as exc:
+        raise ControlError("宿主适配器调用失败", gate_id="lite_review_host_unattested",
+                           detail=type(exc).__name__) from exc
+    finally:
+        _remove_staged_adapter(staged)
+    # 执行后再次核对磁盘内容，检出执行期间的改写。
+    try:
+        if file_sha256(adapter) != expected_sha256:
+            raise ControlError("宿主适配器在执行期间被改写，拒绝信任",
+                               gate_id="lite_host_adapter_unavailable")
+    except OSError as exc:
+        raise ControlError("宿主适配器在执行后不可读", gate_id="lite_host_adapter_unavailable") from exc
+    if proc.returncode != 0:
+        raise ControlError("宿主适配器拒绝确认本次启动", gate_id="lite_review_host_unattested",
+                           detail=(proc.stderr or proc.stdout or "").strip()[:400])
+    try:
+        reply = strict_json_loads(proc.stdout)
+    except (ValueError, RecursionError) as exc:
+        raise ControlError("宿主适配器未返回有效 JSON", gate_id="lite_review_host_unattested") from exc
+    if not isinstance(reply, dict) or reply.get("launched") is not True:
+        raise ControlError("宿主适配器未确认 launched=true", gate_id="lite_review_host_unattested")
+    for key in ("spawn_id", "host_session_id", "challenge", "report_sha256",
+                "stored_report_sha256"):
+        if reply.get(key) != request[key]:
+            raise ControlError(f"宿主适配器回显 {key} 与本次登记不一致",
+                               gate_id="lite_review_host_unattested")
+    return {"adapter_sha256": expected_sha256, "launched": True,
+            "spawn_id": request["spawn_id"], "host_session_id": request["host_session_id"],
+            "challenge": request["challenge"], "report_sha256": request["report_sha256"],
+            "stored_report_sha256": request["stored_report_sha256"],
+            "attested_at": now_iso()}
+
+
 def _require_agent_text(value, option):
     text = (value or "").strip()
     if not text:
@@ -6644,6 +8395,9 @@ def cmd_record_agent_spawn(args):
     }
     if getattr(args, "stage_action", None) is not None:
         input_payload["stage_action"] = _require_agent_text(args.stage_action, "--stage-action")
+    review_attempt = getattr(args, "lite_review_attempt", None)
+    if review_attempt is not None:
+        input_payload["lite_review_attempt"] = review_attempt
     require_stage_action(out_dir, input_payload.get("stage_action", "agent"))
     exclusive_key = (args.exclusive_key or "").strip()
     if exclusive_key:
@@ -6667,20 +8421,25 @@ def cmd_record_agent_spawn(args):
                                gate_id="event_chain", violations=problems)
         prior = find_idempotent_event(
             events, args.request_id, "agent_spawned", input_payload,
-            actor=args.actor, payload_keys=tuple(input_payload))
+            actor=args.actor, payload_keys=(*input_payload, "lite_review_attempt"))
         if prior:
             prior_id = prior["payload"].get("spawn_id")
             prior_spawn = next(
                 (item for item in _agent_spawns(meta) if item.get("spawn_id") == prior_id),
                 {key: value for key, value in prior["payload"].items()
                  if key != "metadata_hash_after"})
-            print(json.dumps({"ok": True, "already_applied": True,
-                              "request_id": args.request_id, "spawn": prior_spawn,
-                              "event_id": prior["event_id"]},
-                             ensure_ascii=False, indent=2))
+            response = {"ok": True, "already_applied": True,
+                        "request_id": args.request_id, "spawn": prior_spawn,
+                        "event_id": prior["event_id"]}
+            # 重放时补回同一 challenge 的只读输入，避免中断后拿不到审核输入；
+            # challenge 不变，安全语义不受影响。
+            if prior_spawn.get("lite_review_attempt") and "result" not in prior_spawn:
+                try:
+                    response["review_input"] = _lite_review_input(meta, events, prior_spawn, out_dir=out_dir)
+                except ControlError:
+                    pass
+            print(json.dumps(response, ensure_ascii=False, indent=2))
             return 0
-        # Idempotency is resolved; the writer performs its own fresh validation.
-        del events
         spawns = _agent_spawns(meta)
         open_spawns = [item for item in spawns if "result" not in item]
         if exclusive_key:
@@ -6697,6 +8456,23 @@ def cmd_record_agent_spawn(args):
                 exit_code=1, gate_id="agent_concurrency_limit",
                 open_spawn_ids=[item.get("spawn_id") for item in open_spawns])
         spawn = {"spawn_id": str(uuid.uuid4()), "at": now_iso(), **input_payload}
+        review_input = None
+        if review_attempt is not None:
+            reviewed = _active_lite_review(meta, events, review_attempt)
+            if any(fact.get("attempt") == review_attempt for fact in lite_review_records(events)[0]):
+                raise ControlError("本 attempt 已登记审核；核对结果后新建 attempt",
+                                   gate_id="lite_review_replay")
+            candidate = candidate_snapshot(out_dir, meta, events=events)
+            if candidate["candidate_id"] != (reviewed or {}).get("candidate_id"):
+                raise ControlError("审核输入已变化，请新建 attempt", gate_id="lite_review_stale")
+            spawn["lite_review_binding"] = {"candidate_id": candidate["candidate_id"],
+                                            "contract_digest": lite_module().contract_digest(meta)}
+            # 宿主中立挑战：签收回执时必须回传本 challenge，证明结果绑定本次登记。
+            challenge = uuid.uuid4().hex + uuid.uuid4().hex
+            spawn["host_receipt_challenge"] = challenge
+            review_input = _lite_review_input(meta, None, spawn, out_dir=out_dir,
+                                              candidate=candidate)
+        del events
         before_meta = dict(meta)
         extensions = dict(meta.get("extensions") or {})
         agent_ns = dict(extensions.get("agent") or {})
@@ -6706,7 +8482,10 @@ def cmd_record_agent_spawn(args):
         event = commit_metadata_and_event(
             out_dir, before_meta, meta, "agent_spawned", spawn,
             request_id=args.request_id, actor=args.actor)
-    print(json.dumps({"ok": True, "spawn": spawn, "event_id": event["event_id"]},
+    response = {"ok": True, "spawn": spawn, "event_id": event["event_id"]}
+    if review_input is not None:
+        response["review_input"] = review_input
+    print(json.dumps(response,
                      ensure_ascii=False, indent=2))
     return 0
 
@@ -6733,6 +8512,38 @@ def cmd_record_agent_result(args):
         "evidence_refs": evidence_refs,
         "summary_digest": hashlib.sha256(summary.encode("utf-8")).hexdigest(),
     }
+    report = None
+    host_receipt = None
+    report_input = getattr(args, "lite_review_report", None)
+    host_session_id = getattr(args, "host_session_id", None)
+    if report_input is not None or host_session_id is not None:
+        host_session_id = _require_agent_text(host_session_id, "--host-session-id")
+        if args.result != "joined" or not report_input or len(host_session_id) > 256:
+            raise ControlError("独立审核报告须匹配 joined 及有效宿主子代理身份",
+                               gate_id="lite_review_host")
+        if getattr(args, "lite_review_report", None) == "-" and \
+                getattr(args, "host_receipt", None) == "-":
+            raise ControlError("--lite-review-report 与 --host-receipt 不能同时使用 stdin",
+                               gate_id="lite_review_host_receipt")
+        report, report_digest = _read_lite_agent_result(args)
+        input_payload["host_session_id"] = host_session_id
+        host_receipt_arg = getattr(args, "host_receipt", None)
+        if not host_receipt_arg:
+            raise ControlError("joined 的独立审核须提供宿主回执（--host-receipt）以证明结果来自本次启动",
+                               gate_id="lite_review_host_receipt")
+        host_receipt, receipt_sha256 = _read_host_receipt(args)
+        stored_receipt = {
+            "spawn_id": host_receipt.get("spawn_id"),
+            "host_session_id": host_receipt.get("host_session_id"),
+            "challenge": host_receipt.get("challenge"),
+            "receipt_sha256": receipt_sha256,
+        }
+        if host_receipt.get("returned_at"):
+            stored_receipt["returned_at"] = host_receipt["returned_at"]
+        input_payload["host_receipt"] = stored_receipt
+    elif getattr(args, "host_receipt", None):
+        raise ControlError("宿主回执仅用于 joined 的 Lite 独立审核结果",
+                           gate_id="lite_review_host_receipt")
     error_class = (args.error_class or "").strip()
     if error_class:
         input_payload["error_class"] = error_class
@@ -6751,15 +8562,28 @@ def cmd_record_agent_result(args):
                                gate_id="event_chain", violations=problems)
         prior = find_idempotent_event(
             events, args.request_id, "agent_result", input_payload,
-            actor=args.actor, payload_keys=tuple(input_payload))
+            actor=args.actor, payload_keys=(*input_payload, "host_session_id"))
         if prior:
+            if report is not None:
+                receipt = prior["payload"]["lite_review_report"]
+                digest = receipt.get("input_sha256") or (
+                    prior["payload"].get("host_attestation") or {}).get("report_sha256")
+                if digest:
+                    same_report = digest == report_digest
+                else:
+                    # 旧降级回执只保存了规范化正文。比较可恢复的内容，兼容原请求重试。
+                    stored = _load_lite_review_report(out_dir, receipt)
+                    binding = {key: stored[key] for key in (
+                        "schema_version", "attempt", "candidate_id", "contract_digest")}
+                    same_report = canonical_digest({**report, **binding}) == canonical_digest(stored)
+                if not same_report:
+                    raise ControlError("同一 request_id 提交了不同的 Lite 审核报告",
+                                       gate_id="idempotency_conflict")
             print(json.dumps({"ok": True, "already_applied": True,
                               "request_id": args.request_id, "spawn_id": spawn_id,
                               "event_id": prior["event_id"]},
                              ensure_ascii=False, indent=2))
             return 0
-        # Idempotency is resolved; do not retain the full history across commit.
-        del events
         spawns = [dict(item) for item in _agent_spawns(meta)]
         target = next((item for item in spawns if item.get("spawn_id") == spawn_id), None)
         if target is None:
@@ -6774,6 +8598,42 @@ def cmd_record_agent_result(args):
         result_at = now_iso()
         result_record = {key: value for key, value in input_payload.items()
                          if key != "spawn_id"}
+        if target.get("lite_review_attempt"):
+            if args.result == "joined":
+                if report is None:
+                    raise ControlError("独立审核须提供宿主身份与实际返回的结构化报告",
+                                       gate_id="lite_review_host")
+                # 先校验回执绑定（不落盘），再由可信适配器确认，最后才写报告并提交。
+                name, data = _lite_agent_receipt(
+                    out_dir, meta, events, target, host_session_id, report,
+                    host_receipt=host_receipt)
+                # 冻结身份在执行前读定并传入：_host_attest 先比对再决定是否
+                # 启动子进程，未受信任的程序不会被执行。
+                degradation = _host_adapter_degradation(meta)
+                if degradation is not None:
+                    # 适配器不可用：不执行适配器，也不写 host_attestation
+                    # （该字段在 schema 中只表示"已获可信确认"）。降级事实本身
+                    # 记在 extensions.lite.host_adapter，审核报告仅作留痕，
+                    # 交付结论固定 verification_pending，不得升为 verified。
+                    result_record["lite_review_report"] = _commit_lite_agent_report(
+                        out_dir, name, data, None, target, host_session_id,
+                        degraded=True)
+                    result_record["host_attestation_degraded"] = {
+                        "status": "unavailable",
+                        "reason": degradation.get("reason") or "lite_host_adapter_unavailable",
+                        "observed_at": result_at}
+                else:
+                    attestation = _host_attest(target, host_session_id, report_digest,
+                                               hashlib.sha256(data).hexdigest(),
+                                               _pinned_adapter_sha256(meta))
+                    _require_pinned_adapter(meta, attestation)
+                    result_record["host_attestation"] = attestation
+                    result_record["lite_review_report"] = _commit_lite_agent_report(
+                        out_dir, name, data, attestation, target, host_session_id)
+                result_record["lite_review_report"]["input_sha256"] = report_digest
+        elif report is not None:
+            raise ControlError("普通 Agent 结果不能签收 Lite 审核报告", gate_id="lite_review_entry")
+        del events
         result_record["result_at"] = result_at
         target.update(result_record)
         before_meta = dict(meta)
@@ -7150,6 +9010,56 @@ def derived_attempt(prefix, request_id):
     return str(uuid.uuid4())
 
 
+def effective_workflow_mode(meta):
+    """请求模式用于追溯，执行模式优先使用已声明的有效模式。"""
+    profile = meta.get("risk_profile")
+    effective = profile.get("effective_mode") if isinstance(profile, dict) else None
+    if effective in ("fast", "full"):
+        return effective
+    return "fast" if meta.get("mode") == "fast" else "full"
+
+
+def step_mode_changed(start, meta, events):
+    """新 attempt 冻结有效模式；旧 attempt 仅在后续模式更新时保守回流。"""
+    if (start.get("payload") or {}).get("step") not in ("review", "deepcheck", "audit"):
+        return False
+    initial = (start.get("payload") or {}).get("effective_mode")
+    if initial not in ("fast", "full"):
+        return any(event.get("event_type") == "metadata_updated" and
+                   bool({"mode", "risk_profile"} & set(((event.get("payload") or {}).get("set") or {})))
+                   for event in events[events.index(start) + 1:])
+    if effective_workflow_mode(meta) != initial:
+        return True
+    subsequent = events[events.index(start) + 1:]
+    for index, event in enumerate(subsequent):
+        payload = event.get("payload") or {}
+        if event.get("event_type") != "metadata_updated":
+            continue
+        updates = payload.get("set") or {}
+        if "risk_profile" in updates:
+            candidate = dict(meta, risk_profile=updates["risk_profile"])
+            if effective_workflow_mode(candidate) != initial:
+                return True
+            profile = updates["risk_profile"]
+            if (not isinstance(profile, dict) or profile.get("effective_mode") not in ("fast", "full")) and any(
+                    later.get("event_type") == "metadata_updated" and
+                    "mode" in ((later.get("payload") or {}).get("set") or {})
+                    for later in subsequent[index + 1:]):
+                return True
+        if "mode" in updates:
+            candidate = dict(meta, mode=updates["mode"])
+            if effective_workflow_mode(candidate) != initial:
+                return True
+            # Earlier risk_profile values are not stored in old events. A later
+            # profile update can hide a temporary mode change, so fail closed.
+            if updates["mode"] != initial and any(
+                    later.get("event_type") == "metadata_updated" and
+                    "risk_profile" in ((later.get("payload") or {}).get("set") or {})
+                    for later in subsequent[index + 1:]):
+                return True
+    return False
+
+
 def cmd_step(args, *, git_provider=None, require_git_provider=False, inspection_provider_factory=None):
     """步骤端口快照、Reactive 边界复检和终结回执。"""
     out_dir = Path(args.dir).resolve()
@@ -7165,7 +9075,7 @@ def cmd_step(args, *, git_provider=None, require_git_provider=False, inspection_
     candidate_access = _code_candidate_access(access)
     if access and args.phase not in {"start", "check", "finish"}:
         raise ControlError("code step phase is not enabled", gate_id="candidate_business_propagation_pending")
-    model = load_execution_model()
+    model = load_execution_model(load_metadata(out_dir))
     contract = step_contract(model, args.step)
     with DirLock(out_dir):
         if access:
@@ -7182,6 +9092,34 @@ def cmd_step(args, *, git_provider=None, require_git_provider=False, inspection_
             raise ControlError("现有事件链不完整，拒绝记录步骤", exit_code=1,
                                gate_id="event_chain", violations=problems)
 
+        # 续跑入口先固定资格合同边界（幂等）：step start/check/finish 走 append_event，
+        # 不经过 metadata 提交；若不在生成新 trace 之前通过受控事务采纳合同，本次
+        # attempt 写出的未标版本记录会在 lint 时按 v1 解释，且其时间早于之后才发生的
+        # 采纳时刻而被永久当作历史行。边界必须早于本次续跑产生的任何新 trace。
+        if meta.get("mcp_gate_contract_version") is None:
+            before_meta = copy.deepcopy(meta)
+            adopt_gate_contract(meta, events=events)
+            commit_metadata_and_event(out_dir, before_meta, meta, "metadata_updated",
+                {"gate_contract_adoption": {
+                    "version": meta["mcp_gate_contract_version"],
+                    "adopted_at": meta["mcp_gate_contract_adopted_at"],
+                    "history_boundary": meta["mcp_gate_contract_history_boundary"]}})
+
+        if meta.get("mode") == "lite" and args.phase == "finish" and args.request:
+            finished_replay = step_attempt_finished(events, args.attempt)
+            if finished_replay and finished_replay.get("request_id") == args.request:
+                old = finished_replay["payload"]
+                if old.get("step") != args.step or old.get("outcome") != args.outcome or old.get("evidence") != args.evidence:
+                    raise ControlError("相同请求的终结内容不一致", gate_id="idempotency_conflict")
+                print(json.dumps({"ok": True, "already_applied": True, "event_id": finished_replay["event_id"]}))
+                return 0
+        if meta.get("mode") == "lite" and args.step != "verify":
+            if args.step not in workflow_contract(meta)["step_order"] or meta["status"] != args.step + "_in_progress":
+                raise ControlError("lite step 与当前状态不匹配", gate_id="lite_step_state")
+            if args.phase == "finish" and args.outcome in {"success", "degraded"}:
+                if args.outcome != "success":
+                    raise ControlError("lite 必需步骤不接受 degraded", gate_id="lite_quality_gate")
+                lite_step_gate(out_dir, meta, events, args.step, args.attempt)
         if args.phase != "finish" or args.outcome in {"success", "degraded"}:
             admission = fast_policy_admission(out_dir, meta, args.step)
             if not admission["ok"]:
@@ -7204,9 +9142,43 @@ def cmd_step(args, *, git_provider=None, require_git_provider=False, inspection_
                 "inputs": snapshot["inputs"],
                 "protected": snapshot["protected"],
             }
-            if args.step in ("deepcheck", "audit") and \
+            if args.step in ("review", "deepcheck", "audit"):
+                # 旧执行合同摘要不变，新增 attempt 单独冻结有效模式。
+                payload["effective_mode"] = effective_workflow_mode(meta)
+            if args.step in ("deepcheck", "audit"):
+                payload["dedup_evidence_version"] = 1
+            if args.step in ("deepcheck", "audit", "lite_review") and \
                     (meta.get("candidate_tracking") or {}).get("mode") == "enabled":
                 payload["candidate_input"] = candidate_snapshot(out_dir, meta, events=events, **candidate_access)
+            prior_start = next((e for e in events if args.request and
+                                e.get("request_id") == args.request and
+                                e.get("event_type") == "step_started"), None)
+            if prior_start and "effective_mode" not in (prior_start.get("payload") or {}):
+                # 旧 attempt 重放不因新增可选冻结字段产生伪冲突。
+                payload.pop("effective_mode", None)
+            if prior_start and "dedup_evidence_version" not in (prior_start.get("payload") or {}):
+                payload.pop("dedup_evidence_version", None)
+            prior_payload = prior_start.get("payload") or {} if prior_start else {}
+            # 跨版本幂等重放必须核对完整请求身份：同 request 但换了 attempt
+            # 是不同执行，不得重放旧事件（否则调用方按新 attempt 找不到启动事件）。
+            same_attempt = bool(prior_start) and prior_payload.get("attempt") == attempt
+            same_step = prior_payload.get("step") == args.step if prior_start else False
+            if same_attempt and same_step and attempt_upgrade_compatible(
+                    prior_payload, contract, captured_protected=snapshot["protected"]):
+                # 工具升级为步骤合同新增端口后，同请求重试的 contract_digest 与受保护
+                # 输入集合都会变化；旧记录自洽且是当前捕获输入的子集 → 重放而非
+                # 输入漂移/伪冲突。返回原事件中的 attempt，绝不虚构新 attempt。
+                require_stage_action(out_dir, args.step if args.step in {"code", "patch", "fast", "verify", "deploy"} else "review",
+                    expected_generation=prior_payload.get("stage_generation"), **candidate_access)
+                result = {"ok": True, "already_applied": True, "step": args.step,
+                          "attempt": prior_payload.get("attempt"),
+                          "event_id": prior_start["event_id"],
+                          "input_digest": prior_payload.get("input_digest"),
+                          "contract_digest": prior_payload.get("contract_digest"),
+                          "contract_drift_replayed": True,
+                          "execution_profile": step_execution_profile(meta, args.step)}
+                _code_output(json.dumps(result, ensure_ascii=False, indent=2), out_dir, meta, access)
+                return 0
             prior = find_idempotent_event(events, args.request, "step_started", payload)
             if prior:
                 require_stage_action(out_dir, args.step if args.step in {"code", "patch", "fast", "verify", "deploy"} else "review",
@@ -7273,16 +9245,60 @@ def cmd_step(args, *, git_provider=None, require_git_provider=False, inspection_
             if args.boundary not in model["boundaries"]:
                 raise ControlError(f"--boundary 非法: {args.boundary!r}", exit_code=2,
                                    allowed=model["boundaries"])
-            current, missing = capture_step_inputs(out_dir, meta, model, args.step, **candidate_access)
+            try:
+                current, missing = capture_step_inputs(out_dir, meta, model, args.step, **candidate_access)
+            except ControlError as exc:
+                if exc.extra.get("gate_id") != "step_ports_transient":
+                    raise
+                payload = {
+                    "execution_model_version": model["schema_version"],
+                    "step": args.step,
+                    "attempt": args.attempt,
+                    "boundary": args.boundary,
+                    "result": "blocked",
+                    "changed_inputs": ["$capture"],
+                    "missing_inputs": [],
+                    "captured_digest": start_payload.get("input_digest"),
+                    "current_digest": None,
+                    "capture_error": {"gate_id": "step_ports_transient", "message": exc.message},
+                    "route": "retry",
+                    "elapsed_ms": elapsed_ms(start.get("timestamp")),
+                }
+                prior = find_idempotent_event(
+                    events, args.request, "gate_checked", payload,
+                    payload_keys=["step", "attempt", "boundary", "result", "changed_inputs",
+                                  "missing_inputs", "captured_digest", "current_digest",
+                                  "capture_error", "route"])
+                del events
+                event = prior or append_event(out_dir, meta, "gate_checked", payload,
+                                              request_id=args.request, **access)
+                result = {"ok": False, "step": args.step, "phase": "check",
+                          "attempt": args.attempt, "boundary": args.boundary,
+                          "result": "blocked", "changed_inputs": ["$capture"],
+                          "missing_inputs": [], "route": "retry",
+                          "capture_error": payload["capture_error"],
+                          "event_id": event["event_id"], "already_applied": bool(prior)}
+                _code_output(json.dumps(result, ensure_ascii=False, indent=2), out_dir, meta, access)
+                return 1
             old_protected = start_payload.get("protected") or {}
-            changed = sorted(
-                key for key in set(old_protected) | set(current["protected"])
-                if old_protected.get(key) != current["protected"].get(key)
-            )
-            if start_payload.get("contract_digest") != current["contract_digest"]:
-                changed.insert(0, "$contract")
+            # 工具升级只新增端口时，旧 attempt 记录的 contract_digest 与受保护输入
+            # 集合都会变化；这是升级而非真实漂移，兼容时按启动时合同继续本
+            # attempt 的边界检查（新增端口只约束升级后启动的新 attempt）。
+            upgrade_compatible = attempt_upgrade_compatible(
+                start_payload, contract, captured_protected=current["protected"])
+            if upgrade_compatible:
+                changed = []
+            else:
+                changed = sorted(
+                    key for key in set(old_protected) | set(current["protected"])
+                    if old_protected.get(key) != current["protected"].get(key)
+                )
+                if start_payload.get("contract_digest") != current["contract_digest"]:
+                    changed.insert(0, "$contract")
+            if step_mode_changed(start, meta, events):
+                changed.append("effective_mode")
             routes = contract["drift_routes"]
-            route = next((routes[item] for item in changed if item in routes),
+            route = "review" if "effective_mode" in changed else next((routes[item] for item in changed if item in routes),
                          routes["default"])
             result_name = "blocked" if changed or missing else "pass"
             payload = {
@@ -7339,6 +9355,14 @@ def cmd_step(args, *, git_provider=None, require_git_provider=False, inspection_
             raise ControlError("step attempt 已终结，拒绝第二个终结结果", exit_code=1,
                                gate_id="step_attempt_finished",
                                existing=finished.get("payload"))
+        if args.outcome in {"success", "degraded"} and step_mode_changed(start, meta, events):
+            raise ControlError("步骤执行期间有效模式变化；请 blocked 终结后按新模式重新审查",
+                               gate_id="effective_mode_drift", route="review")
+        if args.outcome in {"success", "degraded"} and start_payload.get("contract_digest") != canonical_digest(contract):
+            current, _ = capture_step_inputs(out_dir, meta, model, args.step, **candidate_access)
+            if not attempt_upgrade_compatible(start_payload, contract, captured_protected=current["protected"]):
+                raise ControlError("步骤合同漂移；请 blocked 终结后重新进入步骤",
+                                   gate_id="step_contract_drift")
         gate_events = [event for event in attempt_events(events, args.attempt)
                        if event.get("event_type") == "gate_checked"]
         latest_checks = {}
@@ -7407,7 +9431,7 @@ def cmd_step(args, *, git_provider=None, require_git_provider=False, inspection_
         if not prior and args.outcome == "success" and args.step in candidate_module().REVIEW_STEPS \
                 and (meta.get("candidate_tracking") or {}).get("mode") == "enabled":
             candidate = candidate_snapshot(out_dir, meta, events=events, **candidate_access)
-            if args.step in ("deepcheck", "audit"):
+            if args.step in ("deepcheck", "audit", "lite_review"):
                 proof = candidate_module().review_source_equivalence(start_payload.get("candidate_input"), candidate)
                 if not proof["equivalent"]:
                     raise ControlError("复检期间候选源码漂移，先blocked终结再重新start",
@@ -7520,7 +9544,10 @@ def cmd_inspection(args, *, git_provider=None, require_git_provider=False, inspe
         if start["payload"].get("step") != args.step or step_attempt_finished(events, args.attempt):
             raise ControlError("工作清单须关联同一步骤的未终结 attempt", gate_id="inspection_worklist")
         current, missing = capture_step_inputs(out_dir, meta, model, args.step, **candidate_access)
-        if missing or current["protected"] != start["payload"].get("protected") or current["contract_digest"] != start["payload"].get("contract_digest"):
+        upgrade_only_drift = attempt_upgrade_compatible(
+            start["payload"], contract, captured_protected=current.get("protected"))
+        if missing or (not upgrade_only_drift and (current["protected"] != start["payload"].get("protected")
+                or current["contract_digest"] != start["payload"].get("contract_digest"))):
             raise ControlError("执行合同或受保护输入漂移，先 blocked 重入", gate_id="inspection_worklist")
         if not any(e.get("event_type") == "gate_checked" and (e.get("payload") or {}).get("attempt") == args.attempt
                    and (e.get("payload") or {}).get("boundary") == "before_write"
@@ -7648,6 +9675,65 @@ def cmd_inspection(args, *, git_provider=None, require_git_provider=False, inspe
     return 0
 
 
+def manual_dedup_verification_record(out_dir, meta, attempt, target, digest):
+    """受控登记人工去重证据时，当场对当前源码完成完整校验并返回验证回执。
+
+    报告摘要只能证明文件未变，不能证明报告曾经有效；因此完整校验（结构、
+    函数目录、家族/去重结论、范围覆盖）必须在源码仍与报告一致的登记时刻完成，
+    并把结果写入受事件链保护的 artifact 回执。后续 code 阶段修改源码后，
+    lint 以该回执维持 review 时的清偿，无需也无法用新源码重验旧报告。
+    校验不通过 → 拒绝登记（不完整报告不得作为受控证据）。
+    """
+    spec = importlib.util.spec_from_file_location("control_manual_dedup",
+                                                  SKILL_ROOT / "tools/manual_dedup_evidence.py")
+    helper = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(helper)
+    report = load_json(target, "review dedup evidence")
+    if not isinstance(report, dict):
+        raise ControlError("人工去重证据必须是 JSON 对象", gate_id="review_dedup_evidence")
+    workspace_value = meta.get("project_path")
+    if not isinstance(workspace_value, str) or not workspace_value:
+        raise ControlError("人工去重证据缺少工单工程根", gate_id="review_dedup_evidence")
+    workspace = Path(workspace_value).resolve()
+    entries = report.get("repositories")
+    if entries is None:
+        # 文档单仓格式：报告本身即 manual_dedup 报告，或包一层 {"manual_dedup": 报告}。
+        repositories = [{"repo_root": ".",
+                         "manual_dedup": report.get("manual_dedup", report)}]
+    elif isinstance(entries, list) and entries             and all(isinstance(e, dict) and isinstance(e.get("repo_root"), str) for e in entries):
+        repositories = entries
+    else:
+        raise ControlError("人工去重证据 repositories 结构非法", gate_id="review_dedup_evidence")
+    record = {"version": 1, "ticket_id": meta.get("ticket_id"), "attempt": attempt,
+              "report_sha256": digest, "repositories": []}
+    for entry in repositories:
+        report_part = entry.get("manual_dedup", entry)
+        # 文档格式把 review_scope 放在内层报告；外层同名键仅作兼容旧写法。
+        scope = entry.get("review_scope")
+        if scope is None and isinstance(report_part, dict):
+            scope = report_part.get("review_scope")
+        root_raw = entry["repo_root"] if "repo_root" in entry else "."
+        repo = (Path(root_raw) if Path(root_raw).is_absolute() else workspace / Path(root_raw)).resolve()
+        if not repo.is_dir():
+            raise ControlError(f"人工去重证据仓库根不存在: {root_raw}", gate_id="review_dedup_evidence")
+        if not isinstance(scope, list) or not scope or any(not isinstance(s, str) or not s.strip() for s in scope):
+            raise ControlError("人工去重证据缺有效 review_scope", gate_id="review_dedup_evidence")
+        try:
+            sources = helper.collect_sources(repo, scope)
+        except (helper.EvidenceError, OSError, ValueError, UnicodeError) as exc:
+            raise ControlError(f"人工去重证据源码枚举失败: {exc}", gate_id="review_dedup_evidence") from exc
+        errors = helper.validate_report(report_part, repo, meta.get("ticket_id"), attempt, scope, sources)
+        if errors:
+            raise ControlError("人工去重证据完整校验未通过", gate_id="review_dedup_evidence",
+                               violations=errors[:8])
+        record["repositories"].append({
+            "repo_root": str(repo), "review_scope": list(scope),
+            "function_count": sum(len(source["functions"]) for source in report_part["sources"]),
+            "sources": dict(sources),
+        })
+    return record
+
+
 def declared_output_path(out_dir, meta, contract, target):
     workspace = execution_workspace(out_dir, meta)
     target = Path(target).resolve()
@@ -7747,8 +9833,6 @@ def cmd_artifact(args, *, git_provider=None, require_git_provider=False, inspect
     batch_members = _artifact_batch_members(args)
     if batch_members is None and getattr(args, "path", None) is None:
         raise ControlError("必须提供 --path 或 --paths-json", exit_code=2, gate_id="artifact_batch")
-    model = load_execution_model()
-    contract = step_contract(model, args.step)
     with DirLock(out_dir):
         if access:
             _code_inspection_provider(out_dir, load_metadata(out_dir), **access)
@@ -7759,6 +9843,8 @@ def cmd_artifact(args, *, git_provider=None, require_git_provider=False, inspect
         require_vnext(meta, out_dir)
         require_valid_metadata(meta)
         ensure_execution_writable(meta)
+        model = load_execution_model(meta)
+        contract = step_contract(model, args.step)
         events, problems = verify_event_chain(out_dir, meta, **candidate_access)
         if problems:
             raise ControlError("事件链不完整，拒绝记录产物", exit_code=1,
@@ -7791,6 +9877,12 @@ def cmd_artifact(args, *, git_provider=None, require_git_provider=False, inspect
                 "sha256": file_sha256(target),
                 "size": target.stat().st_size,
             }
+            if output_id in ("review_dedup_evidence", "deepcheck_dedup_evidence"):
+                # 完整校验必须在源码仍与报告一致的登记时刻完成，结果进入受控回执；
+                # 摘要只能证明文件未变，不能证明报告曾经有效。review 与 deepcheck
+                # 的人工去重证据共用同一登记合同。
+                payload["manual_dedup_verification"] = manual_dedup_verification_record(
+                    out_dir, meta, args.attempt, target, payload["sha256"])
             if output_id == "review_manifest":
                 issues = review_evidence_issues(out_dir, meta)
                 if issues:
@@ -8360,7 +10452,7 @@ def cmd_action_policy(args, *, git_provider=None, require_git_provider=False,
     if inspection_provider_factory is not None and not access:
         raise ControlError("能力预检缺少配对的受保护候选上下文", gate_id="candidate_provider_context")
     deadline = time.monotonic() + candidate_module().DEFAULT_LIMITS["timeout_seconds"] if access else None
-    sm = load_state_machine()
+    sm = load_state_machine(load_metadata(out_dir))
     policy = sm.get("action_policy")
     if not isinstance(policy, dict) or policy.get("schema_version") != 1 \
             or not isinstance(policy.get("actions"), dict):
@@ -8383,7 +10475,7 @@ def cmd_action_policy(args, *, git_provider=None, require_git_provider=False,
         raise ControlError(
             "事件链不完整，拒绝生成动作策略",
             exit_code=1, gate_id="event_chain", violations=problems)
-    model = load_execution_model()
+    model = load_execution_model(load_metadata(out_dir))
     required_steps = list(getattr(args, "required_step", None) or [])
     if args.action in policy["actions"]:
         required_steps.append(args.action)
@@ -8449,7 +10541,8 @@ def cmd_action_policy(args, *, git_provider=None, require_git_provider=False,
                        or name in {"deepcheck", "audit", "plan", "init", "log"}]
             if (meta.get("candidate_tracking") or {}).get("mode") != "enabled":
                 allowed = [name for name in allowed if name not in {"code", "patch", "fast"}]
-    return_required = bool((legal_transition(sm, status, "review_in_progress") or {}).get("review_return"))
+    return_transition = legal_transition(sm, status, "review_in_progress")
+    return_required = bool(return_transition and (return_transition.get("review_return") or status == "completed"))
     if return_required and review_return_problem(meta, events, stage):
         allowed = [name for name in allowed if name != "review"]
     # State permission alone must not recommend a step whose backend is absent.
@@ -8479,7 +10572,7 @@ def cmd_action_policy(args, *, git_provider=None, require_git_provider=False,
             if status not in contract["statuses"]:
                 raise ControlError(f"verify {variant} 在当前状态不可执行；分析阶段须先确定合法动作",
                                    gate_id="action_policy", status=status, verify_action=variant)
-        model = load_execution_model()
+        model = load_execution_model(load_metadata(out_dir))
         if args.action in model.get("step_contracts", {}):
             _snapshot, missing = capture_step_inputs(
                 out_dir, meta, model, args.action, **access)
@@ -8526,7 +10619,7 @@ def cmd_action_policy(args, *, git_provider=None, require_git_provider=False,
 
 def cmd_snapshot(args):
     out_dir = Path(args.dir).resolve()
-    sm = load_state_machine()
+    sm = load_state_machine(load_metadata(out_dir))
     snap_path = Path(out_dir) / SNAPSHOT_NAME
     view = stage_projection(out_dir) if not args.verify else {"enabled": False}
     with _stage_writer_locks(out_dir, view):
@@ -8633,6 +10726,20 @@ def build_parser():
                                  description="icode 工单控制面（vNext schema v3）")
     sub = ap.add_subparsers(dest="cmd")
 
+    p = sub.add_parser("lite-report", help="从单源合同及状态派生 lite.md")
+    p.add_argument("--dir", required=True)
+    p.set_defaults(func=cmd_lite_report)
+
+    p = sub.add_parser("lite-preflight", help="实施前确认宿主适配器已由宿主配置并锁定摘要")
+    p.add_argument("--dir", required=True)
+    p.set_defaults(func=cmd_lite_preflight)
+
+    p = sub.add_parser("lite-review", help="登记宿主独立子代理审核并返回只读输入引用")
+    p.add_argument("--dir", required=True)
+    p.add_argument("--attempt", required=True)
+    p.add_argument("--request-id", required=True)
+    p.set_defaults(func=cmd_lite_review)
+
     p = sub.add_parser("stage", help="受控顺序阶段计划、绑定、AI报告与验收投影")
     p.add_argument("--dir", required=True)
     p.add_argument("--phase", required=True, choices=["register", "bind", "review", "check", "confirm", "reject", "revoke", "preview-revision"])
@@ -8663,7 +10770,7 @@ def build_parser():
     p.add_argument("--requirement", help="原始需求文本；与 --requirement-file 二选一")
     p.add_argument("--requirement-file", help="UTF-8 需求文件；Windows 非 ASCII argv 的可靠入口")
     p.add_argument("--birth", required=True,
-                   choices=["init", "plan", "log", "debug-init", "debug-log"])
+                   choices=["init", "plan", "log", "debug-init", "debug-log", "lite"])
     p.add_argument("--metadata-json", help="额外 metadata 字段 JSON 对象；受保护出生字段由工具覆盖")
     p.add_argument("--candidate-limits-json", help="Git候选扫描预算JSON；超预算fail-closed，不降级")
     p.add_argument("--exclude", action="append", default=None, help="用户明确排除且未参与本轮实现/构建的相对路径；写入出生候选合同")
@@ -8685,13 +10792,13 @@ def build_parser():
     p.add_argument("--exclude", action="append", default=None, help="用户明确排除的相对文件或目录")
     p.add_argument("--request-id", help="capture 必需幂等键")
     p.add_argument("--limits-json", help="显式扫描预算JSON；持久化并供后续只读检查复用，不改变源码身份")
-    p.add_argument("--require-step", action="append", default=[], choices=["code", "deepcheck", "audit"],
+    p.add_argument("--require-step", action="append", default=[], choices=["code", "deepcheck", "audit", "lite_review"],
                    help="inspect 作为验收检查时所需当前候选真实成功回执")
     p.set_defaults(func=cmd_candidate)
 
     p = sub.add_parser("check-outputs", help="只读检查步骤产物与条件审查证据")
     p.add_argument("--dir", required=True)
-    p.add_argument("--step", required=True, choices=["review", "code", "deepcheck", "audit"])
+    p.add_argument("--step", required=True, choices=["review", "code", "deepcheck", "audit", "lite_review"])
     p.set_defaults(func=cmd_check_outputs)
 
     p = sub.add_parser("validate", help="工单整体校验（fail-closed 报告）")
@@ -8966,6 +11073,9 @@ def build_parser():
     p.add_argument("--evidence-ref", action="append", required=True)
     p.add_argument("--summary", required=True, help="仅计算 sha256，不写入事件链")
     p.add_argument("--error-class")
+    p.add_argument("--host-session-id", help="Lite 审核的实际宿主子代理身份")
+    p.add_argument("--lite-review-report", help="Lite 子代理返回的 JSON 文件或 -（stdin）")
+    p.add_argument("--host-receipt", help="宿主启动/返回回执 JSON 文件或 -（绑定本次 spawn 的 challenge）")
     p.add_argument("--request-id", required=True, help="终结幂等键")
     p.add_argument("--actor", default="icode", choices=["icode", "user", "watch", "system"])
     p.set_defaults(func=cmd_record_agent_result)

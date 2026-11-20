@@ -8,7 +8,7 @@
 
 ## 1. 五项能力及边界
 
-1. **Step Ports**：每个已登记步骤声明 `inputs / outputs`。开始时验证必填输入；成功终结前验证必填输出。端口只保存存在性、路径、大小和摘要，不把正文复制进事件链。`ticket_file` 端口可声明 `ignore_sections`，把保护范围收敛到指定章节之前的正文——audit 的 `final_plan` 端口据此忽略「实现偏差备忘」段，使终审按合同回写该段不再被判成漂移，而正文改动仍然触发漂移。端口解析遇到瞬时环境故障（如 `git rev-parse` 超时）必须 fail-closed 报 `step_ports_transient`，不得退化成「解析结果少一项」，否则摘要变化会被误报为工作区漂移。
+1. **Step Ports**：每个已登记步骤声明 `inputs / outputs`。开始时验证必填输入；成功终结前验证必填输出。端口只保存存在性、路径、大小和摘要，不把正文复制进事件链。audit 的 `final_plan` 端口通过 `ignore_sections` 排除「实现偏差备忘」章节及其子节。代码块内的同名示例和备忘前后的计划正文仍参与计算。Git 仓库根或 HEAD 读取失败时返回 `step_ports_transient`；边界检查会记录 `blocked` 回执并将 `current_digest` 标为不可用，修复路径或 Git 环境后重新执行同一边界检查。Git 未安装或明确报告目标不是仓库时保留无 Git 事实的结果。
 2. **Reactive 边界复检**：开始时冻结 `protected=true` 的输入摘要；在写入、等待返回、外部副作用、状态转换前重新计算。漂移即返回路由并 fail-closed，不在同一 attempt 静默刷新基线。
 3. **统一轨迹**：步骤、边界 gate、产物、长动作和状态转换共用哈希事件链；`trace` 从同一来源生成时间线，不维护第二份运行状态。
 4. **副作用感知 Retry/Fallback**：失败分类与动作类别共同决定 `retry / fallback / repair_then_retry / verify_receipt / block / human_decision`。只有只读瞬时失败可自动重试；写、外部动作和硬件动作禁止盲重放。
@@ -35,6 +35,8 @@ python3 tools/icode_control.py step --dir <out_dir> --step <step> --phase check 
 - `result=pass`：继续。
 - `result=blocked`：按 `route` 回流；先把旧 attempt 以 `blocked` 终结，再重新 `start` 形成新基线。
 - 计划内修改了受保护输入（例如 deepcheck/patch 主动改代码）也必须终结旧 attempt 并重新开始复检；禁止提供“强制接受新摘要”的旁路。
+
+升级后续接仍开放的 audit attempt 时，如果边界检查报告 `$contract` 或 `final_plan` 漂移，先核对计划正文与原审查证据。只有升级引起的摘要变化时，带上原 `--attempt` 和真实 `--evidence`，用 `step --step audit --phase finish --outcome blocked` 终结原 attempt，在当前状态重新 `start` audit 并重新登记回执。发现计划正文确实变化时，按返回的路由回到审查。已终结的历史回执保留原记录。
 
 每个落盘输出都记录实际文件摘要；路径必须命中该步骤的 outputs 端口。同一 attempt 的多个产物优先用批量形式一次登记——每个成员仍各自生成一条 `artifact_written` 事件、各自计算 hash：
 
@@ -164,6 +166,10 @@ python3 tools/icode_control.py trace --dir <out_dir> --limit 50
 - open side-effect operation：先核对真实状态，再补 finish；禁止直接重放。
 - 已 finish：使用回执，不重复执行；request 相同但 payload 不同会触发幂等冲突。
 
+`action-policy` 报 `open_execution` 且只允许 status，是禁止启动新的上层动作，不是禁止核查原 attempt。先确认原执行者及宿主进程状态；确需续接时对原 attempt 执行 `step --phase check`，输入未漂移且执行权可接续才继续；漂移或无法接续则按真实情况用原 attempt `finish --outcome blocked|failure`，再按控制面路由重入。open agent 须核实宿主结果后如实 `record-agent-result`，不得伪造结果；有副作用 operation 结果未知须先核验，不自动重放。
+
+全局索引权限与项目控制面分开：`index-write` 因权限失败时记录真实错误，保持 `indexed=false` 或展示索引未同步，不能直写索引或声称已同步。CLI 工单本地状态、事件合法且无其他硬门时可按用户授权继续本地流程，交付报告列索引债务；权限恢复后以 `index-write --ticket-dir <out_dir>` 原生入口受控重试。UI `create-next` 在出生前获取全局索引锁失败时未创建工单，应报告创建阻断，不能伪报已出生或绕过身份校验。
+
 `snapshot` 会带最近 10 条执行轨迹与开放 attempt，但 snapshot 只是可重建视图；事件链仍是真源。
 
 ## 6. 安全与兼容
@@ -179,3 +185,7 @@ python3 tools/icode_control.py trace --dir <out_dir> --limit 50
 code/deepcheck/audit 的新执行还必需 `<step>_worklist.json` 及本 attempt 真实回执，按 [inspection_worklist.md](inspection_worklist.md)准备关联单元、逐阶段实际 Read、校验源码 findings 位置与版本。full/start 与 fast 均在本 attempt/phase 真正读完一组后优先 `inspection --phase read --paths-json` 批量登记，保留1至256成员/64KiB上限与超限分组；code_review、reverse/fixed/free、audit 各自独立，旧 `--path` 兼容。批量只减少登记调用，不替代阅读、专项、覆盖和裁决。范围声明绑定回执，缺文件/缺 Read/源码漂移不能 success；degraded 不能绕过身份和版本错误。旧已完成合同不追溯补证据，进行中合同改变须 blocked 重入。
 
 review必需review_manifest.json，按每轮真实origin attempt保存轻量round digest回执；首轮和所有非clean轮要JSON，clean后续轮可省详细JSON。deepcheck/audit分别必需coverage JSON，缺Read阶段、旧hash或未观察项不能finish success；degraded也要真实声明回执和债务原因。终审只读产物检查统一调用 `icode_control.py check-outputs --dir <out> --step audit`。具体格式/历史合同兼容见[inspection_evidence](inspection_evidence.md)。
+
+## lite 三步执行
+
+mode/version 选择版本化步骤端口；lite_prepare/lite_code/lite_review 的 start/check/finish 校验当前状态与 attempt。必需步骤只接受 success，不接受 degraded。历史 finish 同请求可回放但不授权新执行。回退使下游旧回执失效；lite-review_<invocation>.json 不可变，lite.md 仅为派生主报告。

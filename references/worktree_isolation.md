@@ -371,10 +371,10 @@ fi
 
 ## 3.8 统一拓扑门禁（共享检查器）
 
-**以下入口进入实际工作前必须调用同一个共享检查器，禁止各自微改或绕过**：
+**以下入口进入实际工作前必须执行同一套拓扑检查，禁止各自微改或绕过**：
 `/icode code` / `/icode patch` / `/icode deepcheck` / `/icode audit` / `/icode readme` / `/icode status --validate` / 带部署监听的 patch 分支（`--listen`）。
 
-**检查内容**（伪代码，各步骤入口引用本段；重复执行迁移命令时跳过第 5 步或按 [steps/worktree.md](../steps/worktree.md)「幂等性」处理）：
+**可执行检查合同**：现有 `action-policy --dir <out>` 验证受信执行根，分别运行 `git -C <路径> rev-parse --show-toplevel`、`git -C <路径> rev-parse --abbrev-ref HEAD` 与 `git -C <路径> rev-parse --verify HEAD` 核对 checkout；按下列字段逐项读取当前 metadata、实际路径、历史记录和验证来源。第⑩项在合同非空时运行 `python3 scripts/submission_guard.py g2-check --metadata <out_dir>/.ico_metadata.json`；其余项由宿主按本节逐项实际检查并留证，不能把此伪代码误认为存在覆盖全部项的独立 CLI。无法确认关键事实时 blocked 并列出缺失项。重复执行迁移命令时跳过第 5 步或按 [steps/worktree.md](../steps/worktree.md)「幂等性」处理：
 
 ```text
 输入：ICODE_OUT_DIR / metadata / cwd
@@ -383,13 +383,14 @@ fi
 ③ active_checkout（非 null 时）：test -d {active_checkout.path} 且为 git checkout（.git 为目录或普通文件）
    + git -C {path} rev-parse --abbrev-ref HEAD == active_checkout.branch
    + git -C {path} rev-parse --verify HEAD 可解析
-④ 单活动根：checkout_history 中 state=active 的元素数 + (active_checkout 非 null ? 1 : 0) == 1
-   ——双活动根（两个 active）属 L1 阻断，禁止自动选择"较新的那个"
+④ 单活动根：对 active_checkout 与 checkout_history 中 state=active 的路径做规范化真实路径去重；旧字段推导出同一路径只计一个。
+   ——不同真实路径的双活动根属 L1 阻断，禁止自动选择"较新的那个"；无法解析或不存在的活动根不得静默忽略
 ⑤ 无未完成迁移：migration 为 null，或 state ∈ {done, failed(已报告且用户裁决)}；进行中迁移 → 本入口是否允许恢复（patch/status 可恢复，code/audit 阻断）
 ⑥ 子仓拓扑：sub_worktrees 每项的 worktree_path 都位于 active_checkout 拓扑内（super-worktree 内同名相对路径）
    ——子仓隔离路径逃逸到原工程 = 未隔离即改子仓，L1 阻断
 ⑦ cwd 相符：worktree 工单（active_checkout 非 null）实际 cwd 必须在 active_checkout 内（cwd 契约的机器校验延伸）
-⑧ 一致性：metadata.active_checkout 与全局 index 对应条目对活动 checkout 的记录一致（不一致 → repairable，仅可执行无歧义、可逆、幂等的 metadata 修复）
+⑧ 一致性：读取全局 index 并核对对应条目与 metadata.active_checkout。已读到冲突记录 → fail-closed，报告冲突并走受控排查，不能自动覆盖任一侧或视作索引不可用。
+   若本地 metadata 为 indexed=false，且索引无该条目或只读失败，则以本地可信根核对：核验控制面身份和事件链、metadata.active_checkout、真实 Git worktree/仓库根及当前 cwd，且其余拓扑与权限门均通过，才能继续本地流程；明确记录索引同步债务、读取错误或缺项，不能声称索引一致。权限恢复后通过原生 index-write 受控重试并重新核对，禁止直写索引。读取失败不等于索引不存在；indexed=true 时无法读取或找不到条目也不能判定一致，应阻断并排查。
 ⑨ 来源约束：编译/测试/部署记录不得引用 superseded checkout（构建目录、二进制路径）
 ⑩ 提交契约（G2，仅当 submission_contracts 非空；只读工单无契约 → 跳过本项）——对**每个契约仓库**（super + 子仓一视同仁）逐一校验；机器实现见 [scripts/submission_guard.py](../scripts/submission_guard.py) `g2-check`（退出码 0=pass / 2=blocked）：
    - 当前分支非 detached（`git -C {repo_path} rev-parse --abbrev-ref HEAD` ≠ `HEAD`）
@@ -522,7 +523,7 @@ git worktree remove --force ../<repo>-wt-<ticket-slug>   # --force 仅限改动�
 
 ## 5. 防误删护栏
 
-1. worktree 创建/清理**必须用户确认**（写操作影响 `.git`）
+1. 显式 `--worktree` 已授权创建，无需再次确认；清理按用户已有授权、实际影响和受控关闭流程判断，不得推定允许删除用户数据。
 2. **永不自动 remove** / **永不自动 `--force` remove**
 3. 精确分支名 `icode/<ticket-slug>` 操作，不触碰其他工单的分支/worktree
 4. 归属 checkout 溯源：判断工单归属 checkout 一律读 `active_checkout`（缺失按 §3.7 用 `worktree_path` 推导），不用猜测

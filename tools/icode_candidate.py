@@ -19,7 +19,7 @@ import time
 
 DEFAULT_LIMITS = {"max_files": 50000, "max_bytes": 512 * 1024 * 1024,
                   "max_git_bytes": 16 * 1024 * 1024, "timeout_seconds": 30}
-REVIEW_STEPS = ("code", "deepcheck", "audit")
+REVIEW_STEPS = ("code", "deepcheck", "audit", "lite_review")
 CONTROL_DIRS = (".icode_output",)
 _LFS_POINTER_MAX_BYTES = 4096
 _IO_REPARSE_TAG_LX_SYMLINK = 0xA000001D
@@ -865,7 +865,7 @@ def review_source_equivalence(recorded, current, *, git_provider=None, require_g
                               require_git_provider=require_git_provider)
 
 
-def delivery_freshness(meta, current, events=None, required_steps=REVIEW_STEPS, *,
+def delivery_freshness(meta, current, events=None, required_steps=("code", "deepcheck", "audit"), *,
                        git_provider=None, require_git_provider=False):
     """Read-only applicability; history/status alone never establish a pass."""
     tracking = meta.get("candidate_tracking") or {}
@@ -887,6 +887,9 @@ def delivery_freshness(meta, current, events=None, required_steps=REVIEW_STEPS, 
     latest = {}
     for event in events or []:
         payload = event.get("payload") or {}
+        change = payload if event.get("event_type") == "state_changed" else (payload.get("lite_invalidation") or {}) if event.get("event_type") == "verification_recorded" else {}
+        if meta.get("mode") == "lite" and change.get("to") in {"lite_prepare_in_progress", "lite_code_in_progress"}:
+            latest["lite_review"] = event
         if event.get("event_type") in ("step_started", "step_finished") and payload.get("step") in REVIEW_STEPS:
             latest[payload["step"]] = event
     for receipt in meta.get("review_receipts") or []:

@@ -37,7 +37,7 @@ if grep -q 'candidate scan: skipped (debug birth)' <<< "$DEBUG_OUT"; then
   ok "debug 出生输出候选扫描跳过摘要"
 else bad "debug 出生缺少扫描摘要"; fi
 SIZE=$(wc -c < "$DD/.ico_events.jsonl" | tr -d ' ')
-if [ "$SIZE" -lt 100000 ]; then ok "debug 出生事件 <100KB（实际 $SIZE）"; else bad "debug 出生事件过大（$SIZE）"; fi
+if [ "$SIZE" -lt 100000 ]; then ok "debug 出生事件 <100KB（实际 ${SIZE}）"; else bad "debug 出生事件过大（${SIZE}）"; fi
 if python3 - "$DD" "$REQ" <<'PY'
 import json, pathlib, sys
 physical = json.loads((pathlib.Path(sys.argv[1]) / ".ico_metadata.json").read_text(encoding="utf-8"))

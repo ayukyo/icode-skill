@@ -8,6 +8,8 @@ SVG 校验、转换、schema 和 Office 双表示工具随 `docx` 组件分发�
 
 上限在 `tools/build_skill_distribution.py::CORE_MAX_FILES` 单处定义，发行构建器复用；测试验证 200 文件成功、201 文件失败且不创建发行输出。核心同时受 5 MiB 和入口 8 KiB 预算约束。开发仓库/完整备份包含测试和维护资料；运行扩展置于 Agent 扫描目录外，不回填核心目录突破上限。
 
+**核心只装运行时，开发维护资料随 `support` 组件分发**（`.gitignore`、发行维护工具、`docs/`、`skill-packs/*` 模板之外还包括）：仓库根 `README.md`/`LICENSE.txt`（插件根已有 `templates/README.md` 与源码 `LICENSE.txt` 的根级副本；`README.zh-CN.md` 保留在核心——核心入口 SKILL.md「使用流程示例」与 full_workflow.md 链接其「快速开始」命令示例，单独安装 core 时链接必须可达）、`mcp/_lib/README.md`、五个仓库契约自检脚本（`tools/selfcheck_*.sh`，只服务于开发仓回归）和 codebuddy 旧版命令桥（`integrations/codebuddy/commands/legacy/`）。核心运行时新增文件前先核对 `component_for` 的 support 清单；共享技能 SKILL.md 按宿主发现合同保留在核心包内（`tests/test_skill_distribution.py` 有锚定）。`tools/check_skill_installation.py` 校验的是完整源码安装（`source_files` 源码侧清单），不受该路由影响。
+
 源码统一采用 `LICENSE.txt` 与 `*.template.json`；构建器、调用说明和测试使用同一命名。`.gitignore` 属于 support 开发资料组件，不进入核心导入包。发行批次自动生成 `icode-v<版本>-skillhub.zip`，补充平台必填元数据并重算核心清单，五组件与同批 core 共用地址和摘要，不再手工重命名上传包。该包保留许可正文和功能资源；本地格式检查通过仍需真实平台校验与审核回执。
 
 ## 核心发行与按需扩展（2026-10-28）

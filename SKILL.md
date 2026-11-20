@@ -18,6 +18,10 @@ description: ICODE 端到端编码工作流，适配 Claude Code、Codex、CodeB
 > - 主流程示意：`00_init → 01_plan → 02_review → 03_merge → 04_code → 05_deepcheck → 06_audit → 07_readme → 08_patch`；不存在 `03_code` / `04_test` / `05_deploy`。测试在 code，部署/回归按 readme / patch / verify。
 > - 辅助独立步骤不参与 1~6 推进；**fast 为精简全流程**，参与全部六步（见命令表）。
 
+## lite 工作流
+
+`/icode lite` 遵循 [lite 合同](steps/lite.md) 和 [公共核心](references/core.md)；审核须独立并绑定候选与证据，不用于 start/fast。
+
 ## 通用约定（对话语言）
 
 DOCX/PPT 技术图可复用 SVG 图源；按对应步骤读取受限校验、PNG 兼容输出和实验双表示合同。PPT 使用 SVG 时同时准备同版本 DOCX 组件。生成、结构、消费者兼容和最终视觉验收分别记录，不因包内有 SVG 就报告原生矢量已验收。
@@ -28,7 +32,7 @@ DOCX/PPT 技术图可复用 SVG 图源；按对应步骤读取受限校验、PNG
 
 ## Python 解释器解析（跨平台硬规则）
 
-skill 内所有 `python3 tools/...` 命令执行前按平台解析：**Linux/macOS 用 `python3`；Windows 用 `py -3`**（`ICODE_PYTHON_BIN` 优先）。Windows 裸 `python`/`python3` 可能是 WindowsApps 假 stub（退出码 0、无输出），**静默成功一律改用 `py -3` 重跑**；非 ASCII 文本优先文件入参（`--requirement-file` / `--set-json-file` / `--append-json-file`），与内联参数二选一。完整规则见 [dir_and_metadata.md](references/dir_and_metadata.md)「跨平台 CLI 规则」。
+控制面最低要求 **Python 3.10**。显式设置 `ICODE_PYTHON_BIN` 时必须核实该解释器，不可用或版本不足就停止；未设置时 Linux/macOS 按 `python3.12`、`python3.11`、`python3.10`、`python3`、`python` 顺序选择首个合格版本，Windows 先试 `py -3`，失败后按序探测 PATH。文档中的 `python3` 是占位写法，控制面和子进程使用同一已验证解释器；验证须输出真实路径与版本，WindowsApps 假 stub 的空输出视为失败。非 ASCII 文本优先使用文件入参，完整规则见 [dir_and_metadata.md](references/dir_and_metadata.md)「跨平台 CLI 规则」。
 
 ## 自然语言入口
 
@@ -51,6 +55,7 @@ skill 内所有 `python3 tools/...` 命令执行前按平台解析：**Linux/mac
 | `[辅助]` `/icode install [--client claude\|codex\|codebuddy\|workbuddy\|all] [--basic\|--preview]` | ICODE、宿主命令桥与 MCP 一键安装；`--basic` 跳过 MCP，`--preview` 零写入预览 | 否 |
 | `[入口]` `/icode log [零散信息...]` | 日志根因分析→转修复需求；版本基线门；TB 复用/批量/`--debug`/`--worktree`；对外简报 | ✅ 每次都新建（同 TB 单复用除外） |
 | `[入口]` `/icode init [--guide] [<需求或指南约束>]` | 常规：新建并产出 `00_init.md`；`--guide`：复用最新合格 init，刷新新人指南+审计 | 常规 ✅；guide 否 |
+| `[流程]` `/icode lite [<需求>\|--ticket <id>]` | 原生三阶段：规划、实现测试、独立审核；见 [lite](steps/lite.md) | ✅ 新建 / 显式续跑 |
 | `[流程]` `/icode start <需求>` | 全流程：创建/复用目录 → 步骤1~6 串联；`--worktree` | ✅ 创建 / 复用 |
 | `[流程]` `/icode fast <需求>` | 精简全流程：plan→review(1轮无对抗)→merge→code→deepcheck(Reverse)→audit；`--worktree` | ✅ 创建 / 复用 |
 | `[流程]` `/icode plan <需求>` | 仅步骤1：拟定计划；`--worktree` | ✅ 创建 / 复用 |
@@ -154,10 +159,12 @@ Windows/WSL 构建按需加载 [WSL 构建合同](references/wsl_build.md)；本
 
 | 级别 | 含义 | 触发后行为 | 典型场景 |
 |---|---|---|---|
-| **L1·致命** | 阻塞流程的前置条件不满足 | **报错退出**，流程不可继续 | 按[工程接入合同](references/project_intake.md)确认目标解析失败（多根、预算截断或该入口不支持 non-git），不是仅凭宿主 cwd / 强制产物文件缺失 / MCP 完全不可用 / **双活动实现根**（同一工单存在两个 `state=active` 的 checkout，见「目录管理·worktree 生命周期」） |
+| **L1·致命** | 必要前置不满足 | **报错退出** | [工程接入失败](references/project_intake.md) / 强制产物缺失 / 必要能力缺失且无可执行替代 / **双活动实现根**（见「目录管理」） |
 | **L2·关键** | 重要约束未满足 | **警告 + 记入 metadata + 流程继续**（不阻塞等用户；用户事后审阅产物/audit 报告时可见，可手动回退）。icode 调性是 AI 自治 + 用户审阅，L2 不强制阻塞（避免 `/icode start` 串联时卡死）；02_review `absolute_cap` 触达同理，不再设例外 | plan §3 架构设计完全缺失 / review 触达 `absolute_cap` 仍有新问题 |
 | **L3·重要** | 重要检查项未通过 | **警告**，记入 metadata，**流程继续**（user 后续可手动回看） | plan §10 checklist ❌ > 3 条 / audit §6.7 视角 A 失败 / 步骤 4 编译失败（带 `code_compile_failed=true`）/ **worktree 创建失败**（降级原地 + metadata 记 `wt_degraded=true`，见「目录管理·worktree 决策与创建」④） |
 | **L4·参考** | 软性建议 | **柔性提示**，不影响流程 | limit 不存在 / cheap-research 未装 / 可选视觉增强不可用（严格视觉目标按[专用合同](references/serial_evidence_stages.md)阻断验收）/ init 末轮理解核对清单用户不回复 |
+
+即使全部 MCP 不可用，start、fast、lite 仍按[本地替代与交付规则](references/mcp_integration.md#no-mcp-workflows)执行并保留证据债务。
 
 **各步骤 L1/L2/L3 声明**：包括 compact 路径，执行时实读对应 step 头部声明并按原级别执行。
 

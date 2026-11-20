@@ -189,3 +189,7 @@ verify 为 **L1（短决策记录）**：结构化验证执行（判断+设备�
 **强制约束**：🟢/🟢*/⚪ 语义 + 双保险机制（执行步骤内嵌 + thinking_core gate）详见 [SKILL.md「MCP 调用覆盖强制化」](../SKILL.md) + [references/mcp_per_step.md「双保险机制」](../references/mcp_per_step.md)。
 
 **派生报告按需生成**：`verification_debt.py` 默认只写 `--output` 指定的 JSON；需阅读或导出 Markdown 时再提供 `--markdown <路径>`。旧双文件调用仍兼容，不删除历史报告。
+
+## lite 补证
+
+对 lite 工单按原 verify 阶段记录实际证据。新增 pass 不自动升级交付；候选/合同/审核仍有效时显式 transition --to completed --delivery-verdict verified 受控重验。新的必需失败会撤销旧 verified 并回到问题处理；仅外部未执行可以 pending，本地指标或严格证据不足不能被外部 pending 掩盖。
